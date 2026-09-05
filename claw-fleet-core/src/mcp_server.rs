@@ -106,7 +106,8 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
     }
 }
 
-/// Build the `tools/list` result. The four UI tools are always present; the six
+/// Build the `tools/list` result. The five always-on tools (the four UI tools
+/// plus `fleet__image`) are always present; the six
 /// control tools (plan / handoff / watch / loop / schedule / wiki) are appended
 /// ONLY for Fleet-owned sessions — a user's hand-launched `claude` never sees
 /// them and keeps using the `fleet` CLI. This makes "Fleet sessions go through
@@ -121,6 +122,7 @@ fn tools_list_result(fleet_owned: bool) -> Value {
         a2ui_render_tool_def(),
         set_session_title_tool_def(),
         permission_prompt_tool_def(),
+        image_tool_def(),
     ];
     if fleet_owned {
         tools.extend(crate::mcp_control::control_tool_defs());
@@ -190,6 +192,7 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
         "fleet__render_a2ui" => handle_a2ui_render_call(params),
         "fleet__set_session_title" => handle_set_session_title_call(params),
         "fleet__permission_prompt" => handle_permission_prompt_call(params),
+        "fleet__image" => handle_image_call(params),
         n if crate::mcp_control::is_control_tool(n) => handle_control_tool_call(n, params),
         other => Err(JsonRpcError {
             code: -32602,
@@ -221,14 +224,7 @@ fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpc
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     let sid = current_session_id();
     let session_id = (!sid.is_empty()).then_some(sid.as_str());
-    // Workspace: the agent's CLAUDE_PROJECT_DIR (what the UI handlers chip on),
-    // falling back to the server's cwd (Fleet spawns claude with
-    // `.current_dir(workspace)`, which the MCP child inherits).
-    let cwd = std::env::var("CLAUDE_PROJECT_DIR")
-        .ok()
-        .filter(|d| !d.trim().is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    let cwd = resolve_workspace_cwd();
     match crate::mcp_control::handle(name, &args, session_id, &cwd) {
         Ok(text) => Ok(json!({
             "content": [{ "type": "text", "text": text }],
@@ -236,6 +232,94 @@ fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpc
         })),
         Err(text) => Ok(tool_error(text)),
     }
+}
+
+/// The workspace a tool call acts on: the agent's `CLAUDE_PROJECT_DIR` (what
+/// the UI handlers chip on), falling back to the server's cwd (Fleet spawns the
+/// agent with `.current_dir(workspace)`, which the MCP child inherits).
+fn resolve_workspace_cwd() -> std::path::PathBuf {
+    std::env::var("CLAUDE_PROJECT_DIR")
+        .ok()
+        .filter(|d| !d.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+}
+
+/// Bridge `fleet__image` to [`crate::codex_image::generate_image`].
+///
+/// Deliberately **not** gated on `session_is_fleet_owned()`, unlike the control
+/// tools: those are gated because a non-Fleet session has an equivalent `fleet`
+/// CLI to fall back on, whereas image generation is a raw capability with no CLI
+/// twin — hiding it would just leave a hand-launched session unable to make an
+/// image at all.
+fn handle_image_call(params: &Value) -> Result<Value, JsonRpcError> {
+    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let description = args
+        .get("description")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .ok_or_else(|| JsonRpcError {
+            code: -32602,
+            message: "Missing or blank `description` argument".into(),
+        })?;
+    let model = args
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|m| !m.is_empty());
+    let workspace = args
+        .get("workspace_path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(resolve_workspace_cwd);
+
+    match crate::codex_image::generate_image(&workspace.to_string_lossy(), description, model) {
+        Ok(result) => {
+            // Report paths as text: the caller decides where they go (a
+            // fleet__ask `images` preview, an artifact, or a copy into the repo).
+            let mut text = format!("Generated {} image(s):\n", result.images.len());
+            for img in &result.images {
+                text.push_str(&format!("- {} ({} bytes)\n", img.path, img.bytes));
+            }
+            if !result.agent_message.trim().is_empty() {
+                text.push_str(&format!("\nAgent note: {}", result.agent_message.trim()));
+            }
+            Ok(json!({
+                "content": [{ "type": "text", "text": text }],
+                "isError": false,
+            }))
+        }
+        Err(e) => Ok(tool_error(e)),
+    }
+}
+
+fn image_tool_def() -> Value {
+    json!({
+        "name": "fleet__image",
+        "description": "Generate a raster image (illustration, sprite, mockup, hero image, texture) by borrowing Codex's built-in image_gen tool — model `gpt-image-2`, billed against the ChatGPT plan quota, no OPENAI_API_KEY needed. Use this instead of hand-writing SVG/HTML/CSS when the deliverable is genuinely a bitmap; prefer editing repo-native vectors when extending an existing icon or logo system. Returns absolute paths on this machine; the file stays put, so pass the path to fleet__ask `images` to show it, fleet__artifact to hand it over, or copy it into the repo yourself. Blocks for tens of seconds per image. Size notes for the prompt: edges must be multiples of 16px, max 3840px, aspect ratio at most 3:1; gpt-image-2 cannot do transparent backgrounds.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "What to draw. Be specific about subject, style, composition, and any verbatim text; state the exact pixel size if it matters."
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Routing model that drives the turn (default gpt-5.6-luna). Generation is always gpt-image-2 regardless, so the cheap tier is usually right."
+                },
+                "workspace_path": {
+                    "type": "string",
+                    "description": "Workspace to run in. Defaults to the calling session's workspace; you rarely need to set this."
+                }
+            },
+            "required": ["description"],
+            "additionalProperties": false
+        }
+    })
 }
 
 fn handle_set_session_title_call(params: &Value) -> Result<Value, JsonRpcError> {
@@ -847,13 +931,64 @@ mod tests {
     }
 
     #[test]
+    fn image_tool_is_advertised_to_non_fleet_sessions_too() {
+        // Unlike the control tools, fleet__image has no `fleet` CLI twin, so
+        // gating it would leave a hand-launched session unable to make an image
+        // at all. It must show up on both sides of the gate.
+        for fleet_owned in [false, true] {
+            let result = tools_list_result(fleet_owned);
+            let names: Vec<&str> = result["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap())
+                .collect();
+            assert!(
+                names.contains(&"fleet__image"),
+                "fleet_owned={fleet_owned} must still see fleet__image"
+            );
+        }
+    }
+
+    #[test]
+    fn image_tool_schema_requires_only_a_description() {
+        let def = image_tool_def();
+        let schema = &def["inputSchema"];
+        assert_eq!(
+            schema["required"].as_array().unwrap(),
+            &vec![json!("description")],
+            "model and workspace_path must stay optional"
+        );
+        for optional in ["model", "workspace_path"] {
+            assert!(
+                schema["properties"][optional].is_object(),
+                "{optional} must be declared"
+            );
+        }
+        // The description is the agent's only guidance on the hard constraints;
+        // losing them means silently-rejected sizes and bogus transparency asks.
+        let desc = def["description"].as_str().unwrap();
+        assert!(desc.contains("gpt-image-2"), "must name the model");
+        assert!(desc.contains("16px"), "must state the size granularity");
+        assert!(desc.contains("transparent"), "must flag the transparency limit");
+    }
+
+    #[test]
+    fn image_call_rejects_blank_description() {
+        let err = handle_image_call(&json!({ "arguments": { "description": "   " } }))
+            .expect_err("blank description must be a protocol error");
+        assert_eq!(err.code, -32602);
+    }
+
+    #[test]
     fn tools_list_returns_all_tools() {
-        // Non-Fleet session: only the four UI tools, regardless of ambient env
-        // (the JSON-RPC path gates on `session_is_fleet_owned`, but the pure
-        // builder lets us assert deterministically).
+        // Non-Fleet session: only the always-on tools (four UI + fleet__image),
+        // regardless of ambient env (the JSON-RPC path gates on
+        // `session_is_fleet_owned`, but the pure builder lets us assert
+        // deterministically).
         let result = tools_list_result(false);
         let tools = result["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 4, "non-Fleet session sees only the UI tools");
+        assert_eq!(tools.len(), 5, "non-Fleet session sees only the always-on tools");
         let names: Vec<&str> = tools
             .iter()
             .map(|t| t["name"].as_str().unwrap())
@@ -901,8 +1036,8 @@ mod tests {
         let tools = result["tools"].as_array().expect("tools array");
         assert_eq!(
             tools.len(),
-            4 + crate::mcp_control::CONTROL_TOOL_NAMES.len(),
-            "Fleet-owned session sees UI + control tools"
+            5 + crate::mcp_control::CONTROL_TOOL_NAMES.len(),
+            "Fleet-owned session sees always-on + control tools"
         );
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         for control in crate::mcp_control::CONTROL_TOOL_NAMES {
