@@ -80,6 +80,25 @@ export function VoiceMicButton({ rec }: { rec: VoiceRecorderApi }) {
  * 输入框里，不在这条上。
  */
 export function VoiceBar({ rec }: { rec: VoiceRecorderApi }) {
+  // 引擎还没说「麦克风开了」。**不走秒也不画波形** —— 那两样都在说「我在听你
+  // 说」，而这一刻它并没有；用户照着假信号开口，前半句就丢了。留一个 ✕，因为
+  // 这段可能卡在权限框或端侧模型加载上，得让人退得出来。
+  if (rec.preparing) {
+    return (
+      <div className={styles.bar} role="status">
+        <button
+          type="button"
+          className={styles.act}
+          onClick={rec.cancel}
+          aria-label={t("取消录音")}
+        >
+          <X size={18} />
+        </button>
+        <span className={styles.finalizing}>{t("准备中…")}</span>
+      </div>
+    );
+  }
+
   // 收音已经停了，还在等引擎把最后半句定稿吐出来。条子留在原地并说明在干什么，
   // 否则用户按下发送后要对着一个毫无动静的界面等一秒多。
   if (!rec.recording) {

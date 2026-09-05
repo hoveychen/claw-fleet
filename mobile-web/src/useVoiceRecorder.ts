@@ -59,6 +59,9 @@ export interface VoiceRecorderApi {
   /** 这台设备能不能语音输入。false 时调用方整个不该画语音入口。 */
   available: boolean;
   recording: boolean;
+  /** 已经开始，但引擎还没说「麦克风真的开了」。这段空窗里说的话不会进任何
+   *  结果，所以录音条不能装作已经在听（不走秒、不画波形）。 */
+  preparing: boolean;
   /** 录音条该不该在屏幕上——收音结束后还有一小段等定稿的时间，那时条子不能
    *  先消失（否则用户按下发送后会看着一个什么都没发生的界面等一秒多）。 */
   active: boolean;
@@ -150,6 +153,7 @@ export function useVoiceRecorder({
   });
 
   const recording = voice.state === "listening";
+  const preparing = voice.state === "preparing";
 
   // 计时。只在录音时跑，停下就归零 —— 计时器是「这次录音」的属性。
   const [seconds, setSeconds] = useState(0);
@@ -237,7 +241,8 @@ export function useVoiceRecorder({
   return {
     available: voice.state !== "probing" && voice.state !== "unsupported",
     recording,
-    active: recording || finalizing,
+    preparing,
+    active: recording || preparing || finalizing,
     preview: voice.partial ? appendVoiceText(value, voice.partial) : value,
     partial: voice.partial,
     seconds,
