@@ -18,7 +18,7 @@ import { dshEffortsFor, dshModelGroups, useDshModels } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
-import { useVoiceRecorder, type VoiceRecorderApi } from "../useVoiceRecorder";
+import { useFollowTail, useVoiceRecorder, type VoiceRecorderApi } from "../useVoiceRecorder";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs } from "./AttachmentThumb";
@@ -572,6 +572,7 @@ export function NewSessionSheet({
     onChange: (next) => setDraft((d) => ({ ...d, prompt: next })),
     onSend: () => void submit(),
   });
+  const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.recording, voice.preview);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
@@ -795,13 +796,11 @@ export function NewSessionSheet({
             />
           </>
         )}
-        {/* placeholder 承担语音的说明职责（对齐 DeepSeek / 千问 的「发消息或按住
-            说话」）—— 按钮变成纯图标后没地方写字了。用与按钮同一个探测结果开关，
-            否则无 GMS 的安卓机上会提示一个不存在的按钮。 */}
         {/* 录音时输入框显示 preview（已定稿 + 还在飘的那一段），并转成只读:
             实时转写就上在真正的输入框里,多行、可滚、不截断 —— 原来它挤在附件行
             末尾一行 12px 的灰字里,说到第八个字就被 ellipsis 吃掉了。 */}
         <textarea
+          ref={voiceTailRef}
           className={styles.promptInput}
           placeholder={
             voice.available ? t("要让 agent 做什么？也可点麦克风说") : t("要让 agent 做什么？")
@@ -930,6 +929,7 @@ export function ResumeComposer({
     onChange: setPrompt,
     onSend: () => void submit(),
   });
+  const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.recording, voice.preview);
   // Folded only when the parent asked AND the user has nothing in flight here.
   const collapsed =
     !!hidden &&
@@ -1068,6 +1068,7 @@ export function ResumeComposer({
         </div>
       )}
       <textarea
+        ref={voiceTailRef}
         className={styles.promptInput}
         placeholder={
           enqueueing

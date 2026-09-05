@@ -254,3 +254,21 @@ export function useVoiceRecorder({
     dismissError,
   };
 }
+
+/**
+ * 录音时让输入框一直跟着最新的字走。
+ *
+ * 只读的 textarea 不会自己滚。说得长一点，用户就看着一个停在开头的框，以为没在
+ * 识别 —— 而实时转写正是这次重做里「它听见了没有」的主要证据，看不见等于没有。
+ */
+export function useFollowTail<T extends HTMLElement>(
+  active: boolean,
+  content: unknown,
+): React.RefObject<T | null> {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el && active) el.scrollTop = el.scrollHeight;
+  }, [active, content]);
+  return ref;
+}
