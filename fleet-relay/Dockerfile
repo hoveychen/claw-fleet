@@ -20,6 +20,10 @@ WORKDIR /src/mobile-web
 COPY mobile-web/package.json mobile-web/pnpm-lock.yaml mobile-web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY mobile-web/ ./
+# 仓库根的跨包共享源码（mobile-web 以 `../../../shared-ts/...` 直接 import 的 .ts，
+# 见 src/views/TerminalView.tsx）。它在包目录之外，`COPY mobile-web/` 带不进来，
+# 漏掉这层的症状是 `pnpm build` 报 TS2307 Cannot find module '../../../shared-ts/...'。
+COPY shared-ts/ /src/shared-ts/
 # The commit this bundle is built from — `.git` isn't in the build context and
 # alpine has no git, so the build passes it in (relay-image.yml sets it to the
 # CI commit). vite bakes it into __APP_COMMIT__ → reported in client_hello so the
