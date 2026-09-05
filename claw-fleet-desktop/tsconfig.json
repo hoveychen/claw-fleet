@@ -20,7 +20,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["app"],
+  "include": ["app", "../shared-ts"],
   "exclude": ["app/**/*.test.ts", "app/**/*.test.tsx"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

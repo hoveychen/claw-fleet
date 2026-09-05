@@ -36,7 +36,11 @@ export default defineConfig(({ mode }) => {
   const webui = mode === "webui";
   return {
     plugins: [react()],
-    server: { host: true },
+    // `fs.allow` 里的 ".." 是必需的,不是保险起见:本包 import 了仓库根的
+    // `shared-ts/`(见 src/views/TerminalView.tsx),而 vite dev 默认只放行包目录,
+    // 于是 `pnpm dev` 会对那个文件回 403 Restricted。`vite build` 不看这个设置,
+    // 所以构建是绿的、只有 dev 挂 —— 别把构建绿当成这条不需要。
+    server: { host: true, fs: { allow: [".."] } },
     test: { setupFiles: ["./vitest.setup.ts"] },
     base: webui ? "/m/" : "/",
     build: webui ? { outDir: "dist-webui" } : {},

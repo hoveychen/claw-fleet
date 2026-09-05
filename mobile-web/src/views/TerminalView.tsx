@@ -11,6 +11,7 @@ import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import { clearProc, killProc, listProcs, runProc, type ProcRecord } from "../terminal";
+import { isDefaultShellCommand } from "../../../shared-ts/procShell";
 import styles from "./TerminalView.module.css";
 
 // xterm 及其 CSS 只在真的开了终端时才下载 —— 见 TerminalPane 顶部的说明。
@@ -71,14 +72,12 @@ function useKeyboardInset(): number {
 
 /** 标签上显示的命令名：默认 shell 显示成「shell」，其余取第一个词，太长再截断。
  *
- *  两种形状都要认：core 现在生成 `exec "/bin/zsh" -i`（绝对路径，见
- *  proc_runner::default_shell_command），而那次改动之前起的、仍活着的 pty 记录里
- *  存的是旧的 `exec "$SHELL" -i`。只认新形状会让老终端的标签显示成「exec」。 */
+ *  「是不是默认 shell」的判断跟桌面端共用一份（shared-ts/procShell.ts）——这里曾经
+ *  各存一份正则，core 把默认命令从 `$SHELL` 改成绝对路径之后只同步了一份，另一份就
+ *  把默认 shell 显示成了「exec」。截断长度是移动端自己的（窄屏 14 而不是 16）。 */
 function procLabel(proc: ProcRecord): string {
   const cmd = proc.command.trim();
-  if (/^exec\s+"[^"]*"\s+-i$/.test(cmd) || /^exec\s+"?\$SHELL/.test(cmd) || cmd === "cmd") {
-    return t("shell");
-  }
+  if (isDefaultShellCommand(cmd)) return t("shell");
   const head = cmd.split(/\s+/)[0] ?? cmd;
   return head.length > 14 ? `${head.slice(0, 13)}…` : head;
 }
