@@ -5,10 +5,12 @@
 // 为什么用 xterm 而不是 <pre>：git / curl / pnpm 这类命令靠 `\r` 原地刷新进度条，
 // 纯文本渲染会把一条进度摊成几百行；vim、htop、claude 本身更是完全没法看。
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, ChevronsDown } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { t } from "../i18n";
 import { useResolvedTheme } from "../theme";
 import type { FleetTransport } from "../transport";
 import {
@@ -74,6 +76,8 @@ export default function TerminalPane({
   const termRef = useRef<Terminal | null>(null);
   // 刚刚这一下是划动不是点击 —— touchend 置起，紧随其后的 pointerup 消费掉。
   const scrolledRef = useRef(false);
+  // 不在最底部时才给「回到底部」——平时那个位置留空，别挡住输出。
+  const [atBottom, setAtBottom] = useState(true);
   const theme = useResolvedTheme();
 
   // 放进 ref：父级传内联闭包时不该把整个终端拆了重建(scrollback 会没)。
@@ -132,6 +136,12 @@ export default function TerminalPane({
     });
     void pump.poll();
     const timer = setInterval(() => void pump.poll(), POLL_MS);
+
+    // 「回到底部」按钮的显隐。onScroll 只在滚动位置变时来，够用。
+    const onScroll = term.onScroll(() => {
+      const buf = term.buffer.active;
+      setAtBottom(buf.viewportY >= buf.baseY);
+    });
 
     // ── 手势滚动 ────────────────────────────────────────────────────────
     // xterm 6 把视口换成了 VS Code 的 ScrollableElement(自绘滚动条)，它只认
@@ -195,11 +205,19 @@ export default function TerminalPane({
       el.removeEventListener("touchend", endTouch);
       el.removeEventListener("touchcancel", endTouch);
       onData.dispose();
+      onScroll.dispose();
       registerInputRef.current?.(null);
       term.dispose();
       termRef.current = null;
     };
   }, [client, proc.id]);
+
+  /** 翻半屏。整屏一跳容易看丢上下文的接缝，半屏留一半重叠。 */
+  const pageScroll = useCallback((dir: -1 | 1) => {
+    const term = termRef.current;
+    if (!term) return;
+    term.scrollLines(dir * Math.max(1, Math.floor(term.rows / 2)));
+  }, []);
 
   // 主题翻转只换颜色，不重建终端 —— 重建会把已有输出全丢掉。
   useEffect(() => {
@@ -208,18 +226,61 @@ export default function TerminalPane({
   }, [theme]);
 
   return (
-    <div
-      ref={containerRef}
-      className={styles.pane}
-      // 点哪都聚焦，软键盘才会起来：xterm 的输入落在一个隐藏 textarea 上，
-      // 手指点在字符网格上不一定命中它。刚划过一下的那次 pointerup 不算点击。
-      onPointerUp={() => {
-        if (scrolledRef.current) {
-          scrolledRef.current = false;
-          return;
-        }
-        termRef.current?.focus();
-      }}
-    />
+    <div className={styles.wrap}>
+      <div
+        ref={containerRef}
+        className={styles.pane}
+        // 点哪都聚焦，软键盘才会起来：xterm 的输入落在一个隐藏 textarea 上，
+        // 手指点在字符网格上不一定命中它。刚划过一下的那次 pointerup 不算点击。
+        onPointerUp={() => {
+          if (scrolledRef.current) {
+            scrolledRef.current = false;
+            return;
+          }
+          termRef.current?.focus();
+        }}
+      />
+      {/* 显式翻页控件。手势那条路在桌面 Chrome 的移动仿真下实测有效，但各家
+          WebView(鸿蒙 ArkWeb、各种壳内 WebView)对 touch 的处理并不一致，而
+          「小屏上翻不回历史」等于这个页面废掉 —— 所以留一条不依赖任何手势的
+          确定通路。半屏一跳，比一行一行划快得多。 */}
+      <div className={styles.scrollPad}>
+        <button
+          className={styles.scrollKey}
+          aria-label={t("向上翻页")}
+          // onPointerDown + preventDefault：别把焦点从隐藏 textarea 上挪走，
+          // 焦点一丢软键盘就收起来了(同键位条的做法)。
+          onPointerDown={(e) => {
+            e.preventDefault();
+            pageScroll(-1);
+          }}
+        >
+          <ChevronUp size={16} />
+        </button>
+        <button
+          className={styles.scrollKey}
+          aria-label={t("向下翻页")}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            pageScroll(1);
+          }}
+        >
+          <ChevronDown size={16} />
+        </button>
+        {!atBottom && (
+          <button
+            className={styles.scrollKey}
+            data-accent
+            aria-label={t("回到底部")}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              termRef.current?.scrollToBottom();
+            }}
+          >
+            <ChevronsDown size={16} />
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
