@@ -82,7 +82,7 @@ ARG CLAUDE_CODE_VERSION=2.1.261
 ARG CODEX_VERSION=0.153.4
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates git openssh-client curl gosu \
+        ca-certificates git openssh-client curl gosu tini \
     && rm -rf /var/lib/apt/lists/* \
     && npm install --global \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
@@ -177,4 +177,17 @@ ENV CODEX_HOME=/home/fleet/.codex \
 VOLUME ["/workspace"]
 EXPOSE 8080
 
-ENTRYPOINT ["fleet-entrypoint"]
+# tini as PID 1, not `fleet` itself. The entrypoint ends in `exec fleet webui`,
+# so without this the Rust binary IS PID 1 — and PID 1 inherits every orphan in
+# the container. Fleet spawns `claude`, which spawns git/node/codex/chromium
+# grandchildren; whenever an intermediate parent exits first, the grandchild is
+# reparented to PID 1, and nothing there ever calls wait() on a pid it does not
+# know about. Measured on fleet-cloud 2026-09-05: 687 zombies (218 git, 216
+# node, 216 codex, 38 chromium) accumulated in ~14 minutes on a 2-core host,
+# still climbing, load average 32.
+#
+# Reaping is a PID 1 responsibility, not an application one — a SIGCHLD handler
+# inside Fleet would only cover the window where Fleet is scheduled, and would
+# have to be re-derived every time the entrypoint chain changes. tini exists for
+# exactly this and forwards signals as well.
+ENTRYPOINT ["/usr/bin/tini", "--", "fleet-entrypoint"]
