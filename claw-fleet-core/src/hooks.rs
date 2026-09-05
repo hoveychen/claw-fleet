@@ -70,6 +70,11 @@ pub struct HookSetupPlan {
     pub model_guidance_installed: bool,
     /// Whether the idle hooks (Stop + UserPromptSubmit → kanban Pending) are installed.
     pub idle_hooks_installed: bool,
+    /// Whether the wakeup-guard hook (ScheduleWakeup / CronCreate interception)
+    /// is installed. `default` keeps payloads from older `fleet serve` probes
+    /// deserializable, like the two guidance flags above.
+    #[serde(default)]
+    pub wakeup_guard_installed: bool,
 }
 
 /// The "cooked" state derived from the most recent hook events for a session.
@@ -173,6 +178,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
     let wiki_guidance_installed = crate::wiki_guidance::is_wiki_guidance_installed();
     let model_guidance_installed = crate::model_guidance::is_model_guidance_installed();
     let idle_hooks_installed = has_idle_hooks(&hooks_obj);
+    let wakeup_guard_installed = has_wakeup_guard_hook(&hooks_obj);
 
     HookSetupPlan {
         to_add,
@@ -187,6 +193,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         wiki_guidance_installed,
         model_guidance_installed,
         idle_hooks_installed,
+        wakeup_guard_installed,
     }
 }
 
@@ -711,6 +718,14 @@ pub fn remove_wakeup_guard_hook() -> Result<(), String> {
 
 fn is_wakeup_guard_group(group: &Value) -> bool {
     group_invokes_fleet_subcommand(group, "wakeup-guard")
+}
+
+fn has_wakeup_guard_hook(hooks_obj: &Map<String, Value>) -> bool {
+    hooks_obj
+        .get("PreToolUse")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(is_wakeup_guard_group))
+        .unwrap_or(false)
 }
 
 // ── Idle hooks (Stop + UserPromptSubmit → kanban Pending sentinel) ──────
@@ -1398,6 +1413,29 @@ mod tests {
         assert!(!is_guard_group(&wakeup));
         assert!(!is_elicitation_group(&wakeup));
         assert!(!is_plan_approval_group(&wakeup));
+    }
+
+    #[test]
+    fn has_wakeup_guard_hook_sees_it_only_when_present() {
+        // The probe self-healing reads: a false negative reinstalls a hook that
+        // is already there (harmless), but a false *positive* leaves the wakeup
+        // guard missing forever, since heal only installs what reads as absent.
+        let bin = "/tmp/fleet";
+        let mut hooks = Map::new();
+        assert!(!has_wakeup_guard_hook(&hooks), "empty settings have no hooks");
+
+        // Siblings under the same event must not read as the wakeup guard.
+        hooks.insert(
+            "PreToolUse".to_string(),
+            json!([guard_group_for(bin), elicitation_group_for(bin)]),
+        );
+        assert!(!has_wakeup_guard_hook(&hooks));
+
+        hooks.insert(
+            "PreToolUse".to_string(),
+            json!([guard_group_for(bin), wakeup_guard_group_for(bin)]),
+        );
+        assert!(has_wakeup_guard_hook(&hooks));
     }
 
     #[test]
