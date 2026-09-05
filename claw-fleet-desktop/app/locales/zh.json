@@ -2594,5 +2594,20 @@
   "mobile_direct_no_token": "本机没有在跑的 serve —— ~/.fleet/token 为空是正常的，桌面端不监听 HTTP。直连要指向的是另一台已经部署好的 Fleet 主机：填它的地址与 admin token（云容器就是 FLEET_ADMIN_TOKEN 那个值）。",
   "mobile_direct_qr_hint": "这张码带着 token，请勿截图外传。",
   "mobile_direct_copy": "复制直连链接",
-  "mobile_direct_copy_hint": "扫码进不来时改用它：在手机上粘贴。"
+  "mobile_direct_copy_hint": "扫码进不来时改用它：在手机上粘贴。",
+  "terminal": {
+    "title": "终端",
+    "shell": "shell",
+    "new": "新终端",
+    "kill": "停止",
+    "close": "关闭",
+    "starting": "正在开终端…",
+    "none": "没有终端",
+    "exited": "已退出",
+    "exited_code": "已退出 · 退出码 {{code}}",
+    "restart": "重开",
+    "select_workspace": "选择一个仓库开终端。",
+    "no_workspaces": "还没有可用的仓库"
+  },
+  "view_terminal": "终端"
 }
