@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { procCommandText } from "./procCommandLabel";
 import { useProcStore, useUIStore } from "../store";
 import { getItem, setItem } from "../storage";
 import type { ProcRecord } from "../types";
@@ -191,7 +192,7 @@ export function ProcPanel({
                   title={shortcut}
                 >
                   <Play size={10} fill="currentColor" />
-                  <code>{shortcut}</code>
+                  <code>{procCommandText(shortcut, t("files.proc_shell"))}</code>
                 </button>
                 <button
                   className={styles.proc_shortcut_remove}
@@ -264,6 +265,8 @@ export function ProcPanel({
                 <button
                   className={styles.proc_row_main}
                   onClick={() => setOpenGroupCommand(groupOpen ? null : group.command)}
+                  // tooltip 保留原始命令：行内显示的是「shell」这种友好名，真要查
+                  // 到底跑的是哪个 shell 时，悬停还看得到 exec "/bin/zsh" -i。
                   title={group.command}
                 >
                   {groupOpen ? (
@@ -276,7 +279,9 @@ export function ProcPanel({
                       group.runningCount > 0 ? styles.proc_dot_running : styles.proc_dot_exited
                     }`}
                   />
-                  <code className={styles.proc_command}>{group.command}</code>
+                  <code className={styles.proc_command}>
+                    {procCommandText(group.command, t("files.proc_shell"))}
+                  </code>
                   <span className={styles.proc_status}>
                     {group.records.length > 1 &&
                       `${t("files.proc_run_count", { count: group.records.length })} · `}

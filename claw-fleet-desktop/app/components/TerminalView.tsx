@@ -17,25 +17,12 @@ import { PageShell } from "./PageShell";
 import { EmptyState } from "./EmptyState";
 import { ProcTerminal } from "./ProcTerminal";
 import { distinctWorkspaces } from "./NewSessionForm";
+import { procLabel } from "./procCommandLabel";
 import { useProcStore, useSessionsStore, useUIStore } from "../store";
 import type { ProcRecord } from "../types";
 import styles from "./MemoryView.module.css";
 import termStyles from "./TerminalView.module.css";
 
-/** 标签上显示的命令名：core 的默认 shell 显示成「shell」，其余取第一个词再截断
- *  —— 命令面板起的 `pnpm build` 也会出现在这里。
- *
- *  两种形状都要认：core 现在生成 `exec "/bin/zsh" -i`（绝对路径，见
- *  proc_runner::default_shell_command），而这次改动之前起的、仍活着的 pty 记录里
- *  存的是旧的 `exec "$SHELL" -i`。只认新形状会让老终端的标签显示成「exec」。 */
-export function procLabel(proc: ProcRecord, shellLabel: string): string {
-  const cmd = proc.command.trim();
-  if (/^exec\s+"[^"]*"\s+-i$/.test(cmd) || /^exec\s+"?\$SHELL/.test(cmd) || cmd === "cmd") {
-    return shellLabel;
-  }
-  const head = cmd.split(/\s+/)[0] ?? cmd;
-  return head.length > 16 ? `${head.slice(0, 15)}…` : head;
-}
 
 export function TerminalView() {
   const { t } = useTranslation();

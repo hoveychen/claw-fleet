@@ -2406,7 +2406,8 @@
       "op_ok": "操作完成。",
       "op_failed": "操作失败。"
     },
-    "proc_open_terminal": "在终端打开"
+    "proc_open_terminal": "在终端打开",
+    "proc_shell": "shell"
   },
   "paths": {
     "open_in_files": "在仓库页中打开",
