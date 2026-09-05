@@ -53,6 +53,13 @@ export function ProcTerminal({
     let disposed = false;
     let offset: number | null = null; // null = tail the recent output
     let drainPolls = 0;
+    // In-flight gate: `offset` only advances once the await resolves, so if a
+    // read takes longer than the poll interval the next tick goes out with the
+    // *same* offset and the same pty echo gets written twice — typing `ls`
+    // renders as `llss` while the pty only ever received `ls`. Local IPC is far
+    // under 300ms, but RemoteBackend (SSH probe HTTP) is not. Same fix as
+    // mobile-web's createOutputPump.
+    let inFlight = false;
 
     const sendResize = () => {
       void invoke("resize_workspace_proc", {
@@ -76,7 +83,8 @@ export function ProcTerminal({
     });
 
     const poll = async () => {
-      if (disposed || drainPolls >= EXIT_DRAIN_POLLS) return;
+      if (disposed || inFlight || drainPolls >= EXIT_DRAIN_POLLS) return;
+      inFlight = true;
       try {
         const chunk = await invoke<ProcOutputChunk>("read_workspace_proc_output", {
           id: proc.id,
@@ -93,6 +101,8 @@ export function ProcTerminal({
       } catch {
         // Proc was cleared while the terminal is open — stop advancing.
         drainPolls = EXIT_DRAIN_POLLS;
+      } finally {
+        inFlight = false;
       }
     };
     void poll();
