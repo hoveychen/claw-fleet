@@ -14,14 +14,6 @@ export type VoiceState =
   /** 这个环境没有可用的识别服务。按钮整个不出现。 */
   | "unsupported"
   | "idle"
-  /**
-   * 已经发起，但麦克风还没真的开始收音。
-   *
-   * 三条实现都要先跨一段异步（起识别会话 / 查权限 / createEngine），这段空窗里
-   * 用户说的话全丢。以前这一段被画成「正在听」，于是用户只会觉得「前半句怎么
-   * 没识别出来」。分出这一态，界面才能老实说「准备中」。
-   */
-  | "preparing"
   | "listening"
   | "error";
 
@@ -127,26 +119,18 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     const gen = ++genRef.current;
     setError(null);
     setPartial("");
-    setState("preparing");
+    setState("listening");
     void provider
       .start(lang, {
-        onReady: () => {
-          if (gen !== genRef.current) return;
-          setState((s) => (s === "preparing" ? "listening" : s));
-        },
         // 三个回调都先验代号。web-speech provider 自己在 cancel 后就闭嘴了，
         // 但那是它的实现细节；这一层不该依赖每个 provider 都同样严谨 —— 漏一个
         // 就是「取消之后文字仍然往输入框里蹦」。
-        // 出字了就一定已经在收音 —— 万一某条实现漏了 onReady，这里兜住，
-        // 不至于把界面永远钉在「准备中」。
         onPartial: (text) => {
           if (gen !== genRef.current) return;
-          setState((s) => (s === "preparing" ? "listening" : s));
           setPartial(text);
         },
         onFinal: (text) => {
           if (gen !== genRef.current) return;
-          setState((s) => (s === "preparing" ? "listening" : s));
           setPartial("");
           onTextRef.current(text);
         },
@@ -187,7 +171,7 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     sessionRef.current?.stop();
     sessionRef.current = null;
     setPartial("");
-    setState((s) => (s === "listening" || s === "preparing" ? "idle" : s));
+    setState((s) => (s === "listening" ? "idle" : s));
   }, []);
 
   const cancel = useCallback(() => {
@@ -195,7 +179,7 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     sessionRef.current?.cancel();
     sessionRef.current = null;
     setPartial("");
-    setState((s) => (s === "listening" || s === "preparing" ? "idle" : s));
+    setState((s) => (s === "listening" ? "idle" : s));
   }, []);
 
   return { state, partial, error, start, stop, cancel };

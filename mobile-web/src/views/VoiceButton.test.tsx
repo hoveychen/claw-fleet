@@ -4,39 +4,35 @@ vi.mock("@capacitor/core", () => ({
   Capacitor: { isNativePlatform: () => false },
 }));
 
+const { releaseIntent, CANCEL_DY, TAP_MS } = await import("./VoiceButton");
 const { appendVoiceText } = await import("../voiceInput");
-const { voiceHint } = await import("./VoiceButton");
 
-// 交互从「按住说话 + 上滑取消 + 点按锁定」改成了点按开关，releaseIntent /
-// TAP_MS / CANCEL_DY 连同它们的用例一起删了 —— 两个看不见的阈值没有了，
-// 也就没有阈值判别可测。剩下真正会出错的规则是「哪个状态说哪句话」。
-
-describe("voiceHint", () => {
-  it("准备中要说出来，不能冒充正在听", () => {
-    const preparing = voiceHint("preparing", "");
-    expect(preparing).not.toBe("");
-    expect(preparing).not.toBe(voiceHint("listening", ""));
+describe("releaseIntent", () => {
+  it("快速点一下是锁定继续录,不是结束", () => {
+    expect(releaseIntent(0, TAP_MS - 1)).toBe("lock");
   });
 
-  // 麦克风还没开，这时哪怕引擎抢跑吐了字也不能显示成「已经在听你说」。
-  it("准备中即使有残留 partial 也仍报准备中", () => {
-    expect(voiceHint("preparing", "残留")).toBe(voiceHint("preparing", ""));
+  it("按住说完松手是结束", () => {
+    expect(releaseIntent(0, TAP_MS + 1)).toBe("stop");
   });
 
-  it("正在听且还没出字时给停止指引", () => {
-    expect(voiceHint("listening", "")).not.toBe("");
+  it("上滑够远就是取消", () => {
+    expect(releaseIntent(-CANCEL_DY, 1000)).toBe("cancel");
   });
 
-  it("出了字就显示识别内容", () => {
-    expect(voiceHint("listening", "把 P3 勾掉")).toBe("把 P3 勾掉");
+  // 上滑取消要压过时长判断:手指已经移开按钮了,按了多久都不该留下结果。
+  // 若先判时长,一次「快速上滑」会被当成点按而锁定录音 —— 用户以为取消了,
+  // 麦克风却还开着。
+  it("上滑取消压过点按", () => {
+    expect(releaseIntent(-CANCEL_DY - 10, 10)).toBe("cancel");
   });
 
-  it("空闲 / 不可用 / 出错时不占这一行", () => {
-    expect(voiceHint("idle", "")).toBe("");
-    expect(voiceHint("unsupported", "")).toBe("");
-    expect(voiceHint("probing", "")).toBe("");
-    // 出错时这一行让位给错误文案，不能两句话挤在一起。
-    expect(voiceHint("error", "说了一半")).toBe("");
+  it("轻微上滑不算取消", () => {
+    expect(releaseIntent(-(CANCEL_DY - 1), 1000)).toBe("stop");
+  });
+
+  it("下滑不取消", () => {
+    expect(releaseIntent(CANCEL_DY * 2, 1000)).toBe("stop");
   });
 });
 
