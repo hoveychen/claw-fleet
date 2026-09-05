@@ -68,10 +68,22 @@ export interface HttpTransportOptions {
   eventSourceImpl?: typeof EventSource;
 }
 
+/** `EventSource.readyState` 的终态。写字面量而不是取 `EventSource.CLOSED`,是因为
+ *  这个类可以由 `eventSourceImpl` 注入(测试替身、非浏览器宿主),那时静态常量不
+ *  一定存在;数值本身由规范钉死。 */
+const CLOSED = 2;
+
+/** 重开一条流的退避区间。与 relay.ts 取同一组数(1s 起、翻倍、封顶 15s):
+ *  「一条链路多久值得再试一次」跟它是 WebSocket 还是 SSE 无关。 */
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS = 15_000;
+
 export class HttpTransport implements FleetTransport {
   private stream: EventSource | null = null;
   private connected = false;
   private closed = false;
+  private reconnectDelay = RECONNECT_BASE_MS;
+  private reconnectTimer: number | undefined;
 
   constructor(
     private readonly handlers: TransportHandlers,
@@ -106,6 +118,8 @@ export class HttpTransport implements FleetTransport {
     stream.onopen = () => {
       if (this.closed) return;
       this.connected = true;
+      // 握手成功 = 这条链路此刻是通的,下一次断开该从最短的退避重来。
+      this.reconnectDelay = RECONNECT_BASE_MS;
       this.handlers.onStatus?.(true);
       // 同源部署里「主机在线」与「这张页面加载出来了」是同一件事:发出这张
       // 页面的进程就是回答 /mobile_rpc 的那一个。没有第三方中转可掉线,所以
@@ -125,13 +139,24 @@ export class HttpTransport implements FleetTransport {
     void this.catchUpSessions();
 
     stream.onerror = () => {
-      if (this.closed || !this.connected) return;
-      this.connected = false;
-      this.handlers.onStatus?.(false);
-      this.handlers.onAgentOnline?.(false);
-      // EventSource 自己会重连(那是它的全部契约),每次重连都会在服务端重新
-      // 注册,心跳也就跟着恢复。这里只报告,不自己调度。
-      this.handlers.onReconnect?.();
+      if (this.closed) return;
+      if (this.connected) {
+        this.connected = false;
+        this.handlers.onStatus?.(false);
+        this.handlers.onAgentOnline?.(false);
+        this.handlers.onReconnect?.();
+      }
+      // EventSource 的内建重试**只覆盖网络层断开**:那时 readyState 停在
+      // CONNECTING,浏览器自己会再握手,我们插一手只会开出第二条并行的流(服务端
+      // 多算一个消费者、事件重复投递)。
+      //
+      // 但服务端回非 200(弱网时网关的 502/504)或 Content-Type 不对时,规范要求
+      // UA "fail the connection" —— readyState 变 CLOSED 且**永不重试**。历史实现
+      // 把重连整个托付给了那份契约,于是这条流死在那儿,而 connect() 开头的
+      // `if (this.stream) return` 又让谁都重建不了它:只剩刷新页面。同一个洞还有
+      // 第二个入口 —— 从没连上过的第一次握手(页面在断网时打开)走的也是这里,
+      // 旧代码的 `!this.connected` 早退把它一并吃掉了。
+      if (stream.readyState === CLOSED) this.scheduleReopen();
     };
 
     for (const kind of DECISION_KINDS) {
@@ -158,6 +183,23 @@ export class HttpTransport implements FleetTransport {
     });
   }
 
+  /** 丢掉这条已死的流,退避之后重开一条。
+   *
+   *  抖动 0–30% 是为了让「网络恢复」那一刻的 N 个标签页不要挤在同一毫秒。 */
+  private scheduleReopen(): void {
+    if (this.closed || this.reconnectTimer !== undefined) return;
+    const delay = this.reconnectDelay * (1 + Math.random() * 0.3);
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_MS);
+    this.reconnectTimer = globalThis.setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (this.closed) return;
+      // connect() 开头会因为 this.stream 非空早退,所以必须先把死流摘掉。
+      this.stream?.close();
+      this.stream = null;
+      this.connect();
+    }, delay) as unknown as number;
+  }
+
   /** 拉一次 sessions 全量,补上 SSE 不会为新客户端重放的那一帧。
    *
    *  失败就安静算了:SSE 那条路仍然可能把数据送到,而这里抛出去只会把一次
@@ -180,6 +222,10 @@ export class HttpTransport implements FleetTransport {
 
   close(): void {
     this.closed = true;
+    if (this.reconnectTimer !== undefined) {
+      globalThis.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
     this.stream?.close();
     this.stream = null;
     if (this.connected) {
