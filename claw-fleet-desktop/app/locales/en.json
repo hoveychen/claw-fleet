@@ -2409,7 +2409,8 @@
       "op_ok": "Done.",
       "op_failed": "Operation failed."
     },
-    "proc_open_terminal": "Open in terminal"
+    "proc_open_terminal": "Open in terminal",
+    "proc_shell": "shell"
   },
   "paths": {
     "open_in_files": "Open in Repos",
