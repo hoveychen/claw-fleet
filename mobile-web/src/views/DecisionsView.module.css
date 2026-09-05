@@ -332,6 +332,12 @@
   gap: 6px;
 }
 
+/* 录音条比这一行宽得多，自己占一行。 */
+.otherVoiceRow {
+  display: flex;
+  margin-top: 6px;
+}
+
 .otherRow {
   display: flex;
   align-items: flex-start;

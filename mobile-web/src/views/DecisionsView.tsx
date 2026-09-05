@@ -11,9 +11,9 @@ import {
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { fileExtIcon } from "./fileIcon";
-import { VoiceButton } from "./VoiceButton";
+import { useFollowTail, useVoiceRecorder } from "../useVoiceRecorder";
+import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 import { VoiceTextarea } from "./VoiceTextarea";
-import { appendVoiceText } from "../voiceInput";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
@@ -1376,8 +1376,10 @@ function OtherComposer({
   const inputRef = useRef<HTMLInputElement | null>(null);
   // 识别结果是异步到的，期间用户可能又敲了字；读 ref 里最近一次渲染的值，
   // 而不是闭包里那个可能已经过期的 value。
-  const valueRef = useRef(value);
-  valueRef.current = value;
+  // 回答决策卡是手机上最高频的输入场景，这里最该能说 —— 用的是 composer 那同一
+  // 套录音条，不是这一处专有的什么手势。
+  const rec = useVoiceRecorder({ value, onChange });
+  const taRef = useFollowTail<HTMLTextAreaElement>(rec.recording, rec.preview);
   return (
     <div className={styles.otherBlock}>
       {label && <span className={styles.otherLabel}>{label}</span>}
@@ -1397,26 +1399,34 @@ function OtherComposer({
           </div>
         )}
         <div className={styles.otherRow}>
-          <button
-            className={styles.otherAttach}
-            disabled={uploading}
-            onClick={() => inputRef.current?.click()}
-            aria-label={t("为「{0}」添加附件", question)}
-          >
-            <Plus size={14} />
-          </button>
+          {!rec.active && (
+            <button
+              className={styles.otherAttach}
+              disabled={uploading}
+              onClick={() => inputRef.current?.click()}
+              aria-label={t("为「{0}」添加附件", question)}
+            >
+              <Plus size={14} />
+            </button>
+          )}
+          {/* 录音时输入框留在原地显示实时转写(只读)，录音条另起一行 —— 这一行
+              太窄，塞不下取消/波形/计时/停止那一串。 */}
           <textarea
+            ref={taRef}
             className={styles.otherInput}
             placeholder={uploading ? t("上传中…") : placeholder}
-            value={value}
+            value={rec.recording ? rec.preview : value}
+            readOnly={rec.recording}
             onChange={(e) => onChange(e.target.value)}
             rows={2}
           />
-          {/* 这一行本来就有附件 + 号，语音按钮并排进去即可，不用 VoiceTextarea
-              （那个是给没有工具行的裸 textarea 的）。回答决策卡是手机上最高频
-              的输入场景，这里最该能说。 */}
-          <VoiceButton onText={(text) => onChange(appendVoiceText(valueRef.current, text))} />
+          {!rec.active && rec.available && <VoiceMicButton rec={rec} />}
         </div>
+        {rec.active && (
+          <div className={styles.otherVoiceRow}>
+            <VoiceBar rec={rec} />
+          </div>
+        )}
         <input
           ref={inputRef}
           type="file"

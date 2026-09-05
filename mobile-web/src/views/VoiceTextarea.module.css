@@ -33,17 +33,17 @@
   color: var(--color-text-secondary);
 }
 
-/* 录音中 / 取消态仍要有明确的色块，那是状态反馈，不能一起去掉。 */
-.slot button[data-listening] {
-  border-color: var(--color-accent);
+/* 录音条压在输入框底部那一条。不用右下角那个位置:录音条要放下取消/波形/计时/
+   停止/发送，右下角挤不开，硬挤就回到了「一堆 30px 小目标」的老问题。 */
+.barSlot {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
 }
 
-.slot button[data-cancel] {
-  border-color: var(--color-error);
-}
-
-/* VoiceButton 的状态文字在它自己的工具行里是 flex:1 撑满的；浮到这里就不能再
-   撑，否则会把按钮从右下角推走。同一条也覆盖它的错误文字（同为 span）。 */
+/* 错误提示浮在右下角时不能撑满，否则会把按钮从角上推走。 */
 .slot span {
   flex: 0 1 auto;
   min-width: 0;
