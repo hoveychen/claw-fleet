@@ -343,6 +343,14 @@ pub(crate) const GUARD_MATCHER: &str = "Bash|PowerShell";
 /// `tool_input.command` field as `Bash`, so `fleet guard` needs no per-tool
 /// parsing branch.
 pub fn apply_guard_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        apply_guard_hook_inner(),
+        crate::control_plane_prefs::Feature::GuardHook,
+        false,
+    )
+}
+
+fn apply_guard_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_fleet_binary()
         .ok_or("Cannot find fleet binary — install fleet CLI first")?;
 
@@ -380,6 +388,14 @@ pub fn apply_guard_hook() -> Result<(), String> {
 
 /// Remove the guard hook from settings.json.
 pub fn remove_guard_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        remove_guard_hook_inner(),
+        crate::control_plane_prefs::Feature::GuardHook,
+        true,
+    )
+}
+
+fn remove_guard_hook_inner() -> Result<(), String> {
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let Some(obj) = settings.as_object_mut() else {
         return Ok(());
@@ -420,6 +436,14 @@ fn is_guard_group(group: &Value) -> bool {
 
 /// Install the elicitation hook (synchronous PreToolUse for AskUserQuestion).
 pub fn apply_elicitation_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        apply_elicitation_hook_inner(),
+        crate::control_plane_prefs::Feature::ElicitationHook,
+        false,
+    )
+}
+
+fn apply_elicitation_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_fleet_binary()
         .ok_or("Cannot find fleet binary — install fleet CLI first")?;
 
@@ -457,6 +481,14 @@ pub fn apply_elicitation_hook() -> Result<(), String> {
 
 /// Remove the elicitation hook from settings.json.
 pub fn remove_elicitation_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        remove_elicitation_hook_inner(),
+        crate::control_plane_prefs::Feature::ElicitationHook,
+        true,
+    )
+}
+
+fn remove_elicitation_hook_inner() -> Result<(), String> {
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let Some(obj) = settings.as_object_mut() else {
         return Ok(());
@@ -495,6 +527,14 @@ fn is_elicitation_group(group: &Value) -> bool {
 
 /// Install the plan-approval hook (synchronous PreToolUse for ExitPlanMode).
 pub fn apply_plan_approval_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        apply_plan_approval_hook_inner(),
+        crate::control_plane_prefs::Feature::PlanApprovalHook,
+        false,
+    )
+}
+
+fn apply_plan_approval_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_fleet_binary()
         .ok_or("Cannot find fleet binary — install fleet CLI first")?;
 
@@ -532,6 +572,14 @@ pub fn apply_plan_approval_hook() -> Result<(), String> {
 
 /// Remove the plan-approval hook from settings.json.
 pub fn remove_plan_approval_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        remove_plan_approval_hook_inner(),
+        crate::control_plane_prefs::Feature::PlanApprovalHook,
+        true,
+    )
+}
+
+fn remove_plan_approval_hook_inner() -> Result<(), String> {
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let Some(obj) = settings.as_object_mut() else {
         return Ok(());
@@ -573,6 +621,14 @@ fn is_plan_approval_group(group: &Value) -> bool {
 /// workspace's `TASKS.md` and emits it as additional context, so context
 /// compression can't erase the macro plan.
 pub fn apply_prd_context_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        apply_prd_context_hook_inner(),
+        crate::control_plane_prefs::Feature::PrdContextHook,
+        false,
+    )
+}
+
+fn apply_prd_context_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_fleet_binary()
         .ok_or("Cannot find fleet binary — install fleet CLI first")?;
 
@@ -611,6 +667,14 @@ pub fn apply_prd_context_hook() -> Result<(), String> {
 
 /// Remove the PRD-context hook from settings.json.
 pub fn remove_prd_context_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        remove_prd_context_hook_inner(),
+        crate::control_plane_prefs::Feature::PrdContextHook,
+        true,
+    )
+}
+
+fn remove_prd_context_hook_inner() -> Result<(), String> {
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let Some(obj) = settings.as_object_mut() else {
         return Ok(());
@@ -656,6 +720,14 @@ fn is_prd_context_group(group: &Value) -> bool {
 /// agents to relay via `fleet watch` / `fleet handoff` / `fleet loop` rather
 /// than the built-ins that silently strand a Fleet turn.
 pub fn apply_wakeup_guard_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        apply_wakeup_guard_hook_inner(),
+        crate::control_plane_prefs::Feature::WakeupGuardHook,
+        false,
+    )
+}
+
+fn apply_wakeup_guard_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_fleet_binary()
         .ok_or("Cannot find fleet binary — install fleet CLI first")?;
 
@@ -694,6 +766,14 @@ pub fn apply_wakeup_guard_hook() -> Result<(), String> {
 
 /// Remove the wakeup guard from settings.json.
 pub fn remove_wakeup_guard_hook() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        remove_wakeup_guard_hook_inner(),
+        crate::control_plane_prefs::Feature::WakeupGuardHook,
+        true,
+    )
+}
+
+fn remove_wakeup_guard_hook_inner() -> Result<(), String> {
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let Some(obj) = settings.as_object_mut() else {
         return Ok(());
@@ -737,6 +817,14 @@ fn has_wakeup_guard_hook(hooks_obj: &Map<String, Value>) -> bool {
 /// Coexists with the prd-context hook on UserPromptSubmit — markers are
 /// distinct, retain-then-push only filters our own group.
 pub fn apply_idle_hooks() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        apply_idle_hooks_inner(),
+        crate::control_plane_prefs::Feature::IdleHooks,
+        false,
+    )
+}
+
+fn apply_idle_hooks_inner() -> Result<(), String> {
     let fleet_bin = resolve_fleet_binary()
         .ok_or("Cannot find fleet binary — install fleet CLI first")?;
 
@@ -785,6 +873,14 @@ pub fn apply_idle_hooks() -> Result<(), String> {
 
 /// Remove both idle hooks from settings.json.
 pub fn remove_idle_hooks() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        remove_idle_hooks_inner(),
+        crate::control_plane_prefs::Feature::IdleHooks,
+        true,
+    )
+}
+
+fn remove_idle_hooks_inner() -> Result<(), String> {
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let Some(obj) = settings.as_object_mut() else {
         return Ok(());
@@ -1518,6 +1614,67 @@ mod tests {
             }
         }
         outcome.expect("wakeup guard apply/remove must be idempotent and sibling-safe");
+    }
+
+    #[test]
+    fn removing_a_hook_records_the_users_intent_and_reapplying_clears_it() {
+        // The contract self-healing rests on: after the user switches the guard
+        // off, `~/.fleet/control-plane-prefs.json` says so, and heal must skip
+        // it. Without this record both "never installed" and "deliberately off"
+        // look identical in settings.json, and heal would override the choice.
+        use crate::control_plane_prefs::{is_disabled, Feature};
+
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-hooks-intent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by the fleet_home_lock.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let outcome = (|| -> Result<(), String> {
+            if is_disabled(Feature::GuardHook) {
+                return Err("a fresh host must not read as disabled".into());
+            }
+
+            remove_guard_hook()?;
+            if !is_disabled(Feature::GuardHook) {
+                return Err("remove_guard_hook must record the disablement".into());
+            }
+            // Only that one feature — an over-broad record would suppress heal
+            // for the whole control plane.
+            if is_disabled(Feature::ElicitationHook) {
+                return Err("remove_guard_hook must not touch its neighbours".into());
+            }
+
+            apply_guard_hook()?;
+            if is_disabled(Feature::GuardHook) {
+                return Err("apply_guard_hook must clear the disablement".into());
+            }
+            Ok(())
+        })();
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = fs::remove_dir_all(&tmp);
+
+        if let Err(e) = &outcome {
+            if e.contains("Cannot find fleet binary") {
+                eprintln!("skipped: no fleet binary on this host");
+                return;
+            }
+        }
+        outcome.expect("remove/apply must record and clear the user's intent");
     }
 
     #[test]
