@@ -2405,7 +2405,8 @@
       "default_remote": "远端",
       "op_ok": "操作完成。",
       "op_failed": "操作失败。"
-    }
+    },
+    "proc_open_terminal": "在终端打开"
   },
   "paths": {
     "open_in_files": "在仓库页中打开",

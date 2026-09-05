@@ -17,7 +17,7 @@ import { PageShell } from "./PageShell";
 import { EmptyState } from "./EmptyState";
 import { ProcTerminal } from "./ProcTerminal";
 import { distinctWorkspaces } from "./NewSessionForm";
-import { useProcStore, useSessionsStore } from "../store";
+import { useProcStore, useSessionsStore, useUIStore } from "../store";
 import type { ProcRecord } from "../types";
 import styles from "./MemoryView.module.css";
 import termStyles from "./TerminalView.module.css";
@@ -43,6 +43,9 @@ export function TerminalView() {
   const procs = useProcStore((s) => s.procs);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
 
+  const terminalNav = useUIStore((s) => s.terminalNav);
+  const clearTerminalNav = useUIStore((s) => s.clearTerminalNav);
+
   const [selected, setSelected] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +60,14 @@ export function TerminalView() {
     () => distinctWorkspaces(sessions, Number.MAX_SAFE_INTEGER),
     [sessions],
   );
+
+  // 仓库页「在终端打开」带过来的仓库。依赖 nonce 而非 workspacePath —— 从终端页
+  // 切回仓库、再点同一个仓库时 path 没变，只有 nonce 变，靠它这个 effect 才会重跑。
+  useEffect(() => {
+    if (!terminalNav) return;
+    setSelected(terminalNav.workspacePath);
+    clearTerminalNav();
+  }, [terminalNav?.nonce, terminalNav, clearTerminalNav]);
 
   // 轮询 proc 注册表：标签的存活状态、以及别处（命令面板、手机）起的 pty 都靠它
   // 进来。ProcTerminal 自己的输出轮询只认它挂着的那一个。
