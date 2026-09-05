@@ -9,6 +9,10 @@ import type { ProcRecord } from "../types";
  *
  * 所以这里钉死的是**两种形状都要认**——新形状是现在生成的，旧形状存在于那次改动
  * 之前起的、仍活着的 pty 记录里。
+ *
+ * isDefaultShellCommand 现在住在 shared-ts/procShell.ts,移动端 import 的是同一个
+ * 文件(经本模块 re-export 进来)。所以这一组绿就等于两端都绿 —— 共享层没有自己的
+ * vitest 工程,把用例放在这里是为了不为一个纯函数再配一套测试运行器。
  */
 
 function rec(command: string): ProcRecord {
