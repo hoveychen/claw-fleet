@@ -20,6 +20,86 @@
 
 use claw_fleet_core::hooks_server::{self, ServeOptions};
 
+/// Marker recording that `fleet webui` already performed its first-run control
+/// plane install on this host. Lives next to the injector configs in `~/.fleet`.
+const WEBUI_BOOTSTRAP_MARKER: &str = "webui-bootstrap.json";
+
+/// Install the control plane the first time `fleet webui` runs on a host, then
+/// never again.
+///
+/// The gap this closes: `hooks_server::serve` injects the `Bash(*)` permissions
+/// allow rule (suppressing Claude Code's native command prompt) and registers
+/// the fleet MCP server, but it installs no hooks and no `~/.claude/CLAUDE.md`
+/// guidance — those ship with the desktop onboarding UI or `fleet bootstrap`.
+/// A fresh Linux host started with `fleet webui` alone, whose page nobody ever
+/// opened, therefore ran agents with the native prompt suppressed and no
+/// `fleet guard` audit gate, no elicitation/plan-approval bridge, no idle hooks
+/// (so `fleet handoff`/`loop`/`watch` silently died) and no guidance at all.
+///
+/// **Why once rather than every start.** Every feature here is a tristate
+/// toggle whose default is ON, but the user's explicit OFF is persisted in the
+/// frontend store (`claw-fleet-desktop/app/storage.ts`), which this process
+/// cannot see. Re-installing on every boot would reinstate modes the user
+/// deliberately switched off, and they would only be undone again the next time
+/// somebody loaded the page. Installing exactly once means "never configured"
+/// gets the defaults, and every later choice — made through the UI, which does
+/// reach the apply/remove routes — stands.
+fn first_run_bootstrap() {
+    let Some(marker) =
+        claw_fleet_core::session::get_fleet_dir().map(|d| d.join(WEBUI_BOOTSTRAP_MARKER))
+    else {
+        return;
+    };
+    first_run_bootstrap_at(&marker, || {
+        let settings = super::bootstrap::resolve_settings(None, None, None);
+        super::bootstrap::install_control_plane(&settings)
+    });
+}
+
+/// The marker gate itself, with the install injected so tests can exercise the
+/// "runs once" contract without writing to a real `~/.claude`.
+fn first_run_bootstrap_at(
+    marker: &std::path::Path,
+    install: impl FnOnce() -> Vec<super::bootstrap::Step>,
+) {
+    if marker.exists() {
+        return;
+    }
+
+    eprintln!(
+        "[fleet webui] first run on this host — installing the control plane \
+         (hooks + guidance). Re-run or adjust it any time with `fleet bootstrap` \
+         or the app's settings panel."
+    );
+    let steps = install();
+    for s in &steps {
+        if let Err(e) = &s.result {
+            eprintln!("[fleet webui] bootstrap step {} failed: {e}", s.name);
+        }
+    }
+
+    // Written even when a step failed: the marker records "the first-run install
+    // was attempted", not "everything succeeded". Retrying on every boot would
+    // re-run the whole install for one persistently failing step — and that is
+    // exactly the every-boot reinstatement the once-only rule exists to avoid.
+    // The failures are on stderr, and `fleet bootstrap` re-runs it on demand.
+    if let Some(parent) = marker.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let failed = steps.iter().filter(|s| s.result.is_err()).count();
+    let body = serde_json::json!({
+        "installed_at": chrono::Utc::now().to_rfc3339(),
+        "failed_steps": failed,
+    });
+    if let Err(e) = std::fs::write(marker, body.to_string()) {
+        eprintln!(
+            "[fleet webui] could not write {} — the control plane will be \
+             reinstalled on the next start: {e}",
+            marker.display()
+        );
+    }
+}
+
 /// `fleet serve` — token-gated API only. No web UI, no auth bypass.
 pub(crate) fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     hooks_server::serve(ServeOptions {
@@ -220,6 +300,11 @@ pub(crate) fn cmd_webui(
             }
         },
     };
+    // Before `serve` takes the thread: a host whose UI nobody has opened yet has
+    // no hooks and no guidance, and `serve` is about to inject the permissions
+    // allow-list on top of that. See [`first_run_bootstrap`].
+    first_run_bootstrap();
+
     if host != DEFAULT_WEBUI_HOST && host != "localhost" {
         eprintln!(
             "[fleet webui] binding {host} — this port has no authentication and can start agent sessions; put an auth gateway in front of it"
@@ -251,6 +336,97 @@ pub(crate) fn cmd_webui(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A temp dir that cleans itself up, so the marker tests never touch a real
+    /// `~/.fleet`.
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "fleet-webui-bootstrap-{tag}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn first_run_installs_and_records_the_marker() {
+        let dir = temp_dir("first");
+        let marker = dir.join(WEBUI_BOOTSTRAP_MARKER);
+        let mut ran = 0;
+
+        first_run_bootstrap_at(&marker, || {
+            ran += 1;
+            vec![super::super::bootstrap::Step { name: "fake", result: Ok(()) }]
+        });
+
+        assert_eq!(ran, 1, "a host with no marker must get the control plane");
+        assert!(marker.is_file(), "the install must be recorded");
+        let body: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&marker).unwrap()).unwrap();
+        assert_eq!(body["failed_steps"], 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_second_start_does_not_reinstall() {
+        // The whole point of the marker: a user who switched a mode OFF in the
+        // UI (state the backend cannot see) must not have it reinstated by the
+        // next `fleet webui` boot.
+        let dir = temp_dir("second");
+        let marker = dir.join(WEBUI_BOOTSTRAP_MARKER);
+        std::fs::write(&marker, "{}").unwrap();
+        let mut ran = 0;
+
+        first_run_bootstrap_at(&marker, || {
+            ran += 1;
+            vec![]
+        });
+
+        assert_eq!(ran, 0, "an existing marker must suppress the install");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "{}", "and not be rewritten");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failing_step_still_marks_the_host_but_counts_the_failure() {
+        // Retrying a persistently failing step on every boot would re-run the
+        // whole install each time — exactly the reinstatement the gate prevents.
+        let dir = temp_dir("failing");
+        let marker = dir.join(WEBUI_BOOTSTRAP_MARKER);
+
+        first_run_bootstrap_at(&marker, || {
+            vec![
+                super::super::bootstrap::Step { name: "ok", result: Ok(()) },
+                super::super::bootstrap::Step { name: "bad", result: Err("boom".into()) },
+            ]
+        });
+
+        let body: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&marker).unwrap()).unwrap();
+        assert_eq!(body["failed_steps"], 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_marker_lands_in_the_fleet_dir() {
+        // Guards the wiring the injected-install tests deliberately skip: the
+        // real entry point must resolve its marker under ~/.fleet, alongside the
+        // permissions/MCP injector configs.
+        let dir = temp_dir("home");
+        let _guard = claw_fleet_core::paths::fleet_home_lock();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", &dir) };
+
+        let resolved = claw_fleet_core::session::get_fleet_dir().map(|d| d.join(WEBUI_BOOTSTRAP_MARKER));
+        assert_eq!(resolved, Some(dir.join(".fleet").join(WEBUI_BOOTSTRAP_MARKER)));
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
+            None => unsafe { std::env::remove_var("FLEET_HOME") },
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn host_flag_beats_env_beats_default() {
