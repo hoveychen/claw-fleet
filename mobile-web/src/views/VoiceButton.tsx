@@ -1,37 +1,40 @@
 // 输入框旁边的语音按钮。挂在 AttachmentRow 里，所以新会话 sheet 和续写
 // composer 两处自动都有。
 //
-// 交互是「长按说话」和「点按录音」的合流，因为这两种习惯都很常见，而它们能靠
-// 松手时长区分开，不必让用户先选一种：
-//   - 按住说、松手结束        —— 短句最快，全程一个动作
-//   - 快速点一下 → 锁定继续录 —— 长内容不用一直按着，再点一下停
-//   - 按住时上滑一段再松手    —— 丢弃这次
+// 交互是**点一下开始、再点一下结束**，没有长按、没有滑动手势。
 //
-// 环境探测、provider 选择、识别生命周期都在 useVoiceInput 里；这里只管手势和画。
+// 之前这里是「按住说话 + 快速点一下锁定 + 上滑取消」的合流，靠两个看不见的阈值
+// （松手 ≤500ms 算点按、上滑 ≥60px 算取消）分流。三个问题让它站不住：
+//
+//   1. 两个阈值在界面上没有任何锚点。滑到哪儿算取消，只有滑过头之后才知道；
+//      手快一点松开就静默进了锁定态，麦克风还开着而用户以为已经结束了。
+//   2. 「按住说话 + 上滑取消」是**发语音消息**的手势语法（微信）。我们做的是
+//      语音转文字，业界（iOS 听写、Gemini）在这件事上一律是点按开关。
+//   3. 长按和系统权限弹窗天生冲突：弹窗一盖上来就抢走指针，浏览器派发
+//      pointercancel，这一次录音在用户点「允许」之前就被判成取消了。
+//      —— 鸿蒙端「弹了权限却一个字都出不来」的首要嫌疑正是这条。
+//
+// 环境探测、provider 选择、识别生命周期都在 useVoiceInput 里；这里只管画。
 
-import { useRef, useState } from "react";
-import { AudioLines, Square, X } from "lucide-react";
+import { AudioLines, Loader, Square } from "lucide-react";
 import { t } from "../i18n";
 import { useVoiceInput, voiceErrorText } from "../useVoiceInput";
+import type { VoiceState } from "../useVoiceInput";
 import styles from "./VoiceButton.module.css";
 
-/** 松手时长 ≤ 这个数算「点按」，锁定继续录音；超过算「长按」，松手即停。 */
-export const TAP_MS = 500;
-/** 按住时上滑超过这么多像素就是要取消。 */
-export const CANCEL_DY = 60;
-
-export type Intent = "cancel" | "stop" | "lock";
-
 /**
- * 松手时该干什么。
+ * 按钮旁边那行状态文字。
  *
- * @param dy   松手点相对按下点的纵向位移，向上为负。
- * @param heldMs 按住的时长。
+ * 抽成纯函数是为了能单测 —— 本仓的组件测试只有 renderToStaticMarkup，测不了
+ * hook 的状态迁移，所以把「哪个状态说哪句话」这条真正会出错的规则单独拎出来。
+ *
+ * 「准备中」必须说出来：麦克风还没开，这段时间说的话会丢，用户有权知道现在
+ * 别急着开口。之前这一段被画成「正在听」，代价是用户以为前半句被吞了。
  */
-export function releaseIntent(dy: number, heldMs: number): Intent {
-  // 上滑取消优先于一切:用户已经把手指移开按钮了,不管按了多久都是「不要」。
-  if (dy <= -CANCEL_DY) return "cancel";
-  return heldMs <= TAP_MS ? "lock" : "stop";
+export function voiceHint(state: VoiceState, partial: string): string {
+  if (state === "preparing") return t("准备中…");
+  if (state === "listening") return partial || t("点击停止");
+  return "";
 }
 
 export function VoiceButton({
@@ -42,97 +45,39 @@ export function VoiceButton({
   /** 识别出的一段文字。调用方决定怎么并进输入框。 */
   onText: (text: string) => void;
 }) {
-  const { state, partial, error, start, stop, cancel } = useVoiceInput(lang, onText);
-  // 点按锁定:此时手指已经松开,录音还在继续,要再点一次才停。
-  const [locked, setLocked] = useState(false);
-  // 上滑到了取消区,松手就丢弃。只用来把按钮画成「松手取消」。
-  const [willCancel, setWillCancel] = useState(false);
-  const pressRef = useRef<{ y: number; at: number } | null>(null);
+  const { state, partial, error, start, stop } = useVoiceInput(lang, onText);
 
   // 探测没结束、或这台设备根本没有识别服务时,整个按钮不出现 —— 画一个按下去
   // 只会报错的按钮没有意义。
   if (state === "probing" || state === "unsupported") return null;
 
+  const preparing = state === "preparing";
   const listening = state === "listening";
+  // 「准备中」也算开着:这一下点下去是收，不是再开一次。
+  const active = preparing || listening;
 
-  const down = (e: React.PointerEvent) => {
-    if (locked) return; // 锁定态下按下不重新开始,松手时才停
-    pressRef.current = { y: e.clientY, at: Date.now() };
-    setWillCancel(false);
-    // 指针捕获:手指滑出按钮范围后仍然收得到 move/up,否则上滑取消一划出去
-    // 就断了,松手事件也丢了,录音会一直开着。
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    start();
-  };
-
-  const move = (e: React.PointerEvent) => {
-    const press = pressRef.current;
-    if (!press) return;
-    setWillCancel(e.clientY - press.y <= -CANCEL_DY);
-  };
-
-  const up = (e: React.PointerEvent) => {
-    const press = pressRef.current;
-    pressRef.current = null;
-    setWillCancel(false);
-    if (locked) {
-      // 锁定态:这一下是「停止」。
-      setLocked(false);
-      stop();
-      return;
-    }
-    if (!press) return;
-    switch (releaseIntent(e.clientY - press.y, Date.now() - press.at)) {
-      case "cancel":
-        cancel();
-        break;
-      case "lock":
-        setLocked(true);
-        break;
-      case "stop":
-        stop();
-        break;
-    }
-  };
-
-  // 按钮变成纯图标之后，指引没地方写了 —— 全部落到旁边这行状态文字上：录音中
-  // 先给操作提示，一旦引擎吐字就换成识别到的内容（那时用户已经知道怎么松手了，
-  // 看见字更要紧）。少了这行，纯图标的按钮就成了一个没人知道该怎么松手的黑盒。
-  const hint = !listening
-    ? ""
-    : willCancel
-      ? t("松开取消")
-      : partial || (locked ? t("点击停止") : t("松开结束"));
+  const hint = voiceHint(state, partial);
 
   return (
     <>
       <button
         type="button"
         className={styles.btn}
-        data-listening={listening || undefined}
-        data-cancel={willCancel || undefined}
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={up}
-        // 指针被系统抢走(来电、手势返回)等同于取消,别把录音留在开着的状态。
-        onPointerCancel={() => {
-          pressRef.current = null;
-          setWillCancel(false);
-          setLocked(false);
-          cancel();
-        }}
-        // 长按在移动端会触发文本选择和系统菜单,压住。
-        onContextMenu={(e) => e.preventDefault()}
-        aria-label={listening ? t("停止录音") : t("语音输入")}
-        aria-pressed={listening}
+        data-listening={active || undefined}
+        data-preparing={preparing || undefined}
+        onClick={() => (active ? stop() : start())}
+        aria-label={active ? t("停止录音") : t("语音输入")}
+        aria-pressed={active}
       >
-        {willCancel ? <X size={17} /> : listening ? <Square size={17} /> : <AudioLines size={17} />}
+        {preparing ? (
+          <Loader size={17} />
+        ) : listening ? (
+          <Square size={17} />
+        ) : (
+          <AudioLines size={17} />
+        )}
       </button>
-      {hint && (
-        <span className={styles.hint} data-cancel={willCancel || undefined}>
-          {hint}
-        </span>
-      )}
+      {hint && <span className={styles.hint}>{hint}</span>}
       {state === "error" && error && <span className={styles.error}>{voiceErrorText(error)}</span>}
     </>
   );

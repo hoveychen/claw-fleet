@@ -33,13 +33,9 @@
   color: var(--color-text-secondary);
 }
 
-/* 录音中 / 取消态仍要有明确的色块，那是状态反馈，不能一起去掉。 */
+/* 录音中仍要有明确的色块，那是状态反馈，不能一起去掉。 */
 .slot button[data-listening] {
   border-color: var(--color-accent);
-}
-
-.slot button[data-cancel] {
-  border-color: var(--color-error);
 }
 
 /* VoiceButton 的状态文字在它自己的工具行里是 flex:1 撑满的；浮到这里就不能再
