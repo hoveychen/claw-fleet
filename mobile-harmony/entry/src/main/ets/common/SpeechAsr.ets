@@ -14,6 +14,7 @@
 import { speechRecognizer } from '@kit.CoreSpeechKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 const DOMAIN = 0x0000;
 const TAG = 'fleet-asr';
@@ -66,6 +67,30 @@ export class SpeechAsr {
       return res.authResults.length > 0 && res.authResults[0] === 0;
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'mic permission request failed: %{public}s', JSON.stringify(e));
+      return false;
+    }
+  }
+
+  /// 二次授权：用户已经拒过一次，把系统的权限面板重新拉起来。
+  ///
+  /// 为什么需要单独一个入口：`requestPermissionsFromUser` 在用户拒绝过之后
+  /// **不再弹窗**，直接返回拒绝。页面上那句「请在系统设置里允许」于是成了死路
+  /// —— 用户既不知道去哪开，我们也没办法把他送过去。`requestPermissionOnSetting`
+  /// 是官方给的这条路，而且直接在应用内弹系统面板，不用跳出去翻设置。
+  ///
+  /// 两个「异常其实是正常结果」的分支（错误码见 @ohos.abilityAccessCtrl.d.ts）：
+  ///   - 12100011 全部权限都已授权 —— 那就是已经好了，报 true。
+  ///   - 12100012 用户从没拒过 —— 这个 API 不受理，退回普通申请去弹第一次的框。
+  async requestOnSetting(ctx: common.UIAbilityContext): Promise<boolean> {
+    const mgr = abilityAccessCtrl.createAtManager();
+    try {
+      const res = await mgr.requestPermissionOnSetting(ctx, [MIC]);
+      return res.length > 0 && res[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+    } catch (e) {
+      const code = (e as BusinessError).code;
+      if (code === 12100011) { return true; }
+      if (code === 12100012) { return await this.ensureMic(ctx); }
+      hilog.warn(DOMAIN, TAG, 'requestPermissionOnSetting failed: %{public}d', code);
       return false;
     }
   }
