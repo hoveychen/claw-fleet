@@ -84,6 +84,15 @@ Fleet 经 codex CLI 调用,按 **ChatGPT 套餐配额**计费,**没有按 token 
 Sol / Terra / Luna = 强 / 中 / 快 三档,同属 gpt-5.6。Codex 的 effort 档是 \
 `minimal` / `low` / `medium` / `high`(**没有** Claude 的 xhigh/max)。\n\
 \n\
+## 生图(只有 codex 有)\n\
+\n\
+Claude 侧**没有**生图能力。要位图资产(插画、贴图、mockup、hero 图)时借 \
+codex 自带的 imagegen skill:`codex exec -m gpt-5.6-luna \"用内置图像生成\
+工具画 …\"`。模型是 `gpt-image-2`,走 ChatGPT 配额,**不需要** \
+`OPENAI_API_KEY`。产物落 `$CODEX_HOME/generated_images/<thread_id>/`,其中 \
+`<thread_id>` 就是 `--json` 流里 `thread.started` 的那个 id。细节(尺寸约束、\
+透明背景限制、token 成本)见 wiki `codex/image-generation`。\n\
+\n\
 ## 怎么挑\n\
 \n\
 - 机械、可并行、量大的 subagent → 便宜快档(Haiku / Sonnet;Luna / Terra)\
@@ -145,6 +154,18 @@ effort (xhigh) |\n\
 Sol / Terra / Luna = strong / balanced / fast, all in the gpt-5.6 family. \
 Codex effort levels are `minimal` / `low` / `medium` / `high` (**no** xhigh or \
 max, unlike Claude).\n\
+\n\
+## Image generation (codex only)\n\
+\n\
+The Claude side has **no** image-generation capability. When you need a raster \
+asset (illustration, sprite, mockup, hero image), borrow codex's bundled \
+imagegen skill: `codex exec -m gpt-5.6-luna \"use the built-in image \
+generation tool to draw …\"`. The model is `gpt-image-2`, it bills against the \
+ChatGPT quota, and it does **not** need `OPENAI_API_KEY`. Output lands in \
+`$CODEX_HOME/generated_images/<thread_id>/`, where `<thread_id>` is the id \
+from `thread.started` in the `--json` stream. Details (size constraints, \
+transparency limits, token cost) live in the wiki at \
+`codex/image-generation`.\n\
 \n\
 ## How to pick\n\
 \n\
@@ -298,6 +319,25 @@ mod tests {
             assert!(g.contains("opts.model"), "{locale} must name the Workflow agent() override");
             assert!(g.contains("--model"), "{locale} must name the spawn/dispatch override");
             assert!(g.contains("--effort"), "{locale} must name the effort override");
+        }
+    }
+
+    #[test]
+    fn render_both_locales_point_image_gen_at_codex() {
+        // Claude cannot generate images; a session that doesn't know that will
+        // hand back ASCII or SVG instead of borrowing codex's gpt-image-2. Both
+        // locales must name the model and where the output lands.
+        for locale in ["en", "zh"] {
+            let g = render_guidance(locale);
+            assert!(g.contains("gpt-image-2"), "{locale} must name the image model");
+            assert!(
+                g.contains("generated_images"),
+                "{locale} must say where generated images land"
+            );
+            assert!(
+                g.contains("codex/image-generation"),
+                "{locale} must point at the wiki doc"
+            );
         }
     }
 
