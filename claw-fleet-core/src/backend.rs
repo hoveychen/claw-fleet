@@ -716,6 +716,31 @@ pub trait Backend: Send + Sync {
         relpath: &str,
     ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String>;
 
+    // ── Codex-generated images ───────────────────────────────────────────────
+    /// Images a Codex session generated, newest-largest first. For a Codex
+    /// session the Fleet session id *is* the Codex thread id, which is also the
+    /// name of the output directory, so no extra correlation is needed; Claude
+    /// sessions simply have none and get an empty list.
+    ///
+    /// Default is empty so a backend that cannot see `$CODEX_HOME` degrades to
+    /// "no images" rather than an error.
+    fn list_session_images(&self, _session_id: &str) -> Vec<crate::codex_image::GeneratedImage> {
+        Vec::new()
+    }
+
+    /// Raw bytes of one such image. Backs the `fleet-genimage://` protocol, so
+    /// it must work for both local and remote backends — the files live on
+    /// whichever machine ran Codex, which for a remote workspace is still the
+    /// probe host.
+    fn get_session_image(
+        &self,
+        session_id: &str,
+        name: &str,
+    ) -> Result<crate::codex_image::GeneratedImageBytes, String> {
+        let _ = (session_id, name);
+        Err("session images not available on this backend".to_string())
+    }
+
     /// Resolve a [`crate::mcp_ipc::ReviewDoc`] (a `.md` file or wiki entry the
     /// agent attached to a `fleet__ask` card) to its current body, so the card's
     /// side panel can render it. Fetched live rather than snapshotted, so it must

@@ -5,6 +5,7 @@ import type { SessionInfo } from "../types";
 import { MessageList } from "./MessageList";
 import { AgentSourceIcon, useMultiSource } from "./SessionCard";
 import { SessionIdRow } from "./SessionIdRow";
+import { SessionImages } from "./SessionImages";
 import { SkillHistory } from "./SkillHistory";
 import styles from "./InspectModal.module.css";
 
@@ -78,6 +79,9 @@ export function InspectModal({ session, onClose }: Props) {
 
         {/* Skill history */}
         <SkillHistory jsonlPath={session.jsonlPath} />
+
+        {/* Images this Codex session generated (hides itself when there are none) */}
+        <SessionImages sessionId={session.id} />
 
         {/* Messages */}
         <div className={styles.scroll_area}>

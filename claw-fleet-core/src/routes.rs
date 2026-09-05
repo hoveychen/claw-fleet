@@ -89,6 +89,10 @@ pub const DAILY_REPORT_STATS: &str = "/daily_report_stats";
 pub const MANAGED_LESSONS: &str = "/managed_lessons";
 pub const MANAGED_LESSON_REMOVE: &str = "/managed_lessons/remove";
 pub const DECISION_ASSET: &str = "/decision_asset";
+/// Images a Codex session generated (`?session=<thread id>`), JSON list.
+pub const SESSION_IMAGES: &str = "/session_images";
+/// Bytes of one of them (`?session=<thread id>&name=<file>`).
+pub const SESSION_IMAGE: &str = "/session_image";
 pub const REVIEW_DOC: &str = "/review_doc";
 pub const ENQUEUE_MESSAGE: &str = "/enqueue_message";
 pub const CANCEL_PENDING_MESSAGE: &str = "/cancel_pending_message";

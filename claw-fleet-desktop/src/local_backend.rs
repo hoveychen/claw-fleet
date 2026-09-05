@@ -2310,6 +2310,18 @@ impl Backend for LocalBackend {
         crate::mcp_ipc::read_review_doc(doc)
     }
 
+    fn list_session_images(&self, session_id: &str) -> Vec<crate::codex_image::GeneratedImage> {
+        crate::codex_image::list_thread_images(session_id)
+    }
+
+    fn get_session_image(
+        &self,
+        session_id: &str,
+        name: &str,
+    ) -> Result<crate::codex_image::GeneratedImageBytes, String> {
+        crate::codex_image::read_thread_image(session_id, name)
+    }
+
     fn list_artifacts(&self) -> Vec<crate::artifacts::Artifact> {
         crate::artifacts::list()
     }

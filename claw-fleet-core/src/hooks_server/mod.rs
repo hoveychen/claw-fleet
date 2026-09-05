@@ -1111,6 +1111,8 @@ fn handle_request(
             crate::routes::WIKI_FILE => route_wiki_file(ctx, request, &query, json_header, path),
 
             crate::routes::DECISION_ASSET => route_decision_asset(ctx, request, &query, json_header, path),
+            crate::routes::SESSION_IMAGES => route_session_images(ctx, request, &query, json_header, path),
+            crate::routes::SESSION_IMAGE => route_session_image(ctx, request, &query, json_header, path),
 
             crate::routes::REVIEW_DOC if request.method() == &tiny_http::Method::Post => route_review_doc(ctx, request, &query, json_header, path),
 

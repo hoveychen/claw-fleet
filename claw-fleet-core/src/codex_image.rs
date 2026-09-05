@@ -118,6 +118,52 @@ pub fn list_thread_images(thread_id: &str) -> Vec<GeneratedImage> {
         .unwrap_or_default()
 }
 
+/// Raw bytes of one generated image, for the `fleet-genimage://` protocol that
+/// renders thumbnails in the desktop.
+///
+/// Mirrors [`crate::mcp_ipc::DecisionAssetBytes`] rather than reusing it so the
+/// two asset stores stay independently evolvable; both cross the `fleet serve`
+/// HTTP boundary, hence `Serialize` + `Deserialize`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GeneratedImageBytes {
+    pub bytes: Vec<u8>,
+    pub mime: String,
+}
+
+/// Read one image out of a thread's generated-images dir by bare filename.
+///
+/// `name` must be a plain filename: the desktop hands it straight off a URL, so
+/// anything with a separator or `..` would be a path-traversal read out of
+/// `$CODEX_HOME`. Same guard shape as
+/// [`crate::mcp_ipc::read_decision_asset`].
+pub fn read_thread_image(thread_id: &str, name: &str) -> Result<GeneratedImageBytes, String> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || Path::new(name).is_absolute()
+    {
+        return Err(format!("invalid image name '{name}'"));
+    }
+    let dir = thread_images_dir(thread_id).ok_or("cannot determine codex home")?;
+    let path = dir.join(name);
+    // Extension gate as well as the name gate: this endpoint is reachable from
+    // the webview, and there is no reason for it to serve anything but images.
+    let ext = path
+        .extension()
+        .and_then(|x| x.to_str())
+        .map(|x| x.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(format!("not an image: '{name}'"));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    Ok(GeneratedImageBytes {
+        bytes,
+        mime: crate::wiki::mime_for_path(&path).to_string(),
+    })
+}
+
 /// Rules every generation/edit prompt repeats. Two of them are load-bearing for
 /// Fleet rather than for the picture: **don't move the output** (Fleet locates
 /// files by thread id, so a helpful `mv` into the workspace empties the
@@ -566,6 +612,18 @@ mod tests {
     fn thread_images_dir_rejects_blank_id() {
         assert!(thread_images_dir("").is_none());
         assert!(thread_images_dir("   ").is_none());
+    }
+
+    #[test]
+    fn read_thread_image_rejects_traversal_and_non_images() {
+        // This endpoint is reachable from the webview off a URL segment, so the
+        // name gate is a security boundary, not tidiness.
+        for bad in ["", "../../.codex/auth.json", "a/b.png", "..", "notes.txt"] {
+            assert!(
+                read_thread_image("some-thread", bad).is_err(),
+                "must reject {bad:?}"
+            );
+        }
     }
 
     #[test]
