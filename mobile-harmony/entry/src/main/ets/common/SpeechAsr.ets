@@ -28,6 +28,9 @@ const CHANNEL = 1;
 const OFFLINE = 1;
 
 export interface AsrCallbacks {
+  /// 引擎真的开始收音了。createEngine 是异步的，这之前用户说的话全丢，
+  /// 所以页面必须等到这一声才敢说「正在听」。
+  onReady: () => void;
   onText: (text: string, isFinal: boolean) => void;
   onError: (code: string) => void;
   /// 引擎自己收工了（VAD 判定说完了、或到了 maxAudioDuration）。
@@ -122,8 +125,13 @@ export class SpeechAsr {
       this.engine = engine;
 
       engine.setListener({
-        onStart: (_sid: string, _msg: string) => {
+        // onStart 是引擎说「麦克风真的开了」的那一刻，页面据此把「准备中」推进
+        // 「正在听」。createEngine 要加载端侧模型，这中间的空窗真实存在，用户在
+        // 那段里说的话不会进任何结果。
+        onStart: (sid: string, _msg: string) => {
           hilog.info(DOMAIN, TAG, 'voice-diag engine onStart cost=%{public}dms', Date.now() - t0);
+          if (gen !== this.gen || sid !== session) { return; }
+          cb.onReady();
         },
         onEvent: (_sid: string, code: number, _msg: string) => {
           hilog.info(DOMAIN, TAG, 'voice-diag engine event code=%{public}d', code);
