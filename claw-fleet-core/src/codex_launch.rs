@@ -612,7 +612,7 @@ pub fn on_codex_turn_exit(session_id: &str) {
 /// `FLEET_AGENT_SOURCE` lets in-session tooling identify its own source. Both
 /// spawn and resume go through here, so self-spawned and self-resumed Codex
 /// sessions are marked identically.
-fn apply_codex_launch_env(cmd: &mut std::process::Command) {
+pub(crate) fn apply_codex_launch_env(cmd: &mut std::process::Command) {
     // A Fleet-launched Codex process must never inherit a session id from the
     // spawner's environment. A new spawn's identity comes solely from its
     // `FLEET_CODEX_LAUNCH_TOKEN`; a resume stamps `FLEET_SESSION_ID` explicitly
@@ -1307,7 +1307,7 @@ pub fn build_codex_resume_args(
 /// program swap + verbatim argv + `--code` (see [`crate::remote_workspace`]).
 /// Returns `(program, args, rca_envs)`; local workspaces pass through
 /// unchanged with no extra env.
-fn wrap_codex_launch(
+pub(crate) fn wrap_codex_launch(
     codex: PathBuf,
     args: Vec<String>,
     workspace_path: &str,
