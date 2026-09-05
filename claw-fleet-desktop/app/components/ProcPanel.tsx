@@ -9,10 +9,11 @@ import {
   Play,
   RotateCw,
   Square,
+  SquareTerminal,
   Trash2,
   X,
 } from "lucide-react";
-import { useProcStore } from "../store";
+import { useProcStore, useUIStore } from "../store";
 import { getItem, setItem } from "../storage";
 import type { ProcRecord } from "../types";
 import styles from "./FilesView.module.css";
@@ -95,6 +96,7 @@ export function ProcPanel({
   const { t } = useTranslation();
   const procs = useProcStore((s) => s.procs);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
+  const requestTerminalNav = useUIStore((s) => s.requestTerminalNav);
   const [command, setCommand] = useState("");
   const [runError, setRunError] = useState<string | null>(null);
   const [openTermId, setOpenTermId] = useState<string | null>(null);
@@ -232,6 +234,17 @@ export function ProcPanel({
         <button className={styles.proc_run_btn} type="submit" disabled={!command.trim()}>
           <Play size={12} strokeWidth={2} />
           {t("files.proc_run")}
+        </button>
+        {/* 这里不自己起 shell,只是带着本仓库跳到终端页 —— 终端页进去会接回已有的
+            pty、没有才开新的,那套「不留孤儿 shell」的逻辑只该有一份。 */}
+        <button
+          className={styles.proc_term_btn}
+          type="button"
+          onClick={() => requestTerminalNav(workspace)}
+          title={t("files.proc_open_terminal")}
+        >
+          <SquareTerminal size={12} strokeWidth={1.8} />
+          {t("files.proc_open_terminal")}
         </button>
       </form>
       {runError && (

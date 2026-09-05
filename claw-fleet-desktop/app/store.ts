@@ -319,6 +319,13 @@ interface UIState {
   fileNav: FileNavRequest | null;
   requestFileNav: (req: Omit<FileNavRequest, "nonce">) => void;
   clearFileNav: () => void;
+  /** A pending "open a terminal in this repo" request, raised by the 命令 panel's
+   *  在终端打开 button. Travels through the store for the same reason fileNav
+   *  does: TerminalView owns its workspace selection internally, so the 仓库 page
+   *  has no prop to hand it. TerminalView clears it once consumed. */
+  terminalNav: TerminalNavRequest | null;
+  requestTerminalNav: (workspacePath: string) => void;
+  clearTerminalNav: () => void;
   /** Absolute paths the 仓库 page was asked to open and could not resolve to
    *  any file. The path chips in agent prose read this to mark themselves as
    *  broken *after* a click — deliberately not before, since knowing in advance
@@ -346,6 +353,14 @@ export interface OpenTaskNavRequest {
   sessionId: string;
   /** Bumped on every request so clicking the same session twice re-navigates
    *  even when the id is unchanged. */
+  nonce: number;
+}
+
+export interface TerminalNavRequest {
+  workspacePath: string;
+  /** Bumped on every request so asking for the same repo twice re-navigates —
+   *  without it, hopping back to 仓库 and clicking 在终端打开 again would set an
+   *  identical object and TerminalView's effect would never re-run. */
   nonce: number;
 }
 
@@ -586,6 +601,15 @@ export const useUIStore = create<UIState>((set) => ({
       fileNav: { ...req, nonce: (s.fileNav?.nonce ?? 0) + 1 },
     })),
   clearFileNav: () => set({ fileNav: null }),
+  terminalNav: null,
+  requestTerminalNav: (workspacePath) =>
+    set((s) => ({
+      // Same bookkeeping as requestFileNav — see the note there on why a nav
+      // that skipped viewModePatch leaves the 工作 tab's memory stale.
+      ...viewModePatch(s, "terminal"),
+      terminalNav: { workspacePath, nonce: (s.terminalNav?.nonce ?? 0) + 1 },
+    })),
+  clearTerminalNav: () => set({ terminalNav: null }),
   unresolvedPaths: [],
   markPathUnresolved: (absPath) =>
     set((s) =>
