@@ -56,7 +56,17 @@ export class SpeechAsr {
 
   /// 开始识别。`lang` 形如 `zh-CN`。
   async start(ctx: common.UIAbilityContext, lang: string, cb: AsrCallbacks): Promise<void> {
-    if (!await this.ensureMic(ctx)) {
+    // 诊断用的时间线（计划 harmony-voice-diag）。「弹了权限却一个字都出不来」有
+    // 四条互相长得一样的可能路径，光看界面分不出来；这几行把它们分开：
+    //   permission 花了多久（>1s 基本就是弹了窗，说明用户那一刻手指必然离开了按钮）
+    //   createEngine 花了多久（用户开口早于引擎就绪，前半句会丢）
+    //   startListening 有没有发出去、之后有没有回调
+    const t0 = Date.now();
+    hilog.info(DOMAIN, TAG, 'voice-diag start lang=%{public}s', lang);
+    const granted = await this.ensureMic(ctx);
+    hilog.info(DOMAIN, TAG, 'voice-diag permission granted=%{public}s cost=%{public}dms',
+      granted ? 'yes' : 'no', Date.now() - t0);
+    if (!granted) {
       cb.onError('PERMISSION_DENIED');
       return;
     }
@@ -76,17 +86,30 @@ export class SpeechAsr {
         language: lang,
         online: OFFLINE,
       };
+      const tEngine = Date.now();
       const engine = await speechRecognizer.createEngine(createParams);
+      hilog.info(DOMAIN, TAG, 'voice-diag createEngine ok cost=%{public}dms dead=%{public}s',
+        Date.now() - tEngine, this.dead ? 'yes' : 'no');
       this.engine = engine;
 
       engine.setListener({
-        onStart: (_sid: string, _msg: string) => {},
-        onEvent: (_sid: string, _code: number, _msg: string) => {},
+        onStart: (_sid: string, _msg: string) => {
+          hilog.info(DOMAIN, TAG, 'voice-diag engine onStart cost=%{public}dms', Date.now() - t0);
+        },
+        onEvent: (_sid: string, code: number, _msg: string) => {
+          hilog.info(DOMAIN, TAG, 'voice-diag engine event code=%{public}d', code);
+        },
         onResult: (sid: string, result: speechRecognizer.SpeechRecognitionResult) => {
+          // 丢弃也要留痕：dead=yes 正是「页面已放弃、引擎还在录」那条路径的证据。
+          hilog.info(DOMAIN, TAG, 'voice-diag result final=%{public}s len=%{public}d dead=%{public}s match=%{public}s',
+            result.isFinal ? 'yes' : 'no', result.result.length,
+            this.dead ? 'yes' : 'no', sid === session ? 'yes' : 'no');
           if (this.dead || sid !== session) { return; }
           cb.onText(result.result, result.isFinal);
         },
         onComplete: (sid: string, _msg: string) => {
+          hilog.info(DOMAIN, TAG, 'voice-diag complete dead=%{public}s cost=%{public}dms',
+            this.dead ? 'yes' : 'no', Date.now() - t0);
           if (this.dead || sid !== session) { return; }
           cb.onComplete();
         },
@@ -117,6 +140,7 @@ export class SpeechAsr {
         extraParams: extra,
       };
       engine.startListening(startParams);
+      hilog.info(DOMAIN, TAG, 'voice-diag startListening issued cost=%{public}dms', Date.now() - t0);
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'asr start failed: %{public}s', JSON.stringify(e));
       cb.onError('START_FAILED');
@@ -125,6 +149,9 @@ export class SpeechAsr {
 
   /// 正常收尾：让引擎把最后一段定稿吐出来（onResult isFinal）再收工。
   stop(): void {
+    // engine=null 时这一下就是空转 —— 页面以为收了尾，实际引擎要么还没建起来
+    // （随后照样会开始录音），要么早已收工。两种都得看得见。
+    hilog.info(DOMAIN, TAG, 'voice-diag stop engine=%{public}s', this.engine === null ? 'null' : 'live');
     if (this.engine === null) { return; }
     try {
       this.engine.finish(this.sessionId);
@@ -135,6 +162,10 @@ export class SpeechAsr {
 
   /// 丢弃这次识别。之后引擎补的回调都不再上报。
   cancel(): void {
+    // 同 stop：engine=null 的 cancel 只置了 dead，而 start() 在拿到权限之后会把
+    // dead 重新置回 false —— 这一行加上 start 那边的 permission cost，就足以判定
+    // 「权限弹窗期间页面取消了、原生却照常开录」这条路径。
+    hilog.info(DOMAIN, TAG, 'voice-diag cancel engine=%{public}s', this.engine === null ? 'null' : 'live');
     this.dead = true;
     if (this.engine === null) { return; }
     try {
