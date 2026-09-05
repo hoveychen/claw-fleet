@@ -38,8 +38,18 @@ export interface AsrCallbacks {
 export class SpeechAsr {
   private engine: speechRecognizer.SpeechRecognitionEngine | null = null;
   private sessionId: string = '';
-  /// 取消之后引擎仍会把回调送完。调用方已经说了不要，之后一律咽掉。
-  private dead: boolean = false;
+  /// 每次 start / cancel 换一代号。
+  ///
+  /// 不能用一个 `dead` 布尔:start() 里有两段 await(申请权限、创建引擎),而
+  /// **申请权限那段几乎必然会被取消打断** —— 系统权限框一弹就抢走焦点,页面上
+  /// 那次按压随之收到 pointercancel,web 侧于是 cancel()。布尔版本里 cancel 设的
+  /// `dead=true` 会被那个还在 await 的 start() 一行 `dead=false` 重置掉,于是用户
+  /// 点完「允许」引擎照常开录,而页面早已把 `window.__fleetVoice` 拆了,结果推回去
+  /// 只剩 NO_HOOK —— 表现就是「弹过一次权限之后,怎么按都不出字」,而麦克风还占着
+  /// 到 maxAudioDuration。代号是单调递增的,晚到的那一轮改不动它。
+  private gen: number = 0;
+  /// 引擎还没建好就被要求停止。见 stop()。
+  private pendingStop: boolean = false;
 
   /// 申请麦克风权限。已授权时直接过，用户拒过则返回 false。
   private async ensureMic(ctx: common.UIAbilityContext): Promise<boolean> {
@@ -56,11 +66,18 @@ export class SpeechAsr {
 
   /// 开始识别。`lang` 形如 `zh-CN`。
   async start(ctx: common.UIAbilityContext, lang: string, cb: AsrCallbacks): Promise<void> {
+    // 开头就占号:这一轮之后的每一次 await 都要拿它跟当前代号比,不一致说明调用方
+    // 已经不要这次识别了。
+    const gen = ++this.gen;
+    this.pendingStop = false;
     if (!await this.ensureMic(ctx)) {
+      if (gen !== this.gen) { return; }
       cb.onError('PERMISSION_DENIED');
       return;
     }
-    this.dead = false;
+    // 等权限的这段时间里被取消了 —— **绝不能**继续往下走。往下一步就是真的开录,
+    // 而页面那边的回调 hook 早已拆掉,录到的东西没有任何出口。
+    if (gen !== this.gen) { return; }
     // sessionId 每次换新:引擎按它区分回调归属,复用会让上一轮的尾巴混进来。
     this.sessionId = `fleet-${Date.now()}`;
     const session = this.sessionId;
@@ -77,21 +94,27 @@ export class SpeechAsr {
         online: OFFLINE,
       };
       const engine = await speechRecognizer.createEngine(createParams);
+      // 端侧模型的加载也要时间,这段里同样可能被取消。引擎已经建出来了,得还回去,
+      // 否则它一直占着麦克风。
+      if (gen !== this.gen) {
+        engine.shutdown();
+        return;
+      }
       this.engine = engine;
 
       engine.setListener({
         onStart: (_sid: string, _msg: string) => {},
         onEvent: (_sid: string, _code: number, _msg: string) => {},
         onResult: (sid: string, result: speechRecognizer.SpeechRecognitionResult) => {
-          if (this.dead || sid !== session) { return; }
+          if (gen !== this.gen || sid !== session) { return; }
           cb.onText(result.result, result.isFinal);
         },
         onComplete: (sid: string, _msg: string) => {
-          if (this.dead || sid !== session) { return; }
+          if (gen !== this.gen || sid !== session) { return; }
           cb.onComplete();
         },
         onError: (sid: string, code: number, msg: string) => {
-          if (this.dead || sid !== session) { return; }
+          if (gen !== this.gen || sid !== session) { return; }
           hilog.warn(DOMAIN, TAG, 'asr error %{public}d %{public}s', code, msg);
           cb.onError(`${code}`);
         },
@@ -117,15 +140,28 @@ export class SpeechAsr {
         extraParams: extra,
       };
       engine.startListening(startParams);
+      // 引擎还没就绪时用户就按了停止 —— 那一下没有引擎可停,只留了个标记,补在这里。
+      // 少了这一步,那次停止就是空操作:页面已经复位,引擎却刚开始录,一直录到
+      // maxAudioDuration 才收工。
+      if (this.pendingStop) {
+        this.pendingStop = false;
+        this.stop();
+      }
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'asr start failed: %{public}s', JSON.stringify(e));
+      if (gen !== this.gen) { return; }
       cb.onError('START_FAILED');
     }
   }
 
   /// 正常收尾：让引擎把最后一段定稿吐出来（onResult isFinal）再收工。
   stop(): void {
-    if (this.engine === null) { return; }
+    if (this.engine === null) {
+      // 引擎还在建(createEngine 要加载端侧模型,不是瞬时的)。记下来,start 走到
+      // 底会替我们停。
+      this.pendingStop = true;
+      return;
+    }
     try {
       this.engine.finish(this.sessionId);
     } catch (e) {
@@ -133,9 +169,10 @@ export class SpeechAsr {
     }
   }
 
-  /// 丢弃这次识别。之后引擎补的回调都不再上报。
+  /// 丢弃这次识别。之后引擎补的回调都不再上报，进行中的 start 也会中途放弃。
   cancel(): void {
-    this.dead = true;
+    this.gen++;
+    this.pendingStop = false;
     if (this.engine === null) { return; }
     try {
       this.engine.cancel(this.sessionId);
