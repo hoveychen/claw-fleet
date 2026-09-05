@@ -22,6 +22,11 @@ import type {
 const BRIDGE = "fleetNative";
 /** 壳把识别事件推回页面的入口。 */
 const HOOK = "__fleetVoice";
+/** 壳把二次授权的结果推回页面的入口。 */
+const PERM_HOOK = "__fleetVoicePermission";
+
+/** 二次授权面板等多久算没下文。用户可能在面板里翻一会儿，给足时间。 */
+const PERM_TIMEOUT_MS = 120_000;
 
 /** 壳侧 VoiceEvent 的形状（WebShell.ets）。 */
 interface HarmonyVoiceEvent {
@@ -34,6 +39,7 @@ interface HarmonyBridge {
   startVoice?: (lang: string) => void;
   stopVoice?: () => void;
   cancelVoice?: () => void;
+  openVoiceSettings?: () => void;
 }
 
 function bridge(): HarmonyBridge | undefined {
@@ -60,6 +66,31 @@ export const harmonyVoiceProvider: VoiceInputProvider = {
   // 设备装没装识别服务」这一说，所以不必再问一次原生。
   async isAvailable(): Promise<boolean> {
     return typeof bridge()?.startVoice === "function";
+  },
+
+  // 用户拒过一次之后，鸿蒙的 requestPermissionsFromUser 就再也不弹了 —— 页面上
+  // 那句「请在系统设置里允许」于是变成一条死路：用户既不知道去哪开，我们也没有
+  // 任何办法把他送过去。壳侧的 requestPermissionOnSetting 是官方给的二次授权
+  // 入口，直接在应用内弹系统面板。
+  async openPermissionSettings(): Promise<boolean> {
+    const b = bridge();
+    if (typeof b?.openVoiceSettings !== "function") return false;
+
+    const w = window as unknown as Record<string, unknown>;
+    return new Promise<boolean>((resolve) => {
+      let done = false;
+      const finish = (granted: boolean) => {
+        if (done) return;
+        done = true;
+        delete w[PERM_HOOK];
+        resolve(granted);
+      };
+      w[PERM_HOOK] = (granted: boolean) => finish(granted === true);
+      // 面板没有下文时不能永远挂着(某些设备上二次授权面板不弹)。按未授权收场,
+      // 用户看到的还是那个可以再点的错误块,而不是一个卡住不动的界面。
+      setTimeout(() => finish(false), PERM_TIMEOUT_MS);
+      b.openVoiceSettings?.();
+    });
   },
 
   async start(lang: string, handlers: VoiceHandlers): Promise<VoiceSession> {
