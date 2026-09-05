@@ -1,9 +1,55 @@
+/* 终端 + 悬浮翻页键叠在一起。翻页键是绝对定位的，所以终端本身仍然占满整块，
+   不会因为多了几个按钮就少几列字符。 */
+.wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .pane {
   flex: 1;
   min-height: 0;
   overflow: hidden;
   padding: 4px 0 0 6px;
   background: var(--color-bg);
+}
+
+.scrollPad {
+  position: absolute;
+  right: 6px;
+  bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 容器本身不吃事件，否则它那块矩形会挡住底下终端的划动与点击。 */
+  pointer-events: none;
+}
+
+.scrollKey {
+  pointer-events: auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  /* 略透，但要能一眼看见 —— 第一版用 --color-border + 78% 透明度，真跑截图
+     下几乎是隐形的，小屏上等于没有这个按钮。 */
+  background: color-mix(in srgb, var(--color-bg-card) 90%, transparent);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 18%);
+  backdrop-filter: blur(6px);
+  touch-action: manipulation;
+}
+
+.scrollKey:active {
+  background: var(--color-bg-card-hover);
+}
+
+.scrollKey[data-accent] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 /* xterm 6 起视口换成了 VS Code 的 ScrollableElement：滚动条是自绘的 div
