@@ -17,6 +17,7 @@ pub mod claude_source;
 pub mod chat_workspace;
 pub mod cmd_ast;
 pub mod codex_guidance;
+pub mod codex_image;
 pub mod codex_launch;
 pub mod codex_source;
 pub mod codex_usage_history;
