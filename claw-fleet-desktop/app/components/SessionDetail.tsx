@@ -1,5 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useTranslation } from "react-i18next";
 import {
   INITIAL_TAIL,
@@ -23,6 +25,7 @@ import {
   type FollowState,
 } from "../followState";
 import { nestedScrollerWillConsume } from "../nestedScroll";
+import { currentViewMetrics, formatSnapshot, takeScrollSnapshot } from "../scrollSnapshot";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
@@ -798,6 +801,34 @@ export function SessionDetail({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
 
+  // ── Scroll-freeze snapshot (⌥⇧S) ────────────────────────────────────────────
+  // The transcript occasionally refuses to scroll until the window is resized,
+  // and no explanation has survived scrutiny yet — see `scrollSnapshot.ts` for
+  // what the readings are meant to separate. Take one while it is stuck and one
+  // after the resize that released it; both land on the clipboard.
+  //
+  // A hotkey rather than a devtools one-liner because opening the inspector
+  // resizes the webview, which is the very thing known to clear the freeze: the
+  // act of going to look would destroy the state being looked at.
+  const [snapshots, setSnapshots] = useState<string[]>([]);
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (!ev.altKey || !ev.shiftKey || ev.code !== "KeyS") return;
+      const el = scrollRef.current;
+      if (!el) return;
+      ev.preventDefault();
+      const stamp = new Date().toTimeString().slice(0, 8);
+      const text = formatSnapshot(takeScrollSnapshot(el, currentViewMetrics(), stamp));
+      setSnapshots((prev) => [...prev, text]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => {
+    if (snapshots.length === 0) return;
+    writeText(snapshots.join("\n\n")).catch(() => {});
+  }, [snapshots]);
+
   // Keep the transcript's bottom padding equal to the floating dock's height.
   // The dock mounts and unmounts with the composer / follow pill, so this
   // re-subscribes on those flags; its *size* changes (a growing draft) come
@@ -1365,6 +1396,21 @@ export function SessionDetail({
           )}
         </>
       )}
+      {/* Portalled to <body> on purpose: a fixed overlay inside the pane would
+          still be a layout mutation on the element under investigation. */}
+      {snapshots.length > 0 &&
+        createPortal(
+          <div className={styles.snapshot_overlay}>
+            <div className={styles.snapshot_head}>
+              <span>scroll snapshots · {snapshots.length} · copied to clipboard</span>
+              <button type="button" onClick={() => setSnapshots([])}>
+                clear
+              </button>
+            </div>
+            <pre className={styles.snapshot_body}>{snapshots.join("\n\n")}</pre>
+          </div>,
+          document.body,
+        )}
       </div>
       </WebLinkProvider>
     </WikiLinksProvider>
