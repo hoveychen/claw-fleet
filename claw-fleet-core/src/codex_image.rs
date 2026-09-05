@@ -115,21 +115,57 @@ pub fn list_thread_images(thread_id: &str) -> Vec<GeneratedImage> {
         .unwrap_or_default()
 }
 
+/// Rules every generation/edit prompt repeats. Two of them are load-bearing for
+/// Fleet rather than for the picture: **don't move the output** (Fleet locates
+/// files by thread id, so a helpful `mv` into the workspace empties the
+/// directory we are about to read) and **don't substitute a vector stand-in**
+/// (the skill tells the agent to prefer repo-native SVG for icon-shaped asks,
+/// which would silently return no bitmap at all).
+const PROMPT_RULES: &str = "Do not substitute SVG, HTML/CSS, or any code-native stand-in, and do \
+     not move or copy the generated file anywhere — leave it at its default \
+     location and simply report what you made.";
+
 /// Wrap the caller's description into a prompt that pins the built-in path.
 ///
-/// Left to its own devices the agent may substitute an SVG or an HTML/CSS
-/// mockup — its skill explicitly tells it to prefer repo-native vectors for
-/// icon-shaped requests — so the wrapper names the tool. It also tells the
-/// agent *not* to move the output: Fleet locates files by thread id, and a
-/// helpful `mv` into the workspace would empty the directory we are about to
-/// read.
-pub fn build_image_prompt(description: &str) -> String {
+/// `attached` says whether `-i` images ride along; they are references for the
+/// subject/style, not things to reproduce, and saying so stops the agent from
+/// treating a style reference as an edit target.
+pub fn build_image_prompt(description: &str, attached: usize) -> String {
+    let refs = if attached > 0 {
+        format!(
+            " The {} attached image(s) are references for style, composition or subject — draw a \
+             new image informed by them rather than returning them.",
+            attached
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "Use the built-in `image_gen` tool to generate the following image. \
-         Do not substitute SVG, HTML/CSS, or any code-native stand-in, and do \
-         not move or copy the generated file anywhere — leave it at its default \
-         location and simply report what you made.\n\n{}",
+        "Use the built-in `image_gen` tool to generate the following image.{refs} {PROMPT_RULES}\n\n{}",
         description.trim()
+    )
+}
+
+/// Prompt for a follow-up turn on an existing thread.
+///
+/// The thread already has the previous image in context, which is exactly what
+/// the built-in edit path needs (its skill only edits images *visible in the
+/// conversation*). Invariants are restated every round because the skill's own
+/// guidance says edits drift otherwise.
+pub fn build_edit_prompt(instruction: &str, attached: usize) -> String {
+    let refs = if attached > 0 {
+        format!(
+            " {} new reference image(s) are attached for this revision.",
+            attached
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "Use the built-in `image_gen` tool to revise the image you generated earlier in this \
+         conversation. Change only what the instruction below asks for and keep everything else \
+         unchanged.{refs} {PROMPT_RULES}\n\n{}",
+        instruction.trim()
     )
 }
 
@@ -174,87 +210,165 @@ fn build_generate_launch(
     codex: PathBuf,
     workspace_path: &str,
     description: &str,
+    images: &[String],
     model: Option<&str>,
 ) -> Result<(PathBuf, Vec<String>, Vec<(String, String)>), String> {
-    let prompt = build_image_prompt(description);
-    // `workspace-write` (not read-only): the skill inspects its own SKILL.md and
-    // may run `sips`-style checks on what it produced.
-    // No decision-card / notify bridging here: this is a one-shot tool call, not
-    // a Fleet-owned session, so it must not register itself as one.
+    let prompt = build_image_prompt(description, images.len());
     let args = crate::codex_launch::build_codex_exec_args(
         workspace_path,
         &prompt,
         Some(model.unwrap_or(DEFAULT_ROUTING_MODEL)),
         None,
-        &["-s".to_string(), "workspace-write".to_string()],
+        &pre_prompt_args(images),
     );
     crate::codex_launch::wrap_codex_launch(codex, args, workspace_path)
 }
 
-/// Run one blocking generation turn and return whatever it produced.
+/// Same, for a follow-up turn on `thread_id` via `codex exec resume`.
+///
+/// `-i` works identically here: despite the help text rendering it `<FILE>`
+/// rather than `<FILE>...`, repeated `-i` flags parse fine on `resume` (verified
+/// against the CLI), so [`crate::codex_launch::codex_image_args`] serves both
+/// paths unchanged.
+fn build_edit_launch(
+    codex: PathBuf,
+    workspace_path: &str,
+    thread_id: &str,
+    instruction: &str,
+    images: &[String],
+    model: Option<&str>,
+) -> Result<(PathBuf, Vec<String>, Vec<(String, String)>), String> {
+    let prompt = build_edit_prompt(instruction, images.len());
+    let args = crate::codex_launch::build_codex_resume_args(
+        thread_id,
+        &prompt,
+        Some(model.unwrap_or(DEFAULT_ROUTING_MODEL)),
+        None,
+        &pre_prompt_args(images),
+    );
+    crate::codex_launch::wrap_codex_launch(codex, args, workspace_path)
+}
+
+/// Flags shared by both launches, in front of the `--` separator.
+///
+/// `workspace-write` (not read-only): the skill inspects its own SKILL.md and
+/// may run `sips`-style checks on what it produced. No decision-card / notify
+/// bridging — this is a one-shot tool call, not a Fleet-owned session, so it
+/// must not register itself as one.
+fn pre_prompt_args(images: &[String]) -> Vec<String> {
+    let mut args = vec!["-s".to_string(), "workspace-write".to_string()];
+    args.extend(crate::codex_launch::codex_image_args(images));
+    args
+}
+
+/// Images in `after` that were not already in `before`, keeping `after`'s order.
+///
+/// A follow-up turn writes into the *same* `generated_images/<thread_id>/`
+/// directory as the turn that created the thread, so "what did this round
+/// produce" is only answerable by snapshotting before and diffing after. Keyed
+/// on path: the built-in tool never overwrites, it writes a fresh `exec-<uuid>`.
+fn new_images_since(before: &[GeneratedImage], after: Vec<GeneratedImage>) -> Vec<GeneratedImage> {
+    let seen: std::collections::HashSet<&str> = before.iter().map(|i| i.path.as_str()).collect();
+    after
+        .into_iter()
+        .filter(|i| !seen.contains(i.path.as_str()))
+        .collect()
+}
+
+/// Reject image paths that don't exist before paying for a turn — Codex would
+/// otherwise burn a full turn and fail deep inside the agent.
+fn validate_images(images: &[String]) -> Result<(), String> {
+    for path in images.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if !Path::new(path).is_file() {
+            return Err(format!("attachment not found: {path}"));
+        }
+    }
+    Ok(())
+}
+
+/// Run one blocking generation turn on a fresh thread.
 ///
 /// Blocking (not detached like [`crate::codex_launch::spawn_new_codex_session`])
 /// because the caller is a tool invocation that must hand back paths. A turn
 /// takes tens of seconds; callers on a UI thread must move this off it.
 ///
-/// `model` selects only the *routing* model (which `gpt-5.6` drives the turn) —
-/// generation is always `gpt-image-2` on Codex's backend — so the default is the
-/// cheap tier.
+/// `images` are attached with `-i` and act as references for style, composition
+/// or subject. `model` selects only the *routing* model (which `gpt-5.6` drives
+/// the turn) — generation is always `gpt-image-2` on Codex's backend — so the
+/// default is the cheap tier.
 pub fn generate_image(
     workspace_path: &str,
     description: &str,
+    images: &[String],
     model: Option<&str>,
 ) -> Result<GenerateImageResult, String> {
     let description = description.trim();
     if description.is_empty() {
         return Err("description is required".to_string());
     }
-    let workspace_path = workspace_path.trim();
-    if workspace_path.is_empty() {
-        return Err("workspace_path is required".to_string());
-    }
-    // A registered remote workspace's local mirror may not exist yet.
-    crate::remote_workspace::ensure_local_mirror(workspace_path)?;
-    if !Path::new(workspace_path).is_dir() {
-        return Err(format!("Workspace directory not found: {workspace_path}"));
-    }
+    let workspace_path = prepare_workspace(workspace_path)?;
+    validate_images(images)?;
+    let codex = resolve_codex()?;
 
-    let codex = crate::codex_source::find_codex_binary().ok_or_else(|| {
-        "Codex CLI not found (no standalone install, VSCode extension, or `codex` on PATH)"
-            .to_string()
-    })?;
+    let (program, args, rca_envs) =
+        build_generate_launch(codex, &workspace_path, description, images, model)?;
+    let stdout = run_turn(&program, &args, &rca_envs, &workspace_path)?;
 
-    let (program, args, rca_envs) = build_generate_launch(codex, workspace_path, description, model)?;
-
-    let mut cmd = crate::process_util::command(&program);
-    cmd.args(&args)
-        .current_dir(workspace_path)
-        // MUST be null: `codex exec` otherwise blocks reading stdin forever.
-        .stdin(std::process::Stdio::null());
-    crate::codex_launch::apply_codex_launch_env(&mut cmd);
-    for (k, v) in &rca_envs {
-        cmd.env(k, v);
-    }
-
-    let out = cmd
-        .output()
-        .map_err(|e| format!("spawn {}: {e}", program.display()))?;
-
-    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let thread_id = stdout
         .lines()
         .find_map(crate::codex_launch::parse_thread_started)
-        .ok_or_else(|| {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            format!(
-                "codex never printed thread.started (exit {:?}); stderr: {}",
-                out.status.code(),
-                stderr.trim()
-            )
-        })?;
+        .ok_or_else(|| format!("codex never printed thread.started; output: {}", tail(&stdout)))?;
 
-    let images = list_thread_images(&thread_id);
-    let agent_message = parse_last_agent_message(&stdout).unwrap_or_default();
+    // Fresh thread: everything in the directory is this turn's output.
+    finish_turn(thread_id, &[], &stdout)
+}
+
+/// Run a follow-up turn on an existing thread — the "keep tweaking until it's
+/// right" path.
+///
+/// The previous image is already in the thread's context, which is what the
+/// built-in edit path requires (it can only edit images visible in the
+/// conversation). Output lands in the *same* directory as the original turn, so
+/// this snapshots it first and reports only what the round added.
+pub fn edit_image(
+    workspace_path: &str,
+    thread_id: &str,
+    instruction: &str,
+    images: &[String],
+    model: Option<&str>,
+) -> Result<GenerateImageResult, String> {
+    let thread_id = thread_id.trim();
+    if thread_id.is_empty() {
+        return Err("thread_id is required".to_string());
+    }
+    let instruction = instruction.trim();
+    if instruction.is_empty() {
+        return Err("instruction is required".to_string());
+    }
+    let workspace_path = prepare_workspace(workspace_path)?;
+    validate_images(images)?;
+    let codex = resolve_codex()?;
+
+    // Snapshot BEFORE the turn — the diff is the only way to tell this round's
+    // output from earlier rounds' in a shared directory.
+    let before = list_thread_images(thread_id);
+
+    let (program, args, rca_envs) =
+        build_edit_launch(codex, &workspace_path, thread_id, instruction, images, model)?;
+    let stdout = run_turn(&program, &args, &rca_envs, &workspace_path)?;
+
+    finish_turn(thread_id.to_string(), &before, &stdout)
+}
+
+/// Shared tail of both paths: diff out this round's images, or explain why there
+/// were none.
+fn finish_turn(
+    thread_id: String,
+    before: &[GeneratedImage],
+    stdout: &str,
+) -> Result<GenerateImageResult, String> {
+    let images = new_images_since(before, list_thread_images(&thread_id));
+    let agent_message = parse_last_agent_message(stdout).unwrap_or_default();
 
     if images.is_empty() {
         // A turn can end cleanly having generated nothing — the agent asked a
@@ -263,7 +377,7 @@ pub fn generate_image(
         // "no images".
         return Err(format!(
             "codex produced no image for thread {thread_id}. Agent said: {}",
-            if agent_message.is_empty() {
+            if agent_message.trim().is_empty() {
                 "(nothing)"
             } else {
                 agent_message.trim()
@@ -276,6 +390,68 @@ pub fn generate_image(
         images,
         agent_message,
     })
+}
+
+/// Normalize + materialize the workspace (a registered remote workspace's local
+/// mirror may not exist yet).
+fn prepare_workspace(workspace_path: &str) -> Result<String, String> {
+    let workspace_path = workspace_path.trim();
+    if workspace_path.is_empty() {
+        return Err("workspace_path is required".to_string());
+    }
+    crate::remote_workspace::ensure_local_mirror(workspace_path)?;
+    if !Path::new(workspace_path).is_dir() {
+        return Err(format!("Workspace directory not found: {workspace_path}"));
+    }
+    Ok(workspace_path.to_string())
+}
+
+fn resolve_codex() -> Result<PathBuf, String> {
+    crate::codex_source::find_codex_binary().ok_or_else(|| {
+        "Codex CLI not found (no standalone install, VSCode extension, or `codex` on PATH)"
+            .to_string()
+    })
+}
+
+/// Spawn the turn and capture its `--json` stdout.
+fn run_turn(
+    program: &Path,
+    args: &[String],
+    rca_envs: &[(String, String)],
+    workspace_path: &str,
+) -> Result<String, String> {
+    let mut cmd = crate::process_util::command(program);
+    cmd.args(args)
+        .current_dir(workspace_path)
+        // MUST be null: `codex exec` otherwise blocks reading stdin forever.
+        .stdin(std::process::Stdio::null());
+    crate::codex_launch::apply_codex_launch_env(&mut cmd);
+    for (k, v) in rca_envs {
+        cmd.env(k, v);
+    }
+    let out = cmd
+        .output()
+        .map_err(|e| format!("spawn {}: {e}", program.display()))?;
+    if !out.status.success() && out.stdout.is_empty() {
+        return Err(format!(
+            "codex exited {:?}: {}",
+            out.status.code(),
+            tail(&String::from_utf8_lossy(&out.stderr))
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// Last few hundred chars — enough to identify a failure without pasting a whole
+/// event stream into an error message.
+fn tail(s: &str) -> String {
+    let s = s.trim();
+    const MAX: usize = 400;
+    if s.chars().count() <= MAX {
+        return s.to_string();
+    }
+    let skip = s.chars().count() - MAX;
+    format!("…{}", s.chars().skip(skip).collect::<String>())
 }
 
 /// Routing default: generation quality is set by `gpt-image-2` regardless, so
@@ -336,7 +512,7 @@ mod tests {
 
     #[test]
     fn prompt_pins_the_builtin_tool_and_forbids_moving() {
-        let p = build_image_prompt("  a shiba in a red scarf  ");
+        let p = build_image_prompt("  a shiba in a red scarf  ", 0);
         assert!(p.contains("image_gen"), "must name the built-in tool: {p}");
         assert!(p.contains("a shiba in a red scarf"), "must carry the description: {p}");
         assert!(!p.contains("  a shiba"), "description must be trimmed: {p}");
@@ -382,7 +558,7 @@ mod tests {
         let ws = td.path().to_string_lossy().to_string();
         let codex = PathBuf::from("/usr/local/bin/codex");
         let (program, args, envs) =
-            build_generate_launch(codex.clone(), &ws, "draw a cat", None).expect("local launch");
+            build_generate_launch(codex.clone(), &ws, "draw a cat", &[], None).expect("local launch");
 
         assert_eq!(program, codex, "local workspace must not be re-programmed");
         assert!(envs.is_empty(), "local workspace needs no rca env, got {envs:?}");
@@ -403,23 +579,136 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let ws = td.path().to_string_lossy().to_string();
         let (_, args, _) =
-            build_generate_launch(PathBuf::from("/usr/local/bin/codex"), &ws, "x", None).unwrap();
+            build_generate_launch(PathBuf::from("/usr/local/bin/codex"), &ws, "x", &[], None).unwrap();
         assert!(
             args.iter().any(|a| a == DEFAULT_ROUTING_MODEL),
             "generation quality comes from gpt-image-2 regardless, so the cheap tier drives: {args:?}"
         );
     }
 
+    /// Two real files to attach — `validate_images` rejects paths that don't
+    /// exist, so tests that exercise the `-i` path need actual files.
+    fn two_attachments(td: &tempfile::TempDir) -> (String, String, Vec<String>) {
+        let a = td.path().join("ref-a.png");
+        let b = td.path().join("ref-b.png");
+        std::fs::write(&a, vec![0u8; 4]).unwrap();
+        std::fs::write(&b, vec![0u8; 4]).unwrap();
+        let (sa, sb) = (
+            a.to_string_lossy().to_string(),
+            b.to_string_lossy().to_string(),
+        );
+        (sa.clone(), sb.clone(), vec![sa, sb])
+    }
+
+    #[test]
+    fn every_attachment_becomes_its_own_dash_i_flag() {
+        let td = tempfile::tempdir().unwrap();
+        let ws = td.path().to_string_lossy().to_string();
+        let (a, b, images) = two_attachments(&td);
+        let (_, args, _) =
+            build_generate_launch(PathBuf::from("/usr/local/bin/codex"), &ws, "x", &images, None)
+                .unwrap();
+        let flags: Vec<&String> = args
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i > 0 && args[i - 1] == "-i")
+            .map(|(_, v)| v)
+            .collect();
+        assert_eq!(flags, vec![&a, &b], "both attachments must ride along: {args:?}");
+        // Flags must precede `--`, or codex parses them as prompt text.
+        let sep = args.iter().position(|a| a == "--").expect("-- separator");
+        let last_i = args.iter().rposition(|a| a == "-i").expect("-i present");
+        assert!(last_i < sep, "-i must come before `--`: {args:?}");
+    }
+
+    #[test]
+    fn edit_launch_resumes_the_thread_and_keeps_attachments() {
+        let td = tempfile::tempdir().unwrap();
+        let ws = td.path().to_string_lossy().to_string();
+        let (_, _, images) = two_attachments(&td);
+        let (program, args, _) = build_edit_launch(
+            PathBuf::from("/usr/local/bin/codex"),
+            &ws,
+            "01a06fc8-4aee-7eb0-a158-b05cbde17e92",
+            "make the scarf blue",
+            &images,
+            None,
+        )
+        .unwrap();
+        assert_eq!(program, PathBuf::from("/usr/local/bin/codex"));
+        assert_eq!(&args[..2], &["exec".to_string(), "resume".to_string()][..]);
+        assert_eq!(args[2], "01a06fc8-4aee-7eb0-a158-b05cbde17e92");
+        // Repeated `-i` parses on `resume` too, despite the help rendering it
+        // `<FILE>` rather than `<FILE>...` — verified against the CLI.
+        assert_eq!(args.iter().filter(|a| *a == "-i").count(), 2, "{args:?}");
+        let last = args.last().unwrap();
+        assert!(last.contains("make the scarf blue"), "{last}");
+        assert!(
+            last.contains("Change only what the instruction below asks for"),
+            "edit prompt must restate invariants: {last}"
+        );
+    }
+
+    #[test]
+    fn new_images_since_reports_only_this_rounds_output() {
+        let img = |p: &str, b: u64| GeneratedImage {
+            path: p.to_string(),
+            bytes: b,
+        };
+        let before = vec![img("/d/one.png", 10)];
+        let after = vec![img("/d/two.png", 30), img("/d/one.png", 10)];
+        let got = new_images_since(&before, after);
+        assert_eq!(got, vec![img("/d/two.png", 30)], "round 1's image must not resurface");
+    }
+
+    #[test]
+    fn new_images_since_on_a_fresh_thread_returns_everything() {
+        let after = vec![GeneratedImage {
+            path: "/d/one.png".into(),
+            bytes: 10,
+        }];
+        assert_eq!(new_images_since(&[], after.clone()), after);
+    }
+
+    #[test]
+    fn missing_attachment_fails_before_paying_for_a_turn() {
+        let err = validate_images(&["/definitely/not/here/ref.png".to_string()])
+            .expect_err("nonexistent attachment must be rejected");
+        assert!(err.contains("attachment not found"), "got {err}");
+        // Blank entries are dropped by codex_image_args, so they must not trip
+        // the validator either.
+        assert!(validate_images(&["".to_string(), "   ".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn edit_rejects_blank_thread_or_instruction_before_spawning() {
+        assert!(edit_image("/tmp", "  ", "do a thing", &[], None).is_err());
+        assert!(edit_image("/tmp", "some-thread", "   ", &[], None).is_err());
+    }
+
+    #[test]
+    fn attached_references_are_announced_in_both_prompts() {
+        // Without this the agent can mistake a style reference for an edit
+        // target and hand back a near-copy of the input.
+        let gen = build_image_prompt("a shiba", 2);
+        assert!(gen.contains("2 attached image(s) are references"), "{gen}");
+        assert!(!build_image_prompt("a shiba", 0).contains("attached"));
+
+        let edit = build_edit_prompt("bluer", 1);
+        assert!(edit.contains("1 new reference image(s)"), "{edit}");
+        assert!(!build_edit_prompt("bluer", 0).contains("reference image"));
+    }
+
     #[test]
     fn generate_rejects_blank_inputs_before_spawning() {
         // Guard rails must fire on argument shape, not after paying for a turn.
-        assert!(generate_image("/tmp", "   ", None).is_err());
-        assert!(generate_image("  ", "draw a cat", None).is_err());
+        assert!(generate_image("/tmp", "   ", &[], None).is_err());
+        assert!(generate_image("  ", "draw a cat", &[], None).is_err());
     }
 
     #[test]
     fn generate_rejects_missing_workspace() {
-        let err = generate_image("/definitely/not/here/xyz", "draw a cat", None)
+        let err = generate_image("/definitely/not/here/xyz", "draw a cat", &[], None)
             .expect_err("missing workspace must fail");
         assert!(err.contains("not found"), "got {err}");
     }

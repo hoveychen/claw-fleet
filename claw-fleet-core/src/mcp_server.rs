@@ -276,7 +276,7 @@ fn handle_image_call(params: &Value) -> Result<Value, JsonRpcError> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(resolve_workspace_cwd);
 
-    match crate::codex_image::generate_image(&workspace.to_string_lossy(), description, model) {
+    match crate::codex_image::generate_image(&workspace.to_string_lossy(), description, &[], model) {
         Ok(result) => {
             // Report paths as text: the caller decides where they go (a
             // fleet__ask `images` preview, an artifact, or a copy into the repo).
