@@ -18,7 +18,12 @@ claw-fleet-core = { path = "../claw-fleet-core" }
 base64 = "0.22"
 
 # ── Tauri & GUI ──────────────────────────────────────────────────────────────
-tauri = { version = "2", features = ["tray-icon"] }
+# `devtools`: keep the webview inspector (right-click → Inspect Element) in
+# release builds too. Debug builds get it for free, but the frontend bugs worth
+# chasing — the transcript pane that occasionally refuses to scroll until the
+# window is resized — only ever show up in the installed app, where there was no
+# way to read the live geometry at all.
+tauri = { version = "2", features = ["tray-icon", "devtools"] }
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2.3.3"
