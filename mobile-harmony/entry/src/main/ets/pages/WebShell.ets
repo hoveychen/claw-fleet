@@ -290,13 +290,23 @@ struct WebShell {
   /// 投递失败后重投：语音事件只在用户按下按钮之后才产生，那一刻页面的 hook 必然
   /// 已经注册好了。没有 hook 只可能是页面在识别中途被换掉了，那时这条结果本来
   /// 就该丢。
+  ///
+  /// **注入结果必须打日志**（与 deliverDeepLink 同）：`NO_HOOK` 是「页面已经放弃
+  /// 这次识别、原生侧却还在往回推」这一类故障的唯一证据。之前这里只 catch 了
+  /// 异常、把返回值扔了，于是真机上「弹了权限却一个字都出不来」查不出任何线索 ——
+  /// 页面侧看起来什么都没发生，壳侧看起来一切正常。
   private deliverVoiceEvent(json: string): void {
-    if (!this.webReady) { return; }
+    if (!this.webReady) {
+      hilog.info(DOMAIN_W, TAG_W, 'voice-diag deliver skipped: web not ready');
+      return;
+    }
     this.controller.runJavaScript(
       `(function(){ if(!window.__fleetVoice) return 'NO_HOOK';` +
       ` window.__fleetVoice(` + json + `); return 'OK'; })()`,
-    ).catch((e: Error) => {
-      hilog.warn(DOMAIN_W, TAG_W, 'voice deliver failed: %{public}s', e.message);
+    ).then((r: string) => {
+      hilog.info(DOMAIN_W, TAG_W, 'voice-diag injected result=%{public}s', r);
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN_W, TAG_W, 'voice-diag deliver failed: %{public}s', e.message);
     });
   }
 
