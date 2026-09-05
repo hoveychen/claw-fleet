@@ -17,6 +17,7 @@ class FakeRecognition {
   started = 0;
   stopped = 0;
   aborted = 0;
+  onstart: (() => void) | null = null;
   onresult: ((e: unknown) => void) | null = null;
   onerror: ((e: { error?: string }) => void) | null = null;
   onend: (() => void) | null = null;
@@ -26,6 +27,10 @@ class FakeRecognition {
   }
   start() {
     this.started++;
+  }
+  /** 引擎真的开麦了 —— 规范里的 onstart。 */
+  begin() {
+    this.onstart?.();
   }
   stop() {
     this.stopped++;
@@ -50,11 +55,14 @@ function collect() {
   const partial: string[] = [];
   const final: string[] = [];
   const errors: string[] = [];
+  const ready: number[] = [];
   return {
     partial,
     final,
     errors,
+    ready,
     handlers: {
+      onReady: () => ready.push(1),
       onPartial: (t: string) => partial.push(t),
       onFinal: (t: string) => final.push(t),
       onError: (k: string) => errors.push(k),
@@ -172,5 +180,33 @@ describe("webSpeechProvider", () => {
     FakeRecognition.last!.emit(0, [{ text: "不该出现", final: true }]);
     expect(c.errors).toEqual(["network"]);
     expect(c.final).toEqual([]);
+  });
+});
+
+// start() 返回 ≠ 麦克风已经开。这段空窗里用户说的话全丢，界面必须说「准备中」
+// 而不是「正在听」，所以 onReady 是这条实现的硬要求。
+describe("webSpeechProvider 的就绪信号", () => {
+  it("start 返回时还没就绪", async () => {
+    installEngine();
+    const c = collect();
+    await webSpeechProvider.start("zh-CN", c.handlers);
+    expect(c.ready).toEqual([]);
+  });
+
+  it("引擎 onstart 之后才报就绪", async () => {
+    installEngine();
+    const c = collect();
+    await webSpeechProvider.start("zh-CN", c.handlers);
+    FakeRecognition.last!.begin();
+    expect(c.ready).toEqual([1]);
+  });
+
+  it("cancel 之后引擎补的 onstart 不再上报", async () => {
+    installEngine();
+    const c = collect();
+    const s = await webSpeechProvider.start("zh-CN", c.handlers);
+    s.cancel();
+    FakeRecognition.last!.begin();
+    expect(c.ready).toEqual([]);
   });
 });

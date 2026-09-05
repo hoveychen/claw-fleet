@@ -30,6 +30,7 @@ interface SpeechRecognitionLike {
   start(): void;
   stop(): void;
   abort(): void;
+  onstart: (() => void) | null;
   onresult: ((e: SpeechResultEvent) => void) | null;
   onerror: ((e: { error?: string }) => void) | null;
   onend: (() => void) | null;
@@ -91,6 +92,12 @@ export const webSpeechProvider: VoiceInputProvider = {
     // cancel 之后引擎仍会吐 onend(有的实现还会吐一次 aborted onerror)。调用方
     // 已经说了不要结果,所以这里之后的一切都咽掉,而不是把它当成一次错误报上去。
     let dead = false;
+
+    // 规范里的 onstart 就是「音频采集已开始」，正是我们要的那一声。
+    rec.onstart = () => {
+      if (dead) return;
+      handlers.onReady();
+    };
 
     rec.onresult = (e) => {
       if (dead) return;
