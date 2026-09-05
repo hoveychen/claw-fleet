@@ -17,7 +17,7 @@ export const NAV_GROUPS: readonly NavGroup[] = ["fleet", "work"];
  *  navGroups.test.ts asserts the partition. */
 export const NAV_GROUP_VIEWS: Record<NavGroup, readonly ViewMode[]> = {
   fleet: ["list", "gallery", "audit", "report", "memory", "skills", "plugins", "mobile"],
-  work: ["history", "files", "wiki", "artifacts", "schedule", "plans"],
+  work: ["history", "files", "terminal", "wiki", "artifacts", "schedule", "plans"],
 };
 
 /** Where a tab lands when it has no remembered last page (first click ever, or

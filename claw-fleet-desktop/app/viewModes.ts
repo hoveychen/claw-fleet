@@ -24,6 +24,7 @@ export const ALL_VIEW_MODES = [
   "skills",
   "plugins",
   "files",
+  "terminal",
   "mobile",
   "schedule",
   "plans",
