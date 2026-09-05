@@ -38,17 +38,6 @@ export type VoiceErrorKind =
   | "aborted";
 
 export interface VoiceHandlers {
-  /**
-   * 麦克风真的开始收音了。
-   *
-   * `start()` 返回 ≠ 已经在录：三条实现都要先跨一段异步 —— Web Speech 要等
-   * 浏览器起识别会话，Capacitor 要查/要权限，鸿蒙要 `createEngine`。这段空窗里
-   * 用户说的话**全丢**，而界面上它和「已经在录」长得一模一样，所以用户只会觉得
-   * 「前半句没识别出来」。有了这一声，UI 才能在就绪之前老实说「准备中」。
-   *
-   * 每条实现都必须调，且只调一次。
-   */
-  onReady(): void;
   /** 说话过程中的临时结果，会被后续结果覆盖。用来做实时回显。 */
   onPartial(text: string): void;
   /** 定稿的一段文字。一次会话可能出多段（长语音被引擎自己切开）。 */

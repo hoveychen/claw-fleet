@@ -78,15 +78,6 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
       return { stop: () => {}, cancel: () => {} };
     }
 
-    // 原生侧真的开始收音了才算就绪。'startingListening' 不算 —— 那一步还在
-    // 起识别会话，此时说的话仍然会丢。
-    listeners.push(
-      await SpeechRecognition.addListener("listeningState", (e) => {
-        if (dead) return;
-        if (e.state === "started") handlers.onReady();
-      }),
-    );
-
     listeners.push(
       await SpeechRecognition.addListener("partialResults", (e) => {
         if (dead) return;

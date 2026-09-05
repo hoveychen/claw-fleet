@@ -41,7 +41,7 @@ interface SharePayload {
 }
 
 /// __fleetVoice 的载荷，形状对齐 voiceHarmony.ts 的 HarmonyVoiceEvent。
-/// 五种事件走同一个通道:引擎就绪、中间结果、定稿、出错、引擎自己收工。
+/// 四种事件走同一个通道:中间结果、定稿、出错、引擎自己收工。
 interface VoiceEvent {
   kind: string;
   text: string;
@@ -107,10 +107,6 @@ class NativeBridge {
   /// 那时页面的 hook 早就注册好了，不存在冷启动赛跑。
   startVoice(lang: string): void {
     this.asr.start(this.ctx, lang, {
-      onReady: () => {
-        const ev: VoiceEvent = { kind: 'ready', text: '', code: '' };
-        this.onVoiceEvent(JSON.stringify(ev));
-      },
       onText: (text: string, isFinal: boolean) => {
         const ev: VoiceEvent = { kind: isFinal ? 'final' : 'partial', text: text, code: '' };
         this.onVoiceEvent(JSON.stringify(ev));

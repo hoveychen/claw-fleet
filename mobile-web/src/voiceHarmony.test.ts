@@ -31,14 +31,11 @@ function collect() {
   const partial: string[] = [];
   const final: string[] = [];
   const errors: string[] = [];
-  const ready: number[] = [];
   return {
     partial,
     final,
     errors,
-    ready,
     handlers: {
-      onReady: () => ready.push(1),
       onPartial: (t: string) => partial.push(t),
       onFinal: (t: string) => final.push(t),
       onError: (k: string) => errors.push(k),
@@ -146,25 +143,5 @@ describe("harmonyVoiceProvider", () => {
       s.stop();
       s.cancel();
     }).not.toThrow();
-  });
-});
-
-// 壳侧的 createEngine 是异步的，页面必须等到引擎真的开麦（ready 事件）才敢说
-// 「正在听」。老壳不发这个事件时也不能卡死——那一路由 useVoiceInput 拿首个
-// partial/final 兜底，这里只保证桥认得这个 kind。
-describe("harmonyVoiceProvider 的就绪信号", () => {
-  it("startVoice 之后还没就绪", async () => {
-    installBridge();
-    const c = collect();
-    await harmonyVoiceProvider.start("zh-CN", c.handlers);
-    expect(c.ready).toEqual([]);
-  });
-
-  it("壳推 ready 才报就绪", async () => {
-    installBridge();
-    const c = collect();
-    await harmonyVoiceProvider.start("zh-CN", c.handlers);
-    push({ kind: "ready" });
-    expect(c.ready).toEqual([1]);
   });
 });

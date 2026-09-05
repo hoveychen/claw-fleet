@@ -787,7 +787,7 @@ export function NewSessionSheet({
         <textarea
           className={styles.promptInput}
           placeholder={
-            voiceReady ? t("要让 agent 做什么？也可点麦克风说") : t("要让 agent 做什么？")
+            voiceReady ? t("要让 agent 做什么？也可按住语音键说") : t("要让 agent 做什么？")
           }
           rows={5}
           value={prompt}
@@ -1056,7 +1056,7 @@ export function ResumeComposer({
           enqueueing
             ? t("会话运行中，发送后排队，本轮结束自动接上…")
             : voiceReady
-              ? t("继续这个会话，也可点麦克风说…")
+              ? t("继续这个会话，也可按住语音键说…")
               : t("继续这个会话（留空 = continue）…")
         }
         rows={2}
