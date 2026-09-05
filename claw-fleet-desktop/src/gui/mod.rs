@@ -1595,6 +1595,44 @@ pub fn run() {
                 responder.respond(response);
             });
         })
+        // Serves images a Codex session generated into the webview:
+        // fleet-genimage://localhost/<session id>/<name>
+        // Same Backend-routed shape as fleet-decision:// above. The files sit in
+        // $CODEX_HOME, outside every workspace, so a remote session proxies them
+        // off the probe host — which is the machine that actually ran Codex.
+        .register_asynchronous_uri_scheme_protocol("fleet-genimage", move |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            std::thread::spawn(move || {
+                let dec = |s: &str| {
+                    percent_encoding::percent_decode_str(s)
+                        .decode_utf8_lossy()
+                        .to_string()
+                };
+                let path = request.uri().path().trim_start_matches('/').to_string();
+                let mut segs = path.splitn(2, '/');
+                let session = dec(segs.next().unwrap_or(""));
+                let name = dec(segs.next().unwrap_or(""));
+                let result = {
+                    let state = app.state::<AppState>();
+                    let backend = state.backend.read().unwrap();
+                    backend.get_session_image(&session, &name)
+                };
+                let response = match result {
+                    Ok(f) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", f.mime)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(f.bytes)
+                        .unwrap(),
+                    Err(e) => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Content-Type", "text/plain")
+                        .body(e.into_bytes())
+                        .unwrap(),
+                };
+                responder.respond(response);
+            });
+        })
         // Serves user-direction attachments (composer pastes, decision-panel
         // picks) into the webview so history can render them as thumbnails:
         // fleet-attachment://localhost/<key>/<name>
@@ -2118,6 +2156,7 @@ pub fn run() {
             get_claude_md_content,
             promote_memory,
             list_artifacts,
+            list_session_images,
             get_artifact,
             add_artifact,
             update_artifact,

@@ -207,3 +207,17 @@ pub(crate) fn get_session_todos(
     Ok(claw_fleet_core::session_todos::extract_latest_todos(&messages))
 }
 
+
+/// Images a Codex session generated, for the session detail's thumbnail strip.
+///
+/// A Codex session's Fleet id *is* its Codex thread id, which is also the output
+/// directory's name — so no correlation table is needed, and a Claude session
+/// simply comes back empty. Bytes reach the webview through the
+/// `fleet-genimage://` protocol registered in `gui/mod.rs`.
+#[tauri::command(async)]
+pub(crate) fn list_session_images(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Vec<claw_fleet_core::codex_image::GeneratedImage> {
+    state.backend.read().unwrap().list_session_images(&session_id)
+}
