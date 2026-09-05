@@ -182,6 +182,14 @@ side, Sol starting at medium.\n\
 /// Apply model guidance: write the guidance file and inject the `@import`
 /// sentinel block into `~/.claude/CLAUDE.md`. Idempotent.
 pub fn apply_model_guidance(locale: &str) -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        apply_model_guidance_inner(locale),
+        crate::control_plane_prefs::Feature::ModelGuidance,
+        false,
+    )
+}
+
+fn apply_model_guidance_inner(locale: &str) -> Result<(), String> {
     let dir = claude_dir().ok_or("cannot determine home dir")?;
     fs::create_dir_all(&dir).map_err(|e| format!("create ~/.claude: {e}"))?;
 
@@ -212,6 +220,14 @@ pub fn apply_model_guidance(locale: &str) -> Result<(), String> {
 /// Remove model guidance: strip the sentinel block and delete the guidance
 /// file. Idempotent (no-op if already clean).
 pub fn remove_model_guidance() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        remove_model_guidance_inner(),
+        crate::control_plane_prefs::Feature::ModelGuidance,
+        true,
+    )
+}
+
+fn remove_model_guidance_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
         if let Ok(existing) = fs::read_to_string(&claude_md) {
             let stripped = strip_sentinel_block(&existing);

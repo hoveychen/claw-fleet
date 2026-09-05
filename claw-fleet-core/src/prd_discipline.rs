@@ -1263,6 +1263,14 @@ Rule 3 (worktree) is **global** for any change to production code. Rules \
 /// Apply PRD-discipline mode: write the guidance file and inject the
 /// `@import` sentinel block into `~/.claude/CLAUDE.md`. Idempotent.
 pub fn apply_prd_discipline(user_title: &str, locale: &str) -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        apply_prd_discipline_inner(user_title, locale),
+        crate::control_plane_prefs::Feature::PrdDiscipline,
+        false,
+    )
+}
+
+fn apply_prd_discipline_inner(user_title: &str, locale: &str) -> Result<(), String> {
     let dir = claude_dir().ok_or("cannot determine home dir")?;
     fs::create_dir_all(&dir).map_err(|e| format!("create ~/.claude: {e}"))?;
 
@@ -1300,6 +1308,14 @@ fn compose_claude_md(existing: &str, block: &str) -> String {
 /// Remove PRD-discipline mode: strip the sentinel block and delete the
 /// guidance file. Idempotent.
 pub fn remove_prd_discipline() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        remove_prd_discipline_inner(),
+        crate::control_plane_prefs::Feature::PrdDiscipline,
+        true,
+    )
+}
+
+fn remove_prd_discipline_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
         if let Ok(existing) = fs::read_to_string(&claude_md) {
             let stripped = strip_sentinel_block(&existing);
