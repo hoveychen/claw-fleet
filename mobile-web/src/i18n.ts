@@ -557,11 +557,10 @@ const DICT: Record<string, string> = {
 
   // ── 语音输入 ──
   语音输入: "Voice input",
-  "要让 agent 做什么？也可按住语音键说": "What should the agent do? Or hold the mic key to talk",
-  "继续这个会话，也可按住语音键说…": "Continue this session, or hold the mic key to talk…",
+  "要让 agent 做什么？也可点麦克风说": "What should the agent do? Or tap the mic to talk",
+  "继续这个会话，也可点麦克风说…": "Continue this session, or tap the mic to talk…",
   停止录音: "Stop recording",
-  松开结束: "Release to finish",
-  松开取消: "Release to cancel",
+  // 「准备中…」在下面的产出 tab 词条里已登记，复用即可。
   点击停止: "Tap to stop",
   没听到声音: "Didn't catch that",
   // 「已取消」已在上面的通用词条里，不重复登记。
