@@ -37,10 +37,15 @@ export function VoiceMicButton({ rec }: { rec: VoiceRecorderApi }) {
         className={styles.mic}
         onPointerDown={(e) => {
           pressedAt.current = Date.now();
-          // 指针捕获:手指滑出按钮范围后仍然收得到 up,否则松手事件丢了,长按
-          // 用法下录音会一直开着。
-          e.currentTarget.setPointerCapture?.(e.pointerId);
           rec.start();
+          // 指针捕获:手指滑出按钮范围后仍然收得到 up,否则松手事件丢了,长按
+          // 用法下录音会一直开着。**排在 start 之后**且吞掉异常:它是个锦上添花的
+          // 增强,不能因为某个环境不认这个 pointerId 就把整个开始录音的动作带崩。
+          try {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+          } catch {
+            /* 捕获不到就算了,点按路径不依赖它 */
+          }
         }}
         onPointerUp={() => {
           if (pressIntent(Date.now() - pressedAt.current) === "stop") rec.stop();
