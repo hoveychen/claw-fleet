@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "./i18n";
-import type { VoiceErrorKind, VoiceSession } from "./voiceInput";
+import type { VoiceErrorKind, VoiceProviderId, VoiceSession } from "./voiceInput";
 import { currentVoiceProvider } from "./voiceProviders";
 
 export type VoiceState =
@@ -29,7 +29,10 @@ export type VoiceState =
 export function voiceErrorText(kind: VoiceErrorKind): string {
   switch (kind) {
     case "no-permission":
-      return t("没有麦克风权限，请在系统设置里允许后重试");
+      // 「请在系统设置里允许」这半句挪到 voiceErrorHint 去了:能把用户送过去的
+      // 环境根本不需要这句话(按钮就是那个动作),送不过去的环境则需要说清楚是
+      // *哪个*设置 —— 浏览器和壳里根本不是同一个地方。
+      return t("没有麦克风权限");
     case "no-speech":
       return t("没听到声音");
     case "network":
@@ -39,6 +42,33 @@ export function voiceErrorText(kind: VoiceErrorKind): string {
     case "aborted":
       return t("已取消");
   }
+}
+
+/**
+ * 错误提示的第二行：**这一刻用户能做什么**。
+ *
+ * 为什么要分环境写：「请在系统设置里允许麦克风」在浏览器里是错的（那是站点权限，
+ * 不在系统设置里），在能直接拉起授权面板的壳里则是多余的（旁边就有按钮）。一条
+ * 指向错地方的指引比不给指引更糟 —— 用户会真的翻一遍设置，然后回来发现没用。
+ *
+ * @param canOpenSettings 这个环境能不能直接把用户送去授权（壳里能，浏览器不能）。
+ * @param providerId 当前实现，决定「权限在哪」这句话怎么说。
+ */
+export function voiceErrorHint(
+  kind: VoiceErrorKind,
+  canOpenSettings: boolean,
+  providerId: VoiceProviderId | null,
+): string | null {
+  if (kind === "no-permission") {
+    // 有按钮就别再写字了,按钮本身就是那句指引。
+    if (canOpenSettings) return null;
+    return providerId === "web-speech"
+      ? t("在浏览器地址栏左侧的站点设置里，把麦克风改成「允许」")
+      : t("到系统设置 → 应用 → Fleet → 权限里允许麦克风");
+  }
+  if (kind === "network") return t("语音识别要把声音发去厂商服务器，检查下网络");
+  if (kind === "unavailable") return t("换成打字，或在能用的设备上说");
+  return null;
 }
 
 /**
@@ -85,6 +115,13 @@ export interface UseVoiceInput {
   /** 收掉错误提示回到待命。cancel 不做这件事：它只管收麦克风，报出去的错该
    *  留在屏幕上，直到用户自己看过。 */
   clearError(): void;
+  /** 这个环境能不能把用户送去开麦克风权限。false 时 UI 只能给一句指引文案，
+   *  不该画一个按下去什么都不会发生的按钮。 */
+  canOpenSettings: boolean;
+  /** 拉起授权入口，返回用户是否授权了。canOpenSettings 为 false 时恒 false。 */
+  openSettings(): Promise<boolean>;
+  /** 当前在用哪条实现。错误提示要靠它说清「权限在哪」。 */
+  providerId: VoiceProviderId | null;
 }
 
 /**
@@ -206,5 +243,34 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     setState((s) => (s === "error" ? "idle" : s));
   }, []);
 
-  return { state, partial, error, start, stop, cancel, clearError };
+  // 只有原生壳实现得了(浏览器没有打开站点权限设置的 API)。探测放在渲染期而不是
+  // state 里:provider 是同步取的,而这个值只影响错误块画按钮还是画一句话。
+  const provider = currentVoiceProvider();
+  const canOpenSettings = typeof provider?.openPermissionSettings === "function";
+  const providerId = provider?.id ?? null;
+
+  const openSettings = useCallback(async (): Promise<boolean> => {
+    const provider = currentVoiceProvider();
+    if (typeof provider?.openPermissionSettings !== "function") return false;
+    const granted = await provider.openPermissionSettings();
+    // 授权成功了就把错误撤掉 —— 那条提示已经不成立了,留着只会让用户以为没生效。
+    if (granted) {
+      setError(null);
+      setState((s) => (s === "error" ? "idle" : s));
+    }
+    return granted;
+  }, []);
+
+  return {
+    state,
+    partial,
+    error,
+    start,
+    stop,
+    cancel,
+    clearError,
+    canOpenSettings,
+    openSettings,
+    providerId,
+  };
 }
