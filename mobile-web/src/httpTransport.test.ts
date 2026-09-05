@@ -7,6 +7,8 @@ import type { TransportHandlers } from "./transport";
 class FakeEventSource {
   static last: FakeEventSource | null = null;
   readonly listeners = new Map<string, ((e: { data: string }) => void)[]>();
+  /** 与浏览器同值:0 CONNECTING / 1 OPEN / 2 CLOSED。 */
+  readyState = 0;
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
@@ -283,6 +285,115 @@ describe("HttpTransport 的 SSE 映射", () => {
     expect(FakeEventSource.last!.closed).toBe(true);
     expect(status).toEqual([true, false]);
     expect(t.isAuthed).toBe(false);
+  });
+});
+
+// 老板报的 bug:webui 部署在服务器上,弱网/断过网之后决策卡就再也不出现,必须
+// 刷新页面才恢复。
+//
+// 根因是这条传输层把重连整个托付给了 EventSource 的内建重试。那份契约只覆盖
+// **网络层**断开:服务端回非 200(弱网时网关的 502/504)或 Content-Type 不对,
+// 规范要求 UA "fail the connection" —— readyState 变 CLOSED 且永不重试。而
+// `connect()` 开头 `if (this.stream) return`,那个死掉的 stream 还挂在字段上,
+// 于是没有任何路径能重建它,只剩刷新页面。
+describe("SSE 断流后的自愈", () => {
+  function makeWatched(handlers: TransportHandlers = {}) {
+    const created: FakeEventSource[] = [];
+    class Spy extends FakeEventSource {
+      constructor(url: string) {
+        super(url);
+        created.push(this);
+      }
+    }
+    const transport = new HttpTransport(handlers, {
+      fetchImpl: vi.fn(async () =>
+        jsonResponse({ ok: true, data: null }),
+      ) as unknown as typeof fetch,
+      eventSourceImpl: Spy as unknown as typeof EventSource,
+    });
+    return { transport, created };
+  }
+
+  // 缺陷 A:第一次握手就失败(页面在断网时打开、网关 502)。旧实现的 onerror 里
+  // `if (this.closed || !this.connected) return` 直接吃掉了这一路 —— 从没连上过
+  // 的连接永远不会被重试。
+  it("首次握手就失败时,仍然会重开一条流", async () => {
+    vi.useFakeTimers();
+    try {
+      const { transport, created } = makeWatched();
+      transport.connect();
+      expect(created).toHaveLength(1);
+
+      created[0].readyState = 2; // CLOSED
+      created[0].onerror?.();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(created.length).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 缺陷 B:连上过、之后被网关判死。这是老板那台服务器最可能的形态。
+  it("连上后进入 CLOSED,会重开一条流并恢复在线状态", async () => {
+    vi.useFakeTimers();
+    try {
+      const status: boolean[] = [];
+      const { transport, created } = makeWatched({ onStatus: (v) => status.push(v) });
+      transport.connect();
+      created[0].onopen?.();
+      expect(status).toEqual([true]);
+
+      created[0].readyState = 2; // CLOSED —— 浏览器不会再自己重试
+      created[0].onerror?.();
+      expect(status).toEqual([true, false]);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(created.length).toBeGreaterThan(1);
+
+      created[created.length - 1].onopen?.();
+      expect(status[status.length - 1]).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 反面:readyState 还是 CONNECTING 时,浏览器**自己**正在重试。这时再开一条
+  // 就成了两条并行的流,服务端会多算一个消费者,事件也会重复投递。
+  it("readyState 仍是 CONNECTING 时不另开流,把重试留给浏览器", async () => {
+    vi.useFakeTimers();
+    try {
+      const { transport, created } = makeWatched();
+      transport.connect();
+      created[0].onopen?.();
+
+      created[0].readyState = 0; // CONNECTING
+      created[0].onerror?.();
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(created).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // close() 是用户意图(切后台、拆组件),不该被自愈逻辑复活。
+  it("close() 之后不再重开", async () => {
+    vi.useFakeTimers();
+    try {
+      const { transport, created } = makeWatched();
+      transport.connect();
+      created[0].onopen?.();
+      transport.close();
+
+      created[0].readyState = 2;
+      created[0].onerror?.();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(created).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
