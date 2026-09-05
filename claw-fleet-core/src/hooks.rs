@@ -39,7 +39,7 @@ const FLEET_HOOK_EVENTS: &[&str] = &[
 // ── Public types ─────────────────────────────────────────────────────────────
 
 /// Describes what Fleet wants to add/change in settings.json.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HookSetupPlan {
     /// Events that need a new Fleet hook group appended (no conflict).
