@@ -13,6 +13,21 @@ export const WORKING_STATUSES = new Set([
 
 export type TrailingIndicator = "working" | "waiting" | null;
 
+const INTERRUPT_MARKERS = new Set([
+  "[Request interrupted by user]",
+  "[Request interrupted by user for tool use]",
+]);
+
+/** Claude persists Esc/interrupt as a synthetic user turn. It is a terminal
+ * marker for the previous turn, never a freshly submitted resume prompt. */
+function isInterruptMarker(msg: RawMessage | undefined): boolean {
+  if (msg?.type !== "user" || !msg.message) return false;
+  const { content } = msg.message;
+  if (typeof content === "string") return INTERRUPT_MARKERS.has(content);
+  if (content.length !== 1 || content[0]?.type !== "text") return false;
+  return INTERRUPT_MARKERS.has((content[0] as { type: "text"; text: string }).text);
+}
+
 /** How long a trailing user prompt may sit unanswered before it stops reading
  *  as a resume gap. The gap itself is seconds; a genuinely in-flight turn keeps
  *  the scanner on a working status the whole time (codex's minutes-long tool
@@ -49,8 +64,12 @@ export function trailingIndicator(
   status?: string | null,
   nowMs: number = Date.now(),
 ): TrailingIndicator {
-  if (status && WORKING_STATUSES.has(status)) return "working";
   const last = messages[messages.length - 1];
+  // This check must precede live status: the backend intentionally reports a
+  // fresh interrupt as Active for 30s so the row reads as recent, but Active
+  // must not resurrect a working spinner under a terminal transcript marker.
+  if (isInterruptMarker(last)) return null;
+  if (status && WORKING_STATUSES.has(status)) return "working";
   if (!last) return null;
   // A fresh user prompt sitting at the tail (not an injected meta/system turn,
   // not a compact summary) is a turn about to run — the resume gap. Never read

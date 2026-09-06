@@ -44,6 +44,20 @@ describe("trailingIndicator", () => {
     expect(trailingIndicator(msgs, null)).toBe("waiting");
   });
 
+  it.each([
+    "[Request interrupted by user]",
+    "[Request interrupted by user for tool use]",
+  ])("does not show working after Claude's synthetic interrupt marker: %s", (text) => {
+    const interrupted = userMsg({
+      message: { role: "user", content: [{ type: "text", text }] },
+      timestamp: new Date().toISOString(),
+    });
+    const msgs = [asst("tool_use", "a1"), interrupted];
+
+    expect(trailingIndicator(msgs, "active")).toBeNull();
+    expect(trailingIndicator(msgs, "idle")).toBeNull();
+  });
+
   it("does not wait mid-tool-call (assistant stop_reason tool_use)", () => {
     expect(trailingIndicator([userMsg(), asst("tool_use")], null)).toBeNull();
   });
