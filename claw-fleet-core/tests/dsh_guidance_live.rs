@@ -68,7 +68,13 @@ fn live_agents_md_reaches_the_session_as_a_durable_instruction() {
         .expect("spawn must report an id");
 
     let port = source.server_port().expect("server must be up after a spawn");
-    let client = DshClient::new(port).expect("client");
+    let launch_token = source
+        .server_launch_token()
+        .expect("a started server announced a token");
+    // NOTE: the read below still names 0.1.1's `session.history`, which 0.1.2
+    // answers 404. Ported with the rest of the history path (plan P10), which
+    // has to open a `session/follow` for its cursor first.
+    let client = DshClient::new(port, &launch_token).expect("client");
 
     // The baseline is composed on the first `agent/pre-step`, which happens a
     // beat after `session.prompt` is admitted.

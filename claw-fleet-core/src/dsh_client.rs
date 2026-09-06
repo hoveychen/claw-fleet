@@ -20,10 +20,11 @@
 //! calls take `request`, `session/list` takes `_request`, `credentials/*` take
 //! `ref`/`refs`, `agentPresets/read` takes `agentPreset`.
 //!
-//! Answerable downlink frames (`approval/requested`, `question/requested`) are
-//! answered on a *different* carrier: POST `/api/respond` with a
-//! `client-response` echoing the frame's `rpcId`, whose body is a carrier
-//! receipt rather than a `server-response`.
+//! Answerable frames (`approval/request`, `user-questions/request`) arrive on
+//! the `$events` stream of the `/api/remote.mux` socket and are settled through
+//! the ordinary unary endpoint `$events/result` — see
+//! [`DshClient::answer_event`]. 0.1.1's separate `/api/respond` carrier, with
+//! its `client-response` envelope and carrier receipt, is gone.
 //!
 //! `/api` sits behind two gates, in this order:
 //!
@@ -48,6 +49,12 @@ use crate::off_runtime::off_runtime;
 /// admitted (not when it finishes), so no call on this face is long-polling.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The endpoint that settles one forwarded-event waterfall
+/// (`REMOTE_EVENT_RESULT_ENDPOINT` in `@deepseek-ai/dsh-api-gateway`). It is an
+/// ordinary unary call despite the `$` — the gateway reserves the name rather
+/// than routing it differently.
+const REMOTE_EVENT_RESULT_ENDPOINT: &str = "$events/result";
+
 /// A failed `/api` call, split by which layer rejected it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DshRpcError {
@@ -60,9 +67,8 @@ pub enum DshRpcError {
     /// The business layer answered `{"ok":false,…}`. `code` is dsh's stable
     /// error taxonomy (`bad-request`, `agent-busy`, `method-unavailable`, …).
     Rpc { code: String, message: String },
-    /// `/api/respond` accepted the carrier but refused the answer: the frame
-    /// was already settled (`not-pending`) or the payload had the wrong shape
-    /// (`bad-response` — e.g. an approval answer missing `approvalId`).
+    /// The answer to a waterfall was refused: the event was already settled, or
+    /// the outcome had a shape the gateway's union does not accept.
     Rejected(String),
 }
 
@@ -159,42 +165,6 @@ fn parse_response(sent_rpc_id: &str, body: &str) -> Result<Value, DshRpcError> {
     })
 }
 
-/// Build the `client-response` envelope body for one answered downlink frame.
-///
-/// The `rpcId` is the *frame's*, not one we mint: `/api/respond` routes the
-/// answer through its pending table by that id, so an id of our own would come
-/// back `not-pending`.
-fn build_client_response(rpc_id: &str, result: Value) -> String {
-    json!({
-        "type": "client-response",
-        "rpcId": rpc_id,
-        "result": result,
-    })
-    .to_string()
-}
-
-/// Decode the carrier receipt returned by `/api/respond`.
-///
-/// This is deliberately not an `RpcResult`: dsh models it as a carrier-layer
-/// receipt, so a refused answer is `{"accepted":false,"reason":…}` with HTTP
-/// 200 — treating a 200 as success would silently drop the refusal.
-fn parse_receipt(body: &str) -> Result<(), DshRpcError> {
-    let parsed: Value = serde_json::from_str(body)
-        .map_err(|e| DshRpcError::Envelope(format!("malformed receipt json: {e}")))?;
-
-    if parsed.get("accepted").and_then(Value::as_bool) == Some(true) {
-        return Ok(());
-    }
-
-    Err(DshRpcError::Rejected(
-        parsed
-            .get("reason")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_string(),
-    ))
-}
-
 /// The `/api` base for one loopback port.
 fn api_base(port: u16) -> String {
     format!("http://127.0.0.1:{port}/api")
@@ -289,6 +259,17 @@ impl DshClient {
         &self.base
     }
 
+    /// The session cookie this client replays, as a `name=value` pair.
+    ///
+    /// Exposed for the one carrier that cannot go through [`Self::call`]: the
+    /// `/api/remote.mux` WebSocket sits behind the same authentication gate but
+    /// is opened by [`crate::dsh_events`] with its own handshake, and the
+    /// exchange that mints this cookie is one-per-token — running it a second
+    /// time for the socket would be a second round trip for the same answer.
+    pub fn cookie(&self) -> &str {
+        &self.cookie
+    }
+
     /// Invoke one unary method and return its `result.value`.
     pub fn call(&self, method: &str, payload: Value) -> Result<Value, DshRpcError> {
         let rpc_id = uuid::Uuid::new_v4().to_string();
@@ -330,64 +311,70 @@ impl DshClient {
         parse_response(&rpc_id, &text)
     }
 
-    /// Answer an answerable downlink frame, echoing its `rpcId`.
+    /// Decide one pending waterfall.
     ///
-    /// `value` is the frame domain's response payload — for an approval that is
-    /// `{sessionId, approvalId, outcome}`; omitting `approvalId` is refused
-    /// with `bad-response`.
-    pub fn respond(&self, rpc_id: &str, value: Value) -> Result<(), DshRpcError> {
-        self.post_response(
-            rpc_id,
-            json!({ "ok": true, "value": value }),
-        )
+    /// `value` is whatever the Host listener returns: a bare `ApprovalOutcome`
+    /// string for `approval/request`, an `AskUserQuestionAnswer` object for
+    /// `user-questions/request`. It travels as `outcome.value`, so the event id
+    /// — not a field inside the value — is what names the request being settled.
+    pub fn decide_event(
+        &self,
+        client_id: &str,
+        event_id: &str,
+        value: Value,
+    ) -> Result<(), DshRpcError> {
+        self.answer_event(client_id, event_id, json!({ "kind": "result", "value": value }))
     }
 
     /// Withdraw an answerable frame instead of answering it.
     ///
-    /// The only refusal dsh accepts: `/api/respond` maps an `ok:false` result
-    /// to a cancellation *only* when the error code is `cancelled` (every other
-    /// code is refused as `bad-response`), and only questions are cancellable —
-    /// an approval expects one of its two outcomes instead. `details` must be
-    /// present and empty: the error schema is a discriminated union whose
-    /// `cancelled` arm declares `details: {}`.
-    pub fn respond_cancelled(&self, rpc_id: &str, message: &str) -> Result<(), DshRpcError> {
-        self.post_response(
-            rpc_id,
+    /// A refusal reaches the Host as a thrown error rather than a decision:
+    /// `restoreRemoteEventRejection` rebuilds it from these fields, so the code
+    /// is what the waiting listener sees. Only questions are refusable this way
+    /// — an approval expects one of its own outcomes instead, and a rejection
+    /// there would fail the tool call rather than deny it.
+    pub fn refuse_event(
+        &self,
+        client_id: &str,
+        event_id: &str,
+        message: &str,
+    ) -> Result<(), DshRpcError> {
+        self.answer_event(
+            client_id,
+            event_id,
             json!({
-                "ok": false,
-                "error": { "code": "cancelled", "message": message, "details": {} },
+                "kind": "rejected",
+                "error": { "name": "Error", "code": "cancelled", "message": message },
             }),
         )
     }
 
-    /// POST one `client-response` envelope and decode its carrier receipt.
-    fn post_response(&self, rpc_id: &str, result: Value) -> Result<(), DshRpcError> {
-        let body = build_client_response(rpc_id, result);
-
-        let (status, text) = off_runtime(|| {
-            let resp = self
-                .http
-                .post(format!("{}/respond", self.base))
-                .header("content-type", "application/json")
-                .header(reqwest::header::COOKIE, &self.cookie)
-                .body(body)
-                .send()
-                .map_err(|e| DshRpcError::Transport(format!("respond: {e}")))?;
-
-            let status = resp.status();
-            let text = resp
-                .text()
-                .map_err(|e| DshRpcError::Transport(format!("respond body: {e}")))?;
-            Ok((status, text))
-        })
-        .map_err(DshRpcError::Transport)??;
-
-        if !status.is_success() {
-            return Err(DshRpcError::Transport(format!("respond: HTTP {status}")));
-        }
-
-        parse_receipt(&text)
+    /// Answer one `$events` waterfall.
+    ///
+    /// 0.1.2 retired `/api/respond`: an answerable frame now arrives on the
+    /// `$events` logical stream and is settled through this ordinary unary
+    /// endpoint, correlated by the generation's `clientId` (from the opening
+    /// `ready` frame) plus the waterfall's own `eventId`. `outcome` is the
+    /// three-armed union the gateway validates: `{kind:"next"}` delegates to the
+    /// next answerer, `{kind:"result", value}` decides, `{kind:"rejected",
+    /// error}` throws into the caller.
+    pub fn answer_event(
+        &self,
+        client_id: &str,
+        event_id: &str,
+        outcome: Value,
+    ) -> Result<(), DshRpcError> {
+        self.call(
+            REMOTE_EVENT_RESULT_ENDPOINT,
+            json!({
+                "clientId": client_id,
+                "eventId": event_id,
+                "outcome": outcome,
+            }),
+        )
+        .map(|_| ())
     }
+
 }
 
 #[cfg(test)]
@@ -504,50 +491,29 @@ mod tests {
         ));
     }
 
+    /// The answer to a waterfall is an ordinary unary call, not a separate
+    /// carrier: correlation is `clientId` (the generation) plus `eventId` (the
+    /// pending event), and the outcome is the gateway's three-armed union.
     #[test]
-    fn parse_receipt_accepts_true() {
-        assert!(parse_receipt(r#"{"accepted":true}"#).is_ok());
-    }
-
-    #[test]
-    fn parse_receipt_surfaces_bad_response() {
-        // Observed live when an approval answer omitted `approvalId`.
-        match parse_receipt(r#"{"accepted":false,"reason":"bad-response"}"#).unwrap_err() {
-            DshRpcError::Rejected(reason) => assert_eq!(reason, "bad-response"),
-            other => panic!("expected Rejected, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_receipt_surfaces_not_pending() {
-        match parse_receipt(r#"{"accepted":false,"reason":"not-pending"}"#).unwrap_err() {
-            DshRpcError::Rejected(reason) => assert_eq!(reason, "not-pending"),
-            other => panic!("expected Rejected, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn client_response_echoes_the_frames_rpc_id() {
-        let body = build_client_response("frame-1", json!({ "ok": true, "value": { "a": 1 } }));
-        let parsed: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(parsed["type"], "client-response");
-        assert_eq!(parsed["rpcId"], "frame-1");
-        assert_eq!(parsed["result"]["value"]["a"], 1);
-    }
-
-    /// dsh's error schema is a discriminated union: the `cancelled` arm declares
-    /// `details: {}`, so an envelope that omits the slot fails validation and
-    /// comes back `bad-response` instead of withdrawing the question.
-    #[test]
-    fn a_cancellation_carries_the_cancelled_code_and_an_empty_details() {
-        let body = build_client_response(
-            "frame-1",
-            json!({ "ok": false, "error": { "code": "cancelled", "message": "m", "details": {} } }),
+    fn an_event_answer_is_an_ordinary_unary_call() {
+        let body = build_request(
+            "id-1",
+            REMOTE_EVENT_RESULT_ENDPOINT,
+            &json!({
+                "clientId": "client-1",
+                "eventId": "event-1",
+                "outcome": { "kind": "result", "value": "allowed-once" },
+            }),
         );
         let parsed: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(parsed["result"]["ok"], false);
-        assert_eq!(parsed["result"]["error"]["code"], "cancelled");
-        assert_eq!(parsed["result"]["error"]["details"], json!({}));
+        assert_eq!(parsed["type"], "client-request");
+        assert_eq!(parsed["method"], "$events/result");
+        assert_eq!(parsed["payload"]["args"]["clientId"], "client-1");
+        assert_eq!(parsed["payload"]["args"]["eventId"], "event-1");
+        assert_eq!(
+            parsed["payload"]["args"]["outcome"],
+            json!({ "kind": "result", "value": "allowed-once" })
+        );
     }
 
     #[test]

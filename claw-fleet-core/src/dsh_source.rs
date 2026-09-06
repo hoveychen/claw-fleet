@@ -332,6 +332,16 @@ impl DshSource {
         lock(server_slot()).as_ref().map(DshServer::port)
     }
 
+    /// The launch token that instance announced, or `None` before the first RPC
+    /// starts it. The companion of [`Self::server_port`]: since 0.1.2 a port
+    /// alone cannot build a client, because `/api` admits only the cookie this
+    /// token buys.
+    pub fn server_launch_token(&self) -> Option<String> {
+        lock(server_slot())
+            .as_ref()
+            .map(|s| s.launch_token().to_string())
+    }
+
     /// The launcher pid, or 0 when the server is not up. Reported as a dsh
     /// session's pid — see [`DshServer::pid`] for why it is shared.
     fn server_pid() -> u32 {
