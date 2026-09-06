@@ -457,6 +457,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
         // Phase frames belong to `dsh_events`; the pump never routes them here.
         DshFrame::Event { .. }
         | DshFrame::Status { .. }
+        | DshFrame::Cursor { .. }
         | DshFrame::Ready { .. }
         | DshFrame::Ignored => {}
     }

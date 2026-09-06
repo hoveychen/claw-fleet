@@ -168,6 +168,9 @@ pub enum DshFrame {
     Event {
         session_id: String,
         kind: String,
+        /// The event's position in the session log. The cursor a history read
+        /// needs is the newest one seen, so every event advances it.
+        seq: u64,
         block_type: Option<String>,
         /// `turn/end`'s `data.reason.kind` — observed as `completed` when the
         /// agent finished on its own and `aborted` when `session/cancel` cut it
@@ -176,6 +179,15 @@ pub enum DshFrame {
     },
     /// `api-session/status` — the coarse running bit, pushed on `$events`.
     Status { session_id: String, running: bool },
+    /// A follow stream's opening `snapshot`, reduced to its `cursor`.
+    ///
+    /// That cursor is the only legitimate source of `session/page`'s required
+    /// `throughSeq` ("Inclusive log cut obtained from the corresponding follow
+    /// opening frame"). `session/list`'s `projections.asOfSeq` looks like it but
+    /// is not: measured live, a settled session reported `asOfSeq` 2 against a
+    /// real cursor of 135, so paging through it would have truncated the
+    /// history to its first two events.
+    Cursor { session_id: String, seq: u64 },
     /// `approval/request` — a tool call the session's policy will not run
     /// unattended, delivered as a waterfall. Answerable: [`crate::dsh_decisions`]
     /// raises a card and answers on `event_id` through `$events/result`.
@@ -362,10 +374,20 @@ fn decode_waterfall(value: &Value) -> DshFrame {
 
 /// One item off a `session/follow`.
 ///
-/// The opening `snapshot` is deliberately not folded: its records are history
-/// Fleet already reads through the poll, and replaying them as live events would
-/// drive the phase machine from a log that finished minutes ago.
+/// The opening `snapshot`'s *records* are deliberately not folded: they are
+/// history Fleet reads through `session/page`, and replaying them as live events
+/// would drive the phase machine from a log that finished minutes ago. Its
+/// `cursor` is kept, because that page read cannot be made without it.
 fn decode_follow_item(session_id: &str, value: &Value) -> DshFrame {
+    if value.get("type").and_then(Value::as_str) == Some("snapshot") {
+        return match value.get("cursor").and_then(Value::as_u64) {
+            Some(seq) => DshFrame::Cursor {
+                session_id: session_id.to_string(),
+                seq,
+            },
+            None => DshFrame::Ignored,
+        };
+    }
     if value.get("type").and_then(Value::as_str) != Some("event") {
         return DshFrame::Ignored;
     }
@@ -382,6 +404,10 @@ fn decode_follow_item(session_id: &str, value: &Value) -> DshFrame {
     DshFrame::Event {
         session_id: session_id.to_string(),
         kind,
+        seq: event
+            .and_then(|e| e.get("seq"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
         block_type: data.and_then(|d| d.get("chunk")).and_then(chunk_block_type),
         reason_kind: data
             .and_then(|d| d.get("reason"))
@@ -421,12 +447,17 @@ fn phase_of(kind: &str, block_type: Option<&str>) -> Option<SessionStatus> {
 /// What the sockets currently know about one session.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LiveSession {
-    /// Last pushed `host/session-status`.
+    /// Last pushed `api-session/status`.
     pub running: bool,
     /// Phase derived from the most recent event that carried one.
     pub phase: SessionStatus,
     /// When that phase was set — drives [`LIVE_STATUS_TTL_MS`].
     pub phase_at_ms: u64,
+    /// Newest log position this follow stream has reported — the opening
+    /// snapshot's `cursor`, then every event's `seq`. `session/page` refuses a
+    /// `throughSeq` past the real cursor, so this only ever tracks positions the
+    /// server has already published.
+    pub cursor: Option<u64>,
 }
 
 impl LiveSession {
@@ -469,17 +500,23 @@ impl LiveView {
             DshFrame::Event {
                 session_id,
                 kind,
+                seq,
                 block_type,
                 reason_kind,
             } => {
-                if let Some(phase) = phase_of(&kind, block_type.as_deref()) {
+                {
                     let mut guard = self
                         .sessions
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let entry = guard.entry(session_id.clone()).or_default();
-                    entry.phase = phase;
-                    entry.phase_at_ms = now_ms;
+                    if let Some(phase) = phase_of(&kind, block_type.as_deref()) {
+                        entry.phase = phase;
+                        entry.phase_at_ms = now_ms;
+                    }
+                    // Every event advances the cut a history read may ask for,
+                    // whether or not it means anything to the phase machine.
+                    entry.cursor = Some(entry.cursor.map_or(seq, |c| c.max(seq)));
                 }
                 if kind == "turn/end" {
                     // `aborted` (session/cancel) is the one other kind observed
@@ -497,6 +534,14 @@ impl LiveView {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 guard.entry(session_id).or_default().running = running;
+            }
+            DshFrame::Cursor { session_id, seq } => {
+                let mut guard = self
+                    .sessions
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let entry = guard.entry(session_id).or_default();
+                entry.cursor = Some(entry.cursor.map_or(seq, |c| c.max(seq)));
             }
             // The answerable frames and their resolutions carry no phase; the
             // pump routes them to `dsh_decisions` instead of here.
@@ -542,6 +587,15 @@ impl LiveView {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(session_id)
             .and_then(|s| s.effective_phase(now_ms))
+    }
+
+    /// The newest log position this session's follow stream has reported.
+    pub fn cursor_of(&self, session_id: &str) -> Option<u64> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(session_id)
+            .and_then(|s| s.cursor)
     }
 
     /// How many sessions the sockets have reported on.
@@ -675,6 +729,30 @@ impl DshEventWatcher {
         self.live.phase_of(session_id, now_ms())
     }
 
+    /// The log cut a history read may ask `session/page` for, opening the
+    /// follow stream that publishes it if nobody has yet.
+    ///
+    /// Blocking, up to `budget`: the cursor arrives in the follow stream's
+    /// opening frame, so a session Fleet has never followed cannot answer
+    /// without one round trip. Returns `None` when the socket is down or the
+    /// server does not answer in time — the caller then has no safe cut to ask
+    /// for, and asking with a guess would either truncate the history (too low)
+    /// or be refused outright (too high).
+    pub fn cursor_for_history(&self, session_id: &str, budget: Duration) -> Option<u64> {
+        if let Some(seq) = self.live.cursor_of(session_id) {
+            return Some(seq);
+        }
+        self.follow(session_id);
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline {
+            if let Some(seq) = self.live.cursor_of(session_id) {
+                return Some(seq);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        None
+    }
+
     /// Call `cb` when this session's next turn ends. See [`LiveView::on_turn_end`].
     ///
     /// Also opens the follow stream that will carry that `turn/end`: registering
@@ -720,9 +798,12 @@ fn open_frame(stream_id: &str, kind: &StreamKind) -> String {
             serde_json::json!({
                 "request": {
                     "address": { "kind": "session", "sessionId": session_id },
-                    // The opening snapshot is discarded (history reaches Fleet
-                    // through the poll), so ask for the smallest one dsh will
-                    // send rather than a window nobody reads.
+                    // Only the snapshot's `cursor` is kept — its records are
+                    // history `session/page` reads on demand — so ask for the
+                    // smallest window dsh will build rather than one nobody
+                    // reads. The cursor is the log's cut, not the window's, so
+                    // shrinking this does not shorten the history a page read
+                    // can then reach.
                     "maxMessages": 1
                 }
             }),
@@ -994,6 +1075,7 @@ mod tests {
             DshFrame::Event {
                 session_id: "session-ef76dbb8".into(),
                 kind: "tool/call".into(),
+                seq: 389,
                 block_type: None,
                 reason_kind: None,
             }
@@ -1195,11 +1277,12 @@ mod tests {
         }
     }
 
-    /// The opening snapshot is history the poll already has. Folding it would
-    /// replay a finished turn through the phase machine and light up a session
-    /// that has been idle for minutes.
+    /// The opening snapshot's records are history `session/page` reads; folding
+    /// them would replay a finished turn through the phase machine and light up
+    /// a session idle for minutes. Its `cursor` is the one thing kept — it is
+    /// the only legitimate `throughSeq` for that page read.
     #[test]
-    fn the_follow_snapshot_is_not_replayed_as_live_events() {
+    fn the_follow_snapshot_yields_its_cursor_and_nothing_else() {
         let value = json!({
             "type": "snapshot",
             "header": { "version": 0, "id": "session-a", "cwd": "/tmp" },
@@ -1208,7 +1291,13 @@ mod tests {
             "hasMore": false,
             "projections": { "asOfSeq": 2, "values": {} }
         });
-        assert_eq!(decode(&follow("session-a"), value), DshFrame::Ignored);
+        assert_eq!(
+            decode(&follow("session-a"), value),
+            DshFrame::Cursor {
+                session_id: "session-a".into(),
+                seq: 2,
+            }
+        );
     }
 
     /// The envelope layer: three terminal shapes, each naming its stream.
@@ -1346,6 +1435,7 @@ mod tests {
         DshFrame::Event {
             session_id: sid.into(),
             kind: kind.into(),
+            seq: 0,
             block_type: None,
             reason_kind: None,
         }
@@ -1355,6 +1445,7 @@ mod tests {
         DshFrame::Event {
             session_id: sid.into(),
             kind: "turn/end".into(),
+            seq: 0,
             block_type: None,
             reason_kind: Some(reason.into()),
         }
@@ -1433,6 +1524,7 @@ mod tests {
             running: true,
             phase: SessionStatus::Executing,
             phase_at_ms: 1_000,
+            cursor: None,
         };
         assert_eq!(
             live.effective_phase(1_000 + LIVE_STATUS_TTL_MS * 10),
@@ -1448,6 +1540,7 @@ mod tests {
             running: false,
             phase: SessionStatus::WaitingInput,
             phase_at_ms: 1_000,
+            cursor: None,
         };
         assert_eq!(
             live.effective_phase(1_000 + LIVE_STATUS_TTL_MS),
@@ -1470,6 +1563,48 @@ mod tests {
         );
         assert_eq!(live.phase_of("session-a", 1_000), None);
         assert_eq!(live.tracked(), 1, "it is tracked, it just has no phase");
+    }
+
+    /// The cursor a history read asks for must never run ahead of what the
+    /// server has published — `session/page` refuses a `throughSeq` past the
+    /// real cut — and must never run backwards either, or a later read would
+    /// silently truncate the history it just walked.
+    #[test]
+    fn the_cursor_advances_with_the_log_and_never_retreats() {
+        let live = LiveView::default();
+        assert_eq!(live.cursor_of("session-a"), None);
+
+        live.apply(
+            DshFrame::Cursor {
+                session_id: "session-a".into(),
+                seq: 48,
+            },
+            1_000,
+        );
+        assert_eq!(live.cursor_of("session-a"), Some(48));
+
+        live.apply(
+            DshFrame::Event {
+                session_id: "session-a".into(),
+                kind: "turn/start".into(),
+                seq: 49,
+                block_type: None,
+                reason_kind: None,
+            },
+            1_000,
+        );
+        assert_eq!(live.cursor_of("session-a"), Some(49));
+
+        // A late frame from an older cut (a reconnect replays the snapshot)
+        // must not pull the cursor back.
+        live.apply(
+            DshFrame::Cursor {
+                session_id: "session-a".into(),
+                seq: 12,
+            },
+            1_000,
+        );
+        assert_eq!(live.cursor_of("session-a"), Some(49));
     }
 
     #[test]

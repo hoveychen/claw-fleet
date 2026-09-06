@@ -70,6 +70,11 @@ pub const DSH_URI_PREFIX: &str = "dsh://";
 /// what it returns.
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 
+/// How long to wait for a session's follow stream to publish its cursor before
+/// giving up on a history read: one loopback round trip plus the server's own
+/// snapshot build.
+const HISTORY_CURSOR_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// How long one `session/list` answer may be reused for a later roster scan.
 ///
 /// Deliberately shorter than [`POLL_INTERVAL`], so the registry's own cadence
@@ -210,31 +215,58 @@ impl DshSource {
         f(&client)
     }
 
-    /// One `session.history` page.
+    /// One `session/page` of a session's log.
     ///
     /// `before_seq` walks backwards through the history (absent = the tail page,
     /// which additionally carries the in-flight partial); `max_messages` is
     /// dsh's own unit — whole append-origin messages *and every raw event they
     /// own*, chunks included. That is the reason [`history_with`] folds pages
     /// onto a cache rather than asking for the whole thing on every poll.
+    ///
+    /// 0.1.2 replaced the standalone `session.history` read with a paged one
+    /// anchored to a `throughSeq` the *follow stream* hands out, so this asks
+    /// the watcher for that cut first — see
+    /// [`crate::dsh_events::DshEventWatcher::cursor_for_history`]. No cursor
+    /// means no read: a guessed cut either truncates the history (too low) or is
+    /// refused outright (too high).
     fn fetch_history(
         &self,
         id: &str,
         before_seq: Option<i64>,
         max: Option<usize>,
     ) -> Result<Value, String> {
-        let mut payload = json!({ "sessionId": id });
+        let through = self.history_cursor(id)?;
+        let mut request = json!({
+            "address": { "kind": "session", "sessionId": id },
+            "throughSeq": through,
+        });
         if let Some(before) = before_seq {
-            payload["beforeSeq"] = json!(before);
+            request["beforeSeq"] = json!(before);
         }
         if let Some(n) = max {
-            payload["maxMessages"] = json!(n);
+            request["maxMessages"] = json!(n);
         }
         self.with_client(|client| {
             client
-                .call("session.history", payload.clone())
+                .call("session/page", json!({ "request": request }))
                 .map_err(Into::into)
         })
+    }
+
+    /// The log cut this session's pages are read against.
+    ///
+    /// Touching the client first is deliberate: the watcher only exists once a
+    /// server does, and the cursor only exists once that watcher has a follow
+    /// stream open on this session.
+    fn history_cursor(&self, id: &str) -> Result<u64, String> {
+        self.with_client(|_| Ok(()))?;
+        let watcher = lock(watcher_slot());
+        let watcher = watcher
+            .as_ref()
+            .ok_or_else(|| "dsh: no event watcher to read a history cursor from".to_string())?;
+        watcher
+            .cursor_for_history(id, HISTORY_CURSOR_TIMEOUT)
+            .ok_or_else(|| format!("dsh: {id} published no history cursor"))
     }
 
     /// Turn the image references in one session's records into renderable store
@@ -1503,7 +1535,7 @@ fn evict_cold(map: &mut std::collections::HashMap<String, CachedHistory>, keep: 
 
 fn history_events(value: &Value) -> Vec<Value> {
     value
-        .get("events")
+        .get("records")
         .and_then(Value::as_array)
         .map(|entries| {
             entries
@@ -2377,7 +2409,7 @@ mod tests {
                 .map(|(_, e)| e.clone())
                 .collect();
             let has_more = keep.len() < ids.len();
-            Ok(json!({ "events": page, "hasMore": has_more }))
+            Ok(json!({ "records": page, "hasMore": has_more }))
         }
 
         fn calls(&self) -> Vec<(Option<i64>, Option<usize>)> {
@@ -2555,7 +2587,7 @@ mod tests {
     #[test]
     fn continuity_is_overlap_or_the_very_next_seq() {
         let events = history_events(&json!({
-            "events": [wire_user_event(10, "x"), wire_user_event(11, "y")],
+            "records": [wire_user_event(10, "x"), wire_user_event(11, "y")],
         }));
         assert!(page_continues(10, &events), "overlapping page");
         assert!(page_continues(9, &events), "starts exactly after the cache");
@@ -2566,7 +2598,7 @@ mod tests {
     #[test]
     fn folds_key_off_the_cached_seq_span() {
         let events = history_events(&json!({
-            "events": [
+            "records": [
                 wire_user_event(1, "old"),
                 wire_user_event(2, "mid"),
                 wire_user_event(3, "new"),
@@ -2582,7 +2614,7 @@ mod tests {
     fn history_events_keeps_the_durable_event_only() {
         // Entries pair the durable event with a transient host-computed view.
         let value = json!({
-            "events": [
+            "records": [
                 { "event": { "type": "user/message", "seq": 7 }, "view": { "for": "call" } },
                 { "event": { "type": "turn/end", "seq": 8 } }
             ],
