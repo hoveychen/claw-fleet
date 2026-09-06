@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "./i18n";
 import type { VoiceErrorKind, VoiceProviderId, VoiceSession } from "./voiceInput";
 import { currentVoiceProvider } from "./voiceProviders";
+import { holdWakeLock } from "./wakeLock";
 
 export type VoiceState =
   /** 还在问 provider 能不能用。按钮此时不显示，避免闪一下又消失。 */
@@ -145,6 +146,20 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     if (probe === "probing") return;
     setState((s) => (s === "probing" ? (probe === "ready" ? "idle" : "unsupported") : s));
   }, [probe]);
+
+  // 录音全程强制常亮，不管用户的常亮开关开没开。
+  //
+  // 手机默认几十秒无触摸就自动息屏，而说话时手根本不碰屏幕——说一段长一点的话
+  // 必然撞上。屏一灭，WebView 被系统挂起，识别会话当场断掉：用户抬头一看，应用
+  // 像是被杀掉了，刚才说的全没了，而且没有任何提示。所以这不是「顺手加个体验」，
+  // 是这条路径能不能用完的问题。
+  //
+  // preparing 也算在内：那一段正是用户已经开口、引擎还没开麦的空窗，息屏同样致命。
+  // 松开时机跟着 state 走，出错 / 停止 / 卸载都会走到这个 effect 的清理。
+  useEffect(() => {
+    if (state !== "listening" && state !== "preparing") return;
+    return holdWakeLock();
+  }, [state]);
 
   // 卸载时收掉进行中的识别，否则麦克风会一直开着。
   useEffect(() => {
