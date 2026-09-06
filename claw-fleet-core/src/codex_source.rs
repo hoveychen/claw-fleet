@@ -1885,6 +1885,7 @@ mod tests {
         codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
         codex_token_breakdown_from_lines, codex_token_deltas_from_lines, codex_usage_from_foxy,
+        codex_usage_from_app_server_result,
         compute_token_stats,
         determine_status, exec_note_from_script, parse_codex_session, plan_type_from_foxy_label,
         USAGE_SOURCE_FOXY,
@@ -3931,6 +3932,7 @@ mod tests {
                 resets_at: Some(1_787_622_736),
             }),
             secondary: None,
+            rate_limit_buckets: Vec::new(),
         }
     }
 
@@ -3947,6 +3949,27 @@ mod tests {
         assert_eq!(primary.used_percent, 1);
         assert_eq!(primary.resets_at, Some(1_787_622_736));
         assert!(item.secondary.is_none());
+    }
+
+    #[test]
+    fn app_server_snapshot_collects_top_level_and_additional_buckets() {
+        let item = codex_usage_from_app_server_result(&json!({
+            "rateLimits": {
+                "limitId": "codex", "planType": "plus",
+                "primary": {"usedPercent": 12, "windowDurationMins": 300}
+            },
+            "rateLimitsByLimitId": {
+                "base_model_inference": {
+                    "limitName": "Luna Reserve", "normalModelSlug": "gpt-reserve",
+                    "primary": {"usedPercent": 48, "windowDurationMins": 10080}
+                }
+            }
+        })).unwrap();
+        assert_eq!(item.primary.as_ref().unwrap().used_percent, 12);
+        assert_eq!(item.rate_limit_buckets.len(), 2);
+        assert_eq!(item.rate_limit_buckets[0].limit_id.as_deref(), Some("codex"));
+        assert_eq!(item.rate_limit_buckets[1].limit_id.as_deref(), Some("base_model_inference"));
+        assert_eq!(item.rate_limit_buckets[1].limit_name.as_deref(), Some("Luna Reserve"));
     }
 
     #[test]
@@ -3985,6 +4008,7 @@ mod tests {
             full_name: "Harry C".into(),
             primary: primary.map(w),
             secondary: secondary.map(w),
+            rate_limit_buckets: Vec::new(),
         }
     }
 
@@ -6134,6 +6158,24 @@ pub struct CodexRateLimitWindow {
     pub resets_at: Option<i64>,
 }
 
+/// One independently-metered Codex quota, carrying the provider's display
+/// metadata and both windows. The legacy top-level pair remains on
+/// [`CodexUsageItem`] as the canonical quota projection.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexRateLimitBucket {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub normal_model_slug: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary: Option<CodexRateLimitWindow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secondary: Option<CodexRateLimitWindow>,
+}
+
 /// Credits snapshot from Codex.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -6158,6 +6200,8 @@ pub struct CodexUsageItem {
     pub primary: Option<CodexRateLimitWindow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary: Option<CodexRateLimitWindow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rate_limit_buckets: Vec<CodexRateLimitBucket>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credits: Option<CodexCreditsSnapshot>,
     /// Which window (if any) the account has actually hit: `"primary"` /
@@ -6186,11 +6230,9 @@ pub const USAGE_SOURCE_APP_SERVER: &str = "codex-app-server";
 /// Project a foxy-sourced Codex account onto the app-server's snapshot shape, so
 /// every consumer downstream is source-agnostic.
 ///
-/// Two fields cannot be filled from foxy and are deliberately left at their
-/// defaults rather than guessed:
-/// - `window_duration_mins` (already `None` per
-///   [`crate::foxy::FoxyCodexAccount`]) — foxy stores no window length.
-/// - `credits` — foxy polls no credits balance.
+/// Credits cannot be filled from foxy and are deliberately left unknown.
+/// Current foxy versions preserve provider-reported window durations in their
+/// dynamic buckets; legacy versions continue to leave them absent.
 ///
 /// `plan_type` is normalised back to the app-server's spelling: foxy stores the
 /// display label (`"Codex Team"`, built as `"Codex " + titlecase(plan_type)` in
@@ -6202,9 +6244,51 @@ fn codex_usage_from_foxy(a: crate::foxy::FoxyCodexAccount) -> CodexUsageItem {
         rate_limit_reached_type: reached_window_from_percentages(&a.primary, &a.secondary),
         primary: a.primary,
         secondary: a.secondary,
+        rate_limit_buckets: a.rate_limit_buckets,
         usage_source: USAGE_SOURCE_FOXY.to_string(),
         ..Default::default()
     }
+}
+
+fn app_server_rate_limit_buckets(result: &Value) -> Vec<CodexRateLimitBucket> {
+    let legacy = result.get("rateLimits").unwrap_or(result);
+    let legacy_bucket = serde_json::from_value::<CodexRateLimitBucket>(legacy.clone()).ok();
+    let mut entries: Vec<(String, CodexRateLimitBucket)> = result
+        .get("rateLimitsByLimitId")
+        .and_then(Value::as_object)
+        .map(|buckets| {
+            buckets
+                .iter()
+                .filter_map(|(id, value)| {
+                    let mut bucket = serde_json::from_value::<CodexRateLimitBucket>(value.clone()).ok()?;
+                    if bucket.limit_id.is_none() {
+                        bucket.limit_id = Some(id.clone());
+                    }
+                    Some((id.clone(), bucket))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    entries.sort_by(|(left, _), (right, _)| {
+        (left != "codex", left).cmp(&(right != "codex", right))
+    });
+    let mut buckets: Vec<CodexRateLimitBucket> = entries.into_iter().map(|(_, bucket)| bucket).collect();
+    if let Some(bucket) = legacy_bucket {
+        let legacy_id = bucket.limit_id.as_deref().unwrap_or("codex");
+        if !buckets.iter().any(|item| item.limit_id.as_deref() == Some(legacy_id)) {
+            buckets.insert(0, bucket);
+        }
+    }
+    buckets
+}
+
+fn codex_usage_from_app_server_result(result: &Value) -> Result<CodexUsageItem, String> {
+    let legacy = result.get("rateLimits").unwrap_or(result);
+    let mut snapshot: CodexUsageItem = serde_json::from_value(legacy.clone())
+        .map_err(|e| format!("parse rate-limit: {e}"))?;
+    snapshot.rate_limit_buckets = app_server_rate_limit_buckets(result);
+    snapshot.usage_source = USAGE_SOURCE_APP_SERVER.to_string();
+    Ok(snapshot)
 }
 
 /// Derive Codex's `rateLimitReachedType` from the window percentages.
@@ -6658,17 +6742,7 @@ fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageIt
                         let result = msg
                             .get("result")
                             .ok_or("Missing result in response")?;
-                        let mut snapshot: CodexUsageItem = serde_json::from_value(
-                            result
-                                .get("rateLimits")
-                                .cloned()
-                                .unwrap_or_else(|| result.clone()),
-                        )
-                        .map_err(|e| format!("parse rate-limit: {e}"))?;
-                        // Codex has no notion of Fleet's source labels, so the
-                        // field arrives at its serde default and is stamped here.
-                        snapshot.usage_source = USAGE_SOURCE_APP_SERVER.to_string();
-                        return Ok(snapshot);
+                        return codex_usage_from_app_server_result(result);
                     }
                 }
             }
