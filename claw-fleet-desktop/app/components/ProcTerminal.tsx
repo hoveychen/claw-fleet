@@ -123,5 +123,11 @@ export function ProcTerminal({
     };
   }, [proc.id]);
 
-  return <div ref={containerRef} style={{ height, padding: "4px 0 0 6px" }} />;
+  // boxSizing 必须是 border-box：content-box 下 height:100% 的内容盒已经吃满父级，
+  // padding 再把整体顶高 4px，而 .screen 是 overflow:hidden —— 多出来的 4px 连同
+  // 最后一行的下半截一起被裁掉。border-box 同时让 FitAddon 读到扣掉 padding 的
+  // 可用高度，算出的行数才真的放得下。
+  return (
+    <div ref={containerRef} style={{ height, padding: "4px 0 0 6px", boxSizing: "border-box" }} />
+  );
 }
