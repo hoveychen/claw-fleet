@@ -7,12 +7,16 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { t } from "./i18n";
 import { initTheme } from "./theme";
 import { initWakeLock } from "./wakeLock";
+import { installNativeWakeLock } from "./wakeLockNative";
 import { lockZoom } from "./lockZoom";
 import { ConfirmProvider } from "./confirmDialog";
 import "./index.css";
 
 initTheme();
 initWakeLock();
+// 壳里没有标准 wakeLock 时补一条原生兜底（iOS 18.4 以下）。异步、失败静默：
+// 装上之后 wakeLock 模块会自己重新对齐持锁状态。
+void installNativeWakeLock();
 lockZoom();
 
 const cloudMode = import.meta.env.MODE === "cloud";
