@@ -4,10 +4,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const CHAT = "/Users/foo/.fleet/chat";
+const mockState = vi.hoisted(() => ({ chatResponse: null as Promise<string> | null }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string) => {
-    if (cmd === "chat_workspace") return CHAT;
+    if (cmd === "chat_workspace") return mockState.chatResponse ?? CHAT;
     if (cmd === "get_sources_config") return [{ tool: "claude", enabled: true, installed: true }];
     return null;
   }),
@@ -15,6 +16,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
 
 import "../i18n";
+import { invoke } from "@tauri-apps/api/core";
 import { NewSessionForm } from "./NewSessionForm";
 import { useComposerDraftStore } from "../composerDraft";
 import { useSessionsStore } from "../store";
@@ -44,6 +46,7 @@ let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
 beforeEach(() => {
+  mockState.chatResponse = null;
   window.localStorage.clear();
   useComposerDraftStore.setState({ drafts: {} });
   useSessionsStore.setState({ sessions: [] });
@@ -101,6 +104,17 @@ async function click(el: HTMLElement) {
  *  off. Both halves are exercised because the form's workspace seeding runs off
  *  the same field the pill writes, so either direction can be undone by it. */
 describe("NewSessionForm chat-mode pill", () => {
+  it("renders immediately while the chat workspace path is still loading", async () => {
+    let resolveChat!: (path: string) => void;
+    mockState.chatResponse = new Promise<string>((resolve) => { resolveChat = resolve; });
+
+    await mount();
+    expect(pill().disabled).toBe(true);
+
+    await act(async () => resolveChat(CHAT));
+    expect(pill().disabled).toBe(false);
+  });
+
   it("toggles off again on a host that has project workspaces", async () => {
     useSessionsStore.setState({ sessions: [session("/Users/foo/repo")] });
     await mount();
