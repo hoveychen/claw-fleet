@@ -120,7 +120,7 @@ pub(crate) async fn spawn_new_claude_session(
 /// and under a remote connection it resolves against the probe host's home.
 #[tauri::command(async)]
 pub(crate) fn chat_workspace(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state.backend.write().unwrap().chat_workspace()
+    state.backend.read().unwrap().chat_workspace()
 }
 
 /// One level of directories under `path` on the *backend host* (`None` = its
