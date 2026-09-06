@@ -2,13 +2,16 @@
 //! just to a hand-written envelope fixture.
 //!
 //! Ignored by default because it needs a running server. Start one and run:
-//!   npx -y @deepseek-ai/dsh@latest web --port 3080 &
-//!   DSH_PORT=3080 cargo test -p claw-fleet-core --test dsh_client_live -- --ignored --nocapture
+//!   dsh web --port 3080 --no-open &
+//!   # the URL it prints carries the launch token: http://127.0.0.1:3080/?token=…
+//!   DSH_PORT=3080 DSH_LAUNCH_TOKEN=<token> \
+//!     cargo test -p claw-fleet-core --test dsh_client_live -- --ignored --nocapture
 //!
-//! The three assertions below are exactly the three layers `dsh_client` splits
-//! its error type over: a successful unary call, a business-level rejection
-//! (`ok:false`), and the loopback trust fence. Passing all three proves the
-//! client's envelope handling matches the server's actual wire behavior.
+//! The four assertions below are exactly the layers `dsh_client` splits its
+//! error type over: a successful unary call, a business-level rejection
+//! (`ok:false`), the endpoint-shape fence, and the waterfall answer path.
+//! Passing them proves the client's envelope handling matches the server's
+//! actual wire behavior.
 
 use claw_fleet_core::dsh_client::{DshClient, DshRpcError};
 use serde_json::json;
@@ -18,23 +21,24 @@ fn client() -> DshClient {
         .unwrap_or_else(|_| "3080".into())
         .parse()
         .expect("DSH_PORT must be a port number");
-    DshClient::new(port).expect("build client")
+    // Since 0.1.2 a port is not enough: `/api` admits only the cookie this
+    // token buys, and the token exists solely in the line the server printed.
+    let launch_token = std::env::var("DSH_LAUNCH_TOKEN")
+        .expect("DSH_LAUNCH_TOKEN must be the token from the `dsh web` URL");
+    DshClient::new(port, &launch_token).expect("build client")
 }
 
 #[test]
 #[ignore = "needs a running `dsh web`; run manually with --ignored"]
-fn live_host_describe_returns_cwd_and_model() {
+fn live_settings_describe_reports_namespaces() {
+    // `host.describe` is gone in 0.1.2 — the whole `host.*` service was split
+    // up — and `settings/describe` is what Fleet polls for readiness instead.
     let value = client()
-        .call("host.describe", json!({}))
-        .expect("host.describe");
-    println!("host.describe -> {value}");
+        .call("settings/describe", json!({}))
+        .expect("settings/describe");
     assert!(
-        value.get("cwd").and_then(|v| v.as_str()).is_some(),
-        "host.describe must report a cwd: {value}"
-    );
-    assert!(
-        value.get("model").and_then(|v| v.as_str()).is_some(),
-        "host.describe must report a model: {value}"
+        value.get("namespaces").and_then(|v| v.as_array()).is_some(),
+        "settings/describe must report namespaces: {value}"
     );
 }
 
@@ -42,43 +46,64 @@ fn live_host_describe_returns_cwd_and_model() {
 #[ignore = "needs a running `dsh web`; run manually with --ignored"]
 fn live_session_list_is_an_item_array() {
     let value = client()
-        .call("session.list", json!({}))
-        .expect("session.list");
+        .call("session/list", json!({ "_request": {} }))
+        .expect("session/list");
     assert!(
         value.get("items").and_then(|v| v.as_array()).is_some(),
-        "session.list must return an items array: {value}"
+        "session/list must return an items array: {value}"
     );
 }
 
 #[test]
 #[ignore = "needs a running `dsh web`; run manually with --ignored"]
 fn live_bad_payload_surfaces_rpc_error_not_transport() {
-    // `credentials.describe` requires a `refs` array; omitting it is the
+    // `credentials/describe` requires a `refs` array; omitting it is the
     // cheapest read-only way to make the server answer `{"ok":false}`.
     let err = client()
-        .call("credentials.describe", json!({}))
+        .call("credentials/describe", json!({}))
         .expect_err("missing refs must be rejected");
-    println!("credentials.describe(bad) -> {err}");
+    println!("credentials/describe(bad) -> {err}");
     match err {
-        DshRpcError::Rpc { code, .. } => assert_eq!(code, "bad-request"),
+        DshRpcError::Rpc { code, .. } => {
+            assert!(
+                code.starts_with("gateway/"),
+                "argument validation is the gateway's, got {code}"
+            )
+        }
         other => panic!("expected a business-level Rpc error, got {other:?}"),
     }
 }
 
+/// The dotted 0.1.1 spelling is not a soft fallback: the gateway requires an
+/// endpoint of exactly two slash-separated segments, so `session.list` never
+/// reaches dispatch and comes back as a transport-level 404.
 #[test]
 #[ignore = "needs a running `dsh web`; run manually with --ignored"]
-fn live_respond_to_unknown_frame_is_not_pending() {
-    // Nothing is awaiting this id, so the carrier receipt must refuse it —
-    // proving `respond` reads the receipt instead of trusting HTTP 200.
+fn live_a_dotted_endpoint_is_a_404() {
     let err = client()
-        .respond(
+        .call("session.list", json!({ "_request": {} }))
+        .expect_err("a dotted endpoint must not resolve");
+    match err {
+        DshRpcError::Transport(msg) => assert!(msg.contains("404"), "expected a 404, got {msg}"),
+        other => panic!("expected a transport 404, got {other:?}"),
+    }
+}
+
+/// Nothing is awaiting this event, so the answer must be refused — proving the
+/// client reads the server's verdict instead of trusting HTTP 200.
+#[test]
+#[ignore = "needs a running `dsh web`; run manually with --ignored"]
+fn live_answering_an_unknown_event_is_refused() {
+    let err = client()
+        .decide_event(
             "00000000-0000-4000-8000-000000000000",
-            json!({ "sessionId": "session-nonexistent", "outcome": "rejected" }),
+            "00000000-0000-4000-8000-000000000001",
+            json!("rejected"),
         )
-        .expect_err("an unknown rpcId must be refused");
-    println!("respond(unknown) -> {err}");
+        .expect_err("an unknown event id must be refused");
+    println!("$events/result(unknown) -> {err}");
     assert!(
-        matches!(err, DshRpcError::Rejected(_)),
-        "expected a carrier rejection, got {err:?}"
+        matches!(err, DshRpcError::Rpc { .. }),
+        "expected a business-level refusal, got {err:?}"
     );
 }

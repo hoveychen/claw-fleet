@@ -1,54 +1,66 @@
-//! Live observation of a `dsh web` instance over its two downlink WebSockets.
+//! Live observation of a `dsh web` instance over its mux WebSocket.
 //!
-//! `session.list` (polled by [`crate::dsh_source`]) carries one liveness bit per
+//! `session/list` (polled by [`crate::dsh_source`]) carries one liveness bit per
 //! session — `running` — which collapses every phase of a turn into "Active".
 //! The fine phases Fleet shows for the other two sources (Thinking / Streaming /
 //! Executing / Processing) exist in dsh only as events, and events are only
-//! published on the sockets:
+//! published on the socket.
 //!
-//! * `ws://127.0.0.1:<port>/api/events.mux` — every session's turn lifecycle
-//!   (`turn/start`, `step/start`, `assistant/chunk`, `tool/call`, `tool/result`,
-//!   `step/end`, `turn/end`) plus projection and queue updates.
-//! * `ws://127.0.0.1:<port>/api/events.host` — host-wide facts, of which Fleet
-//!   uses `host/session-status` (the `running` bit, pushed instead of polled).
+//! ## One socket, many logical streams
 //!
-//! Both are **downlink-only**: the client opens them without parameters and
-//! sends nothing. Frames are not bare events — each one is a `server-request`
-//! envelope whose `method` names the frame and whose `payload` carries it:
+//! 0.1.2 replaced 0.1.1's two downlink sockets (`/api/events.mux` and
+//! `/api/events.host`, both gone) with a single multiplexed one at
+//! [`REMOTE_MUX_PATH`], behind the same cookie gate as `/api`. The client opens
+//! logical streams on it and the host answers per stream:
 //!
 //! ```text
-//! {"type":"server-request","rpcId":"<uuid>","method":"session/event",
-//!  "payload":{"type":"session/event","sessionId":"session-…",
-//!             "event":{"type":"tool/call","seq":62,"time":…,"data":{…}}}}
+//! → {"type":"open","streamId":"<uuid>","endpoint":"$events","payload":{"args":{}}}
+//! ← {"type":"item","streamId":"<uuid>","value":{"type":"ready","clientId":…}}
+//! ← {"type":"end"|"error","streamId":"<uuid>",…}
 //! ```
 //!
-//! This module keeps the derived per-session phase in memory and hands it to
-//! `scan_sessions`, which overlays it on the polled list. The poll still decides
-//! *which* sessions exist and what their token totals are; the socket only
-//! sharpens their status.
+//! Fleet opens two kinds ([`StreamKind`]):
 //!
-//! ## Both sockets are scoped to their own server process
+//! * **`$events`** — host-wide. Its opening `ready` frame carries the
+//!   `clientId` every decision answer is scoped to, and its `emit` frames carry
+//!   `api-session/status` (the `running` bit, pushed instead of polled).
+//!   Answerable requests — `approval/request`, `user-questions/request` —
+//!   arrive here as `waterfall` frames and go to [`crate::dsh_decisions`].
+//! * **`session/follow`** — one per session, opened on demand. This is the only
+//!   place a turn's lifecycle appears (`turn/start`, `step/start`,
+//!   `assistant/chunk`, `tool/call`, `step/end`, `turn/end`); 0.1.1's global
+//!   feed of every session's events no longer exists. Its opening snapshot also
+//!   carries the `cursor` that [`crate::dsh_source`] needs before it can read
+//!   history through `session/page`.
 //!
-//! Measured against two concurrent `dsh web` instances sharing one `~/.dsh`
-//! home: while instance A ran a full turn, instance B's `events.mux` and
-//! `events.host` published **nothing** about it, and B's `session.list` reported
-//! `running: false` for that session throughout — A's reported `true`. Sessions
-//! are shared through the on-disk log; the *live* view is not.
+//! Because the fine phases are per-session now, they have to be *asked* for: the
+//! launch path follows a session it is about to prompt, and the pump follows any
+//! session the host reports running.
+//!
+//! ## The socket is scoped to its own server process
+//!
+//! Measured on 0.1.1 against two concurrent `dsh web` instances sharing one
+//! `~/.dsh` home: while instance A ran a full turn, instance B published
+//! **nothing** about it and its `session/list` reported `running: false`
+//! throughout — A's reported `true`. Sessions are shared through the on-disk
+//! log; the *live* view is not.
 //!
 //! So this watcher observes turns Fleet drives through Fleet's own server, which
-//! is what the spawn/resume path will do. A session someone runs in their own
-//! `dsh` TUI still appears in the list with its history and token totals, but it
-//! has no live phase for Fleet to show — and no `running` bit either, so that
-//! limit predates this module rather than being introduced by it.
+//! is what the spawn/resume path does. A session someone runs in their own `dsh`
+//! TUI still appears in the list with its history and token totals, but it has
+//! no live phase for Fleet to show — and no `running` bit either, so that limit
+//! predates this module rather than being introduced by it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::StreamExt;
+use tokio::sync::mpsc;
 use serde_json::Value;
 
+use crate::dsh_client::DshClient;
 use crate::session::SessionStatus;
 
 /// How long a pushed phase stays authoritative after the last frame that set it.
@@ -71,6 +83,13 @@ const RECONNECT_BACKOFF: Duration = Duration::from_secs(2);
 /// long `Drop` waits for the thread to notice it is finished.
 const READ_TICK: Duration = Duration::from_secs(1);
 
+/// The one WebSocket route dsh 0.1.2 publishes on. Every logical stream — the
+/// host-wide `$events` and one `session/follow` per followed session — is
+/// multiplexed over it (`REMOTE_STREAM_MUX_PATH` in
+/// `@deepseek-ai/dsh-api-gateway`). 0.1.1's `/api/events.mux` and
+/// `/api/events.host` are both gone.
+const REMOTE_MUX_PATH: &str = "/api/remote.mux";
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -80,55 +99,132 @@ fn now_ms() -> u64 {
 
 // ── Frame decoding ──────────────────────────────────────────────────────────
 
-/// One decoded downlink frame, reduced to what Fleet acts on.
+/// One logical stream Fleet opens on the mux.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamKind {
+    /// `$events` — the host-wide forwarded-event stream. Exactly one per socket.
+    Events,
+    /// `session/follow` — one session's durable log, opened on demand.
+    Follow(String),
+}
+
+/// One decoded mux envelope, before its `value` is interpreted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MuxEnvelope {
+    /// `{"type":"item","streamId":…,"value":…}` — `value` may be absent.
+    Item { stream_id: String, value: Value },
+    /// `{"type":"end","streamId":…}` — the stream completed normally.
+    End { stream_id: String },
+    /// `{"type":"error","streamId":…,"error":{code,message,details}}`.
+    Error {
+        stream_id: String,
+        code: String,
+        message: String,
+    },
+    /// Anything this build does not recognise. dsh is a developer preview whose
+    /// frame set grows between releases, so an unknown frame is not a failure.
+    Ignored,
+}
+
+/// Decode one text message off `/api/remote.mux`.
+pub fn parse_envelope(text: &str) -> MuxEnvelope {
+    let Ok(parsed) = serde_json::from_str::<Value>(text) else {
+        return MuxEnvelope::Ignored;
+    };
+    let stream_id = parsed
+        .get("streamId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if stream_id.is_empty() {
+        return MuxEnvelope::Ignored;
+    }
+    match parsed.get("type").and_then(Value::as_str) {
+        Some("item") => MuxEnvelope::Item {
+            stream_id,
+            value: parsed.get("value").cloned().unwrap_or(Value::Null),
+        },
+        Some("end") => MuxEnvelope::End { stream_id },
+        Some("error") => {
+            let error = parsed.get("error");
+            MuxEnvelope::Error {
+                stream_id,
+                code: error
+                    .and_then(|e| e.get("code"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string(),
+                message: error
+                    .and_then(|e| e.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            }
+        }
+        _ => MuxEnvelope::Ignored,
+    }
+}
+
+/// One decoded stream item, reduced to what Fleet acts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DshFrame {
-    /// `session/event` — one entry of a session's durable event log.
+    /// The `$events` opening item. `client_id` is required by every later
+    /// waterfall answer, so it is published rather than folded into state.
+    Ready { client_id: String },
+    /// One entry of a session's durable event log, off its `session/follow`.
     ///
     /// `block_type` is only populated for `assistant/chunk`, whose phase depends
     /// on what kind of block is streaming (text vs reasoning vs tool call).
     Event {
         session_id: String,
         kind: String,
+        /// The event's position in the session log. The cursor a history read
+        /// needs is the newest one seen, so every event advances it.
+        seq: u64,
         block_type: Option<String>,
         /// `turn/end`'s `data.reason.kind` — observed as `completed` when the
-        /// agent finished on its own and `aborted` when `session.cancel` cut it
+        /// agent finished on its own and `aborted` when `session/cancel` cut it
         /// short. Absent on every other event.
         reason_kind: Option<String>,
     },
-    /// `host/session-status` — the coarse running bit, pushed.
+    /// `api-session/status` — the coarse running bit, pushed on `$events`.
     Status { session_id: String, running: bool },
-    /// `approval/requested` — a tool call the session's policy will not run
-    /// unattended. Answerable: [`crate::dsh_decisions`] raises a card for it and
-    /// answers on `rpc_id`.
+    /// A follow stream's opening `snapshot`, reduced to its `cursor`.
+    ///
+    /// That cursor is the only legitimate source of `session/page`'s required
+    /// `throughSeq` ("Inclusive log cut obtained from the corresponding follow
+    /// opening frame"). `session/list`'s `projections.asOfSeq` looks like it but
+    /// is not: measured live, a settled session reported `asOfSeq` 2 against a
+    /// real cursor of 135, so paging through it would have truncated the
+    /// history to its first two events.
+    Cursor { session_id: String, seq: u64 },
+    /// `approval/request` — a tool call the session's policy will not run
+    /// unattended, delivered as a waterfall. Answerable: [`crate::dsh_decisions`]
+    /// raises a card and answers on `event_id` through `$events/result`.
     ///
     /// Not to be confused with the `approval/asked` *session event*, which the
-    /// mux also carries at the same moment: that one is the durable audit
-    /// record, it has no `rpcId` of its own, and answering it is impossible.
+    /// follow stream carries at the same moment: that one is the durable audit
+    /// record, it has no event id of its own, and answering it is impossible.
     ApprovalRequested {
-        rpc_id: String,
+        event_id: String,
         session_id: String,
-        approval_id: String,
         tool_name: String,
         call_id: Option<String>,
         reason: Option<String>,
     },
-    /// `approval/resolved` — the decision was reached, by us or by anyone else.
-    ApprovalResolved {
-        session_id: String,
-        approval_id: String,
-    },
-    /// `question/requested` — the agent called `ask_user_question`. Answerable.
+    /// `user-questions/request` — the agent called `ask_user_question`.
     QuestionRequested {
-        rpc_id: String,
+        event_id: String,
         session_id: String,
         questions: Vec<crate::dsh_decisions::DshQuestion>,
     },
-    /// `question/resolved` — answered or cancelled. Identified by the requested
-    /// frame's `rpcId`, since a question carries no id of its own.
-    QuestionResolved { question_rpc_id: String },
-    /// Everything Fleet does not act on: projections (already carried by
-    /// `session.list`), queue snapshots, `session/subscribed`, host commands.
+    /// The host withdrew a pending waterfall: `{"type":"cancel","eventId":…}`.
+    /// One shape for both kinds — a cancellation names only the event id, and
+    /// the bridge knows which card that id belongs to.
+    Withdrawn { event_id: String },
+    /// Everything Fleet does not act on: `api-session/activity`, settings and
+    /// adapter notices, follow snapshots (their projections already reach Fleet
+    /// through `session/list`).
     Ignored,
 }
 
@@ -138,10 +234,7 @@ impl DshFrame {
     pub fn is_decision(&self) -> bool {
         matches!(
             self,
-            Self::ApprovalRequested { .. }
-                | Self::ApprovalResolved { .. }
-                | Self::QuestionRequested { .. }
-                | Self::QuestionResolved { .. }
+            Self::ApprovalRequested { .. } | Self::QuestionRequested { .. } | Self::Withdrawn { .. }
         )
     }
 }
@@ -168,112 +261,107 @@ fn chunk_block_type(chunk: &Value) -> Option<String> {
     }
 }
 
-/// Decode one text frame off either socket.
+/// Interpret one `item` value against the stream it arrived on.
 ///
-/// Anything that is not a `server-request` envelope — or is one Fleet has no use
-/// for — decodes to [`DshFrame::Ignored`] rather than an error: dsh is a
-/// developer preview whose frame set grows between releases, and an unknown
-/// frame is not a failure.
-pub fn parse_frame(text: &str) -> DshFrame {
-    let Ok(parsed) = serde_json::from_str::<Value>(text) else {
-        return DshFrame::Ignored;
-    };
-    if parsed.get("type").and_then(Value::as_str) != Some("server-request") {
-        return DshFrame::Ignored;
+/// The two streams carry different vocabularies — `$events` carries
+/// ready/emit/waterfall/cancel, a follow carries snapshot/event — and nothing in
+/// the value itself says which, so the stream identity has to be passed in.
+pub fn decode_item(kind: &StreamKind, value: &Value) -> DshFrame {
+    match kind {
+        StreamKind::Events => decode_event_stream_item(value),
+        StreamKind::Follow(session_id) => decode_follow_item(session_id, value),
     }
-    let method = parsed.get("method").and_then(Value::as_str).unwrap_or("");
-    let Some(payload) = parsed.get("payload") else {
-        return DshFrame::Ignored;
-    };
-    let rpc_id = parsed
-        .get("rpcId")
+}
+
+/// One item off `$events`.
+fn decode_event_stream_item(value: &Value) -> DshFrame {
+    match value.get("type").and_then(Value::as_str) {
+        Some("ready") => match value.get("clientId").and_then(Value::as_str) {
+            Some(client_id) if !client_id.is_empty() => DshFrame::Ready {
+                client_id: client_id.to_string(),
+            },
+            // A generation with no client id can never answer a waterfall, so it
+            // is worth naming rather than silently dropping.
+            _ => DshFrame::Ignored,
+        },
+        Some("emit") => decode_emit(value),
+        Some("waterfall") => decode_waterfall(value),
+        Some("cancel") => match value.get("eventId").and_then(Value::as_str) {
+            Some(event_id) if !event_id.is_empty() => DshFrame::Withdrawn {
+                event_id: event_id.to_string(),
+            },
+            _ => DshFrame::Ignored,
+        },
+        _ => DshFrame::Ignored,
+    }
+}
+
+/// `{"type":"emit","event":…,"args":[…]}` — positional args, per the Cordis
+/// listener signature the host forwards without renaming.
+fn decode_emit(value: &Value) -> DshFrame {
+    let event = value.get("event").and_then(Value::as_str).unwrap_or("");
+    let args = value.get("args").and_then(Value::as_array);
+    let arg = |i: usize| args.and_then(|a| a.get(i));
+    match event {
+        // `api-session/status(sessionId, running)`.
+        "api-session/status" => {
+            let Some(session_id) = arg(0).and_then(Value::as_str).filter(|s| !s.is_empty()) else {
+                return DshFrame::Ignored;
+            };
+            DshFrame::Status {
+                session_id: session_id.to_string(),
+                running: arg(1).and_then(Value::as_bool).unwrap_or(false),
+            }
+        }
+        _ => DshFrame::Ignored,
+    }
+}
+
+/// `{"type":"waterfall","event":…,"eventId":…,"agentId":…,"request":{…}}`.
+///
+/// `agentId` is the session id for the session-scoped agents Fleet drives —
+/// verified live against `approval/request` raised by a Fleet-created session.
+fn decode_waterfall(value: &Value) -> DshFrame {
+    let event = value.get("event").and_then(Value::as_str).unwrap_or("");
+    let event_id = value
+        .get("eventId")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let session_id = payload
-        .get("sessionId")
+    // Without the event id there is no way to answer, and a card nobody can
+    // answer is worse than no card: it would block the turn behind a button
+    // whose answer the host would refuse.
+    if event_id.is_empty() {
+        return DshFrame::Ignored;
+    }
+    let session_id = value
+        .get("agentId")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    // `question/resolved` names the question by the requested frame's rpcId
-    // rather than by session, so it is the one frame that survives without one.
-    if session_id.is_empty() && method != "question/resolved" {
-        return DshFrame::Ignored;
-    }
-    let optional_str = |key: &str| {
-        payload
-            .get(key)
+    let request = value.get("request");
+    let field = |key: &str| {
+        request
+            .and_then(|r| r.get(key))
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .map(str::to_string)
     };
 
-    match method {
-        "session/event" => {
-            let event = payload.get("event");
-            let kind = event
-                .and_then(|e| e.get("type"))
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            if kind.is_empty() {
-                return DshFrame::Ignored;
-            }
-            let data = event.and_then(|e| e.get("data"));
-            let block_type = data.and_then(|d| d.get("chunk")).and_then(chunk_block_type);
-            let reason_kind = data
-                .and_then(|d| d.get("reason"))
-                .and_then(|r| r.get("kind"))
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            DshFrame::Event {
+    match event {
+        "approval/request" => match field("toolName") {
+            Some(tool_name) => DshFrame::ApprovalRequested {
+                event_id,
                 session_id,
-                kind,
-                block_type,
-                reason_kind,
-            }
-        }
-        "host/session-status" => {
-            let running = payload
-                .get("running")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            DshFrame::Status {
-                session_id,
-                running,
-            }
-        }
-        "approval/requested" => {
-            // Without the envelope's rpcId there is no way to answer, and a card
-            // nobody can answer is worse than no card: it would block the turn
-            // behind a button that always comes back `not-pending`.
-            let (Some(approval_id), Some(tool_name)) =
-                (optional_str("approvalId"), optional_str("toolName"))
-            else {
-                return DshFrame::Ignored;
-            };
-            if rpc_id.is_empty() {
-                return DshFrame::Ignored;
-            }
-            DshFrame::ApprovalRequested {
-                rpc_id,
-                session_id,
-                approval_id,
                 tool_name,
-                call_id: optional_str("callId"),
-                reason: optional_str("reason"),
-            }
-        }
-        "approval/resolved" => match optional_str("approvalId") {
-            Some(approval_id) => DshFrame::ApprovalResolved {
-                session_id,
-                approval_id,
+                call_id: field("callId"),
+                reason: field("reason"),
             },
             None => DshFrame::Ignored,
         },
-        "question/requested" => {
-            let questions: Vec<crate::dsh_decisions::DshQuestion> = payload
-                .get("questions")
+        "user-questions/request" => {
+            let questions: Vec<crate::dsh_decisions::DshQuestion> = request
+                .and_then(|r| r.get("questions"))
                 .and_then(Value::as_array)
                 .map(|qs| {
                     qs.iter()
@@ -281,20 +369,61 @@ pub fn parse_frame(text: &str) -> DshFrame {
                         .collect()
                 })
                 .unwrap_or_default();
-            if rpc_id.is_empty() || questions.is_empty() {
+            if questions.is_empty() {
                 return DshFrame::Ignored;
             }
             DshFrame::QuestionRequested {
-                rpc_id,
+                event_id,
                 session_id,
                 questions,
             }
         }
-        "question/resolved" => match optional_str("questionRpcId") {
-            Some(question_rpc_id) => DshFrame::QuestionResolved { question_rpc_id },
-            None => DshFrame::Ignored,
-        },
         _ => DshFrame::Ignored,
+    }
+}
+
+/// One item off a `session/follow`.
+///
+/// The opening `snapshot`'s *records* are deliberately not folded: they are
+/// history Fleet reads through `session/page`, and replaying them as live events
+/// would drive the phase machine from a log that finished minutes ago. Its
+/// `cursor` is kept, because that page read cannot be made without it.
+fn decode_follow_item(session_id: &str, value: &Value) -> DshFrame {
+    if value.get("type").and_then(Value::as_str) == Some("snapshot") {
+        return match value.get("cursor").and_then(Value::as_u64) {
+            Some(seq) => DshFrame::Cursor {
+                session_id: session_id.to_string(),
+                seq,
+            },
+            None => DshFrame::Ignored,
+        };
+    }
+    if value.get("type").and_then(Value::as_str) != Some("event") {
+        return DshFrame::Ignored;
+    }
+    let event = value.get("event");
+    let kind = event
+        .and_then(|e| e.get("type"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if kind.is_empty() {
+        return DshFrame::Ignored;
+    }
+    let data = event.and_then(|e| e.get("data"));
+    DshFrame::Event {
+        session_id: session_id.to_string(),
+        kind,
+        seq: event
+            .and_then(|e| e.get("seq"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        block_type: data.and_then(|d| d.get("chunk")).and_then(chunk_block_type),
+        reason_kind: data
+            .and_then(|d| d.get("reason"))
+            .and_then(|r| r.get("kind"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
     }
 }
 
@@ -328,12 +457,17 @@ fn phase_of(kind: &str, block_type: Option<&str>) -> Option<SessionStatus> {
 /// What the sockets currently know about one session.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LiveSession {
-    /// Last pushed `host/session-status`.
+    /// Last pushed `api-session/status`.
     pub running: bool,
     /// Phase derived from the most recent event that carried one.
     pub phase: SessionStatus,
     /// When that phase was set — drives [`LIVE_STATUS_TTL_MS`].
     pub phase_at_ms: u64,
+    /// Newest log position this follow stream has reported — the opening
+    /// snapshot's `cursor`, then every event's `seq`. `session/page` refuses a
+    /// `throughSeq` past the real cursor, so this only ever tracks positions the
+    /// server has already published.
+    pub cursor: Option<u64>,
 }
 
 impl LiveSession {
@@ -363,6 +497,16 @@ pub type TurnEndCallback = Box<dyn FnOnce(bool) + Send>;
 pub struct LiveView {
     sessions: Mutex<HashMap<String, LiveSession>>,
     waiters: Mutex<HashMap<String, Vec<TurnEndCallback>>>,
+    /// Whether the last attempt to reach the mux socket failed outright.
+    ///
+    /// Cleared whenever a generation connects, set when the handshake itself
+    /// fails (connection refused, timeout, 401). Read by
+    /// [`Self::cursor_for_history`]: a cut can only arrive on that socket, so
+    /// once the server has proven unreachable there is nothing left to wait for.
+    /// Deliberately *not* "is a generation live right now" — during a cold start
+    /// the socket is legitimately mid-handshake, and a read that gave up on that
+    /// would fail every first transcript open.
+    unreachable: AtomicBool,
 }
 
 /// Handle shared between the socket follower and its owner.
@@ -376,20 +520,26 @@ impl LiveView {
             DshFrame::Event {
                 session_id,
                 kind,
+                seq,
                 block_type,
                 reason_kind,
             } => {
-                if let Some(phase) = phase_of(&kind, block_type.as_deref()) {
+                {
                     let mut guard = self
                         .sessions
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let entry = guard.entry(session_id.clone()).or_default();
-                    entry.phase = phase;
-                    entry.phase_at_ms = now_ms;
+                    if let Some(phase) = phase_of(&kind, block_type.as_deref()) {
+                        entry.phase = phase;
+                        entry.phase_at_ms = now_ms;
+                    }
+                    // Every event advances the cut a history read may ask for,
+                    // whether or not it means anything to the phase machine.
+                    entry.cursor = Some(entry.cursor.map_or(seq, |c| c.max(seq)));
                 }
                 if kind == "turn/end" {
-                    // `aborted` (session.cancel) is the one other kind observed
+                    // `aborted` (session/cancel) is the one other kind observed
                     // live; treat anything that is not an outright completion as
                     // a failed turn so the caller does not record it as success.
                     self.settle(&session_id, reason_kind.as_deref() == Some("completed"));
@@ -404,6 +554,14 @@ impl LiveView {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 guard.entry(session_id).or_default().running = running;
+            }
+            DshFrame::Cursor { session_id, seq } => {
+                let mut guard = self
+                    .sessions
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let entry = guard.entry(session_id).or_default();
+                entry.cursor = Some(entry.cursor.map_or(seq, |c| c.max(seq)));
             }
             // The answerable frames and their resolutions carry no phase; the
             // pump routes them to `dsh_decisions` instead of here.
@@ -451,6 +609,65 @@ impl LiveView {
             .and_then(|s| s.effective_phase(now_ms))
     }
 
+    /// Record the outcome of one attempt to reach the mux socket.
+    pub fn set_unreachable(&self, unreachable: bool) {
+        self.unreachable.store(unreachable, Ordering::SeqCst);
+    }
+
+    /// Whether the socket that publishes cursors and phases has proven
+    /// unreachable.
+    pub fn is_unreachable(&self) -> bool {
+        self.unreachable.load(Ordering::SeqCst)
+    }
+
+    /// The log cut a history read may ask `session/page` for, opening the
+    /// follow stream that publishes it if nobody has yet.
+    ///
+    /// Blocking, up to `budget`: the cursor arrives in the follow stream's
+    /// opening frame, so a session nobody has followed cannot answer without one
+    /// round trip. Returns `None` when the server does not answer in time — the
+    /// caller then has no safe cut to ask for, and guessing one would either
+    /// truncate the history (too low) or be refused outright (too high).
+    ///
+    /// Returns `None` *immediately* once the socket has proven unreachable: the
+    /// budget only buys time for an answer that can actually come.
+    pub fn cursor_for_history(
+        &self,
+        session_id: &str,
+        budget: Duration,
+        follow: impl Fn(&str),
+    ) -> Option<u64> {
+        if let Some(seq) = self.cursor_of(session_id) {
+            return Some(seq);
+        }
+        // A cursor can only arrive on the socket. Once a handshake has actually
+        // failed there is nothing left to wait for, and waiting anyway would
+        // stall every read for the full budget for as long as the server is
+        // unreachable. A socket that is merely still connecting is not this
+        // case — that one is worth the wait, and is what a cold first read hits.
+        if self.is_unreachable() {
+            return None;
+        }
+        follow(session_id);
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline {
+            if let Some(seq) = self.cursor_of(session_id) {
+                return Some(seq);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        None
+    }
+
+    /// The newest log position this session's follow stream has reported.
+    pub fn cursor_of(&self, session_id: &str) -> Option<u64> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(session_id)
+            .and_then(|s| s.cursor)
+    }
+
     /// How many sessions the sockets have reported on.
     pub fn tracked(&self) -> usize {
         self.sessions
@@ -478,35 +695,60 @@ impl LiveView {
 
 // ── The watcher ─────────────────────────────────────────────────────────────
 
-/// A background follower of one `dsh web` instance's two downlinks.
+/// A background follower of one `dsh web` instance's mux socket.
 ///
-/// Bound to a single port: a restarted server lands on a fresh OS-assigned port,
-/// so the owner drops this watcher and starts another rather than reusing it.
+/// Bound to a single port: a restarted server lands on a fresh OS-assigned port
+/// (and mints a fresh launch token), so the owner drops this watcher and starts
+/// another rather than reusing it.
 pub struct DshEventWatcher {
     port: u16,
     live: SharedLive,
     stop: Arc<AtomicBool>,
+    /// Asks the socket thread to open a `session/follow` for one session.
+    ///
+    /// Unbounded and lossy on purpose: a send that fails means the thread is
+    /// gone, which the caller cannot fix and must not block on.
+    follow_tx: mpsc::UnboundedSender<String>,
     /// Kept alive for as long as the watcher is: dropping it is what tells the
     /// bridge's worker to withdraw whatever it is still holding.
     _decisions: Arc<crate::dsh_decisions::DecisionBridge>,
 }
 
 impl DshEventWatcher {
-    /// Open both downlinks in a background thread and start folding frames.
+    /// Open the mux in a background thread and start folding frames.
     ///
-    /// Returns immediately; the sockets connect (and reconnect) on their own, so
+    /// Returns immediately; the socket connects (and reconnects) on its own, so
     /// a server that is not answering yet costs nothing but a retry.
-    pub fn start(port: u16) -> Self {
+    pub fn start(port: u16, launch_token: &str) -> Self {
         let live: SharedLive = Arc::new(LiveView::default());
         let stop = Arc::new(AtomicBool::new(false));
-        let decisions = Arc::new(crate::dsh_decisions::DecisionBridge::start(port));
+        let decisions = Arc::new(crate::dsh_decisions::DecisionBridge::start(port, launch_token));
+        let (follow_tx, follow_rx) = mpsc::unbounded_channel();
 
         let thread_states = live.clone();
         let thread_stop = stop.clone();
         let thread_decisions = decisions.clone();
+        let token = launch_token.to_string();
         let spawned = std::thread::Builder::new()
             .name("dsh-events".into())
             .spawn(move || {
+                // The cookie is minted off the runtime: the exchange is one
+                // blocking HTTP round trip, and it has to succeed before the
+                // handshake is worth attempting at all.
+                let cookie = match DshClient::new(port, &token) {
+                    Ok(client) => client.cookie().to_string(),
+                    Err(e) => {
+                        crate::log_debug(&format!("dsh events: no session cookie: {e}"));
+                        // This watcher will never open a socket, so it will
+                        // never publish a cursor either. Said out loud in the
+                        // live view, otherwise every history read would spend
+                        // its whole budget waiting on a thread that has already
+                        // given up.
+                        thread_states.set_unreachable(true);
+                        thread_stop.store(true, Ordering::SeqCst);
+                        return;
+                    }
+                };
                 let rt = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -517,21 +759,14 @@ impl DshEventWatcher {
                         return;
                     }
                 };
-                rt.block_on(async {
-                    let mux = follow(
-                        format!("ws://127.0.0.1:{port}/api/events.mux"),
-                        thread_states.clone(),
-                        thread_decisions.clone(),
-                        thread_stop.clone(),
-                    );
-                    let host = follow(
-                        format!("ws://127.0.0.1:{port}/api/events.host"),
-                        thread_states.clone(),
-                        thread_decisions.clone(),
-                        thread_stop.clone(),
-                    );
-                    tokio::join!(mux, host);
-                });
+                rt.block_on(run_mux(
+                    port,
+                    cookie,
+                    thread_states,
+                    thread_decisions,
+                    thread_stop,
+                    follow_rx,
+                ));
             });
         if let Err(e) = spawned {
             crate::log_debug(&format!("dsh events: cannot spawn follower: {e}"));
@@ -542,6 +777,7 @@ impl DshEventWatcher {
             port,
             live,
             stop,
+            follow_tx,
             _decisions: decisions,
         }
     }
@@ -551,18 +787,48 @@ impl DshEventWatcher {
         self.port
     }
 
-    /// The phase to show for `session_id`, or `None` when the sockets have
+    /// Start following one session's log, if it is not already followed.
+    ///
+    /// 0.1.1 published every session's turn lifecycle on one global socket;
+    /// 0.1.2 publishes it only per session, on a `session/follow` stream the
+    /// client opens by address. So a phase Fleet wants to show has to be asked
+    /// for — by the scan, for sessions the host reports running, and by the
+    /// launch path, which needs `turn/end` for a session that may not have
+    /// started running yet.
+    pub fn follow(&self, session_id: &str) {
+        let _ = self.follow_tx.send(session_id.to_string());
+    }
+
+    /// The phase to show for `session_id`, or `None` when the socket has
     /// nothing fresher than the poll.
     pub fn phase_of(&self, session_id: &str) -> Option<SessionStatus> {
         self.live.phase_of(session_id, now_ms())
     }
 
+    /// The log cut a history read may ask `session/page` for, opening the
+    /// follow stream that publishes it if nobody has yet.
+    ///
+    /// Blocking, up to `budget`: the cursor arrives in the follow stream's
+    /// opening frame, so a session Fleet has never followed cannot answer
+    /// without one round trip. Returns `None` when the socket is down or the
+    /// server does not answer in time — the caller then has no safe cut to ask
+    /// for, and asking with a guess would either truncate the history (too low)
+    /// or be refused outright (too high).
+    pub fn cursor_for_history(&self, session_id: &str, budget: Duration) -> Option<u64> {
+        self.live
+            .cursor_for_history(session_id, budget, |sid| self.follow(sid))
+    }
+
     /// Call `cb` when this session's next turn ends. See [`LiveView::on_turn_end`].
+    ///
+    /// Also opens the follow stream that will carry that `turn/end`: registering
+    /// a waiter for a session nobody is following would wait forever.
     pub fn on_turn_end(&self, session_id: &str, cb: TurnEndCallback) {
+        self.follow(session_id);
         self.live.on_turn_end(session_id, cb);
     }
 
-    /// How many sessions the sockets have reported on. Diagnostics and tests.
+    /// How many sessions the socket has reported on. Diagnostics and tests.
     pub fn tracked(&self) -> usize {
         self.live.tracked()
     }
@@ -570,7 +836,7 @@ impl DshEventWatcher {
 
 impl Drop for DshEventWatcher {
     fn drop(&mut self) {
-        // The follower notices within one `READ_TICK` and closes both sockets.
+        // The follower notices within one `READ_TICK` and closes the socket.
         // Not joined: the owner drops this on a rescan path that must not block
         // on a socket read, and a detached thread with a stop flag set exits on
         // its own within the tick.
@@ -585,24 +851,109 @@ type DshWs = tokio_tungstenite::WebSocketStream<
     tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
 >;
 
-/// Keep one downlink connected for as long as the watcher lives.
-async fn follow(
-    url: String,
+/// Build one `{"type":"open",…}` request for a logical stream.
+///
+/// The host validates these keys exactly — an extra or missing one is refused
+/// before the endpoint is looked at — and `payload` carries the same
+/// `{"args": …}` wrapper every unary call does.
+fn open_frame(stream_id: &str, kind: &StreamKind) -> String {
+    let (endpoint, args) = match kind {
+        StreamKind::Events => ("$events", serde_json::json!({})),
+        StreamKind::Follow(session_id) => (
+            "session/follow",
+            serde_json::json!({
+                "request": {
+                    "address": { "kind": "session", "sessionId": session_id },
+                    // Only the snapshot's `cursor` is kept — its records are
+                    // history `session/page` reads on demand — so ask for the
+                    // smallest window dsh will build rather than one nobody
+                    // reads. The cursor is the log's cut, not the window's, so
+                    // shrinking this does not shorten the history a page read
+                    // can then reach.
+                    "maxMessages": 1
+                }
+            }),
+        ),
+    };
+    serde_json::json!({
+        "type": "open",
+        "streamId": stream_id,
+        "endpoint": endpoint,
+        "payload": { "args": args },
+    })
+    .to_string()
+}
+
+/// Register one logical stream and render its `open` request.
+fn open_stream(streams: &mut HashMap<String, StreamKind>, kind: StreamKind) -> String {
+    let stream_id = uuid::Uuid::new_v4().to_string();
+    let frame = open_frame(&stream_id, &kind);
+    streams.insert(stream_id, kind);
+    frame
+}
+
+/// Keep one mux socket connected for as long as the watcher lives.
+///
+/// Sessions asked for while the socket is down are remembered and re-opened on
+/// the next generation: a logical stream does not survive its carrier, and the
+/// launch path's `turn/end` waiter must not be lost to a server restart.
+async fn run_mux(
+    port: u16,
+    cookie: String,
     states: SharedLive,
     decisions: Arc<crate::dsh_decisions::DecisionBridge>,
     stop: Arc<AtomicBool>,
+    mut follow_rx: mpsc::UnboundedReceiver<String>,
 ) {
+    let mut wanted: HashSet<String> = HashSet::new();
     while !stop.load(Ordering::SeqCst) {
-        match connect(&url).await {
-            Ok(ws) => pump(ws, &states, &decisions, &stop).await,
-            Err(e) => crate::log_debug(&format!("dsh events: {e}")),
+        // Anything asked for while disconnected is picked up here rather than
+        // dropped on the floor.
+        while let Ok(session_id) = follow_rx.try_recv() {
+            wanted.insert(session_id);
+        }
+        match connect(port, &cookie).await {
+            Ok(ws) => {
+                states.set_unreachable(false);
+                pump(
+                    ws,
+                    &states,
+                    &decisions,
+                    &stop,
+                    &mut follow_rx,
+                    &mut wanted,
+                )
+                .await;
+            }
+            Err(e) => {
+                // Reads that need a cut from this socket can stop waiting for
+                // one until a later attempt connects.
+                states.set_unreachable(true);
+                crate::log_debug(&format!("dsh events: {e}"));
+            }
         }
         sleep_interruptible(RECONNECT_BACKOFF, &stop).await;
     }
 }
 
-async fn connect(url: &str) -> Result<DshWs, String> {
-    match tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(url)).await {
+async fn connect(port: u16, cookie: &str) -> Result<DshWs, String> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    let url = format!("ws://127.0.0.1:{port}{REMOTE_MUX_PATH}");
+    let mut request = url
+        .as_str()
+        .into_client_request()
+        .map_err(|e| format!("mux request {url}: {e}"))?;
+    // The mux sits behind the same browser-authentication gate as `/api`: an
+    // unauthenticated handshake is answered 401 and never becomes a socket.
+    let header = cookie
+        .parse()
+        .map_err(|e| format!("mux cookie header: {e}"))?;
+    request
+        .headers_mut()
+        .insert(tokio_tungstenite::tungstenite::http::header::COOKIE, header);
+
+    match tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(request)).await {
         Ok(Ok((ws, _))) => Ok(ws),
         Ok(Err(e)) => Err(format!("connect {url}: {e}")),
         Err(_) => Err(format!(
@@ -614,38 +965,127 @@ async fn connect(url: &str) -> Result<DshWs, String> {
 
 /// Read frames until the socket closes or the watcher is dropped.
 async fn pump(
-    mut ws: DshWs,
+    ws: DshWs,
     states: &SharedLive,
     decisions: &Arc<crate::dsh_decisions::DecisionBridge>,
     stop: &Arc<AtomicBool>,
+    follow_rx: &mut mpsc::UnboundedReceiver<String>,
+    wanted: &mut HashSet<String>,
 ) {
+    use futures::SinkExt;
     use tokio_tungstenite::tungstenite::Message;
+
+    let (mut write, mut read) = ws.split();
+    // Logical streams live and die with this physical socket, so the registry
+    // is rebuilt per generation rather than carried across reconnects.
+    let mut streams: HashMap<String, StreamKind> = HashMap::new();
+    let hello = open_stream(&mut streams, StreamKind::Events);
+    if let Err(e) = write.send(Message::Text(hello.into())).await {
+        crate::log_debug(&format!("dsh events: open $events: {e}"));
+        return;
+    }
+    for session_id in wanted.iter() {
+        let frame = open_stream(&mut streams, StreamKind::Follow(session_id.clone()));
+        if let Err(e) = write.send(Message::Text(frame.into())).await {
+            crate::log_debug(&format!("dsh events: reopen follow: {e}"));
+            return;
+        }
+    }
+
     while !stop.load(Ordering::SeqCst) {
-        // The timeout is the only reason this loop re-checks `stop` on an idle
-        // socket: dsh publishes nothing between turns, so a bare `next()` would
-        // park here until the next session ran.
-        match tokio::time::timeout(READ_TICK, ws.next()).await {
-            Err(_) => continue,
-            Ok(None) => break,
-            Ok(Some(Err(e))) => {
-                crate::log_debug(&format!("dsh events: read: {e}"));
-                break;
-            }
-            Ok(Some(Ok(Message::Text(text)))) => {
-                let frame = parse_frame(&text);
-                // Answerable frames go to the bridge's own thread: raising a
-                // card and answering it are blocking file + HTTP work, and this
-                // one is a tokio worker.
-                if frame.is_decision() {
-                    decisions.offer(frame);
-                } else {
-                    states.apply(frame, now_ms());
+        tokio::select! {
+            biased;
+
+            asked = follow_rx.recv() => {
+                let Some(session_id) = asked else { return };
+                if !wanted.insert(session_id.clone()) {
+                    continue;
+                }
+                let frame = open_stream(&mut streams, StreamKind::Follow(session_id));
+                if let Err(e) = write.send(Message::Text(frame.into())).await {
+                    crate::log_debug(&format!("dsh events: open follow: {e}"));
+                    return;
                 }
             }
-            Ok(Some(Ok(Message::Close(_)))) => break,
-            // Ping/Pong are answered by the stream itself; binary frames are not
-            // part of this protocol.
-            Ok(Some(Ok(_))) => {}
+
+            // The timeout is the only reason this loop re-checks `stop` on an
+            // idle socket: dsh publishes nothing between turns, so a bare
+            // `next()` would park here until the next session ran.
+            read = tokio::time::timeout(READ_TICK, read.next()) => {
+                let message = match read {
+                    Err(_) => continue,
+                    Ok(None) => return,
+                    Ok(Some(Err(e))) => {
+                        crate::log_debug(&format!("dsh events: read: {e}"));
+                        return;
+                    }
+                    Ok(Some(Ok(m))) => m,
+                };
+                match message {
+                    Message::Text(text) => {
+                        match parse_envelope(&text) {
+                            MuxEnvelope::Item { stream_id, value } => {
+                                let Some(kind) = streams.get(&stream_id) else { continue };
+                                let frame = decode_item(kind, &value);
+                                // Answerable frames go to the bridge's own
+                                // thread: raising a card and answering it are
+                                // blocking file + HTTP work, and this is a
+                                // tokio worker.
+                                if frame.is_decision() {
+                                    decisions.offer(frame);
+                                } else if let DshFrame::Ready { client_id } = frame {
+                                    // Every waterfall answer is scoped to the
+                                    // generation that delivered it, so the
+                                    // bridge cannot answer before this arrives.
+                                    decisions.set_client_id(client_id);
+                                } else {
+                                    // A session the host reports running gets
+                                    // followed here, so its phases show up
+                                    // without anyone having asked in advance —
+                                    // the poll learns of a session at most one
+                                    // tick later, and by then its first chunks
+                                    // are gone.
+                                    if let DshFrame::Status { session_id, running: true } = &frame {
+                                        if wanted.insert(session_id.clone()) {
+                                            let open = open_stream(
+                                                &mut streams,
+                                                StreamKind::Follow(session_id.clone()),
+                                            );
+                                            if let Err(e) =
+                                                write.send(Message::Text(open.into())).await
+                                            {
+                                                crate::log_debug(&format!(
+                                                    "dsh events: follow a running session: {e}"
+                                                ));
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    states.apply(frame, now_ms());
+                                }
+                            }
+                            MuxEnvelope::End { stream_id } => {
+                                streams.remove(&stream_id);
+                            }
+                            MuxEnvelope::Error { stream_id, code, message } => {
+                                if let Some(kind) = streams.remove(&stream_id) {
+                                    crate::log_debug(&format!(
+                                        "dsh events: stream {kind:?} failed: {code}: {message}"
+                                    ));
+                                    // A follow that failed is no longer wanted
+                                    // under this generation's id; the next
+                                    // reconnect reopens it from `wanted`.
+                                }
+                            }
+                            MuxEnvelope::Ignored => {}
+                        }
+                    }
+                    Message::Close(_) => return,
+                    // Ping/Pong are answered by the stream itself; binary frames
+                    // are not part of this protocol.
+                    _ => {}
+                }
+            }
         }
     }
 }
@@ -667,58 +1107,69 @@ mod tests {
     use serde_json::json;
 
     /// Verbatim `tool/call` frame captured off `events.mux`.
-    fn tool_call_frame() -> String {
-        json!({
-            "type": "server-request",
-            "rpcId": "e128abf8-ed58-4710-912c-46689acc01d9",
-            "method": "session/event",
-            "payload": {
-                "type": "session/event",
-                "sessionId": "session-ef76dbb8",
-                "event": {
-                    "type": "tool/call",
-                    "seq": 62,
-                    "time": 1786753415952u64,
-                    "data": { "turn": 2, "step": 1, "callId": "toolu_x", "name": "bash" }
-                },
-                "view": { "for": "call" }
-            }
-        })
-        .to_string()
+     /// Every frame in this block is verbatim from a live capture: a node `ws`
+    /// client on `/api/remote.mux` against dsh 0.1.2-rc.1, driving one real turn
+    /// and one real approval.
+    fn item(stream_id: &str, value: Value) -> String {
+        json!({ "type": "item", "streamId": stream_id, "value": value }).to_string()
+    }
+
+    fn follow(session_id: &str) -> StreamKind {
+        StreamKind::Follow(session_id.to_string())
+    }
+
+    /// Decode one captured `item` the way the pump does: envelope first, then
+    /// the value against the stream it arrived on.
+    fn decode(kind: &StreamKind, value: Value) -> DshFrame {
+        match parse_envelope(&item("s-1", value)) {
+            MuxEnvelope::Item { value, .. } => decode_item(kind, &value),
+            other => panic!("expected an item envelope, got {other:?}"),
+        }
     }
 
     #[test]
     fn decodes_a_live_tool_call_frame() {
+        let value = json!({
+            "type": "event",
+            "event": {
+                "type": "tool/call",
+                "seq": 389,
+                "time": 1788723346552u64,
+                "data": {
+                    "turn": 1, "step": 1,
+                    "callId": "call_00_Mxllh1ma05OXI5WLpwSy1032",
+                    "name": "bash"
+                }
+            }
+        });
         assert_eq!(
-            parse_frame(&tool_call_frame()),
+            decode(&follow("session-ef76dbb8"), value),
             DshFrame::Event {
                 session_id: "session-ef76dbb8".into(),
                 kind: "tool/call".into(),
+                seq: 389,
                 block_type: None,
                 reason_kind: None,
             }
         );
     }
 
-    /// Verbatim `turn/end` frames: one that finished, one cut short by
-    /// `session.cancel`. The nested `reason.kind` is the only thing telling the
+    /// Verbatim `turn/end` values: one that finished, one cut short by
+    /// `session/cancel`. The nested `reason.kind` is the only thing telling the
     /// two apart, and it decides what `on_turn_end` reports.
     #[test]
     fn decodes_the_outcome_of_a_finished_turn() {
         let end = |reason: Value| {
             json!({
-                "type": "server-request",
-                "rpcId": "x",
-                "method": "session/event",
-                "payload": {
-                    "sessionId": "session-a",
-                    "event": { "type": "turn/end", "seq": 85, "data": { "turn": 2, "reason": reason } }
-                }
+                "type": "event",
+                "event": { "type": "turn/end", "seq": 48, "data": { "turn": 1, "reason": reason } }
             })
-            .to_string()
         };
-        let completed = parse_frame(&end(json!({ "kind": "completed" })));
-        let aborted = parse_frame(&end(json!({ "kind": "aborted", "reason": { "kind": "user" } })));
+        let completed = decode(&follow("session-a"), end(json!({ "kind": "completed" })));
+        let aborted = decode(
+            &follow("session-a"),
+            end(json!({ "kind": "aborted", "reason": { "kind": "user" } })),
+        );
         assert!(matches!(
             completed,
             DshFrame::Event { ref reason_kind, .. } if reason_kind.as_deref() == Some("completed")
@@ -729,142 +1180,151 @@ mod tests {
         ));
     }
 
-    /// The frame type lives on the envelope's `method`, not on the payload — a
-    /// reader that matched the payload's own `type` would see every session
-    /// event as the same thing.
+    /// The two streams speak different vocabularies and nothing in a value says
+    /// which one it came from, so the same bytes must decode differently per
+    /// stream. A follow item read as an `$events` item would be a silent
+    /// mis-decode rather than an error.
     #[test]
-    fn rejects_anything_that_is_not_a_server_request() {
-        let unary = json!({
-            "type": "server-response",
-            "rpcId": "x",
-            "result": { "ok": true, "value": {} }
-        })
-        .to_string();
-        assert_eq!(parse_frame(&unary), DshFrame::Ignored);
+    fn the_stream_identity_decides_how_a_value_reads() {
+        let value = json!({ "type": "event", "event": { "type": "turn/start", "data": {} } });
+        assert!(matches!(
+            decode(&follow("session-a"), value.clone()),
+            DshFrame::Event { .. }
+        ));
+        assert_eq!(decode(&StreamKind::Events, value), DshFrame::Ignored);
     }
 
+    /// The opening item of `$events`. Its `clientId` is the only way to answer a
+    /// waterfall, so losing it would take every decision card with it.
     #[test]
-    fn ignores_frames_fleet_does_not_act_on() {
-        for method in ["session/projection", "session/queue", "session/subscribed"] {
-            let frame = json!({
-                "type": "server-request",
-                "rpcId": "x",
-                "method": method,
-                "payload": { "sessionId": "session-a", "key": "tokenUsage" }
-            })
-            .to_string();
-            assert_eq!(parse_frame(&frame), DshFrame::Ignored, "method {method}");
+    fn decodes_the_opening_ready_frame() {
+        let value = json!({
+            "type": "ready",
+            "clientId": "dd879fb9-23c1-4eb0-8b5e-1745d2ce4b51",
+            "host": { "home": "/Users/hoveychen" }
+        });
+        assert_eq!(
+            decode(&StreamKind::Events, value),
+            DshFrame::Ready {
+                client_id: "dd879fb9-23c1-4eb0-8b5e-1745d2ce4b51".into()
+            }
+        );
+    }
+
+    /// `api-session/status` is an `emit` with *positional* args, mirroring the
+    /// Cordis listener signature the host forwards unchanged.
+    #[test]
+    fn decodes_the_host_running_bit() {
+        for running in [true, false] {
+            let value = json!({
+                "type": "emit",
+                "event": "api-session/status",
+                "args": ["session-63035897-e9ff-45be-a076-89e50847b7a8", running]
+            });
+            assert_eq!(
+                decode(&StreamKind::Events, value),
+                DshFrame::Status {
+                    session_id: "session-63035897-e9ff-45be-a076-89e50847b7a8".into(),
+                    running,
+                }
+            );
         }
     }
 
-    /// Verbatim `approval/requested` frame captured off `events.mux` while a
+    #[test]
+    fn ignores_emits_fleet_does_not_act_on() {
+        let value = json!({
+            "type": "emit",
+            "event": "api-session/activity",
+            "args": ["session-a", 1788723263490u64]
+        });
+        assert_eq!(decode(&StreamKind::Events, value), DshFrame::Ignored);
+    }
+
+    /// Verbatim `approval/request` waterfall, captured while a
     /// `workspace-write` session tried to touch a file outside its workspace.
     #[test]
     fn decodes_a_live_approval_request() {
-        let frame = json!({
-            "type": "server-request",
-            "rpcId": "4ca8058f-2e6f-4c1e-9b0a-2a1f5c7d3e11",
-            "method": "approval/requested",
-            "payload": {
-                "type": "approval/requested",
-                "sessionId": "session-ef76dbb8",
-                "approvalId": "364f574f-9d2c-4a7b-9f10-8c3d1e5a7b92",
+        let value = json!({
+            "type": "waterfall",
+            "event": "approval/request",
+            "eventId": "04eccea2-3c00-416e-955c-2f0a802a5a62",
+            "agentId": "session-0304f53d-19db-4e4f-b240-ff4961c16e2d",
+            "request": {
                 "toolName": "bash",
-                "callId": "toolu_01ABC",
+                "callId": "call_00_7ENJ63IKfC3CFTIrrETU9309",
                 "reason": "escalate sandbox to danger-full-access: writes outside the workspace"
             }
-        })
-        .to_string();
-        match parse_frame(&frame) {
+        });
+        match decode(&StreamKind::Events, value) {
             DshFrame::ApprovalRequested {
-                rpc_id,
+                event_id,
                 session_id,
-                approval_id,
                 tool_name,
                 call_id,
                 reason,
             } => {
-                assert_eq!(rpc_id, "4ca8058f-2e6f-4c1e-9b0a-2a1f5c7d3e11");
-                assert_eq!(session_id, "session-ef76dbb8");
-                assert_eq!(approval_id, "364f574f-9d2c-4a7b-9f10-8c3d1e5a7b92");
+                assert_eq!(event_id, "04eccea2-3c00-416e-955c-2f0a802a5a62");
+                assert_eq!(session_id, "session-0304f53d-19db-4e4f-b240-ff4961c16e2d");
                 assert_eq!(tool_name, "bash");
-                assert_eq!(call_id.as_deref(), Some("toolu_01ABC"));
+                assert_eq!(call_id.as_deref(), Some("call_00_7ENJ63IKfC3CFTIrrETU9309"));
                 assert!(reason.unwrap().contains("danger-full-access"));
             }
             other => panic!("expected ApprovalRequested, got {other:?}"),
         }
     }
 
-    /// The mux carries a durable `approval/asked` session event at the same
-    /// moment as the answerable frame. It has no rpcId of its own, so answering
-    /// it is impossible — it must not be mistaken for the request.
+    /// The session's follow stream carries a durable `approval/asked` event at
+    /// the same moment as the waterfall. It has no event id of its own, so
+    /// answering it is impossible — it must not be mistaken for the request.
     #[test]
     fn the_durable_approval_audit_event_is_not_the_answerable_frame() {
-        let frame = json!({
-            "type": "server-request",
-            "rpcId": "x",
-            "method": "session/event",
-            "payload": {
-                "sessionId": "session-a",
-                "event": {
-                    "type": "approval/asked",
-                    "seq": 40,
-                    "data": { "id": "ap-1", "toolName": "bash", "reason": "why" }
-                }
+        let value = json!({
+            "type": "event",
+            "event": {
+                "type": "approval/asked",
+                "seq": 40,
+                "data": { "id": "ap-1", "toolName": "bash", "reason": "why" }
             }
-        })
-        .to_string();
+        });
         assert!(matches!(
-            parse_frame(&frame),
+            decode(&follow("session-a"), value),
             DshFrame::Event { ref kind, .. } if kind == "approval/asked"
         ));
     }
 
-    /// An approval frame with no rpcId cannot be answered, and a card nobody can
-    /// answer would park the turn behind a permanently `not-pending` button.
+    /// A waterfall with no event id cannot be answered, and a card nobody can
+    /// answer would park the turn behind a permanently refused button.
     #[test]
     fn an_unanswerable_approval_is_dropped() {
-        let frame = json!({
-            "type": "server-request",
-            "method": "approval/requested",
-            "payload": { "sessionId": "session-a", "approvalId": "ap-1", "toolName": "bash" }
-        })
-        .to_string();
-        assert_eq!(parse_frame(&frame), DshFrame::Ignored);
+        let value = json!({
+            "type": "waterfall",
+            "event": "approval/request",
+            "agentId": "session-a",
+            "request": { "toolName": "bash" }
+        });
+        assert_eq!(decode(&StreamKind::Events, value), DshFrame::Ignored);
     }
 
     #[test]
-    fn decodes_an_approval_resolution() {
-        let frame = json!({
-            "type": "server-request",
-            "rpcId": "x",
-            "method": "approval/resolved",
-            "payload": {
-                "type": "approval/resolved",
-                "sessionId": "session-a",
-                "approvalId": "ap-1",
-                "outcome": "allowed-once"
-            }
-        })
-        .to_string();
+    fn decodes_a_withdrawn_waterfall() {
+        let value = json!({ "type": "cancel", "eventId": "04eccea2-3c00-416e-955c-2f0a802a5a62" });
         assert_eq!(
-            parse_frame(&frame),
-            DshFrame::ApprovalResolved {
-                session_id: "session-a".into(),
-                approval_id: "ap-1".into(),
+            decode(&StreamKind::Events, value),
+            DshFrame::Withdrawn {
+                event_id: "04eccea2-3c00-416e-955c-2f0a802a5a62".into()
             }
         );
     }
 
     #[test]
     fn decodes_a_question_request() {
-        let frame = json!({
-            "type": "server-request",
-            "rpcId": "q-rpc-1",
-            "method": "question/requested",
-            "payload": {
-                "type": "question/requested",
-                "sessionId": "session-a",
+        let value = json!({
+            "type": "waterfall",
+            "event": "user-questions/request",
+            "eventId": "q-event-1",
+            "agentId": "session-a",
+            "request": {
                 "questions": [{
                     "id": "pick",
                     "question": "Which database?",
@@ -872,15 +1332,14 @@ mod tests {
                     "options": [{ "label": "Postgres" }, { "label": "SQLite" }]
                 }]
             }
-        })
-        .to_string();
-        match parse_frame(&frame) {
+        });
+        match decode(&StreamKind::Events, value) {
             DshFrame::QuestionRequested {
-                rpc_id,
+                event_id,
                 session_id,
                 questions,
             } => {
-                assert_eq!(rpc_id, "q-rpc-1");
+                assert_eq!(event_id, "q-event-1");
                 assert_eq!(session_id, "session-a");
                 assert_eq!(questions.len(), 1);
                 assert_eq!(questions[0].id, "pick");
@@ -890,37 +1349,102 @@ mod tests {
         }
     }
 
-    /// A question is named by the requested frame's rpcId, so its resolution is
-    /// the one frame that carries no `sessionId` — the session-less guard must
-    /// not swallow it.
+    /// The opening snapshot's records are history `session/page` reads; folding
+    /// them would replay a finished turn through the phase machine and light up
+    /// a session idle for minutes. Its `cursor` is the one thing kept — it is
+    /// the only legitimate `throughSeq` for that page read.
     #[test]
-    fn decodes_a_question_resolution_without_a_session_id() {
-        let frame = json!({
-            "type": "server-request",
-            "rpcId": "x",
-            "method": "question/resolved",
-            "payload": {
-                "type": "question/resolved",
-                "questionRpcId": "q-rpc-1",
-                "outcome": "answered"
-            }
-        })
-        .to_string();
+    fn the_follow_snapshot_yields_its_cursor_and_nothing_else() {
+        let value = json!({
+            "type": "snapshot",
+            "header": { "version": 0, "id": "session-a", "cwd": "/tmp" },
+            "cursor": 2,
+            "records": [{ "type": "event", "event": { "type": "turn/end", "seq": 1, "data": {} } }],
+            "hasMore": false,
+            "projections": { "asOfSeq": 2, "values": {} }
+        });
         assert_eq!(
-            parse_frame(&frame),
-            DshFrame::QuestionResolved {
-                question_rpc_id: "q-rpc-1".into(),
+            decode(&follow("session-a"), value),
+            DshFrame::Cursor {
+                session_id: "session-a".into(),
+                seq: 2,
+            }
+        );
+    }
+
+    /// The envelope layer: three terminal shapes, each naming its stream.
+    #[test]
+    fn decodes_every_envelope_shape() {
+        assert_eq!(
+            parse_envelope(r#"{"type":"end","streamId":"s-1"}"#),
+            MuxEnvelope::End {
+                stream_id: "s-1".into()
+            }
+        );
+        assert_eq!(
+            parse_envelope(
+                r#"{"type":"error","streamId":"s-1","error":{"code":"gateway/cancelled","message":"gone","details":{}}}"#
+            ),
+            MuxEnvelope::Error {
+                stream_id: "s-1".into(),
+                code: "gateway/cancelled".into(),
+                message: "gone".into(),
+            }
+        );
+        // An item may arrive without a value at all.
+        assert_eq!(
+            parse_envelope(r#"{"type":"item","streamId":"s-1"}"#),
+            MuxEnvelope::Item {
+                stream_id: "s-1".into(),
+                value: Value::Null,
             }
         );
     }
 
     #[test]
+    fn ignores_malformed_and_stream_less_envelopes() {
+        for text in [
+            "",
+            "not json",
+            r#"{"type":"item"}"#,
+            r#"{"streamId":"s-1"}"#,
+            r#"{"type":"open","streamId":"s-1","endpoint":"$events","payload":{}}"#,
+        ] {
+            assert_eq!(parse_envelope(text), MuxEnvelope::Ignored, "text {text:?}");
+        }
+    }
+
+    /// The `open` request the pump sends. The host validates these keys exactly
+    /// — one extra or missing key is refused before the endpoint is looked at.
+    #[test]
+    fn opens_each_stream_with_the_shape_the_gateway_validates() {
+        let events: Value = serde_json::from_str(&open_frame("s-1", &StreamKind::Events)).unwrap();
+        assert_eq!(events["type"], "open");
+        assert_eq!(events["streamId"], "s-1");
+        assert_eq!(events["endpoint"], "$events");
+        assert_eq!(events["payload"], json!({ "args": {} }));
+        assert_eq!(events.as_object().unwrap().len(), 4);
+
+        let follow: Value =
+            serde_json::from_str(&open_frame("s-2", &follow("session-a"))).unwrap();
+        assert_eq!(follow["endpoint"], "session/follow");
+        assert_eq!(
+            follow["payload"]["args"]["request"]["address"],
+            json!({ "kind": "session", "sessionId": "session-a" })
+        );
+    }
+
+    #[test]
     fn only_the_answerable_frames_route_to_the_bridge() {
-        assert!(DshFrame::QuestionResolved {
-            question_rpc_id: "q".into()
+        assert!(DshFrame::Withdrawn {
+            event_id: "e".into()
         }
         .is_decision());
         assert!(!event("session-a", "tool/call").is_decision());
+        assert!(!DshFrame::Ready {
+            client_id: "c".into()
+        }
+        .is_decision());
         assert!(!DshFrame::Status {
             session_id: "session-a".into(),
             running: true
@@ -929,42 +1453,6 @@ mod tests {
         assert!(!DshFrame::Ignored.is_decision());
     }
 
-    #[test]
-    fn ignores_malformed_and_session_less_frames() {
-        assert_eq!(parse_frame("not json"), DshFrame::Ignored);
-        let no_session = json!({
-            "type": "server-request",
-            "method": "session/event",
-            "payload": { "event": { "type": "turn/start" } }
-        })
-        .to_string();
-        assert_eq!(parse_frame(&no_session), DshFrame::Ignored);
-    }
-
-    #[test]
-    fn decodes_the_host_running_bit() {
-        let frame = json!({
-            "type": "server-request",
-            "rpcId": "x",
-            "method": "host/session-status",
-            "payload": {
-                "type": "host/session-status",
-                "sessionId": "session-a",
-                "running": true
-            }
-        })
-        .to_string();
-        assert_eq!(
-            parse_frame(&frame),
-            DshFrame::Status {
-                session_id: "session-a".into(),
-                running: true
-            }
-        );
-    }
-
-    /// All four chunk shapes observed live name their block one way or another;
-    /// `usage` and `finish` name none.
     #[test]
     fn resolves_the_block_type_of_every_observed_chunk_shape() {
         let cases = [
@@ -1019,6 +1507,7 @@ mod tests {
         DshFrame::Event {
             session_id: sid.into(),
             kind: kind.into(),
+            seq: 0,
             block_type: None,
             reason_kind: None,
         }
@@ -1028,6 +1517,7 @@ mod tests {
         DshFrame::Event {
             session_id: sid.into(),
             kind: "turn/end".into(),
+            seq: 0,
             block_type: None,
             reason_kind: Some(reason.into()),
         }
@@ -1106,6 +1596,7 @@ mod tests {
             running: true,
             phase: SessionStatus::Executing,
             phase_at_ms: 1_000,
+            cursor: None,
         };
         assert_eq!(
             live.effective_phase(1_000 + LIVE_STATUS_TTL_MS * 10),
@@ -1121,6 +1612,7 @@ mod tests {
             running: false,
             phase: SessionStatus::WaitingInput,
             phase_at_ms: 1_000,
+            cursor: None,
         };
         assert_eq!(
             live.effective_phase(1_000 + LIVE_STATUS_TTL_MS),
@@ -1143,6 +1635,95 @@ mod tests {
         );
         assert_eq!(live.phase_of("session-a", 1_000), None);
         assert_eq!(live.tracked(), 1, "it is tracked, it just has no phase");
+    }
+
+    /// A history read must not pay the full cursor budget once the socket that
+    /// would publish the cursor has proven unreachable. The follow stream is the
+    /// only source of a `session/page` cut, so the read cannot succeed — waiting
+    /// 5s to discover that turns every transcript open into a five-second stall,
+    /// once per read, for as long as the server is away.
+    #[test]
+    fn an_unreachable_socket_fails_a_history_read_immediately() {
+        use std::sync::atomic::AtomicUsize;
+
+        let live = LiveView::default();
+        live.set_unreachable(true);
+        let asked = AtomicUsize::new(0);
+        let started = std::time::Instant::now();
+        let got = live.cursor_for_history("session-a", Duration::from_secs(5), |_| {
+            asked.fetch_add(1, Ordering::SeqCst);
+        });
+
+        assert_eq!(got, None, "an unreachable socket has no cursor to give");
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            0,
+            "must not ask a dead socket to open a stream"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "must not burn the budget waiting on a socket that is down: {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The same read on a socket that is merely still connecting *does* wait and
+    /// does open the stream — that is what makes the first read of a
+    /// never-followed session work at all, including at cold start.
+    #[test]
+    fn a_socket_that_is_still_coming_up_asks_for_the_stream_and_waits() {
+        use std::sync::atomic::AtomicUsize;
+
+        let live = LiveView::default();
+        let asked = AtomicUsize::new(0);
+        let got = live.cursor_for_history("session-a", Duration::from_millis(120), |_| {
+            asked.fetch_add(1, Ordering::SeqCst);
+        });
+
+        assert_eq!(got, None, "nothing published a cursor within the budget");
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "the stream must be opened");
+    }
+
+    /// The cursor a history read asks for must never run ahead of what the
+    /// server has published — `session/page` refuses a `throughSeq` past the
+    /// real cut — and must never run backwards either, or a later read would
+    /// silently truncate the history it just walked.
+    #[test]
+    fn the_cursor_advances_with_the_log_and_never_retreats() {
+        let live = LiveView::default();
+        assert_eq!(live.cursor_of("session-a"), None);
+
+        live.apply(
+            DshFrame::Cursor {
+                session_id: "session-a".into(),
+                seq: 48,
+            },
+            1_000,
+        );
+        assert_eq!(live.cursor_of("session-a"), Some(48));
+
+        live.apply(
+            DshFrame::Event {
+                session_id: "session-a".into(),
+                kind: "turn/start".into(),
+                seq: 49,
+                block_type: None,
+                reason_kind: None,
+            },
+            1_000,
+        );
+        assert_eq!(live.cursor_of("session-a"), Some(49));
+
+        // A late frame from an older cut (a reconnect replays the snapshot)
+        // must not pull the cursor back.
+        live.apply(
+            DshFrame::Cursor {
+                session_id: "session-a".into(),
+                seq: 12,
+            },
+            1_000,
+        );
+        assert_eq!(live.cursor_of("session-a"), Some(49));
     }
 
     #[test]

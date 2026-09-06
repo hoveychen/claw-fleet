@@ -4,7 +4,7 @@
 //! trailing `Context files:` block ([`crate::context_files`]). Claude Code and
 //! codex read those paths themselves with a file tool, so a path is a complete
 //! handle for them. dsh's agent cannot: an image only reaches the model as an
-//! `{type:"image"}` content part on `session.prompt`, which the host admits into
+//! `{type:"image"}` content part on `session/prompt`, which the host admits into
 //! its durable attachment store. So the image paths are lifted out of the block
 //! and encoded; everything else stays in the block as text.
 //!
@@ -21,7 +21,7 @@
 //! `attachmentId` is the SHA-256 of the committed bytes and Fleet's store key is
 //! the first 16 hex characters of the SHA-256 of the stored bytes, so the same
 //! image has the same key on both sides. Verified live against dsh 0.1.1-rc.2: a
-//! 209-byte PNG uploaded through `session.prompt` came back as
+//! 209-byte PNG uploaded through `session/prompt` came back as
 //! `attachmentId: "sha256:dae52f01…"`, byte-identical to `shasum -a 256` of the
 //! file on disk.
 //!
@@ -111,7 +111,7 @@ fn image_part(path: &str) -> Option<Value> {
     }))
 }
 
-/// Build `session.prompt`'s `content` from a composer prompt.
+/// Build `session/prompt`'s `content` from a composer prompt.
 ///
 /// A prompt with no attachment block — every Fleet-spawned session's first
 /// prompt, every handoff note — produces exactly the single text part this used
@@ -153,15 +153,25 @@ pub fn prompt_content(prompt: &str) -> Vec<Value> {
 /// Whether this failure is the attachment layer refusing the images, as opposed
 /// to anything else that can fail a prompt.
 ///
-/// `attachment-error` is dsh's own taxonomy entry for the whole family: the
-/// route's model has no vision (measured: `{"code":"attachment-error",
+/// dsh has one taxonomy entry for the whole family: the route's model has no
+/// vision (measured on 0.1.1: `{"code":"attachment-error",
 /// "message":"Model \"deepseek-v4-flash\" does not support image input.",
 /// "details":{"reason":"MODEL_DOES_NOT_SUPPORT_IMAGES"}}`), a batch over the
 /// deployment's limits, bytes that fail validation. Keyed on the code rather
 /// than the message so it does not hinge on English prose, and treated as one
 /// family because the answer is the same for all of them — send the prose.
+///
+/// Both spellings are accepted because 0.1.2 renamed it: the same refusal now
+/// arrives as `session/attachment-invalid` (measured live against
+/// `deepseek-v4-flash` on 0.1.2-rc.1). Matching only one spelling is not a
+/// degraded read but a lost turn — the refusal rejects the *whole* call, so a
+/// fallback that never fires takes the user's prose down with the image.
 pub fn is_attachment_refusal(err: &crate::dsh_client::DshRpcError) -> bool {
-    matches!(err, crate::dsh_client::DshRpcError::Rpc { code, .. } if code == "attachment-error")
+    matches!(
+        err,
+        crate::dsh_client::DshRpcError::Rpc { code, .. }
+            if code == "attachment-error" || code == "session/attachment-invalid"
+    )
 }
 
 /// Send one composer prompt, degrading to plain text if the deployment refuses
@@ -232,7 +242,7 @@ const KEY_HEX_LEN: usize = 16;
 /// transcript renderer knows how to display, filling the store first for any
 /// image it does not already hold.
 ///
-/// `fetch` reads one attachment's bytes by id — `session.attachment` in
+/// `fetch` reads one attachment's bytes by id — `session/attachment` in
 /// production, which proves the session's log references that id before
 /// answering. It is a parameter so this orchestration is testable without a live
 /// server, the way `dsh_source::history_with` takes its own fetch.
@@ -475,6 +485,37 @@ mod tests {
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["text"], prompt);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 0.1.2 renamed the code: the same refusal — verbatim from a live
+    /// `session/prompt` against `deepseek-v4-flash` on 0.1.2-rc.1 — now arrives
+    /// as `session/attachment-invalid`. Keyed only on 0.1.1's spelling, the
+    /// fallback stopped firing and the whole turn died instead of degrading:
+    /// the user's prose was lost along with the image.
+    #[test]
+    fn the_0_1_2_refusal_code_still_resends_the_prompt_as_text() {
+        let dir = std::env::temp_dir().join(format!("fleet-dsh-fb12-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shot = dir.join("shot.png");
+        std::fs::write(&shot, png()).unwrap();
+        let prompt = format!("这张图什么颜色\n\nContext files:\n- {}", shot.display());
+
+        let sent = std::cell::RefCell::new(Vec::new());
+        let result = send_with_text_fallback(&prompt, |content| {
+            sent.borrow_mut().push(content.clone());
+            if content
+                .iter()
+                .any(|b| b.get("type").and_then(Value::as_str) == Some("image"))
+            {
+                return Err(crate::dsh_client::DshRpcError::Rpc {
+                    code: "session/attachment-invalid".into(),
+                    message: "Model \"deepseek-v4-flash\" does not support image input.".into(),
+                });
+            }
+            Ok(())
+        });
+        assert!(result.is_ok(), "the turn must still happen: {result:?}");
+        assert_eq!(sent.borrow().len(), 2, "one image attempt, one text retry");
     }
 
     /// Measured against dsh 0.1.1-rc.2: a text-only route refuses the *whole*

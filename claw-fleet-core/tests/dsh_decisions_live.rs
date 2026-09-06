@@ -133,7 +133,9 @@ fn live_an_allowed_approval_lets_the_tool_call_through() {
     let (session_id, card) = park_a_turn_on_an_approval(&probe);
 
     // The card has to carry enough for a human to judge the action, and enough
-    // for the bridge to answer it: dsh refuses an answer without `approvalId`.
+    // for the bridge to answer it: since 0.1.2 an answer is correlated by the
+    // waterfall's `eventId` (plus the generation's clientId, which the bridge
+    // holds), and dsh refuses one that names no pending event.
     assert_eq!(card.session_id, session_id);
     assert!(
         !card.tool_name.is_empty(),
@@ -142,10 +144,10 @@ fn live_an_allowed_approval_lets_the_tool_call_through() {
     );
     assert!(
         card.tool_input
-            .get("approvalId")
+            .get("eventId")
             .and_then(|v| v.as_str())
             .is_some_and(|s| !s.is_empty()),
-        "card carries no approvalId: {}",
+        "card carries no eventId: {}",
         card.tool_input
     );
     assert_eq!(card.tool_input["agent"], "dsh");

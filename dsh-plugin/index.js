@@ -91,6 +91,30 @@ export function fetchSections(config, cwd, sessionId) {
 }
 
 /**
+ * One session's durable event log, across the two shapes dsh has shipped.
+ *
+ * 0.1.1 exposed a plain `events` array; 0.1.2 replaced it with
+ * `snapshotEvents()` (a frozen snapshot reused until the next append). Reading
+ * the gone property was not a degraded read but a fatal one: this plugin runs
+ * inside `agent/pre-step`, so the `TypeError` ended the turn — every turn on a
+ * machine carrying this plugin died with `UNKNOWN: Cannot read properties of
+ * undefined (reading 'length')`, dsh's own CLI included. Hence the last
+ * fallback: a shape this does not recognise costs the inject-only-on-change
+ * optimisation, never the turn.
+ *
+ * @param {any} session
+ * @returns {Array<any>} the log in order, or an empty list
+ */
+function sessionEvents(session) {
+  if (Array.isArray(session?.events)) return session.events
+  if (typeof session?.snapshotEvents === 'function') {
+    const snapshot = session.snapshotEvents()
+    if (Array.isArray(snapshot)) return snapshot
+  }
+  return []
+}
+
+/**
  * Find the latest text this plugin injected for one section name, including a
  * reading compaction has shadowed.
  *
@@ -108,7 +132,7 @@ export function fetchSections(config, cwd, sessionId) {
  * @returns {string | undefined}
  */
 export function latestInjectedText(agent, sectionName) {
-  const events = agent.session.events
+  const events = sessionEvents(agent.session)
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]
     if (event.type !== 'user/message') continue

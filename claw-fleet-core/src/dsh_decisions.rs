@@ -33,6 +33,7 @@
 
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -219,35 +220,31 @@ fn decode_answer(answer: &str, q: &DshQuestion) -> Value {
 }
 
 /// Build the `result.value` of a question answer.
-fn question_response_value(session_id: &str, answers: Vec<Value>) -> Value {
-    json!({
-        "sessionId": session_id,
-        "answer": { "answers": answers },
-    })
+/// Build the `outcome.value` of an answered `user-questions/request`.
+///
+/// The waterfall's listener returns an `AskUserQuestionAnswer`, so the value is
+/// that object itself — the session is already named by the pending event, and
+/// an extra field would fail the gateway's JSON-safety check.
+fn question_outcome(answers: Vec<Value>) -> Value {
+    json!({ "answers": answers })
 }
 
-/// Build the `result.value` of an approval answer.
+/// Build the `outcome.value` of an approval answer.
 ///
-/// dsh's outcome vocabulary has four members but only two are answerable —
-/// `cancelled` and `unavailable` are outcomes the *server* reaches on its own.
-/// The card's optional deny reason has nowhere to go: the payload schema is
-/// closed, so an unrecognised field would fail validation and be refused.
-fn approval_response_value(session_id: &str, approval_id: &str, allow: bool) -> Value {
-    json!({
-        "sessionId": session_id,
-        "approvalId": approval_id,
-        "outcome": if allow { "allowed-once" } else { "rejected" },
-    })
+/// The waterfall's listener returns a bare `ApprovalOutcome` string, so the
+/// value is that string. dsh's vocabulary has four members but only two are
+/// answerable — `cancelled` and `unavailable` are outcomes the *server* reaches
+/// on its own. The card's optional deny reason has nowhere to go: the outcome is
+/// a closed union of four literals, not an object.
+fn approval_outcome(allow: bool) -> Value {
+    json!(if allow { "allowed-once" } else { "rejected" })
 }
 
 // ── The pending table ───────────────────────────────────────────────────────
 
 /// One card the bridge has raised and is waiting on.
 enum Pending {
-    Approval {
-        session_id: String,
-        approval_id: String,
-    },
+    Approval { session_id: String },
     Question {
         session_id: String,
         questions: Vec<DshQuestion>,
@@ -276,19 +273,45 @@ impl Pending {
 /// everything still open and exit.
 pub struct DecisionBridge {
     tx: Sender<DshFrame>,
+    /// The `clientId` of the `$events` generation currently delivering
+    /// waterfalls. Every answer is scoped to it, so a card raised before the
+    /// opening `ready` frame — or after a reconnect replaced the generation —
+    /// must answer with the id that is live *now*, not the one it was raised
+    /// under. Shared rather than sent so a late-arriving id reaches cards that
+    /// are already up.
+    client_id: Arc<Mutex<Option<String>>>,
 }
 
 impl DecisionBridge {
     /// Start the worker against the `dsh web` instance on `port`.
-    pub fn start(port: u16) -> Self {
+    ///
+    /// `launch_token` is the one that instance announced: the worker builds its
+    /// own [`DshClient`], and since 0.1.2 that means trading the token for a
+    /// session cookie. A stale token here costs every card its answer path.
+    pub fn start(port: u16, launch_token: &str) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let token = launch_token.to_string();
+        let client_id = Arc::new(Mutex::new(None));
+        let worker_client_id = client_id.clone();
         let spawned = std::thread::Builder::new()
             .name("dsh-decisions".into())
-            .spawn(move || worker(port, rx));
+            .spawn(move || worker(port, &token, rx, worker_client_id));
         if let Err(e) = spawned {
             crate::log_debug(&format!("dsh decisions: cannot spawn worker: {e}"));
         }
-        Self { tx }
+        Self { tx, client_id }
+    }
+
+    /// Publish the `clientId` of the `$events` generation now in force.
+    ///
+    /// Called by [`crate::dsh_events`] on every opening `ready` frame, including
+    /// the ones that follow a reconnect: an answer sent under a retired
+    /// generation is refused, so the newest id always wins.
+    pub fn set_client_id(&self, client_id: String) {
+        *self
+            .client_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(client_id);
     }
 
     /// Hand one frame over. Never blocks; a dead worker silently drops it,
@@ -300,8 +323,20 @@ impl DecisionBridge {
 
 /// Own every pending card until it is answered, resolved elsewhere, or the
 /// channel closes.
-fn worker(port: u16, rx: Receiver<DshFrame>) {
-    let client = match DshClient::new(port) {
+fn worker(
+    port: u16,
+    launch_token: &str,
+    rx: Receiver<DshFrame>,
+    client_id: Arc<Mutex<Option<String>>>,
+) {
+    /// The generation id to answer under, or `None` before the first `ready`.
+    fn generation(slot: &Mutex<Option<String>>) -> Option<String> {
+        slot.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    let client = match DshClient::new(port, launch_token) {
         Ok(c) => c,
         Err(e) => {
             crate::log_debug(&format!("dsh decisions: no client: {e}"));
@@ -313,15 +348,18 @@ fn worker(port: u16, rx: Receiver<DshFrame>) {
     loop {
         match rx.recv_timeout(POLL_INTERVAL) {
             Ok(frame) => handle_frame(&client, &mut pending, frame),
-            Err(RecvTimeoutError::Timeout) => collect_answers(&client, &mut pending),
+            Err(RecvTimeoutError::Timeout) => {
+                collect_answers(&client, &mut pending, generation(&client_id).as_deref())
+            }
             // The watcher was dropped: this server is gone or has moved to a new
             // port, so nothing here can ever be answered. Withdraw the questions
             // (an unanswered `ask_user_question` would hang its turn forever)
             // and take the cards down.
             Err(RecvTimeoutError::Disconnected) => {
+                let generation = generation(&client_id);
                 for (id, entry) in pending.drain() {
-                    if let Pending::Question { .. } = entry {
-                        let _ = client.respond_cancelled(&id, ABANDONED_MESSAGE);
+                    if let (Pending::Question { .. }, Some(client_id)) = (&entry, &generation) {
+                        let _ = client.refuse_event(client_id, &id, ABANDONED_MESSAGE);
                     }
                     entry.cleanup(&id);
                 }
@@ -334,27 +372,27 @@ fn worker(port: u16, rx: Receiver<DshFrame>) {
 fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, frame: DshFrame) {
     match frame {
         DshFrame::ApprovalRequested {
-            rpc_id,
+            event_id,
             session_id,
-            approval_id,
             tool_name,
             call_id,
             reason,
         } => {
-            // A mux reconnect replays this frame verbatim; the card is already up.
-            if pending.contains_key(&rpc_id) {
+            // A pending waterfall keeps its event id across a reconnect, so a
+            // replayed frame names a card that is already up.
+            if pending.contains_key(&event_id) {
                 return;
             }
             let (workspace_name, ai_title) = session_meta(client, &session_id);
             let request = PermissionPromptRequest {
-                id: rpc_id.clone(),
+                id: event_id.clone(),
                 session_id: session_id.clone(),
                 workspace_name,
                 ai_title,
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 tool_name,
                 tool_input: json!({
-                    "approvalId": approval_id,
+                    "eventId": event_id,
                     "reason": reason,
                     "callId": call_id,
                     "agent": "dsh",
@@ -363,23 +401,17 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
             };
             match crate::permission_prompt_ipc::write_request(&request) {
                 Ok(()) => {
-                    pending.insert(
-                        rpc_id,
-                        Pending::Approval {
-                            session_id,
-                            approval_id,
-                        },
-                    );
+                    pending.insert(event_id, Pending::Approval { session_id });
                 }
                 Err(e) => crate::log_debug(&format!("dsh decisions: approval card: {e}")),
             }
         }
         DshFrame::QuestionRequested {
-            rpc_id,
+            event_id,
             session_id,
             questions,
         } => {
-            if pending.contains_key(&rpc_id) {
+            if pending.contains_key(&event_id) {
                 return;
             }
             if questions.is_empty() {
@@ -391,7 +423,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
             let cards: Vec<ElicitationQuestion> = questions.iter().map(card_question).collect();
             let texts = cards.iter().map(|c| c.question.clone()).collect();
             let request = ElicitationRequest {
-                id: rpc_id.clone(),
+                id: event_id.clone(),
                 session_id: session_id.clone(),
                 workspace_name,
                 ai_title,
@@ -402,7 +434,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
             match crate::elicitation::write_request(&request) {
                 Ok(()) => {
                     pending.insert(
-                        rpc_id,
+                        event_id,
                         Pending::Question {
                             session_id,
                             questions,
@@ -413,35 +445,37 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
                 Err(e) => crate::log_debug(&format!("dsh decisions: question card: {e}")),
             }
         }
-        // Someone else settled it — dsh's own web UI, a cancelled turn, or the
-        // fail-closed default. The card is stale, so take it down rather than
-        // leaving a button that would come back `not-pending`.
-        DshFrame::ApprovalResolved { approval_id, .. } => {
-            let stale: Vec<String> = pending
-                .iter()
-                .filter(|(_, p)| {
-                    matches!(p, Pending::Approval { approval_id: a, .. } if *a == approval_id)
-                })
-                .map(|(id, _)| id.clone())
-                .collect();
-            for id in stale {
-                if let Some(entry) = pending.remove(&id) {
-                    entry.cleanup(&id);
-                }
-            }
-        }
-        DshFrame::QuestionResolved { question_rpc_id } => {
-            if let Some(entry) = pending.remove(&question_rpc_id) {
-                entry.cleanup(&question_rpc_id);
+        // The host withdrew the request: dsh's own web UI answered it, the turn
+        // was cancelled, or the pending lifetime expired. The card is stale, so
+        // take it down rather than leaving a button whose answer would be
+        // refused as belonging to no pending event.
+        DshFrame::Withdrawn { event_id } => {
+            if let Some(entry) = pending.remove(&event_id) {
+                entry.cleanup(&event_id);
             }
         }
         // Phase frames belong to `dsh_events`; the pump never routes them here.
-        DshFrame::Event { .. } | DshFrame::Status { .. } | DshFrame::Ignored => {}
+        DshFrame::Event { .. }
+        | DshFrame::Status { .. }
+        | DshFrame::Cursor { .. }
+        | DshFrame::Ready { .. }
+        | DshFrame::Ignored => {}
     }
 }
 
 /// Answer everything the user has settled since the last tick.
-fn collect_answers(client: &DshClient, pending: &mut HashMap<String, Pending>) {
+///
+/// `client_id` is the live `$events` generation. Without one there is nothing to
+/// answer *under* — the socket has not opened yet — so answered cards are left
+/// pending rather than settled into the void; the next tick retries.
+fn collect_answers(
+    client: &DshClient,
+    pending: &mut HashMap<String, Pending>,
+    client_id: Option<&str>,
+) {
+    let Some(client_id) = client_id else {
+        return;
+    };
     let answered: Vec<String> = pending
         .iter()
         .filter(|(id, entry)| match entry {
@@ -458,18 +492,12 @@ fn collect_answers(client: &DshClient, pending: &mut HashMap<String, Pending>) {
             continue;
         };
         let outcome = match &entry {
-            Pending::Approval {
-                session_id,
-                approval_id,
-            } => crate::permission_prompt_ipc::try_read_response(&id).map(|r| {
-                send_approval(client, &id, session_id, approval_id, &r)
-            }),
+            Pending::Approval { .. } => crate::permission_prompt_ipc::try_read_response(&id)
+                .map(|r| send_approval(client, client_id, &id, &r)),
             Pending::Question {
-                session_id,
-                questions,
-                texts,
+                questions, texts, ..
             } => crate::elicitation::try_read_response(&id)
-                .map(|r| send_question(client, &id, session_id, questions, texts, &r)),
+                .map(|r| send_question(client, client_id, &id, questions, texts, &r)),
         };
         if let Some(Err(e)) = outcome {
             crate::log_debug(&format!("dsh decisions: respond {id}: {e}"));
@@ -480,28 +508,27 @@ fn collect_answers(client: &DshClient, pending: &mut HashMap<String, Pending>) {
 
 fn send_approval(
     client: &DshClient,
-    rpc_id: &str,
-    session_id: &str,
-    approval_id: &str,
+    client_id: &str,
+    event_id: &str,
     resp: &PermissionPromptResponse,
 ) -> Result<(), String> {
     let allow = matches!(resp.decision, PermissionPromptDecision::Allow);
     client
-        .respond(rpc_id, approval_response_value(session_id, approval_id, allow))
+        .decide_event(client_id, event_id, approval_outcome(allow))
         .map_err(Into::into)
 }
 
 fn send_question(
     client: &DshClient,
-    rpc_id: &str,
-    session_id: &str,
+    client_id: &str,
+    event_id: &str,
     questions: &[DshQuestion],
     texts: &[String],
     resp: &ElicitationResponse,
 ) -> Result<(), String> {
     if resp.declined {
         return client
-            .respond_cancelled(rpc_id, DECLINED_MESSAGE)
+            .refuse_event(client_id, event_id, DECLINED_MESSAGE)
             .map_err(Into::into);
     }
     // Positional: the server checks answer[i].id against questions[i].id, so the
@@ -520,18 +547,18 @@ fn send_question(
         })
         .collect();
     client
-        .respond(rpc_id, question_response_value(session_id, answers))
+        .decide_event(client_id, event_id, question_outcome(answers))
         .map_err(Into::into)
 }
 
 /// Look up the workspace name and title Fleet shows on the card.
 ///
-/// One `session.list` per decision — decisions are rare and the call is a
+/// One `session/list` per decision — decisions are rare and the call is a
 /// loopback round trip, so caching it would only risk showing a stale title.
 /// A lookup that fails leaves the card with the fields the panel already
 /// tolerates being empty.
 fn session_meta(client: &DshClient, session_id: &str) -> (String, Option<String>) {
-    let Ok(listed) = client.call("session.list", json!({})) else {
+    let Ok(listed) = client.call("session/list", json!({ "_request": {} })) else {
         return (String::new(), None);
     };
     listed
@@ -740,26 +767,23 @@ mod tests {
         );
     }
 
+    /// The approval listener returns a bare `ApprovalOutcome` string, so the
+    /// outcome value is that string — not an object naming the session and the
+    /// approval, the way 0.1.1's `/api/respond` payload did.
     #[test]
-    fn approval_payload_names_both_ids_and_a_closed_outcome() {
-        assert_eq!(
-            approval_response_value("session-a", "ap-1", true),
-            json!({ "sessionId": "session-a", "approvalId": "ap-1", "outcome": "allowed-once" })
-        );
-        assert_eq!(
-            approval_response_value("session-a", "ap-1", false)["outcome"],
-            json!("rejected")
-        );
+    fn an_approval_answers_with_one_outcome_word() {
+        assert_eq!(approval_outcome(true), json!("allowed-once"));
+        assert_eq!(approval_outcome(false), json!("rejected"));
     }
 
+    /// The question listener returns an `AskUserQuestionAnswer`, whose only
+    /// field is `answers`. The pending event already names the session, and an
+    /// extra field would fail the gateway's validation.
     #[test]
-    fn question_payload_nests_the_answers_under_answer() {
+    fn a_question_answers_with_the_answers_object() {
         assert_eq!(
-            question_response_value("session-a", vec![json!({ "id": "q1", "selected": [] })]),
-            json!({
-                "sessionId": "session-a",
-                "answer": { "answers": [{ "id": "q1", "selected": [] }] }
-            })
+            question_outcome(vec![json!({ "id": "q1", "selected": [] })]),
+            json!({ "answers": [{ "id": "q1", "selected": [] }] })
         );
     }
 }

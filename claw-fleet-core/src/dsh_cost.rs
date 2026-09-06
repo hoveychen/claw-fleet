@@ -484,7 +484,7 @@ pub fn generation_refs(events: &[Value]) -> Vec<GenerationRef> {
 ///    **keyed by env-var name, not by provider name**.
 ///
 /// Measured against a real `dsh web`: with `OPENROUTER_API_KEY: sk-…` in that
-/// file, `credentials.describe` answers
+/// file, `credentials/describe` answers
 /// `{configured: true, source: "file", writable: true}` with no env var set.
 /// An `openrouter: sk-…` entry is *accepted* by the file (a valid POSIX
 /// identifier, so the server still boots) but no provider ever looks that name
@@ -714,7 +714,7 @@ fn tally(
 ///
 /// Unlike [`crate::dsh_source::dsh_token_breakdown`] this needs the full
 /// `session.history` — the generation ids live in the events, not in the
-/// `session.list` projections — and it may go to the network, so the panel
+/// `session/list` projections — and it may go to the network, so the panel
 /// fetches it separately from the (cheap, local) token counts rather than
 /// making the token view wait on it.
 pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
@@ -1472,7 +1472,7 @@ mod tests {
     /// The credential store is keyed by **environment-variable name**, not by
     /// provider name. Measured against a real `dsh web`: with
     /// `OPENROUTER_API_KEY: sk-…` in `$DSH_HOME/.credentials.yaml`,
-    /// `credentials.describe` reports `{configured: true, source: "file"}`.
+    /// `credentials/describe` reports `{configured: true, source: "file"}`.
     /// A `openrouter: sk-…` entry is accepted by the file (it is a valid POSIX
     /// identifier) but nothing ever looks it up — measured too: the server still
     /// boots, the key is simply never used.

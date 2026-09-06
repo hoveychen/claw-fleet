@@ -14,10 +14,8 @@
 use std::time::{Duration, Instant};
 
 use claw_fleet_core::agent_source::{AgentSource, SpawnSpec};
-use claw_fleet_core::dsh_client::DshClient;
 use claw_fleet_core::dsh_guidance::{reconcile_dsh_agents_md, DshGuidanceSet};
 use claw_fleet_core::dsh_source::DshSource;
-use serde_json::json;
 
 /// Stops Fleet's process-global `dsh web` however the test ends — it outlives
 /// every `DshSource` by design, so a test binary must reclaim it itself.
@@ -67,42 +65,44 @@ fn live_agents_md_reaches_the_session_as_a_durable_instruction() {
         .session_id
         .expect("spawn must report an id");
 
-    let port = source.server_port().expect("server must be up after a spawn");
-    let client = DshClient::new(port).expect("client");
-
     // The baseline is composed on the first `agent/pre-step`, which happens a
-    // beat after `session.prompt` is admitted.
+    // beat after the prompt is admitted. Read it back the way the desktop does
+    // — `get_messages` walks `session/page`, which since 0.1.2 needs a cursor
+    // the follow stream publishes, so this also exercises that path.
+    //
+    // Matched on the injected *text*, not on `source.kind`: the conversion in
+    // `dsh_messages` deliberately folds every non-human `user/message` kind
+    // (`agent-instructions`, `plugin`, `skill-catalog`) into one `isMeta` flag,
+    // so the kind name does not survive into what the desktop renders. What has
+    // to survive is the content, which is what this test is about.
+    let uri = format!("dsh://{session_id}");
+    let marker = "Fleet PRD Discipline for dsh";
     let deadline = Instant::now() + Duration::from_secs(30);
-    let mut history = json!(null);
+    let mut events = Vec::new();
+    let mut injected = None;
     while Instant::now() < deadline {
-        history = client
-            .call("session.history", json!({ "sessionId": session_id }))
-            .expect("session.history");
-        if history.to_string().contains("agent-instructions") {
+        events = source.get_messages(&uri).unwrap_or_default();
+        injected = events.iter().find(|e| {
+            e.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true)
+                && serde_json::to_string(e)
+                    .unwrap_or_default()
+                    .contains(marker)
+        }).cloned();
+        if injected.is_some() {
             break;
         }
         std::thread::sleep(Duration::from_millis(500));
     }
 
-    let events = history
-        .get("events")
-        .and_then(|e| e.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let injected = events
-        .iter()
-        .find(|e| {
-            e.pointer("/event/data/source/kind").and_then(|k| k.as_str())
-                == Some("agent-instructions")
-        })
-        .unwrap_or_else(|| {
-            panic!("no agent-instructions event in history: {history}");
-        });
+    let injected = injected.unwrap_or_else(|| {
+        panic!(
+            "no injected instruction message in history: {} event(s): {}",
+            events.len(),
+            serde_json::to_string(&events).unwrap_or_default().chars().take(2000).collect::<String>()
+        );
+    });
 
-    let text = injected
-        .pointer("/event/data/content/0/text")
-        .and_then(|t| t.as_str())
-        .unwrap_or_default();
+    let text = serde_json::to_string(&injected).unwrap_or_default();
 
     assert!(
         text.contains("<system-reminder>"),

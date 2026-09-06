@@ -1,7 +1,7 @@
 //! The session list, kept off the request path.
 //!
 //! `scan_all_sources` asks every agent source for its sessions, so it is only as
-//! fast as the slowest one — a dsh answering `session.list` in seconds makes the
+//! fast as the slowest one — a dsh answering `session/list` in seconds makes the
 //! whole scan take seconds. A route that scans on the request therefore pays
 //! that cost on nearly every frontend poll: dsh's own single-flight bounds it to
 //! one call per `ROSTER_TTL` (2s), but the frontend polls slower than that, so

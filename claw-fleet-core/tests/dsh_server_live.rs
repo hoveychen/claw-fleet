@@ -24,6 +24,7 @@ fn binary() -> PathBuf {
 fn live_start_serves_rpc_then_stops_on_drop() {
     let workspace = std::env::temp_dir();
     let port;
+    let token;
 
     {
         let mut server = DshServer::start(&binary(), &workspace).expect("start dsh web");
@@ -32,21 +33,23 @@ fn live_start_serves_rpc_then_stops_on_drop() {
         assert!(port > 0, "the OS must have assigned a real port");
         assert!(server.is_alive(), "server must be alive right after start");
 
-        // The health gate already called host.describe; prove the caller-facing
-        // client works too, and that the server rooted itself where we asked.
+        // The health gate already probed `settings/describe`; prove the
+        // caller-facing client works too — including the launch-token → cookie
+        // exchange it performs at construction.
         let value = server
             .client()
             .expect("client")
-            .call("host.describe", json!({}))
-            .expect("host.describe");
-        println!("host.describe -> {value}");
-        assert!(value.get("cwd").and_then(|v| v.as_str()).is_some());
+            .call("session/list", json!({ "_request": {} }))
+            .expect("session/list");
+        assert!(value.get("items").and_then(|v| v.as_array()).is_some());
+        token = server.launch_token().to_string();
     }
 
-    // Drop killed it: nothing may still answer on that port.
-    let refused = claw_fleet_core::dsh_client::DshClient::new(port)
-        .expect("client")
-        .call("host.describe", json!({}));
+    // Drop killed it: nothing may still answer on that port. Construction is
+    // enough to prove it — the token exchange is itself an HTTP round trip, so
+    // a dead port fails there rather than at the first call.
+    let refused = claw_fleet_core::dsh_client::DshClient::new(port, &token)
+        .map(|c| c.call("session/list", json!({ "_request": {} })));
     assert!(
         refused.is_err(),
         "dropping DshServer must leave no unauthenticated port behind (port {port} still answers)"
@@ -83,6 +86,6 @@ fn live_ensure_alive_restarts_a_killed_server() {
     server
         .client()
         .expect("client")
-        .call("host.describe", json!({}))
+        .call("session/list", json!({ "_request": {} }))
         .expect("restarted server must serve RPC");
 }

@@ -45,7 +45,7 @@ fn wait_for<T>(budget: Duration, mut f: impl FnMut() -> Option<T>) -> Option<T> 
 #[ignore = "runs a real dsh turn (costs model credits); run manually with --ignored"]
 fn live_watcher_reports_the_phases_of_a_real_turn() {
     let server = DshServer::start(&binary(), &std::env::temp_dir()).expect("start dsh web");
-    let watcher = DshEventWatcher::start(server.port());
+    let watcher = DshEventWatcher::start(server.port(), server.launch_token());
     let client = server.client().expect("client");
 
     // Give both downlinks a moment to finish their handshakes before the turn
@@ -55,10 +55,10 @@ fn live_watcher_reports_the_phases_of_a_real_turn() {
     let session_id = format!("session-{}", uuid::Uuid::new_v4());
     let created = client
         .call(
-            "session.create",
-            json!({ "cwd": "/tmp", "sessionId": session_id }),
+            "session/create",
+            json!({ "request": { "cwd": "/tmp", "sessionId": session_id } }),
         )
-        .expect("session.create");
+        .expect("session/create");
     assert_eq!(
         created.get("sessionId").and_then(|v| v.as_str()),
         Some(session_id.as_str()),
@@ -67,14 +67,17 @@ fn live_watcher_reports_the_phases_of_a_real_turn() {
 
     client
         .call(
-            "session.prompt",
+            "session/prompt",
             json!({
-                "sessionId": session_id,
-                "mode": "queue",
-                "content": [{ "type": "text", "text": PROBE_PROMPT }],
+                "request": {
+                    "requestId": uuid::Uuid::new_v4().to_string(),
+                    "sessionId": session_id,
+                    "mode": "queue",
+                    "content": [{ "type": "text", "text": PROBE_PROMPT }],
+                }
             }),
         )
-        .expect("session.prompt");
+        .expect("session/prompt");
 
     // The turn is in flight: the watcher must report *some* phase, and it must
     // be a working one — not the Idle default it would show if no frame landed.
@@ -130,7 +133,7 @@ fn live_watcher_reports_the_phases_of_a_real_turn() {
 #[ignore = "starts a real `dsh web`; run manually with --ignored"]
 fn live_unknown_session_has_no_phase() {
     let server = DshServer::start(&binary(), &std::env::temp_dir()).expect("start dsh web");
-    let watcher = DshEventWatcher::start(server.port());
+    let watcher = DshEventWatcher::start(server.port(), server.launch_token());
     std::thread::sleep(Duration::from_secs(2));
     assert_eq!(watcher.phase_of("session-does-not-exist"), None);
 }
@@ -162,24 +165,31 @@ fn live_scan_sessions_carries_the_pushed_phase() {
     // Drive the turn through *that* server: both downlinks are scoped to the
     // process that runs the turn, so a helper server's turn would be invisible
     // here (measured: an observer instance sees neither frames nor `running`).
-    let client = claw_fleet_core::dsh_client::DshClient::new(port).expect("client");
+    let launch_token = source
+        .server_launch_token()
+        .expect("a started server announced a token");
+    let client =
+        claw_fleet_core::dsh_client::DshClient::new(port, &launch_token).expect("client");
     let session_id = format!("session-{}", uuid::Uuid::new_v4());
     client
         .call(
-            "session.create",
-            json!({ "cwd": "/tmp", "sessionId": session_id }),
+            "session/create",
+            json!({ "request": { "cwd": "/tmp", "sessionId": session_id } }),
         )
-        .expect("session.create");
+        .expect("session/create");
     client
         .call(
-            "session.prompt",
+            "session/prompt",
             json!({
-                "sessionId": session_id,
-                "mode": "queue",
-                "content": [{ "type": "text", "text": PROBE_PROMPT }],
+                "request": {
+                    "requestId": uuid::Uuid::new_v4().to_string(),
+                    "sessionId": session_id,
+                    "mode": "queue",
+                    "content": [{ "type": "text", "text": PROBE_PROMPT }],
+                }
             }),
         )
-        .expect("session.prompt");
+        .expect("session/prompt");
 
     let overlaid = wait_for(Duration::from_secs(90), || {
         let found = source
