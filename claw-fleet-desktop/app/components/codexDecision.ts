@@ -15,12 +15,20 @@ import type {
 export function inlineCodexFleetAsk(
   session: SessionInfo | null,
   decisions: PendingDecision[],
+  records: DecisionHistoryRecord[] = [],
 ): FleetAskDecision | null {
   if (!session || session.agentSource !== "codex") return null;
+  const resolvedIds = new Set(
+    records
+      .filter((record) => record.kind === "fleet-ask" && record.sessionId === session.id)
+      .map((record) => record.id),
+  );
   return (
     decisions.find(
       (d): d is FleetAskDecision =>
-        d.kind === "fleet-ask" && d.request.sessionId === session.id,
+        d.kind === "fleet-ask"
+        && d.request.sessionId === session.id
+        && !resolvedIds.has(d.id),
     ) ?? null
   );
 }

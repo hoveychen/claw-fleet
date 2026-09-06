@@ -49,7 +49,7 @@ import { TokenSpendPanel } from "./TokenSpendPanel";
 import { CodexTokenPanel } from "./CodexTokenPanel";
 import { DshTokenPanel } from "./DshTokenPanel";
 import { tokenPanelForAgentSource } from "../modelChoices";
-import { inlineCodexFleetAsk } from "./codexDecision";
+import { inlineCodexFleetAsk, withCodexDecisionHistory } from "./codexDecision";
 import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -356,15 +356,6 @@ export function SessionDetail({
     [optimisticSends, realUserTexts],
   );
 
-  // Real transcript + not-yet-landed optimistic bubbles, appended at the end.
-  const displayedMessages = useMemo(
-    () =>
-      pendingOptimistic.length === 0
-        ? messages
-        : [...messages, ...pendingOptimistic.map(optimisticToMessage)],
-    [messages, pendingOptimistic],
-  );
-
   // Once a send has landed in the real transcript, prune it from state so the
   // list doesn't keep re-appending it (and the memo above stays cheap). Only
   // set state when something actually changed, to avoid a render loop.
@@ -407,9 +398,22 @@ export function SessionDetail({
   }, [session, sessions]);
   const preferredTitle = liveSession ? preferredSessionTitle(liveSession) : null;
   const pendingDecisions = useDecisionStore((s) => s.decisions);
+  const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
+  const timelineMessages = useMemo(
+    () => withCodexDecisionHistory(liveSession, messages, decisionRecords),
+    [liveSession, messages, decisionRecords],
+  );
+  // Durable transcript/history rows first; optimistic user bubbles always stay
+  // at the live edge and disappear once their real transcript row lands.
+  const displayedMessages = useMemo(
+    () => pendingOptimistic.length === 0
+      ? timelineMessages
+      : [...timelineMessages, ...pendingOptimistic.map(optimisticToMessage)],
+    [timelineMessages, pendingOptimistic],
+  );
   const inlineFleetAsk = useMemo(
-    () => inlineCodexFleetAsk(liveSession, pendingDecisions),
-    [liveSession, pendingDecisions],
+    () => inlineCodexFleetAsk(liveSession, pendingDecisions, decisionRecords),
+    [liveSession, pendingDecisions, decisionRecords],
   );
   const reasoningPercent =
     liveSession && liveSession.totalOutputTokens > 0
@@ -443,7 +447,6 @@ export function SessionDetail({
      behind one toggle and the row keeps only what names the session. Context %
      is the exception: see the render for why the warn state stays out. */
   const [metricsOpen, setMetricsOpen] = useState(false);
-  const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
   const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
 

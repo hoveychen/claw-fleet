@@ -57,6 +57,15 @@ describe("inlineCodexFleetAsk", () => {
     expect(inlineCodexFleetAsk(session("different-session", "codex"), [pending])).toBeNull();
     expect(inlineCodexFleetAsk(null, [pending])).toBeNull();
   });
+
+  it("hides a stale pending copy once the same decision is durable history", () => {
+    const pending = ask("ask-1", "codex-session");
+    expect(inlineCodexFleetAsk(
+      session("codex-session", "codex"),
+      [pending],
+      [historicalAsk("ask-1", "codex-session", "2026-09-06T12:00:01.000Z")],
+    )).toBeNull();
+  });
 });
 
 describe("withCodexDecisionHistory", () => {
