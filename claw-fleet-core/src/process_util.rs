@@ -101,8 +101,10 @@ pub fn gate_met(cmd: &str) -> bool {
 /// apply this to short-lived tool invocations (`which`, `git`, …): those
 /// *should* die with the caller.
 ///
-/// Fleet's own stop paths are unaffected: `interrupt_pid_impl` /
-/// `kill_pid_tree` signal explicit pids collected by ppid walk, not the group.
+/// Fleet's hard-stop path still walks explicit descendants. The graceful
+/// interrupt path uses this dedicated group as an additional ownership signal
+/// when cleaning up a tool that deliberately daemonized itself and left the
+/// parent/child tree before the click.
 pub fn detach_process_group(cmd: &mut Command) -> &mut Command {
     #[cfg(unix)]
     {

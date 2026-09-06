@@ -40,6 +40,38 @@ pub fn collect_process_tree(root_pid: u32) -> Vec<u32> {
     result
 }
 
+/// Members of a process group Fleet can prove is dedicated to `root_pid`.
+/// Session launch makes the agent a group leader (`pgid == pid`); refusing any
+/// other shape keeps the public interrupt entry point from sweeping the
+/// caller's terminal or another shared group when handed an arbitrary pid.
+#[cfg(unix)]
+fn collect_dedicated_process_group(root_pid: u32) -> Option<(libc::pid_t, Vec<u32>)> {
+    let pgid = unsafe { libc::getpgid(root_pid as libc::pid_t) };
+    if pgid < 0 || pgid != root_pid as libc::pid_t {
+        return None;
+    }
+
+    let output = std::process::Command::new("ps")
+        .args(["-A", "-o", "pid=,pgid="])
+        .output()
+        .ok()?;
+    let members = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let pid = parts.next()?.parse::<u32>().ok()?;
+            let member_pgid = parts.next()?.parse::<libc::pid_t>().ok()?;
+            (member_pgid == pgid).then_some(pid)
+        })
+        .collect();
+    Some((pgid, members))
+}
+
+#[cfg(unix)]
+fn process_still_in_group(pid: u32, pgid: libc::pid_t) -> bool {
+    unsafe { libc::getpgid(pid as libc::pid_t) == pgid }
+}
+
 /// Grace period before a SIGINT that nobody handled escalates to a tree kill.
 const INTERRUPT_ESCALATION: Duration = Duration::from_millis(5000);
 
@@ -74,9 +106,15 @@ pub fn interrupt_pid_with_grace(pid: u32, grace: Duration) -> Result<(), String>
         // Capture the tree BEFORE signalling: once the root exits, its children
         // are reparented to init and walking down from `pid` finds nothing.
         let tree = collect_process_tree(pid);
+        // `nohup tool &` may have been reparented before the user clicks
+        // interrupt, so it is absent from `tree`. Fleet-launched sessions own
+        // their process group; capture its members as the second ownership
+        // signal while the root is still alive and its pgid is unambiguous.
+        let process_group = collect_dedicated_process_group(pid);
         crate::log_debug(&format!(
-            "interrupt_pid: SIGINT to root {pid} (captured tree of {})",
-            tree.len()
+            "interrupt_pid: SIGINT to root {pid} (captured tree of {}, dedicated group of {})",
+            tree.len(),
+            process_group.as_ref().map_or(0, |(_, members)| members.len())
         ));
         if unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) } != 0 {
             return Err(format!("no such process: {pid}"));
@@ -85,36 +123,56 @@ pub fn interrupt_pid_with_grace(pid: u32, grace: Duration) -> Result<(), String>
         std::thread::spawn(move || {
             std::thread::sleep(grace);
 
-            if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+            let root_alive = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
+            if root_alive {
                 crate::log_debug(&format!(
                     "interrupt_pid: {pid} still alive {grace:?} after SIGINT; escalating to tree kill"
                 ));
                 let _ = kill_pid_impl(pid);
-                return;
             }
 
-            // The root is gone. A headless CLI reaped its own children; an
-            // interactive one abandoned them. Sweep the survivors.
+            // A headless CLI normally reaps its children; an interactive one
+            // may abandon them. A daemonized tool can have left the tree even
+            // before SIGINT. Sweep both kinds of owned survivors.
             //
-            // Every pid here was alive moments ago, so reuse inside this window
-            // is unlikely — the same bet kill_pid_tree's delayed SIGKILL makes.
-            let orphans: Vec<u32> = tree
+            // Tree members use the existing short-window pid-reuse assumption.
+            // Group-only members get a stronger check before every signal: the
+            // pid must still belong to the exact dedicated pgid captured above.
+            let mut survivors: Vec<u32> = tree
                 .iter()
                 .copied()
                 .filter(|&p| p != pid && unsafe { libc::kill(p as libc::pid_t, 0) } == 0)
                 .collect();
-            if orphans.is_empty() {
+            if let Some((pgid, members)) = &process_group {
+                survivors.extend(
+                    members.iter().copied()
+                        .filter(|&p| p != pid && process_still_in_group(p, *pgid)),
+                );
+            }
+            survivors.sort_unstable();
+            survivors.dedup();
+            if survivors.is_empty() {
                 return;
             }
             crate::log_debug(&format!(
-                "interrupt_pid: root {pid} exited but orphaned {orphans:?}; sweeping"
+                "interrupt_pid: root {pid} left owned survivors {survivors:?}; sweeping"
             ));
-            for &p in orphans.iter().rev() {
-                unsafe { libc::kill(p as libc::pid_t, libc::SIGTERM) };
+            for &p in survivors.iter().rev() {
+                let group_owned = process_group.as_ref().is_some_and(|(pgid, members)| {
+                    members.contains(&p) && process_still_in_group(p, *pgid)
+                });
+                if group_owned || tree.contains(&p) {
+                    unsafe { libc::kill(p as libc::pid_t, libc::SIGTERM) };
+                }
             }
             std::thread::sleep(Duration::from_millis(2000));
-            for &p in orphans.iter().rev() {
-                if unsafe { libc::kill(p as libc::pid_t, 0) } == 0 {
+            for &p in survivors.iter().rev() {
+                let group_owned = process_group.as_ref().is_some_and(|(pgid, members)| {
+                    members.contains(&p) && process_still_in_group(p, *pgid)
+                });
+                if (group_owned || tree.contains(&p))
+                    && unsafe { libc::kill(p as libc::pid_t, 0) } == 0
+                {
                     unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
                 }
             }
@@ -537,6 +595,7 @@ mod interrupt_tests {
 #[cfg(all(test, unix))]
 mod interrupt_orphan_tests {
     use super::*;
+    use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
     fn alive(pattern: &str) -> bool {
@@ -574,5 +633,55 @@ mod interrupt_orphan_tests {
         Command::new("pkill").args(["-9", "-f", marker]).output().ok();
 
         assert!(!leaked, "interrupt orphaned the tool child after the root exited");
+    }
+
+    /// A tool may deliberately daemonize work with `nohup ... &`. By the time
+    /// the user interrupts the agent, that process is no longer below the
+    /// agent in the parent/child tree, but it still belongs to the dedicated
+    /// process group Fleet created for the session. Interrupting the turn must
+    /// not leave that owned background work running.
+    #[test]
+    fn interrupt_reaps_detached_member_of_the_session_process_group() {
+        let pid_file = std::env::temp_dir().join(format!(
+            "fleet-interrupt-detached-{}-{}.pid",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let script = format!(
+            "sh -c 'sleep 5052 & echo $! > {}'; trap 'exit 0' INT; while :; do sleep 1; done",
+            pid_file.display()
+        );
+        let mut child = Command::new("sh");
+        child
+            .args(["-c", &script])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        child.process_group(0);
+        let mut child = child.spawn().expect("spawn");
+
+        let detached_pid = (0..20)
+            .find_map(|_| {
+                std::thread::sleep(Duration::from_millis(50));
+                std::fs::read_to_string(&pid_file)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u32>().ok())
+            })
+            .expect("detached pid file");
+        assert!(
+            !collect_process_tree(child.id()).contains(&detached_pid),
+            "precondition: background process must already be detached from the tree"
+        );
+
+        interrupt_pid_with_grace(child.id(), Duration::from_millis(300)).expect("interrupt");
+        child.wait().expect("root must exit after interrupt escalation");
+
+        std::thread::sleep(Duration::from_millis(1200));
+        let leaked = unsafe { libc::kill(detached_pid as libc::pid_t, 0) } == 0;
+        if leaked {
+            unsafe { libc::kill(detached_pid as libc::pid_t, libc::SIGKILL) };
+        }
+        std::fs::remove_file(pid_file).ok();
+
+        assert!(!leaked, "interrupt left detached process-group member running");
     }
 }
