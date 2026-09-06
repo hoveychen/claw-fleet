@@ -482,7 +482,7 @@ pub fn resume_session(
 /// "claude"; the config name "claude-code" → its api name "claude" (the resume
 /// path receives `SessionInfo::agent_source`, which uses config names). Other
 /// values (e.g. "codex") pass through unchanged.
-fn normalize_tool(tool: &str) -> &str {
+pub(crate) fn normalize_tool(tool: &str) -> &str {
     match tool.trim() {
         "" | "claude-code" => "claude",
         t => t,

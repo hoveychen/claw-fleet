@@ -463,6 +463,24 @@ fn record_link_in(
     fs::write(&path, json).map_err(|e| format!("write chain: {e}"))
 }
 
+/// Remove one `from -> to` link from a chain file (best effort — the callers
+/// are already on an error path or fixing up after a spawn). A chain left with
+/// no links is deleted rather than kept as an empty shell.
+fn unlink_in(dir: &Path, chain_id: &str, from_session_id: &str, to_session_id: &str) {
+    let path = dir.join(format!("{chain_id}.json"));
+    let Some(mut chain) = read_chain_file(&path) else { return };
+    chain
+        .links
+        .retain(|l| !(l.from_session_id == from_session_id && l.to_session_id == to_session_id));
+    if chain.links.is_empty() {
+        let _ = fs::remove_file(&path);
+        return;
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&chain) {
+        let _ = fs::write(&path, json);
+    }
+}
+
 fn read_chain_file(path: &Path) -> Option<HandoffChain> {
     let s = fs::read_to_string(path).ok()?;
     serde_json::from_str(&s).ok()
@@ -702,6 +720,7 @@ fn spawn_successor_by_source(
     effort: Option<&str>,
     permission_mode: Option<&str>,
     entrypoint: &str,
+    session_id: Option<&str>,
 ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
     crate::agent_source::spawn_session(
         agent_source,
@@ -711,9 +730,9 @@ fn spawn_successor_by_source(
             model: model.map(str::to_string),
             effort: effort.map(str::to_string),
             permission_mode: permission_mode.map(str::to_string),
-            session_id: None,
+            session_id: session_id.map(str::to_string),
             entrypoint: entrypoint.to_string(),
-        images: Vec::new(),
+            images: Vec::new(),
         },
     )
 }
@@ -740,6 +759,7 @@ where
         Option<&str>,
         Option<&str>,
         &str,
+        Option<&str>,
     ) -> Result<crate::session_launch::SpawnSessionResponse, String>,
 {
     let Some(pending) = take_pending_in(pending_dir, session_id, now) else {
@@ -763,11 +783,23 @@ where
         }
     }
     let prompt = compose_successor_prompt(&pending, prior.as_ref());
+    // Link before spawn when the id is ours to assign. The successor's first
+    // act is its SessionStart hook, and Fleet's notes-hint hook answers "whose
+    // notes may this session read?" by finding the session on a chain — so the
+    // link must be on disk before the child can possibly look. Claude takes a
+    // caller-assigned `--session-id`; Codex mints its own thread id after
+    // launch, so for Codex the link can only follow the spawn (its rollout has
+    // no SessionStart hook to race anyway).
+    let pre_assigned = (crate::agent_source::normalize_tool(&pending.agent_source) == "claude")
+        .then(|| uuid::Uuid::new_v4().to_string());
+    if let Some(id) = &pre_assigned {
+        record_link_in(chain_dir, &pending, id, now)?;
+    }
     // The relay continues the predecessor's work, so it continues on the
     // predecessor's model and effort. Falling through to the CLI default here
     // would silently switch models mid-plan. `permission_mode` is deliberately
     // left to the default: a relay should not inherit an elevated mode.
-    let resp = spawn(
+    let spawned = spawn(
         &pending.agent_source,
         &pending.workspace_path,
         &prompt,
@@ -775,14 +807,35 @@ where
         pending.effort.as_deref(),
         None,
         HANDOFF_ENTRYPOINT,
-    )?;
-    let to_sid = resp
-        .session_id
-        .ok_or_else(|| "spawn returned no session id".to_string())?;
+        pre_assigned.as_deref(),
+    )
+    .and_then(|resp| {
+        resp.session_id
+            .ok_or_else(|| "spawn returned no session id".to_string())
+    });
+    let to_sid = match spawned {
+        Ok(id) => id,
+        Err(e) => {
+            // A link to a successor that never started would make the
+            // consume-side backstop refuse to relay this session ever again.
+            if let Some(id) = &pre_assigned {
+                unlink_in(chain_dir, &pending.chain_id, &pending.from_session_id, id);
+            }
+            return Err(e);
+        }
+    };
     if let Some(dir) = progress_dir {
         attribute_successor_in(dir, &pending, &to_sid);
     }
-    record_link_in(chain_dir, &pending, &to_sid, now)?;
+    match pre_assigned.as_deref() {
+        Some(id) if id == to_sid => {}
+        Some(id) => {
+            // The source ignored the pre-assigned id; keep the chain truthful.
+            unlink_in(chain_dir, &pending.chain_id, &pending.from_session_id, id);
+            record_link_in(chain_dir, &pending, &to_sid, now)?;
+        }
+        None => record_link_in(chain_dir, &pending, &to_sid, now)?,
+    }
     crate::log_debug(&format!(
         "handoff: relayed session {} -> {} (chain {}, hop {} -> {})",
         session_id,
@@ -938,7 +991,7 @@ mod tests {
             None,
             "s1",
             1001,
-            |agent_source, _ws, _prompt, model, effort, _perm, entrypoint| {
+            |agent_source, _ws, _prompt, model, effort, _perm, entrypoint, _sid| {
                 assert_eq!(entrypoint, HANDOFF_ENTRYPOINT);
                 let mut s = spy.borrow_mut();
                 s.agent_source = Some(agent_source.to_string());
@@ -986,7 +1039,7 @@ mod tests {
             None,
             "t1",
             1001,
-            |agent_source, _ws, _prompt, _model, _effort, _perm, _entrypoint| {
+            |agent_source, _ws, _prompt, _model, _effort, _perm, _entrypoint, _sid| {
                 spy.borrow_mut().agent_source = Some(agent_source.to_string());
                 Ok(crate::session_launch::SpawnSessionResponse {
                     pid: 7,
@@ -997,6 +1050,96 @@ mod tests {
         .unwrap();
 
         assert_eq!(spy.into_inner().agent_source.as_deref(), Some("codex"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The successor's very first act is its `SessionStart` hook, and Fleet's
+    /// notes-hint hook answers "whose notes may this session read?" by looking
+    /// the session up on a chain. If the link is written only *after* the
+    /// detached spawn returns, the hook races the link write — it wins on
+    /// timing today, but nothing guarantees it. For a Claude successor the id
+    /// is ours to assign, so the link must be on disk before the spawn call.
+    #[test]
+    fn claude_successor_link_is_on_disk_before_spawn() {
+        let (root, pdir, cdir) = fresh_dirs("link-first");
+        register_simple(&pdir, &cdir, "s1", "note", 1000).unwrap();
+
+        let seen = std::cell::RefCell::new(None::<String>);
+        let to = consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            "s1",
+            1001,
+            |_src, _w, _p, _m, _e, _pm, _ep, sid| {
+                let sid = sid.expect("a Claude successor gets a pre-assigned id");
+                assert!(uuid::Uuid::parse_str(sid).is_ok(), "pre-assigned id is a uuid: {sid}");
+                let chain = chain_containing_in(&cdir, "s1")
+                    .expect("chain must already exist when the spawner runs");
+                assert_eq!(
+                    successor_of(&chain, "s1").as_deref(),
+                    Some(sid),
+                    "link s1 -> successor must be on disk before spawn"
+                );
+                *seen.borrow_mut() = Some(sid.to_string());
+                Ok(crate::session_launch::SpawnSessionResponse {
+                    pid: 1,
+                    session_id: Some(sid.to_string()),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(to, seen.into_inner(), "consume returns the pre-assigned id");
+        let chain = chain_containing_in(&cdir, "s1").unwrap();
+        assert_eq!(chain.links.len(), 1, "exactly one link, not a pre-link plus a post-link");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// If the spawn itself fails, the pre-written link must be rolled back —
+    /// otherwise the chain claims a successor that never existed, and the
+    /// consume-side backstop would refuse to relay s1 ever again.
+    #[test]
+    fn failed_spawn_rolls_the_pre_written_link_back() {
+        let (root, pdir, cdir) = fresh_dirs("link-rollback");
+        register_simple(&pdir, &cdir, "s1", "note", 1000).unwrap();
+
+        let err = consume_and_spawn_in(&pdir, &cdir, None, "s1", 1001, |_, _, _, _, _, _, _, _| {
+            Err("claude binary missing".to_string())
+        })
+        .unwrap_err();
+        assert!(err.contains("claude binary missing"));
+        assert!(
+            chain_containing_in(&cdir, "s1")
+                .and_then(|c| successor_of(&c, "s1"))
+                .is_none(),
+            "no successor link may survive a failed spawn"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Codex mints its own thread id after launch, so no id can be pre-assigned:
+    /// the spawner gets `None` and the link is recorded from the id it returns,
+    /// exactly as before.
+    #[test]
+    fn codex_successor_is_linked_after_spawn_from_the_returned_id() {
+        let (root, pdir, cdir) = fresh_dirs("codex-link-after");
+        register_in(
+            &pdir, &cdir, "t1", "/ws", None, "note", None, None, None, None, "codex", 1000,
+        )
+        .unwrap();
+        let to = consume_and_spawn_in(&pdir, &cdir, None, "t1", 1001, |_, _, _, _, _, _, _, sid| {
+            assert!(sid.is_none(), "Codex cannot take a pre-assigned id");
+            assert!(chain_containing_in(&cdir, "t1").is_none(), "nothing linked before spawn");
+            Ok(crate::session_launch::SpawnSessionResponse {
+                pid: 7,
+                session_id: Some("t2".to_string()),
+            })
+        })
+        .unwrap();
+        assert_eq!(to.as_deref(), Some("t2"));
+        let chain = chain_containing_in(&cdir, "t1").unwrap();
+        assert_eq!(successor_of(&chain, "t1").as_deref(), Some("t2"));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1030,7 +1173,7 @@ mod tests {
             None,
             "s1",
             1001,
-            |_src, _w, _p, model, effort, _pm, _e| {
+            |_src, _w, _p, model, effort, _pm, _e, _sid| {
                 let mut s = spy.borrow_mut();
                 s.model = model.map(str::to_string);
                 s.effort = effort.map(str::to_string);
@@ -1258,7 +1401,7 @@ mod tests {
         record_link_in(&cdir, &rec, "s2", 1001).unwrap();
 
         let spawned = std::cell::Cell::new(false);
-        let out = consume_and_spawn_in(&pdir, &cdir, None, "s1", 1002, |_, _, _, _, _, _, _| {
+        let out = consume_and_spawn_in(&pdir, &cdir, None, "s1", 1002, |_, _, _, _, _, _, _, _| {
             spawned.set(true);
             Ok(crate::session_launch::SpawnSessionResponse {
                 pid: 1,
