@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODEX_MODEL_CHOICES,
   carryPromptToDevice,
+  codexEffortChoices,
   defaultWorkspace,
   recentWorkspaces,
 } from "./Composer";
@@ -29,6 +30,17 @@ function session(
 describe("Codex model choices", () => {
   it("includes GPT-6 Astra", () => {
     expect(CODEX_MODEL_CHOICES).toContainEqual(["gpt-6-astra", "GPT-6 Astra"]);
+  });
+
+  it("uses Astra's supported effort ladder", () => {
+    expect(codexEffortChoices("gpt-6-astra").map(([value]) => value)).toEqual([
+      "",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
   });
 });
 
