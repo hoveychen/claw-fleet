@@ -31,7 +31,11 @@ use crate::log_debug;
 ///   5 — added the `line_no` column (1-based line of the record in its jsonl)
 ///       so a hit can be read back as one item (`search_scoped` / the
 ///       `fleet__history` tool); v4 rows cannot be located.
-const SCHEMA_VERSION: i64 = 5;
+///   6 — Codex rollout `response_item` lines are indexed (user/assistant
+///       message text, tool-call names, reasoning summaries). Under v5 every
+///       Codex line extracted to "" and was skipped, so Codex sessions have no
+///       rows at all and must be rebuilt to become searchable.
+const SCHEMA_VERSION: i64 = 6;
 
 // ── SearchHit ────────────────────────────────────────────────────────────────
 
@@ -463,6 +467,11 @@ pub(crate) fn extract_searchable_text(val: &Value) -> String {
         return val["aiTitle"].as_str().unwrap_or("").to_string();
     }
 
+    // Codex rollout line: `{"type":"response_item","payload":{"type":…}}`.
+    if msg_type == "response_item" {
+        return extract_codex_item_text(&val["payload"]);
+    }
+
     // Otherwise only index user and assistant messages.
     if msg_type != "user" && msg_type != "assistant" {
         return String::new();
@@ -504,6 +513,58 @@ pub(crate) fn extract_searchable_text(val: &Value) -> String {
     }
 
     parts.join(" ")
+}
+
+/// Searchable text of one Codex `response_item` payload — the same policy as
+/// the Claude branch above: conversation text, tool *names*, reasoning
+/// summaries. Developer messages are Codex-/Fleet-injected instructions, not
+/// conversation, and tool outputs are read back via `session_history::read`
+/// rather than indexed.
+pub(crate) fn extract_codex_item_text(payload: &Value) -> String {
+    match payload["type"].as_str() {
+        Some("message") => {
+            let role = payload["role"].as_str().unwrap_or("");
+            if role != "user" && role != "assistant" {
+                return String::new();
+            }
+            codex_content_text(&payload["content"])
+        }
+        Some("reasoning") => payload["summary"]
+            .as_array()
+            .map(|parts| {
+                parts
+                    .iter()
+                    .filter_map(|p| p["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default(),
+        Some("function_call") | Some("custom_tool_call") => {
+            payload["name"].as_str().unwrap_or("").to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+/// Text of a Codex content array (`input_text` / `output_text` blocks) or a
+/// bare string, as both message content and tool outputs use.
+pub(crate) fn codex_content_text(content: &Value) -> String {
+    if let Some(s) = content.as_str() {
+        return s.to_string();
+    }
+    content
+        .as_array()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|b| match b["type"].as_str() {
+                    Some("input_text") | Some("output_text") | Some("text") => b["text"].as_str(),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default()
 }
 
 /// True for scripts that `unicode61` does not segment: it treats a whole run of
@@ -1097,6 +1158,60 @@ mod tests {
 
         let _ = fs::remove_file(&own);
         let _ = fs::remove_file(&other);
+        let _ = fs::remove_file(&db);
+    }
+
+    /// Codex rollouts are a different shape from Claude transcripts: every model
+    /// item is a `response_item` whose `payload.type` says what it is. The
+    /// index must read user/assistant messages, tool names and reasoning
+    /// summaries out of them — and must NOT index developer messages (they are
+    /// Fleet/Codex-injected instructions, not conversation) or the event /
+    /// token-usage bookkeeping lines. Before this, `extract_searchable_text`
+    /// returned "" for every Codex line, so Codex sessions were silently
+    /// unsearchable in the desktop search box too.
+    #[test]
+    fn codex_rollout_items_are_indexed() {
+        let dir = std::env::temp_dir().join("fleet-search-codex-test");
+        let _ = fs::create_dir_all(&dir);
+        let jsonl = dir.join("rollout.jsonl");
+        fs::write(
+            &jsonl,
+            concat!(
+                r#"{"type":"session_meta","payload":{"id":"t1","cwd":"/ws"}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"zqdev injected skills instructions"}]}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"zquser please fix the 分词器"}]}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"zqreason planning the fix"}],"encrypted_content":"gAAAA"}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"zqassistant on it"}]}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"custom_tool_call","name":"zqexec","input":"const x = 1;","call_id":"c1"}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c1","output":[{"type":"input_text","text":"zqoutput secret build log"}]}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"function_call","name":"zqwait","arguments":"{\"cell_id\":\"1\"}","call_id":"c2"}}"#, "\n",
+                r#"{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"zqevent done"}}"#, "\n",
+                r#"{"type":"token_usage_record","payload":{"thread_id":"t1"}}"#, "\n",
+            ),
+        )
+        .unwrap();
+
+        let db = dir.join("codex.db");
+        let _ = fs::remove_file(&db);
+        let idx = SearchIndex::open_at(&db).unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "t1").unwrap();
+        let paths = vec![jsonl.to_str().unwrap().to_string()];
+        let line_of = |q: &str| -> Vec<i64> {
+            idx.search_scoped(&paths, q, 10).unwrap().iter().map(|h| h.line_no).collect()
+        };
+
+        assert_eq!(line_of("zquser"), vec![3], "user input_text must be indexed");
+        assert_eq!(line_of("分词器"), vec![3], "CJK inside a Codex user message must be indexed");
+        assert_eq!(line_of("zqassistant"), vec![5], "assistant output_text must be indexed");
+        assert_eq!(line_of("zqreason"), vec![4], "reasoning summary must be indexed");
+        assert_eq!(line_of("zqexec"), vec![6], "custom_tool_call name must be indexed");
+        assert_eq!(line_of("zqwait"), vec![8], "function_call name must be indexed");
+        // Same policy as Claude: tool outputs are read via `read`, not indexed.
+        assert!(line_of("zqoutput").is_empty(), "tool output must not be indexed");
+        assert!(line_of("zqdev").is_empty(), "developer (injected) messages must not be indexed");
+        assert!(line_of("zqevent").is_empty(), "event_msg bookkeeping must not be indexed");
+
+        let _ = fs::remove_file(&jsonl);
         let _ = fs::remove_file(&db);
     }
 
