@@ -51,6 +51,9 @@ export interface CodexUsageItem {
   primary?: CodexRateLimitWindow | null;
   secondary?: CodexRateLimitWindow | null;
   credits?: { hasCredits: boolean; unlimited: boolean; balance?: string | null } | null;
+  /** Signed-in ChatGPT account, the Codex parallel of AccountInfoData.email.
+   *  Absent on API-key auth (no id_token to read it from). */
+  email?: string | null;
   /** Where the numbers came from: "foxy-switcher" (read from the local foxy
    *  daemon) or "codex-app-server" (queried from codex itself). The codex
    *  parallel of AccountInfoData.usage_source. Optional so payloads from an

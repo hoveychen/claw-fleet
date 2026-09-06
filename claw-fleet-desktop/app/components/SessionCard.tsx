@@ -387,6 +387,22 @@ export function DshIcon() {
   );
 }
 
+/** foxy-switcher's fox head — marks a panel whose numbers were served by the
+ *  local foxy daemon rather than the provider's own API. Drawn here (not
+ *  imported) because foxy ships no logo asset; same 11px/currentColor
+ *  conventions as the provider marks above. */
+export function FoxyIcon() {
+  return (
+    <svg viewBox="0 0 100 100" width="11" height="11" fill="currentColor" aria-hidden>
+      <path
+        fillRule="evenodd"
+        d="M6 4 L34 27 C40 25 60 25 66 27 L94 4 L88 41 C94 51 84 58 73 62 C67 76 60 87 50 96 C40 87 33 76 27 62 C16 58 6 51 12 41 Z M31 44 L45 50 L31 56 Z M69 44 L55 50 L69 56 Z M50 70 L57 77 L50 83 L43 77 Z"
+        opacity="0.85"
+      />
+    </svg>
+  );
+}
+
 export function AgentSourceIcon({ source }: { source: string }) {
   switch (source) {
     case "claude-code":
