@@ -188,12 +188,16 @@ export class SpeechAsr {
         soundChannel: CHANNEL,
         sampleBit: SAMPLE_BIT,
       };
-      // recognitionMode 0 = 引擎自采麦克风。vadEnd 是「静默多久算说完」——
-      // 3 秒对着手机想下一句话是常事，短了会把一句话切两半。
+      // recognitionMode 0 = 引擎自采麦克风。vadEnd 是「静默多久算说完」。
+      //
+      // 5 秒而不是 3 秒：官方按场景给的建议就是命令词 2 秒、**听写 5 秒**，而
+      // Fleet 的语音是听写 —— 对着手机想下一句话停三秒是常事，短了引擎就自己
+      // 收工，用户接着说的那半段根本没进这次会话。宁可多等两秒（用户随时可以
+      // 按停止），也不要把一段话拦腰截断。
       const extra: Record<string, Object> = {
         'recognitionMode': 0,
         'vadBegin': 2000,
-        'vadEnd': 3000,
+        'vadEnd': 5000,
         'maxAudioDuration': 60000,
       };
       const startParams: speechRecognizer.StartParams = {
