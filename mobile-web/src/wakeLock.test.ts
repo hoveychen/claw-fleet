@@ -154,3 +154,73 @@ describe("wakeLock", () => {
     expect(slow.release).toHaveBeenCalledTimes(1);
   });
 });
+
+// 录音期间的临时持锁：不改用户的常亮开关，但只要还有人 hold 着，就得真持着锁。
+// 这是「说到一半手机自动息屏，识别被打断」的修复面。
+describe("holdWakeLock", () => {
+  beforeEach(() => {
+    installEnv();
+  });
+
+  it("开关关着时 hold 也真申请锁，释放后放掉", async () => {
+    const { holdWakeLock, getWakeLockEnabled } = await import("./wakeLock");
+    const release = holdWakeLock();
+    await flush();
+    expect(requestMock).toHaveBeenCalledWith("screen");
+    // 临时持锁不该把用户的开关掰开——录完要回到他自己的设置。
+    expect(getWakeLockEnabled()).toBe(false);
+    release();
+    await flush();
+    expect(sentinels[0].release).toHaveBeenCalledTimes(1);
+  });
+
+  it("多个 hold 引用计数：放掉一个还剩一个时不松锁", async () => {
+    const { holdWakeLock } = await import("./wakeLock");
+    const a = holdWakeLock();
+    const b = holdWakeLock();
+    await flush();
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    a();
+    await flush();
+    expect(sentinels[0].release).not.toHaveBeenCalled();
+    b();
+    await flush();
+    expect(sentinels[0].release).toHaveBeenCalledTimes(1);
+  });
+
+  it("同一个 hold 重复释放只算一次", async () => {
+    const { holdWakeLock } = await import("./wakeLock");
+    const a = holdWakeLock();
+    const b = holdWakeLock();
+    await flush();
+    a();
+    a();
+    await flush();
+    // 第二次 a() 不该把 b 的那一份也抵消掉。
+    expect(sentinels[0].release).not.toHaveBeenCalled();
+    b();
+    await flush();
+    expect(sentinels[0].release).toHaveBeenCalledTimes(1);
+  });
+
+  it("用户开关开着时，释放 hold 不会把锁一起放掉", async () => {
+    const { holdWakeLock, setWakeLockEnabled } = await import("./wakeLock");
+    setWakeLockEnabled(true);
+    await flush();
+    const release = holdWakeLock();
+    await flush();
+    release();
+    await flush();
+    expect(sentinels[0].release).not.toHaveBeenCalled();
+  });
+
+  it("hold 期间系统在后台放掉了锁，回前台重新拿", async () => {
+    const { holdWakeLock } = await import("./wakeLock");
+    holdWakeLock();
+    await flush();
+    sentinels[0]._fireRelease();
+    for (const fn of visibilityListeners) fn();
+    await flush();
+    expect(requestMock).toHaveBeenCalledTimes(2);
+  });
+});
