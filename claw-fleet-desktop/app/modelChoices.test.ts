@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODEX_MODEL_CHOICES,
   agentToolsForSources,
+  codexEffortChoices,
   codexProfileChoices,
   toolForAgentSource,
   tokenPanelForAgentSource,
@@ -63,6 +64,27 @@ describe("codexProfileChoices", () => {
       expect(c.value.startsWith("profile:")).toBe(false);
       expect(c.value).not.toContain("/");
     }
+  });
+});
+
+describe("codexEffortChoices", () => {
+  it("uses Astra's supported effort ladder", () => {
+    expect(codexEffortChoices("gpt-6-astra")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+  });
+
+  it("keeps the legacy Codex effort ladder for other models", () => {
+    expect(codexEffortChoices("gpt-5.6-sol")).toEqual([
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
   });
 });
 

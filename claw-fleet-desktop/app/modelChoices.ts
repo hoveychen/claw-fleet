@@ -72,6 +72,13 @@ export function codexProfileChoices(
 // Claude's --effort scale (no "xhigh"/"max"); Codex adds "minimal".
 export const CODEX_EFFORT_CHOICES: string[] = ["minimal", "low", "medium", "high"];
 
+/** GPT-6 Astra rejects `minimal` and adds the deeper xhigh/max levels. */
+export function codexEffortChoices(model: string): string[] {
+  return model === "gpt-6-astra"
+    ? ["low", "medium", "high", "xhigh", "max"]
+    : CODEX_EFFORT_CHOICES;
+}
+
 // ── dsh model catalogue → menu ───────────────────────────────────────────────
 //
 // dsh is the one agent whose model list is not curated by Fleet: it publishes

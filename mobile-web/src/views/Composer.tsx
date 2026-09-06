@@ -66,6 +66,19 @@ const CODEX_EFFORT_CHOICES: Array<[string, string]> = [
   ["high", "high"],
 ];
 
+export function codexEffortChoices(model: string): Array<[string, string]> {
+  return model === "gpt-6-astra"
+    ? [
+        ["", "默认努力度"],
+        ["low", "low"],
+        ["medium", "medium"],
+        ["high", "high"],
+        ["xhigh", "xhigh"],
+        ["max", "max"],
+      ]
+    : CODEX_EFFORT_CHOICES;
+}
+
 const PERMISSION_LABEL: Record<string, string> = {
   acceptEdits: "自动接受编辑",
   plan: "计划模式",
@@ -340,14 +353,21 @@ function OptionSelects({
         ...dshEffort.efforts,
       ]
     : isCodex
-      ? CODEX_EFFORT_CHOICES
+      ? codexEffortChoices(model)
       : EFFORT_CHOICES;
   return (
     <div className={styles.optionRow}>
       <select
         className={styles.optionSelect}
         value={model}
-        onChange={(e) => onChange({ model: e.target.value })}
+        onChange={(e) => {
+          const nextModel = e.target.value;
+          const supportedEfforts = codexEffortChoices(nextModel).map(([value]) => value);
+          onChange({
+            model: nextModel,
+            ...(isCodex && !supportedEfforts.includes(effort) ? { effort: "" } : {}),
+          });
+        }}
       >
         {isDsh ? (
           <>
