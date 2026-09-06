@@ -85,6 +85,7 @@ import { RepoView } from "./views/RepoView";
 import { RepoDetailView } from "./views/RepoDetailView";
 import { TerminalView, type TerminalWorkspace } from "./views/TerminalView";
 import { SessionDetailView } from "./views/SessionDetailView";
+import { sessionDetailKey } from "./sessionDetailKey";
 import { TasksView } from "./views/TasksView";
 import { UsageView } from "./views/UsageView";
 import { WikiView } from "./views/WikiView";
@@ -1104,6 +1105,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       ))}
       {detailSession && (
         <SessionDetailView
+          key={sessionDetailKey(detailSession.deviceId, detailSession.id)}
           session={detailSession}
           // 详情页解析子代理/父会话都按 id 找,所以只给它**这条会话所属那一台**的
           // 列表 —— 混进别台的会话只会让它按同名 id 找到一条自己拉不动的记录。
