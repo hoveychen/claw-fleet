@@ -619,10 +619,11 @@ provider,会话就留在 harness 自身配置的模型上。\n\
 | Opus 5 | `claude-opus-5` | 1M | $5 / $25 | 默认主力,自主 agentic / 编码 / 长程任务 |\n\
 | Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 | 近 Opus 编码、成本更低;并行 subagent 首选 |\n\
 | Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | 最快最便宜;分类/抽取/机械活 |\n\
+| GPT-6 Astra | `gpt-6-astra` | 1.05M | ChatGPT 套餐配额 | Codex 最强端到端模型;需账号已开放 |\n\
 | Sol / Terra / Luna | `gpt-5.6-sol` / `-terra` / `-luna` | — | 走 ChatGPT 套餐配额 | Codex 侧强 / 中 / 快三档 |\n\
 \n\
 Claude effort:`low`/`medium`/`high`/`xhigh`/`max`,`xhigh` 是编码/agentic 最佳档;\
-Codex effort 只有 `minimal`/`low`/`medium`/`high`。\n\
+Astra effort 是 `low`/`medium`/`high`/`xhigh`/`max`;其余 Codex 模型是 `minimal`/`low`/`medium`/`high`。\n\
 \n\
 ## 怎么挑\n\
 \n\
@@ -654,10 +655,12 @@ would be inventing one. Read that config when you need to know; don't guess.\n\
 | Opus 5 | `claude-opus-5` | 1M | $5 / $25 | Default workhorse: autonomous agentic / coding / long-horizon |\n\
 | Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 | Near-Opus coding at lower cost; value pick for parallel work |\n\
 | Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | Fastest / cheapest; classification, extraction, mechanical work |\n\
+| GPT-6 Astra | `gpt-6-astra` | 1.05M | ChatGPT-plan quota | Codex's most capable end-to-end model; account access required |\n\
 | Sol / Terra / Luna | `gpt-5.6-sol` / `-terra` / `-luna` | — | ChatGPT-plan quota | Codex's strong / balanced / fast tiers |\n\
 \n\
 Claude effort: `low`/`medium`/`high`/`xhigh`/`max` (`xhigh` is best for coding \
-and agentic work); Codex effort is only `minimal`/`low`/`medium`/`high`.\n\
+and agentic work). Astra supports `low`/`medium`/`high`/`xhigh`/`max`; other \
+Codex models use `minimal`/`low`/`medium`/`high`.\n\
 \n\
 ## How to pick\n\
 \n\
@@ -1143,7 +1146,7 @@ mod tests {
              prices dsh does not fix"
         );
         assert!(
-            model.contains("claude-opus-5"),
+            model.contains("claude-opus-5") && model.contains("gpt-6-astra"),
             "model block must still cover the tiers a dsh session spawns Fleet work with"
         );
     }

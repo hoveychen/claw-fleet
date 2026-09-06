@@ -24,6 +24,7 @@ export const CLAUDE_EFFORT_CHOICES: string[] = ["low", "medium", "high", "xhigh"
 // profile files at runtime (see `codexProfileChoices`). Hardcoding them would
 // offer models whose provider block may not exist on the machine running Codex.
 export const CODEX_MODEL_CHOICES: { value: string; label: string }[] = [
+  { value: "gpt-6-astra", label: "GPT-6 Astra" },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
@@ -70,6 +71,13 @@ export function codexProfileChoices(
 // Codex reasoning effort (`-c model_reasoning_effort=<level>`). Distinct from
 // Claude's --effort scale (no "xhigh"/"max"); Codex adds "minimal".
 export const CODEX_EFFORT_CHOICES: string[] = ["minimal", "low", "medium", "high"];
+
+/** GPT-6 Astra rejects `minimal` and adds the deeper xhigh/max levels. */
+export function codexEffortChoices(model: string): string[] {
+  return model === "gpt-6-astra"
+    ? ["low", "medium", "high", "xhigh", "max"]
+    : CODEX_EFFORT_CHOICES;
+}
 
 // ── dsh model catalogue → menu ───────────────────────────────────────────────
 //

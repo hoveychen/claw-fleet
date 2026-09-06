@@ -7,8 +7,8 @@ import {
   CLAUDE_EFFORT_CHOICES,
   CLAUDE_MODEL_CHOICES,
   CLAUDE_PERMISSION_MODE_CHOICES,
-  CODEX_EFFORT_CHOICES,
   CODEX_MODEL_CHOICES,
+  codexEffortChoices,
   codexProfileChoices,
   dshFindPick,
   dshModelMenu,
@@ -165,8 +165,13 @@ export function SessionOptionPills({
   const effortChoices = isDsh
     ? (dshPick?.efforts ?? [])
     : isCodex
-      ? CODEX_EFFORT_CHOICES
+      ? codexEffortChoices(model)
       : CLAUDE_EFFORT_CHOICES;
+  useEffect(() => {
+    if (isCodex && effort && !codexEffortChoices(model).includes(effort)) {
+      onEffortChange("");
+    }
+  }, [effort, isCodex, model, onEffortChange]);
   // In the un-chosen ("") state a pill shows only its bare category name
   // ("Model" / "模型"), not a "…: default" value: the prefix+value form made the
   // toolbar too wide to hold one row (English overflowed outright). The menu's

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODEX_MODEL_CHOICES,
   agentToolsForSources,
+  codexEffortChoices,
   codexProfileChoices,
   toolForAgentSource,
   tokenPanelForAgentSource,
@@ -16,6 +17,13 @@ const profile = (p: Partial<CodexProfile> & { name: string }): CodexProfile => (
 });
 
 describe("codexProfileChoices", () => {
+  it("offers GPT-6 Astra in the built-in catalog", () => {
+    expect(CODEX_MODEL_CHOICES).toContainEqual({
+      value: "gpt-6-astra",
+      label: "GPT-6 Astra",
+    });
+  });
+
   it("encodes the profile marker the backend splits into `-p <name>`", () => {
     const [choice] = codexProfileChoices([
       profile({
@@ -56,6 +64,27 @@ describe("codexProfileChoices", () => {
       expect(c.value.startsWith("profile:")).toBe(false);
       expect(c.value).not.toContain("/");
     }
+  });
+});
+
+describe("codexEffortChoices", () => {
+  it("uses Astra's supported effort ladder", () => {
+    expect(codexEffortChoices("gpt-6-astra")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+  });
+
+  it("keeps the legacy Codex effort ladder for other models", () => {
+    expect(codexEffortChoices("gpt-5.6-sol")).toEqual([
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
   });
 });
 

@@ -653,16 +653,17 @@ pub fn render_codex_model_block(locale: &str) -> String {
 `Workflow` `agent()` 的 `opts.model`/`opts.effort`、`fleet` spawn 的 `--model`、\
 `cws dispatch` 的 `--model`/`--effort`。\n\
 \n\
-## Codex 家族(codex 工具链,gpt-5.6 系;按 ChatGPT 套餐配额计费,无按 token 定价)\n\
+## Codex 家族(codex 工具链;按 ChatGPT 套餐配额计费,无按 token 定价)\n\
 \n\
 | 模型 | ID | 定位 |\n\
 |---|---|---|\n\
+| GPT-6 Astra | `gpt-6-astra` | 最强端到端模型;复杂推理、编码、研究和电脑操作;1.05M 上下文;需账号已开放 |\n\
 | Sol | `gpt-5.6-sol` | 前沿最强 agentic 编码(Fleet 默认);低 effort 也能打——先低后调高 |\n\
 | Terra | `gpt-5.6-terra` | 均衡型日常 agentic 编码 |\n\
 | Luna | `gpt-5.6-luna` | 快且省的 agentic 编码 |\n\
 | GPT-5.5 | `gpt-5.5` | 复杂编码 / 研究前沿,默认 effort 更高 |\n\
 \n\
-Codex effort 档:`minimal` / `low` / `medium` / `high`(**没有** Claude 的 xhigh/max)。\n\
+Astra effort:`low`/`medium`/`high`/`xhigh`/`max`;其余 Codex 模型:`minimal`/`low`/`medium`/`high`。\n\
 \n\
 ## Claude 家族(claude 工具链)\n\
 \n\
@@ -678,7 +679,7 @@ Claude effort:`low`/`medium`/`high`/`xhigh`/`max`;`xhigh` 是编码/agentic 最�
 ## 怎么挑\n\
 \n\
 - 机械、可并行、量大的 subagent → 便宜快档(Luna / Terra;Haiku / Sonnet)+ 低 effort。\n\
-- 硬推理、最终综合、把关校验 → 最强档(Sol;Opus / Fable)+ high/xhigh。\n\
+- 最难的端到端工作 → Astra + high/xhigh;普通硬推理、最终把关 → Sol 或 Opus / Fable。\n\
 - 编码 / agentic 主循环 → Codex 侧 Sol 从 medium 起步;Claude 侧 Opus 5 / Sonnet 5 配 xhigh。\n\
 - 拿不准就别 override,继承父/会话模型。\n"
             .to_string();
@@ -691,16 +692,17 @@ right; only override with a clear reason. Selection points: the `Agent` tool's \
 `model`, `Workflow` `agent()`'s `opts.model`/`opts.effort`, `fleet` spawn's \
 `--model`, `cws dispatch`'s `--model`/`--effort`.\n\
 \n\
-## Codex family (codex toolchain, gpt-5.6 series; billed against a ChatGPT-plan quota, no per-token price)\n\
+## Codex family (codex toolchain; billed against a ChatGPT-plan quota, no per-token price)\n\
 \n\
 | Model | ID | Positioning |\n\
 |---|---|---|\n\
+| GPT-6 Astra | `gpt-6-astra` | Most capable end-to-end model for complex reasoning, coding, research, and computer use; 1.05M context; account access required |\n\
 | Sol | `gpt-5.6-sol` | Frontier, most capable agentic coding (Fleet default); strong even at low effort — start low, turn up |\n\
 | Terra | `gpt-5.6-terra` | Balanced everyday agentic coding |\n\
 | Luna | `gpt-5.6-luna` | Fast and affordable agentic coding |\n\
 | GPT-5.5 | `gpt-5.5` | Frontier for complex coding / research; higher default effort |\n\
 \n\
-Codex effort levels: `minimal` / `low` / `medium` / `high` (**no** xhigh or max, unlike Claude).\n\
+Astra effort: `low`/`medium`/`high`/`xhigh`/`max`; other Codex models: `minimal`/`low`/`medium`/`high`.\n\
 \n\
 ## Claude family (claude toolchain)\n\
 \n\
@@ -1115,7 +1117,7 @@ mod tests {
         assert!(wiki.contains("[[slug]]"), "wiki must teach cross-links");
         assert!(!wiki.contains("git worktree"), "wiki block must not drag in PRD content");
         let model = render_codex_model_block("en");
-        assert!(model.contains("gpt-5.6-sol") && model.contains("claude-opus-5"),
+        assert!(model.contains("gpt-6-astra") && model.contains("gpt-5.6-sol") && model.contains("claude-opus-5"),
             "model block must cover both families");
         assert!(model.contains("inherit"), "model block must teach the inherit default");
     }
