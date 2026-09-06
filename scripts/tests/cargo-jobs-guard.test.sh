@@ -223,6 +223,15 @@ fi
 teardown
 
 setup
+CARGO_BUILD_JOBS=5 run_guard build >/dev/null 2>&1
+if grep -q 'jobs: 5' "$FAKE_LOG"; then
+  ok "an explicit CARGO_BUILD_JOBS from the caller is not overruled"
+else
+  bad "an explicit CARGO_BUILD_JOBS from the caller is not overruled" "$(cat "$FAKE_LOG")"
+fi
+teardown
+
+setup
 run_guard build >/dev/null 2>&1
 jobs_line="$(grep '^jobs: ' "$FAKE_LOG" | head -1)"
 jobs_val="${jobs_line#jobs: }"

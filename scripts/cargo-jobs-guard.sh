@@ -134,6 +134,12 @@ compute_jobs() {
     printf '%s\n' "$FLEET_BUILD_JOBS"
     return
   fi
+  # An explicit cap from the caller wins. build-local.sh computes its own and
+  # exports it; recomputing here would silently overrule a deliberate choice.
+  if [[ -n "${CARGO_BUILD_JOBS:-}" ]]; then
+    printf '%s\n' "$CARGO_BUILD_JOBS"
+    return
+  fi
   local ncpu budget page free avail_gb
   ncpu="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
   budget="$ncpu"

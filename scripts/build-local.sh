@@ -26,8 +26,19 @@ cd "$ROOT_DIR"
 # its own target/, so a repo-local lock would not see a build running in a
 # sibling worktree — which is exactly the overlap that happens in practice.
 #
+# It is also NOT under $TMPDIR, for the same reason the cargo gate's slot store
+# is not (see scripts/cargo-jobs-guard.sh): TMPDIR is a per-user launchd
+# directory on macOS, and a Fleet session spawned detached need not inherit it.
+# Such a session falls back to /tmp, takes a *different* lock, and the two
+# builds overlap anyway — silently, because each one believes it holds the
+# global lock.
+#
+# This lock is coarser than, and complementary to, the cargo gate: the gate
+# bounds concurrent rustc, while this bounds concurrent *builds*, which also
+# contend over pnpm, the tauri bundler and claw-fleet-desktop/binaries/.
+#
 # `mkdir` is the atomic primitive here because macOS has no `flock(1)`.
-BUILD_LOCK="${TMPDIR:-/tmp}/claw-fleet-build-local.lock"
+BUILD_LOCK="/tmp/claw-fleet-build-local-$(id -u).lock"
 if ! mkdir "$BUILD_LOCK" 2>/dev/null; then
   holder="$(cat "$BUILD_LOCK/owner" 2>/dev/null || true)"
   holder_pid="${holder%% *}"
@@ -52,6 +63,11 @@ echo "$$ $ROOT_DIR $(date '+%Y-%m-%d %H:%M:%S')" > "$BUILD_LOCK/owner"
 # there isn't. The 2GB divisor comes from the measured 1224MB peak of a single
 # rustc in this workspace, rounded up for headroom. Only lowers the job count,
 # never raises it, and FLEET_BUILD_JOBS overrides the whole calculation.
+#
+# Kept here even though the cargo shim computes the same cap: the shim is an
+# opt-in install (scripts/install-cargo-guard.sh), so a machine without it
+# would otherwise lose this protection entirely. When the shim IS installed it
+# inherits the CARGO_BUILD_JOBS exported below rather than recomputing.
 if [[ -z "${FLEET_BUILD_JOBS:-}" ]] && command -v vm_stat >/dev/null 2>&1; then
   _page=$(vm_stat | sed -n '1s/.*page size of \([0-9]*\).*/\1/p')
   _free=$(vm_stat | awk '/Pages (free|inactive|speculative)/ {gsub(/\./,"",$NF); s+=$NF} END {print s+0}')
