@@ -362,6 +362,7 @@ const DICT: Record<string, string> = {
   计划: "Plans",
   接力: "Relay",
   "加载消息中…": "Loading messages…",
+  "正在同步最新消息…": "Syncing latest messages…",
   "消息加载失败：{0}": "Failed to load messages: {0}",
   加载失败: "Load failed",
   加载更早的消息: "Load earlier messages",

@@ -436,6 +436,40 @@
   flex-direction: column;
 }
 
+/* A background tab keeps its transcript mounted. When it becomes visible the
+   old rows remain readable while the tail catches up, so this marker names
+   that temporary staleness instead of letting the old last row look current. */
+.syncing_latest {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  box-shadow: var(--shadow-card);
+  font-size: var(--t-aux, 12px);
+  pointer-events: none;
+}
+
+.syncing_latest svg {
+  color: var(--color-accent);
+  animation: syncingLatestSpin 800ms linear infinite;
+}
+
+@keyframes syncingLatestSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .syncing_latest svg { animation: none; }
+}
+
 /* Scroll area. `padding-bottom` is set inline from the dock's measured height
    (SessionDetail), so the last message can always scroll clear of the composer
    however tall the draft grows. */
