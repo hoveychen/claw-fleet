@@ -739,6 +739,12 @@ impl DshEventWatcher {
                     Ok(client) => client.cookie().to_string(),
                     Err(e) => {
                         crate::log_debug(&format!("dsh events: no session cookie: {e}"));
+                        // This watcher will never open a socket, so it will
+                        // never publish a cursor either. Said out loud in the
+                        // live view, otherwise every history read would spend
+                        // its whole budget waiting on a thread that has already
+                        // given up.
+                        thread_states.set_unreachable(true);
                         thread_stop.store(true, Ordering::SeqCst);
                         return;
                     }
