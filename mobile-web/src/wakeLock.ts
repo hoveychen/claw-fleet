@@ -12,16 +12,36 @@ const KEY = "fleet-wake-lock";
 
 // lib.dom 对 WakeLock 的类型覆盖各版本不一致，这里像 push.ts 一样用最小接口
 // 自描述并 unknown 转型，避免依赖 lib 版本。
-type WakeLockSentinelLike = {
+export type WakeLockSentinelLike = {
   released: boolean;
   release: () => Promise<void>;
   addEventListener: (type: "release", listener: () => void) => void;
 };
-type WakeLockLike = { request: (type: "screen") => Promise<WakeLockSentinelLike> };
+export type WakeLockLike = { request: (type: "screen") => Promise<WakeLockSentinelLike> };
+
+/**
+ * WebView 没有标准 API 时的兜底实现（iOS 18.4 以下走原生 keep-awake）。
+ *
+ * 由 wakeLockNative.ts 在启动时装进来 —— 本模块**不**认识 Capacitor：这样它在
+ * 纯浏览器和 node 测试里都不会拖进一个原生依赖，鸿蒙那条早就存在的
+ * `navigator.wakeLock` 垫片也照旧走标准路径，三种环境共用同一套持锁逻辑。
+ */
+let fallback: WakeLockLike | null = null;
 
 function api(): WakeLockLike | undefined {
-  if (typeof navigator === "undefined") return undefined;
-  return (navigator as unknown as { wakeLock?: WakeLockLike }).wakeLock;
+  const std =
+    typeof navigator === "undefined"
+      ? undefined
+      : (navigator as unknown as { wakeLock?: WakeLockLike }).wakeLock;
+  return std ?? fallback ?? undefined;
+}
+
+/** 装一条兜底实现；标准 API 在场时它不会被用到。 */
+export function setWakeLockFallback(impl: WakeLockLike | null): void {
+  fallback = impl;
+  sync();
+  // supported 变了，设置页那个开关要跟着出现/消失。
+  for (const fn of listeners) fn();
 }
 
 function visible(): boolean {
@@ -153,7 +173,8 @@ function subscribe(fn: () => void): () => void {
 }
 
 function snapshot(): string {
-  return enabled ? "1" : "0";
+  // supported 也进快照：兜底是启动后异步装上的，不带上它，设置页不会重画那个开关。
+  return `${enabled ? "1" : "0"}${api() ? "s" : "-"}`;
 }
 
 export function useWakeLock(): {
