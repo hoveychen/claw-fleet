@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { carryPromptToDevice, defaultWorkspace, recentWorkspaces } from "./Composer";
+import {
+  CODEX_MODEL_CHOICES,
+  carryPromptToDevice,
+  defaultWorkspace,
+  recentWorkspaces,
+} from "./Composer";
 import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import type { SessionInfo } from "../types";
 
@@ -20,6 +25,12 @@ function session(
     lastActivityMs,
   } as unknown as SessionInfo;
 }
+
+describe("Codex model choices", () => {
+  it("includes GPT-6 Astra", () => {
+    expect(CODEX_MODEL_CHOICES).toContainEqual(["gpt-6-astra", "GPT-6 Astra"]);
+  });
+});
 
 describe("recentWorkspaces", () => {
   it("候选未超过 limit 时全部保留，按名称字母序展示", () => {
