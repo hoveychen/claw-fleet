@@ -12,7 +12,7 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, LoaderCircle } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
@@ -56,6 +56,7 @@ import { isWorkflowAgent } from "../workflowAgent";
 import { bgTaskIcon, bgTaskDataType } from "../bgTaskKinds";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
 import styles from "./SessionDetail.module.css";
+import { showLatestSync } from "../conversationPlaceholder";
 
 
 /** Max subagents listed in the scope dropdown (AgentScopeSwitcher). Active ones
@@ -189,6 +190,7 @@ export function SessionDetail({
   const [localSession, setLocalSession] = useState<SessionInfo | null>(sessionInfo ?? null);
   const [localMessages, setLocalMessages] = useState<RawMessage[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
+  const [localLoadingEarlier, setLocalLoadingEarlier] = useState(false);
   const [localStalled, setLocalStalled] = useState(false);
   /** Bumped by the stalled pane's retry button to re-run the fetch effect. */
   const [reloadKey, setReloadKey] = useState(0);
@@ -217,6 +219,7 @@ export function SessionDetail({
     if (sessionInfo && sessionInfo.id !== localSession?.id) {
       setLocalSession(sessionInfo);
       setLocalMessages([]);
+      setLocalLoadingEarlier(false);
       setLocalTail(INITIAL_TAIL);
       setLocalFullyLoaded(false);
     }
@@ -287,6 +290,7 @@ export function SessionDetail({
     if (!isStandalone || !localSession || localFullyLoaded) return;
     const nextTail = localTail + LOAD_EARLIER_STEP;
     setLocalLoading(true);
+    setLocalLoadingEarlier(true);
     setLocalTail(nextTail);
     try {
       const msgs = await invoke<RawMessage[]>("get_messages_tail", {
@@ -297,6 +301,7 @@ export function SessionDetail({
       setLocalFullyLoaded(msgs.length < nextTail);
     } finally {
       setLocalLoading(false);
+      setLocalLoadingEarlier(false);
     }
   }, [isStandalone, localSession?.jsonlPath, localTail, localFullyLoaded]);
 
@@ -326,6 +331,14 @@ export function SessionDetail({
     [isStandalone, global.open],
   );
   const loadEarlier = isStandalone ? standaloneLoadEarlier : global.loadEarlier;
+  const isLoadingEarlier = isStandalone
+    ? localLoadingEarlier
+    : isLoading && messages.length > 0;
+  const syncingLatest = showLatestSync({
+    isLoading,
+    isLoadingEarlier,
+    messageCount: messages.length,
+  });
 
   // Text of every real user row already in the transcript, so we can tell which
   // optimistic sends have landed and drop them (dedup by trimmed text).
@@ -1324,6 +1337,12 @@ export function SessionDetail({
 
           {viewTab === "messages" && (
             <div className={styles.messages_pane}>
+              {syncingLatest && (
+                <div className={styles.syncing_latest} role="status" aria-live="polite">
+                  <LoaderCircle size={14} aria-hidden="true" />
+                  {t("detail.syncing_latest", "正在同步最新消息…")}
+                </div>
+              )}
               <div
                 ref={scrollRef}
                 className={styles.scroll_area}
@@ -1343,7 +1362,7 @@ export function SessionDetail({
                     decisionRecords={decisionRecords}
                     onLoadEarlier={loadEarlier}
                     fullyLoaded={fullyLoaded}
-                    isLoadingEarlier={isLoading && messages.length > 0}
+                    isLoadingEarlier={isLoadingEarlier}
                     paths={pathLinks}
                     // Use the live-refreshed session (same source every other
                     // jsonlPath consumer here uses); `session` is the possibly-
