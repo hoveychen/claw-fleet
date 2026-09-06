@@ -496,10 +496,10 @@ impl DshEventWatcher {
     ///
     /// Returns immediately; the sockets connect (and reconnect) on their own, so
     /// a server that is not answering yet costs nothing but a retry.
-    pub fn start(port: u16) -> Self {
+    pub fn start(port: u16, launch_token: &str) -> Self {
         let live: SharedLive = Arc::new(LiveView::default());
         let stop = Arc::new(AtomicBool::new(false));
-        let decisions = Arc::new(crate::dsh_decisions::DecisionBridge::start(port));
+        let decisions = Arc::new(crate::dsh_decisions::DecisionBridge::start(port, launch_token));
 
         let thread_states = live.clone();
         let thread_stop = stop.clone();

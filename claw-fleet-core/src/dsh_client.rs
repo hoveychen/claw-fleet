@@ -1,23 +1,36 @@
 //! RPC client for the dsh (DeepSeek Harness) `/api` face.
 //!
-//! `dsh web` serves one HTTP route (`/api`) plus two downlink-only WebSockets.
-//! Every unary call is a POST to `/api/<method>` carrying a `client-request`
+//! `dsh web` serves one HTTP route (`/api`) plus a downlink WebSocket. Every
+//! unary call is a POST to `/api/<endpoint>` carrying a `client-request`
 //! envelope; the HTTP response body is the matching `server-response`:
 //!
 //! ```text
-//! POST /api/session.list
-//! {"type":"client-request","rpcId":"<uuid>","method":"session.list","payload":{}}
+//! POST /api/session/list
+//! {"type":"client-request","rpcId":"<uuid>","method":"session/list","payload":{}}
 //! → {"type":"server-response","rpcId":"<same uuid>","result":{"ok":true,"value":{…}}}
 //! ```
+//!
+//! Endpoints are `<service>/<method>` — exactly two slash-separated segments,
+//! which the gateway enforces. dsh 0.1.1 spelled them `service.method`; the
+//! dotted form is a 404 on 0.1.2 because it parses as one segment.
 //!
 //! Answerable downlink frames (`approval/requested`, `question/requested`) are
 //! answered on a *different* carrier: POST `/api/respond` with a
 //! `client-response` echoing the frame's `rpcId`, whose body is a carrier
 //! receipt rather than a `server-response`.
 //!
-//! The server has no authentication layer. It guards `/api` with a Host-header
-//! loopback fence only, so every call here targets `127.0.0.1` — a non-loopback
-//! `Host` is answered 403 before dispatch.
+//! `/api` sits behind two gates, in this order:
+//!
+//! 1. **Host-header loopback fence** — a non-loopback `Host` is answered 403
+//!    before dispatch, so every call here targets `127.0.0.1`.
+//! 2. **Browser authentication** — an unauthenticated request is answered 401.
+//!    `dsh web` mints one random launch token per process and prints it as the
+//!    query of the URL it announces (`http://127.0.0.1:<port>/?token=<token>`);
+//!    that stdout line is the token's only exit from the process. `GET
+//!    /?token=…` answers 303 with a `Set-Cookie` bound to the request's
+//!    authority, and `/api` accepts that cookie — and *only* that cookie. It
+//!    does not read `?token=` itself, so [`DshClient::new`] performs the
+//!    exchange once at construction and replays the cookie on every request.
 
 use std::time::Duration;
 
@@ -71,12 +84,21 @@ impl From<DshRpcError> for String {
 /// Returns the minted `rpcId` alongside the serialized body so the caller can
 /// verify the echo. Correlation is per-call: dsh rejects a `server-response`
 /// whose id does not match, and so do we.
-fn build_request(rpc_id: &str, method: &str, payload: &Value) -> String {
+///
+/// `args` is the endpoint's own argument object, which this wraps in the
+/// gateway's `{"args": …}` envelope. 0.1.2 checks that wrapper before it ever
+/// looks at the endpoint — a payload holding the arguments directly is
+/// answered `gateway/internal: Remote payload must contain exactly one
+/// plain-object args field`, whatever the method was. Wrapping here rather
+/// than at each call site keeps the *inner* field names (which differ per
+/// endpoint: `request`, `_request`, `refs`, `agentPreset`, …) the call site's
+/// business and the envelope this module's.
+fn build_request(rpc_id: &str, method: &str, args: &Value) -> String {
     json!({
         "type": "client-request",
         "rpcId": rpc_id,
         "method": method,
-        "payload": payload,
+        "payload": { "args": args },
     })
     .to_string()
 }
@@ -167,30 +189,93 @@ fn parse_receipt(body: &str) -> Result<(), DshRpcError> {
     ))
 }
 
+/// The `/api` base for one loopback port.
+fn api_base(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/api")
+}
+
+/// Pull the `name=value` pair out of one `Set-Cookie` header.
+///
+/// Split out from the exchange so the parsing is testable without a live
+/// server: everything from the first `;` on is attributes (`Path`, `Max-Age`,
+/// `HttpOnly`, …) that a request must not echo back.
+fn cookie_pair(set_cookie: &str) -> Option<String> {
+    let pair = set_cookie.split(';').next()?.trim();
+    (pair.contains('=') && !pair.starts_with('=')).then(|| pair.to_string())
+}
+
 /// Blocking client for one `dsh web` instance on loopback.
 pub struct DshClient {
     base: String,
     http: reqwest::blocking::Client,
+    /// The `name=value` minted by the launch-token exchange, replayed on every
+    /// request. Without it `/api` answers 401.
+    cookie: String,
 }
 
 impl DshClient {
-    /// Build a client for `127.0.0.1:<port>`.
+    /// Build a client for `127.0.0.1:<port>`, trading `launch_token` for the
+    /// session cookie `/api` requires.
     ///
     /// The host is fixed: dsh's `/api` fence only admits loopback authorities
     /// (or an explicitly declared `--trusted-host`), and Fleet always runs the
-    /// server it talks to on the same machine.
-    pub fn new(port: u16) -> Result<Self, DshRpcError> {
+    /// server it talks to on the same machine. That matters twice over here —
+    /// the cookie dsh mints is bound to the authority that asked for it, so it
+    /// is only valid for requests carrying this same `127.0.0.1:<port>` Host.
+    pub fn new(port: u16, launch_token: &str) -> Result<Self, DshRpcError> {
         let http = off_runtime(|| {
             reqwest::blocking::Client::builder()
                 .timeout(DEFAULT_TIMEOUT)
+                // The exchange answers 303 → `/`. Following it would drop the
+                // `Set-Cookie` we came for on the floor and return the index
+                // page instead, so read the redirect rather than chase it.
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|e| DshRpcError::Transport(format!("http client: {e}")))
         })
         .map_err(DshRpcError::Transport)??;
+
+        let cookie = Self::exchange_token(&http, port, launch_token)?;
         Ok(Self {
-            base: format!("http://127.0.0.1:{port}/api"),
+            base: api_base(port),
             http,
+            cookie,
         })
+    }
+
+    /// Trade the launch token for an authority-bound session cookie.
+    fn exchange_token(
+        http: &reqwest::blocking::Client,
+        port: u16,
+        launch_token: &str,
+    ) -> Result<String, DshRpcError> {
+        let url = format!("http://127.0.0.1:{port}/?token={launch_token}");
+        let header = off_runtime(|| {
+            let resp = http
+                .get(&url)
+                .send()
+                .map_err(|e| DshRpcError::Transport(format!("token exchange: {e}")))?;
+            let status = resp.status();
+            let set_cookie = resp
+                .headers()
+                .get(reqwest::header::SET_COOKIE)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string);
+            Ok((status, set_cookie))
+        })
+        .map_err(DshRpcError::Transport)??;
+
+        let (status, set_cookie) = header;
+        match set_cookie.as_deref().and_then(cookie_pair) {
+            Some(pair) => Ok(pair),
+            // A stale or wrong token is answered 401 with no cookie; anything
+            // else means dsh changed the exchange out from under us. Both are
+            // worth naming, because every later call would just say 401.
+            None => Err(DshRpcError::Transport(format!(
+                "token exchange: HTTP {status} with no usable Set-Cookie \
+                 (is this dsh older than 0.1.2, or the token stale?)"
+            ))),
+        }
     }
 
     /// The `/api` base URL this client targets.
@@ -208,6 +293,7 @@ impl DshClient {
                 .http
                 .post(format!("{}/{}", self.base, method))
                 .header("content-type", "application/json")
+                .header(reqwest::header::COOKIE, &self.cookie)
                 .body(body)
                 .send()
                 .map_err(|e| DshRpcError::Transport(format!("{method}: {e}")))?;
@@ -223,10 +309,14 @@ impl DshClient {
         if !status.is_success() {
             return Err(DshRpcError::Transport(format!(
                 "{method}: HTTP {status}{}",
-                if status.as_u16() == 403 {
-                    " (loopback trust fence)"
-                } else {
-                    ""
+                match status.as_u16() {
+                    403 => " (loopback trust fence)",
+                    401 => " (session cookie rejected)",
+                    // A live `/api` answers an unknown endpoint with 404 rather
+                    // than an envelope error, and the dotted 0.1.1 spelling is
+                    // exactly that shape — so name the likely cause.
+                    404 => " (no such endpoint — endpoints are <service>/<method>)",
+                    _ => "",
                 }
             )));
         }
@@ -273,6 +363,7 @@ impl DshClient {
                 .http
                 .post(format!("{}/respond", self.base))
                 .header("content-type", "application/json")
+                .header(reqwest::header::COOKIE, &self.cookie)
                 .body(body)
                 .send()
                 .map_err(|e| DshRpcError::Transport(format!("respond: {e}")))?;
@@ -301,9 +392,11 @@ mod tests {
     /// and that is where every UI-triggered dsh RPC executes. reqwest's blocking
     /// carrier refuses that context (`wait::enter` → "Cannot drop a runtime…"),
     /// and the panic is swallowed by the task harness, so the invoke promise
-    /// hangs forever — the 「永久加载中」 bug. Construct + call must therefore
-    /// survive inside a tokio worker: a clean transport Err (nothing listens on
-    /// the probed port), never a panic.
+    /// hangs forever — the 「永久加载中」 bug. Construct must therefore survive
+    /// inside a tokio worker: a clean transport Err (nothing listens on the
+    /// probed port), never a panic. Construction is the sharper end of that
+    /// contract since 0.1.2, because it now issues the token exchange itself —
+    /// the very first blocking request Fleet makes.
     #[test]
     fn client_survives_tokio_worker_context() {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -313,9 +406,9 @@ mod tests {
             .unwrap();
         let joined = rt.block_on(async {
             tokio::spawn(async {
-                let client = DshClient::new(1).map_err(|e| e.to_string())?;
+                let client = DshClient::new(1, "not-a-real-token").map_err(|e| e.to_string())?;
                 client
-                    .call("session.list", json!({}))
+                    .call("session/list", json!({}))
                     .map(|_| ())
                     .map_err(|e| e.to_string())
             })
@@ -328,12 +421,25 @@ mod tests {
 
     #[test]
     fn build_request_carries_method_and_id() {
-        let body = build_request("id-1", "session.list", &json!({}));
+        let body = build_request("id-1", "session/list", &json!({}));
         let parsed: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(parsed["type"], "client-request");
         assert_eq!(parsed["rpcId"], "id-1");
-        assert_eq!(parsed["method"], "session.list");
-        assert_eq!(parsed["payload"], json!({}));
+        assert_eq!(parsed["method"], "session/list");
+        assert_eq!(parsed["payload"], json!({ "args": {} }));
+    }
+
+    /// The 0.1.2 gateway rejects a payload that is not exactly `{args: {…}}`
+    /// with `gateway/internal: Remote payload must contain exactly one
+    /// plain-object args field` — verbatim from a live `settings/describe`
+    /// probe on 0.1.2-rc.1. Call sites keep passing the bare argument object
+    /// (whose field names are per-endpoint: `request`, `_request`, `refs`,
+    /// `agentPreset`, …), so the wrapper belongs here, once.
+    #[test]
+    fn build_request_wraps_the_arguments_in_the_gateway_args_field() {
+        let body = build_request("id-2", "session/page", &json!({ "request": { "id": "s1" } }));
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["payload"], json!({ "args": { "request": { "id": "s1" } } }));
     }
 
     #[test]
@@ -440,7 +546,25 @@ mod tests {
 
     #[test]
     fn client_targets_loopback() {
-        let client = DshClient::new(3080).unwrap();
-        assert_eq!(client.base_url(), "http://127.0.0.1:3080/api");
+        assert_eq!(api_base(3080), "http://127.0.0.1:3080/api");
+    }
+
+    #[test]
+    fn cookie_pair_keeps_only_the_name_value() {
+        // Shape taken from a live `dsh web` 0.1.2-rc.1 exchange.
+        let raw = "dsh-auth-q76Y4r_EfF9y=v1.eyJ2IjoxfQ.sig; Max-Age=2592000; \
+                   Path=/; Expires=Mon, 05 Oct 2026 17:34:29 GMT; HttpOnly; SameSite=Strict";
+        assert_eq!(
+            cookie_pair(raw).as_deref(),
+            Some("dsh-auth-q76Y4r_EfF9y=v1.eyJ2IjoxfQ.sig")
+        );
+    }
+
+    #[test]
+    fn cookie_pair_rejects_headers_without_a_pair() {
+        assert_eq!(cookie_pair(""), None);
+        assert_eq!(cookie_pair("Path=/; HttpOnly").as_deref(), Some("Path=/"));
+        assert_eq!(cookie_pair("=orphan; Path=/"), None);
+        assert_eq!(cookie_pair("justaname; Path=/"), None);
     }
 }

@@ -203,7 +203,7 @@ impl DshSource {
             }
 
             let server = guard.as_ref().expect("server started above");
-            Self::ensure_watcher(server.port());
+            Self::ensure_watcher(server.port(), server.launch_token());
             server.client()?
         };
 
@@ -314,7 +314,7 @@ impl DshSource {
     /// server-then-watcher; nothing takes them the other way round.
     ///
     /// [`with_client`]: Self::with_client
-    fn ensure_watcher(port: u16) {
+    fn ensure_watcher(port: u16, launch_token: &str) {
         let mut guard = lock(watcher_slot());
         if guard.as_ref().is_some_and(|w| w.port() == port) {
             return;
@@ -322,7 +322,7 @@ impl DshSource {
         // Assigning drops the old watcher, which stops its follower thread. Its
         // live view goes with it: those phases belong to sessions as seen by a
         // server that no longer exists.
-        *guard = Some(DshEventWatcher::start(port));
+        *guard = Some(DshEventWatcher::start(port, launch_token));
     }
 
     /// The port Fleet's `dsh web` instance is listening on, or `None` before

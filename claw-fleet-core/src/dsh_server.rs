@@ -41,9 +41,18 @@ use crate::session::{prune_dead_holders, HolderEntry};
 /// materializes its plugin tree on first launch, so this is generous.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// How long to keep retrying `host.describe` after the URL appears. The port is
-/// printed by the launcher shell, which can win the race against the listener.
+/// How long to keep retrying the health endpoint after the URL appears. The
+/// port is printed by the launcher shell, which can win the race against the
+/// listener.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The endpoint Fleet polls to decide the server is answering RPC.
+///
+/// Any cheap side-effect-free call would do; this one is picked because it
+/// touches no session state. It is *not* `host.describe` any more — dsh 0.1.2
+/// dropped the whole `host.*` service, so that call now 404s where it used to
+/// be the readiness signal.
+const HEALTH_ENDPOINT: &str = "settings/describe";
 
 /// Locate the `dsh` executable.
 ///
@@ -89,7 +98,7 @@ pub fn is_available() -> bool {
 ///
 /// One place, because two other things read it back: [`sweep_unregistered_orphans`]
 /// matches leaked servers by this exact command line, and the startup contract
-/// (`--port 0`, so the OS assigns the port) is what makes [`parse_port_line`]
+/// (`--port 0`, so the OS assigns the port) is what makes [`parse_launch_line`]
 /// the only way to learn it.
 ///
 /// `--no-open` last, so the sweep's `dsh web --port 0` signature still matches.
@@ -104,16 +113,32 @@ fn web_args() -> &'static [&'static str] {
     &["web", "--port", "0", "--no-open"]
 }
 
-/// Extract the listening port from one launcher stdout line.
+/// Extract the listening port and launch token from one launcher stdout line.
 ///
-/// `dsh web` prints exactly `dsh web: http://127.0.0.1:<port>` once the server
-/// is up. With `--port 0` that port is OS-assigned, so parsing this line is the
+/// `dsh web` prints exactly
+/// `dsh web: http://127.0.0.1:<port>/?token=<launch token>` once the server is
+/// up. With `--port 0` that port is OS-assigned, so parsing this line is the
 /// only way to learn it — which is also why Fleet uses `--port 0`: it never has
 /// to guess a free port or collide with another instance.
-fn parse_port_line(line: &str) -> Option<u16> {
+///
+/// The token half is just as load-bearing and just as unrecoverable: dsh mints
+/// it per process with `randomBytes` and never writes it anywhere, so this line
+/// is its only exit. Miss it and every `/api` call is 401. That is why both
+/// halves are required here — a line carrying a port but no token means we are
+/// talking to a dsh older than 0.1.2, and reporting that as a healthy start
+/// would only defer the failure to the first call.
+fn parse_launch_line(line: &str) -> Option<(u16, String)> {
     let rest = line.split("http://127.0.0.1:").nth(1)?;
     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-    digits.parse().ok()
+    let port: u16 = digits.parse().ok()?;
+    let token: String = rest
+        .split("?token=")
+        .nth(1)?
+        .trim()
+        .chars()
+        .take_while(|c| !c.is_whitespace() && *c != '&')
+        .collect();
+    (!token.is_empty()).then_some((port, token))
 }
 
 // ── Cross-process ownership registry ────────────────────────────────────────
@@ -301,6 +326,11 @@ pub fn sweep_unregistered_orphans() -> usize {
 pub struct DshServer {
     child: Child,
     port: u16,
+    /// The per-process launch token read off the announcement line. Every
+    /// [`DshClient`] trades it for the session cookie `/api` demands, so it has
+    /// to live exactly as long as the child that minted it — a restart mints a
+    /// new one, alongside a new port.
+    launch_token: String,
     binary: PathBuf,
     workspace: PathBuf,
 }
@@ -339,8 +369,8 @@ impl DshServer {
             .spawn()
             .map_err(|e| format!("spawn {}: {e}", binary.display()))?;
 
-        let port = match read_port(&mut child) {
-            Ok(port) => port,
+        let (port, launch_token) = match read_launch_line(&mut child) {
+            Ok(parsed) => parsed,
             Err(e) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -351,6 +381,7 @@ impl DshServer {
         let mut server = Self {
             child,
             port,
+            launch_token,
             binary: binary.to_path_buf(),
             workspace: workspace.to_path_buf(),
         };
@@ -390,7 +421,14 @@ impl DshServer {
 
     /// An RPC client pointed at this instance.
     pub fn client(&self) -> Result<DshClient, String> {
-        DshClient::new(self.port).map_err(Into::into)
+        DshClient::new(self.port, &self.launch_token).map_err(Into::into)
+    }
+
+    /// The launch token this instance announced. Anything that builds its own
+    /// [`DshClient`] (the decision bridge runs on its own thread) needs it —
+    /// there is no way to re-derive it from the port.
+    pub fn launch_token(&self) -> &str {
+        &self.launch_token
     }
 
     /// Has the process exited? Reaps it when it has, so a crashed server does
@@ -413,6 +451,9 @@ impl DshServer {
         // the already-reaped dead child, and its Drop is a no-op.
         std::mem::swap(&mut self.child, &mut fresh.child);
         self.port = fresh.port;
+        // The fresh child minted its own token; the old one dies with the old
+        // process, so keeping it would 401 every call after a restart.
+        self.launch_token = std::mem::take(&mut fresh.launch_token);
         Ok(())
     }
 
@@ -443,13 +484,13 @@ impl DshServer {
             if !self.is_alive() {
                 return Err("dsh web exited during startup".into());
             }
-            match client.call("host.describe", serde_json::json!({})) {
+            match client.call(HEALTH_ENDPOINT, serde_json::json!({})) {
                 Ok(_) => return Ok(()),
                 Err(e) => last = e.to_string(),
             }
             std::thread::sleep(Duration::from_millis(200));
         }
-        Err(format!("dsh web never answered host.describe: {last}"))
+        Err(format!("dsh web never answered {HEALTH_ENDPOINT}: {last}"))
     }
 }
 
@@ -464,7 +505,7 @@ impl Drop for DshServer {
 /// The read must not happen on this thread: a server that fails to start (bad
 /// profile, port refused, missing artifacts) prints nothing and never closes
 /// stdout, so a direct `read_line` would block forever instead of timing out.
-fn read_port(child: &mut Child) -> Result<u16, String> {
+fn read_launch_line(child: &mut Child) -> Result<(u16, String), String> {
     let stdout = child
         .stdout
         .take()
@@ -473,8 +514,8 @@ fn read_port(child: &mut Child) -> Result<u16, String> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if let Some(port) = parse_port_line(&line) {
-                let _ = tx.send(port);
+            if let Some(parsed) = parse_launch_line(&line) {
+                let _ = tx.send(parsed);
                 return;
             }
         }
@@ -483,7 +524,7 @@ fn read_port(child: &mut Child) -> Result<u16, String> {
     });
 
     match rx.recv_timeout(STARTUP_TIMEOUT) {
-        Ok(port) => Ok(port),
+        Ok(parsed) => Ok(parsed),
         Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
             "dsh web did not report a port within {STARTUP_TIMEOUT:?}"
         )),
@@ -589,40 +630,56 @@ mod tests {
 
     #[test]
     fn parses_the_launcher_url_line() {
-        // Verbatim from a live `dsh web --port 0` run.
+        // Verbatim from a live `dsh web --port 0` run on 0.1.2-rc.1.
         assert_eq!(
-            parse_port_line("dsh web: http://127.0.0.1:63234"),
-            Some(63234)
+            parse_launch_line(
+                "dsh web: http://127.0.0.1:51813/?token=K2--JSbxHKelXA2nUsP43zD4GORrzMrzoKd1cnB_NVg"
+            ),
+            Some((
+                51813,
+                "K2--JSbxHKelXA2nUsP43zD4GORrzMrzoKd1cnB_NVg".to_string()
+            ))
         );
     }
 
     #[test]
-    fn parses_a_fixed_port_line() {
+    fn tolerates_trailing_text_after_the_token() {
         assert_eq!(
-            parse_port_line("dsh web: http://127.0.0.1:3080"),
-            Some(3080)
+            parse_launch_line("dsh web: http://127.0.0.1:3080/?token=abc123 (press ctrl-c to stop)"),
+            Some((3080, "abc123".to_string()))
         );
     }
 
+    /// dsh 0.1.1 printed the bare URL. Parsing that as a healthy start would
+    /// leave `launch_token` empty and turn every later call into a 401, so the
+    /// line is rejected here — where the error still names the startup step.
     #[test]
-    fn tolerates_trailing_text_after_the_port() {
+    fn rejects_a_line_without_a_token() {
+        assert_eq!(parse_launch_line("dsh web: http://127.0.0.1:63234"), None);
+        assert_eq!(parse_launch_line("dsh web: http://127.0.0.1:3080/"), None);
         assert_eq!(
-            parse_port_line("dsh web: http://127.0.0.1:3080/ (press ctrl-c to stop)"),
-            Some(3080)
+            parse_launch_line("dsh web: http://127.0.0.1:3080/?token="),
+            None
         );
     }
 
     #[test]
     fn ignores_unrelated_lines() {
-        assert_eq!(parse_port_line("npm warn deprecated foo@1.0.0"), None);
-        assert_eq!(parse_port_line(""), None);
+        assert_eq!(parse_launch_line("npm warn deprecated foo@1.0.0"), None);
+        assert_eq!(parse_launch_line(""), None);
         // A non-loopback URL is not ours to talk to: the /api fence would 403 it.
-        assert_eq!(parse_port_line("serving http://0.0.0.0:3080"), None);
+        assert_eq!(
+            parse_launch_line("serving http://0.0.0.0:3080/?token=abc"),
+            None
+        );
     }
 
     #[test]
     fn rejects_a_port_that_is_not_a_number() {
-        assert_eq!(parse_port_line("dsh web: http://127.0.0.1:abc"), None);
+        assert_eq!(
+            parse_launch_line("dsh web: http://127.0.0.1:abc/?token=xyz"),
+            None
+        );
     }
 
     // ── Registry ────────────────────────────────────────────────────────────

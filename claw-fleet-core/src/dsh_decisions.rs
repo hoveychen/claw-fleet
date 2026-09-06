@@ -280,11 +280,16 @@ pub struct DecisionBridge {
 
 impl DecisionBridge {
     /// Start the worker against the `dsh web` instance on `port`.
-    pub fn start(port: u16) -> Self {
+    ///
+    /// `launch_token` is the one that instance announced: the worker builds its
+    /// own [`DshClient`], and since 0.1.2 that means trading the token for a
+    /// session cookie. A stale token here costs every card its answer path.
+    pub fn start(port: u16, launch_token: &str) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let token = launch_token.to_string();
         let spawned = std::thread::Builder::new()
             .name("dsh-decisions".into())
-            .spawn(move || worker(port, rx));
+            .spawn(move || worker(port, &token, rx));
         if let Err(e) = spawned {
             crate::log_debug(&format!("dsh decisions: cannot spawn worker: {e}"));
         }
@@ -300,8 +305,8 @@ impl DecisionBridge {
 
 /// Own every pending card until it is answered, resolved elsewhere, or the
 /// channel closes.
-fn worker(port: u16, rx: Receiver<DshFrame>) {
-    let client = match DshClient::new(port) {
+fn worker(port: u16, launch_token: &str, rx: Receiver<DshFrame>) {
+    let client = match DshClient::new(port, launch_token) {
         Ok(c) => c,
         Err(e) => {
             crate::log_debug(&format!("dsh decisions: no client: {e}"));
