@@ -48,8 +48,9 @@ const EFFORT_CHOICES: Array<[string, string]> = [
 // the desktop's CODEX_MODEL_CHOICES. "" default follows Codex's configured model.
 // 第三方模型不写在这里：它们运行时从主机的 codex profile 文件发现
 // （见 useCodexProfiles），硬编码会列出那台机器上根本没配 provider 的模型。
-const CODEX_MODEL_CHOICES: Array<[string, string]> = [
+export const CODEX_MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
+  ["gpt-6-astra", "GPT-6 Astra"],
   ["gpt-5.6-sol", "GPT-5.6 Sol"],
   ["gpt-5.6-terra", "GPT-5.6 Terra"],
   ["gpt-5.6-luna", "GPT-5.6 Luna"],
@@ -64,6 +65,19 @@ const CODEX_EFFORT_CHOICES: Array<[string, string]> = [
   ["medium", "medium"],
   ["high", "high"],
 ];
+
+export function codexEffortChoices(model: string): Array<[string, string]> {
+  return model === "gpt-6-astra"
+    ? [
+        ["", "默认努力度"],
+        ["low", "low"],
+        ["medium", "medium"],
+        ["high", "high"],
+        ["xhigh", "xhigh"],
+        ["max", "max"],
+      ]
+    : CODEX_EFFORT_CHOICES;
+}
 
 const PERMISSION_LABEL: Record<string, string> = {
   acceptEdits: "自动接受编辑",
@@ -339,14 +353,21 @@ function OptionSelects({
         ...dshEffort.efforts,
       ]
     : isCodex
-      ? CODEX_EFFORT_CHOICES
+      ? codexEffortChoices(model)
       : EFFORT_CHOICES;
   return (
     <div className={styles.optionRow}>
       <select
         className={styles.optionSelect}
         value={model}
-        onChange={(e) => onChange({ model: e.target.value })}
+        onChange={(e) => {
+          const nextModel = e.target.value;
+          const supportedEfforts = codexEffortChoices(nextModel).map(([value]) => value);
+          onChange({
+            model: nextModel,
+            ...(isCodex && !supportedEfforts.includes(effort) ? { effort: "" } : {}),
+          });
+        }}
       >
         {isDsh ? (
           <>

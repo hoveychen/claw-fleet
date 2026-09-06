@@ -68,21 +68,24 @@ effort(`output_config.effort` / `--effort`):`low` / `medium` / `high` / \
 `xhigh` / `max`。`xhigh` 是编码和 agentic 的最佳档;`high` 是多数智力敏感\
 任务的下限;`low` 给 subagent 和简单任务(更少、更集中的工具调用)。\n\
 \n\
-## Codex 家族(codex 工具链,gpt-5.6 系)\n\
+## Codex 家族(codex 工具链)\n\
 \n\
 Fleet 经 codex CLI 调用,按 **ChatGPT 套餐配额**计费,**没有按 token 的\
 定价**。\n\
 \n\
 | 模型 | ID | 定位 |\n\
 |---|---|---|\n\
+| GPT-6 Astra | `gpt-6-astra` | 最强端到端模型;复杂推理、编码、研究和电脑操作;\
+1.05M 上下文;需账号已开放 |\n\
 | Sol | `gpt-5.6-sol` | 前沿最强 agentic 编码(Fleet 默认);低 effort 也很\
 能打——先低后按需调高 |\n\
 | Terra | `gpt-5.6-terra` | 均衡型日常 agentic 编码 |\n\
 | Luna | `gpt-5.6-luna` | 快且省的 agentic 编码 |\n\
 | GPT-5.5 | `gpt-5.5` | 复杂编码 / 研究前沿,默认 effort 更高(xhigh) |\n\
 \n\
-Sol / Terra / Luna = 强 / 中 / 快 三档,同属 gpt-5.6。Codex 的 effort 档是 \
-`minimal` / `low` / `medium` / `high`(**没有** Claude 的 xhigh/max)。\n\
+Sol / Terra / Luna = 强 / 中 / 快 三档,同属 gpt-5.6。Astra 的 effort 档是 \
+`low` / `medium` / `high` / `xhigh` / `max`;其余 Codex 模型沿用 \
+`minimal` / `low` / `medium` / `high`。\n\
 \n\
 ## 生图(只有 codex 有)\n\
 \n\
@@ -97,7 +100,8 @@ codex 自带的 imagegen skill:`codex exec -m gpt-5.6-luna \"用内置图像生�
 \n\
 - 机械、可并行、量大的 subagent → 便宜快档(Haiku / Sonnet;Luna / Terra)\
 + 低 effort。\n\
-- 硬推理、最终综合、把关校验 → 最强档(Opus / Fable;Sol)+ high/xhigh。\n\
+- 最难的端到端工作 → Astra + high/xhigh;普通硬推理、最终把关 → \
+Opus / Fable 或 Sol。\n\
 - 编码 / agentic 主循环 → Opus 5 或 Sonnet 5 配 xhigh;Codex 侧 Sol 从 \
 medium 起步。\n\
 - 拿不准就别 override,继承父/会话模型。\n"
@@ -137,13 +141,15 @@ Effort (`output_config.effort` / `--effort`): `low` / `medium` / `high` / \
 floor for most intelligence-sensitive work; `low` for subagents and simple \
 tasks (fewer, more-consolidated tool calls).\n\
 \n\
-## Codex family (codex toolchain, gpt-5.6 series)\n\
+## Codex family (codex toolchain)\n\
 \n\
 Fleet drives these through the codex CLI. They bill against a **ChatGPT-plan \
 quota** and have **no per-token price**.\n\
 \n\
 | Model | ID | Positioning |\n\
 |---|---|---|\n\
+| GPT-6 Astra | `gpt-6-astra` | Most capable end-to-end model for complex \
+reasoning, coding, research, and computer use; 1.05M context; account access required |\n\
 | Sol | `gpt-5.6-sol` | Frontier, most capable agentic coding (Fleet default); \
 highly capable even at low effort — start low, turn it up as needed |\n\
 | Terra | `gpt-5.6-terra` | Balanced everyday agentic coding |\n\
@@ -152,8 +158,8 @@ highly capable even at low effort — start low, turn it up as needed |\n\
 effort (xhigh) |\n\
 \n\
 Sol / Terra / Luna = strong / balanced / fast, all in the gpt-5.6 family. \
-Codex effort levels are `minimal` / `low` / `medium` / `high` (**no** xhigh or \
-max, unlike Claude).\n\
+Astra supports `low` / `medium` / `high` / `xhigh` / `max`; other Codex models \
+keep `minimal` / `low` / `medium` / `high`.\n\
 \n\
 ## Image generation (codex only)\n\
 \n\
@@ -171,8 +177,8 @@ transparency limits, token cost) live in the wiki at \
 \n\
 - Mechanical, parallel, high-volume subagents → the cheap/fast tier \
 (Haiku / Sonnet; Luna / Terra) at low effort.\n\
-- Hard reasoning, final synthesis, adversarial verification → the strongest \
-tier (Opus / Fable; Sol) at high/xhigh.\n\
+- Hardest end-to-end work → Astra at high/xhigh; regular hard reasoning and \
+final verification → Opus / Fable or Sol.\n\
 - Coding / agentic main loop → Opus 5 or Sonnet 5 at xhigh; on the Codex \
 side, Sol starting at medium.\n\
 - When in doubt, don't override — inherit the parent/session model.\n"
@@ -320,6 +326,7 @@ mod tests {
             assert!(g.contains("claude-sonnet-5"), "{locale} must list Sonnet 5");
             assert!(g.contains("claude-haiku-4-5"), "{locale} must list Haiku 4.5");
             // Codex family model IDs
+            assert!(g.contains("gpt-6-astra"), "{locale} must list GPT-6 Astra");
             assert!(g.contains("gpt-5.6-sol"), "{locale} must list Codex Sol");
             assert!(g.contains("gpt-5.6-terra"), "{locale} must list Codex Terra");
             assert!(g.contains("gpt-5.6-luna"), "{locale} must list Codex Luna");

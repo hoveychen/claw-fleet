@@ -507,11 +507,7 @@ impl LlmProvider for CodexCliProvider {
         // ChatGPT-account login can actually run — the older `*-codex` /
         // `*-codex-mini` slugs 400 with "not supported when using Codex with a
         // ChatGPT account" (verified live).
-        vec![
-            LlmModel::new("gpt-5.6-sol", "GPT-5.6-Sol"),
-            LlmModel::new("gpt-5.6-terra", "GPT-5.6-Terra"),
-            LlmModel::new("gpt-5.6-luna", "GPT-5.6-Luna"),
-        ]
+        codex_fallback_models()
     }
 
     // Luna is Codex's fast/cheap tier; Terra the balanced one. The previous
@@ -546,6 +542,15 @@ impl LlmProvider for CodexCliProvider {
         )?;
         Some(Completion { text, usage: None })
     }
+}
+
+fn codex_fallback_models() -> Vec<LlmModel> {
+    vec![
+        LlmModel::new("gpt-6-astra", "GPT-6 Astra"),
+        LlmModel::new("gpt-5.6-sol", "GPT-5.6-Sol"),
+        LlmModel::new("gpt-5.6-terra", "GPT-5.6-Terra"),
+        LlmModel::new("gpt-5.6-luna", "GPT-5.6-Luna"),
+    ]
 }
 
 /// Read `~/.codex/models_cache.json` and return non-hidden models.
@@ -642,7 +647,7 @@ fn model_tier(model: &str, fallback: ModelSlot) -> ModelTier {
     let model = model.to_ascii_lowercase();
     if model.contains("haiku") || model.contains("luna") {
         ModelTier::Fast
-    } else if model.contains("opus") || model.contains("fable") || model.contains("sol") {
+    } else if model.contains("opus") || model.contains("fable") || model.contains("sol") || model.contains("astra") {
         ModelTier::Premium
     } else if model.contains("sonnet") || model.contains("terra") {
         ModelTier::Standard
@@ -898,6 +903,11 @@ mod tests {
         // cached at login). The older `*-codex` slugs were dropped because they
         // 400 under a ChatGPT account, so assert the current contract instead.
         assert!(models.iter().any(|m| m.id.starts_with("gpt-5")));
+    }
+
+    #[test]
+    fn codex_fallback_models_include_astra() {
+        assert!(codex_fallback_models().iter().any(|m| m.id == "gpt-6-astra"));
     }
 
     #[test]
