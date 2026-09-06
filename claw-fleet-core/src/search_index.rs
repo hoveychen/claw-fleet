@@ -23,7 +23,10 @@ use crate::log_debug;
 /// History:
 ///   1 — initial (user/assistant message bodies only)
 ///   2 — also index the `ai-title` line's `aiTitle` field
-const SCHEMA_VERSION: i64 = 2;
+///   3 — CJK text is stored segmented per character (see [`segment_cjk`]);
+///       rows written under v2 hold unsegmented runs and can never match a
+///       Chinese substring query, so they must be rebuilt.
+const SCHEMA_VERSION: i64 = 3;
 
 // ── SearchHit ────────────────────────────────────────────────────────────────
 
@@ -396,13 +399,20 @@ fn extract_searchable_text(val: &Value) -> String {
 /// them as a single token, so only a query equal to that entire run can match.
 ///
 /// Covers Han (incl. ext-A and compatibility), kana, and Hangul syllables.
+///
+/// CJK punctuation and fullwidth forms are included deliberately. They are not
+/// "characters to search for", but they sit *inside* Chinese runs, and leaving
+/// them out strands a separator next to them that `desegment_cjk` then cannot
+/// remove — snippets came back reading `已合并 ，main` instead of `已合并，main`.
 fn is_cjk(c: char) -> bool {
     matches!(c,
-        '\u{3400}'..='\u{4DBF}'   // CJK ext A
-        | '\u{4E00}'..='\u{9FFF}' // CJK unified
-        | '\u{F900}'..='\u{FAFF}' // CJK compatibility
+        '\u{3000}'..='\u{303F}'   // CJK symbols + punctuation (。、「」…)
         | '\u{3040}'..='\u{30FF}' // hiragana + katakana
+        | '\u{3400}'..='\u{4DBF}' // CJK ext A
+        | '\u{4E00}'..='\u{9FFF}' // CJK unified
         | '\u{AC00}'..='\u{D7AF}' // Hangul syllables
+        | '\u{F900}'..='\u{FAFF}' // CJK compatibility
+        | '\u{FF00}'..='\u{FFEF}' // fullwidth forms (，！？：；)
     )
 }
 
@@ -740,5 +750,26 @@ mod tests {
         // A space the user actually typed between two Chinese words is the one
         // case we cannot distinguish; document the known behaviour.
         assert_eq!(desegment_cjk(&segment_cjk("决策 卡")), "决策卡");
+        // Punctuation inside a Chinese run restores cleanly.
+        assert_eq!(desegment_cjk(&segment_cjk("完成。下一步")), "完成。下一步");
+        assert_eq!(
+            desegment_cjk(&segment_cjk("决策卡，工具，面板")),
+            "决策卡，工具，面板"
+        );
+
+        // KNOWN BEHAVIOUR at a CJK↔ASCII boundary: one space survives.
+        //
+        // `unicode61` does not split there either — measured: indexing
+        // `已合并main全绿` as one run makes even `main` unsearchable — so
+        // `segment_cjk` *must* insert a separator at that boundary. Once
+        // inserted it is indistinguishable from a space the author typed, and
+        // deleting it unconditionally would corrupt the common `使用 fleet 工具`
+        // spacing. Leaving it is the safer half of the trade: CJK/ASCII spacing
+        // is conventional typography anyway, and search correctness is
+        // unaffected — this is display-only.
+        assert_eq!(
+            desegment_cjk(&segment_cjk("已合并，main全绿")),
+            "已合并， main 全绿"
+        );
     }
 }
