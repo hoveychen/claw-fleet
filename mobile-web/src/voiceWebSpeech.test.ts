@@ -56,16 +56,19 @@ function collect() {
   const final: string[] = [];
   const errors: string[] = [];
   const ready: number[] = [];
+  const ended: number[] = [];
   return {
     partial,
     final,
     errors,
     ready,
+    ended,
     handlers: {
       onReady: () => ready.push(1),
       onPartial: (t: string) => partial.push(t),
       onFinal: (t: string) => final.push(t),
       onError: (k: string) => errors.push(k),
+      onEnd: () => ended.push(1),
     },
   };
 }
@@ -208,5 +211,39 @@ describe("webSpeechProvider 的就绪信号", () => {
     s.cancel();
     FakeRecognition.last!.begin();
     expect(c.ready).toEqual([]);
+  });
+});
+
+// 浏览器即便 continuous=true 也会在长静默后自己结束会话（各家实现不一）。以前
+// onend 只把内部的 dead 置上，页面还以为在录 —— 和鸿蒙 VAD 收工是同一个症状。
+describe("引擎自己收工", () => {
+  it("onend 要上报给调用方", async () => {
+    installEngine();
+    const c = collect();
+    await webSpeechProvider.start("zh-CN", c.handlers);
+    FakeRecognition.last!.begin();
+    FakeRecognition.last!.onend?.();
+    expect(c.ended).toHaveLength(1);
+  });
+
+  it("取消之后引擎补的 onend 不上报", async () => {
+    installEngine();
+    const c = collect();
+    const session = await webSpeechProvider.start("zh-CN", c.handlers);
+    FakeRecognition.last!.begin();
+    session.cancel();
+    FakeRecognition.last!.onend?.();
+    expect(c.ended).toHaveLength(0);
+  });
+
+  it("报错收场之后紧跟的 onend 不再上报", async () => {
+    installEngine();
+    const c = collect();
+    await webSpeechProvider.start("zh-CN", c.handlers);
+    FakeRecognition.last!.begin();
+    FakeRecognition.last!.onerror?.({ error: "network" });
+    FakeRecognition.last!.onend?.();
+    expect(c.errors).toEqual(["network"]);
+    expect(c.ended).toHaveLength(0);
   });
 });

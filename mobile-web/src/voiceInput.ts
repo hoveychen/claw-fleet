@@ -55,6 +55,18 @@ export interface VoiceHandlers {
   onFinal(text: string): void;
   /** 出错。收到之后本次会话即结束，不会再有其它回调。 */
   onError(kind: VoiceErrorKind): void;
+  /**
+   * **引擎自己收工了** —— 不是调用方要求的。
+   *
+   * 三条实现都有这一刻，而且都不罕见：鸿蒙的 VAD 判定静默 3 秒（或录满 60 秒
+   * 上限）、Web Speech 即便 continuous 也会在长静默后自行结束、Capacitor 那边
+   * 是 `start()` 的 promise resolve。以前这三处都只在内部把会话标成死的，页面
+   * 无从知道 —— 界面继续显示「正在听」，用户接着说却一个字都不出，只有再点一次
+   * 停止才回得来。
+   *
+   * 与 onError 互斥，一次会话最多一个结局；调用方 cancel 之后不再上报。
+   */
+  onEnd(): void;
 }
 
 /** 一次进行中的识别。 */

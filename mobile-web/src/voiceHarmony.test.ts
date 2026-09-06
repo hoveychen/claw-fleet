@@ -32,16 +32,19 @@ function collect() {
   const final: string[] = [];
   const errors: string[] = [];
   const ready: number[] = [];
+  const ended: number[] = [];
   return {
     partial,
     final,
     errors,
     ready,
+    ended,
     handlers: {
       onReady: () => ready.push(1),
       onPartial: (t: string) => partial.push(t),
       onFinal: (t: string) => final.push(t),
       onError: (k: string) => errors.push(k),
+      onEnd: () => ended.push(1),
     },
   };
 }
@@ -198,5 +201,40 @@ describe("openPermissionSettings", () => {
     const pending = harmonyVoiceProvider.openPermissionSettings?.();
     (w["__fleetVoicePermission"] as (g: boolean) => void)(false);
     expect(await pending).toBe(false);
+  });
+});
+
+// 鸿蒙的引擎 VAD 判定静默 3 秒就自己收工（也可能是录满 60 秒的上限），壳侧推一条
+// `end` 回来。以前这条事件只用来拆 hook，页面完全不知道 —— 界面一直显示「正在
+// 听」，用户继续说却一个字都不出，只有再点一次停止才回得来。
+describe("引擎自己收工", () => {
+  it("end 事件要上报给调用方，而不是只在内部拆 hook", async () => {
+    installBridge();
+    const c = collect();
+    await harmonyVoiceProvider.start("zh-CN", c.handlers);
+    push({ kind: "ready" });
+    push({ kind: "partial", text: "说了半句" });
+    push({ kind: "end" });
+    expect(c.ended).toHaveLength(1);
+  });
+
+  it("用户自己取消之后，壳里补来的 end 不再上报", async () => {
+    installBridge();
+    const c = collect();
+    const session = await harmonyVoiceProvider.start("zh-CN", c.handlers);
+    push({ kind: "ready" });
+    session.cancel();
+    push({ kind: "end" });
+    expect(c.ended).toHaveLength(0);
+  });
+
+  it("出错收场之后不再补一次 end——一次会话只该有一个结局", async () => {
+    installBridge();
+    const c = collect();
+    await harmonyVoiceProvider.start("zh-CN", c.handlers);
+    push({ kind: "error", code: "PERMISSION_DENIED" });
+    push({ kind: "end" });
+    expect(c.errors).toEqual(["no-permission"]);
+    expect(c.ended).toHaveLength(0);
   });
 });
