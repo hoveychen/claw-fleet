@@ -1,7 +1,8 @@
 /* Shared styles applied by safeMarkdownComponents so every ReactMarkdown
    site renders tables and inline code that respect the parent container
-   width — critical for lite mode (340px) where default table auto-sizing
-   otherwise pushes content past the panel edge. */
+   width — critical in narrow hosts (a decision card, the inline detail
+   column) where default table auto-sizing otherwise pushes content past the
+   panel edge. */
 
 .table_wrap {
   max-width: 100%;

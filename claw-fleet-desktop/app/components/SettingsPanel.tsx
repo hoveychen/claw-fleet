@@ -954,10 +954,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   // ── Master mute ───────────────────────────────────────────────────────
   // `tts-muted` is read by both the front-end decision-panel queue
   // (audio.ts playDecisionAlert/playAlertSound) and the Rust notification
-  // TTS path (gui.rs play_tts_for_notification). It used to have NO settings
-  // UI — only the Lite-mode top-bar button — which is why "I turned sound
-  // off but the decision panel still spoke" happened. Surface it here as the
-  // single master switch.
+  // TTS path (gui.rs play_tts_for_notification). It used to have no settings
+  // UI at all — which is why "I turned sound off but the decision panel still
+  // spoke" happened. This is the single master switch.
   const [ttsMutedState, setTtsMutedState] = useState<FeatureState>(
     () => getFeatureState("tts-muted"),
   );

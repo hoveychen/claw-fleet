@@ -6,9 +6,8 @@
  * button that should not be there. Three kinds of UI have to know the host
  * directly:
  *
- *   - entries that only mean something on the desktop (the Lite portrait
- *     window, the mobile-relay pairing panel — a tab has no second window to
- *     shrink and no OS keychain to pair from);
+ *   - entries that only mean something on the desktop (the mobile-relay
+ *     pairing panel — a tab has no OS keychain to pair from);
  *   - native-dialog call sites that must swap to the backend-driven picker,
  *     which is the same swap a remote connection already makes;
  *   - the custom-protocol asset URLs (`fleet-attachment://` and friends),

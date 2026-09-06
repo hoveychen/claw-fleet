@@ -35,8 +35,8 @@ function lastQuestionSentence(text: string): string {
  * Subscribe to backend decision events and push them into the decision store.
  *
  * Must be mounted at the App root (unconditionally) so events are never
- * dropped while the DecisionPanel itself is unmounted (e.g. lite mode with
- * no pending decisions). Backend emits are one-shot — if no listener is
+ * dropped while the DecisionPanel itself is unmounted (no pending
+ * decisions). Backend emits are one-shot — if no listener is
  * attached at emit time, the event is gone.
  *
  * `silent: true` skips `playDecisionAlert` — used by the decision-float

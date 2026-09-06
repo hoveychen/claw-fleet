@@ -115,8 +115,8 @@ export function parseTabKind(id: string): TabKind {
  * down to the surfaces that render agent prose.
  *
  * It is a prop rather than a store hop because it is only meaningful where a tab
- * strip exists: the same `SessionDetail` also renders in the global drawer and
- * in Lite mode, and there a clicked path still belongs in the 仓库 page. A
+ * strip exists: the same `SessionDetail` also renders in the global drawer,
+ * and there a clicked path still belongs in the 仓库 page. A
  * surface holding one of these knows it has somewhere to put a tab; a surface
  * without it keeps the page-switching behaviour.
  */

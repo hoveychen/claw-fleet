@@ -65,8 +65,8 @@ function shouldSkip(el: Element): boolean {
 /**
  * The content roots to search: the current page's content container(s), tagged
  * `data-find-content`. Only visible ones count, so a mounted-but-offscreen view
- * doesn't leak matches. Falls back to `<body>` if nothing is tagged (e.g. lite
- * mode), which still beats searching nothing.
+ * doesn't leak matches. Falls back to `<body>` if nothing is tagged, which
+ * still beats searching nothing.
  */
 function searchRoots(): Element[] {
   const tagged = Array.from(document.querySelectorAll("[data-find-content]")).filter(
