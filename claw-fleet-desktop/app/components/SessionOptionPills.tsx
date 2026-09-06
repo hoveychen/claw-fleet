@@ -36,7 +36,6 @@ export function SessionOptionPills({
   onToolChange,
   toolChoices = AGENT_TOOL_CHOICES,
   showPermission = true,
-  compact = false,
 }: {
   model: string;
   effort: string;
@@ -65,13 +64,6 @@ export function SessionOptionPills({
    *  monitored sources by the host. Defaults to the full catalog. When only one
    *  tool remains the pill is hidden — there is nothing to switch between. */
   toolChoices?: { value: string; label: string }[];
-  /** Narrow-host (lite) mode: tighter pill chrome for the 340px strip. Labels are
-   *  the same in both modes — lite used to swap in a shorter "默认" / "Default" for
-   *  the un-chosen state, but now that a default pill just shows its category name
-   *  there is nothing left to shorten (measured in the lite strip: identical row
-   *  height, ≤12px of extra pill width, and that row wraps to two lines either
-   *  way). */
-  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const isCodex = tool === "codex";
@@ -274,7 +266,6 @@ export function SessionOptionPills({
       {onToolChange && toolChoices.length > 1 && (
         <PillMenu
           placement={placement}
-          compact={compact}
           label={toolLabel}
           title={t("new_session.tool")}
           testId="agent-pill"
@@ -289,7 +280,6 @@ export function SessionOptionPills({
       )}
       <PillMenu
         placement={placement}
-        compact={compact}
         label={modelLabel}
         title={t("new_session.model")}
         testId="model-pill"
@@ -300,7 +290,6 @@ export function SessionOptionPills({
       />
       <PillMenu
         placement={placement}
-        compact={compact}
         label={effortLabel}
         title={t("new_session.effort")}
         testId="effort-pill"
@@ -329,7 +318,6 @@ export function SessionOptionPills({
       {showPermission && !isCodex && !isDsh && (
         <PillMenu
           placement={placement}
-          compact={compact}
           label={permissionLabel}
           title={t("new_session.permission")}
           disabled={disabled}

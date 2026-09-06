@@ -46,9 +46,6 @@ export interface NewSessionFormProps {
    *  the user opened — an empty editor group — since there is nothing to back
    *  out to. The close button is then hidden along with it. */
   onCancel?: () => void;
-  /** Narrow-host (lite mode) rendering: compact option pills so the toolbar
-   *  fits the 340px strip without wrapping to a third line. */
-  compact?: boolean;
 }
 
 function basename(p: string): string {
@@ -228,7 +225,7 @@ export function defaultWorkspace(
  *  pills and custom popovers instead of labeled form rows and native
  *  <select>s. */
 
-export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormProps) {
+export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const { connection } = useConnectionStore();
@@ -581,9 +578,7 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   const chatModePill = (
     <button
       type="button"
-      className={`${pillStyles.ghost_pill} ${compact ? pillStyles.ghost_pill_compact : ""} ${
-        isChat ? styles.chat_pill_on : ""
-      }`}
+      className={`${pillStyles.ghost_pill} ${isChat ? styles.chat_pill_on : ""}`}
       aria-pressed={isChat}
       disabled={submitting || !chatPath}
       onClick={() => setChatMode(!isChat)}
@@ -703,7 +698,6 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
       onEffortChange={setEffort}
       onPermissionModeChange={setPermissionMode}
       disabled={submitting}
-      compact={compact}
     />
   );
 
