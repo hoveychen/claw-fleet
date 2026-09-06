@@ -67,6 +67,14 @@ export interface VoiceRecorderApi {
   active: boolean;
   /** 录音中输入框该显示的内容（已定稿 + 未定稿合成）。不录时等于原值。 */
   preview: string;
+  /**
+   * 输入框现在该显示 `preview` 而不是 `value`。
+   *
+   * **不等于 `recording`**：按下停止后还有一小段等最后一句定稿的时间，那段字仍在
+   * `preview` 里而尚未进 `value`。这期间切回 `value`，用户看到的就是「文字消失了」
+   * ——正是这一版要修的那个症状，只是短一点。
+   */
+  showingPreview: boolean;
   /** 未定稿的那一段，单独给出来是为了让调用方能把它画成灰的。 */
   partial: string;
   seconds: number;
@@ -159,6 +167,9 @@ export function useVoiceRecorder({
   });
 
   const recording = voice.state === "listening";
+  // 收音停了、还在等最后一段定稿的那段时间。输入框在这期间要继续显示那段字
+  // （见 voiceTail.ts），所以它和「正在录」一起决定输入框显示 preview 还是 value。
+  const settling = voice.settling;
   const preparing = voice.state === "preparing";
 
   // 计时。只在录音时跑，停下就归零 —— 计时器是「这次录音」的属性。
@@ -256,7 +267,8 @@ export function useVoiceRecorder({
     available: voice.state !== "probing" && voice.state !== "unsupported",
     recording,
     preparing,
-    active: recording || preparing || finalizing,
+    active: recording || preparing || finalizing || settling,
+    showingPreview: recording || settling,
     preview: voice.partial ? appendVoiceText(value, voice.partial) : value,
     partial: voice.partial,
     seconds,

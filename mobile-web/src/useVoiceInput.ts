@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "./i18n";
 import type { VoiceErrorKind, VoiceProviderId, VoiceSession } from "./voiceInput";
 import { currentVoiceProvider } from "./voiceProviders";
+import { createTailGuard, type TailGuard } from "./voiceTail";
 import { holdWakeLock } from "./wakeLock";
 
 export type VoiceState =
@@ -108,6 +109,8 @@ export interface UseVoiceInput {
   partial: string;
   /** state 为 error 时的原因。 */
   error: VoiceErrorKind | null;
+  /** 收音已停，还在等引擎把最后一段定稿吐出来。这期间 partial 仍要显示。 */
+  settling: boolean;
   start(): void;
   /** 停止收音，保留已识别的内容。 */
   stop(): void;
@@ -133,6 +136,8 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
   const [state, setState] = useState<VoiceState>("probing");
   const [partial, setPartial] = useState("");
   const [error, setError] = useState<VoiceErrorKind | null>(null);
+  /** 停止之后还在等最后一段定稿。这期间那段字必须留在屏幕上，见 voiceTail.ts。 */
+  const [settling, setSettling] = useState(false);
   const sessionRef = useRef<VoiceSession | null>(null);
 
   // onText 每次渲染都是新函数（调用方基本都写内联箭头）。放进 ref，start 的
@@ -161,13 +166,27 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     return holdWakeLock();
   }, [state]);
 
+  // 停止时还没定稿的那一段的兜底，见 voiceTail.ts。补交的文字与引擎自己的定稿
+  // 走同一条出口 —— 调用方分不出来，也不该分得出来。
+  const tailRef = useRef<TailGuard | null>(null);
+  if (tailRef.current === null) {
+    tailRef.current = createTailGuard((text) => onTextRef.current(text), {
+      onSettle: () => {
+        setSettling(false);
+        setPartial("");
+      },
+    });
+  }
+  const tail = tailRef.current;
+
   // 卸载时收掉进行中的识别，否则麦克风会一直开着。
   useEffect(() => {
     return () => {
       sessionRef.current?.cancel();
       sessionRef.current = null;
+      tail.dispose();
     };
-  }, []);
+  }, [tail]);
 
   // 每次 start / stop / cancel 都换一代号。provider.start 是异步的，等它 resolve
   // 时用户可能已经取消了；比对代号就知道手上这次结果还算不算数。
@@ -180,6 +199,9 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     const provider = currentVoiceProvider();
     if (!provider || sessionRef.current) return;
     const gen = ++genRef.current;
+    // 新一轮作废上一轮还挂着的补交：那段字属于上次录音，用户已经不要了。
+    tail.cancel();
+    setSettling(false);
     setError(null);
     setPartial("");
     setState("preparing");
@@ -198,17 +220,22 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
           if (gen !== genRef.current) return;
           setState((s) => (s === "preparing" ? "listening" : s));
           setPartial(text);
+          tail.partial(text);
         },
         onFinal: (text) => {
           if (gen !== genRef.current) return;
           setState((s) => (s === "preparing" ? "listening" : s));
           setPartial("");
+          // 定稿接管了这一段，待补交的作废，否则同一句话会进两遍。
+          tail.final();
           onTextRef.current(text);
         },
         onError: (kind) => {
           if (gen !== genRef.current) return;
           sessionRef.current = null;
           setPartial("");
+          tail.cancel();
+          setSettling(false);
           // 用户自己取消的不是错误,静默回到待命。
           if (kind === "aborted") {
             setState("idle");
@@ -233,7 +260,7 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
         setError("unavailable");
         setState("error");
       });
-  }, [lang]);
+  }, [lang, tail]);
 
   // 注意 stop **不**换代号:引擎在 stop 之后还要把最后一段定稿吐出来,换了代号
   // 那一段就被守卫挡掉了 —— 表现为「说完按停止,最后一句没进输入框」。
@@ -241,17 +268,26 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
   const stop = useCallback(() => {
     sessionRef.current?.stop();
     sessionRef.current = null;
-    setPartial("");
+    // 屏幕上那段还没定稿的字先记着：引擎补了定稿就用它的，没补就到点自己交上去。
+    // 少了这一步，「说完按停止、文字整段消失」就取决于原生两个回调谁先到。
+    //
+    // 注意**不**在这里清 partial：等待期间那段字要一直留在输入框里，否则用户看到
+    // 的还是「先消失、过一会儿再冒出来」。清空交给 onSettle。
+    const awaiting = tail.stop();
+    setSettling(awaiting);
+    if (!awaiting) setPartial("");
     setState((s) => (s === "listening" || s === "preparing" ? "idle" : s));
-  }, []);
+  }, [tail]);
 
   const cancel = useCallback(() => {
     genRef.current++;
     sessionRef.current?.cancel();
     sessionRef.current = null;
     setPartial("");
+    tail.cancel();
+    setSettling(false);
     setState((s) => (s === "listening" || s === "preparing" ? "idle" : s));
-  }, []);
+  }, [tail]);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -280,6 +316,7 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     state,
     partial,
     error,
+    settling,
     start,
     stop,
     cancel,
