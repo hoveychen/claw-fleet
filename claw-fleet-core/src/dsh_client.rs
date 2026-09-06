@@ -6,13 +6,19 @@
 //!
 //! ```text
 //! POST /api/session/list
-//! {"type":"client-request","rpcId":"<uuid>","method":"session/list","payload":{}}
+//! {"type":"client-request","rpcId":"<uuid>","method":"session/list",
+//!  "payload":{"args":{"_request":{}}}}
 //! → {"type":"server-response","rpcId":"<same uuid>","result":{"ok":true,"value":{…}}}
 //! ```
 //!
 //! Endpoints are `<service>/<method>` — exactly two slash-separated segments,
 //! which the gateway enforces. dsh 0.1.1 spelled them `service.method`; the
 //! dotted form is a 404 on 0.1.2 because it parses as one segment.
+//!
+//! The `payload` is always `{"args": …}` (see [`build_request`]), and the
+//! argument object's own field name is the endpoint's business: most session
+//! calls take `request`, `session/list` takes `_request`, `credentials/*` take
+//! `ref`/`refs`, `agentPresets/read` takes `agentPreset`.
 //!
 //! Answerable downlink frames (`approval/requested`, `question/requested`) are
 //! answered on a *different* carrier: POST `/api/respond` with a
@@ -38,7 +44,7 @@ use serde_json::{json, Value};
 
 use crate::off_runtime::off_runtime;
 
-/// Default per-call timeout. `session.prompt` returns as soon as the turn is
+/// Default per-call timeout. `session/prompt` returns as soon as the turn is
 /// admitted (not when it finishes), so no call on this face is long-polling.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -133,7 +139,7 @@ fn parse_response(sent_rpc_id: &str, body: &str) -> Result<Value, DshRpcError> {
         .ok_or_else(|| DshRpcError::Envelope("response has no result".into()))?;
 
     if result.get("ok").and_then(Value::as_bool) == Some(true) {
-        // An `ok` result with no `value` is a unit return (`credentials.set`
+        // An `ok` result with no `value` is a unit return (`credentials/set`
         // answers `{"ok":true,"value":{}}`, but the slot may be elided).
         return Ok(result.get("value").cloned().unwrap_or_else(|| json!({})));
     }
@@ -444,7 +450,7 @@ mod tests {
 
     #[test]
     fn parse_response_returns_ok_value() {
-        // Shape taken verbatim from a live `session.create` response.
+        // Shape taken verbatim from a live `session/create` response.
         let body = r#"{"type":"server-response","rpcId":"id-1",
             "result":{"ok":true,"value":{"sessionId":"session-abc","agentPreset":"standard"}}}"#;
         let value = parse_response("id-1", body).unwrap();
@@ -459,9 +465,9 @@ mod tests {
 
     #[test]
     fn parse_response_surfaces_business_error() {
-        // Shape taken verbatim from a live `credentials.describe` rejection.
+        // Shape taken verbatim from a live `credentials/describe` rejection.
         let body = r#"{"type":"server-response","rpcId":"id-1","result":{"ok":false,
-            "error":{"code":"bad-request","message":"invalid payload for credentials.describe"}}}"#;
+            "error":{"code":"bad-request","message":"invalid payload for credentials/describe"}}}"#;
         match parse_response("id-1", body).unwrap_err() {
             DshRpcError::Rpc { code, message } => {
                 assert_eq!(code, "bad-request");

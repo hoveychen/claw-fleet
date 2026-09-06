@@ -531,12 +531,12 @@ fn send_question(
 
 /// Look up the workspace name and title Fleet shows on the card.
 ///
-/// One `session.list` per decision — decisions are rare and the call is a
+/// One `session/list` per decision — decisions are rare and the call is a
 /// loopback round trip, so caching it would only risk showing a stale title.
 /// A lookup that fails leaves the card with the fields the panel already
 /// tolerates being empty.
 fn session_meta(client: &DshClient, session_id: &str) -> (String, Option<String>) {
-    let Ok(listed) = client.call("session.list", json!({})) else {
+    let Ok(listed) = client.call("session/list", json!({ "_request": {} })) else {
         return (String::new(), None);
     };
     listed

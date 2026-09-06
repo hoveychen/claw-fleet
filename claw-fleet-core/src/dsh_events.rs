@@ -1,6 +1,6 @@
 //! Live observation of a `dsh web` instance over its two downlink WebSockets.
 //!
-//! `session.list` (polled by [`crate::dsh_source`]) carries one liveness bit per
+//! `session/list` (polled by [`crate::dsh_source`]) carries one liveness bit per
 //! session — `running` — which collapses every phase of a turn into "Active".
 //! The fine phases Fleet shows for the other two sources (Thinking / Streaming /
 //! Executing / Processing) exist in dsh only as events, and events are only
@@ -31,7 +31,7 @@
 //!
 //! Measured against two concurrent `dsh web` instances sharing one `~/.dsh`
 //! home: while instance A ran a full turn, instance B's `events.mux` and
-//! `events.host` published **nothing** about it, and B's `session.list` reported
+//! `events.host` published **nothing** about it, and B's `session/list` reported
 //! `running: false` for that session throughout — A's reported `true`. Sessions
 //! are shared through the on-disk log; the *live* view is not.
 //!
@@ -92,7 +92,7 @@ pub enum DshFrame {
         kind: String,
         block_type: Option<String>,
         /// `turn/end`'s `data.reason.kind` — observed as `completed` when the
-        /// agent finished on its own and `aborted` when `session.cancel` cut it
+        /// agent finished on its own and `aborted` when `session/cancel` cut it
         /// short. Absent on every other event.
         reason_kind: Option<String>,
     },
@@ -128,7 +128,7 @@ pub enum DshFrame {
     /// frame's `rpcId`, since a question carries no id of its own.
     QuestionResolved { question_rpc_id: String },
     /// Everything Fleet does not act on: projections (already carried by
-    /// `session.list`), queue snapshots, `session/subscribed`, host commands.
+    /// `session/list`), queue snapshots, `session/subscribed`, host commands.
     Ignored,
 }
 
@@ -389,7 +389,7 @@ impl LiveView {
                     entry.phase_at_ms = now_ms;
                 }
                 if kind == "turn/end" {
-                    // `aborted` (session.cancel) is the one other kind observed
+                    // `aborted` (session/cancel) is the one other kind observed
                     // live; treat anything that is not an outright completion as
                     // a failed turn so the caller does not record it as success.
                     self.settle(&session_id, reason_kind.as_deref() == Some("completed"));
@@ -701,7 +701,7 @@ mod tests {
     }
 
     /// Verbatim `turn/end` frames: one that finished, one cut short by
-    /// `session.cancel`. The nested `reason.kind` is the only thing telling the
+    /// `session/cancel`. The nested `reason.kind` is the only thing telling the
     /// two apart, and it decides what `on_turn_end` reports.
     #[test]
     fn decodes_the_outcome_of_a_finished_turn() {

@@ -10,14 +10,14 @@
 //!
 //! ## Why a preset is the only lever (verified against the shipped wire schema)
 //!
-//! `session.create`'s payload is `{workspaceId?, cwd?, sessionId?, agentPreset?}`
+//! `session/create`'s payload is `{workspaceId?, cwd?, sessionId?, agentPreset?}`
 //! (`sessionCreateRequestSchema` in `dsh-host-apiproxy`). There is no
 //! per-session instruction or plugin-config field, and `dshHome` is *plugin*
 //! config — deployment-wide. `agentPreset` is the one seam: a preset is a
 //! directory holding one `agent.cordis.yml`, user-authored ones live under
 //! `${DSH_HOME:-~/.dsh}/.agent-presets/<id>/`, and preset discovery is
 //! unmemoized (the roster re-reads its roots on every call), so a directory
-//! Fleet writes is visible to the next `session.create` without restarting
+//! Fleet writes is visible to the next `session/create` without restarting
 //! `dsh web`.
 //!
 //! So Fleet authors one preset, `fleet-chat`, that is the deployment's own
@@ -36,7 +36,7 @@
 //! Copying a composition freezes it: a dsh upgrade that adds a plugin row to
 //! `standard` would never reach a frozen copy, and the chat sessions would
 //! quietly run last release's agent. So the source text is re-read from the
-//! deployment (`agentPreset.read` on whichever preset reports `isDefault`) and
+//! deployment (`agentPresets/read` on whichever preset reports `isDefault`) and
 //! re-patched every time, which makes upgrades free.
 //!
 //! The patch is textual rather than a YAML round-trip because the shipped
@@ -185,7 +185,7 @@ pub fn ensure_chat_preset(source_composition: &str) -> Result<String, String> {
     let stale = fs::read_to_string(&path).map(|c| c != patched).unwrap_or(true);
     if stale {
         // Atomic because the roster re-reads its roots on every call: a chat
-        // spawn racing a concurrent `agentPreset.list` must never expose a
+        // spawn racing a concurrent `agentPresets/list` must never expose a
         // half-written composition, which discovery would report as broken.
         crate::atomic_json::write_atomic(&path, patched.as_bytes())
             .map_err(|e| format!("write chat preset: {e}"))?;
@@ -194,7 +194,7 @@ pub fn ensure_chat_preset(source_composition: &str) -> Result<String, String> {
 }
 
 /// The id of the preset a session would otherwise be created under, read from
-/// an `agentPreset.list` answer.
+/// an `agentPresets/list` answer.
 ///
 /// The deployment default is what a chat session must inherit — hardcoding
 /// `standard` would silently change composition on a deployment whose default

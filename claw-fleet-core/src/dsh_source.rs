@@ -6,7 +6,7 @@
 //! so this source talks RPC ([`crate::dsh_client`]) to a server it owns
 //! ([`crate::dsh_server`]) rather than reading files.
 //!
-//! One server covers every workspace: `session.list` returns all sessions the
+//! One server covers every workspace: `session/list` returns all sessions the
 //! harness home knows about regardless of their cwd, including ones written by
 //! a completely different profile (a `dsh --profile headless` run shows up
 //! here). The server's own cwd only decides where *new* sessions would root.
@@ -18,12 +18,12 @@
 //! that is not an omission: **dsh exposes nothing to implement them with.**
 //!
 //! The `/api` method catalog (read off `@deepseek-ai/dsh-host-apiproxy`, then
-//! called against a live server) is `agentPreset.*`, `credentials.*`, `goal.*`,
+//! called against a live server) is `agentPresets/*`, `credentials/*`, `goal.*`,
 //! `host.*`, `llm.*`, `session.*`, `settings.*`, `skill.list`, `subagent.*`,
 //! `workspace.*`. There is no `account.*`, `usage.*`, `quota.*`, or
 //! `rateLimit.*`. Of the near misses:
 //!
-//! * `credentials.describe` takes `{refs: [...]}` and reports whether *those
+//! * `credentials/describe` takes `{refs: [...]}` and reports whether *those
 //!   credential refs* are set — presence, not an account or a balance.
 //! * `llm.providers` returns the provider catalog with an `active` flag
 //!   (measured on this machine: `openrouter` and `deepseek-official` active,
@@ -41,7 +41,7 @@
 //! a dsh user has to come from that provider's own API (for the OpenRouter case,
 //! see the generation-cost path in [`dsh_token_breakdown`]'s neighbourhood), not
 //! from dsh. Per-session token accounting is a different question and dsh *does*
-//! answer it — see [`dsh_token_breakdown`], which reads the `session.list`
+//! answer it — see [`dsh_token_breakdown`], which reads the `session/list`
 //! projections `@deepseek-ai/dsh-token-meter` publishes.
 
 use std::path::PathBuf;
@@ -70,7 +70,7 @@ pub const DSH_URI_PREFIX: &str = "dsh://";
 /// what it returns.
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 
-/// How long one `session.list` answer may be reused for a later roster scan.
+/// How long one `session/list` answer may be reused for a later roster scan.
 ///
 /// Deliberately shorter than [`POLL_INTERVAL`], so the registry's own cadence
 /// always reaches dsh and the roster cannot freeze behind the cache; what it
@@ -99,7 +99,7 @@ static SERVER: OnceLock<Mutex<Option<DshServer>>> = OnceLock::new();
 /// a new port.
 static WATCHER: OnceLock<Mutex<Option<DshEventWatcher>>> = OnceLock::new();
 
-/// The last `session.list` answer, with the instant it landed. Shared by every
+/// The last `session/list` answer, with the instant it landed. Shared by every
 /// roster scan in the process — see [`DshSource::roster`].
 static ROSTER: OnceLock<Mutex<Option<(std::time::Instant, Value)>>> = OnceLock::new();
 
@@ -240,7 +240,7 @@ impl DshSource {
     /// Turn the image references in one session's records into renderable store
     /// paths (see [`crate::dsh_attachments::resolve_image_blocks`]).
     ///
-    /// The fetch is `session.attachment`, which answers only for an attachment
+    /// The fetch is `session/attachment`, which answers only for an attachment
     /// the named session's log references — so this cannot be turned into a
     /// read of arbitrary attachments by handing it another session's id. It runs
     /// at most once per image ever, since the bytes then live in the store.
@@ -250,8 +250,8 @@ impl DshSource {
                 .with_client(|client| {
                     client
                         .call(
-                            "session.attachment",
-                            json!({ "sessionId": session_id, "attachmentId": attachment_id }),
+                            "session/attachment",
+                            json!({ "request": { "sessionId": session_id, "attachmentId": attachment_id } }),
                         )
                         .map_err(Into::into)
                 })
@@ -265,7 +265,7 @@ impl DshSource {
     ///
     /// Fleet scans the roster from several places at once — the registry watch
     /// loop, the desktop's rescan, and one per scan-bearing `fleet serve` route.
-    /// Each used to mean its own `session.list`, which is fine against a fast dsh
+    /// Each used to mean its own `session/list`, which is fine against a fast dsh
     /// and ruinous against a slow one: a frontend polling faster than the call
     /// completes queues scans without bound (measured through `fleet serve` with
     /// a 5s dsh: `/sessions` 61s, `/health` 26–29s behind the pile).
@@ -294,7 +294,7 @@ impl DshSource {
         }
 
         let value =
-            self.with_client(|client| client.call("session.list", json!({})).map_err(Into::into))?;
+            self.with_client(|client| client.call("session/list", json!({ "_request": {} })).map_err(Into::into))?;
         *lock(roster_slot()) = Some((std::time::Instant::now(), value.clone()));
         Ok(value)
     }
@@ -357,7 +357,7 @@ impl DshSource {
     ///
     /// Also the step that makes resume work: a session written by another
     /// process is cold to this server until something touches it, and
-    /// `session.selectModel` loads it (verified against a session created by a
+    /// `session/selectModel` loads it (verified against a session created by a
     /// different `dsh web` instance).
     fn select_model(
         client: &DshClient,
@@ -377,7 +377,7 @@ impl DshSource {
             payload["reasoningEffort"] = json!(effort);
         }
         client
-            .call("session.selectModel", payload)
+            .call("session/selectModel", json!({ "request": payload }))
             .map(|_| ())
             .map_err(Into::into)
     }
@@ -396,14 +396,23 @@ impl DshSource {
         crate::dsh_attachments::send_with_text_fallback(prompt, |content| {
             client
                 .call(
-                    "session.prompt",
+                    "session/prompt",
                     json!({
-                        "sessionId": session_id,
-                        // "queue" appends to the session's inbox; "steer" would
-                        // cut into a turn already running, which is not what
-                        // either of Fleet's launch paths means.
-                        "mode": "queue",
-                        "content": content,
+                        "request": {
+                            // 0.1.2 persists a client-minted id on the exact
+                            // accepted user message (`SessionPromptRequest
+                            // .requestId`), and refuses the call without it.
+                            // Fleet never has to correlate it back — the turn's
+                            // outcome arrives on the mux — so a fresh v4 per
+                            // send is all this needs.
+                            "requestId": uuid::Uuid::new_v4().to_string(),
+                            "sessionId": session_id,
+                            // "queue" appends to the session's inbox; "steer"
+                            // would cut into a turn already running, which is
+                            // not what either of Fleet's launch paths means.
+                            "mode": "queue",
+                            "content": content,
+                        }
                     }),
                 )
                 .map(|_| ())
@@ -453,10 +462,10 @@ type ArmedCallback = Arc<Mutex<Option<Box<dyn FnOnce(bool) + Send>>>>;
 /// or `None` to let dsh mount its own default.
 ///
 /// Only the chat workspace asks for one: dsh loads `$DSH_HOME/AGENTS.md` — where
-/// Fleet writes its engineering doctrine — unconditionally, and `session.create`
+/// Fleet writes its engineering doctrine — unconditionally, and `session/create`
 /// carries no per-session instruction knob, so the preset is the only seam (see
-/// [`crate::dsh_chat_preset`]). Two RPCs: `agentPreset.list` to learn the
-/// deployment's own default, `agentPreset.read` to get its composition text,
+/// [`crate::dsh_chat_preset`]). Two RPCs: `agentPresets/list` to learn the
+/// deployment's own default, `agentPresets/read` to get its composition text,
 /// then Fleet re-authors `fleet-chat` from it.
 ///
 /// `call` is a parameter so the orchestration is testable without a live server,
@@ -473,18 +482,18 @@ where
     if !crate::dsh_chat_preset::wants_chat_preset(workspace_path) {
         return None;
     }
-    let listed = call("agentPreset.list", json!({}))
-        .inspect_err(|e| log_chat_preset_skip(&format!("agentPreset.list failed: {e}")))
+    let listed = call("agentPresets/list", json!({}))
+        .inspect_err(|e| log_chat_preset_skip(&format!("agentPresets/list failed: {e}")))
         .ok()?;
     let source_id = crate::dsh_chat_preset::default_preset_id(&listed).or_else(|| {
-        log_chat_preset_skip("agentPreset.list reported no usable default preset");
+        log_chat_preset_skip("agentPresets/list reported no usable default preset");
         None
     })?;
-    let read = call("agentPreset.read", json!({ "agentPreset": source_id }))
-        .inspect_err(|e| log_chat_preset_skip(&format!("agentPreset.read failed: {e}")))
+    let read = call("agentPresets/read", json!({ "agentPreset": source_id }))
+        .inspect_err(|e| log_chat_preset_skip(&format!("agentPresets/read failed: {e}")))
         .ok()?;
     let composition = read.get("content").and_then(Value::as_str).or_else(|| {
-        log_chat_preset_skip("agentPreset.read answered without a composition");
+        log_chat_preset_skip("agentPresets/read answered without a composition");
         None
     })?;
     crate::dsh_chat_preset::ensure_chat_preset(composition)
@@ -526,7 +535,7 @@ fn normalize_session_id(id: Option<&str>) -> String {
     }
 }
 
-/// Read a token count out of a `session.list` projections block.
+/// Read a token count out of a `session/list` projections block.
 fn projection_u64(projections: &Value, key: &str, field: &str) -> u64 {
     projections
         .get("values")
@@ -536,7 +545,7 @@ fn projection_u64(projections: &Value, key: &str, field: &str) -> u64 {
         .unwrap_or(0)
 }
 
-/// Map one `session.list` item onto Fleet's [`SessionInfo`].
+/// Map one `session/list` item onto Fleet's [`SessionInfo`].
 ///
 /// dsh hands over its own projections (title, token usage, context breakdown)
 /// already folded, so this is a field rename rather than a transcript parse.
@@ -591,7 +600,7 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         model: known_model(&id),
         // Same story for the effort, with one extra source: for a session Fleet
         // spawned with an explicit `--effort`, the launch spec is a record of
-        // what Fleet asked for (and applied via `session.selectModel`). The log
+        // what Fleet asked for (and applied via `session/selectModel`). The log
         // header wins when known — it is the effort a real request went out
         // with, and it tracks a later change the spawn record cannot.
         effort: known_effort(&id).or_else(|| crate::launch_spec::effort_of(&id)),
@@ -604,7 +613,7 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         ai_title: title,
         entrypoint,
         fleet_spawned,
-        // `running` is the only liveness bit `session.list` carries. Finer
+        // `running` is the only liveness bit `session/list` carries. Finer
         // phases (Thinking / Streaming / Executing / Processing) come off the
         // mux downlink and are overlaid by `scan_sessions`.
         status: if running {
@@ -688,10 +697,10 @@ impl AgentSource for DshSource {
 
     /// Start a brand-new dsh session and give it its first prompt.
     ///
-    /// Three RPCs, no process: `session.create` with a Fleet-minted id (dsh
+    /// Three RPCs, no process: `session/create` with a Fleet-minted id (dsh
     /// honours a pre-assigned one, so the caller can correlate immediately
     /// instead of guessing which session appeared), an optional
-    /// `session.selectModel`, then `session.prompt`.
+    /// `session/selectModel`, then `session/prompt`.
     fn spawn(
         &self,
         spec: &crate::agent_source::SpawnSpec,
@@ -710,9 +719,9 @@ impl AgentSource for DshSource {
                 payload["agentPreset"] = json!(preset);
             }
             let created = client
-                .call("session.create", payload)
+                .call("session/create", json!({ "request": payload }))
                 .map_err(String::from)?;
-            // `session.create` echoes the preset it mounted. A mismatch means the
+            // `session/create` echoes the preset it mounted. A mismatch means the
             // chat session silently kept the doctrine, which is the whole failure
             // the preset exists to prevent — so it is said out loud rather than
             // inferred later from a transcript. Not fatal: the session is healthy
@@ -769,9 +778,9 @@ impl AgentSource for DshSource {
 
     /// Continue an existing dsh session.
     ///
-    /// dsh has no separate resume method and needs none: `session.selectModel`
+    /// dsh has no separate resume method and needs none: `session/selectModel`
     /// loads a session this server has never seen (verified against one written
-    /// by a different `dsh web` process) and `session.prompt` appends to it, so
+    /// by a different `dsh web` process) and `session/prompt` appends to it, so
     /// the history is already back in the model's context.
     fn resume(
         &self,
@@ -817,7 +826,7 @@ impl AgentSource for DshSource {
     /// This is the whole reason [`AgentSource::interrupt_session`] exists: every
     /// dsh session shares one server process, so the pid-based stop path would
     /// signal that server and take down every dsh session on the machine
-    /// (Fleet's included). `session.cancel` is the per-session lever — measured
+    /// (Fleet's included). `session/cancel` is the per-session lever — measured
     /// live, it ends the turn with `turn/end.data.reason = {"kind":"aborted",
     /// "reason":{"kind":"user"}}` against `{"kind":"completed"}` for a turn that
     /// finished on its own, which is also what makes
@@ -830,7 +839,7 @@ impl AgentSource for DshSource {
         }
         self.with_client(|client| {
             client
-                .call("session.cancel", json!({ "sessionId": id }))
+                .call("session/cancel", json!({ "request": { "sessionId": id } }))
                 .map(|_| ())
                 .map_err(Into::into)
         })
@@ -847,7 +856,7 @@ impl AgentSource for DshSource {
 ///
 /// The other two sources parse a transcript file; dsh has none (see
 /// [`AgentSource::resolve_file_path`] above), so this is assembled from the
-/// projections dsh itself folds and hands over on `session.list`. Two distinct
+/// projections dsh itself folds and hands over on `session/list`. Two distinct
 /// things live here and must not be added together:
 ///
 /// - **Billed, cumulative** (`tokenUsage`): the four buckets dsh meters over the
@@ -892,7 +901,7 @@ pub struct DshTokenBreakdown {
     pub context_percent: Option<f64>,
 }
 
-/// Build a [`DshTokenBreakdown`] from one `session.list` item's projections.
+/// Build a [`DshTokenBreakdown`] from one `session/list` item's projections.
 ///
 /// Split out from the RPC so the mapping is unit-testable against a recorded
 /// payload. A projections block missing a key yields zeros rather than an error:
@@ -938,7 +947,7 @@ fn dsh_token_breakdown_from_projections(projections: &Value) -> DshTokenBreakdow
 
 /// Token breakdown for a `dsh://` session URI.
 ///
-/// Reads the projections off `session.list` — the same call [`DshSource::scan_sessions`]
+/// Reads the projections off `session/list` — the same call [`DshSource::scan_sessions`]
 /// already makes — rather than `session.history`: both carry the same
 /// projections block, but history additionally ships every event of the session
 /// just to be thrown away here. Errors when the id is unknown to the server, so
@@ -946,7 +955,7 @@ fn dsh_token_breakdown_from_projections(projections: &Value) -> DshTokenBreakdow
 pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
     let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
     let value = DshSource::new()
-        .with_client(|client| client.call("session.list", json!({})).map_err(Into::into))?;
+        .with_client(|client| client.call("session/list", json!({ "_request": {} })).map_err(Into::into))?;
 
     let item = value
         .get("items")
@@ -1279,7 +1288,7 @@ fn events_before(first_seq: i64, page: &[Value]) -> Vec<Value> {
 fn merge_page(session_id: &str, events: &[Value], has_more: bool) -> (usize, Option<i64>, bool) {
     // Every history read is also the one chance to learn how the session is
     // configured: the roster names neither route nor effort, and asking per
-    // session would be a `session.list` sized cost on every scan. Recorded
+    // session would be a `session/list` sized cost on every scan. Recorded
     // before the fold so a page that turns out to be entirely already-cached
     // still teaches the scan something.
     remember_seen(session_id, seen_in(events));
@@ -1560,7 +1569,7 @@ pub struct DshModelCatalogFailure {
 
 /// dsh's session-independent model catalogue: what the launcher can offer.
 ///
-/// Partial success is the normal case, not an error: `llm.models` answers `ok`
+/// Partial success is the normal case, not an error: `session/modelCatalog` answers `ok`
 /// with the providers it *could* reach in `groups` and the ones it could not in
 /// `failures`. A caller that treated a non-empty `failures` as a hard error
 /// would blank a working DeepSeek list because some third-party route was
@@ -1573,7 +1582,7 @@ pub struct DshModelCatalog {
     pub failures: Vec<DshModelCatalogFailure>,
 }
 
-/// Map an `llm.models` answer onto [`DshModelCatalog`].
+/// Map an `session/modelCatalog` answer onto [`DshModelCatalog`].
 ///
 /// Split from [`dsh_models`] so the mapping is unit-testable against a recorded
 /// payload. Tolerant by construction — a group or model missing `id` is dropped
@@ -1651,7 +1660,7 @@ fn parse_model_catalog(value: &Value) -> DshModelCatalog {
 
 /// dsh's model catalogue, for the launcher's model / effort menus.
 ///
-/// Session-independent: `llm.models` takes an empty payload and describes the
+/// Session-independent: `session/modelCatalog` takes an empty payload and describes the
 /// machine's configured providers, so the answer is the same for every session
 /// and needs no id. Reached through [`DshSource::with_client`] like every other
 /// read, which starts `dsh web` if it is not already up.
@@ -1660,14 +1669,14 @@ fn parse_model_catalog(value: &Value) -> DshModelCatalog {
 // dsh is a bring-your-own-key harness: "login" is storing provider API keys.
 // The protocol's own discovery rule (credentials.d.ts): there is no
 // enumeration RPC — clients learn which credential references exist from the
-// settings namespaces' `apiKeyEnv` fields, then drive `credentials.describe`
-// (configured/source/writable, never values) and `credentials.set`.
+// settings namespaces' `apiKeyEnv` fields, then drive `credentials/describe`
+// (configured/source/writable, never values) and `credentials/set`.
 
-/// Credential reference names learned from `settings.describe` (`apiKeyEnv`
+/// Credential reference names learned from `settings/describe` (`apiKeyEnv`
 /// fields anywhere in the redacted namespace values).
 pub fn dsh_credential_refs() -> Result<Vec<String>, String> {
     let v = DshSource::new()
-        .with_client(|client| client.call("settings.describe", json!({})).map_err(Into::into))?;
+        .with_client(|client| client.call("settings/describe", json!({})).map_err(Into::into))?;
     let mut refs = Vec::new();
     collect_api_key_envs(&v, &mut refs);
     refs.sort();
@@ -1698,13 +1707,13 @@ fn collect_api_key_envs(v: &Value, out: &mut Vec<String>) {
     }
 }
 
-/// `credentials.describe` for the given refs; returns the raw
+/// `credentials/describe` for the given refs; returns the raw
 /// `{credentials: {ref: {configured, source?, writable}}}` payload (values
 /// never ride the wire by design).
 pub fn dsh_credentials_describe(refs: Vec<String>) -> Result<Value, String> {
     DshSource::new().with_client(|client| {
         client
-            .call("credentials.describe", json!({ "refs": refs }))
+            .call("credentials/describe", json!({ "refs": refs }))
             .map_err(Into::into)
     })
 }
@@ -1715,7 +1724,7 @@ pub fn dsh_credentials_describe(refs: Vec<String>) -> Result<Value, String> {
 pub fn dsh_credentials_set(reference: &str, value: &str) -> Result<(), String> {
     DshSource::new().with_client(|client| {
         client
-            .call("credentials.set", json!({ "ref": reference, "value": value }))
+            .call("credentials/set", json!({ "ref": reference, "value": value }))
             .map(|_| ())
             .map_err(Into::into)
     })
@@ -1725,7 +1734,7 @@ pub fn dsh_credentials_set(reference: &str, value: &str) -> Result<(), String> {
 pub fn dsh_credentials_unset(reference: &str) -> Result<(), String> {
     DshSource::new().with_client(|client| {
         client
-            .call("credentials.unset", json!({ "ref": reference }))
+            .call("credentials/unset", json!({ "ref": reference }))
             .map(|_| ())
             .map_err(Into::into)
     })
@@ -1733,7 +1742,7 @@ pub fn dsh_credentials_unset(reference: &str) -> Result<(), String> {
 
 pub fn dsh_models() -> Result<DshModelCatalog, String> {
     let value = DshSource::new()
-        .with_client(|client| client.call("llm.models", json!({})).map_err(Into::into))?;
+        .with_client(|client| client.call("session/modelCatalog", json!({})).map_err(Into::into))?;
     Ok(parse_model_catalog(&value))
 }
 
@@ -1743,7 +1752,7 @@ mod tests {
 
     #[test]
     fn collect_api_key_envs_walks_namespace_values() {
-        // Shape mirrors a live settings.describe: namespaces[].value carries
+        // Shape mirrors a live settings/describe: namespaces[].value carries
         // providers.<id>.apiKeyEnv (this machine's real settings.yaml layout).
         let v = json!({
             "writable": true,
@@ -1781,7 +1790,7 @@ mod tests {
         assert_eq!(desc["credentials"][test_ref]["configured"].as_bool(), Some(false));
     }
 
-    /// Verbatim shape of one `session.list` item observed live.
+    /// Verbatim shape of one `session/list` item observed live.
     fn live_list_item() -> Value {
         json!({
             "sessionId": "session-f8d1103c-db06-45c9-9902-6dc522f0f0ee",
@@ -1913,7 +1922,7 @@ mod tests {
 
     // ── Which model a session runs on ────────────────────────────────────────
     //
-    // `session.list` names no route (the `SessionSummary` contract carries
+    // `session/list` names no route (the `SessionSummary` contract carries
     // sessionId / updatedAt / running / blank / parentSessionId / origin / cwd /
     // agentPreset / projections and nothing else, and none of the projection
     // units publishes one either — read off `@deepseek-ai/dsh-host-apiproxy`
@@ -2193,7 +2202,7 @@ mod tests {
     }
 
     /// Verbatim projections of a session that has run four turns, copied off a
-    /// live `session.list` (server started with `dsh web --port 0`).
+    /// live `session/list` (server started with `dsh web --port 0`).
     fn live_projections() -> Value {
         json!({
             "asOfSeq": 175,
@@ -2643,7 +2652,7 @@ mod tests {
         assert!(normalize_session_id(Some("   ")).len() > "session-".len());
     }
 
-    /// The spawn path refuses to guess a workspace: `session.create`'s `cwd`
+    /// The spawn path refuses to guess a workspace: `session/create`'s `cwd`
     /// decides where the agent's tools run.
     #[test]
     fn spawn_requires_a_workspace() {
@@ -2655,7 +2664,7 @@ mod tests {
 
     /// The chat preset orchestration, end to end against a scripted `call`: an
     /// ordinary workspace asks dsh nothing, and the chat workspace walks
-    /// `agentPreset.list` → `agentPreset.read` → author, then names the preset.
+    /// `agentPresets/list` → `agentPresets/read` → author, then names the preset.
     ///
     /// Repoints both homes, so it holds the shared home lock.
     #[test]
@@ -2674,12 +2683,12 @@ mod tests {
         let call = |method: &str, _payload: Value| -> Result<Value, String> {
             calls.borrow_mut().push(method.to_string());
             Ok(match method {
-                "agentPreset.list" => json!({
+                "agentPresets/list" => json!({
                     "presets": [{ "id": "standard", "trust": "system", "isDefault": true }],
                     "authorable": true,
                     "hasDocument": true,
                 }),
-                "agentPreset.read" => json!({
+                "agentPresets/read" => json!({
                     "agentPreset": "standard",
                     "trust": "system",
                     "content": "- id: agent-instructions\n  name: 'x'\n  config:\n    maxBytes: 65536\n",
@@ -2698,7 +2707,7 @@ mod tests {
         assert_eq!(got.as_deref(), Some(crate::dsh_chat_preset::CHAT_PRESET_ID));
         assert_eq!(
             *calls.borrow(),
-            vec!["agentPreset.list", "agentPreset.read"],
+            vec!["agentPresets/list", "agentPresets/read"],
             "the deployment default is read, never hardcoded",
         );
 
@@ -2742,7 +2751,7 @@ mod tests {
         );
     }
 
-    /// Verbatim `llm.models` value observed live (dsh 0.1.0-rc.7), trimmed to
+    /// Verbatim `session/modelCatalog` value observed live (dsh 0.1.0-rc.7), trimmed to
     /// one model per interesting shape. The three openrouter rows are the whole
     /// reason this mapping is not a one-liner: a model may carry no `reasoning`
     /// object at all, or carry `efforts` with no `defaultEffort`.
@@ -2885,7 +2894,7 @@ mod tests {
 
     #[test]
     /// An unusable row is dropped, never mapped to a spec that would silently
-    /// no-op at `session.selectModel`: `split_model` ignores a string without a
+    /// no-op at `session/selectModel`: `split_model` ignores a string without a
     /// provider prefix, so an id-less model offered in the menu would look
     /// selectable and change nothing.
     fn rows_without_an_id_are_dropped_rather_than_offered() {

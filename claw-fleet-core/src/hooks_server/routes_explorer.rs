@@ -154,7 +154,7 @@ pub(crate) fn route_dsh_session_cost(
 
 /// dsh's model catalogue, for the desktop launcher's model / effort menus.
 ///
-/// No query params: `llm.models` is session-independent, so the answer is the
+/// No query params: `session/modelCatalog` is session-independent, so the answer is the
 /// same for every caller. The lookup happens on *this* host because the dsh
 /// install and its provider credentials live here, not on the remote client.
 pub(crate) fn route_dsh_models(

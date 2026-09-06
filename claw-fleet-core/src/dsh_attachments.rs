@@ -4,7 +4,7 @@
 //! trailing `Context files:` block ([`crate::context_files`]). Claude Code and
 //! codex read those paths themselves with a file tool, so a path is a complete
 //! handle for them. dsh's agent cannot: an image only reaches the model as an
-//! `{type:"image"}` content part on `session.prompt`, which the host admits into
+//! `{type:"image"}` content part on `session/prompt`, which the host admits into
 //! its durable attachment store. So the image paths are lifted out of the block
 //! and encoded; everything else stays in the block as text.
 //!
@@ -21,7 +21,7 @@
 //! `attachmentId` is the SHA-256 of the committed bytes and Fleet's store key is
 //! the first 16 hex characters of the SHA-256 of the stored bytes, so the same
 //! image has the same key on both sides. Verified live against dsh 0.1.1-rc.2: a
-//! 209-byte PNG uploaded through `session.prompt` came back as
+//! 209-byte PNG uploaded through `session/prompt` came back as
 //! `attachmentId: "sha256:dae52f01…"`, byte-identical to `shasum -a 256` of the
 //! file on disk.
 //!
@@ -111,7 +111,7 @@ fn image_part(path: &str) -> Option<Value> {
     }))
 }
 
-/// Build `session.prompt`'s `content` from a composer prompt.
+/// Build `session/prompt`'s `content` from a composer prompt.
 ///
 /// A prompt with no attachment block — every Fleet-spawned session's first
 /// prompt, every handoff note — produces exactly the single text part this used
@@ -232,7 +232,7 @@ const KEY_HEX_LEN: usize = 16;
 /// transcript renderer knows how to display, filling the store first for any
 /// image it does not already hold.
 ///
-/// `fetch` reads one attachment's bytes by id — `session.attachment` in
+/// `fetch` reads one attachment's bytes by id — `session/attachment` in
 /// production, which proves the session's log references that id before
 /// answering. It is a parameter so this orchestration is testable without a live
 /// server, the way `dsh_source::history_with` takes its own fetch.
