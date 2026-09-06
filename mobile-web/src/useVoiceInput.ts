@@ -230,6 +230,20 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
           tail.final();
           onTextRef.current(text);
         },
+        // 引擎自己收工了（鸿蒙 VAD 静默 3 秒、Web Speech 自行结束、原生识别
+        // 跑完）。这不是错误,也不是用户的动作 —— 界面该像被按了停止一样收场,
+        // 而不是继续假装在听。最后那段还没定稿的话走和停止同一条补交路径。
+        onEnd: () => {
+          if (gen !== genRef.current) return;
+          // 会话句柄还没拿到、或我们自己已经停过了 —— 那两种情况下这一声是
+          // 回声,不该再收一次场。
+          if (!sessionRef.current) return;
+          sessionRef.current = null;
+          const awaiting = tail.stop();
+          setSettling(awaiting);
+          if (!awaiting) setPartial("");
+          setState((s) => (s === "listening" || s === "preparing" ? "idle" : s));
+        },
         onError: (kind) => {
           if (gen !== genRef.current) return;
           sessionRef.current = null;
