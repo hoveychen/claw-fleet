@@ -172,6 +172,23 @@ describe('latestInjectedText', () => {
   test('an empty log has no reading', () => {
     assert.equal(latestInjectedText(fakeAgent(), 'fleet-prd'), undefined)
   })
+
+  /// dsh 0.1.2 dropped `Session.events` for `snapshotEvents()`. Reading the
+  /// gone property threw inside `agent/pre-step`, which ends the turn — every
+  /// turn on a machine carrying this plugin died with
+  /// `UNKNOWN: Cannot read properties of undefined (reading 'length')`
+  /// (isolated live: adding this plugin's patch file to a working 0.1.2 home
+  /// reproduced it, removing it fixed it).
+  test('reads the log through snapshotEvents when there is no events array', () => {
+    const events = [injected('fleet-prd', 'from-snapshot')]
+    const agent = { session: { header: { cwd: '/ws' }, id: 's', snapshotEvents: () => events } }
+    assert.equal(latestInjectedText(agent, 'fleet-prd'), 'from-snapshot')
+  })
+
+  test('a session exposing neither shape is silent rather than fatal', () => {
+    const agent = { session: { header: { cwd: '/ws' }, id: 's' } }
+    assert.equal(latestInjectedText(agent, 'fleet-prd'), undefined)
+  })
 })
 
 describe('apply', () => {
