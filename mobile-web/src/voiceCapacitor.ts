@@ -121,6 +121,9 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
         teardown();
         const text = matches?.[0];
         if (text) handlers.onFinal(text);
+        // promise resolve 就是「这段识别结束了」,不管是用户按的停止还是原生
+        // 自己判定说完了。上层据此收掉「正在听」。
+        handlers.onEnd();
       })
       .catch((e: unknown) => {
         if (dead) return;

@@ -35,7 +35,7 @@ export function VoiceTextarea({
   "aria-label"?: string;
 }) {
   const rec = useVoiceRecorder({ lang, value, onChange });
-  const taRef = useFollowTail<HTMLTextAreaElement>(rec.recording, rec.preview);
+  const taRef = useFollowTail<HTMLTextAreaElement>(rec.showingPreview, rec.preview);
 
   return (
     <div className={styles.wrap}>
@@ -43,8 +43,8 @@ export function VoiceTextarea({
         ref={taRef}
         className={className}
         placeholder={placeholder}
-        value={rec.recording ? rec.preview : value}
-        readOnly={rec.recording}
+        value={rec.showingPreview ? rec.preview : value}
+        readOnly={rec.showingPreview}
         onChange={(e) => onChange(e.target.value)}
         rows={rows}
         aria-label={ariaLabel}

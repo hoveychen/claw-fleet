@@ -572,7 +572,7 @@ export function NewSessionSheet({
     onChange: (next) => setDraft((d) => ({ ...d, prompt: next })),
     onSend: () => void submit(),
   });
-  const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.recording, voice.preview);
+  const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
@@ -806,8 +806,8 @@ export function NewSessionSheet({
             voice.available ? t("要让 agent 做什么？也可点麦克风说") : t("要让 agent 做什么？")
           }
           rows={5}
-          value={voice.recording ? voice.preview : prompt}
-          readOnly={voice.recording}
+          value={voice.showingPreview ? voice.preview : prompt}
+          readOnly={voice.showingPreview}
           onChange={(e) => patch({ prompt: e.target.value })}
         />
         <AttachmentRow
@@ -929,7 +929,7 @@ export function ResumeComposer({
     onChange: setPrompt,
     onSend: () => void submit(),
   });
-  const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.recording, voice.preview);
+  const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
   // Folded only when the parent asked AND the user has nothing in flight here.
   const collapsed =
     !!hidden &&
@@ -1078,8 +1078,8 @@ export function ResumeComposer({
               : t("继续这个会话（留空 = continue）…")
         }
         rows={2}
-        value={voice.recording ? voice.preview : prompt}
-        readOnly={voice.recording}
+        value={voice.showingPreview ? voice.preview : prompt}
+        readOnly={voice.showingPreview}
         onChange={(e) => setPrompt(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}

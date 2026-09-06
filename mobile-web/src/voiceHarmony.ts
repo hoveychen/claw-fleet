@@ -125,9 +125,11 @@ export const harmonyVoiceProvider: VoiceInputProvider = {
           break;
         case "end":
           // 引擎自己收工(VAD 判定说完了、或到了 maxAudioDuration)。定稿已经
-          // 在此之前经 final 到过,这里只需拆掉 hook。
+          // 在此之前经 final 到过,这里拆掉 hook **并且告诉调用方会话结束了** ——
+          // 少了后半句,页面会一直停在「正在听」,用户接着说却一个字都不出。
           dead = true;
           teardown();
+          handlers.onEnd();
           break;
       }
     };
