@@ -69,32 +69,40 @@ fn live_agents_md_reaches_the_session_as_a_durable_instruction() {
     // beat after the prompt is admitted. Read it back the way the desktop does
     // — `get_messages` walks `session/page`, which since 0.1.2 needs a cursor
     // the follow stream publishes, so this also exercises that path.
+    //
+    // Matched on the injected *text*, not on `source.kind`: the conversion in
+    // `dsh_messages` deliberately folds every non-human `user/message` kind
+    // (`agent-instructions`, `plugin`, `skill-catalog`) into one `isMeta` flag,
+    // so the kind name does not survive into what the desktop renders. What has
+    // to survive is the content, which is what this test is about.
     let uri = format!("dsh://{session_id}");
+    let marker = "Fleet PRD Discipline for dsh";
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut events = Vec::new();
+    let mut injected = None;
     while Instant::now() < deadline {
         events = source.get_messages(&uri).unwrap_or_default();
-        if serde_json::to_string(&events)
-            .unwrap_or_default()
-            .contains("agent-instructions")
-        {
+        injected = events.iter().find(|e| {
+            e.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true)
+                && serde_json::to_string(e)
+                    .unwrap_or_default()
+                    .contains(marker)
+        }).cloned();
+        if injected.is_some() {
             break;
         }
         std::thread::sleep(Duration::from_millis(500));
     }
 
-    let injected = events
-        .iter()
-        .find(|e| {
-            serde_json::to_string(e)
-                .unwrap_or_default()
-                .contains("agent-instructions")
-        })
-        .unwrap_or_else(|| {
-            panic!("no agent-instructions message in history: {} event(s)", events.len());
-        });
+    let injected = injected.unwrap_or_else(|| {
+        panic!(
+            "no injected instruction message in history: {} event(s): {}",
+            events.len(),
+            serde_json::to_string(&events).unwrap_or_default().chars().take(2000).collect::<String>()
+        );
+    });
 
-    let text = serde_json::to_string(injected).unwrap_or_default();
+    let text = serde_json::to_string(&injected).unwrap_or_default();
 
     assert!(
         text.contains("<system-reminder>"),

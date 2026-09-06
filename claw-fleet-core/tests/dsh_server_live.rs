@@ -86,6 +86,6 @@ fn live_ensure_alive_restarts_a_killed_server() {
     server
         .client()
         .expect("client")
-        .call("host.describe", json!({}))
+        .call("session/list", json!({ "_request": {} }))
         .expect("restarted server must serve RPC");
 }

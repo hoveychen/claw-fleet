@@ -1,45 +1,55 @@
-//! Live observation of a `dsh web` instance over its two downlink WebSockets.
+//! Live observation of a `dsh web` instance over its mux WebSocket.
 //!
 //! `session/list` (polled by [`crate::dsh_source`]) carries one liveness bit per
 //! session — `running` — which collapses every phase of a turn into "Active".
 //! The fine phases Fleet shows for the other two sources (Thinking / Streaming /
 //! Executing / Processing) exist in dsh only as events, and events are only
-//! published on the sockets:
+//! published on the socket.
 //!
-//! * `ws://127.0.0.1:<port>/api/events.mux` — every session's turn lifecycle
-//!   (`turn/start`, `step/start`, `assistant/chunk`, `tool/call`, `tool/result`,
-//!   `step/end`, `turn/end`) plus projection and queue updates.
-//! * `ws://127.0.0.1:<port>/api/events.host` — host-wide facts, of which Fleet
-//!   uses `host/session-status` (the `running` bit, pushed instead of polled).
+//! ## One socket, many logical streams
 //!
-//! Both are **downlink-only**: the client opens them without parameters and
-//! sends nothing. Frames are not bare events — each one is a `server-request`
-//! envelope whose `method` names the frame and whose `payload` carries it:
+//! 0.1.2 replaced 0.1.1's two downlink sockets (`/api/events.mux` and
+//! `/api/events.host`, both gone) with a single multiplexed one at
+//! [`REMOTE_MUX_PATH`], behind the same cookie gate as `/api`. The client opens
+//! logical streams on it and the host answers per stream:
 //!
 //! ```text
-//! {"type":"server-request","rpcId":"<uuid>","method":"session/event",
-//!  "payload":{"type":"session/event","sessionId":"session-…",
-//!             "event":{"type":"tool/call","seq":62,"time":…,"data":{…}}}}
+//! → {"type":"open","streamId":"<uuid>","endpoint":"$events","payload":{"args":{}}}
+//! ← {"type":"item","streamId":"<uuid>","value":{"type":"ready","clientId":…}}
+//! ← {"type":"end"|"error","streamId":"<uuid>",…}
 //! ```
 //!
-//! This module keeps the derived per-session phase in memory and hands it to
-//! `scan_sessions`, which overlays it on the polled list. The poll still decides
-//! *which* sessions exist and what their token totals are; the socket only
-//! sharpens their status.
+//! Fleet opens two kinds ([`StreamKind`]):
 //!
-//! ## Both sockets are scoped to their own server process
+//! * **`$events`** — host-wide. Its opening `ready` frame carries the
+//!   `clientId` every decision answer is scoped to, and its `emit` frames carry
+//!   `api-session/status` (the `running` bit, pushed instead of polled).
+//!   Answerable requests — `approval/request`, `user-questions/request` —
+//!   arrive here as `waterfall` frames and go to [`crate::dsh_decisions`].
+//! * **`session/follow`** — one per session, opened on demand. This is the only
+//!   place a turn's lifecycle appears (`turn/start`, `step/start`,
+//!   `assistant/chunk`, `tool/call`, `step/end`, `turn/end`); 0.1.1's global
+//!   feed of every session's events no longer exists. Its opening snapshot also
+//!   carries the `cursor` that [`crate::dsh_source`] needs before it can read
+//!   history through `session/page`.
 //!
-//! Measured against two concurrent `dsh web` instances sharing one `~/.dsh`
-//! home: while instance A ran a full turn, instance B's `events.mux` and
-//! `events.host` published **nothing** about it, and B's `session/list` reported
-//! `running: false` for that session throughout — A's reported `true`. Sessions
-//! are shared through the on-disk log; the *live* view is not.
+//! Because the fine phases are per-session now, they have to be *asked* for: the
+//! launch path follows a session it is about to prompt, and the pump follows any
+//! session the host reports running.
+//!
+//! ## The socket is scoped to its own server process
+//!
+//! Measured on 0.1.1 against two concurrent `dsh web` instances sharing one
+//! `~/.dsh` home: while instance A ran a full turn, instance B published
+//! **nothing** about it and its `session/list` reported `running: false`
+//! throughout — A's reported `true`. Sessions are shared through the on-disk
+//! log; the *live* view is not.
 //!
 //! So this watcher observes turns Fleet drives through Fleet's own server, which
-//! is what the spawn/resume path will do. A session someone runs in their own
-//! `dsh` TUI still appears in the list with its history and token totals, but it
-//! has no live phase for Fleet to show — and no `running` bit either, so that
-//! limit predates this module rather than being introduced by it.
+//! is what the spawn/resume path does. A session someone runs in their own `dsh`
+//! TUI still appears in the list with its history and token totals, but it has
+//! no live phase for Fleet to show — and no `running` bit either, so that limit
+//! predates this module rather than being introduced by it.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -487,6 +497,16 @@ pub type TurnEndCallback = Box<dyn FnOnce(bool) + Send>;
 pub struct LiveView {
     sessions: Mutex<HashMap<String, LiveSession>>,
     waiters: Mutex<HashMap<String, Vec<TurnEndCallback>>>,
+    /// Whether the last attempt to reach the mux socket failed outright.
+    ///
+    /// Cleared whenever a generation connects, set when the handshake itself
+    /// fails (connection refused, timeout, 401). Read by
+    /// [`Self::cursor_for_history`]: a cut can only arrive on that socket, so
+    /// once the server has proven unreachable there is nothing left to wait for.
+    /// Deliberately *not* "is a generation live right now" — during a cold start
+    /// the socket is legitimately mid-handshake, and a read that gave up on that
+    /// would fail every first transcript open.
+    unreachable: AtomicBool,
 }
 
 /// Handle shared between the socket follower and its owner.
@@ -587,6 +607,56 @@ impl LiveView {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(session_id)
             .and_then(|s| s.effective_phase(now_ms))
+    }
+
+    /// Record the outcome of one attempt to reach the mux socket.
+    pub fn set_unreachable(&self, unreachable: bool) {
+        self.unreachable.store(unreachable, Ordering::SeqCst);
+    }
+
+    /// Whether the socket that publishes cursors and phases has proven
+    /// unreachable.
+    pub fn is_unreachable(&self) -> bool {
+        self.unreachable.load(Ordering::SeqCst)
+    }
+
+    /// The log cut a history read may ask `session/page` for, opening the
+    /// follow stream that publishes it if nobody has yet.
+    ///
+    /// Blocking, up to `budget`: the cursor arrives in the follow stream's
+    /// opening frame, so a session nobody has followed cannot answer without one
+    /// round trip. Returns `None` when the server does not answer in time — the
+    /// caller then has no safe cut to ask for, and guessing one would either
+    /// truncate the history (too low) or be refused outright (too high).
+    ///
+    /// Returns `None` *immediately* once the socket has proven unreachable: the
+    /// budget only buys time for an answer that can actually come.
+    pub fn cursor_for_history(
+        &self,
+        session_id: &str,
+        budget: Duration,
+        follow: impl Fn(&str),
+    ) -> Option<u64> {
+        if let Some(seq) = self.cursor_of(session_id) {
+            return Some(seq);
+        }
+        // A cursor can only arrive on the socket. Once a handshake has actually
+        // failed there is nothing left to wait for, and waiting anyway would
+        // stall every read for the full budget for as long as the server is
+        // unreachable. A socket that is merely still connecting is not this
+        // case — that one is worth the wait, and is what a cold first read hits.
+        if self.is_unreachable() {
+            return None;
+        }
+        follow(session_id);
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline {
+            if let Some(seq) = self.cursor_of(session_id) {
+                return Some(seq);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        None
     }
 
     /// The newest log position this session's follow stream has reported.
@@ -739,18 +809,8 @@ impl DshEventWatcher {
     /// for, and asking with a guess would either truncate the history (too low)
     /// or be refused outright (too high).
     pub fn cursor_for_history(&self, session_id: &str, budget: Duration) -> Option<u64> {
-        if let Some(seq) = self.live.cursor_of(session_id) {
-            return Some(seq);
-        }
-        self.follow(session_id);
-        let deadline = std::time::Instant::now() + budget;
-        while std::time::Instant::now() < deadline {
-            if let Some(seq) = self.live.cursor_of(session_id) {
-                return Some(seq);
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        None
+        self.live
+            .cursor_for_history(session_id, budget, |sid| self.follow(sid))
     }
 
     /// Call `cb` when this session's next turn ends. See [`LiveView::on_turn_end`].
@@ -848,6 +908,7 @@ async fn run_mux(
         }
         match connect(port, &cookie).await {
             Ok(ws) => {
+                states.set_unreachable(false);
                 pump(
                     ws,
                     &states,
@@ -856,9 +917,14 @@ async fn run_mux(
                     &mut follow_rx,
                     &mut wanted,
                 )
-                .await
+                .await;
             }
-            Err(e) => crate::log_debug(&format!("dsh events: {e}")),
+            Err(e) => {
+                // Reads that need a cut from this socket can stop waiting for
+                // one until a later attempt connects.
+                states.set_unreachable(true);
+                crate::log_debug(&format!("dsh events: {e}"));
+            }
         }
         sleep_interruptible(RECONNECT_BACKOFF, &stop).await;
     }
@@ -1563,6 +1629,53 @@ mod tests {
         );
         assert_eq!(live.phase_of("session-a", 1_000), None);
         assert_eq!(live.tracked(), 1, "it is tracked, it just has no phase");
+    }
+
+    /// A history read must not pay the full cursor budget once the socket that
+    /// would publish the cursor has proven unreachable. The follow stream is the
+    /// only source of a `session/page` cut, so the read cannot succeed — waiting
+    /// 5s to discover that turns every transcript open into a five-second stall,
+    /// once per read, for as long as the server is away.
+    #[test]
+    fn an_unreachable_socket_fails_a_history_read_immediately() {
+        use std::sync::atomic::AtomicUsize;
+
+        let live = LiveView::default();
+        live.set_unreachable(true);
+        let asked = AtomicUsize::new(0);
+        let started = std::time::Instant::now();
+        let got = live.cursor_for_history("session-a", Duration::from_secs(5), |_| {
+            asked.fetch_add(1, Ordering::SeqCst);
+        });
+
+        assert_eq!(got, None, "an unreachable socket has no cursor to give");
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            0,
+            "must not ask a dead socket to open a stream"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "must not burn the budget waiting on a socket that is down: {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The same read on a socket that is merely still connecting *does* wait and
+    /// does open the stream — that is what makes the first read of a
+    /// never-followed session work at all, including at cold start.
+    #[test]
+    fn a_socket_that_is_still_coming_up_asks_for_the_stream_and_waits() {
+        use std::sync::atomic::AtomicUsize;
+
+        let live = LiveView::default();
+        let asked = AtomicUsize::new(0);
+        let got = live.cursor_for_history("session-a", Duration::from_millis(120), |_| {
+            asked.fetch_add(1, Ordering::SeqCst);
+        });
+
+        assert_eq!(got, None, "nothing published a cursor within the budget");
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "the stream must be opened");
     }
 
     /// The cursor a history read asks for must never run ahead of what the
