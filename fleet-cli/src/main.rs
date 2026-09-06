@@ -89,6 +89,20 @@ enum Commands {
         #[command(subcommand)]
         action: WikiCommands,
     },
+    /// Private incremental checkpoint notes for this session (survive context
+    /// compaction and handoff relays). CLI face of the `fleet__notes` MCP tool.
+    /// Reads FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID.
+    Notes {
+        #[command(subcommand)]
+        action: NotesCommands,
+    },
+    /// Search / read this session's own transcript (and its handoff
+    /// predecessors') to recover details a compaction dropped. CLI face of the
+    /// `fleet__history` MCP tool. Reads FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID.
+    History {
+        #[command(subcommand)]
+        action: HistoryCommands,
+    },
     /// Start the HTTP probe server (used by Fleet app for remote monitoring)
     Serve {
         /// Port to listen on.  Pass 0 to let the OS pick a free ephemeral port;
@@ -219,6 +233,10 @@ enum Commands {
     /// [internal] PRD-context hook — re-injects the workspace's TASKS.md on every UserPromptSubmit
     #[command(hide = true)]
     PrdContext,
+    /// [internal] Notes-hint hook — on SessionStart (compact/resume/startup)
+    /// injects a bounded summary of the session's private notes
+    #[command(name = "notes-hint", hide = true)]
+    NotesHint,
     /// [internal] dsh plugin content source — the sections to inject on one `agent/pre-step`
     #[command(hide = true)]
     DshContext {
@@ -703,6 +721,65 @@ pub(crate) enum HandoffCommands {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum NotesCommands {
+    /// Create or replace a note file (virtual path, e.g. `checkpoint.md`).
+    Write {
+        path: String,
+        /// Full replacement text.
+        text: String,
+    },
+    /// Append text exactly as provided (creates the file if absent).
+    Append { path: String, text: String },
+    /// Print a note, optionally a 1-based inclusive line range (negative counts
+    /// from the end).
+    Read {
+        path: String,
+        /// Negative values count back from the last line (`--start-line -1`).
+        #[arg(long, allow_hyphen_values = true)]
+        start_line: Option<i64>,
+        #[arg(long, allow_hyphen_values = true)]
+        stop_line: Option<i64>,
+    },
+    /// List note files visible to this session (own + handoff predecessors).
+    List {
+        /// Only paths starting with this prefix.
+        #[arg(long)]
+        prefix: Option<String>,
+    },
+    /// Case-sensitive literal substring search over note lines.
+    Search {
+        query: String,
+        #[arg(long)]
+        prefix: Option<String>,
+        #[arg(long, default_value_t = 10)]
+        max_files: usize,
+        #[arg(long, default_value_t = 5)]
+        max_matches_per_file: usize,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum HistoryCommands {
+    /// Full-text search this session's transcript (and handoff predecessors').
+    Search {
+        query: Vec<String>,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Render one transcript record by the line number a search hit reported.
+    Read {
+        line_no: i64,
+        /// Session id the line belongs to (default: this session).
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        offset_chars: usize,
+        #[arg(long)]
+        limit_chars: Option<usize>,
+    },
+}
+
+#[derive(Subcommand)]
 pub(crate) enum PlanCommands {
     /// Tick a task done (`[ ]`→`[x]`) and record this session's focus.
     Check {
@@ -1005,6 +1082,7 @@ fn main() {
             | Commands::Acp { .. }
             | Commands::PlanApproval
             | Commands::PrdContext
+            | Commands::NotesHint
             | Commands::DshContext { .. }
             | Commands::WakeupGuard
             | Commands::HookEvent => {
@@ -1019,6 +1097,7 @@ fn main() {
                         Commands::Acp { .. } => "acp",
                         Commands::PlanApproval => "plan-approval",
                         Commands::PrdContext => "prd-context",
+                        Commands::NotesHint => "notes-hint",
                         Commands::DshContext { .. } => "dsh-context",
                         Commands::WakeupGuard => "wakeup-guard",
                         Commands::HookEvent => "hook-event",
@@ -1043,6 +1122,8 @@ fn main() {
         Commands::Memory { file, json } => commands::memory::cmd_memory(file, json),
         Commands::Artifact { action } => commands::artifact::cmd_artifact(action),
         Commands::Wiki { action } => commands::wiki::cmd_wiki(action),
+        Commands::Notes { action } => commands::notes::cmd_notes(action),
+        Commands::History { action } => commands::notes::cmd_history(action),
         Commands::Search { query, limit, json } => commands::search::cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => commands::audit::cmd_audit(&level, filter.as_deref(), json),
         Commands::Report { date, backfill, regenerate, lessons, summary, json, lang } => commands::report::cmd_report(date, backfill, regenerate, lessons, summary, json, &lang),
@@ -1073,6 +1154,7 @@ fn main() {
         }
         Commands::PlanApproval => commands::guard::cmd_plan_approval(),
         Commands::PrdContext => commands::prd::cmd_prd_context(),
+        Commands::NotesHint => commands::notes::cmd_notes_hint(),
         Commands::DshContext {
             cwd,
             session,

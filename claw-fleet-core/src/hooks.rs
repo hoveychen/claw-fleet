@@ -57,7 +57,16 @@ pub struct HookSetupPlan {
     /// Whether the interaction-mode CLAUDE.md guidance is installed.
     pub interaction_mode_installed: bool,
     /// Whether the PRD-context (UserPromptSubmit injection) hook is installed.
+    /// Requires its SessionStart companion (`notes_hint_installed`) too, so a
+    /// host upgraded from a build without the companion reads as not installed
+    /// and `control_plane::heal` fills the gap on the next start.
     pub prd_context_installed: bool,
+    /// Whether the notes-hint SessionStart hook (post-compaction re-injection
+    /// of the session's private notes) is installed. Installed and removed with
+    /// the PRD-context hook, never on its own. `default` keeps payloads from
+    /// older `fleet serve` probes deserializable.
+    #[serde(default)]
+    pub notes_hint_installed: bool,
     /// Whether the PRD-discipline CLAUDE.md guidance is installed.
     pub prd_discipline_installed: bool,
     /// Whether the wiki-guidance CLAUDE.md block is installed. `default` keeps
@@ -173,6 +182,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
     let elicitation_installed = has_elicitation_hook(&hooks_obj);
     let plan_approval_installed = has_plan_approval_hook(&hooks_obj);
     let interaction_mode_installed = crate::interaction_mode::is_interaction_mode_installed();
+    let notes_hint_installed = has_notes_hint_hook(&hooks_obj);
     let prd_context_installed = has_prd_context_hook(&hooks_obj);
     let prd_discipline_installed = crate::prd_discipline::is_prd_discipline_installed();
     let wiki_guidance_installed = crate::wiki_guidance::is_wiki_guidance_installed();
@@ -189,6 +199,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         plan_approval_installed,
         interaction_mode_installed,
         prd_context_installed,
+        notes_hint_installed,
         prd_discipline_installed,
         wiki_guidance_installed,
         model_guidance_installed,
@@ -662,8 +673,35 @@ fn apply_prd_context_hook_inner() -> Result<(), String> {
         );
     }
 
+    // Companion: the notes-hint SessionStart hook. Fires when a context window
+    // is (re)opened — after a compaction, on `--resume`, and on startup (a
+    // handoff successor inherits its predecessor's notes) — and re-injects the
+    // session's private checkpoint notes. Same feature as prd-context: both
+    // exist so compaction can't erase what the agent was doing.
+    let mut notes_hint_hook = fleet_subcommand_hook(&fleet_bin, "notes-hint");
+    notes_hint_hook["timeout"] = json!(10000);
+    let notes_hint_group = json!({
+        "matcher": NOTES_HINT_MATCHER,
+        "hooks": [notes_hint_hook]
+    });
+    if let Some(existing) = hooks_obj.get_mut("SessionStart") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.retain(|group| !is_notes_hint_group(group));
+            arr.push(notes_hint_group);
+        }
+    } else {
+        hooks_obj.insert("SessionStart".to_string(), json!([notes_hint_group]));
+    }
+
     write_settings(&settings)
 }
+
+/// `SessionStart` sources that open a context window whose model has not seen
+/// the session's notes: `compact` (the case this exists for), `resume` (a
+/// `claude --resume` — Fleet's auto-resume and relays), `startup` (a fresh
+/// session; only matters for a handoff successor, which inherits notes).
+/// `clear` is left out: the user asked for an empty slate.
+pub const NOTES_HINT_MATCHER: &str = "compact|resume|startup";
 
 /// Remove the PRD-context hook from settings.json.
 pub fn remove_prd_context_hook() -> Result<(), String> {
@@ -692,6 +730,15 @@ fn remove_prd_context_hook_inner() -> Result<(), String> {
             hooks_obj.remove("UserPromptSubmit");
         }
     }
+    if let Some(arr) = hooks_obj
+        .get_mut("SessionStart")
+        .and_then(|v| v.as_array_mut())
+    {
+        arr.retain(|group| !is_notes_hint_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("SessionStart");
+        }
+    }
 
     if hooks_obj.is_empty() {
         obj.remove("hooks");
@@ -700,16 +747,34 @@ fn remove_prd_context_hook_inner() -> Result<(), String> {
     write_settings(&settings)
 }
 
+/// Both halves must be present: the UserPromptSubmit injection *and* its
+/// SessionStart companion. A settings.json from a build that predates the
+/// companion therefore reads as "not installed", which is what makes
+/// `control_plane::heal` add the missing group instead of leaving upgraded
+/// hosts without post-compaction notes forever.
 fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
     hooks_obj
         .get("UserPromptSubmit")
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().any(|group| is_prd_context_group(group)))
         .unwrap_or(false)
+        && has_notes_hint_hook(hooks_obj)
 }
 
 fn is_prd_context_group(group: &Value) -> bool {
     group_invokes_fleet_subcommand(group, "prd-context")
+}
+
+fn has_notes_hint_hook(hooks_obj: &Map<String, Value>) -> bool {
+    hooks_obj
+        .get("SessionStart")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(is_notes_hint_group))
+        .unwrap_or(false)
+}
+
+fn is_notes_hint_group(group: &Value) -> bool {
+    group_invokes_fleet_subcommand(group, "notes-hint")
 }
 
 // ── Wakeup guard hook (ScheduleWakeup / CronCreate interception) ────────
@@ -1453,6 +1518,50 @@ mod tests {
                 "timeout": 10000
             }]
         })
+    }
+
+    fn notes_hint_group_for(bin: &str) -> Value {
+        json!({
+            "matcher": NOTES_HINT_MATCHER,
+            "hooks": [{
+                "type": "command",
+                "command": fault_tolerant_command(bin, "notes-hint"),
+                "timeout": 10000
+            }]
+        })
+    }
+
+    /// The notes-hint group lives under SessionStart next to whatever the user
+    /// put there; its marker must catch only itself, and `has_prd_context_hook`
+    /// must demand both halves so an upgraded host gets healed.
+    #[test]
+    fn notes_hint_marker_and_prd_context_pairing() {
+        let bin = "/x/fleet";
+        let hint = notes_hint_group_for(bin);
+        let prd = prd_context_group_for(bin);
+        let user_start = json!({ "matcher": "startup", "hooks": [{"type": "command", "command": "echo hi"}] });
+
+        assert!(is_notes_hint_group(&hint));
+        assert!(!is_notes_hint_group(&prd));
+        assert!(!is_notes_hint_group(&user_start));
+        assert!(!is_prd_context_group(&hint));
+        assert!(!is_idle_resume_group(&hint));
+        assert!(!is_wakeup_guard_group(&hint));
+
+        // Old-build shape: prd-context present, no SessionStart companion.
+        let mut hooks = Map::new();
+        hooks.insert("UserPromptSubmit".into(), json!([prd.clone()]));
+        assert!(!has_prd_context_hook(&hooks), "must read as not installed until the companion exists");
+        assert!(!has_notes_hint_hook(&hooks));
+
+        // Current shape: both halves; a neighbouring user group is untouched by
+        // the idempotent retain.
+        let mut start_arr = vec![user_start.clone(), notes_hint_group_for("/old/fleet"), hint.clone()];
+        start_arr.retain(|g| !is_notes_hint_group(g));
+        assert_eq!(start_arr, vec![user_start.clone()]);
+        hooks.insert("SessionStart".into(), json!([user_start, hint]));
+        assert!(has_prd_context_hook(&hooks));
+        assert!(has_notes_hint_hook(&hooks));
     }
 
     fn idle_stop_group_for(bin: &str) -> Value {

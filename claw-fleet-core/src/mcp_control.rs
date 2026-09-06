@@ -31,7 +31,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Names of the control tools, in `tools/list` order.
-pub const CONTROL_TOOL_NAMES: [&str; 9] = [
+pub const CONTROL_TOOL_NAMES: [&str; 11] = [
     "fleet__plan",
     "fleet__handoff",
     "fleet__watch",
@@ -41,6 +41,8 @@ pub const CONTROL_TOOL_NAMES: [&str; 9] = [
     "fleet__artifact",
     "fleet__inspect",
     "fleet__control",
+    "fleet__notes",
+    "fleet__history",
 ];
 
 /// True when `name` is one of the control tools this module owns.
@@ -61,10 +63,56 @@ pub fn control_tool_defs() -> Vec<Value> {
         artifact_tool_def(),
         crate::mcp_inspect::inspect_tool_def(),
         crate::mcp_inspect::control_tool_def(),
+        notes_tool_def(),
+        history_tool_def(),
     ]
 }
 
 // ── Tool definitions ─────────────────────────────────────────────────────────
+
+fn notes_tool_def() -> Value {
+    json!({
+        "name": "fleet__notes",
+        "description": "Private incremental checkpoint notes that survive context compaction and handoff relays (Fleet's local analogue of Codex's `notes` tool). For any task that may outlive one context window, append as you go — goal, decisions, progress, learnings, next steps, and pointers (file paths, `fleet__history` line numbers) — so a compaction or relay does not lose them; after a compaction Fleet re-injects a summary of these notes. Paths are virtual (relative, `/`-separated, no `.`/`..`); every file stays ≤ 1,000,000 bytes. Reads see this session's notes plus its handoff predecessors'; writes go to this session only. Internal bookkeeping: do not narrate notes to the user. Actions: write (replace), append, read (optional start_line/stop_line, 1-based inclusive, negative counts from the end), list (optional prefix), search (case-sensitive literal substring).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["write", "append", "read", "list", "search"]},
+                "path": {"type": "string", "description": "Virtual note path, e.g. `checkpoint.md` or `bugs/tokenizer.md`. Required for write/append/read."},
+                "text": {"type": "string", "description": "Text to write or append, exactly as provided. Required for write/append."},
+                "start_line": {"type": "integer", "description": "read: first line to return (1-based, inclusive; negative = from the end)."},
+                "stop_line": {"type": "integer", "description": "read: last line to return (1-based, inclusive; negative = from the end)."},
+                "prefix": {"type": "string", "description": "list/search: only paths starting with this prefix."},
+                "query": {"type": "string", "description": "search: case-sensitive literal substring. Required for search."},
+                "max_files": {"type": "integer", "description": "search: max matching files (default 10)."},
+                "max_matches_per_file": {"type": "integer", "description": "search: max matching lines per file (default 5)."}
+            },
+            "required": ["action"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn history_tool_def() -> Value {
+    json!({
+        "name": "fleet__history",
+        "description": "Read-only recovery of this session's own transcript — and its handoff predecessors' — after context compaction (Fleet's local analogue of Codex's `history` tool). `search` full-text-searches user/assistant text, thinking and tool names and returns hits with a session id and line number; `read` renders one record by that line number, including tool inputs and tool results, paged by offset_chars/limit_chars. Use it to recover details a compaction summary dropped (\"what exactly did that build print\", \"what did the boss say verbatim\"). Covers Claude Code transcripts on this machine only. Internal bookkeeping: do not narrate this tool to the user. Actions: search (query, optional limit), read (line_no, optional session/offset_chars/limit_chars).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["search", "read"]},
+                "query": {"type": "string", "description": "search: terms (implicit AND; CJK substrings work). Required for search."},
+                "limit": {"type": "integer", "description": "search: max hits (default 20)."},
+                "session": {"type": "string", "description": "read: session id the line belongs to (from a search hit). Defaults to this session; must be this session or a handoff predecessor."},
+                "line_no": {"type": "integer", "description": "read: 1-based transcript line from a search hit. Required for read."},
+                "offset_chars": {"type": "integer", "description": "read: character offset to start at (default 0); the previous read tells you the next one."},
+                "limit_chars": {"type": "integer", "description": "read: max characters to return (default 4000)."}
+            },
+            "required": ["action"],
+            "additionalProperties": false
+        }
+    })
+}
 
 fn plan_tool_def() -> Value {
     json!({
@@ -241,7 +289,154 @@ pub fn handle(
         "fleet__artifact" => handle_artifact(args, session_id, cwd),
         "fleet__inspect" => crate::mcp_inspect::handle_inspect(args, &action_of(args)?),
         "fleet__control" => crate::mcp_inspect::handle_control(args, &action_of(args)?),
+        "fleet__notes" => handle_notes(args, session_id),
+        "fleet__history" => handle_history(args, session_id),
         other => Err(format!("unknown control tool: {other}")),
+    }
+}
+
+// ── notes / history ──────────────────────────────────────────────────────────
+
+const NO_SESSION_ID: &str =
+    "no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)";
+
+fn int_arg(args: &Value, key: &str) -> Result<Option<i64>, String> {
+    match arg(args, key) {
+        None => Ok(None),
+        Some(s) => s
+            .parse::<i64>()
+            .map(Some)
+            .map_err(|_| format!("`{key}` must be an integer, got `{s}`")),
+    }
+}
+
+fn usize_arg(args: &Value, key: &str, default: usize) -> Result<usize, String> {
+    match int_arg(args, key)? {
+        None => Ok(default),
+        Some(v) if v >= 0 => Ok(v as usize),
+        Some(v) => Err(format!("`{key}` must be ≥ 0, got {v}")),
+    }
+}
+
+/// Shared by the `fleet__notes` MCP tool and the `fleet notes` CLI so both
+/// front ends print byte-identical output.
+pub fn render_note_files(files: &[crate::session_notes::NoteFile], own: &str) -> String {
+    if files.is_empty() {
+        return "No notes yet. Use action=write or append to start a checkpoint.".to_string();
+    }
+    let mut out = format!("{} note file(s):\n", files.len());
+    for f in files {
+        let owner = if f.session_id == own { "own" } else { "predecessor" };
+        out.push_str(&format!(
+            "  {}  {} bytes  {}  [{owner} {}]\n",
+            f.path,
+            f.bytes,
+            fmt_ms(f.updated_ms),
+            &f.session_id[..f.session_id.len().min(8)]
+        ));
+    }
+    out.trim_end().to_string()
+}
+
+pub fn render_note_matches(matches: &[crate::session_notes::NoteMatch], query: &str) -> String {
+    if matches.is_empty() {
+        return format!("No note line contains '{query}'.");
+    }
+    let mut out = format!("{} matching line(s) for '{query}':\n", matches.len());
+    for m in matches {
+        out.push_str(&format!("  {}:{}  {}\n", m.path, m.line, m.text));
+    }
+    out.trim_end().to_string()
+}
+
+fn handle_notes(args: &Value, sid: Option<&str>) -> Result<String, String> {
+    use crate::session_notes as notes;
+    let sid = sid.ok_or(NO_SESSION_ID)?;
+    let action = action_of(args)?;
+    match action.as_str() {
+        "write" | "append" => {
+            let path = req(args, "path")?;
+            let text = args
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or("`text` is required for this action")?;
+            let file = if action == "write" {
+                notes::write(sid, &path, text)?
+            } else {
+                notes::append(sid, &path, text)?
+            };
+            Ok(format!("ok: {} {} ({} bytes)", action, file.path, file.bytes))
+        }
+        "read" => {
+            let path = req(args, "path")?;
+            notes::read(sid, &path, int_arg(args, "start_line")?, int_arg(args, "stop_line")?)
+        }
+        "list" => {
+            let files = notes::list(sid, arg(args, "prefix").as_deref())?;
+            Ok(render_note_files(&files, sid))
+        }
+        "search" => {
+            let query = req(args, "query")?;
+            let hits = notes::search(
+                sid,
+                &query,
+                arg(args, "prefix").as_deref(),
+                usize_arg(args, "max_files", 10)?,
+                usize_arg(args, "max_matches_per_file", 5)?,
+            )?;
+            Ok(render_note_matches(&hits, &query))
+        }
+        other => Err(format!("unknown notes action: {other}")),
+    }
+}
+
+pub fn render_history_hits(hits: &[crate::session_history::HistoryHit], query: &str) -> String {
+    if hits.is_empty() {
+        return format!("No transcript record in this session's scope matches '{query}'.");
+    }
+    let mut out = format!(
+        "{} hit(s) for '{query}' — read one with action=read, session=<id>, line_no=<n>:\n",
+        hits.len()
+    );
+    for h in hits {
+        out.push_str(&format!(
+            "  {} line {}  {}\n",
+            &h.session_id[..h.session_id.len().min(8)],
+            h.line_no,
+            h.snippet.replace("<mark>", "").replace("</mark>", "")
+        ));
+    }
+    // The 8-char prefix is for the eye; `read` wants the full id, so list them once.
+    let mut ids: Vec<&str> = hits.iter().map(|h| h.session_id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    out.push_str("sessions: ");
+    out.push_str(&ids.join(", "));
+    out
+}
+
+fn handle_history(args: &Value, sid: Option<&str>) -> Result<String, String> {
+    use crate::session_history as history;
+    let sid = sid.ok_or(NO_SESSION_ID)?;
+    let action = action_of(args)?;
+    match action.as_str() {
+        "search" => {
+            let query = req(args, "query")?;
+            let hits = history::search(sid, &query, usize_arg(args, "limit", 20)?)?;
+            Ok(render_history_hits(&hits, &query))
+        }
+        "read" => {
+            let line_no = int_arg(args, "line_no")?.ok_or("`line_no` is required for read")?;
+            let limit = int_arg(args, "limit_chars")?.map(|v| v.max(1) as usize);
+            history::read(
+                sid,
+                arg(args, "session").as_deref(),
+                line_no,
+                usize_arg(args, "offset_chars", 0)?,
+                limit,
+            )
+        }
+        other => Err(format!("unknown history action: {other}")),
     }
 }
 
@@ -980,8 +1175,36 @@ mod tests {
     fn is_control_tool_matches_only_the_six() {
         assert!(is_control_tool("fleet__plan"));
         assert!(is_control_tool("fleet__wiki"));
+        assert!(is_control_tool("fleet__notes"));
+        assert!(is_control_tool("fleet__history"));
         assert!(!is_control_tool("fleet__ask"));
         assert!(!is_control_tool("fleet__set_session_title"));
+    }
+
+    /// The notes tool must refuse without a session id (its storage is keyed on
+    /// it) and must reject a malformed integer before touching disk, so an agent
+    /// gets a schema-level error rather than a half-applied write.
+    #[test]
+    fn notes_and_history_refuse_without_session_and_validate_ints() {
+        let no_sid = handle("fleet__notes", &json!({"action":"list"}), None, Path::new("."));
+        assert!(no_sid.unwrap_err().contains("no session id"));
+        let no_sid = handle("fleet__history", &json!({"action":"search","query":"x"}), None, Path::new("."));
+        assert!(no_sid.unwrap_err().contains("no session id"));
+
+        let bad = handle(
+            "fleet__notes",
+            &json!({"action":"read","path":"a.md","start_line":"two"}),
+            Some("11111111-1111-4111-8111-111111111111"),
+            Path::new("."),
+        );
+        assert!(bad.unwrap_err().contains("`start_line` must be an integer"));
+        let bad = handle(
+            "fleet__history",
+            &json!({"action":"read"}),
+            Some("11111111-1111-4111-8111-111111111111"),
+            Path::new("."),
+        );
+        assert!(bad.unwrap_err().contains("`line_no` is required"));
     }
 
     /// `root_reason` must survive the MCP arg mapping and be declared in the
