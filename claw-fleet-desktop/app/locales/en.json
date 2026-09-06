@@ -1590,7 +1590,7 @@
     "done": "Got it",
     "new_session": {
       "title": "Start a session here",
-      "desc": "This is the Tasks page — click \"New Session\" in the top right, pick a working directory, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is collected on this page."
+      "desc": "This is the Tasks page — click \"New Session\" at the top of the task rail, pick a working directory, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is grouped here by directory."
     }
   },
   "waiting_alerts": {
