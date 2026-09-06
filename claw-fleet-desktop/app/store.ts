@@ -2157,6 +2157,8 @@ interface ProcState {
   procs: ProcRecord[];
   /** Re-fetch the proc list from the backend (polled while 文件 page is open). */
   fetchProcs: () => Promise<void>;
+  /** Drop a proc the backend reports as already cleared. */
+  forgetProc: (id: string) => void;
 }
 
 export const useProcStore = create<ProcState>((set) => ({
@@ -2169,6 +2171,7 @@ export const useProcStore = create<ProcState>((set) => ({
       // Backend not ready (startup) — keep the previous list.
     }
   },
+  forgetProc: (id) => set((state) => ({ procs: state.procs.filter((proc) => proc.id !== id) })),
 }));
 
 /** Running proc count per workspace path — drives the sidebar badges. */

@@ -4,6 +4,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { ProcOutputChunk, ProcRecord } from "../types";
+import { isMissingProcError } from "./terminalProcs";
 
 /** Post-exit drain polls: the host finishes writing `<id>.out` before it
  * flips the record to `exited`, so a couple of extra reads flush the tail. */
@@ -16,6 +17,7 @@ const EXIT_DRAIN_POLLS = 3;
 export function ProcTerminal({
   proc,
   onRecord,
+  onMissing,
   height = 320,
 }: {
   proc: ProcRecord;
@@ -23,6 +25,8 @@ export function ProcTerminal({
    *  needs to know the proc exited (and with what code) doesn't have to run a
    *  second poll loop against the same log. */
   onRecord?: (record: ProcRecord) => void;
+  /** Called when another view has already deleted this proc's registry entry. */
+  onMissing?: (id: string) => void;
   /** Fixed pixel height (the 命令 panel's inline rows) or a CSS length — the
    *  终端 page passes `"100%"` to fill its pane. The ResizeObserver below
    *  re-fits either way, so a stretched terminal reflows with the window. */
@@ -33,6 +37,8 @@ export function ProcTerminal({
   // rebuild the terminal on every render.
   const onRecordRef = useRef(onRecord);
   onRecordRef.current = onRecord;
+  const onMissingRef = useRef(onMissing);
+  onMissingRef.current = onMissing;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -98,9 +104,10 @@ export function ProcTerminal({
         }
         onRecordRef.current?.(chunk.record);
         if (chunk.record.status === "exited") drainPolls += 1;
-      } catch {
+      } catch (error) {
         // Proc was cleared while the terminal is open — stop advancing.
         drainPolls = EXIT_DRAIN_POLLS;
+        if (isMissingProcError(error)) onMissingRef.current?.(proc.id);
       } finally {
         inFlight = false;
       }
