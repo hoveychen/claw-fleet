@@ -35,7 +35,6 @@ const ALL_KEYS = [
   // on boot, otherwise the migration re-runs every launch and re-wipes whatever
   // the user has since chosen.
   "feature-tristate-migrated",
-  "liteMode",
   "lang",
   "sidebar-width",
   "sidebar-collapsed",

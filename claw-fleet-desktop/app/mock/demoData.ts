@@ -220,8 +220,8 @@ export const DEMO_BOARD: SessionInfo[] = [
     tokenSpeed: 43.6, agentTokenSpeed: 43.6, totalOutputTokens: 128_050, contextPercent: 0.6,
   }),
   mkDemo({
-    id: "d-litemode", workspaceName: "aurora-mobile", status: "streaming",
-    aiTitle: "Rework the lite-mode sidebar",
+    id: "d-portrait-nav", workspaceName: "aurora-mobile", status: "streaming",
+    aiTitle: "Rework the portrait sidebar",
     lastMessagePreview: "Collapsing the nav into the portrait rail…",
     tokenSpeed: 66.3, agentTokenSpeed: 66.3, totalOutputTokens: 82_700, contextPercent: 0.41,
   }),
