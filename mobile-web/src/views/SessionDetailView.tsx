@@ -1035,6 +1035,9 @@ export function SessionDetailView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id]);
   const [messages, setMessages] = useState<RawMessage[] | null>(null);
+  const messagesRef = useRef<RawMessage[] | null>(messages);
+  messagesRef.current = messages;
+  const [syncingLatest, setSyncingLatest] = useState(false);
   // Optimistic follow-ups: echoed the moment the desktop acks a resume, dropped
   // once the real row arrives via tail. Kept out of `messages` so the poller's
   // setMessages doesn't clobber them.
@@ -1105,7 +1108,7 @@ export function SessionDetailView({
       await fullTail();
     };
 
-    const poll = async () => {
+    const poll = async (reportSync = false) => {
       // Paused while the tab is hidden: no point waking the CPU every few
       // seconds to tail a view nobody is looking at. Returning without
       // rescheduling stops the timer chain entirely; `onVisible` restarts it on
@@ -1115,7 +1118,7 @@ export function SessionDetailView({
       // the single serialized WS; the optimistic echo already shows the user's
       // message, so a skipped tick costs nothing. Retry on the next interval.
       if (submitInFlightRef.current) {
-        if (!cancelled) timer = window.setTimeout(poll, TAIL_POLL_MS);
+        if (!cancelled) timer = window.setTimeout(() => void poll(reportSync), TAIL_POLL_MS);
         return;
       }
       try {
@@ -1144,17 +1147,24 @@ export function SessionDetailView({
           setLoadError(e instanceof Error ? e.message : t("加载失败"));
         }
       }
-      if (!cancelled) timer = window.setTimeout(poll, TAIL_POLL_MS);
+      if (!cancelled) {
+        if (reportSync) setSyncingLatest(false);
+        timer = window.setTimeout(() => void poll(), TAIL_POLL_MS);
+      }
     };
 
     offsetRef.current = null; // path / window size changed → re-bootstrap
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       window.clearTimeout(timer); // drop any stray timer → single chain
-      void poll();
+      const reportSync = messagesRef.current !== null;
+      if (reportSync) setSyncingLatest(true);
+      void poll(reportSync);
     };
     document.addEventListener("visibilitychange", onVisible);
-    void poll();
+    const reportSync = messagesRef.current !== null;
+    if (reportSync) setSyncingLatest(true);
+    void poll(reportSync);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
@@ -1446,6 +1456,12 @@ export function SessionDetailView({
 
       {tab === "messages" && (
       <div className={styles.scroll} ref={scrollRef} onScroll={onScroll}>
+        {syncingLatest && messages !== null && (
+          <div className={styles.syncingLatest} role="status" aria-live="polite">
+            <LoaderCircle size={14} aria-hidden="true" />
+            <span>{t("正在同步最新消息…")}</span>
+          </div>
+        )}
         {messages === null && !loadError && (
           <div className={styles.messageLoading} role="status" aria-live="polite">
             <LoaderCircle size={18} aria-hidden="true" />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conversationPlaceholder } from "./conversationPlaceholder";
+import { conversationPlaceholder, showLatestSync } from "./conversationPlaceholder";
 
 describe("conversationPlaceholder", () => {
   it("转圈只在真的还在取数、且一条都没有时出现", () => {
@@ -27,5 +27,19 @@ describe("conversationPlaceholder", () => {
   it("空会话、也不在取数时,交给正常的空态渲染", () => {
     expect(conversationPlaceholder({ isLoading: false, stalled: false, messageCount: 0 }))
       .toBeNull();
+  });
+});
+
+describe("showLatestSync", () => {
+  it("有旧消息且正在刷新最新 tail 时明确提示", () => {
+    expect(showLatestSync({ isLoading: true, isLoadingEarlier: false, messageCount: 3 }))
+      .toBe(true);
+  });
+
+  it("首次加载与加载更早记录不冒充同步最新消息", () => {
+    expect(showLatestSync({ isLoading: true, isLoadingEarlier: false, messageCount: 0 }))
+      .toBe(false);
+    expect(showLatestSync({ isLoading: true, isLoadingEarlier: true, messageCount: 3 }))
+      .toBe(false);
   });
 });
