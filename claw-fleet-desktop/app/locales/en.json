@@ -241,6 +241,7 @@
     "workspace": "Workspace",
     "chat": "Just chat",
     "chat_sub": "Not tied to any project directory",
+    "chat_loading": "Preparing chat…",
     "workspace_placeholder": "Absolute path of the workspace directory",
     "browse": "Browse…",
     "model": "Model",

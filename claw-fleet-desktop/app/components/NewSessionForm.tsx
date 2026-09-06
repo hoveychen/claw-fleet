@@ -574,24 +574,31 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   // Chat mode's own switch, ahead of the workspace pill. Chat used to be one
   // more entry inside that pill's menu, which framed it as a special directory;
   // it is a mode, so it gets its own control and the picker disappears under it
-  // (chat has no directory to choose). Hidden when the backend couldn't name the
-  // chat workspace, since there would be nothing to switch into.
-  const chatModePill = chatPath ? (
+  // (chat has no directory to choose). Keep the control in the very first paint:
+  // resolving the backend-host path can queue behind slow filesystem I/O, and
+  // hiding the whole pill until that round-trip completed made the form visibly
+  // reflow seconds later. It stays disabled until there is a launchable path.
+  const chatModePill = (
     <button
       type="button"
       className={`${pillStyles.ghost_pill} ${compact ? pillStyles.ghost_pill_compact : ""} ${
         isChat ? styles.chat_pill_on : ""
       }`}
       aria-pressed={isChat}
-      disabled={submitting}
+      disabled={submitting || !chatPath}
       onClick={() => setChatMode(!isChat)}
-      title={t("new_session.chat_sub")}
+      title={
+        chatPath
+          ? t("new_session.chat_sub")
+          : t("new_session.chat_loading", "正在准备纯聊天…")
+      }
+      aria-busy={!chatPath}
       data-testid="chat-mode-pill"
     >
       <MessageCircle size={13} strokeWidth={1.7} />
       <span className={pillStyles.pill_label}>{t("new_session.chat")}</span>
     </button>
-  ) : null;
+  );
 
   const workspacePill = (
     <PillMenu

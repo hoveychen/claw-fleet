@@ -333,7 +333,9 @@ pub trait Backend: Send + Sync {
         // Which agent tool to launch: "claude" (or None) / "codex".
         tool: Option<String>,
     ) -> Result<crate::session_launch::SpawnSessionResponse, String>;
-    /// Absolute path of the pure-chat workspace, creating it if absent. The
+    /// Absolute path of the pure-chat workspace. This lookup must not create or
+    /// repair it: opening the launcher is read-only, while the spawn path owns
+    /// initialisation immediately before launch. The
     /// launcher pins this as a fixed entry because, unlike a project, it has no
     /// prior sessions to be discovered from — and the path must come from the
     /// backend, since under a remote connection it lives in the *probe host's*

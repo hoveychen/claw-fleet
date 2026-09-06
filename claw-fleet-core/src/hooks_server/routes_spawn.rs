@@ -159,7 +159,7 @@ pub(crate) fn route_chat_workspace(
     path: &str,
 ) {
 
-                match crate::chat_workspace::ensure_chat_workspace() {
+                match crate::chat_workspace::chat_workspace_for_ui() {
                     Ok(path) => {
                         let body = serde_json::json!({"path": path}).to_string();
                         let _ = request.respond(

@@ -1923,7 +1923,7 @@ impl Backend for LocalBackend {
     }
 
     fn chat_workspace(&self) -> Result<String, String> {
-        claw_fleet_core::chat_workspace::ensure_chat_workspace()
+        claw_fleet_core::chat_workspace::chat_workspace_for_ui()
     }
 
     fn browse_dir(

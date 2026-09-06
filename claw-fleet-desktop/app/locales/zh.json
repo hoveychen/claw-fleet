@@ -241,6 +241,7 @@
     "workspace": "工作目录",
     "chat": "纯聊天",
     "chat_sub": "不绑定任何项目目录，随便聊",
+    "chat_loading": "正在准备纯聊天…",
     "workspace_placeholder": "输入工作目录的绝对路径",
     "browse": "浏览…",
     "model": "模型",
