@@ -16,6 +16,13 @@ const profile = (p: Partial<CodexProfile> & { name: string }): CodexProfile => (
 });
 
 describe("codexProfileChoices", () => {
+  it("offers GPT-6 Astra in the built-in catalog", () => {
+    expect(CODEX_MODEL_CHOICES).toContainEqual({
+      value: "gpt-6-astra",
+      label: "GPT-6 Astra",
+    });
+  });
+
   it("encodes the profile marker the backend splits into `-p <name>`", () => {
     const [choice] = codexProfileChoices([
       profile({

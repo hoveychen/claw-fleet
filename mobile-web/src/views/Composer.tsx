@@ -48,8 +48,9 @@ const EFFORT_CHOICES: Array<[string, string]> = [
 // the desktop's CODEX_MODEL_CHOICES. "" default follows Codex's configured model.
 // 第三方模型不写在这里：它们运行时从主机的 codex profile 文件发现
 // （见 useCodexProfiles），硬编码会列出那台机器上根本没配 provider 的模型。
-const CODEX_MODEL_CHOICES: Array<[string, string]> = [
+export const CODEX_MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
+  ["gpt-6-astra", "GPT-6 Astra"],
   ["gpt-5.6-sol", "GPT-5.6 Sol"],
   ["gpt-5.6-terra", "GPT-5.6 Terra"],
   ["gpt-5.6-luna", "GPT-5.6 Luna"],

@@ -24,6 +24,7 @@ export const CLAUDE_EFFORT_CHOICES: string[] = ["low", "medium", "high", "xhigh"
 // profile files at runtime (see `codexProfileChoices`). Hardcoding them would
 // offer models whose provider block may not exist on the machine running Codex.
 export const CODEX_MODEL_CHOICES: { value: string; label: string }[] = [
+  { value: "gpt-6-astra", label: "GPT-6 Astra" },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
