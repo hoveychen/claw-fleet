@@ -126,6 +126,17 @@ pub const COST_HAIKU_45: ModelCosts = ModelCosts {
 // per-request multiplier to the cumulative sum would over-count. See
 // `codex_source::codex_cost_and_input`.
 
+// gpt-6-astra standard short-context pricing: $10 / $50 per Mtok, with
+// cached input at $1 and explicit cache writes at $12.50 (verified 2026-09-06).
+pub const COST_GPT_ASTRA: ModelCosts = ModelCosts {
+    input: 10.0,
+    output: 50.0,
+    cache_write: 12.50,
+    cache_write_1h: 12.50,
+    cache_read: 1.0,
+    web_search: 0.0,
+};
+
 // gpt-5.6-sol (and bare gpt-5.6): $5 / $30 per Mtok.
 pub const COST_GPT_SOL: ModelCosts = ModelCosts {
     input: 5.0,
@@ -186,6 +197,9 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
     // conservative, most-expensive gpt-5.6 tier) so an unrecognised gpt
     // model never silently prices below what it likely costs.
     if m.contains("gpt") || m.contains("codex") {
+        if m.contains("astra") {
+            return COST_GPT_ASTRA;
+        }
         if m.contains("terra") {
             return COST_GPT_TERRA;
         }
@@ -511,6 +525,24 @@ mod tests {
         assert!((turn_cost_usd("gpt-5.6-luna", &usage) - 7.0).abs() < 1e-9);
         // Codex tier: $1.75 + $14 = $15.75.
         assert!((turn_cost_usd("gpt-5.3-codex", &usage) - 15.75).abs() < 1e-9);
+    }
+
+    #[test]
+    fn gpt_astra_uses_its_own_standard_short_context_pricing() {
+        let costs = get_model_costs("gpt-6-astra");
+        assert_eq!(costs.input, 10.0);
+        assert_eq!(costs.cache_read, 1.0);
+        assert_eq!(costs.cache_write, 12.50);
+        assert_eq!(costs.cache_write_1h, 12.50);
+        assert_eq!(costs.output, 50.0);
+
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            cache_read_tokens: 1_000_000,
+            ..Default::default()
+        };
+        assert!((turn_cost_usd("GPT-6-Astra", &usage) - 61.0).abs() < 1e-9);
     }
 
     #[test]
