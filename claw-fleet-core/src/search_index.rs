@@ -537,4 +537,65 @@ mod tests {
         let _ = fs::remove_file(&jsonl);
         let _ = fs::remove_file(&db);
     }
+
+    /// FTS5's `unicode61` tokenizer does not segment CJK: a run of Chinese
+    /// characters becomes **one** token, so only a query equal to that whole
+    /// run matches and every substring query silently returns nothing.
+    ///
+    /// Measured on the real 194 MB index before the fix: `worktree` hit 4,364
+    /// rows while `决策` hit 4 — and `决策` scored *fewer* hits than the longer
+    /// `决策卡`, which is the tell. Chinese search was broken at every entry
+    /// point (desktop box, `fleet search`, mobile relay, `mcp_inspect`).
+    #[test]
+    fn cjk_substring_queries_match() {
+        let dir = std::env::temp_dir().join("fleet-search-cjk-test");
+        let _ = fs::create_dir_all(&dir);
+        let jsonl = dir.join("cjk.jsonl");
+        fs::write(
+            &jsonl,
+            "{\"type\":\"user\",\"message\":{\"content\":\"这条会话讨论了决策卡的实现细节\"}}\n",
+        )
+        .unwrap();
+
+        let db = dir.join("cjk.db");
+        let _ = fs::remove_file(&db);
+        let idx = SearchIndex::open_at(&db).unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-cjk").unwrap();
+
+        // Two-character word — the most common shape in Chinese, and the case
+        // an ngram tokenizer of size 3 would still miss.
+        assert_eq!(
+            idx.search("决策", 10).unwrap().len(),
+            1,
+            "a two-character Chinese substring must be findable"
+        );
+        // Three-character substring taken from the middle of the run.
+        assert_eq!(
+            idx.search("决策卡", 10).unwrap().len(),
+            1,
+            "a three-character Chinese substring must be findable"
+        );
+        // A word at the very end of the run.
+        assert_eq!(
+            idx.search("细节", 10).unwrap().len(),
+            1,
+            "a Chinese word at the end of the run must be findable"
+        );
+        // Mixed CJK + ASCII must keep working in the same query.
+        assert_eq!(
+            idx.search("实现", 10).unwrap().len(),
+            1,
+            "an interior Chinese word must be findable"
+        );
+        // A phrase that is absent must still miss — the fix must not make
+        // everything match everything.
+        assert_eq!(
+            idx.search("永动机", 10).unwrap().len(),
+            0,
+            "an absent Chinese phrase must not match"
+        );
+
+        let _ = fs::remove_file(&jsonl);
+        let _ = fs::remove_file(&db);
+    }
 }
