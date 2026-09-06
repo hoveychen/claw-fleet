@@ -23,7 +23,12 @@ use crate::log_debug;
 /// History:
 ///   1 — initial (user/assistant message bodies only)
 ///   2 — also index the `ai-title` line's `aiTitle` field
-const SCHEMA_VERSION: i64 = 2;
+///   3 — CJK text is stored segmented per character (see [`segment_cjk`]);
+///       rows written under v2 hold unsegmented runs and can never match a
+///       Chinese substring query, so they must be rebuilt.
+///   4 — added the `raw` column holding the author's untouched text, which
+///       snippets are cut from; v3 rows have no `raw` to cut.
+const SCHEMA_VERSION: i64 = 4;
 
 // ── SearchHit ────────────────────────────────────────────────────────────────
 
@@ -70,6 +75,22 @@ impl SearchIndex {
         )
         .map_err(|e| format!("sqlite pragma: {e}"))?;
 
+        // Migration runs BEFORE the CREATEs. `CREATE TABLE IF NOT EXISTS` is a
+        // no-op against an existing table, so it can never add a column to one
+        // — a v3 database would keep its 3-column `session_fts` and every
+        // 4-column INSERT would fail. Dropping first is what actually lets the
+        // shape change between versions; clearing rows alone is not enough.
+        let db_version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap_or(0);
+        if db_version < SCHEMA_VERSION {
+            conn.execute_batch(
+                "DROP TABLE IF EXISTS session_fts;
+                 DROP TABLE IF EXISTS index_meta;",
+            )
+            .map_err(|e| format!("sqlite migrate drop: {e}"))?;
+        }
+
         // Create schema if missing.
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS index_meta (
@@ -84,23 +105,15 @@ impl SearchIndex {
                  session_id UNINDEXED,
                  jsonl_path UNINDEXED,
                  content,
+                 raw UNINDEXED,
                  tokenize='unicode61'
              );",
         )
         .map_err(|e| format!("sqlite schema: {e}"))?;
 
-        // One-time migration: if the DB was built under an older field set,
-        // wipe content + offsets so the next scan re-indexes everything.
-        let db_version: i64 = conn
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .unwrap_or(0);
         if db_version < SCHEMA_VERSION {
-            conn.execute_batch(&format!(
-                "DELETE FROM session_fts;
-                 DELETE FROM index_meta;
-                 PRAGMA user_version = {SCHEMA_VERSION};"
-            ))
-            .map_err(|e| format!("sqlite migrate: {e}"))?;
+            conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
+                .map_err(|e| format!("sqlite migrate stamp: {e}"))?;
         }
 
         Ok(Self { conn })
@@ -199,9 +212,14 @@ impl SearchIndex {
 
             let text = extract_searchable_text(&parsed);
             if !text.is_empty() {
+                // `content` is segmented so `unicode61` tokenizes CJK per
+                // character; `raw` keeps the author's exact text so snippets
+                // can be cut from it verbatim (see `build_snippet`).
+                let segmented = segment_cjk(&text);
                 tx.execute(
-                    "INSERT INTO session_fts(session_id, jsonl_path, content) VALUES (?1, ?2, ?3)",
-                    params![session_id, jsonl_path, text],
+                    "INSERT INTO session_fts(session_id, jsonl_path, content, raw)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![session_id, jsonl_path, segmented, text],
                 )
                 .map_err(|e| format!("fts insert: {e}"))?;
             }
@@ -281,12 +299,14 @@ impl SearchIndex {
             return Ok(vec![]);
         }
 
+        let terms = query_terms(query);
+
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT session_id, jsonl_path,
                         snippet(session_fts, 2, '<mark>', '</mark>', '…', 40) as snip,
-                        rank
+                        rank, raw
                  FROM session_fts
                  WHERE session_fts MATCH ?1
                  ORDER BY rank
@@ -300,10 +320,17 @@ impl SearchIndex {
 
         let rows = stmt
             .query_map(params![fts_query, limit * 5], |row| {
+                let sql_snippet: String = row.get(2)?;
+                let raw: String = row.get(4).unwrap_or_default();
+                // Preferred: cut the snippet straight out of the author's text,
+                // so no indexing artefact can reach the UI. Fall back to the
+                // segmented column only when no term is locatable in `raw`.
+                let snippet = build_snippet(&raw, &terms)
+                    .unwrap_or_else(|| desegment_cjk(&sql_snippet));
                 Ok(SearchHit {
                     session_id: row.get(0)?,
                     jsonl_path: row.get(1)?,
-                    snippet: row.get(2)?,
+                    snippet,
                     rank: row.get(3)?,
                 })
             })
@@ -387,14 +414,202 @@ fn extract_searchable_text(val: &Value) -> String {
     parts.join(" ")
 }
 
+/// True for scripts that `unicode61` does not segment: it treats a whole run of
+/// them as a single token, so only a query equal to that entire run can match.
+///
+/// Covers Han (incl. ext-A and compatibility), kana, and Hangul syllables.
+///
+/// CJK punctuation and fullwidth forms are included deliberately. They are not
+/// "characters to search for", but they sit *inside* Chinese runs, and leaving
+/// them out strands a separator next to them that `desegment_cjk` then cannot
+/// remove — snippets came back reading `已合并 ，main` instead of `已合并，main`.
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{3000}'..='\u{303F}'   // CJK symbols + punctuation (。、「」…)
+        | '\u{3040}'..='\u{30FF}' // hiragana + katakana
+        | '\u{3400}'..='\u{4DBF}' // CJK ext A
+        | '\u{4E00}'..='\u{9FFF}' // CJK unified
+        | '\u{AC00}'..='\u{D7AF}' // Hangul syllables
+        | '\u{F900}'..='\u{FAFF}' // CJK compatibility
+        | '\u{FF00}'..='\u{FFEF}' // fullwidth forms (，！？：；)
+    )
+}
+
+/// Surround every CJK character with spaces so `unicode61` emits one token per
+/// character instead of one token per run. Applied to both the indexed text and
+/// the query, which turns a Chinese query into a phrase of single-character
+/// tokens — i.e. a substring match against the original run.
+///
+/// Chosen over `tokenize='trigram'` after measuring both on a 5,000-line sample
+/// of the real corpus: trigram inflated the index 2.9x (8.9 MB vs 3.1 MB) *and*
+/// cannot match two-character words at all, which are the most common shape in
+/// Chinese. This approach measured 3.1 MB — identical to the status quo.
+fn segment_cjk(text: &str) -> String {
+    // Fast path: pure-ASCII input (the overwhelming majority of lines) is
+    // returned untouched, so English-only corpora pay nothing.
+    if !text.chars().any(is_cjk) {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + text.len() / 2);
+    let mut prev_cjk = false;
+    for c in text.chars() {
+        let cur_cjk = is_cjk(c);
+        // Insert a separator only at a CJK boundary where one is not already
+        // present. Skipping it when `c` is itself whitespace keeps a space the
+        // original text had from being doubled.
+        if (cur_cjk || prev_cjk)
+            && !c.is_whitespace()
+            && !out.is_empty()
+            && !out.ends_with(' ')
+        {
+            out.push(' ');
+        }
+        out.push(c);
+        prev_cjk = cur_cjk;
+    }
+    out
+}
+
+/// Number of characters of context shown around a match in a snippet.
+const SNIPPET_RADIUS: usize = 40;
+
+/// Split a user query into the terms to highlight, in original (unsegmented)
+/// form. Mirrors [`sanitize_fts_query`]'s whitespace split so the highlighted
+/// terms are exactly the ones that were searched for.
+fn query_terms(query: &str) -> Vec<String> {
+    query
+        .split_whitespace()
+        .map(|t| t.replace('"', ""))
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
+/// Find the first case-insensitive occurrence of `needle` in `hay`, returning a
+/// byte offset. ASCII-lowercases both sides; CJK is unaffected by case folding.
+fn find_ci(hay: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return None;
+    }
+    hay.to_lowercase().find(&needle.to_lowercase()).and_then(|i| {
+        // `to_lowercase` can change byte lengths (e.g. 'İ'), which would make
+        // the offset meaningless. Fall back to an exact search in that case.
+        if hay.to_lowercase().len() == hay.len() {
+            Some(i)
+        } else {
+            hay.find(needle)
+        }
+    })
+}
+
+/// Build a display snippet from the **original** text, so nothing the indexer
+/// did to make CJK searchable can leak into the UI.
+///
+/// This replaces FTS5's `snippet()`, which can only cut from the segmented
+/// `content` column and therefore returned text with a space between every CJK
+/// character. Cutting from `raw` sidesteps the whole reconstruction problem:
+/// there is no separator to guess about, because none was ever inserted.
+fn build_snippet(raw: &str, terms: &[String]) -> Option<String> {
+    let chars: Vec<char> = raw.chars().collect();
+
+    // Byte offset -> char index, so we can work in characters (CJK-safe).
+    let byte_to_char: Vec<(usize, usize)> = raw
+        .char_indices()
+        .enumerate()
+        .map(|(ci, (bi, _))| (bi, ci))
+        .collect();
+    let char_index_of = |byte: usize| -> usize {
+        byte_to_char
+            .binary_search_by_key(&byte, |(b, _)| *b)
+            .map(|i| byte_to_char[i].1)
+            .unwrap_or_else(|i| byte_to_char.get(i).map(|(_, c)| *c).unwrap_or(chars.len()))
+    };
+
+    // Locate every term; anchor the window on the earliest one.
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for term in terms {
+        if let Some(byte) = find_ci(raw, term) {
+            let start = char_index_of(byte);
+            spans.push((start, start + term.chars().count()));
+        }
+    }
+    if spans.is_empty() {
+        return None;
+    }
+    spans.sort_unstable();
+
+    let anchor = spans[0].0;
+    let win_start = anchor.saturating_sub(SNIPPET_RADIUS);
+    let win_end = (spans[0].1 + SNIPPET_RADIUS).min(chars.len());
+
+    // Emit the window, wrapping any span that falls inside it.
+    let mut out = String::new();
+    if win_start > 0 {
+        out.push('…');
+    }
+    let mut i = win_start;
+    while i < win_end {
+        if let Some(&(s, e)) = spans.iter().find(|&&(s, _)| s == i) {
+            let e = e.min(win_end);
+            out.push_str("<mark>");
+            out.extend(&chars[s..e]);
+            out.push_str("</mark>");
+            i = e;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    if win_end < chars.len() {
+        out.push('…');
+    }
+    Some(out)
+}
+
+/// Undo [`segment_cjk`] for display: drop the single space FTS5 hands back
+/// between two CJK characters. Spaces adjacent to non-CJK are left alone, so
+/// `"决 策 卡 walks fleet"` restores to `"决策卡 walks fleet"`.
+///
+/// Only used as a fallback now that [`build_snippet`] cuts from `raw`: it still
+/// covers the case where a match lives in a different indexed row than the one
+/// whose `raw` we are holding.
+fn desegment_cjk(text: &str) -> String {
+    if !text.chars().any(is_cjk) {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == ' '
+            && i > 0
+            && i + 1 < chars.len()
+            && is_cjk(chars[i - 1])
+            && is_cjk(chars[i + 1])
+        {
+            i += 1; // drop this separator
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Sanitize user input for FTS5 MATCH syntax.
 /// Splits on whitespace, quotes each token, joins with spaces (implicit AND).
+///
+/// A token containing CJK is segmented first, so the quoted result is a phrase
+/// query over consecutive single-character tokens — `"决 策"` matches `决策`
+/// anywhere inside an indexed run, but still requires the two characters to be
+/// adjacent and in order.
 fn sanitize_fts_query(input: &str) -> String {
     input
         .split_whitespace()
         .map(|token| {
             // Remove any embedded double quotes to prevent FTS5 syntax errors.
             let clean = token.replace('"', "");
+            let clean = segment_cjk(&clean);
+            let clean = clean.trim();
             if clean.is_empty() {
                 String::new()
             } else {
@@ -536,5 +751,239 @@ mod tests {
 
         let _ = fs::remove_file(&jsonl);
         let _ = fs::remove_file(&db);
+    }
+
+    /// FTS5's `unicode61` tokenizer does not segment CJK: a run of Chinese
+    /// characters becomes **one** token, so only a query equal to that whole
+    /// run matches and every substring query silently returns nothing.
+    ///
+    /// Measured on the real 194 MB index before the fix: `worktree` hit 4,364
+    /// rows while `决策` hit 4 — and `决策` scored *fewer* hits than the longer
+    /// `决策卡`, which is the tell. Chinese search was broken at every entry
+    /// point (desktop box, `fleet search`, mobile relay, `mcp_inspect`).
+    #[test]
+    fn cjk_substring_queries_match() {
+        let dir = std::env::temp_dir().join("fleet-search-cjk-test");
+        let _ = fs::create_dir_all(&dir);
+        let jsonl = dir.join("cjk.jsonl");
+        fs::write(
+            &jsonl,
+            "{\"type\":\"user\",\"message\":{\"content\":\"这条会话讨论了决策卡的实现细节\"}}\n",
+        )
+        .unwrap();
+
+        let db = dir.join("cjk.db");
+        let _ = fs::remove_file(&db);
+        let idx = SearchIndex::open_at(&db).unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-cjk").unwrap();
+
+        // Two-character word — the most common shape in Chinese, and the case
+        // an ngram tokenizer of size 3 would still miss.
+        assert_eq!(
+            idx.search("决策", 10).unwrap().len(),
+            1,
+            "a two-character Chinese substring must be findable"
+        );
+        // Three-character substring taken from the middle of the run.
+        assert_eq!(
+            idx.search("决策卡", 10).unwrap().len(),
+            1,
+            "a three-character Chinese substring must be findable"
+        );
+        // A word at the very end of the run.
+        assert_eq!(
+            idx.search("细节", 10).unwrap().len(),
+            1,
+            "a Chinese word at the end of the run must be findable"
+        );
+        // Mixed CJK + ASCII must keep working in the same query.
+        assert_eq!(
+            idx.search("实现", 10).unwrap().len(),
+            1,
+            "an interior Chinese word must be findable"
+        );
+        // A phrase that is absent must still miss — the fix must not make
+        // everything match everything.
+        assert_eq!(
+            idx.search("永动机", 10).unwrap().len(),
+            0,
+            "an absent Chinese phrase must not match"
+        );
+
+        let _ = fs::remove_file(&jsonl);
+        let _ = fs::remove_file(&db);
+    }
+
+    /// A database whose `session_fts` predates the `raw` column must have the
+    /// table **dropped**, not just emptied — `CREATE TABLE IF NOT EXISTS` will
+    /// not widen an existing table, so a 4-column INSERT against the old shape
+    /// fails with "table session_fts has 3 columns but 4 values were supplied".
+    #[test]
+    fn a_db_with_the_old_column_set_is_rebuilt_not_just_emptied() {
+        let dir = std::env::temp_dir().join("fleet-search-oldcols-test");
+        let _ = fs::create_dir_all(&dir);
+        let jsonl = dir.join("oldcols.jsonl");
+        fs::write(
+            &jsonl,
+            "{\"type\":\"user\",\"message\":{\"content\":\"决策卡与工具\"}}\n",
+        )
+        .unwrap();
+
+        let db = dir.join("oldcols.db");
+        let _ = fs::remove_file(&db);
+
+        // Hand-build a pre-`raw` (v3-shaped) database.
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE index_meta (
+                     jsonl_path TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                     mtime_ms INTEGER NOT NULL, byte_offset INTEGER NOT NULL,
+                     line_count INTEGER NOT NULL DEFAULT 0);
+                 CREATE VIRTUAL TABLE session_fts USING fts5(
+                     session_id UNINDEXED, jsonl_path UNINDEXED, content,
+                     tokenize='unicode61');
+                 PRAGMA user_version = 3;",
+            )
+            .unwrap();
+        }
+
+        // Opening must rebuild the table with the new shape, and indexing must
+        // then succeed rather than erroring on the column count.
+        let idx = SearchIndex::open_at(&db).unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-old")
+            .expect("indexing must succeed after the table is rebuilt");
+        assert_eq!(idx.search("决策卡", 10).unwrap().len(), 1);
+
+        let _ = fs::remove_file(&jsonl);
+        let _ = fs::remove_file(&db);
+    }
+
+    /// The content column is stored segmented, so `snippet()` hands back text
+    /// with a space between every CJK character. That is an index-side detail
+    /// and must never reach the UI.
+    #[test]
+    fn cjk_snippets_are_restored_for_display() {
+        let dir = std::env::temp_dir().join("fleet-search-cjk-snippet-test");
+        let _ = fs::create_dir_all(&dir);
+        let jsonl = dir.join("snip.jsonl");
+        fs::write(
+            &jsonl,
+            "{\"type\":\"user\",\"message\":{\"content\":\"决策卡走 fleet__ask 工具\"}}\n",
+        )
+        .unwrap();
+
+        let db = dir.join("snip.db");
+        let _ = fs::remove_file(&db);
+        let idx = SearchIndex::open_at(&db).unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-s").unwrap();
+
+        let hits = idx.search("决策卡", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        let snip = &hits[0].snippet;
+        assert!(
+            snip.contains("<mark>决策卡</mark>"),
+            "the matched term must be highlighted contiguously, got: {snip}"
+        );
+        assert!(
+            !snip.contains("决 策"),
+            "snippet must not leak the segmented form, got: {snip}"
+        );
+        assert!(
+            snip.contains("fleet__ask"),
+            "ASCII text must survive, got: {snip}"
+        );
+        // Snippets are now cut from `raw`, so the text is byte-for-byte what
+        // the author wrote once the <mark> wrappers are removed.
+        assert_eq!(
+            snip.replace("<mark>", "").replace("</mark>", ""),
+            "决策卡走 fleet__ask 工具",
+            "snippet must reproduce the original text exactly"
+        );
+
+        let _ = fs::remove_file(&jsonl);
+        let _ = fs::remove_file(&db);
+    }
+
+    /// The whole point of the `raw` column: a CJK↔ASCII boundary must come back
+    /// exactly as written, with no separator the indexer introduced.
+    #[test]
+    fn cjk_ascii_boundary_survives_verbatim() {
+        let dir = std::env::temp_dir().join("fleet-search-boundary-test");
+        let _ = fs::create_dir_all(&dir);
+        let jsonl = dir.join("boundary.jsonl");
+        // Both spacing conventions in one line: no space around `main`, and a
+        // conventional space around `fleet`.
+        let original = "已合并，main全绿，使用 fleet 工具。下一步";
+        fs::write(
+            &jsonl,
+            format!(
+                "{{\"type\":\"user\",\"message\":{{\"content\":\"{original}\"}}}}\n"
+            ),
+        )
+        .unwrap();
+
+        let db = dir.join("boundary.db");
+        let _ = fs::remove_file(&db);
+        let idx = SearchIndex::open_at(&db).unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-b").unwrap();
+
+        // `main` is searchable even though it is welded between CJK…
+        assert_eq!(idx.search("main", 10).unwrap().len(), 1);
+        let hits = idx.search("已合并", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        let plain = hits[0]
+            .snippet
+            .replace("<mark>", "")
+            .replace("</mark>", "");
+        // …and the snippet is the author's text, both conventions intact.
+        assert_eq!(plain, original, "snippet must be verbatim");
+        assert!(
+            plain.contains("已合并，main全绿"),
+            "no space may be introduced at a CJK↔ASCII boundary: {plain}"
+        );
+        assert!(
+            plain.contains("使用 fleet 工具"),
+            "a space the author typed must be preserved: {plain}"
+        );
+
+        let _ = fs::remove_file(&jsonl);
+        let _ = fs::remove_file(&db);
+    }
+
+    /// Round-trip guard: desegmentation must not eat spaces that were in the
+    /// original text, and must be a no-op for pure ASCII.
+    #[test]
+    fn segment_roundtrip_preserves_meaningful_spaces() {
+        assert_eq!(segment_cjk("hello world"), "hello world");
+        assert_eq!(desegment_cjk("hello world"), "hello world");
+        assert_eq!(desegment_cjk(&segment_cjk("决策卡")), "决策卡");
+        assert_eq!(
+            desegment_cjk(&segment_cjk("决策卡 walks fleet")),
+            "决策卡 walks fleet"
+        );
+        // A space the user actually typed between two Chinese words is the one
+        // case we cannot distinguish; document the known behaviour.
+        assert_eq!(desegment_cjk(&segment_cjk("决策 卡")), "决策卡");
+        // Punctuation inside a Chinese run restores cleanly.
+        assert_eq!(desegment_cjk(&segment_cjk("完成。下一步")), "完成。下一步");
+        assert_eq!(
+            desegment_cjk(&segment_cjk("决策卡，工具，面板")),
+            "决策卡，工具，面板"
+        );
+
+        // At a CJK↔ASCII boundary `desegment_cjk` cannot restore the original:
+        // `unicode61` does not split there either (indexing `已合并main全绿` as
+        // one run makes even `main` unsearchable), so `segment_cjk` *must* put
+        // a separator in, and afterwards it is indistinguishable from a space
+        // the author typed.
+        //
+        // This is why snippets are cut from the `raw` column instead — see
+        // `cjk_ascii_boundary_survives_verbatim`. The lossy round-trip below is
+        // only the fallback path's behaviour, pinned here so it stays known.
+        assert_eq!(
+            desegment_cjk(&segment_cjk("已合并，main全绿")),
+            "已合并， main 全绿"
+        );
     }
 }
