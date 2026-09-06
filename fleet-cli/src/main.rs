@@ -734,9 +734,10 @@ pub(crate) enum NotesCommands {
     /// from the end).
     Read {
         path: String,
-        #[arg(long)]
+        /// Negative values count back from the last line (`--start-line -1`).
+        #[arg(long, allow_hyphen_values = true)]
         start_line: Option<i64>,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         stop_line: Option<i64>,
     },
     /// List note files visible to this session (own + handoff predecessors).
