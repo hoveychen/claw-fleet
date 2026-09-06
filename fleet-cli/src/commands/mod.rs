@@ -15,6 +15,7 @@ pub(crate) mod guard;
 pub(crate) mod handoff;
 pub(crate) mod loop_cmd;
 pub(crate) mod memory;
+pub(crate) mod notes;
 pub(crate) mod plan;
 pub(crate) mod prd;
 pub(crate) mod remote;

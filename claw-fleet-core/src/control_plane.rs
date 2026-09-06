@@ -148,6 +148,7 @@ mod tests {
             plan_approval_installed: true,
             interaction_mode_installed: true,
             prd_context_installed: true,
+            notes_hint_installed: true,
             prd_discipline_installed: true,
             wiki_guidance_installed: true,
             model_guidance_installed: true,
