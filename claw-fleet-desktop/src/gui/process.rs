@@ -115,7 +115,7 @@ pub(crate) async fn spawn_new_claude_session(
     .map_err(|e| format!("join: {e}"))?
 }
 
-/// Absolute path of the pure-chat workspace, created on demand. The launcher
+/// Absolute path of the pure-chat workspace. The launcher
 /// pins it as a fixed entry — it has no prior sessions to be discovered from,
 /// and under a remote connection it resolves against the probe host's home.
 #[tauri::command(async)]
@@ -327,4 +327,3 @@ pub(crate) fn set_keep_awake(app: tauri::AppHandle, enabled: bool) -> Result<boo
     let _ = app.emit("keep-awake-changed", state);
     Ok(state)
 }
-

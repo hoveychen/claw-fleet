@@ -179,6 +179,17 @@ pub fn chat_workspace_path() -> Option<PathBuf> {
     Some(resolved(&raw).unwrap_or(raw))
 }
 
+/// Resolve the path the launcher should display without initialising the
+/// workspace. Opening the new-session form is a read-only UI action: directory
+/// creation and brief repair belong to the actual spawn path, which already
+/// calls [`ensure_chat_workspace`]. Keeping them out of this lookup prevents a
+/// slow disk from delaying the chat-mode control itself.
+pub fn chat_workspace_for_ui() -> Result<String, String> {
+    chat_workspace_path()
+        .map(|path| path.to_string_lossy().to_string())
+        .ok_or_else(|| "no fleet dir".to_string())
+}
+
 /// True when `path` denotes the chat workspace. Both the link path
 /// (`~/.fleet/chat`) and its resolved form match, and trailing separators are
 /// stripped, so neither a symlinked fleet dir nor a stray slash round-tripped
@@ -328,6 +339,20 @@ mod tests {
             assert!(
                 body.contains("别把行为归因于这份文件"),
                 "must not blame behaviour on a file the user cannot see",
+            );
+        });
+    }
+
+    #[test]
+    fn ui_path_lookup_does_not_create_the_chat_workspace() {
+        let tmp = tempfile::tempdir().unwrap();
+        with_home(tmp.path(), || {
+            let expected = tmp.path().join(".fleet/chat");
+            let path = chat_workspace_for_ui().unwrap();
+            assert_eq!(path, expected.to_string_lossy());
+            assert!(
+                !expected.exists(),
+                "opening the launcher must not initialise the chat workspace",
             );
         });
     }
