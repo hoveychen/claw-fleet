@@ -27,6 +27,7 @@
 #   FLEET_CARGO_MAX_WAIT=<secs>    give up waiting and proceed (default 1800)
 #   FLEET_BUILD_JOBS=<n>           force CARGO_BUILD_JOBS, skips the memory calc
 #   FLEET_CARGO_GUARD_QUIET=1      suppress the "waiting for a slot" notices
+#   FLEET_CARGO_SLOT_ROOT=<dir>    relocate the slot store (tests use this)
 
 set -uo pipefail
 
@@ -151,7 +152,12 @@ compute_jobs() {
 }
 
 # ── Acquire one of N slots ───────────────────────────────────────────────────
-SLOT_ROOT="${TMPDIR:-/tmp}/claw-fleet-cargo-slots"
+# A fixed path, deliberately NOT under $TMPDIR. On macOS TMPDIR is a per-user
+# launchd directory, but Fleet spawns its sessions detached — a session that
+# does not inherit that environment falls back to /tmp and would then queue
+# against a different, private slot store. Two stores means no gate at all, and
+# the failure is silent. `id -u` keeps it per-user on shared machines.
+SLOT_ROOT="${FLEET_CARGO_SLOT_ROOT:-/tmp/claw-fleet-cargo-slots-$(id -u)}"
 mkdir -p "$SLOT_ROOT" 2>/dev/null || true
 HELD_SLOT=""
 

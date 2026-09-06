@@ -5,8 +5,8 @@
 # the environment it was handed, so every assertion is about the guard's own
 # decisions (gate / passthrough / queue / reap) rather than about rustc.
 #
-# The guard derives its slot store from TMPDIR, so pointing TMPDIR at a scratch
-# directory isolates each test from the machine's real slots for free.
+# Each test points FLEET_CARGO_SLOT_ROOT at a scratch directory so it never
+# touches — or waits on — the machine's real compile slots.
 #
 # Usage: scripts/tests/cargo-jobs-guard.test.sh
 
@@ -39,13 +39,13 @@ exit "${FAKE_EXIT:-0}"
 FAKE
   chmod +x "$SANDBOX/bin/cargo"
   export FAKE_LOG
-  export TMPDIR="$SANDBOX/tmp"
-  SLOT_ROOT="$TMPDIR/claw-fleet-cargo-slots"
+  SLOT_ROOT="$SANDBOX/tmp/slots"
+  export FLEET_CARGO_SLOT_ROOT="$SLOT_ROOT"
 }
 
 teardown() {
   rm -rf "$SANDBOX"
-  unset FAKE_SLEEP FAKE_EXIT
+  unset FAKE_SLEEP FAKE_EXIT FLEET_CARGO_SLOT_ROOT
 }
 
 run_guard() {
