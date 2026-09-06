@@ -2270,7 +2270,7 @@
   "history": {
     "title": "任务",
     "search_placeholder": "搜索标题、计划、全文…",
-    "empty": "还没有会话，点右上角“新会话”发起一个",
+    "empty": "还没有会话，点上方“新会话”发起一个",
     "no_match": "没有匹配的会话",
     "untitled": "（无标题）",
     "unread": "未读 — 有新消息",
@@ -2285,6 +2285,8 @@
     "filter_workspace": "按工作目录筛选",
     "filter_workspace_off": "仅聊天模式下不按目录筛选",
     "all_workspaces": "全部目录",
+    "workspaces": "工作区",
+    "workspace_session_count": "{{count}} 个会话",
     "chat_mode": "仅聊天",
     "filter_chat_tip": "只显示纯聊天会话，不按目录筛选；关闭时全部目录也含聊天",
     "only_active": "仅活跃",

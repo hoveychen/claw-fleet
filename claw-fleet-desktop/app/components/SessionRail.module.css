@@ -1,3 +1,70 @@
+/* Workspace sections belong to the desktop task rail. The flat SessionRail is
+   still shared by LiteApp, so its repository shell lives beside (not inside)
+   the relay-chain renderer. */
+.workspace_section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace_header {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 7px 5px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.workspace_header:hover {
+  background: color-mix(in srgb, var(--color-bg-card-hover) 60%, transparent);
+  color: var(--color-text);
+}
+
+.workspace_folder {
+  display: inline-flex;
+  color: var(--color-accent);
+  flex: 0 0 auto;
+}
+
+.workspace_name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workspace_count {
+  color: var(--color-text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.workspace_chevron {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+  transition: transform 0.14s ease;
+}
+
+.workspace_chevron[data-open="true"] {
+  transform: rotate(90deg);
+}
+
+.workspace_sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 /* Handoff-relay group wrappers for SessionRail — the grouped session list shared
    by the desktop task page (HistoryView) and lite mode (LiteApp). A collapsed
    relay chain is a header row (tip session, click to expand) over an indented

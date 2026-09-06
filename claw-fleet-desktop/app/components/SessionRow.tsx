@@ -99,6 +99,8 @@ export type SessionRowProps = {
    *  title so the two are told apart at a glance. Hidden when everything is the
    *  same source — a badge that never varies is just noise. */
   showSource: boolean;
+  /** Hidden when a repository heading already labels this row. */
+  showWorkspace?: boolean;
   onClick: (s: SessionInfo) => void;
   onContextMenu: (e: React.MouseEvent, s: SessionInfo) => void;
   /** Overrides the run-status dot colour. A collapsed relay group's header is
@@ -126,6 +128,7 @@ export const SessionRow = memo(function SessionRow({
   isOpen,
   unread,
   showSource,
+  showWorkspace = true,
   onClick,
   onContextMenu,
   runColorOverride,
@@ -178,10 +181,12 @@ export const SessionRow = memo(function SessionRow({
             {s.titleOverride ?? s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
           </span>
           <span className={styles.row_meta}>
-            <span className={styles.row_project} title={s.workspacePath}>
-              <FolderGit2 size={10} strokeWidth={1.6} />
-              {s.workspaceName}
-            </span>
+            {showWorkspace && (
+              <span className={styles.row_project} title={s.workspacePath}>
+                <FolderGit2 size={10} strokeWidth={1.6} />
+                {s.workspaceName}
+              </span>
+            )}
             {s.handoff && (
               <span
                 className={styles.row_handoff}
