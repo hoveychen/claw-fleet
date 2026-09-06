@@ -256,6 +256,42 @@ fn lookup_thread_rollout_cwd(thread_id: &str) -> Option<(String, String)> {
     .ok()
 }
 
+/// Locate a Codex thread's rollout file by thread id: the SQLite `threads`
+/// table first (authoritative, O(1)), then a filename scan of the sessions dir
+/// (`rollout-<timestamp>-<thread id>.jsonl[.zst]`) for threads the index has
+/// not caught up with. `None` when neither knows the thread.
+///
+/// Codex's counterpart of `session::find_session_jsonl`, for callers that only
+/// hold a session id (`session_history`, the `fleet__history` tool).
+pub(crate) fn find_codex_rollout(thread_id: &str) -> Option<PathBuf> {
+    if let Some((path, _cwd)) = lookup_thread_rollout_cwd(thread_id) {
+        let p = PathBuf::from(path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    find_rollout_in(&get_sessions_dir()?, thread_id)
+}
+
+/// Pure filename scan behind [`find_codex_rollout`]: the rollout whose name ends
+/// in `-<thread_id>.jsonl` or `-<thread_id>.jsonl.zst` under `sessions_dir`.
+pub(crate) fn find_rollout_in(sessions_dir: &Path, thread_id: &str) -> Option<PathBuf> {
+    // Thread ids are full uuids (36 chars). The suffix match below is anchored
+    // on `-`, but a uuid's own last group is also preceded by `-`, so a partial
+    // id such as `04889a84f941` would match every thread ending in it. Refuse
+    // anything shorter than a hyphenless uuid rather than guess.
+    if thread_id.len() < 32 {
+        return None;
+    }
+    let plain = format!("-{thread_id}.jsonl");
+    let zst = format!("-{thread_id}.jsonl.zst");
+    find_rollout_files(sessions_dir).into_iter().find(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(&plain) || n.ends_with(&zst))
+    })
+}
+
 /// For a Fleet-owned Codex session identified by `thread_id`, the workspace it
 /// was launched in; `None` if the thread is unknown or not Fleet-owned.
 ///
