@@ -1588,6 +1588,7 @@ impl crate::backend::Backend for RemoteBackend {
             interaction_mode_installed: false,
             plan_approval_installed: false,
             prd_context_installed: false,
+            notes_hint_installed: false,
             prd_discipline_installed: false,
             wiki_guidance_installed: false,
             model_guidance_installed: false,

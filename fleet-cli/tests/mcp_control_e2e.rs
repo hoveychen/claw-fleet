@@ -51,6 +51,10 @@ fn run_mcp(fleet_home: &Path, ws: &Path, fleet_owned: bool, requests: &[Value]) 
         // ambient CLAUDE_CODE_SESSION_ID (a suite run inside a real session)
         // so the id is deterministically SID.
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        // `fleet__history` locates the transcript via the Claude config dir;
+        // pin it under FLEET_HOME even when the suite runs in a shell that
+        // points CLAUDE_CONFIG_DIR elsewhere.
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env("FLEET_SESSION_ID", SID)
         .env("CLAUDE_PROJECT_DIR", ws)
         .stdin(Stdio::piped())
@@ -194,6 +198,78 @@ fn fleet_session_handoff_register_persists_a_pending_record() {
     assert!(pending.exists(), "pending handoff record must be written to {}", pending.display());
     let rec: Value = serde_json::from_str(&std::fs::read_to_string(&pending).unwrap()).unwrap();
     assert_eq!(rec["note"], "P2 done, continue at P3");
+}
+
+/// `fleet__notes` must persist under `$FLEET_HOME/.fleet/notes/<session>/` and
+/// read back over the wire; `fleet__history` must find a record in this
+/// session's own transcript and read it by the reported line number — the
+/// whole "recover after compaction" loop, end to end through the real server.
+#[test]
+fn fleet_session_notes_and_history_roundtrip_over_the_wire() {
+    let home = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+
+    // A transcript for SID where Claude Code keeps them, with a distinctive
+    // phrase on line 3 (line 2 is a record the index ignores).
+    let proj = home.path().join(".claude").join("projects").join("-tmp-ws");
+    std::fs::create_dir_all(&proj).unwrap();
+    std::fs::write(
+        proj.join(format!("{SID}.jsonl")),
+        concat!(
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n",
+            "{\"type\":\"progress\"}\n",
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[",
+            "{\"type\":\"text\",\"text\":\"the zqe2e tokenizer fix landed\"},",
+            "{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"cargo test\"}}]}}\n",
+        ),
+    )
+    .unwrap();
+
+    let resps = run_mcp(
+        home.path(),
+        ws.path(),
+        true,
+        &[
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+                "name":"fleet__notes","arguments":{"action":"write","path":"checkpoint.md","text":"goal: ship notes\n"}}}),
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+                "name":"fleet__notes","arguments":{"action":"append","path":"checkpoint.md","text":"next: history\n"}}}),
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+                "name":"fleet__notes","arguments":{"action":"read","path":"checkpoint.md"}}}),
+            json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
+                "name":"fleet__notes","arguments":{"action":"search","query":"history"}}}),
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{
+                "name":"fleet__history","arguments":{"action":"search","query":"zqe2e"}}}),
+            json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{
+                "name":"fleet__history","arguments":{"action":"read","line_no":3}}}),
+        ],
+    );
+
+    let text = |id: u64| -> String {
+        let r = resps.iter().find(|r| r["id"] == id).expect("response present");
+        assert_eq!(r["result"]["isError"], false, "call {id} errored: {r}");
+        r["result"]["content"][0]["text"].as_str().unwrap().to_string()
+    };
+
+    assert_eq!(text(3), "goal: ship notes\nnext: history\n");
+    assert!(text(4).contains("checkpoint.md:2  next: history"), "{}", text(4));
+    let note_file = home
+        .path()
+        .join(".fleet")
+        .join("notes")
+        .join(SID)
+        .join("checkpoint.md");
+    assert!(note_file.is_file(), "note must land at {}", note_file.display());
+
+    let hits = text(5);
+    assert!(hits.contains("line 3"), "history hit must point at line 3: {hits}");
+    let record = text(6);
+    assert!(record.starts_with("[assistant]"), "{record}");
+    assert!(record.contains("the zqe2e tokenizer fix landed"), "{record}");
+    assert!(
+        record.contains("<tool_use name=\"Bash\">{\"command\":\"cargo test\"}</tool_use>"),
+        "read must expand tool inputs: {record}"
+    );
 }
 
 /// `fleet__artifact` is the ONLY way a deliverable reaches the 产出 page — the
