@@ -12,12 +12,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderOpen, Plus, Square, Trash2 } from "lucide-react";
+import { FolderOpen, Plus, Square } from "lucide-react";
 import { PageShell } from "./PageShell";
 import { EmptyState } from "./EmptyState";
 import { ProcTerminal } from "./ProcTerminal";
 import { distinctWorkspaces } from "./NewSessionForm";
 import { procLabel } from "./procCommandLabel";
+import { isMissingProcError, terminalProcsForWorkspace } from "./terminalProcs";
 import { useProcStore, useSessionsStore, useUIStore } from "../store";
 import type { ProcRecord } from "../types";
 import styles from "./MemoryView.module.css";
@@ -29,6 +30,7 @@ export function TerminalView() {
   const sessions = useSessionsStore((s) => s.sessions);
   const procs = useProcStore((s) => s.procs);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
+  const forgetProc = useProcStore((s) => s.forgetProc);
 
   const terminalNav = useUIStore((s) => s.terminalNav);
   const clearTerminalNav = useUIStore((s) => s.clearTerminalNav);
@@ -65,7 +67,7 @@ export function TerminalView() {
   }, [fetchProcs]);
 
   const wsProcs = useMemo(
-    () => procs.filter((p) => p.workspacePath === selected),
+    () => terminalProcsForWorkspace(procs, selected),
     [procs, selected],
   );
 
@@ -100,11 +102,9 @@ export function TerminalView() {
     void (async () => {
       await fetchProcs();
       if (stale) return;
-      const list = useProcStore
-        .getState()
-        .procs.filter((p) => p.workspacePath === selected);
-      const live = list.find((p) => p.status !== "exited");
-      setActiveId(live?.id ?? list[0]?.id ?? null);
+      const list = terminalProcsForWorkspace(useProcStore.getState().procs, selected);
+      const live = list[0];
+      setActiveId(live?.id ?? null);
       if (!live && autoSpawned.current !== selected) {
         autoSpawned.current = selected;
         void spawn();
@@ -118,27 +118,28 @@ export function TerminalView() {
   }, [selected]);
 
   const active = wsProcs.find((p) => p.id === activeId) ?? null;
-  const exited = active?.status === "exited";
+
+  // The active shell can disappear after a poll (normal exit) or an explicit
+  // not-found eviction. Keep another live shell selected instead of leaving a
+  // row of tabs above an empty screen.
+  useEffect(() => {
+    if (activeId && wsProcs.some((proc) => proc.id === activeId)) return;
+    setActiveId(wsProcs[0]?.id ?? null);
+  }, [activeId, wsProcs]);
 
   const kill = async () => {
     if (!active) return;
     try {
       await invoke("kill_workspace_proc", { id: active.id, force: false });
     } catch (e) {
+      if (isMissingProcError(e)) {
+        forgetProc(active.id);
+        setActiveId(null);
+        setError(null);
+        return;
+      }
       setError(String(e));
     }
-    void fetchProcs();
-  };
-
-  /** 关掉一个已退出的终端：删记录 + 从标签里摘掉。 */
-  const clear = async () => {
-    if (!active) return;
-    try {
-      await invoke("clear_workspace_procs", { id: active.id, workspacePath: null });
-    } catch (e) {
-      setError(String(e));
-    }
-    setActiveId(wsProcs.find((p) => p.id !== active.id)?.id ?? null);
     void fetchProcs();
   };
 
@@ -183,7 +184,6 @@ export function TerminalView() {
                   key={p.id}
                   className={termStyles.tab}
                   data-active={p.id === activeId}
-                  data-exited={p.status === "exited"}
                   onClick={() => setActiveId(p.id)}
                   title={p.command || t("terminal.shell")}
                 >
@@ -192,24 +192,15 @@ export function TerminalView() {
               ))}
             </div>
             <div className={termStyles.actions}>
-              {active &&
-                (exited ? (
-                  <button
-                    className={termStyles.icon_btn}
-                    onClick={() => void clear()}
-                    title={t("terminal.close")}
-                  >
-                    <Trash2 size={13} strokeWidth={1.6} />
-                  </button>
-                ) : (
-                  <button
-                    className={termStyles.icon_btn}
-                    onClick={() => void kill()}
-                    title={t("terminal.kill")}
-                  >
-                    <Square size={12} strokeWidth={1.8} />
-                  </button>
-                ))}
+              {active && (
+                <button
+                  className={termStyles.icon_btn}
+                  onClick={() => void kill()}
+                  title={t("terminal.kill")}
+                >
+                  <Square size={12} strokeWidth={1.8} />
+                </button>
+              )}
               <button
                 className={termStyles.icon_btn}
                 onClick={() => void spawn()}
@@ -227,24 +218,20 @@ export function TerminalView() {
             // key = proc id：切标签必须重建 xterm，否则新终端会继续写进上一个的
             // 缓冲区（ProcTerminal 的 effect 就是按 proc.id 生命周期建的）。
             <div className={termStyles.screen}>
-              <ProcTerminal key={active.id} proc={active} height="100%" />
+              <ProcTerminal
+                key={active.id}
+                proc={active}
+                height="100%"
+                onMissing={(id) => {
+                  forgetProc(id);
+                  setActiveId((current) => (current === id ? null : current));
+                  setError(null);
+                }}
+              />
             </div>
           ) : (
             <div className={styles.placeholder}>
               {busy ? t("terminal.starting") : t("terminal.none")}
-            </div>
-          )}
-
-          {exited && active && (
-            <div className={termStyles.exit_bar}>
-              <span>
-                {active.exitCode === null || active.exitCode === undefined
-                  ? t("terminal.exited")
-                  : t("terminal.exited_code", { code: active.exitCode })}
-              </span>
-              <button className={termStyles.exit_action} onClick={() => void spawn()}>
-                {t("terminal.restart")}
-              </button>
             </div>
           )}
         </div>
