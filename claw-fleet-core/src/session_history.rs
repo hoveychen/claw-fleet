@@ -49,20 +49,49 @@ pub struct HistoryHit {
     pub rank: f64,
 }
 
+/// Locate a session's transcript on this machine: a Claude Code jsonl under
+/// `~/.claude/projects`, else a Codex rollout (SQLite index, then filename
+/// scan). A zstd-compressed rollout is found but refused: the line-addressed
+/// index and `read` both work on the plain file, and Codex only compresses
+/// rollouts it has archived, so a live session is never one.
+pub fn find_transcript(session_id: &str) -> Result<PathBuf, String> {
+    if let Some(p) = crate::session::find_session_jsonl(session_id) {
+        return Ok(p);
+    }
+    match crate::codex_source::find_codex_rollout(session_id) {
+        Some(p) => reject_compressed(p),
+        None => Err(no_transcript_error(session_id)),
+    }
+}
+
+pub(crate) fn reject_compressed(path: PathBuf) -> Result<PathBuf, String> {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    if name.ends_with(".jsonl.zst") {
+        return Err(format!(
+            "the transcript {} is a zstd-compressed (archived) Codex rollout — history \
+             recovery reads plain rollouts only",
+            path.display()
+        ));
+    }
+    Ok(path)
+}
+
 /// `(session_id, transcript path)` for every readable session whose transcript
-/// exists on this machine, in scope order (own first).
+/// exists on this machine, in scope order (own first). Sessions whose
+/// transcript is missing or compressed are skipped here; `search` reports the
+/// caller's own session explicitly when nothing at all is found.
 fn transcripts_for(readable: &[String]) -> Vec<(String, PathBuf)> {
     readable
         .iter()
-        .filter_map(|sid| crate::session::find_session_jsonl(sid).map(|p| (sid.clone(), p)))
+        .filter_map(|sid| find_transcript(sid).ok().map(|p| (sid.clone(), p)))
         .collect()
 }
 
 fn no_transcript_error(session_id: &str) -> String {
     format!(
-        "no transcript found for session {session_id} under ~/.claude/projects — history \
-         recovery covers Claude Code sessions whose transcript is on this machine (not Codex \
-         sessions, not rca remote workspaces)"
+        "no transcript found for session {session_id} — looked for a Claude Code jsonl under \
+         ~/.claude/projects and a Codex rollout under $CODEX_HOME/sessions. History recovery \
+         covers sessions whose transcript is on this machine (an rca remote workspace's is not)"
     )
 }
 
@@ -73,7 +102,9 @@ pub fn search(session_id: &str, query: &str, limit: usize) -> Result<Vec<History
     let readable = crate::session_notes::readable_sessions(session_id);
     let transcripts = transcripts_for(&readable);
     if transcripts.is_empty() {
-        return Err(no_transcript_error(session_id));
+        // Surface the *reason* for the caller's own session (missing vs
+        // compressed) rather than a generic "nothing found".
+        return Err(find_transcript(session_id).err().unwrap_or_else(|| no_transcript_error(session_id)));
     }
     let index = SearchIndex::open().map_err(|e| format!("cannot open search index: {e}"))?;
     search_with(&index, &transcripts, query, limit)
@@ -124,7 +155,7 @@ pub fn read(
 ) -> Result<String, String> {
     let readable = crate::session_notes::readable_sessions(session_id);
     let target = ensure_readable(&readable, target_session.unwrap_or(session_id))?;
-    let path = crate::session::find_session_jsonl(target).ok_or_else(|| no_transcript_error(target))?;
+    let path = find_transcript(target)?;
     read_record(&path, line_no, offset_chars, limit_chars.unwrap_or(DEFAULT_READ_CHARS))
 }
 
@@ -169,6 +200,9 @@ pub fn read_record(
 /// "what did that command print" is answerable from a hit on the command.
 pub(crate) fn render_record(val: &Value) -> String {
     let kind = val["type"].as_str().unwrap_or("record");
+    if kind == "response_item" {
+        return render_codex_record(val);
+    }
     let role = val["message"]["role"].as_str().unwrap_or(kind);
     let mut out = format!("[{role}]");
     if let Some(ts) = val["timestamp"].as_str() {
@@ -211,6 +245,58 @@ pub(crate) fn render_record(val: &Value) -> String {
         } else if val.get("message").is_none() {
             out.push_str(&val.to_string());
             out.push('\n');
+        }
+    }
+    out
+}
+
+/// Codex rollout `response_item`: header from the payload's role (messages) or
+/// type (everything else); tool calls expand to name + arguments/input, tool
+/// outputs to their text, reasoning to its summary.
+fn render_codex_record(val: &Value) -> String {
+    use crate::search_index::{codex_content_text, extract_codex_item_text};
+    let payload = &val["payload"];
+    let ptype = payload["type"].as_str().unwrap_or("item");
+    let role = payload["role"].as_str().unwrap_or(ptype);
+    let mut out = format!("[{role}]");
+    if let Some(ts) = val["timestamp"].as_str() {
+        out.push_str(&format!(" {ts}"));
+    }
+    out.push('\n');
+
+    match ptype {
+        "function_call" => {
+            let name = payload["name"].as_str().unwrap_or("tool");
+            let args = payload["arguments"].as_str().map(str::to_string).unwrap_or_else(|| payload["arguments"].to_string());
+            out.push_str(&format!("<tool_use name=\"{name}\">{args}</tool_use>\n"));
+        }
+        "custom_tool_call" => {
+            let name = payload["name"].as_str().unwrap_or("tool");
+            let input = payload["input"].as_str().map(str::to_string).unwrap_or_else(|| payload["input"].to_string());
+            out.push_str(&format!("<tool_use name=\"{name}\">{input}</tool_use>\n"));
+        }
+        "function_call_output" | "custom_tool_call_output" => {
+            let text = codex_content_text(&payload["output"]);
+            out.push_str(&format!("<tool_result>{text}</tool_result>\n"));
+        }
+        "message" => {
+            // Developer messages are not indexed, but an explicit read may want
+            // them (they carry the injected instructions the turn ran under).
+            let text = codex_content_text(&payload["content"]);
+            if !text.is_empty() {
+                out.push_str(&text);
+                out.push('\n');
+            }
+        }
+        _ => {
+            let body = extract_codex_item_text(payload);
+            if !body.is_empty() {
+                out.push_str(&body);
+                out.push('\n');
+            } else {
+                out.push_str(&payload.to_string());
+                out.push('\n');
+            }
         }
     }
     out
@@ -335,6 +421,76 @@ mod tests {
         assert!(read_record(&own, 0, 0, 10).is_err());
         assert!(read_record(&own, 99, 0, 10).is_err());
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Codex rollout records must read back with the same affordances as Claude
+    /// ones: a role header, tool calls expanded to name + input, tool outputs to
+    /// their text, reasoning to its summary — and a developer message, though
+    /// never indexed, is still readable when addressed explicitly.
+    #[test]
+    fn read_renders_codex_rollout_records() {
+        let dir = fresh_dir("codex-read");
+        let rollout = dir.join("rollout.jsonl");
+        fs::write(
+            &rollout,
+            concat!(
+                r#"{"timestamp":"2026-09-06T05:06:27Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"fix the 分词器 please"}]}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"const x = await tools.exec_command({cmd:\"cargo test\"});","call_id":"c1"}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c1","output":[{"type":"input_text","text":"Script completed\n"},{"type":"input_text","text":"error[E0425]: zqfail"}]}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"function_call","name":"wait","arguments":"{\"cell_id\":\"118\"}","call_id":"c2"}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"function_call_output","call_id":"c2","output":"Script running with cell ID 118"}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"**Planning**"}],"encrypted_content":"gAAAA"}}"#, "\n",
+                r#"{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<skills_instructions>injected</skills_instructions>"}]}}"#, "\n",
+            ),
+        )
+        .unwrap();
+        let r = |n: i64| read_record(&rollout, n, 0, 10_000).unwrap();
+        assert_eq!(r(1), "[user] 2026-09-06T05:06:27Z\nfix the 分词器 please\n");
+        assert_eq!(
+            r(2),
+            "[custom_tool_call]\n<tool_use name=\"exec\">const x = await tools.exec_command({cmd:\"cargo test\"});</tool_use>\n"
+        );
+        assert_eq!(
+            r(3),
+            "[custom_tool_call_output]\n<tool_result>Script completed\n error[E0425]: zqfail</tool_result>\n"
+        );
+        assert_eq!(r(4), "[function_call]\n<tool_use name=\"wait\">{\"cell_id\":\"118\"}</tool_use>\n");
+        assert_eq!(r(5), "[function_call_output]\n<tool_result>Script running with cell ID 118</tool_result>\n");
+        assert_eq!(r(6), "[reasoning]\n**Planning**\n");
+        assert_eq!(r(7), "[developer]\n<skills_instructions>injected</skills_instructions>\n");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The rollout lookup must find a thread by the id suffix of its filename
+    /// (Codex's `rollout-<timestamp>-<thread id>.jsonl` convention) anywhere
+    /// under the dated sessions tree, and a compressed hit must be refused with
+    /// a reason rather than fed to the line indexer.
+    #[test]
+    fn codex_rollout_is_found_by_thread_id_and_zst_is_refused() {
+        let dir = fresh_dir("codex-find");
+        let day = dir.join("sessions").join("2026").join("09").join("06");
+        fs::create_dir_all(&day).unwrap();
+        let live = day.join("rollout-2026-09-06T05-06-25-01a0751c-52d9-7f22-a351-04889a84f941.jsonl");
+        let archived = day.join("rollout-2026-09-01T00-00-00-deadbeef-0000-7000-8000-000000000000.jsonl.zst");
+        fs::write(&live, "{}\n").unwrap();
+        fs::write(&archived, b"\x28\xb5\x2f\xfd").unwrap();
+
+        let sessions = dir.join("sessions");
+        assert_eq!(
+            crate::codex_source::find_rollout_in(&sessions, "01a0751c-52d9-7f22-a351-04889a84f941"),
+            Some(live.clone())
+        );
+        // A prefix of the id must not match (the suffix match is anchored on `-`).
+        assert_eq!(crate::codex_source::find_rollout_in(&sessions, "04889a84f941"), None);
+        assert_eq!(crate::codex_source::find_rollout_in(&sessions, ""), None);
+        assert_eq!(crate::codex_source::find_rollout_in(&sessions, "nope"), None);
+
+        let zst = crate::codex_source::find_rollout_in(&sessions, "deadbeef-0000-7000-8000-000000000000")
+            .expect("compressed rollout is still located");
+        let err = reject_compressed(zst).unwrap_err();
+        assert!(err.contains("zstd-compressed"), "{err}");
+        assert!(reject_compressed(live).is_ok());
         let _ = fs::remove_dir_all(&dir);
     }
 
