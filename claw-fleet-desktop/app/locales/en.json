@@ -1645,6 +1645,7 @@
     "scroll_to_latest": "Scroll to latest",
     "load_earlier": "Load earlier messages",
     "loading_earlier": "Loading earlier messages…",
+    "syncing_latest": "Syncing latest messages…",
     "tab_decisions": "Decisions",
     "task_notification": "Background task",
     "task_done": "Completed",

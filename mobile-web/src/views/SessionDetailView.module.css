@@ -187,12 +187,36 @@
   animation: messageLoadingSpin 800ms linear infinite;
 }
 
+.syncingLatest {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
+  font-size: var(--t-aux, 12px);
+  pointer-events: none;
+}
+
+.syncingLatest svg {
+  color: var(--color-accent);
+  animation: messageLoadingSpin 800ms linear infinite;
+}
+
 @keyframes messageLoadingSpin {
   to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .messageLoading svg { animation: none; }
+  .messageLoading svg,
+  .syncingLatest svg { animation: none; }
 }
 
 .loadMore {

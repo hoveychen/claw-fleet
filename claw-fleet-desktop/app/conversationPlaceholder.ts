@@ -25,3 +25,16 @@ export function conversationPlaceholder({
   if (isLoading) return "loading";
   return null;
 }
+
+/** Whether a populated transcript needs a visible "catching up" marker. */
+export function showLatestSync({
+  isLoading,
+  isLoadingEarlier,
+  messageCount,
+}: {
+  isLoading: boolean;
+  isLoadingEarlier: boolean;
+  messageCount: number;
+}): boolean {
+  return isLoading && !isLoadingEarlier && messageCount > 0;
+}
