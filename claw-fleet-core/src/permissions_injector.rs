@@ -82,6 +82,8 @@ pub const INJECT_RULES: &[&str] = &[
     "mcp__fleet__fleet__artifact",
     "mcp__fleet__fleet__inspect",
     "mcp__fleet__fleet__control",
+    "mcp__fleet__fleet__notes",
+    "mcp__fleet__fleet__history",
 ];
 
 const LOCK_FILE_NAME: &str = "permissions-lock.json";
