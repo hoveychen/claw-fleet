@@ -39,7 +39,6 @@ import { useSessionSearch } from "../hooks/useSessionSearch";
 import { PageShell } from "./PageShell";
 import {
   NewSessionForm,
-  distinctWorkspaces,
   repoRootPath,
   type NewSessionCreated,
 } from "./NewSessionForm";
@@ -96,10 +95,11 @@ import { WikiTabPane } from "./WikiTabPane";
 import { WebTabPane } from "./WebTabPane";
 import { getItem, setItem } from "../storage";
 import { canControl, stopMode, performStop } from "./StopControl";
-import { SessionRail } from "./SessionRail";
+import { SessionRail, WorkspaceRailSection } from "./SessionRail";
 import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./ContextMenu";
 import { RenameSessionDialog } from "./RenameSessionDialog";
 import { buildRenderItems, dwellReadTargets } from "./sessionGroups";
+import { groupSessionsByWorkspace } from "./workspaceSessionGroups";
 import styles from "./HistoryView.module.css";
 import { canRevealPath } from "../canReveal";
 
@@ -294,8 +294,6 @@ export function HistoryView() {
   // the user's back (a waiting-input alert forcing setViewMode("list") is enough).
   const query = useUIStore((s) => s.historyQuery);
   const setQuery = useUIStore((s) => s.setHistoryQuery);
-  const workspaceFilter = useUIStore((s) => s.historyWorkspaceFilter);
-  const setWorkspaceFilter = useUIStore((s) => s.setHistoryWorkspaceFilter);
   const chatOnly = useUIStore((s) => s.historyChatOnly);
   const setChatOnly = useUIStore((s) => s.setHistoryChatOnly);
   // Re-render on a slow tick so the relative "last updated" and the live
@@ -415,51 +413,13 @@ export function HistoryView() {
   // would sit in there a second time, alphabetised among the repos as "Chat".
   const chatPath = useChatWorkspace();
 
-  // Same derivation as the New Session launcher (distinctWorkspaces): temp
-  // scratchpad cwds dropped, in-repo worktree checkouts folded onto their repo
-  // root. No cap here — the filter should list every real directory — so the
-  // matcher above compares on repoRootPath to keep folded options selectable.
-  const workspaces = useMemo(
-    () =>
-      distinctWorkspaces(adhocSessions, Number.MAX_SAFE_INTEGER, chatPath)
-        .map((w) => [w.path, w.name] as [string, string])
-        .sort((a, b) => a[1].localeCompare(b[1])),
-    [adhocSessions, chatPath],
-  );
-
-  // A filter persisted back when the chat workspace was still an option in the
-  // <select> may be a raw chat path. It is no longer among the project options,
-  // so hand it to the toggle instead of letting the reset below drop it — that
-  // would silently turn "I only want my chats" into "show me everything".
-  // (`store.ts` migrates the two retired pseudo-values; only the raw path needs
-  // `chatPath`, which the store has no way to read.)
-  useEffect(() => {
-    if (chatPath && workspaceFilter === chatPath) {
-      setWorkspaceFilter("all");
-      setChatOnly(true);
-    }
-  }, [chatPath, workspaceFilter, setWorkspaceFilter, setChatOnly]);
-
-  // The workspace filter is persisted, but the dropdown's options only cover
-  // workspaces with sessions inside the scanner's 7-day window. A restored path
-  // whose sessions have aged out would render a blank <select> over an empty
-  // rail, with no obvious way back — fall back to "all" once the scan lands.
-  // Chat mode is unaffected: it lives in its own always-available toggle.
-  useEffect(() => {
-    if (!scanReady || workspaceFilter === "all") return;
-    if (workspaceFilter === chatPath) return; // promoted by the effect above
-    if (!workspaces.some(([path]) => path === workspaceFilter)) {
-      setWorkspaceFilter("all");
-    }
-  }, [scanReady, workspaces, workspaceFilter, chatPath, setWorkspaceFilter]);
-
   const { rows, markCounts } = useMemo(() => {
     const q = query.trim().toLowerCase();
     // Everything except the mark filter — the segment counts are taken over
     // this set so each count reflects how many rows its segment would reveal
     // under the current workspace / query / active filters.
     const preMark = adhocSessions
-      .filter((s) => matchesWorkspaceFilter(s, workspaceFilter, chatPath, chatOnly))
+      .filter((s) => matchesWorkspaceFilter(s, "all", chatPath, chatOnly))
       .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
       .filter((s) => {
         if (!q) return true;
@@ -492,7 +452,7 @@ export function HistoryView() {
       // `lastActivityMs` would be stale, but the tree is very much alive.
       .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
     return { rows, markCounts: counts };
-  }, [adhocSessions, workspaceFilter, chatPath, chatOnly, activeOnly, query, ftsMatchPaths, markFilter]);
+  }, [adhocSessions, chatPath, chatOnly, activeOnly, query, ftsMatchPaths, markFilter]);
 
   // Whether the task page currently mixes agent sources (Claude + Codex + …).
   // Only then does the per-row source glyph earn its place; a uniform list gets
@@ -513,10 +473,15 @@ export function HistoryView() {
     [rows, frozenOrder],
   );
 
-  // Fold the flat display list into groups + singles. A no-op (all singles)
-  // when grouping is off, so the render loop below is uniform either way.
-  const displayItems = useMemo(
-    () => buildRenderItems(displayRows, groupHandoff),
+  // Repository sections are the rail's primary hierarchy. Relay chains stay a
+  // secondary grouping inside each repository instead of joining sessions from
+  // separate directories into one flat stream.
+  const workspaceGroups = useMemo(
+    () =>
+      groupSessionsByWorkspace(displayRows).map((group) => ({
+        ...group,
+        items: buildRenderItems(group.sessions, groupHandoff),
+      })),
     [displayRows, groupHandoff],
   );
 
@@ -544,13 +509,15 @@ export function HistoryView() {
   // themselves.
   const groupHeaderChains = useMemo(() => {
     const m = new Map<string, SessionInfo[]>();
-    for (const it of displayItems) {
-      if (it.kind === "group") {
-        m.set(it.tip.id, chainMembersAll.get(it.chainId) ?? it.members);
+    for (const workspace of workspaceGroups) {
+      for (const it of workspace.items) {
+        if (it.kind === "group") {
+          m.set(it.tip.id, chainMembersAll.get(it.chainId) ?? it.members);
+        }
       }
     }
     return m;
-  }, [displayItems, chainMembersAll]);
+  }, [workspaceGroups, chainMembersAll]);
 
   // Chain expand / page-in state now lives inside <SessionRail>.
 
@@ -1262,19 +1229,20 @@ export function HistoryView() {
         busy: searching,
       }}
       actions={
+        <button
+          type="button"
+          className={styles.read_btn}
+          disabled={unreadSessions.length === 0}
+          onClick={() => markManyRead(unreadSessions)}
+          title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
+          aria-label={t("history.mark_all_read", "全部已读")}
+        >
+          <CheckCheck size={14} strokeWidth={1.8} />
+        </button>
+      }
+      secondary={
         <>
-          {/* Icon-only: "Mark all read" spelled out is long enough in en locale to
-              crowd the new-session button next to it. */}
-          <button
-            type="button"
-            className={styles.read_btn}
-            disabled={unreadSessions.length === 0}
-            onClick={() => markManyRead(unreadSessions)}
-            title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
-            aria-label={t("history.mark_all_read", "全部已读")}
-          >
-            <CheckCheck size={14} strokeWidth={1.8} />
-          </button>
+        <div className={styles.rail_launch}>
           <button
             type="button"
             data-wizard="new-session-btn"
@@ -1282,37 +1250,15 @@ export function HistoryView() {
             onClick={handleNewSession}
             title={t("new_session.title")}
           >
-            <Plus size={12} strokeWidth={2} />
+            <Plus size={15} strokeWidth={2} />
             <span>{t("new_session.button")}</span>
           </button>
-        </>
-      }
-      secondary={
-        <>
+        </div>
         <div className={styles.controls}>
-          {/* The directory <select> and the chat toggle are the two halves of
-              one filter, and they are mutually exclusive: chat mode owns the
-              whole rail, so the <select> is inert (and dimmed) underneath it
-              rather than silently narrowing a list it no longer governs. The
-              toggle is hidden entirely when the backend couldn't name the chat
-              workspace, since it could not then be honoured. */}
-          <div className={styles.filter_row}>
-            <select
-              className={styles.project_select}
-              value={workspaceFilter}
-              onChange={(e) => setWorkspaceFilter(e.target.value)}
-              disabled={chatOnly}
-              title={
-                chatOnly
-                  ? t("history.filter_workspace_off", "仅聊天模式下不按目录筛选")
-                  : t("history.filter_workspace", "按工作目录筛选")
-              }
-            >
-              <option value="all">{t("history.all_workspaces", "全部目录")}</option>
-              {workspaces.map(([path, name]) => (
-                <option key={path} value={path} title={path}>{name}</option>
-              ))}
-            </select>
+          <div className={styles.workspace_toolbar}>
+            <span className={styles.workspace_label}>
+              {t("history.workspaces", "工作区")}
+            </span>
             {chatPath && (
               <button
                 type="button"
@@ -1320,9 +1266,10 @@ export function HistoryView() {
                 aria-pressed={chatOnly}
                 onClick={() => setChatOnly(!chatOnly)}
                 title={t("history.filter_chat_tip", "只显示纯聊天会话，不按目录筛选；关闭时全部目录也含聊天")}
+                aria-label={t("history.chat_mode", "仅聊天")}
               >
                 <MessageCircle size={12} strokeWidth={1.8} />
-                {t("history.chat_mode", "仅聊天")}
+                <span>{t("history.chat_mode", "仅聊天")}</span>
               </button>
             )}
           </div>
@@ -1390,22 +1337,32 @@ export function HistoryView() {
           ) : rows.length === 0 ? (
             <div className={styles.empty}>
               {adhocSessions.length === 0
-                ? t("history.empty", "还没有会话，点右上角“新会话”发起一个")
+                ? t("history.empty", "还没有会话，点上方“新会话”发起一个")
                 : t("history.no_match", "没有匹配的会话")}
             </div>
           ) : (
-            <SessionRail
-              items={displayItems}
-              chainMembersAll={chainMembersAll}
-              activeId={railActiveId}
-              openIds={openTabIds}
-              snippetFor={railSnippetFor}
-              isUnread={railIsUnread}
-              nowTick={nowTick}
-              showSource={multiSource}
-              onRowClick={handleRowClick}
-              onContextMenu={openRowMenu}
-            />
+            workspaceGroups.map((workspace) => (
+              <WorkspaceRailSection
+                key={workspace.path}
+                path={workspace.path}
+                name={workspace.name}
+                count={workspace.sessions.length}
+              >
+                <SessionRail
+                  items={workspace.items}
+                  chainMembersAll={chainMembersAll}
+                  activeId={railActiveId}
+                  openIds={openTabIds}
+                  snippetFor={railSnippetFor}
+                  isUnread={railIsUnread}
+                  nowTick={nowTick}
+                  showSource={multiSource}
+                  showWorkspace={false}
+                  onRowClick={handleRowClick}
+                  onContextMenu={openRowMenu}
+                />
+              </WorkspaceRailSection>
+            ))
           )}
           {menuAnchor && menuSession && (
             <ContextMenu

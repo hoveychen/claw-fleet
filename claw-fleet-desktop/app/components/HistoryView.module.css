@@ -1,11 +1,10 @@
 /* ── History page ─────────────────────────────────────────────────────────────
    The page frame — banner, rail, main — is PageShell's. What is left here is the
-   rail's *content* (filters + session list), the banner's two action buttons,
+   rail's *content* (launcher + filters + session list), the banner action,
    and the detail column that fills the main container. */
 
 /* "全部已读" — clears every unread session's dot in one call. Icon-only so it
-   sits compactly beside the new-session button; dimmed and inert when nothing
-   is unread. */
+   remains in the page banner; dimmed and inert when nothing is unread. */
 .read_btn {
   display: inline-flex;
   align-items: center;
@@ -33,38 +32,47 @@
 .new_btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 3px 9px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  font-size: 11px;
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: filter 0.1s;
+  transition: background 0.14s, border-color 0.14s, color 0.14s;
 }
 
 .new_btn:hover {
-  filter: brightness(1.1);
+  border-color: var(--color-accent);
+  background: var(--color-bg-card-hover);
+  color: var(--color-accent);
 }
 
 .new_btn_active {
-  filter: brightness(1.15);
-  box-shadow: 0 0 0 2px var(--color-accent-soft);
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
 
 /* ── Rail: filters over the session list ─────────────────────────────────── */
 
-/* The search box moved up to the banner with the title and the actions, so this
-   block now opens the rail and carries its own top padding. */
+.rail_launch {
+  padding: 12px 12px 5px;
+  flex: 0 0 auto;
+}
+
 .controls {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 6px 12px 10px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
@@ -73,33 +81,18 @@
   to { transform: rotate(360deg); }
 }
 
-.filter_row {
+.workspace_toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  /* Wrap to a second line on a narrow rail rather than squashing the pills. */
-  flex-wrap: wrap;
+  min-height: 28px;
+  gap: 6px;
 }
 
-.project_select {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 5px 8px;
+.workspace_label {
+  flex: 1;
   font-size: 12px;
-  color: var(--color-text);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  outline: none;
-  cursor: pointer;
-}
-
-/* Chat mode owns the whole rail, so the directory <select> is disabled beneath
-   it. Dimmed rather than hidden: the selection is still there and comes back
-   the moment the toggle goes off. */
-.project_select:disabled {
-  opacity: 0.45;
-  cursor: default;
+  color: var(--color-text-dim);
+  font-weight: 500;
 }
 
 /* Chat mode — the pure-chat workspace pulled out of the <select> beside it into
@@ -110,8 +103,8 @@
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  padding: 5px 9px;
-  font-size: 12px;
+  padding: 4px 7px;
+  font-size: 11px;
   color: var(--color-text-dim);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
@@ -131,9 +124,7 @@
   background: rgba(var(--color-accent-rgb), 0.12);
 }
 
-/* Row 2 of the filter block: the "only active" pill + the mark segments,
-   sharing one line. Kept separate from .filter_row (the workspace <select>)
-   because a WebKit <select> won't shrink to share a row — see HistoryView.tsx. */
+/* Row 2 keeps non-directory filters compact under the workspace title. */
 .mark_row {
   display: flex;
   align-items: stretch;
@@ -258,7 +249,7 @@
   flex-direction: column;
   /* Match the family's `.card_list` row rhythm (gap 4) so the list breathes
      the same as 记忆/插件 rather than packing tighter. */
-  gap: 4px;
+  gap: 8px;
 }
 
 .empty {

@@ -1590,7 +1590,7 @@
     "done": "Got it",
     "new_session": {
       "title": "Start a session here",
-      "desc": "This is the Tasks page — click \"New Session\" in the top right, pick a working directory, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is collected on this page."
+      "desc": "This is the Tasks page — click \"New Session\" at the top of the task rail, pick a working directory, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is grouped here by directory."
     }
   },
   "waiting_alerts": {
@@ -2274,7 +2274,7 @@
     "title": "Tasks",
     "search_placeholder": "Search title, plan, full text…",
     "enqueue_placeholder": "Session is running — your message queues and sends when this turn ends…",
-    "empty": "No sessions yet — hit New Session in the top-right to launch one",
+    "empty": "No sessions yet — start one from the button above",
     "no_match": "No matching sessions",
     "untitled": "(untitled)",
     "unread": "Unread — new activity",
@@ -2289,6 +2289,8 @@
     "filter_workspace": "Filter by workspace",
     "filter_workspace_off": "Chat-only mode ignores the workspace filter",
     "all_workspaces": "All workspaces",
+    "workspaces": "Workspaces",
+    "workspace_session_count": "{{count}} sessions",
     "chat_mode": "Chat only",
     "filter_chat_tip": "Show only pure-chat sessions; when off, chat sessions appear under all workspaces too",
     "only_active": "Active only",

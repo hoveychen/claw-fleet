@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import type { SessionInfo } from "../types";
 import { SessionRow } from "./SessionRow";
 import { GroupMarkControl } from "./MarkControl";
@@ -35,9 +36,61 @@ type SessionRailProps = {
   nowTick: number;
   /** Show the agent-source glyph ahead of each title (only when sources mix). */
   showSource: boolean;
+  /** Hidden when a repository heading already labels these rows. */
+  showWorkspace?: boolean;
   onRowClick: (s: SessionInfo) => void;
   onContextMenu: (e: React.MouseEvent, s: SessionInfo) => void;
 };
+
+type WorkspaceRailSectionProps = {
+  path: string;
+  name: string;
+  count: number;
+  children: ReactNode;
+};
+
+/** A repository heading around one SessionRail. Directory grouping is kept
+ * outside SessionRail itself so the relay-chain renderer stays unchanged and
+ * can still be reused by LiteApp as a flat list. */
+export function WorkspaceRailSection({
+  path,
+  name,
+  count,
+  children,
+}: WorkspaceRailSectionProps) {
+  const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <section className={styles.workspace_section}>
+      <button
+        type="button"
+        className={styles.workspace_header}
+        aria-expanded={!collapsed}
+        title={path}
+        onClick={() => setCollapsed((value) => !value)}
+      >
+        <span className={styles.workspace_folder} aria-hidden="true">
+          {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
+        </span>
+        <span className={styles.workspace_name}>{name}</span>
+        <span
+          className={styles.workspace_count}
+          aria-label={t("history.workspace_session_count", "{{count}} 个会话", { count })}
+        >
+          {count}
+        </span>
+        <ChevronRight
+          className={styles.workspace_chevron}
+          size={13}
+          data-open={!collapsed}
+          aria-hidden="true"
+        />
+      </button>
+      {!collapsed && <div className={styles.workspace_sessions}>{children}</div>}
+    </section>
+  );
+}
 
 /**
  * The grouped session list — the "二级侧边栏" rail shared by the desktop task
@@ -56,6 +109,7 @@ export function SessionRail({
   isUnread,
   nowTick,
   showSource,
+  showWorkspace = true,
   onRowClick,
   onContextMenu,
 }: SessionRailProps) {
@@ -89,6 +143,7 @@ export function SessionRail({
       unread={isUnread(s)}
       nowTick={nowTick}
       showSource={showSource}
+      showWorkspace={showWorkspace}
       onClick={onRowClick}
       onContextMenu={onContextMenu}
     />
@@ -128,6 +183,7 @@ export function SessionRail({
               runColorOverride={chainBarColor(full)}
               nowTick={nowTick}
               showSource={showSource}
+              showWorkspace={showWorkspace}
               onClick={onRowClick}
               onContextMenu={onContextMenu}
               expandable={{
