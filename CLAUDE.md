@@ -13,6 +13,16 @@ New features must always support both LocalBackend (local file system) and Remot
 5. Tauri commands in `claw-fleet-desktop/src/gui.rs` must delegate via `state.backend.lock().unwrap()`
 6. Types that cross the HTTP boundary need both `Serialize` and `Deserialize`
 
+## Cargo concurrency gate
+
+`cargo` on this machine may be a shim (`~/.local/bin/cargo` → `scripts/cargo-jobs-guard.sh`, installed by `scripts/install-cargo-guard.sh`). It holds one of N machine-global slots for compile-heavy subcommands, so **a `cargo build/test/check` can sit and wait before producing any output** — that is the gate, not a hang. Verified 2026-09-06: with `FLEET_CARGO_SLOTS=1`, a second `cargo build` returned in 21s (≈8s waiting out the holder, then its own ~10s) while the holder's pid was recorded in `/tmp/claw-fleet-cargo-slots-$(id -u)/slot-1/owner`.
+
+Why it exists: several agent sessions each run their own cargo, cargo defaults each to `jobs = ncpu`, and Rule 3's worktree workflow gives every plan its own `target/`. Measured on 2026-09-06: 12 concurrent rustc across three unrelated sessions on a 10-core box.
+
+- `cargo fmt/metadata/tree/--version` and anything with `--message-format` (rust-analyzer's every-save `cargo check`) pass through ungated. Never gate those — a queued rust-analyzer freezes the editor with nothing on screen to explain it.
+- `FLEET_CARGO_GUARD=0` bypasses it for one command; `FLEET_CARGO_SLOTS` / `FLEET_CARGO_MAX_WAIT` tune it.
+- The slot store and `build-local.sh`'s build lock both live under `/tmp`, deliberately **not** `$TMPDIR`: Fleet spawns sessions detached, and one that does not inherit the per-user launchd TMPDIR would queue against a private store — two stores means no gate at all, silently.
+
 ## Relay agent role
 
 Only **one** process per machine may join the mobile-relay channel as an agent. The relay hands every client frame to *all* agents in the channel (`fleet-relay/src/registry.rs::deliver_or_queue`) and each agent runs the handler for real, so a second local agent executes every phone-side write twice — on 2026-08-27 the desktop app plus a hand-started `fleet webui` turned one phone submit into two `claude --resume` processes on the same transcript.
