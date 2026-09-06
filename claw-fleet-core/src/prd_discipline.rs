@@ -491,6 +491,28 @@ Bash 命令，就没有后继者被 spawn，计划会在你交出的那一刻悄
 结束回合——Fleet 在后台轮询，条件一触发就 `claude --resume` *这个*会话，把捕获\
 的结果喂给你的下一回合。`fleet watch stop <id>` 取消它。\n\
 \n\
+### 增量笔记：`fleet__notes` 与 `fleet__history`（压缩前后的记忆）\n\
+\n\
+交接是**换人**；本节管的是**同一个会话跨上下文窗口**。上下文压缩会把早期回合压成\
+摘要，「某次修复为什么失败」「某个组件到底怎么工作」这类细节最容易在摘要里丢掉。\
+Fleet 给了两个本地工具（Fleet 起的会话见 MCP 工具 `fleet__notes` / `fleet__history`，\
+手起的会话用 `fleet notes` / `fleet history` CLI）：\n\
+\n\
+- **`fleet__notes`——边做边记，别等到最后。**任何可能跨窗口的任务，从一开始就维护一份\
+checkpoint（如 `checkpoint.md`）：目标、已定的决策、进展、教训、下一步，以及能回捞细节\
+的指针（文件路径、`fleet__history` 的行号）。每完成一个 P-task 或撞上一个值得记的坑就 \
+`append` 一段；过期的用 `write` 重写。笔记存在 `~/.fleet/notes/<session>/`，压缩不会动它，\
+handoff 后继者也能读到前任的（只读）。\n\
+- **压缩后先读 hint，再回捞。**新窗口开头 Fleet 的 SessionStart hook 会注入一段 \
+`<fleet_notes>`：笔记清单 + 最近一份的正文（≤4KB）。先读它恢复宏观状态；缺细节就 \
+`fleet__history search` 搜自己（和前任）transcript 里的原话，拿到 `line_no` 后 \
+`read` 那一条——它会展开工具输入和工具输出，「那次构建到底报了什么」这类问题直接可答。\n\
+- **它们是内部记账。**不要在给{title}的回复里复述笔记、提这两个工具或它们的路径；\
+{title}要看的是结果，不是你的备忘。\n\
+- **与 TASKS.md / handoff 的分工：**TASKS.md 是勾选框级别的宏观计划，handoff note \
+是换人时的一次性简报；笔记是它们之间那层——同一个人、跨窗口、随时可增量、可搜索。\
+三者都不替代彼此。\n\
+\n\
 ### 绝不用 Claude Code 自带的跨回合调度器\n\
 \n\
 **NEVER 调用 `ScheduleWakeup` 或 `CronCreate`，也不要用 `/loop` 斜杠命令。**\
@@ -1130,6 +1152,37 @@ are waiting for>'`, then end the turn — Fleet polls in the background and \
 `claude --resume`s THIS session the moment the condition fires, feeding the \
 captured result to your next turn. `fleet watch stop <id>` cancels it.\n\
 \n\
+### Incremental notes: `fleet__notes` and `fleet__history` (memory across compaction)\n\
+\n\
+A handoff is a **change of hands**; this section is about the **same session \
+crossing context windows**. Compaction squashes early turns into a summary, and \
+the details that summary drops first are exactly \"why did that fix fail\" and \
+\"how does that component actually work\". Fleet gives you two local tools \
+(Fleet-launched sessions see the MCP tools `fleet__notes` / `fleet__history`; a \
+hand-launched session uses the `fleet notes` / `fleet history` CLI):\n\
+\n\
+- **`fleet__notes` — take notes as you go, not at the end.** For any task that \
+may outlive one context window, keep a checkpoint (say `checkpoint.md`) from the \
+start: goal, decisions taken, progress, learnings, next steps, and pointers that \
+let you recover detail later (file paths, `fleet__history` line numbers). \
+`append` a paragraph after each P-task or each gotcha worth remembering; `write` \
+to rewrite what went stale. Notes live in `~/.fleet/notes/<session>/`, compaction \
+never touches them, and a handoff successor can read its predecessor's \
+(read-only).\n\
+- **After a compaction, read the hint first, then recover.** At the top of the \
+new window Fleet's SessionStart hook injects a `<fleet_notes>` block: the note \
+roster plus the body of the most recent one (≤4 KB). Read it to restore the big \
+picture; when a detail is missing, `fleet__history search` your own (and your \
+predecessors') transcript for the original words, then `read` the hit's \
+`line_no` — it expands tool inputs and tool results, so \"what exactly did that \
+build print\" is answerable directly.\n\
+- **They are internal bookkeeping.** Do not recite notes, name these tools or \
+their paths in replies to {title}; {title} wants the outcome, not your memo.\n\
+- **Division of labour with TASKS.md / handoff:** TASKS.md is the checkbox-level \
+macro plan, the handoff note is a one-shot briefing for a change of hands; notes \
+are the layer between — same person, across windows, incremental and searchable \
+at any time. None replaces the others.\n\
+\n\
 ### Never use Claude Code's built-in cross-turn schedulers\n\
 \n\
 **NEVER call `ScheduleWakeup` or `CronCreate`, and don't use the `/loop` slash \
@@ -1455,6 +1508,36 @@ mod tests {
             assert!(
                 g.contains("无关") || g.contains("regardless of how much context"),
                 "[{locale}] ban must say it applies regardless of remaining context"
+            );
+        }
+    }
+
+    /// Notes are the layer between TASKS.md (checkboxes) and a handoff note
+    /// (one-shot briefing): same session, across context windows. The section
+    /// has to teach the three moves — append as you go, read the injected hint
+    /// after a compaction, recover detail via history — and mark all of it as
+    /// internal bookkeeping, in both locales.
+    #[test]
+    fn incremental_notes_section_teaches_the_loop_in_both_locales() {
+        for locale in ["zh", "en"] {
+            let g = render_guidance("Boss", locale);
+            assert!(
+                g.contains("### 增量笔记") || g.contains("### Incremental notes"),
+                "[{locale}] notes need their own heading"
+            );
+            for tool in ["fleet__notes", "fleet__history", "fleet notes", "fleet history"] {
+                assert!(g.contains(tool), "[{locale}] must name {tool}");
+            }
+            // The injected block the agent is told to read first.
+            assert!(g.contains("<fleet_notes>"), "[{locale}] must name the injected hint block");
+            assert!(g.contains("line_no"), "[{locale}] must teach history search → read by line_no");
+            assert!(
+                g.contains("内部记账") || g.contains("internal bookkeeping"),
+                "[{locale}] must mark notes as internal, not for the user"
+            );
+            assert!(
+                g.contains("边做边记") || g.contains("as you go"),
+                "[{locale}] must say notes are incremental, not end-of-task"
             );
         }
     }
