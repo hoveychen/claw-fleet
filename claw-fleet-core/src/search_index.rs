@@ -28,7 +28,10 @@ use crate::log_debug;
 ///       Chinese substring query, so they must be rebuilt.
 ///   4 — added the `raw` column holding the author's untouched text, which
 ///       snippets are cut from; v3 rows have no `raw` to cut.
-const SCHEMA_VERSION: i64 = 4;
+///   5 — added the `line_no` column (1-based line of the record in its jsonl)
+///       so a hit can be read back as one item (`search_scoped` / the
+///       `fleet__history` tool); v4 rows cannot be located.
+const SCHEMA_VERSION: i64 = 5;
 
 // ── SearchHit ────────────────────────────────────────────────────────────────
 
@@ -38,6 +41,20 @@ const SCHEMA_VERSION: i64 = 4;
 pub struct SearchHit {
     pub session_id: String,
     pub jsonl_path: String,
+    pub snippet: String,
+    pub rank: f64,
+}
+
+/// One matching *record* from [`SearchIndex::search_scoped`]: unlike
+/// [`SearchHit`] it is not collapsed per session and carries the record's line
+/// so the caller can read the whole item back.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScopedHit {
+    pub session_id: String,
+    pub jsonl_path: String,
+    /// 1-based line number of the record within `jsonl_path`.
+    pub line_no: i64,
     pub snippet: String,
     pub rank: f64,
 }
@@ -106,6 +123,7 @@ impl SearchIndex {
                  jsonl_path UNINDEXED,
                  content,
                  raw UNINDEXED,
+                 line_no UNINDEXED,
                  tokenize='unicode61'
              );",
         )
@@ -216,10 +234,14 @@ impl SearchIndex {
                 // character; `raw` keeps the author's exact text so snippets
                 // can be cut from it verbatim (see `build_snippet`).
                 let segmented = segment_cjk(&text);
+                // `new_lines` counts the lines already folded from this chunk,
+                // so the current record sits at start_line + new_lines (0-based)
+                // — +1 for the 1-based number a reader seeks to.
+                let line_no = start_line + new_lines + 1;
                 tx.execute(
-                    "INSERT INTO session_fts(session_id, jsonl_path, content, raw)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![session_id, jsonl_path, segmented, text],
+                    "INSERT INTO session_fts(session_id, jsonl_path, content, raw, line_no)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![session_id, jsonl_path, segmented, text, line_no],
                 )
                 .map_err(|e| format!("fts insert: {e}"))?;
             }
@@ -349,6 +371,73 @@ impl SearchIndex {
         Ok(results)
     }
 
+    /// Record-level search restricted to the given transcripts, for an agent
+    /// recovering its own history (`fleet__history`). Every matching record is
+    /// returned (no per-session collapse) with its line number, best rank
+    /// first. `jsonl_paths` empty → no hits.
+    pub fn search_scoped(
+        &self,
+        jsonl_paths: &[String],
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ScopedHit>, String> {
+        let query = query.trim();
+        if query.is_empty() || jsonl_paths.is_empty() {
+            return Ok(vec![]);
+        }
+        let fts_query = sanitize_fts_query(query);
+        if fts_query.is_empty() {
+            return Ok(vec![]);
+        }
+        let terms = query_terms(query);
+
+        // One bound placeholder per path; the set is small (a session plus its
+        // relay predecessors), so a dynamic IN list is fine.
+        let placeholders = (0..jsonl_paths.len())
+            .map(|i| format!("?{}", i + 3))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT session_id, jsonl_path, line_no,
+                    snippet(session_fts, 2, '<mark>', '</mark>', '…', 40) as snip,
+                    rank, raw
+             FROM session_fts
+             WHERE session_fts MATCH ?1 AND jsonl_path IN ({placeholders})
+             ORDER BY rank
+             LIMIT ?2"
+        );
+        let mut stmt = self
+            .conn
+            .prepare(&sql)
+            .map_err(|e| format!("prepare scoped search: {e}"))?;
+
+        let mut bound: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(jsonl_paths.len() + 2);
+        bound.push(Box::new(fts_query));
+        bound.push(Box::new(limit.max(1) as i64));
+        for p in jsonl_paths {
+            bound.push(Box::new(p.clone()));
+        }
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(params_ref.as_slice(), |row| {
+                let sql_snippet: String = row.get(3)?;
+                let raw: String = row.get(5).unwrap_or_default();
+                let snippet =
+                    build_snippet(&raw, &terms).unwrap_or_else(|| desegment_cjk(&sql_snippet));
+                Ok(ScopedHit {
+                    session_id: row.get(0)?,
+                    jsonl_path: row.get(1)?,
+                    line_no: row.get::<_, i64>(2).unwrap_or(0),
+                    snippet,
+                    rank: row.get(4)?,
+                })
+            })
+            .map_err(|e| format!("scoped search query: {e}"))?;
+
+        Ok(rows.flatten().collect())
+    }
+
     /// Bulk-index a batch of sessions. Called after each scan cycle.
     pub fn index_batch(&self, sessions: &[(String, String)]) {
         for (path, id) in sessions {
@@ -362,7 +451,10 @@ impl SearchIndex {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Extract all searchable text from a single JSONL line.
-fn extract_searchable_text(val: &Value) -> String {
+///
+/// Also what `session_history::read` renders when an agent reads a record back
+/// by line, so what is searchable and what is readable stay one definition.
+pub(crate) fn extract_searchable_text(val: &Value) -> String {
     let msg_type = val["type"].as_str().unwrap_or("");
 
     // The session's AI-generated title lives on its own line; index it so a
@@ -948,6 +1040,63 @@ mod tests {
         );
 
         let _ = fs::remove_file(&jsonl);
+        let _ = fs::remove_file(&db);
+    }
+
+    /// `search_scoped` is the agent-facing query: it must stay inside the given
+    /// transcripts, return every matching record (not one per session), and
+    /// carry a line number that points at the record — including for records
+    /// folded in a later incremental pass, where the number must continue from
+    /// the saved `line_count` rather than restart at 1.
+    #[test]
+    fn scoped_search_returns_every_record_with_its_line_number() {
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join("fleet-search-scoped-test");
+        let _ = fs::create_dir_all(&dir);
+        let own = dir.join("own.jsonl");
+        let other = dir.join("other.jsonl");
+        fs::write(
+            &own,
+            "{\"type\":\"user\",\"message\":{\"content\":\"zqscoped first\"}}\n\
+             {\"type\":\"progress\"}\n\
+             {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"zqscoped third\"}]}}\n",
+        )
+        .unwrap();
+        fs::write(
+            &other,
+            "{\"type\":\"user\",\"message\":{\"content\":\"zqscoped elsewhere\"}}\n",
+        )
+        .unwrap();
+
+        let db = dir.join("scoped.db");
+        let _ = fs::remove_file(&db);
+        let idx = SearchIndex::open_at(&db).unwrap();
+        idx.index_session(own.to_str().unwrap(), "sess-own").unwrap();
+        idx.index_session(other.to_str().unwrap(), "sess-other").unwrap();
+
+        // A second, incremental pass: the line number must be 4, not 1.
+        let mut f = fs::OpenOptions::new().append(true).open(&own).unwrap();
+        f.write_all(b"{\"type\":\"user\",\"message\":{\"content\":\"zqscoped fourth\"}}\n")
+            .unwrap();
+        drop(f);
+        idx.index_session(own.to_str().unwrap(), "sess-own").unwrap();
+
+        let mut hits = idx
+            .search_scoped(&[own.to_str().unwrap().to_string()], "zqscoped", 10)
+            .unwrap();
+        hits.sort_by_key(|h| h.line_no);
+        let lines: Vec<i64> = hits.iter().map(|h| h.line_no).collect();
+        assert_eq!(lines, vec![1, 3, 4], "every record, located, none from `other`: {hits:?}");
+        assert!(hits.iter().all(|h| h.session_id == "sess-own"));
+
+        // The unscoped search still collapses to one hit per session.
+        assert_eq!(idx.search("zqscoped", 10).unwrap().len(), 2);
+        // Empty scope → nothing, rather than everything.
+        assert!(idx.search_scoped(&[], "zqscoped", 10).unwrap().is_empty());
+
+        let _ = fs::remove_file(&own);
+        let _ = fs::remove_file(&other);
         let _ = fs::remove_file(&db);
     }
 
