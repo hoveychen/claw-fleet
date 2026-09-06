@@ -168,6 +168,33 @@
   font-size: var(--t-ui, 14px);
 }
 
+/* Initial transcript bootstrap. Keep this in the message rail rather than in
+   a floating card: it marks the content below as unavailable, not the whole
+   page as blocked. */
+.messageLoading {
+  flex: 1;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-dim);
+  font-size: var(--t-ui, 14px);
+}
+
+.messageLoading svg {
+  color: var(--color-accent);
+  animation: messageLoadingSpin 800ms linear infinite;
+}
+
+@keyframes messageLoadingSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .messageLoading svg { animation: none; }
+}
+
 .loadMore {
   align-self: center;
   border: 1px solid var(--color-border-strong);
@@ -805,4 +832,3 @@
 .parentCrumb:not(:disabled):active {
   opacity: 0.6;
 }
-

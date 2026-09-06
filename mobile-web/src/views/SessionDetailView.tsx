@@ -16,6 +16,7 @@ import {
   FileText,
   Globe,
   ListTodo,
+  LoaderCircle,
   MessageSquareDashed,
   Pencil,
   Puzzle,
@@ -1445,7 +1446,12 @@ export function SessionDetailView({
 
       {tab === "messages" && (
       <div className={styles.scroll} ref={scrollRef} onScroll={onScroll}>
-        {messages === null && !loadError && <div className={styles.hint}>{t("加载消息中…")}</div>}
+        {messages === null && !loadError && (
+          <div className={styles.messageLoading} role="status" aria-live="polite">
+            <LoaderCircle size={18} aria-hidden="true" />
+            <span>{t("正在同步最新消息…")}</span>
+          </div>
+        )}
         {loadError && <div className={styles.hint}>{t("消息加载失败：{0}", loadError)}</div>}
         {messages !== null && (messages.length >= tailN || tailN > TAIL_INITIAL) && (
           <button
