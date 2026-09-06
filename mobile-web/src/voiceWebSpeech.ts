@@ -118,8 +118,14 @@ export const webSpeechProvider: VoiceInputProvider = {
       handlers.onError(classifyWebSpeechError(e.error));
     };
 
+    // 浏览器即便 continuous=true 也会在长静默后自行结束会话（各家实现不一）。
+    // 我们自己 stop() 之后也会走到这里 —— 那时上层早已回到待命,再收一次结束
+    // 通知是无害的（它按当前状态决定要不要理）。cancel / 出错那两条路上 dead
+    // 已经是 true,不会重复上报。
     rec.onend = () => {
+      if (dead) return;
       dead = true;
+      handlers.onEnd();
     };
 
     rec.start();
