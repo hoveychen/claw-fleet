@@ -230,23 +230,47 @@ fn entry_command_is_live(entry: &serde_json::Value) -> bool {
 /// whole path segment. Same literal `session::workspace_name` folds on.
 const WORKTREE_DIR: &str = ".worktrees";
 
-/// True when `fleet_path` is ephemeral by construction: it lives inside
-/// `<repo>/.worktrees/<task-id>/`, which the worktree workflow deletes the
-/// moment that plan merges. Publishing such a path as the machine-wide MCP
-/// command guarantees a dangling registration a few hours later.
+/// True when this fleet binary is ephemeral by construction — either because it
+/// *sits* inside `<repo>/.worktrees/<task-id>/`, or because it was *built*
+/// there. The worktree workflow deletes that directory the moment the plan
+/// merges, and publishing such a build as the machine-wide MCP command
+/// guarantees either a dangling registration or an in-flight feature branch
+/// serving every session on the machine.
 ///
-/// The main checkout's `target/debug/fleet-cli` is deliberately *not* covered:
-/// it survives merges, and blocking it would strip `fleet__ask` from every
-/// ordinary `cargo tauri dev` run.
-fn is_ephemeral_worktree_binary(fleet_path: &str) -> bool {
-    fleet_path.split(['/', '\\']).any(|seg| seg == WORKTREE_DIR)
+/// Both halves are load-bearing, and the second only became so on 2026-09-06:
+/// a shared `build.target-dir` now lands every worktree's artifacts in one
+/// `~/.cargo/shared-target/` outside the repo, so the artifact path alone no
+/// longer reveals which worktree produced it. The build directory does, and
+/// rustc freezes it in at compile time.
+///
+/// The main checkout's own dev build is deliberately *not* covered by either
+/// half: it survives merges, and blocking it would strip `fleet__ask` from
+/// every ordinary `cargo tauri dev` run.
+///
+/// `build_dir` is where this binary was *compiled* from, not where it now sits;
+/// the sole production caller ([`may_publish`]) passes
+/// `env!("CARGO_MANIFEST_DIR")`. Taking it as an argument rather than reading
+/// the `env!` here is what keeps the tests deterministic — this crate is itself
+/// compiled from a `.worktrees/<plan>/` checkout whenever Rule 3 is in play, so
+/// an `env!`-reading predicate would answer differently depending on which
+/// checkout built the test binary.
+fn is_ephemeral_worktree_binary_built_at(fleet_path: &str, build_dir: &str) -> bool {
+    let under_worktree = |p: &str| p.split(['/', '\\']).any(|seg| seg == WORKTREE_DIR);
+    under_worktree(fleet_path) || under_worktree(build_dir)
 }
 
 /// Whether a fleet binary at `fleet_path` may write its own path into the
 /// `~/.claude.json` this process resolves. `isolated_config` says that config
 /// is a throwaway (see [`config_is_isolated`]), in which case anything goes.
 fn may_publish(fleet_path: &str, isolated_config: bool) -> bool {
-    isolated_config || !is_ephemeral_worktree_binary(fleet_path)
+    may_publish_built_at(fleet_path, isolated_config, env!("CARGO_MANIFEST_DIR"))
+}
+
+/// [`may_publish`] with the build location injected. Same reason as
+/// [`is_ephemeral_worktree_binary_built_at`]: tests must not depend on which
+/// checkout compiled them.
+fn may_publish_built_at(fleet_path: &str, isolated_config: bool, build_dir: &str) -> bool {
+    isolated_config || !is_ephemeral_worktree_binary_built_at(fleet_path, build_dir)
 }
 
 /// True when the config we resolve is a throwaway rather than the real user's.
@@ -964,23 +988,79 @@ mod tests {
     const WORKTREE_BIN: &str =
         "/Users/foo/workspace/claude-fleet/.worktrees/acp-consumer-heartbeat/target/debug/fleet-cli";
 
+    /// Build dir of a main-checkout compile. Every assertion below pins this
+    /// explicitly rather than letting `env!("CARGO_MANIFEST_DIR")` supply it:
+    /// this crate is itself compiled from a `.worktrees/<plan>/` checkout
+    /// whenever Rule 3 is in play, which would otherwise flip these results
+    /// depending on where the test binary was built.
+    const MAIN_BUILD: &str = "/Users/foo/workspace/claude-fleet/claw-fleet-core";
+
     #[test]
     fn ephemeral_worktree_binaries_are_recognised() {
-        assert!(is_ephemeral_worktree_binary(WORKTREE_BIN));
+        assert!(is_ephemeral_worktree_binary_built_at(
+            WORKTREE_BIN,
+            MAIN_BUILD
+        ));
         assert!(
-            is_ephemeral_worktree_binary(
-                r"C:\src\claude-fleet\.worktrees\foo\target\debug\fleet-cli.exe"
+            is_ephemeral_worktree_binary_built_at(
+                r"C:\src\claude-fleet\.worktrees\foo\target\debug\fleet-cli.exe",
+                MAIN_BUILD
             ),
             "windows separators count too"
         );
-        assert!(!is_ephemeral_worktree_binary(
-            "/Applications/Claw Fleet.app/Contents/MacOS/fleet"
+        assert!(!is_ephemeral_worktree_binary_built_at(
+            "/Applications/Claw Fleet.app/Contents/MacOS/fleet",
+            MAIN_BUILD
         ));
         assert!(
-            !is_ephemeral_worktree_binary("/Users/foo/workspace/claude-fleet/target/debug/fleet-cli"),
+            !is_ephemeral_worktree_binary_built_at(
+                "/Users/foo/workspace/claude-fleet/target/debug/fleet-cli",
+                MAIN_BUILD
+            ),
             "the main checkout's dev build is stable — don't block it"
         );
-        assert!(!is_ephemeral_worktree_binary("fleet"));
+        assert!(!is_ephemeral_worktree_binary_built_at("fleet", MAIN_BUILD));
+    }
+
+    /// Regression for the shared `build.target-dir` introduced 2026-09-06. The
+    /// machine's local `.cargo/config.toml` redirects every build — the main
+    /// checkout's and every worktree's alike — into one
+    /// `~/.cargo/shared-target/claude-fleet/` so the 901-crate dependency tree
+    /// is compiled once instead of per worktree.
+    ///
+    /// That silently defeated a guard which read provenance off the artifact
+    /// path: a worktree build no longer *has* a `.worktrees` segment in its
+    /// path, so it looked as permanent as the main checkout's and would
+    /// happily publish an in-flight feature branch's `fleet-cli` as the
+    /// machine-wide MCP command. Build provenance has to come from where the
+    /// binary was compiled, which `env!("CARGO_MANIFEST_DIR")` records at
+    /// compile time and no later file move can rewrite.
+    #[test]
+    fn a_worktree_build_landing_in_a_shared_target_dir_is_still_ephemeral() {
+        const SHARED_BIN: &str = "/Users/foo/.cargo/shared-target/claude-fleet/debug/fleet-cli";
+        const WORKTREE_BUILD: &str =
+            "/Users/foo/workspace/claude-fleet/.worktrees/some-plan/claw-fleet-core";
+
+        assert!(
+            is_ephemeral_worktree_binary_built_at(SHARED_BIN, WORKTREE_BUILD),
+            "a worktree built this — the shared artifact path hides that, the build dir does not"
+        );
+        assert!(
+            !is_ephemeral_worktree_binary_built_at(SHARED_BIN, MAIN_BUILD),
+            "the main checkout's build is stable even from the shared dir — \
+             blocking it would strip fleet__ask from every cargo tauri dev run"
+        );
+        assert!(
+            is_ephemeral_worktree_binary_built_at(
+                r"C:\Users\foo\.cargo\shared-target\claude-fleet\debug\fleet-cli.exe",
+                r"C:\src\claude-fleet\.worktrees\some-plan\claw-fleet-core"
+            ),
+            "windows separators count in the build dir too"
+        );
+        assert!(
+            is_ephemeral_worktree_binary_built_at(WORKTREE_BIN, MAIN_BUILD),
+            "an in-worktree artifact path stays ephemeral regardless of build dir"
+        );
     }
 
     /// Root cause of 2026-08-27: a `fleet-cli` built inside
@@ -994,16 +1074,28 @@ mod tests {
     #[test]
     fn a_worktree_binary_may_only_publish_when_the_config_is_isolated() {
         assert!(
-            !may_publish(WORKTREE_BIN, false),
+            !may_publish_built_at(WORKTREE_BIN, false, MAIN_BUILD),
             "a worktree build must not write the user's real ~/.claude.json"
         );
         assert!(
-            may_publish(WORKTREE_BIN, true),
+            may_publish_built_at(WORKTREE_BIN, true, MAIN_BUILD),
             "an isolated run writes a throwaway config — allow it"
         );
         assert!(
-            may_publish("/Applications/Claw Fleet.app/Contents/MacOS/fleet", false),
+            may_publish_built_at(
+                "/Applications/Claw Fleet.app/Contents/MacOS/fleet",
+                false,
+                MAIN_BUILD
+            ),
             "a stable install publishes as before"
+        );
+        assert!(
+            !may_publish_built_at(
+                "/Users/foo/.cargo/shared-target/claude-fleet/debug/fleet-cli",
+                false,
+                "/Users/foo/workspace/claude-fleet/.worktrees/some-plan/claw-fleet-core"
+            ),
+            "shared target dir hides the worktree in the path — the build dir must still refuse"
         );
     }
 
