@@ -69,6 +69,7 @@ import { userDisplayText } from "./slashCommand";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { ToolDigest } from "../types";
+import { memberDisplayStatus } from "../../../shared-ts/memberStatus";
 import { AgentNavProvider, useAgentNav } from "./AgentNavContext";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { buildInfoRows } from "./sessionInfoRows";
@@ -100,8 +101,12 @@ const SUBAGENT_TAB_CAP = 12;
 
 /** Statuses that count as "this member is doing something", used to order the
  *  scope switcher active-first. Mirrors the desktop LIVE_STATUSES (broader than
- *  WORKING: includes waitingInput/active) so a subagent parked on a decision
- *  card still sorts ahead of finished ones. */
+ *  WORKING: includes waitingInput/active) so a main session parked for input
+ *  still sorts ahead of finished ones. Consulted through
+ *  `memberDisplayStatus`, which is what keeps a *subagent* at `waitingInput`
+ *  (= its final report landed) from sorting as active. A subagent genuinely
+ *  parked on a decision card reads Executing (stop_reason=tool_use), so it is
+ *  unaffected. */
 const SCOPE_LIVE: Set<SessionStatus> = new Set([
   "thinking",
   "executing",
@@ -994,9 +999,9 @@ export function SessionDetailView({
       );
     }
     if (subs.length === 0) return [];
-    const active = subs.filter((s) => SCOPE_LIVE.has(s.status));
+    const active = subs.filter((s) => SCOPE_LIVE.has(memberDisplayStatus(s)));
     const finished = subs
-      .filter((s) => !SCOPE_LIVE.has(s.status))
+      .filter((s) => !SCOPE_LIVE.has(memberDisplayStatus(s)))
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
     let ordered = [...active, ...finished].slice(0, SUBAGENT_TAB_CAP);
     // Never drop the subagent currently being viewed, even if fresher siblings

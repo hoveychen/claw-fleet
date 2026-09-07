@@ -24,6 +24,9 @@ import {
   resetQuietLatch,
   stickyQuiet,
 } from "../../shared-ts/quietLatch";
+import { memberDisplayStatus } from "../../shared-ts/memberStatus";
+
+export { memberDisplayStatus };
 
 // ── Session launch entrypoints / status helpers ──────────────────────────────
 
@@ -97,31 +100,15 @@ export const LIVE_STATUSES = new Set([
 /**
  * Whether a member of a session family (the parent itself, or one of its
  * subagents) still has something going on — the predicate behind the 运行中的
- * Agent deck and the scope switcher's active-first ordering.
+ * Agent deck, the scope switcher's active-first ordering and the gallery's
+ * 活跃 grouping.
  *
- * `LIVE_STATUSES` alone is wrong for a subagent. `waitingInput` is derived from
- * the transcript shape (core `session/detect.rs`): the last assistant message
- * carried `stop_reason=end_turn` less than 300s ago. On a main session that
- * genuinely means "parked, your turn". A subagent has no user to answer it —
- * its `end_turn` is the final report going back to the parent, i.e. it is
- * *done*. Left unfiltered, a finished Explore agent kept sitting in a panel
- * titled 运行中 for a further five minutes before its status aged out to Idle.
- *
- * A subagent blocked on a decision card is not affected: an outstanding MCP
- * call leaves `stop_reason=tool_use`, which `determine_status` maps to
- * Executing, never to `waitingInput`.
+ * `LIVE_STATUSES.has(s.status)` is what these sites used to ask, and it is
+ * wrong for a subagent: see [`memberDisplayStatus`] (shared with the mobile
+ * client) for why a subagent's `waitingInput` means "done", not "parked".
  */
 export function isLiveMember(s: SessionInfo): boolean {
   return LIVE_STATUSES.has(memberDisplayStatus(s));
-}
-
-/** The status a member should be *shown* as, which for a subagent parked at
- *  `waitingInput` is `idle` — see [`isLiveMember`] for why. Used by the dot in
- *  the scope switcher so the colour agrees with the liveness maths instead of
- *  painting a finished agent amber ("waiting for you"). */
-export function memberDisplayStatus(s: SessionInfo): SessionStatus {
-  if (s.isSubagent && s.status === "waitingInput") return "idle";
-  return s.status;
 }
 
 /** Faded green for the quiet-alive third state (see [`isQuietAlive`]). Built on
