@@ -124,12 +124,14 @@
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .summaryCopy strong {
   font-size: var(--t-body, 17px);
   line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .summaryCopy small {
@@ -137,6 +139,7 @@
   color: var(--color-text-secondary);
   font-size: var(--t-aux, 12px);
   line-height: 1.3;
+  white-space: nowrap;
 }
 
 .summaryChevron {
