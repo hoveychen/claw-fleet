@@ -16,11 +16,16 @@ import {
 } from "./fleetTools";
 import styles from "./FleetToolCard.module.css";
 
-/** Fields shown as key/value rows, in this order; anything else falls after. */
+/** Fields shown as key/value rows, in this order; anything else falls after.
+ *  The tail from `all` on is the params the five later control tools
+ *  (artifact / inspect / control / notes / history) add. */
 const PARAM_ORDER = [
   "plan_id", "plan", "task", "title", "text", "parent", "note", "next",
   "until", "capture", "poll", "timeout", "prompt", "interval", "max",
   "at", "in", "slug", "path", "query", "version", "file", "id", "model", "effort",
+  "all", "level", "filter", "limit", "prefix", "start_line", "stop_line",
+  "max_files", "max_matches_per_file", "session", "line_no", "offset_chars",
+  "limit_chars", "force",
 ];
 
 /** Long free-text fields render as a block rather than an inline value. */
@@ -74,6 +79,10 @@ function summaryVars(input: Record<string, unknown>): Record<string, string> {
     slug: s("slug"),
     query: s("query"),
     title: s("title"),
+    // `notes` addresses its files by virtual path; `history read` by transcript
+    // line number (a JSON number, so it needs stringifying, unlike the rest).
+    path: s("path"),
+    line: typeof input.line_no === "number" ? String(input.line_no) : s("line_no"),
   };
 }
 

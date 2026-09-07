@@ -7,7 +7,12 @@
       "watch": "守望",
       "loop": "循环",
       "schedule": "定时",
-      "wiki": "知识库"
+      "wiki": "知识库",
+      "artifact": "产出",
+      "inspect": "巡检",
+      "control": "信号",
+      "notes": "笔记",
+      "history": "历史"
     },
     "param": {
       "plan_id": "计划",
@@ -34,7 +39,21 @@
       "file": "文件",
       "id": "ID",
       "model": "模型",
-      "effort": "档位"
+      "effort": "档位",
+      "all": "含全部",
+      "level": "级别",
+      "filter": "过滤",
+      "limit": "条数",
+      "prefix": "前缀",
+      "start_line": "起始行",
+      "stop_line": "结束行",
+      "max_files": "文件上限",
+      "max_matches_per_file": "每文件上限",
+      "session": "会话",
+      "line_no": "行号",
+      "offset_chars": "字符偏移",
+      "limit_chars": "字符上限",
+      "force": "强制"
     },
     "summary": {
       "plan": {
@@ -78,6 +97,35 @@
         "cat": "查看 {{slug}}",
         "list": "列出知识库",
         "search": "搜索 {{query}}"
+      },
+      "artifact": {
+        "add": "存入产出 {{title}}",
+        "list": "列出产出",
+        "get": "查看产出 {{id}}",
+        "delete": "删除产出 {{id}}"
+      },
+      "inspect": {
+        "list": "列出在跑的 agent",
+        "get": "查看 agent {{id}}",
+        "speed": "查看 token 速度",
+        "account": "查看账号用量",
+        "search": "搜索会话记录 {{query}}",
+        "audit": "审计风险命令"
+      },
+      "control": {
+        "stop": "停止 agent {{id}}",
+        "interrupt": "打断 agent {{id}}"
+      },
+      "notes": {
+        "write": "写入笔记 {{path}}",
+        "append": "追加笔记 {{path}}",
+        "read": "读取笔记 {{path}}",
+        "list": "列出笔记",
+        "search": "搜索笔记 {{query}}"
+      },
+      "history": {
+        "search": "搜索历史记录 {{query}}",
+        "read": "读取历史第 {{line}} 行"
       }
     },
     "rec": {
@@ -1718,7 +1766,15 @@
       "loop": "循环",
       "schedule": "定时",
       "wiki": "知识库",
-      "set_session_title": "设置标题"
+      "set_session_title": "设置标题",
+      "artifact": "产出",
+      "inspect": "巡检",
+      "control": "信号",
+      "notes": "笔记",
+      "history": "历史",
+      "image": "生成图片",
+      "image_edit": "修改图片",
+      "permission_prompt": "权限询问"
     },
     "tool_patch_add": "新建 {{path}}",
     "tool_patch_update": "编辑 {{path}}",
@@ -1766,7 +1822,18 @@
     "no_summary": "没有记录摘要。",
     "tool_running": "运行中…",
     "decision_task_completed": "已结束任务",
-    "decision_task_abandoned": "已放弃任务"
+    "decision_task_abandoned": "已放弃任务",
+    "fleet_sum": {
+      "title": "设置会话标题",
+      "title_named": "设置会话标题：{{title}}",
+      "image": "生成图片",
+      "image_named": "生成图片：{{desc}}",
+      "image_edit": "修改图片",
+      "image_edit_named": "修改图片：{{desc}}",
+      "render_a2ui": "渲染富交互卡",
+      "ask": "发出决策卡",
+      "permission_prompt": "请求命令授权"
+    }
   },
   "settings": {
     "title": "设置",
