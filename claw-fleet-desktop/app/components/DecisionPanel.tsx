@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  resolveTheme,
   useDecisionStore,
   useSessionsStore,
   useUIStore,
@@ -910,32 +909,6 @@ function SharedOptionsBlock({
 
   const focusedPreview = question.options.find((o) => o.label === focusedLabel)?.preview;
 
-  // Lite mode: push preview into a floating Tauri subwindow instead of the
-  // inline grid, so the narrow main window isn't split in half. Normal mode
-  // keeps the side-by-side layout and leaves the subwindow untouched.
-  useEffect(() => {
-    if (!compact) return;
-    if (hasPreview) {
-      const theme = resolveTheme(useUIStore.getState().theme);
-      invoke("open_preview_window", {
-        markdown: focusedPreview ?? "",
-        title: focusedLabel || null,
-        theme,
-      }).catch(() => {});
-    } else {
-      invoke("close_preview_window").catch(() => {});
-    }
-  }, [compact, hasPreview, focusedPreview, focusedLabel]);
-
-  // Tear down the subwindow when the card unmounts (decision resolved, tab
-  // switched, or user exited lite mode). Only relevant in compact mode.
-  useEffect(() => {
-    if (!compact) return;
-    return () => {
-      invoke("close_preview_window").catch(() => {});
-    };
-  }, [compact]);
-
   const list = (
     <div className={styles.elicitation_options}>
       {question.options.map((opt) => {
@@ -1009,17 +982,35 @@ function SharedOptionsBlock({
     </div>
   );
 
-  // In lite mode the preview lives in a floating subwindow — don't split the
-  // panel in half. In normal mode keep the side-by-side grid as before.
-  if (!hasPreview || compact) return list;
+  if (!hasPreview) return list;
+  const preview = (
+    <div className={styles.elicitation_preview}>
+      {focusedPreview ? (
+        <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(focusedPreview)}</ReactMarkdown>
+      ) : null}
+    </div>
+  );
+  // Compact hosts — the inline card inside SessionDetail — stack the preview
+  // under the options instead of splitting the narrow column in half. This used
+  // to open an always-on-top Tauri subwindow; stacking keeps the preview inside
+  // the card, which is where the option it belongs to is. The focused option's
+  // label is captioned because the side-by-side layout's spatial pairing is
+  // what stacking gives up.
+  if (compact) {
+    return (
+      <div className={styles.elicitation_options_stacked_preview}>
+        {list}
+        <div className={styles.elicitation_preview_caption}>
+          {focusedLabel || t("elicitation.preview", "Preview")}
+        </div>
+        {preview}
+      </div>
+    );
+  }
   return (
     <div className={styles.elicitation_options_with_preview}>
       {list}
-      <div className={styles.elicitation_preview}>
-        {focusedPreview ? (
-          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(focusedPreview)}</ReactMarkdown>
-        ) : null}
-      </div>
+      {preview}
     </div>
   );
 }
@@ -1750,14 +1741,14 @@ export function FleetAskCard({
 
 // ── Card dispatcher ──────────────────────────────────────────────────────
 
-function DecisionCard({ decision, compact }: { decision: PendingDecision; compact: boolean }) {
+function DecisionCard({ decision }: { decision: PendingDecision }) {
   switch (decision.kind) {
     case "guard":
       return <GuardCard decision={decision} />;
     case "elicitation":
-      return <ElicitationCard decision={decision} compact={compact} />;
+      return <ElicitationCard decision={decision} />;
     case "fleet-ask":
-      return <FleetAskCard decision={decision} compact={compact} />;
+      return <FleetAskCard decision={decision} />;
     case "a2ui-render":
       return <A2uiRenderCard decision={decision} />;
     case "plan-approval":
@@ -1867,34 +1858,13 @@ function tabLabel(d: PendingDecision): string {
 
 // ── Main panel ───────────────────────────────────────────────────────────
 
-export function DecisionPanel({
-  compact = false,
-  float = false,
-  onInlineDetailChange,
-}: {
-  compact?: boolean;
-  /** Standalone decision-float window mode. Unlike the main-window overlay
-   *  (which floats `position: fixed` over the app) or lite/`compact` (which
-   *  fills a fixed-size window), the float window *is* the panel and sizes
-   *  itself to the card's natural height. So the panel must flow in normal
-   *  document layout — not `position: fixed`, no `max-height` cap — otherwise
-   *  it contributes zero height to the wrapper the float window measures
-   *  (a fixed-position element is out of flow), the window never grows, and
-   *  only a sliver of the card shows. */
-  float?: boolean;
-  /** Fired when the inline SessionDetail column toggles. The standalone
-   *  decision-float window uses this to widen itself when detail expands. */
-  onInlineDetailChange?: (open: boolean) => void;
-} = {}) {
+export function DecisionPanel() {
   const { t } = useTranslation();
   const {
     decisions,
     activeDecisionId,
     setActiveDecision,
   } = useDecisionStore();
-  const setLiteDecisionHistorySessionId = useUIStore(
-    (s) => s.setLiteDecisionHistorySessionId,
-  );
   const decisionPanelCollapsed = useUIStore((s) => s.decisionPanelCollapsed);
   const setDecisionPanelCollapsed = useUIStore(
     (s) => s.setDecisionPanelCollapsed,
@@ -1913,6 +1883,11 @@ export function DecisionPanel({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || !activeDecisionId) return;
+      // The Settings overlay sits on top of the panel and takes Escape for
+      // itself. Both listeners live on `window`, so stopPropagation there
+      // cannot reach this one — the panel has to yield explicitly, or one
+      // Escape would close Settings *and* decline a pending guard.
+      if (useUIStore.getState().settingsOpen) return;
       const active = decisions.find((d) => d.id === activeDecisionId);
       if (active?.kind === "guard") {
         respond(active.id, false);
@@ -1982,11 +1957,7 @@ export function DecisionPanel({
     }
   }, [decisionPanelCollapsed, active?.kind, setDecisionPanelCollapsed]);
 
-  // Lite/compact never collapses — the lite window is already small. The
-  // standalone float window never collapses either: it exists solely to show
-  // the card, and the collapsed state is shared via localStorage with the
-  // main window, so honoring it here would leave the float a bare pill.
-  const effectiveCollapsed = decisionPanelCollapsed && !compact && !float;
+  const effectiveCollapsed = decisionPanelCollapsed;
 
   const hasPreview =
     (active?.kind === "elicitation" || active?.kind === "fleet-ask") &&
@@ -2044,18 +2015,13 @@ export function DecisionPanel({
     setDocsOpen(hasReviewDocs);
   }, [active?.id, hasReviewDocs]);
 
-  // Inline detail column is normal-mode only; lite has its own chip flow.
   // SessionDetail in standalone mode owns its own state (no shared global
   // store), so two detail views can coexist on different sessions.
-  const inlineDetailActive = !compact && historyOpen && !!activeSessionInfo;
-  const docsColumnActive = !compact && docsOpen && hasReviewDocs;
+  const inlineDetailActive = historyOpen && !!activeSessionInfo;
+  const docsColumnActive = docsOpen && hasReviewDocs;
   // The docs panel and the SessionDetail history share the one side column;
   // docs win when both would be open (they reset closed on card change).
   const sideColumnActive = docsColumnActive || inlineDetailActive;
-
-  useEffect(() => {
-    onInlineDetailChange?.(sideColumnActive);
-  }, [sideColumnActive, onInlineDetailChange]);
 
   // Bump tier when the card area overflows vertically, until no overflow or
   // we hit the maximum tier.
@@ -2132,11 +2098,9 @@ export function DecisionPanel({
   // side without dropping below their min-widths (detail 420 + card 380 = 800),
   // the two flex columns overflow the clamped panel and the card gets shoved
   // off-screen. Below this threshold, stack them vertically instead (card on
-  // top, detail below) so everything stays inside the panel. The float window
-  // manages its own width (it widens to ~920px for the side-by-side layout), so
-  // it never needs stacking.
+  // top, detail below) so everything stays inside the panel.
   const STACK_DETAIL_BELOW = 900;
-  const stackDetail = sideColumnActive && !float && vpClamp < STACK_DETAIL_BELOW;
+  const stackDetail = sideColumnActive && vpClamp < STACK_DETAIL_BELOW;
   const targetTotalWidth = sideColumnActive && !stackDetail
     ? DETAIL_COLUMN_WIDTH + currentWidth
     : currentWidth;
@@ -2144,8 +2108,8 @@ export function DecisionPanel({
 
   return (
     <div
-      className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${float ? styles.panel_float : ""} ${peeking ? styles.panel_peeking : ""} ${sideColumnActive ? (stackDetail ? styles.panel_with_detail_stacked : styles.panel_with_detail) : ""}`}
-      style={compact || float ? undefined : { width: `${panelWidth}px` }}
+      className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${peeking ? styles.panel_peeking : ""} ${sideColumnActive ? (stackDetail ? styles.panel_with_detail_stacked : styles.panel_with_detail) : ""}`}
+      style={{ width: `${panelWidth}px` }}
     >
       {sideColumnActive && (
         <div className={styles.detail_column}>
@@ -2163,84 +2127,58 @@ export function DecisionPanel({
         {/* Panel toolbar: aligns the panel-level controls (collapse + history)
          *  into one slim top strip instead of two orphaned, absolutely-positioned
          *  buttons floating in the left gutter. Covers all card kinds (guard /
-         *  plan / elicitation / fleet-ask) plus the standalone float window.
-         *  Lite/`compact` keeps its own labeled history_jump chip below. */}
-        {!compact && (
-          <div className={styles.panel_toolbar}>
-            <button
-              type="button"
-              className={styles.collapse_btn}
-              onClick={() => setDecisionPanelCollapsed(true)}
-              title={t("decision_panel.collapse", "Collapse panel")}
-              aria-label={t("decision_panel.collapse", "Collapse panel")}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            <span className={styles.panel_toolbar_spacer} />
-            {/* Review-docs toggle: the agent attached `.md` / wiki docs to this
-             *  card. Opening docs closes history (they share the side column). */}
-            {hasReviewDocs && (
-              <button
-                type="button"
-                className={`${styles.review_docs_toggle} ${docsColumnActive ? styles.review_docs_toggle_active : ""}`}
-                onClick={() =>
-                  setDocsOpen((v) => {
-                    const next = !v;
-                    if (next) setHistoryOpen(false);
-                    return next;
-                  })
-                }
-                title={t("review_docs.toggle", "Review documents")}
-                aria-pressed={docsColumnActive}
-              >
-                {t("review_docs.chip", "📄 Docs · {{count}}", {
-                  count: reviewDocs.length,
-                })}
-              </button>
-            )}
-            {/* History toggle opens the inline SessionDetail column. Neutral
-             *  chip styling (no red alarm badge) since it's context, not alert. */}
-            {active.request.sessionId && (
-              <PastHistoryStrip
-                key={active.id}
-                sessionId={active.request.sessionId}
-                expanded={historyOpen}
-                onToggle={() =>
-                  setHistoryOpen((v) => {
-                    const next = !v;
-                    if (next) setDocsOpen(false);
-                    return next;
-                  })
-                }
-              />
-            )}
-          </div>
-        )}
-        {/* Lite mode: a single chip-button swaps the lite body for a dedicated
-         *  decision-history view (LiteDecisionHistory). Avoids stuffing the list
-         *  into the narrow lite window. */}
-        {active.request.sessionId && compact && (
+         *  plan / elicitation / fleet-ask). */}
+        <div className={styles.panel_toolbar}>
           <button
             type="button"
-            className={styles.history_jump}
-            onClick={() => {
-              const sid = active.request.sessionId;
-              if (!sid) return;
-              setLiteDecisionHistorySessionId(sid);
-            }}
+            className={styles.collapse_btn}
+            onClick={() => setDecisionPanelCollapsed(true)}
+            title={t("decision_panel.collapse", "Collapse panel")}
+            aria-label={t("decision_panel.collapse", "Collapse panel")}
           >
-            <span className={styles.history_jump_chevron}>↗</span>
-            <span className={styles.history_jump_label}>
-              {t(
-                "decision_panel.view_session_history",
-                "View this session's history",
-              )}
-            </span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
           </button>
-        )}
-
+          <span className={styles.panel_toolbar_spacer} />
+          {/* Review-docs toggle: the agent attached `.md` / wiki docs to this
+           *  card. Opening docs closes history (they share the side column). */}
+          {hasReviewDocs && (
+            <button
+              type="button"
+              className={`${styles.review_docs_toggle} ${docsColumnActive ? styles.review_docs_toggle_active : ""}`}
+              onClick={() =>
+                setDocsOpen((v) => {
+                  const next = !v;
+                  if (next) setHistoryOpen(false);
+                  return next;
+                })
+              }
+              title={t("review_docs.toggle", "Review documents")}
+              aria-pressed={docsColumnActive}
+            >
+              {t("review_docs.chip", "📄 Docs · {{count}}", {
+                count: reviewDocs.length,
+              })}
+            </button>
+          )}
+          {/* History toggle opens the inline SessionDetail column. Neutral
+           *  chip styling (no red alarm badge) since it's context, not alert. */}
+          {active.request.sessionId && (
+            <PastHistoryStrip
+              key={active.id}
+              sessionId={active.request.sessionId}
+              expanded={historyOpen}
+              onToggle={() =>
+                setHistoryOpen((v) => {
+                  const next = !v;
+                  if (next) setDocsOpen(false);
+                  return next;
+                })
+              }
+            />
+          )}
+        </div>
         {/* Card area — scrollable, shows the active decision. Elicitation /
             fleet-ask cards own their internal scroll + flex-none footer, so the
             area switches to a clip-flex container for them (see .card_area_flex). */}
@@ -2252,7 +2190,7 @@ export function DecisionPanel({
           }`}
           ref={cardAreaRef}
         >
-          <DecisionCard key={active.id} decision={active} compact={compact} />
+          <DecisionCard key={active.id} decision={active} />
         </div>
 
         {/* Tab bar — always at the bottom */}

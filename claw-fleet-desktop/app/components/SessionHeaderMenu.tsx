@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
-  Columns2,
   Copy,
   FileJson2,
   Folder,
@@ -27,14 +26,10 @@ export function SessionHeaderMenu({
   sessionId,
   jsonlPath,
   workspacePath,
-  onOpenSecondView,
 }: {
   sessionId: string;
   jsonlPath: string;
   workspacePath: string;
-  /** Open a second pane on this session beside the first. Absent where there is
-   *  no tab strip to hold it, and in the second pane itself. */
-  onOpenSecondView?: () => void;
 }) {
   const { t } = useTranslation();
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -59,15 +54,6 @@ export function SessionHeaderMenu({
 
   // Leads the menu: it is the one item that *does* something to the layout,
   // where the rest hand you a string to paste elsewhere.
-  if (onOpenSecondView) {
-    items.push({
-      id: "second-view",
-      label: t("tabs.open_second_view", "在旁边再开一份"),
-      sub: t("tabs.open_second_view_sub", "同一会话两个面板，各看各的"),
-      icon: <Columns2 size={13} />,
-      onSelect: onOpenSecondView,
-    });
-  }
 
   items.push(
     {

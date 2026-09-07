@@ -11,11 +11,12 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { CalendarClock, LoaderCircle } from "lucide-react";
+import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
-import { messageToText } from "../messageRows";
+import { isRenderableRow, messageToText } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
+import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
 import {
   initialFollowState,
@@ -26,34 +27,44 @@ import {
 import { nestedScrollerWillConsume } from "../nestedScroll";
 import { currentViewMetrics, formatSnapshot, takeScrollSnapshot } from "../scrollSnapshot";
 import { AgentNavProvider } from "./AgentNavContext";
-import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
 import { PlanProgressRow } from "./PlanProgressRow";
 import { WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
-import type { DetailTabOpener } from "../tabKind";
 import { WikiLinksProvider } from "../markdown/wikiLinksContext";
 import { WebLinkProvider } from "../markdown/webLinks";
-import { revealSlugInWikiPage, useWikiDocs } from "../hooks/useWikiDocs";
+import { useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
-import { ScratchpadView } from "./ScratchpadView";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { effortChipLabel, effortTitle, formatModel } from "./SessionCard";
-import { SkillHistory } from "./SkillHistory";
-import { TokenSpendPanel } from "./TokenSpendPanel";
-import { CodexTokenPanel } from "./CodexTokenPanel";
-import { DshTokenPanel } from "./DshTokenPanel";
-import { tokenPanelForAgentSource } from "../modelChoices";
 import { inlineCodexFleetAsk, withCodexDecisionHistory } from "./codexDecision";
-import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
-import { bgTaskIcon, bgTaskDataType } from "../bgTaskKinds";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
+import {
+  activeAuxTab,
+  AGENTS_TAB,
+  closeAux,
+  closeDoc,
+  initialAux,
+  isAuxFacet,
+  openDoc,
+  pruneTab,
+  showTab,
+  syncLiveAgents,
+  toggleTab,
+  type AuxDocKind,
+  type AuxState,
+} from "../detailAux";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { SessionAuxPanel, type AuxTab } from "./SessionAuxPanel";
+import { SessionFacetPanel } from "./SessionFacetPanel";
+import { SubagentLiveCards } from "./SubagentLiveCards";
+import { SessionAuxDoc } from "./SessionAuxDoc";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
 
@@ -62,6 +73,12 @@ import { showLatestSync } from "../conversationPlaceholder";
  *  win the slots first, then the most-recently-active finished ones. A parent
  *  that fanned out hundreds of subagents would otherwise flood the menu. */
 const SUBAGENT_TAB_CAP = 12;
+
+/** Narrower than this and the pane can't hold two readable columns, so the
+ *  auxiliary panel floats over the conversation instead of splitting it. A
+ *  4-way split of the 任务 page bottoms out at MIN_GROUP_PX (280), and
+ *  DecisionPanel's inline column is narrower still. */
+const AUX_OVERLAY_PX = 640;
 
 /** Standalone-mode live tail: re-pull the transcript tail at this cadence
  *  while the session is in an active status. */
@@ -141,15 +158,11 @@ function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
 }
 
 export function SessionDetail({
-  lite = false,
   inline = false,
   sessionInfo = null,
   searchQuery: standaloneSearchQuery = null,
   paused = false,
-  tabOpener,
-  secondView = false,
 }: {
-  lite?: boolean;
   inline?: boolean;
   /** When set, the component runs in standalone mode: its own local
    *  session/messages state, independent from the global useDetailStore.
@@ -169,17 +182,6 @@ export function SessionDetail({
    *  every 700ms and `get_messages_tail` every 1.5s in the background. Coming
    *  back to the foreground refetches the tail once, immediately. */
   paused?: boolean;
-  /** Present when this instance lives in a tab strip (the 任务 page's detail
-   *  column): a path the agent named then opens as a tab *beside* the
-   *  conversation instead of switching the whole window to the 仓库 page. Absent
-   *  in the global drawer and Lite mode, which have nowhere to put a tab and so
-   *  keep the page-switching behaviour. */
-  tabOpener?: DetailTabOpener;
-  /** This pane is the *second* view of a session already open in the column.
-   *  Only drops the header's "open beside" item — it would offer to open the
-   *  very pane you are looking at. Everything else about the two is identical,
-   *  which is the point: the copy is a second look, not a lesser mode. */
-  secondView?: boolean;
 } = {}) {
   const { t } = useTranslation();
   const isStandalone = sessionInfo != null;
@@ -201,6 +203,9 @@ export function SessionDetail({
   localTailRef.current = localTail;
   const localLoadingRef = useRef(localLoading);
   localLoadingRef.current = localLoading;
+  /** Last record of the previous poll's window — how the next poll measures
+   *  what the agent appended. Cleared with the messages it describes. */
+  const prevLastIdRef = useRef<string | null>(null);
 
   // Optimistic follow-ups: submitting a resume/enqueue spawns a detached
   // `claude --resume` that only writes the message into the JSONL once the CLI
@@ -218,6 +223,7 @@ export function SessionDetail({
     if (sessionInfo && sessionInfo.id !== localSession?.id) {
       setLocalSession(sessionInfo);
       setLocalMessages([]);
+      prevLastIdRef.current = null;
       setLocalLoadingEarlier(false);
       setLocalTail(INITIAL_TAIL);
       setLocalFullyLoaded(false);
@@ -321,6 +327,7 @@ export function SessionDetail({
       if (isStandalone) {
         setLocalSession(s);
         setLocalMessages([]);
+        prevLastIdRef.current = null;
         setLocalTail(INITIAL_TAIL);
         setLocalFullyLoaded(false);
       } else {
@@ -389,7 +396,6 @@ export function SessionDetail({
   }, []);
 
   const sessions = useSessionsStore((s) => s.sessions);
-  const requestFileNav = useUIStore((s) => s.requestFileNav);
   const liveSession = useMemo(() => {
     if (!session) return null;
     return sessions.find((s) => s.id === session.id) ?? session;
@@ -429,16 +435,24 @@ export function SessionDetail({
   // the draft, the option pills and the queued-follow-up chips.
   const dockRef = useRef<HTMLDivElement>(null);
   const [dockHeight, setDockHeight] = useState(0);
-  type ViewTab =
-    | "decisions"
-    | "skills"
-    | "messages"
-    | "tokens"
-    | "workflow"
-    | "tasks"
-    | "bgtasks"
-    | "scratchpad";
-  const [viewTab, setViewTab] = useState<ViewTab>("messages");
+  /* The conversation is no longer one tab among many — it owns this column for
+     good. Everything that used to sit beside it in that row (Skills, 决策,
+     Token, 任务, 后台任务, 临时文件, Workflow) is now a *button* that pulls the
+     panel up in the auxiliary column, so reading a token receipt no longer
+     costs you sight of the transcript. See detailAux.ts for the state. */
+  const [aux, setAux] = useState<AuxState>(initialAux);
+  /** Panel width, only meaningful in the side-by-side (non-overlay) form. */
+  const {
+    width: auxWidth,
+    isDragging: auxDragging,
+    onMouseDown: onAuxResize,
+  } = useResizableWidth("detail-aux-width", { min: 260, max: 720, initial: 380, side: "right" });
+  /** Pane width, measured — the aux column collapses to an overlay drawer below
+   *  AUX_OVERLAY_PX. Measured rather than a media query because the constraint
+   *  is this pane's width (one of four split groups, or DecisionPanel's inline
+   *  column), not the window's. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [paneWidth, setPaneWidth] = useState(0);
   /* The header's numeric chips — spend, tokens, reasoning share, compactions —
      are reference figures you look up, not identity you read at a glance. Seven
      of them in a row turned the title area into a status bar, so they collapse
@@ -528,10 +542,14 @@ export function SessionDetail({
           if (cancelled) return;
           setLocalMessages((prev) => reconcileMessages(prev, msgs));
           setLocalFullyLoaded(msgs.length < tail);
-          // Window saturated: the next transcript write would slide already-
-          // rendered messages out of the top. Grow the window so the visible
-          // history stays anchored while the tail keeps extending.
-          if (msgs.length >= tail) setLocalTail(tail + LOAD_EARLIER_STEP);
+          // Keep the window's start pinned as the transcript grows, so nothing
+          // the reader has scrolled back to slides out of the top. Growth is
+          // measured against the previous window's last record — see
+          // `liveTailWindow` for the rule and what it costs to get wrong.
+          const arrived = arrivedSince(prevLastIdRef.current, msgs);
+          prevLastIdRef.current = recordId(msgs[msgs.length - 1]);
+          const grown = nextLiveTail({ tail, returned: msgs.length, arrived });
+          if (grown !== tail) setLocalTail(grown);
         })
         .catch(() => {})
         .finally(() => {
@@ -609,13 +627,14 @@ export function SessionDetail({
     };
   }, [liveSession?.id, liveSession?.jsonlPath]);
 
-  // Honor an explicit initial tab (e.g. the user clicked the card's plan row →
-  // open straight to "tasks"). Default tab is "messages" (对话).
+  // Honor an explicit initial facet (e.g. the user clicked the card's plan row
+  // → open straight to 任务). Opens it in the aux column; the conversation is
+  // always on screen either way.
   useEffect(() => {
     if (isStandalone) return;
-    const tab = global.initialTab;
-    if (!tab) return;
-    setViewTab(tab as ViewTab);
+    const facet = global.initialTab;
+    if (!facet || !isAuxFacet(facet)) return;
+    setAux((st) => showTab(st, facet));
   }, [isStandalone, global.session?.id, global.initialTab]);
 
   // TASKS.md plan for THIS session — scoped to the plan the session is focused
@@ -625,21 +644,24 @@ export function SessionDetail({
   const workspacePath = liveSession?.workspacePath;
   const sessionId = liveSession?.id;
 
+  /** Open a doc — a repo file, a wiki doc or a url the agent named — in the
+   *  auxiliary column. Every surface that renders agent prose routes here:
+   *  the thing the transcript named opens beside the sentence that named it,
+   *  instead of taking over the window (the 仓库 / 知识库 pages) or landing in
+   *  the window's tab strip, where reading it cost sight of the conversation. */
+  const openAuxDoc = useCallback((kind: AuxDocKind, ref: string) => {
+    setAux((st) => openDoc(st, kind, ref));
+  }, []);
+
   // Paths the agent wrote in backticks become clickable chips. Memoised because
   // MessageRow is memo'd — a fresh object each render would re-render every row.
   const pathLinks = useMemo<PathLinkContext | undefined>(() => {
     if (!workspacePath) return undefined;
     return {
       workspaceRoot: workspacePath,
-      // In a tab strip the file opens beside the prose that named it — the
-      // whole point of an IDE's split. Elsewhere (drawer, Lite) there is no
-      // strip, so it still goes to the 仓库 page.
-      openInFiles: (absPath, line) =>
-        tabOpener
-          ? tabOpener.openFile(absPath, line)
-          : requestFileNav({ workspacePath, absPath, line }),
+      openInFiles: (absPath) => openAuxDoc("file", absPath),
     };
-  }, [workspacePath, requestFileNav, tabOpener]);
+  }, [workspacePath, openAuxDoc]);
 
   // `[[slug]]` refs the agent wrote become links. Agents are told to publish
   // findings to the wiki and to cross-reference them that way, so the refs were
@@ -655,11 +677,10 @@ export function SessionDetail({
     const slugs = new Set(wikiDocs.map((d) => d.slug));
     return {
       hasSlug: (slug) => slugs.has(slug),
-      // A tab beside the prose where there is a strip; the 知识库 page otherwise
-      // — the same split as a clicked path.
-      openSlug: tabOpener ? tabOpener.openWiki : revealSlugInWikiPage,
+      // Beside the prose, same as a clicked path.
+      openSlug: (slug) => openAuxDoc("wiki", slug),
     };
-  }, [wikiDocs, tabOpener]);
+  }, [wikiDocs, openAuxDoc]);
 
   useEffect(() => {
     if (!workspacePath || !sessionId) {
@@ -716,17 +737,32 @@ export function SessionDetail({
   const bgTasks = liveSession?.backgroundTasks ?? [];
   const hasBgTasks = bgTasks.length > 0;
 
-  // Switching to a session without a scratchpad would otherwise strand the view
-  // on a tab whose button no longer renders. Same for the background-tasks tab,
-  // whose array empties as soon as the session takes another turn.
-  useEffect(() => {
-    if (viewTab === "scratchpad" && !hasScratchpad) setViewTab("messages");
-    if (viewTab === "bgtasks" && !hasBgTasks) setViewTab("messages");
-  }, [viewTab, hasScratchpad, hasBgTasks]);
-
-  const pickTab = useCallback((tab: ViewTab) => {
-    setViewTab(tab);
+  const pickTab = useCallback((id: string) => {
+    setAux((st) => toggleTab(st, id));
   }, []);
+  const closeAuxPanel = useCallback(() => {
+    setAux((st) => closeAux(st));
+  }, []);
+  const openWebInAux = useCallback(
+    (url: string) => {
+      openAuxDoc("web", url);
+    },
+    [openAuxDoc],
+  );
+  const dropDoc = useCallback((id: string) => {
+    setAux((st) => closeDoc(st, id));
+  }, []);
+
+  // Pane width drives the overlay/side-by-side choice.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const measure = () => setPaneWidth(el.clientWidth);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, [liveSession?.id]);
 
   // `isFollowing` drives the footer, but the pin below runs from a
   // ResizeObserver callback that must not re-subscribe on every state change —
@@ -767,13 +803,13 @@ export function SessionDetail({
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("wheel", onWheel);
     };
-  }, [applyFollow, session, viewTab]);
+  }, [applyFollow, session]);
 
-  // A different session, or a fresh visit to the tab, starts pinned again.
+  // A different session starts pinned again.
   useEffect(() => {
     followRef.current = initialFollowState;
     setIsFollowing(true);
-  }, [liveSession?.id, viewTab]);
+  }, [liveSession?.id]);
 
   // Pin the viewport to the newest message for as long as the reader has not
   // scrolled away to read history.
@@ -789,7 +825,6 @@ export function SessionDetail({
   const hasMessages = messages.length > 0;
   const hasLiveThinking = !!(liveThinking?.streaming && liveThinking.thinking);
   useEffect(() => {
-    if (viewTab !== "messages") return;
     const el = scrollRef.current;
     if (!el) return;
 
@@ -806,7 +841,7 @@ export function SessionDetail({
     for (const child of Array.from(el.children)) ro.observe(child);
     pin();
     return () => ro.disconnect();
-  }, [viewTab, liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
+  }, [liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -824,6 +859,26 @@ export function SessionDetail({
   // resizes the webview, which is the very thing known to clear the freeze: the
   // act of going to look would destroy the state being looked at.
   const [snapshots, setSnapshots] = useState<string[]>([]);
+  // Render-synced so the keydown listener (mounted once) reads current values
+  // without re-subscribing. What the DOM cannot say about itself: a pane
+  // measured holding one message while its owner had 1621 renderable records is
+  // only a contradiction once both halves are in the same reading.
+  const probeCountsRef = useRef<Record<string, string | number | boolean>>({});
+  probeCountsRef.current = {
+    msgs: messages.length,
+    displayed: displayedMessages.length,
+    renderable: displayedMessages.filter(isRenderableRow).length,
+    tail: isStandalone ? localTail : global.loadedTail ?? -1,
+    fullyLoaded,
+    isLoading,
+    stalled: loadStalled,
+    following: followRef.current.following,
+    detached: followRef.current.detached,
+    // The conversation is no longer a tab; what varies is which auxiliary
+    // panel is up beside it (null = closed).
+    tab: aux.active ?? "—",
+    dockH: dockHeight,
+  };
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       if (!ev.altKey || !ev.shiftKey || ev.code !== "KeyS") return;
@@ -831,7 +886,9 @@ export function SessionDetail({
       if (!el) return;
       ev.preventDefault();
       const stamp = new Date().toTimeString().slice(0, 8);
-      const text = formatSnapshot(takeScrollSnapshot(el, currentViewMetrics(), stamp));
+      const text = formatSnapshot(
+        takeScrollSnapshot(el, currentViewMetrics(), stamp, probeCountsRef.current),
+      );
       setSnapshots((prev) => [...prev, text]);
     };
     window.addEventListener("keydown", onKey);
@@ -848,10 +905,6 @@ export function SessionDetail({
   // through the observer.
   const showsComposer = (canResume || canEnqueue) && !!liveSession;
   useEffect(() => {
-    if (viewTab !== "messages") {
-      setDockHeight(0);
-      return;
-    }
     const el = dockRef.current;
     if (!el) {
       setDockHeight(0);
@@ -862,7 +915,7 @@ export function SessionDetail({
     ro.observe(el);
     measure();
     return () => ro.disconnect();
-  }, [viewTab, showsComposer, isFollowing, liveSession?.id]);
+  }, [showsComposer, isFollowing, liveSession?.id]);
 
   // Padding is applied by React on the next paint, which grows scrollHeight
   // under a reader who is pinned to the newest message. Re-pin in the same
@@ -873,6 +926,35 @@ export function SessionDetail({
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [dockHeight]);
+
+  /** Subagents of this session family that are running *right now* — the deck
+   *  of cards pinned to the top of the auxiliary column. Workflow fan-out
+   *  agents are included (unlike the scope dropdown, which excludes them to
+   *  stay a menu): "看完整个任务的所有 agent 状态" means all of them, and the
+   *  deck caps its render rather than its input. Sorted most-recently-active
+   *  first so the cap keeps the ones actually moving. */
+  const liveSubagents = useMemo((): SessionInfo[] => {
+    if (!liveSession) return [];
+    const parentId = liveSession.isSubagent
+      ? liveSession.parentSessionId
+      : liveSession.id;
+    if (!parentId) return [];
+    return sessions
+      .filter(
+        (s) =>
+          s.isSubagent &&
+          s.parentSessionId === parentId &&
+          s.id !== liveSession.id &&
+          LIVE_STATUSES.has(s.status),
+      )
+      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  }, [liveSession, sessions]);
+
+  // A dismissal of the agent deck is spent once the last one finishes, so the
+  // next fan-out earns a fresh auto-open.
+  useEffect(() => {
+    setAux((st) => syncLiveAgents(st, liveSubagents.length));
+  }, [liveSubagents.length]);
 
   const tabs = useMemo((): SessionInfo[] => {
     if (!liveSession) return [];
@@ -927,491 +1009,388 @@ export function SessionDetail({
     return mainSession ? [mainSession, ...ordered] : ordered;
   }, [liveSession, sessions]);
 
+  // The auxiliary column's tab strip: the running agents, the session's facets,
+  // then every doc opened from the transcript. Conditional facets appear on the
+  // same terms their old tabs did — only when the session has something to show.
+  const auxTabs = useMemo((): AuxTab[] => {
+    const list: AuxTab[] = [];
+    if (liveSubagents.length > 0) {
+      list.push({
+        id: AGENTS_TAB,
+        label: t("detail.live_agents", { count: liveSubagents.length }),
+      });
+    }
+    list.push({ id: "skills", label: t("detail.tab_skills") });
+    list.push({ id: "decisions", label: t("detail.tab_decisions") });
+    list.push({ id: "tokens", label: t("detail.tab_tokens") });
+    if (hasTaskPlans) list.push({ id: "tasks", label: t("detail.tab_tasks") });
+    if (hasBgTasks) {
+      list.push({ id: "bgtasks", label: `${t("detail.tab_bgtasks")} (${bgTasks.length})` });
+    }
+    if (hasScratchpad) {
+      list.push({
+        id: "scratchpad",
+        label: `${t("detail.tab_scratchpad")} (${scratchpadCount})`,
+      });
+    }
+    if (hasWorkflows) {
+      list.push({
+        id: "workflow",
+        label: `${t("detail.tab_workflow")} (${workflowTrees.length})`,
+      });
+    }
+    for (const d of aux.docs) list.push({ id: d.id, label: d.label, closable: true });
+    return list;
+  }, [
+    t,
+    liveSubagents.length,
+    hasTaskPlans,
+    hasBgTasks,
+    bgTasks.length,
+    hasScratchpad,
+    scratchpadCount,
+    hasWorkflows,
+    workflowTrees.length,
+    aux.docs,
+  ]);
+
+  // A selection whose tab has since disappeared (the session took another turn
+  // and emptied 后台任务, say) would otherwise hold the panel on nothing.
+  useEffect(() => {
+    const ids = new Set(auxTabs.map((tb) => tb.id));
+    setAux((st) => pruneTab(st, (id) => ids.has(id)));
+  }, [auxTabs]);
+
+  const activeTab = activeAuxTab(aux, liveSubagents.length);
+  const auxOpen = activeTab != null;
+  const activeFacet = activeTab != null && isAuxFacet(activeTab) ? activeTab : null;
+  const activeDoc = activeTab == null ? null : aux.docs.find((d) => d.id === activeTab) ?? null;
+  // Overlay until the pane is wide enough for two columns. `paneWidth === 0` is
+  // the pre-measure frame; treat it as wide so the panel doesn't flash as an
+  // overlay on mount.
+  const auxOverlay = paneWidth > 0 && paneWidth < AUX_OVERLAY_PX;
+  // The toolbar switch: hide it when it is showing, and bring back the tab the
+  // reader was last on (the agent deck, if agents are running) when it is not.
+  const reopenTabId = auxTabs[0]?.id ?? "skills";
+  const toggleAuxPanel = useCallback(() => {
+    setAux((st) =>
+      activeAuxTab(st, liveSubagents.length) == null ? showTab(st, reopenTabId) : closeAux(st),
+    );
+  }, [liveSubagents.length, reopenTabId]);
+
   return (
     // Both link capabilities cover the whole component, so the reader modal and
-    // every tool-block renderer inherit them too. `openWeb` is null outside a
-    // tab strip, which is precisely "send it to the browser".
+    // every tool-block renderer inherit them too — and both now land in the
+    // auxiliary column, which every instance of this component has.
     <WikiLinksProvider value={wikiLinks}>
-      <WebLinkProvider value={tabOpener?.openWeb ?? null}>
-      <div className={`${styles.root} ${liveSession ? styles.open : ""} ${lite ? styles.lite : ""} ${inline ? styles.inline : ""}`}>
+      <WebLinkProvider value={openWebInAux}>
+      <div
+        ref={rootRef}
+        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""}`}
+      >
         {liveSession && (
           <>
-          {/* Header — two rows. The AI title leads (it is what identifies the
-              session); everything you only ever copy (session id, transcript
-              path, workspace path) lives behind the ⋯ menu. */}
-          <div className={styles.header}>
-            <div className={styles.header_row}>
-              <div
-                className={styles.header_title}
-                title={preferredTitle || liveSession.workspacePath}
-              >
-                {preferredTitle || liveSession.workspaceName}
-              </div>
-              <SessionHeaderMenu
-                sessionId={liveSession.id}
-                jsonlPath={liveSession.jsonlPath}
-                workspacePath={liveSession.workspacePath}
-                // Absent without a tab strip (the global drawer, Lite mode) —
-                // there is nowhere to put the second pane — and absent in the
-                // second pane itself, where it would offer to open this one.
-                onOpenSecondView={
-                  tabOpener && !secondView
-                    ? () => tabOpener.openSecondView(liveSession.id)
-                    : undefined
-                }
-              />
-              {!inline && (
-                <button className={styles.close_btn} onClick={close} title={t("common.close") || "Close"}>
-                  ✕
-                </button>
-              )}
-            </div>
-            <div className={styles.meta_row}>
-              {/* Only when the title line isn't already the workspace name. */}
-              {preferredTitle && preferredTitle !== liveSession.workspaceName && (
-                <span
-                  className={styles.workspace_chip}
-                  title={liveSession.workspacePath}
-                >
-                  {liveSession.workspaceName}
-                </span>
-              )}
-              {/* Agent scope: which member of the session family every facet is
-                  scoped to. A dropdown (not the old in-row segmented strip) so a
-                  growing subagent list never crowds the view tabs. */}
-              <AgentScopeSwitcher tabs={tabs} current={liveSession} onOpen={open} />
-              {liveSession.model && (
-                <span
-                  className={styles.meta_chip}
-                  title={t("card.tip_model", { model: liveSession.model })}
-                >
-                  {formatModel(liveSession.model)}
-                </span>
-              )}
-              {/* Reasoning effort — same lightbulb the cards use, but WITHOUT
-                  their `medium` cut. On a dense board a chip on every card says
-                  nothing; the detail header is the one place you come to ask
-                  what this session is actually running at, so `medium` is an
-                  answer there. */}
-              {effortChipLabel(liveSession) && (
-                <span
-                  className={styles.meta_chip}
-                  title={effortTitle(t, liveSession)}
-                >
-                  <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
-                    <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
-                  </svg>
-                  {effortChipLabel(liveSession)}
-                </span>
-              )}
-              {/* Context stays out of the fold once it crosses the warn line.
-                  Below it, it is a figure; above it, it is an alarm — the
-                  session is about to compact — and an alarm you have to click
-                  to see is not an alarm. */}
-              {liveSession.contextPercent != null &&
-                (metricsOpen || liveSession.contextPercent >= 0.8) && (
-                <span
-                  className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
-                  title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
-                >
-                  ctx {Math.round(liveSession.contextPercent * 100)}%
-                </span>
-              )}
-              {metricsOpen && (liveSession.totalCostUsd ?? 0) >= 0.005 && (
-                <span className={styles.meta_chip} title={t("card.tip_cost")}>
-                  ${liveSession.totalCostUsd.toFixed(2)}
-                </span>
-              )}
-              {metricsOpen && (
-                <span className={styles.meta_chip} title={t("tokens_out")}>
-                  {liveSession.totalOutputTokens.toLocaleString()} tok
-                </span>
-              )}
-              {metricsOpen && liveSession.reasoningOutputTokens > 0 && (
-                <span
-                  className={styles.meta_chip}
-                  title={t("reasoning_tokens_tip", {
-                    tokens: liveSession.reasoningOutputTokens.toLocaleString(),
-                    percent: reasoningPercent.toFixed(1),
-                  })}
-                >
-                  {t("reasoning_tokens_chip", {
-                    tokens: liveSession.reasoningOutputTokens.toLocaleString(),
-                    percent: reasoningPercent.toFixed(1),
-                  })}
-                </span>
-              )}
-              {metricsOpen && (liveSession.compactCount ?? 0) > 0 && (
-                <span
-                  className={styles.meta_chip}
-                  title={t("card.tip_compact", {
-                    count: liveSession.compactCount ?? 0,
-                    pre: (liveSession.compactPreTokens ?? 0).toLocaleString(),
-                    post: (liveSession.compactPostTokens ?? 0).toLocaleString(),
-                    cost: (liveSession.compactCostUsd ?? 0).toFixed(2),
-                  })}
-                >
-                  ⊞ {liveSession.compactCount}× ~${(liveSession.compactCostUsd ?? 0).toFixed(2)}
-                </span>
-              )}
-              {liveSession.ideName && (
-                <span className={styles.meta_chip}>{liveSession.ideName}</span>
-              )}
-              {liveSession.slug && (
-                <span className={styles.slug} title={t("card.tip_slug", { slug: liveSession.slug })}>
-                  {liveSession.slug}
-                </span>
-              )}
-              <ScheduleProvenanceChip session={liveSession} />
-              {/* Reveals the numeric chips above. Sits last so the identity run
-                  reads uninterrupted and the control lands at the row's end. */}
-              <button
-                type="button"
-                className={`${styles.metrics_toggle} ${metricsOpen ? styles.metrics_toggle_open : ""}`}
-                onClick={() => setMetricsOpen((v) => !v)}
-                title={t("detail.metrics") || "Session metrics"}
-                aria-expanded={metricsOpen}
-              >
-                {metricsOpen ? "×" : "···"}
-              </button>
-            </div>
-            {/* Pinned plan.
-                Cursor keeps plans as first-class objects in its sidebar, Jules
-                gives the plan its own card above the activity feed, Devin has a
-                Progress tab — the shape they converge on is that the plan does
-                not scroll away with the work. Fleet already had this row on the
-                session cards and the data on SessionInfo; it was only missing
-                where you actually read the run. Clicking opens the Tasks tab,
-                the same destination as from a card. */}
-            {liveSession.taskPlan && (
-              <PlanProgressRow
-                plan={liveSession.taskPlan}
-                variant="header"
-                onOpen={() => pickTab("tasks")}
-              />
-            )}
-            {/* Handoff relay chain — chip toggles the chain detail panel */}
-            {liveSession.handoff && <HandoffChainRow session={liveSession} />}
-            {/* Active fleet-watch(es) — what this session is waiting on */}
-            {liveSession.watches && liveSession.watches.length > 0 && (
-              <WatchStatusRow session={liveSession} />
-            )}
-          </div>
-
-          {/* View-tab row. The agent scope selector no longer lives here — it
-              moved to the header as a dropdown (AgentScopeSwitcher) so a growing
-              subagent list can't push these fixed tabs off the right edge. */}
-          <div className={styles.tab_bar}>
-            <button
-              className={`${styles.view_tab} ${viewTab === "messages" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("messages")}
-            >
-              {t("detail.tab_messages")}
-            </button>
-            <button
-              className={`${styles.view_tab} ${viewTab === "skills" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("skills")}
-            >
-              {t("detail.tab_skills")}
-            </button>
-            <button
-              className={`${styles.view_tab} ${viewTab === "decisions" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("decisions")}
-            >
-              {t("detail.tab_decisions")}
-            </button>
-            <button
-              className={`${styles.view_tab} ${viewTab === "tokens" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("tokens")}
-            >
-              {t("detail.tab_tokens")}
-            </button>
-            {hasTaskPlans && (
-              <button
-                className={`${styles.view_tab} ${viewTab === "tasks" ? styles.view_tab_active : ""}`}
-                onClick={() => pickTab("tasks")}
-              >
-                {t("detail.tab_tasks")}
-              </button>
-            )}
-            {hasBgTasks && (
-              <button
-                className={`${styles.view_tab} ${viewTab === "bgtasks" ? styles.view_tab_active : ""}`}
-                onClick={() => pickTab("bgtasks")}
-              >
-                {t("detail.tab_bgtasks")} ({bgTasks.length})
-              </button>
-            )}
-            {hasScratchpad && (
-              <button
-                className={`${styles.view_tab} ${viewTab === "scratchpad" ? styles.view_tab_active : ""}`}
-                onClick={() => pickTab("scratchpad")}
-              >
-                {t("detail.tab_scratchpad")} ({scratchpadCount})
-              </button>
-            )}
-            {hasWorkflows && (
-              <button
-                className={`${styles.view_tab} ${viewTab === "workflow" ? styles.view_tab_active : ""}`}
-                onClick={() => pickTab("workflow")}
-              >
-                {t("detail.tab_workflow")} ({workflowTrees.length})
-              </button>
-            )}
-          </div>
-
-          {viewTab === "scratchpad" && workspacePath && sessionId && (
-            <ScratchpadView workspace={workspacePath} sessionId={sessionId} />
-          )}
-
-          {viewTab === "decisions" && (
-            <DecisionHistory records={decisionRecords} mode="tab" />
-          )}
-
-          {viewTab === "skills" && (
-            <div className={styles.skills_panel}>
-              <SkillHistory jsonlPath={liveSession.jsonlPath} mode="tab" />
-            </div>
-          )}
-
-          {viewTab === "tokens" && liveSession && (
-            {
-              // `jsonlPath` carries each source's own handle: a file path for
-              // Claude, a `codex://` rollout URI, a `dsh://` session id.
-              codex: <CodexTokenPanel jsonlPath={liveSession.jsonlPath} />,
-              dsh: <DshTokenPanel uri={liveSession.jsonlPath} />,
-              claude: (
-                <TokenSpendPanel
-                  jsonlPath={liveSession.jsonlPath}
-                  workspacePath={liveSession.workspacePath}
-                />
-              ),
-            }[tokenPanelForAgentSource(liveSession.agentSource)]
-          )}
-
-          {viewTab === "tasks" && (
-            <div className={styles.tasks_panel}>
-              {taskPlans.map((plan, pi) => {
-                const done = plan.items.filter((it) => it.done).length;
-                const total = plan.items.length;
-                const allDone = total > 0 && done === total;
-                // Prefer the human-readable `**Plan:**` title; fall back to the
-                // sentinel id, then to the anonymous label.
-                const title = plan.title ?? plan.id ?? t("detail.tasks_anonymous");
-                // Keep the id as a secondary tag only when a title is present —
-                // otherwise the title already *is* the id, no need to repeat it.
-                const showId = Boolean(plan.title && plan.id);
-                // The first still-pending item is "current" for this plan —
-                // the visible answer to "做到第几个 P 了".
-                const currentIdx = plan.items.findIndex((it) => !it.done);
-                return (
-                  <div key={plan.id ?? `plan-${pi}`} className={styles.tasks_plan}>
-                    <div className={styles.tasks_plan_head}>
-                      <span className={styles.tasks_plan_title}>{title}</span>
-                      <span
-                        className={`${styles.tasks_plan_status} ${allDone ? styles.tasks_plan_status_done : styles.tasks_plan_status_active}`}
-                      >
-                        {allDone
-                          ? t("detail.tasks_status_done")
-                          : t("detail.tasks_status_active")}
-                      </span>
-                      <span className={styles.tasks_plan_count}>
-                        {done}/{total}
-                      </span>
+          <div className={styles.body_row}>
+            <div className={styles.main_col}>
+              {/* Hero banner. The session's identity and the controls that act
+                  on it, as one surface rather than a title row with a tab strip
+                  bolted under it — there are no tabs on this side any more, so
+                  nothing here should look like one. The AI title leads (it is
+                  what identifies the session); everything you only ever copy
+                  (session id, transcript path, workspace path) lives behind the
+                  ⋯ menu; the plan / handoff / watch rows ride along the bottom
+                  edge, where they stay put instead of scrolling away with the
+                  conversation. */}
+              <div className={styles.hero}>
+                <div className={styles.hero_top}>
+                  <div className={styles.hero_ident}>
+                    <div
+                      className={styles.header_title}
+                      title={preferredTitle || liveSession.workspacePath}
+                    >
+                      {preferredTitle || liveSession.workspaceName}
                     </div>
-                    {(showId || plan.source) && (
-                      <div className={styles.tasks_plan_sub}>
-                        {showId && <span className={styles.tasks_plan_id}>{plan.id}</span>}
-                        {plan.source && (
-                          <span className={styles.tasks_plan_source} title={plan.source}>
-                            {plan.source}
-                          </span>
-                        )}
+                  <div className={styles.meta_row}>
+                    {/* Only when the title line isn't already the workspace name. */}
+                    {preferredTitle && preferredTitle !== liveSession.workspaceName && (
+                      <span
+                        className={styles.workspace_chip}
+                        title={liveSession.workspacePath}
+                      >
+                        {liveSession.workspaceName}
+                      </span>
+                    )}
+                    {/* Agent scope: which member of the session family every facet is
+                        scoped to. A dropdown (not the old in-row segmented strip) so a
+                        growing subagent list never crowds the view tabs. */}
+                    <AgentScopeSwitcher tabs={tabs} current={liveSession} onOpen={open} />
+                    {liveSession.model && (
+                      <span
+                        className={styles.meta_chip}
+                        title={t("card.tip_model", { model: liveSession.model })}
+                      >
+                        {formatModel(liveSession.model)}
+                      </span>
+                    )}
+                    {/* Reasoning effort — same lightbulb the cards use, but WITHOUT
+                        their `medium` cut. On a dense board a chip on every card says
+                        nothing; the detail header is the one place you come to ask
+                        what this session is actually running at, so `medium` is an
+                        answer there. */}
+                    {effortChipLabel(liveSession) && (
+                      <span
+                        className={styles.meta_chip}
+                        title={effortTitle(t, liveSession)}
+                      >
+                        <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
+                          <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
+                        </svg>
+                        {effortChipLabel(liveSession)}
+                      </span>
+                    )}
+                    {/* Context stays out of the fold once it crosses the warn line.
+                        Below it, it is a figure; above it, it is an alarm — the
+                        session is about to compact — and an alarm you have to click
+                        to see is not an alarm. */}
+                    {liveSession.contextPercent != null &&
+                      (metricsOpen || liveSession.contextPercent >= 0.8) && (
+                      <span
+                        className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
+                        title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
+                      >
+                        ctx {Math.round(liveSession.contextPercent * 100)}%
+                      </span>
+                    )}
+                    {metricsOpen && (liveSession.totalCostUsd ?? 0) >= 0.005 && (
+                      <span className={styles.meta_chip} title={t("card.tip_cost")}>
+                        ${liveSession.totalCostUsd.toFixed(2)}
+                      </span>
+                    )}
+                    {metricsOpen && (
+                      <span className={styles.meta_chip} title={t("tokens_out")}>
+                        {liveSession.totalOutputTokens.toLocaleString()} tok
+                      </span>
+                    )}
+                    {metricsOpen && liveSession.reasoningOutputTokens > 0 && (
+                      <span
+                        className={styles.meta_chip}
+                        title={t("reasoning_tokens_tip", {
+                          tokens: liveSession.reasoningOutputTokens.toLocaleString(),
+                          percent: reasoningPercent.toFixed(1),
+                        })}
+                      >
+                        {t("reasoning_tokens_chip", {
+                          tokens: liveSession.reasoningOutputTokens.toLocaleString(),
+                          percent: reasoningPercent.toFixed(1),
+                        })}
+                      </span>
+                    )}
+                    {metricsOpen && (liveSession.compactCount ?? 0) > 0 && (
+                      <span
+                        className={styles.meta_chip}
+                        title={t("card.tip_compact", {
+                          count: liveSession.compactCount ?? 0,
+                          pre: (liveSession.compactPreTokens ?? 0).toLocaleString(),
+                          post: (liveSession.compactPostTokens ?? 0).toLocaleString(),
+                          cost: (liveSession.compactCostUsd ?? 0).toFixed(2),
+                        })}
+                      >
+                        ⊞ {liveSession.compactCount}× ~${(liveSession.compactCostUsd ?? 0).toFixed(2)}
+                      </span>
+                    )}
+                    {liveSession.ideName && (
+                      <span className={styles.meta_chip}>{liveSession.ideName}</span>
+                    )}
+                    {liveSession.slug && (
+                      <span className={styles.slug} title={t("card.tip_slug", { slug: liveSession.slug })}>
+                        {liveSession.slug}
+                      </span>
+                    )}
+                    <ScheduleProvenanceChip session={liveSession} />
+                    {/* Reveals the numeric chips above. Sits last so the identity run
+                        reads uninterrupted and the control lands at the row's end. */}
+                    <button
+                      type="button"
+                      className={`${styles.metrics_toggle} ${metricsOpen ? styles.metrics_toggle_open : ""}`}
+                      onClick={() => setMetricsOpen((v) => !v)}
+                      title={t("detail.metrics") || "Session metrics"}
+                      aria-expanded={metricsOpen}
+                    >
+                      {metricsOpen ? "×" : "···"}
+                    </button>
+                  </div>
+                  </div>
+                  {/* Toolbar. The auxiliary column's switch leads it: with the
+                      facet buttons gone from this side, this is how you get the
+                      panel back once it is closed. */}
+                  <div className={styles.hero_tools}>
+                    <button
+                      type="button"
+                      className={`${styles.hero_tool} ${auxOpen ? styles.hero_tool_on : ""}`}
+                      onClick={toggleAuxPanel}
+                      aria-pressed={auxOpen}
+                      title={auxOpen ? t("detail.aux_hide", "收起辅助栏") : t("detail.aux_show", "展开辅助栏")}
+                      aria-label={auxOpen ? t("detail.aux_hide", "收起辅助栏") : t("detail.aux_show", "展开辅助栏")}
+                    >
+                      <PanelRight size={14} strokeWidth={1.8} />
+                      {liveSubagents.length > 0 && (
+                        <span className={styles.hero_tool_badge}>{liveSubagents.length}</span>
+                      )}
+                    </button>
+                    <SessionHeaderMenu
+                      sessionId={liveSession.id}
+                      jsonlPath={liveSession.jsonlPath}
+                      workspacePath={liveSession.workspacePath}
+                    />
+                    {!inline && (
+                      <button
+                        className={styles.close_btn}
+                        onClick={close}
+                        title={t("common.close") || "Close"}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {/* Pinned plan.
+                    Cursor keeps plans as first-class objects in its sidebar, Jules
+                    gives the plan its own card above the activity feed, Devin has a
+                    Progress tab — the shape they converge on is that the plan does
+                    not scroll away with the work. Fleet already had this row on the
+                    session cards and the data on SessionInfo; it was only missing
+                    where you actually read the run. Clicking opens the Tasks tab,
+                    the same destination as from a card. */}
+                {liveSession.taskPlan && (
+                  <PlanProgressRow
+                    plan={liveSession.taskPlan}
+                    variant="header"
+                    onOpen={() => setAux((st) => showTab(st, "tasks"))}
+                  />
+                )}
+                {/* Handoff relay chain — chip toggles the chain detail panel */}
+                {liveSession.handoff && <HandoffChainRow session={liveSession} />}
+                {/* Active fleet-watch(es) — what this session is waiting on */}
+                {liveSession.watches && liveSession.watches.length > 0 && (
+                  <WatchStatusRow session={liveSession} />
+                )}
+              </div>
+
+              <div className={styles.messages_pane}>
+                {syncingLatest && (
+                  <div className={styles.syncing_latest} role="status" aria-live="polite">
+                    <LoaderCircle size={14} aria-hidden="true" />
+                    {t("detail.syncing_latest", "正在同步最新消息…")}
+                  </div>
+                )}
+                <div
+                  ref={scrollRef}
+                  className={styles.scroll_area}
+                  style={{ paddingBottom: dockHeight }}
+                >
+                  {/* The "load earlier" control lives inside MessageList, which
+                      owns the render window this button used to duplicate. */}
+                  <AgentNavProvider nav={agentNav}>
+                    <MessageList
+                      messages={displayedMessages}
+                      isLoading={isLoading}
+                      stalled={loadStalled}
+                      onRetry={retryLoad}
+                      searchQuery={searchQuery}
+                      status={liveSession?.status ?? null}
+                      liveThinking={liveThinking}
+                      decisionRecords={decisionRecords}
+                      onLoadEarlier={loadEarlier}
+                      fullyLoaded={fullyLoaded}
+                      isLoadingEarlier={isLoadingEarlier}
+                      paths={pathLinks}
+                      // Use the live-refreshed session (same source every other
+                      // jsonlPath consumer here uses); `session` is the possibly-
+                      // stale object the drawer was opened with, whose jsonlPath
+                      // can be absent for sessions opened from a partial shape.
+                      jsonlPath={liveSession?.jsonlPath ?? session?.jsonlPath}
+                    />
+                    {inlineFleetAsk && (
+                      <div className={styles.inline_fleet_ask} data-testid="inline-codex-fleet-ask">
+                        <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
+                          <InlineFleetAskCard decision={inlineFleetAsk} compact />
+                        </Suspense>
                       </div>
                     )}
-                    <ul className={styles.tasks_items}>
-                      {plan.items.map((it, ii) => {
-                        const isCurrent = ii === currentIdx;
-                        return (
-                          <li
-                            key={ii}
-                            className={`${styles.tasks_item} ${it.done ? styles.tasks_item_done : ""} ${isCurrent ? styles.tasks_item_current : ""}`}
-                          >
-                            <span className={styles.tasks_check} aria-hidden>
-                              {it.done ? "☑" : isCurrent ? "▶" : "☐"}
-                            </span>
-                            <span className={styles.tasks_text}>{it.text}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {viewTab === "bgtasks" && (
-            <div className={styles.bgtasks_panel}>
-              {bgTasks.map((bt) => {
-                const icon = bgTaskIcon(bt.type);
-                const dataType = bgTaskDataType(bt.type);
-                const label = bt.description || bt.command || bt.id;
-                // A subagent task correlates to its own scanned session
-                // (`agent-<id>`, see session.rs / openAgentSession). When that
-                // session is present we read its *live* status and let the row
-                // open it — far more accurate than the last-Stop snapshot,
-                // which for a subagent can be minutes stale.
-                const linked =
-                  bt.type === "subagent"
-                    ? sessions.find((s) => s.id === `agent-${bt.id}`)
-                    : undefined;
-                if (linked) {
-                  return (
-                    <button
-                      key={bt.id}
-                      className={styles.bgtask_item_link}
-                      onClick={() => openAgentSession(bt.id)}
-                      title={t("detail.bgtask_open_hint")}
-                    >
-                      <span className={styles.bgtask_icon} aria-hidden>{icon}</span>
-                      <span className={styles.tab_dot} data-status={linked.status} />
-                      <span className={styles.bgtask_type} data-bgtype={dataType}>
-                        {linked.agentType ?? bt.type}
-                      </span>
-                      <span className={styles.bgtask_desc}>
-                        {linked.aiTitle || label}
-                      </span>
-                    </button>
-                  );
-                }
-                // Shell / monitor, or a subagent whose session hasn't surfaced
-                // (or already aged out): no live source, so this row reflects
-                // the *last Stop* only — flag it as such rather than imply it's
-                // current.
-                return (
-                  <div key={bt.id} className={styles.bgtask_item}>
-                    <span className={styles.bgtask_icon} aria-hidden>{icon}</span>
-                    <span className={styles.bgtask_type} data-bgtype={dataType}>
-                      {bt.type}
-                    </span>
-                    <span className={styles.bgtask_desc}>{label}</span>
-                    <span
-                      className={styles.bgtask_stale}
-                      title={
-                        liveSession.lastActivityMs
-                          ? new Date(liveSession.lastActivityMs).toLocaleString()
-                          : undefined
-                      }
-                    >
-                      {t("detail.bgtask_as_of_stop")}
-                    </span>
-                  </div>
-                );
-              })}
-              <div className={styles.bgtasks_note}>{t("detail.bgtasks_note")}</div>
-            </div>
-          )}
-
-          {viewTab === "workflow" && (
-            <div className={styles.workflow_panel}>
-              {workflowTrees.map((tree) => {
-                const done = tree.agents.filter((a) => a.status === "done").length;
-                return (
-                  <div key={tree.runId} className={styles.workflow_run}>
-                    <div className={styles.workflow_run_head}>
-                      <span className={styles.workflow_run_name}>
-                        {tree.name ?? tree.runId}
-                      </span>
-                      <span className={styles.workflow_run_meta}>
-                        {tree.runId} · {done}/{tree.agents.length} agents
-                      </span>
-                    </div>
-                    <WorkflowDag tree={tree} onOpenAgent={openAgentSession} />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {viewTab === "messages" && (
-            <div className={styles.messages_pane}>
-              {syncingLatest && (
-                <div className={styles.syncing_latest} role="status" aria-live="polite">
-                  <LoaderCircle size={14} aria-hidden="true" />
-                  {t("detail.syncing_latest", "正在同步最新消息…")}
+                  </AgentNavProvider>
                 </div>
-              )}
-              <div
-                ref={scrollRef}
-                className={styles.scroll_area}
-                style={{ paddingBottom: dockHeight }}
-              >
-                {/* The "load earlier" control lives inside MessageList, which
-                    owns the render window this button used to duplicate. */}
-                <AgentNavProvider nav={agentNav}>
-                  <MessageList
-                    messages={displayedMessages}
-                    isLoading={isLoading}
-                    stalled={loadStalled}
-                    onRetry={retryLoad}
-                    searchQuery={searchQuery}
-                    status={liveSession?.status ?? null}
-                    liveThinking={liveThinking}
-                    decisionRecords={decisionRecords}
-                    onLoadEarlier={loadEarlier}
-                    fullyLoaded={fullyLoaded}
-                    isLoadingEarlier={isLoadingEarlier}
-                    paths={pathLinks}
-                    // Use the live-refreshed session (same source every other
-                    // jsonlPath consumer here uses); `session` is the possibly-
-                    // stale object the drawer was opened with, whose jsonlPath
-                    // can be absent for sessions opened from a partial shape.
-                    jsonlPath={liveSession?.jsonlPath ?? session?.jsonlPath}
-                  />
-                  {inlineFleetAsk && (
-                    <div className={styles.inline_fleet_ask} data-testid="inline-codex-fleet-ask">
-                      <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
-                        <InlineFleetAskCard decision={inlineFleetAsk} compact />
-                      </Suspense>
-                    </div>
-                  )}
-                </AgentNavProvider>
+
+                {/* Composer + follow control, floating over the bottom of the
+                    transcript instead of sitting in a separate docked bar below
+                    it: same reading column as the messages, and the conversation
+                    scrolls under it behind a fade. The scroller reserves this
+                    element's measured height as bottom padding.
+
+                    Resume/enqueue: when the turn has ended submit resumes; while
+                    the turn is still running it queues a follow-up (delivered
+                    when the turn ends). One of canResume / canEnqueue holds. */}
+                {(showsComposer || !isFollowing) && (
+                  <div ref={dockRef} className={styles.dock_layer}>
+                    {!isFollowing && (
+                      <button className={styles.follow_pill} onClick={scrollToBottom}>
+                        ↓ {t("detail.scroll_to_latest")}
+                      </button>
+                    )}
+                    {showsComposer && liveSession && (
+                      <div className={styles.resume_dock}>
+                        <ResumeComposer
+                          sessionId={liveSession.id}
+                          workspacePath={liveSession.workspacePath}
+                          agentSource={liveSession.agentSource}
+                          session={liveSession}
+                          onResumed={handleResumed}
+                          mode={canEnqueue ? "enqueue" : "resume"}
+                          pendingMessages={liveSession.pendingMessages ?? []}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-
-              {/* Composer + follow control, floating over the bottom of the
-                  transcript instead of sitting in a separate docked bar below
-                  it: same reading column as the messages, and the conversation
-                  scrolls under it behind a fade. The scroller reserves this
-                  element's measured height as bottom padding.
-
-                  Resume/enqueue: when the turn has ended submit resumes; while
-                  the turn is still running it queues a follow-up (delivered
-                  when the turn ends). One of canResume / canEnqueue holds. */}
-              {(showsComposer || !isFollowing) && (
-                <div ref={dockRef} className={styles.dock_layer}>
-                  {!isFollowing && (
-                    <button className={styles.follow_pill} onClick={scrollToBottom}>
-                      ↓ {t("detail.scroll_to_latest")}
-                    </button>
-                  )}
-                  {showsComposer && liveSession && (
-                    <div className={styles.resume_dock}>
-                      <ResumeComposer
-                        sessionId={liveSession.id}
-                        workspacePath={liveSession.workspacePath}
-                        agentSource={liveSession.agentSource}
-                        session={liveSession}
-                        onResumed={handleResumed}
-                        mode={canEnqueue ? "enqueue" : "resume"}
-                        pendingMessages={liveSession.pendingMessages ?? []}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
-          )}
+
+            {auxOpen && (
+              <SessionAuxPanel
+                overlay={auxOverlay}
+                width={auxWidth}
+                isDragging={auxDragging}
+                onResizeStart={onAuxResize}
+                tabs={auxTabs}
+                activeId={activeTab}
+                onPick={pickTab}
+                onCloseTab={dropDoc}
+                onClose={closeAuxPanel}
+              >
+                {activeTab === AGENTS_TAB && (
+                  <SubagentLiveCards agents={liveSubagents} onOpen={open} />
+                )}
+                {activeDoc && (
+                  <SessionAuxDoc
+                    doc={activeDoc}
+                    onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
+                    onClose={() => dropDoc(activeDoc.id)}
+                  />
+                )}
+                {activeFacet && (
+                  <SessionFacetPanel
+                    facet={activeFacet}
+                    session={liveSession}
+                    decisionRecords={decisionRecords}
+                    taskPlans={taskPlans}
+                    bgTasks={bgTasks}
+                    workflowTrees={workflowTrees}
+                    sessions={sessions}
+                    onOpenAgent={openAgentSession}
+                  />
+                )}
+              </SessionAuxPanel>
+            )}
+          </div>
         </>
       )}
       {/* Portalled to <body> on purpose: a fixed overlay inside the pane would

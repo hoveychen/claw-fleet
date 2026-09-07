@@ -29,9 +29,8 @@ export interface PathLinkContext {
   /** Open in the 文件 page. `absPath` is already resolved. */
   openInFiles: (absPath: string, line: number | null) => void;
   /**
-   * Paths a previous click could not resolve to any file. Undefined in the
-   * decision-float window, which hands the click to the main window and never
-   * hears back.
+   * Paths a previous click could not resolve to any file. Undefined on a
+   * surface that dispatches the click somewhere it never hears back from.
    */
   unresolved?: string[];
 }

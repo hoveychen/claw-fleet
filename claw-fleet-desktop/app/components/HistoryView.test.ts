@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFrozenOrder,
-  matchesWorkspaceFilter,
-  sessionPaneStyle,
 } from "./HistoryView";
 import { chainBarColor, dwellReadTargets } from "./sessionGroups";
 import { sessionEq } from "./SessionRow";
@@ -188,67 +186,6 @@ describe("sessionEq", () => {
 });
 
 /**
- * `chatOnly` narrows the rail to the pure-chat workspace and nothing else; with
- * it off the rail is not filtered by mode at all, so chat sessions show up
- * alongside the repos under "all directories". The cases that matter: the
- * toggle owns the rail outright while on (a directory left selected underneath
- * must not narrow it), chat is included rather than dropped while off, and a
- * chat path the backend never handed us must not silently empty the rail.
- */
-describe("matchesWorkspaceFilter", () => {
-  const CHAT = "/Users/foo/.fleet/chat";
-  const chatSession = { ...base(), workspacePath: CHAT } as SessionInfo;
-  const repoSession = { ...base(), workspacePath: "/Users/foo/repo" } as SessionInfo;
-
-  it("keeps only chat sessions while the chat toggle is on", () => {
-    expect(matchesWorkspaceFilter(chatSession, "all", CHAT, true)).toBe(true);
-    expect(matchesWorkspaceFilter(repoSession, "all", CHAT, true)).toBe(false);
-  });
-
-  // Chat mode owns the whole rail — a directory left selected underneath it
-  // must not narrow the chat sessions it shows.
-  it("ignores the directory filter while the chat toggle is on", () => {
-    expect(matchesWorkspaceFilter(chatSession, "/Users/foo/repo", CHAT, true)).toBe(true);
-    expect(matchesWorkspaceFilter(repoSession, "/Users/foo/repo", CHAT, true)).toBe(false);
-  });
-
-  // The toggle is chat-*only*, not chat-on/chat-off: with it off the rail is
-  // unfiltered by mode, so "all directories" includes the chat sessions too.
-  it("includes chat sessions under the all-directories filter", () => {
-    expect(matchesWorkspaceFilter(chatSession, "all", CHAT, false)).toBe(true);
-    expect(matchesWorkspaceFilter(repoSession, "all", CHAT, false)).toBe(true);
-  });
-
-  it("still matches a plain workspace path", () => {
-    expect(matchesWorkspaceFilter(repoSession, "/Users/foo/repo", CHAT, false)).toBe(true);
-    expect(matchesWorkspaceFilter(chatSession, "/Users/foo/repo", CHAT, false)).toBe(false);
-  });
-
-  // The dropdown collapses in-repo worktree checkouts onto their repo root
-  // (via distinctWorkspaces), so the option value is the root. A session
-  // running inside `<repo>/.worktrees/<task>` must therefore match the root
-  // filter — an exact-path compare would silently omit it from the view.
-  it("matches a worktree-checkout session against its repo-root filter", () => {
-    const worktreeSession = {
-      ...base(),
-      workspacePath: "/Users/foo/repo/.worktrees/fix-bug",
-    } as SessionInfo;
-    expect(matchesWorkspaceFilter(worktreeSession, "/Users/foo/repo", CHAT, false)).toBe(true);
-  });
-
-  // Without the path neither half can be honoured, so the toggle goes inert
-  // rather than emptying the rail (chat mode) or hiding nothing (directory
-  // mode) on a guess.
-  it("degrades to a plain directory filter when the chat path is unknown", () => {
-    for (const s of [chatSession, repoSession]) {
-      expect(matchesWorkspaceFilter(s, "all", null, true)).toBe(true);
-      expect(matchesWorkspaceFilter(s, "all", null, false)).toBe(true);
-    }
-    expect(matchesWorkspaceFilter(chatSession, "/Users/foo/repo", null, true)).toBe(false);
-  });
-});
-
-/**
  * `applyFrozenOrder` holds the list still while the pointer is parked over it.
  * The behaviours that matter: it preserves the frozen order (not the live sort),
  * appends genuinely new rows at the end (never splices them into the frozen
@@ -301,21 +238,3 @@ describe("applyFrozenOrder", () => {
  * repaints it. Hidden session tabs must therefore stay laid out while being
  * invisible, so their scroll layer and ResizeObserver never collapse to zero.
  */
-describe("sessionPaneStyle", () => {
-  it("keeps a hidden pane in layout without accepting input", () => {
-    expect(sessionPaneStyle(false)).toEqual({
-      visibility: "hidden",
-      position: "absolute",
-      inset: 0,
-      pointerEvents: "none",
-    });
-  });
-
-  it("lets the active pane participate in the detail flex row", () => {
-    expect(sessionPaneStyle(true)).toEqual({
-      visibility: "visible",
-      position: "relative",
-      pointerEvents: "auto",
-    });
-  });
-});

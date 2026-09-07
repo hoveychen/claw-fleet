@@ -1,6 +1,6 @@
-/* Workspace sections belong to the desktop task rail. The flat SessionRail is
-   still shared by LiteApp, so its repository shell lives beside (not inside)
-   the relay-chain renderer. */
+/* Workspace sections belong to the desktop task rail. SessionRail also renders
+   as a flat list, so its repository shell lives beside (not inside) the
+   relay-chain renderer. */
 .workspace_section {
   display: flex;
   flex-direction: column;
@@ -66,7 +66,7 @@
 }
 
 /* Handoff-relay group wrappers for SessionRail — the grouped session list shared
-   by the desktop task page (HistoryView) and lite mode (LiteApp). A collapsed
+   by the desktop task page (HistoryView). A collapsed
    relay chain is a header row (tip session, click to expand) over an indented
    list of the chain's other hops. The header row itself and its expand chevron
    are SessionRow (see SessionRow.module.css); these classes only add the group

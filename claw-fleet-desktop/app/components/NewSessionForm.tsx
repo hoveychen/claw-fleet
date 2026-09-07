@@ -3,7 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder, FolderOpen, MessageCircle, Server } from "lucide-react";
-import { openSettingsWindow, useSessionsStore } from "../store";
+import { openSettings, useSessionsStore } from "../store";
 import { classifyHarnessError, requestSettingsTab } from "../harnessErrors";
 import {
   ChatComposer,
@@ -24,6 +24,7 @@ import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
 import { sshTargetOf, type SshHost } from "../sshHosts";
 import styles from "./NewSessionForm.module.css";
 import { rcaErrorMessage } from "../rcaErrors";
+import { repoRootPath } from "../../../shared-ts/repoPath";
 
 export interface NewSessionCreated {
   /** PID of the spawned `claude` process — the caller matches it against
@@ -46,9 +47,6 @@ export interface NewSessionFormProps {
    *  the user opened — an empty editor group — since there is nothing to back
    *  out to. The close button is then hidden along with it. */
   onCancel?: () => void;
-  /** Narrow-host (lite mode) rendering: compact option pills so the toolbar
-   *  fits the 340px strip without wrapping to a third line. */
-  compact?: boolean;
 }
 
 function basename(p: string): string {
@@ -57,23 +55,10 @@ function basename(p: string): string {
   return slash >= 0 ? normalized.slice(slash + 1) : normalized;
 }
 
-/** Collapse an in-repo worktree checkout to its repo root. Fleet develops plans
- *  inside `<repo-root>/.worktrees/<task-id>` (see the worktree workflow), which
- *  are transient — removed once the plan merges. The launcher must offer the
- *  durable repo root, never the task-id leaf. Mirrors the backend's
- *  `workspace_name` segment logic (session.rs), but returns the *path* prefix
- *  instead of the name. Paths without a `.worktrees` segment (including the
- *  unrelated `~/.fleet/worktrees/` task-workers, whose segment is `worktrees`)
- *  are returned unchanged. */
-export function repoRootPath(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const idx = normalized.split("/").indexOf(".worktrees");
-  if (idx <= 0) return path;
-  // Rejoin the segments before `.worktrees`, preserving the original separators
-  // by slicing the raw string at the segment boundary.
-  const before = normalized.split("/").slice(0, idx).join("/");
-  return before || path;
-}
+// `repoRootPath` moved to shared-ts/repoPath.ts once the mobile task page grew
+// the same folder sections; re-exported here so its many desktop callers (and
+// their imports) stay put.
+export { repoRootPath };
 
 /** True when `path` lives under an OS temp/scratchpad directory that should never
  *  be offered as a launchable workspace. Fleet (and Claude Code) drop per-session
@@ -228,7 +213,7 @@ export function defaultWorkspace(
  *  pills and custom popovers instead of labeled form rows and native
  *  <select>s. */
 
-export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormProps) {
+export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   // Tauri's native directory dialog browses the machine the *desktop* runs on.
@@ -578,9 +563,7 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   const chatModePill = (
     <button
       type="button"
-      className={`${pillStyles.ghost_pill} ${compact ? pillStyles.ghost_pill_compact : ""} ${
-        isChat ? styles.chat_pill_on : ""
-      }`}
+      className={`${pillStyles.ghost_pill} ${isChat ? styles.chat_pill_on : ""}`}
       aria-pressed={isChat}
       disabled={submitting || !chatPath}
       onClick={() => setChatMode(!isChat)}
@@ -679,7 +662,7 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
                 icon: <Server size={13} strokeWidth={1.7} className={pillStyles.menu_icon} />,
                 onSelect: () => {
                   requestSettingsTab("integration");
-                  void openSettingsWindow();
+                  openSettings();
                 },
               },
             ]
@@ -700,7 +683,6 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
       onEffortChange={setEffort}
       onPermissionModeChange={setPermissionMode}
       disabled={submitting}
-      compact={compact}
     />
   );
 
@@ -788,7 +770,7 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
                   className={styles.error_action}
                   onClick={() => {
                     requestSettingsTab("environment");
-                    void openSettingsWindow();
+                    openSettings();
                   }}
                 >
                   {t("env.open_env_panel")}

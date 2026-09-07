@@ -11,14 +11,15 @@ import i18n from "./i18n";
 import { playChime } from "./audio";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 
-/** Open the standalone Settings window. */
-export async function openSettingsWindow(): Promise<void> {
-  const { theme } = useUIStore.getState();
-  await invoke("open_settings_window", {
-    theme: resolveTheme(theme),
-  }).catch((e) => {
-    console.error("open_settings_window failed:", e);
-  });
+/** Open the in-app Settings overlay.
+ *
+ * Settings used to live in its own `settings.html` webview window, which meant
+ * a second window with its own copy of every store and cross-window theme/lang
+ * events to keep the two in sync. It is
+ * now an overlay inside the main window, so all of that is just a boolean: the
+ * panel reads the same stores the rest of the app already has. */
+export function openSettings(): void {
+  useUIStore.getState().setSettingsOpen(true);
 }
 
 // ── Theme store ───────────────────────────────────────────────────────────────
@@ -211,7 +212,6 @@ interface UIState {
    *  deliberately no `navGroup` field: the active tab is derived from `viewMode`
    *  via navGroupOf, so a cross-page hop can't desync the two. */
   lastViewByNavGroup: Record<NavGroup, ViewMode>;
-  liteMode: boolean;
   sidebarCollapsed: boolean;
   /** Per-view collapse state for each view's secondary sidebar (二级侧边栏),
    *  keyed by ViewMode. Re-clicking the already-active nav item toggles the
@@ -228,12 +228,6 @@ interface UIState {
    *  would fire an FTS query the user never asked for. */
   historyMarkFilter: MarkFilter;
   historyWorkspaceFilter: string;
-  /** Chat-only mode: show the pure-chat workspace and nothing else. Off is not
-   *  its mirror image — it simply stops filtering by mode, so chat sessions show
-   *  up under 「全部目录」 too. Independent of `historyWorkspaceFilter` rather
-   *  than a value inside it, so flipping it off returns to whatever directory
-   *  was selected before. See `matchesWorkspaceFilter`. */
-  historyChatOnly: boolean;
   historyActiveOnly: boolean;
   historyQuery: string;
   /** Group handoff-relay sessions (sharing a `handoff.chainId`) into one
@@ -252,40 +246,31 @@ interface UIState {
   updatePlansView: (patch: Partial<MainViewState["plans"]>) => void;
   setHistoryMarkFilter: (f: MarkFilter) => void;
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
-  setHistoryChatOnly: (on: boolean) => void;
   setHistoryActiveOnly: (on: boolean) => void;
   setHistoryQuery: (q: string) => void;
   setHistoryGroupHandoff: (on: boolean) => void;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
-  // Lite-mode hop from the active DecisionPanel into a dedicated decision-
-  // history view. Holds the session id whose history is being viewed, or null
-  // when the view is closed. Takes precedence over DecisionPanel and the
-  // session list until the user closes it via the back button.
-  liteDecisionHistorySessionId: string | null;
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
   /** Switch sidebar tabs: hops to that tab's remembered page (or its home page
    *  on the first visit). A no-op when the current page already belongs to it. */
   setNavGroup: (g: NavGroup) => void;
   setLastSessionViewMode: (m: SessionViewMode) => void;
-  setLiteMode: (on: boolean) => void;
   setSidebarCollapsed: (on: boolean) => void;
   /** Toggle the collapsed state of `view`'s secondary sidebar. */
   toggleSecondarySidebar: (view: ViewMode) => void;
   /** Explicitly set `view`'s secondary sidebar collapsed state. */
   setSecondarySidebar: (view: ViewMode, collapsed: boolean) => void;
   setMascotVisible: (on: boolean) => void;
-  setLiteDecisionHistorySessionId: (id: string | null) => void;
+  /** Settings overlay visibility. Deliberately not persisted — a settings
+   *  panel restored on boot is not a preference, it is a surprise. */
+  settingsOpen: boolean;
+  setSettingsOpen: (on: boolean) => void;
   /** When true, the DecisionPanel renders as a minimized bar at the bottom
    *  of the screen instead of the full card. Guard decisions force-expand. */
   decisionPanelCollapsed: boolean;
   setDecisionPanelCollapsed: (on: boolean) => void;
-  /** When true, pending decisions are always presented in the standalone
-   *  decision-float window instead of the in-app DecisionPanel, regardless
-   *  of whether the main window is minimized. */
-  floatingDecisionPanel: boolean;
-  setFloatingDecisionPanel: (on: boolean) => void;
   /** A pending "reveal this file in the 文件 page" request, raised when the
    *  user clicks a path in agent prose. FilesView owns the explorer's
    *  selection state internally, so a request travels through the store
@@ -420,26 +405,22 @@ function readMarkFilter(): MarkFilter {
 }
 
 /** Values the workspace filter used to take when the pure-chat workspace was
- *  still one of the `<select>`'s options rather than its own toggle. Every real
- *  value is an absolute path, so these bare words could never collide with one.
- *  Read-only: {@link readHistoryWorkspaceFilters} rewrites them on boot. */
+ *  still one of the `<select>`'s options, and later a 仅聊天 toggle. Both are
+ *  retired — the chat section is simply pinned to the top of the rail now — so
+ *  either legacy word collapses to "all". Every real value is an absolute path,
+ *  so these bare words could never collide with one. The rewrite is persisted,
+ *  not just derived: leaving the legacy string on disk would let it re-narrow
+ *  the rail on the next boot. */
 const LEGACY_CHAT_ONLY_FILTER = "chat";
 const LEGACY_CHAT_HIDDEN_FILTER = "no-chat";
 
-/** The workspace filter and the chat-only toggle, migrating the two retired
- *  pseudo-values above. "chat" becomes the toggle; "no-chat" has no equivalent
- *  left — 「全部目录」 now includes chat — so it collapses to "all". The rewrite is
- *  persisted, not just derived — leaving the legacy string on disk would let it
- *  re-force chat mode on the next boot after the user turned the toggle off. */
-function readHistoryWorkspaceFilters(): { filter: string; chatOnly: boolean } {
+function readHistoryWorkspaceFilter(): string {
   const raw = getItem("history-workspace-filter") ?? "all";
-  const legacyChatOnly = raw === LEGACY_CHAT_ONLY_FILTER;
-  if (legacyChatOnly || raw === LEGACY_CHAT_HIDDEN_FILTER) {
+  if (raw === LEGACY_CHAT_ONLY_FILTER || raw === LEGACY_CHAT_HIDDEN_FILTER) {
     setItem("history-workspace-filter", "all");
-    if (legacyChatOnly) setItem("history-chat-only", "true");
-    return { filter: "all", chatOnly: legacyChatOnly };
+    return "all";
   }
-  return { filter: raw, chatOnly: getItem("history-chat-only") === "true" };
+  return raw;
 }
 
 /** Keys this blob used to be written under, for tabs that have been renamed.
@@ -486,7 +467,7 @@ function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
 
 /** Read once: the call rewrites the retired pseudo-values on disk, so the two
  *  initial values below must come from the same read. */
-const initialHistoryWorkspaceFilters = readHistoryWorkspaceFilters();
+const initialHistoryWorkspaceFilter = readHistoryWorkspaceFilter();
 
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
@@ -494,13 +475,11 @@ export const useUIStore = create<UIState>((set) => ({
   lastSessionViewMode:
     (getItem("lastSessionViewMode") as SessionViewMode) ?? "gallery",
   lastViewByNavGroup: readLastViewByNavGroup(),
-  liteMode: getItem("liteMode") === "true",
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
   mascotVisible: getItem("mascot-visible") === "true",
   historyMarkFilter: readMarkFilter(),
-  historyWorkspaceFilter: initialHistoryWorkspaceFilters.filter,
-  historyChatOnly: initialHistoryWorkspaceFilters.chatOnly,
+  historyWorkspaceFilter: initialHistoryWorkspaceFilter,
   historyActiveOnly: getItem("history-active-only") === "true",
   historyQuery: "",
   // Default on — the empty/absent case yields grouping; only an explicit
@@ -528,10 +507,6 @@ export const useUIStore = create<UIState>((set) => ({
     setItem("history-workspace-filter", p);
     set({ historyWorkspaceFilter: p });
   },
-  setHistoryChatOnly: (on) => {
-    setItem("history-chat-only", on ? "true" : "false");
-    set({ historyChatOnly: on });
-  },
   setHistoryActiveOnly: (on) => {
     setItem("history-active-only", on ? "true" : "false");
     set({ historyActiveOnly: on });
@@ -541,9 +516,7 @@ export const useUIStore = create<UIState>((set) => ({
     setItem("history-group-handoff", on ? "true" : "false");
     set({ historyGroupHandoff: on });
   },
-  liteDecisionHistorySessionId: null,
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
-  floatingDecisionPanel: getItem("floating-decision-panel") === "true",
   setTheme: (t) => {
     setItem("theme", t);
     emit("overlay-theme-changed", t).catch(() => {});
@@ -559,11 +532,6 @@ export const useUIStore = create<UIState>((set) => ({
   setLastSessionViewMode: (m) => {
     setItem("lastSessionViewMode", m);
     set({ lastSessionViewMode: m });
-  },
-  setLiteMode: (on) => {
-    setItem("liteMode", on ? "true" : "false");
-    invoke("set_lite_mode", { enabled: on }).catch(() => {});
-    set({ liteMode: on });
   },
   fileNav: null,
   requestFileNav: (req) =>
@@ -630,21 +598,16 @@ export const useUIStore = create<UIState>((set) => ({
       setItem("secondary-sidebar-collapsed", JSON.stringify(next));
       return { secondarySidebarCollapsed: next };
     }),
+  settingsOpen: false,
+  setSettingsOpen: (on) => set({ settingsOpen: on }),
   setMascotVisible: (on) => {
     setItem("mascot-visible", on ? "true" : "false");
     emit("overlay-mascot-visible-changed", on).catch(() => {});
     set({ mascotVisible: on });
   },
-  setLiteDecisionHistorySessionId: (id) =>
-    set({ liteDecisionHistorySessionId: id }),
   setDecisionPanelCollapsed: (on) => {
     setItem("decision-panel-collapsed", on ? "true" : "false");
     set({ decisionPanelCollapsed: on });
-  },
-  setFloatingDecisionPanel: (on) => {
-    setItem("floating-decision-panel", on ? "true" : "false");
-    emit("overlay-floating-decision-panel-changed", on).catch(() => {});
-    set({ floatingDecisionPanel: on });
   },
 }));
 

@@ -157,6 +157,12 @@ pub struct SourceUsageSummary {
     /// `#[serde(default)]` keeps older serialized payloads deserializable.
     #[serde(default)]
     pub usage_source: Option<String>,
+    /// Which account these numbers belong to, so a foxy-managed machine can
+    /// name the account in use on every source, not just Claude. `None` when
+    /// the source cannot tell (e.g. Codex on API-key auth, which writes no
+    /// `id_token`). `#[serde(default)]` for older serialized payloads.
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 impl SourceUsageSummary {
@@ -193,6 +199,7 @@ impl SourceUsageSummary {
             } else {
                 Some(info.usage_source.clone())
             },
+            email: if info.email.is_empty() { None } else { Some(info.email.clone()) },
         }
     }
 
@@ -200,36 +207,65 @@ impl SourceUsageSummary {
     pub fn from_codex(val: &Value) -> Self {
         let plan = val["planType"].as_str().map(|s| s.to_string());
         let mut bars = Vec::new();
-        if let Some(primary) = val.get("primary") {
-            let pct = primary["usedPercent"].as_i64().unwrap_or(0);
-            let resets = primary["resetsAt"].as_i64()
-                .map(|ts| chrono::DateTime::from_timestamp(ts, 0)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_default());
-            bars.push(UsageBar {
-                label: "Primary".into(),
-                utilization: pct as f64 / 100.0,
-                resets_at: resets,
-            });
-        }
-        if let Some(secondary) = val.get("secondary") {
-            let pct = secondary["usedPercent"].as_i64().unwrap_or(0);
-            let resets = secondary["resetsAt"].as_i64()
-                .map(|ts| chrono::DateTime::from_timestamp(ts, 0)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_default());
-            bars.push(UsageBar {
-                label: "Secondary".into(),
-                utilization: pct as f64 / 100.0,
-                resets_at: resets,
-            });
+        let buckets = val.get("rateLimitBuckets").and_then(Value::as_array);
+        if let Some(buckets) = buckets.filter(|items| !items.is_empty()) {
+            for bucket in buckets {
+                for slot in ["primary", "secondary"] {
+                    if let Some(window) = bucket.get(slot).filter(|window| !window.is_null()) {
+                        bars.push(codex_usage_bar(bucket, window, slot));
+                    }
+                }
+            }
+        } else {
+            for (slot, label) in [("primary", "Primary"), ("secondary", "Secondary")] {
+                if let Some(window) = val.get(slot).filter(|window| !window.is_null()) {
+                    let mut bar = codex_usage_bar(val, window, slot);
+                    bar.label = label.to_string();
+                    bars.push(bar);
+                }
+            }
         }
         SourceUsageSummary {
             source: "codex".into(),
             plan,
             bars,
             usage_source: val["usageSource"].as_str().map(|s| s.to_string()),
+            email: val["email"].as_str().map(|s| s.to_string()),
         }
+    }
+}
+
+fn codex_usage_bar(bucket: &Value, window: &Value, slot: &str) -> UsageBar {
+    let base = bucket
+        .get("limitName")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .or_else(|| bucket.get("normalModelSlug").and_then(Value::as_str).filter(|value| !value.is_empty()))
+        .or_else(|| bucket.get("limitId").and_then(Value::as_str).filter(|value| !value.is_empty()))
+        .unwrap_or("Codex");
+    let duration = window
+        .get("windowDurationMins")
+        .and_then(Value::as_i64)
+        .filter(|mins| *mins > 0)
+        .map(|mins| {
+            if mins % (24 * 60) == 0 {
+                format!("{}d", mins / (24 * 60))
+            } else if mins % 60 == 0 {
+                format!("{}h", mins / 60)
+            } else {
+                format!("{mins}m")
+            }
+        })
+        .unwrap_or_else(|| if slot == "primary" { "Primary".into() } else { "Secondary".into() });
+    let resets_at = window["resetsAt"].as_i64().map(|ts| {
+        chrono::DateTime::from_timestamp(ts, 0)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_default()
+    });
+    UsageBar {
+        label: format!("{base} · {duration}"),
+        utilization: window["usedPercent"].as_i64().unwrap_or(0) as f64 / 100.0,
+        resets_at,
     }
 }
 
@@ -440,6 +476,23 @@ mod tests {
         assert!((s.bars[0].utilization - 0.45).abs() < f64::EPSILON);
         assert!((s.bars[1].utilization - 0.10).abs() < f64::EPSILON);
         assert!(s.bars[0].resets_at.is_some());
+    }
+
+    #[test]
+    fn from_codex_flattens_named_dynamic_buckets() {
+        let val = json!({
+            "planType": "plus",
+            "rateLimitBuckets": [
+                {"limitId": "codex", "primary": {"usedPercent": 12, "windowDurationMins": 300}},
+                {"limitId": "base_model_inference", "limitName": "Luna Reserve",
+                 "primary": {"usedPercent": 48, "windowDurationMins": 10080}}
+            ]
+        });
+        let summary = SourceUsageSummary::from_codex(&val);
+        assert_eq!(summary.bars.len(), 2);
+        assert_eq!(summary.bars[0].label, "codex · 5h");
+        assert_eq!(summary.bars[1].label, "Luna Reserve · 7d");
+        assert!((summary.bars[1].utilization - 0.48).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -9,6 +9,7 @@ import { fetchAccountUsage } from "../account";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { AccountUsage, TodayUsage, UsageBar } from "../types";
+import { FoxyIcon } from "./AgentSourceIcon";
 import { UsageChart } from "./UsageChart";
 import { CodexUsageChart } from "./CodexUsageChart";
 import styles from "./UsageView.module.css";
@@ -94,12 +95,30 @@ function Bar({ bar }: { bar: UsageBar }) {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className={styles.row}>
       <span className={styles.rowLabel}>{label}</span>
       <span className={styles.rowValue}>{value}</span>
     </div>
+  );
+}
+
+/** 「用量来源」那一行的值：foxy 画狐狸头，跟桌面卡头同一个标记。非 foxy 仍是
+ *  文字（各家自己的通道名）——手机上没有 hover tooltip，一个 OpenAI/Anthropic
+ *  的 mark 摆在这里跟标题里的源名重复，反而认不出它在说来源。 */
+function UsageSourceValue({
+  source,
+  fallback,
+}: {
+  source: string | null | undefined;
+  fallback: string;
+}) {
+  if (source !== "foxy-switcher") return <>{fallback}</>;
+  return (
+    <span className={styles.sourceIcon} aria-label="foxy-switcher">
+      <FoxyIcon />
+    </span>
   );
 }
 
@@ -194,9 +213,10 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
                   <Row
                     label={t("用量来源")}
                     value={
-                      claude.usageSource === "foxy-switcher"
-                        ? t("foxy-switcher（本地守护进程）")
-                        : t("Anthropic 接口")
+                      <UsageSourceValue
+                        source={claude.usageSource}
+                        fallback={t("Anthropic 接口")}
+                      />
                     }
                   />
                   {claude.bars.length > 0 && (
@@ -235,14 +255,16 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
           <div key={s.source} className={styles.section}>
             <div className={styles.sectionLabel}>{SOURCE_LABEL[s.source] ?? s.source}</div>
             <div className={styles.card}>
+              {s.email && <Row label={t("账号")} value={s.email} />}
               {s.plan && <Row label={t("套餐")} value={s.plan} />}
               {s.usageSource && (
                 <Row
                   label={t("用量来源")}
                   value={
-                    s.usageSource === "foxy-switcher"
-                      ? t("foxy-switcher（本地守护进程）")
-                      : t("Codex app-server")
+                    <UsageSourceValue
+                      source={s.usageSource}
+                      fallback={t("Codex app-server")}
+                    />
                   }
                 />
               )}

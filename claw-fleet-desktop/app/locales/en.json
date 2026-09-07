@@ -1597,12 +1597,6 @@
     "dismiss_tip": "Click to dismiss",
     "clear_all": "Clear all ({{n}})"
   },
-  "lite": {
-    "enter": "Lite portrait mode",
-    "exit": "Exit lite mode",
-    "mute": "Mute alert sounds",
-    "unmute": "Unmute alert sounds"
-  },
   "nav_group": {
     "aria": "Mode",
     "fleet": "Fleet",
@@ -1615,15 +1609,6 @@
     "secondary_expand": "Expand sidebar"
   },
   "tabs": {
-    "close": "Close",
-    "close_others": "Close Others",
-    "close_right": "Close to the Right",
-    "close_all": "Close All",
-    "overflow": "All Tabs",
-    "search": "Search tabs…",
-    "no_match": "No matching tabs",
-    "open_second_view": "Open a second view beside",
-    "open_second_view_sub": "Two panes on one session, each on its own tab",
     "file_readonly": "Read-only preview",
     "wiki_missing": "This doc isn't published, or was deleted",
     "wiki_open_page": "Open in the wiki page",
@@ -1633,7 +1618,6 @@
     "web_reload": "Reload",
     "web_open_browser": "Open in browser",
     "web_open_browser_short": "Browser",
-    "split_down": "Split down",
     "split_right": "Split right"
   },
   "detail": {
@@ -1645,6 +1629,11 @@
     "load_earlier": "Load earlier messages",
     "loading_earlier": "Loading earlier messages…",
     "syncing_latest": "Syncing latest messages…",
+    "live_agents": "Running agents · {{count}}",
+    "live_agents_more": "{{count}} more not shown",
+    "live_agent_generic": "Agent",
+    "aux_show": "Show side panel",
+    "aux_hide": "Hide side panel",
     "tab_decisions": "Decisions",
     "task_notification": "Background task",
     "task_done": "Completed",
@@ -1798,7 +1787,6 @@
     "alerts_master": "Mute",
     "mute_all": "Mute all alerts",
     "mute_all_desc": "Silences every chime and spoken announcement, including the decision panel. The single switch that turns sound off everywhere.",
-    "alerts_visual": "Visual",
     "general": "General",
     "appearance": "Appearance",
     "profile": "Profile",
@@ -1920,8 +1908,6 @@
     "user_title_placeholder": "Boss",
     "mascot_visible": "Show mascot",
     "mascot_visible_desc": "Display the kawaii sidebar mascot. Off by default — flip on to bring it out.",
-    "floating_decision_panel": "Always use the standalone decision window",
-    "floating_decision_panel_desc": "When on, pending decisions always pop up in a separate small window instead of being embedded in the main window.",
     "personalized_mascot": "Personalized assistant",
     "personalized_mascot_desc": "Use AI to generate context-aware quips based on your current tasks (uses Claude Haiku)",
     "tts": "Alert Sound",
@@ -2089,6 +2075,7 @@
     "other": "Other",
     "other_placeholder": "Type your answer…",
     "edit_option": "Edit this option (copy to Other)",
+    "preview": "Preview",
     "mode_single": "Single",
     "mode_multi": "Multi",
     "mode_tooltip": "Switch this question between single and multi select",
@@ -2141,7 +2128,6 @@
   "decision_panel": {
     "history_title": "Recent in this session",
     "history_more": "+{{count}} more in session detail",
-    "view_session_history": "View this session's history",
     "collapse": "Collapse panel",
     "expand": "Expand panel",
     "collapsed_label": "Decision panel · {{count}} pending",
@@ -2162,11 +2148,6 @@
     "submit_with_action": "Submit ({{action}})",
     "submitting": "Submitting…",
     "cancel": "Cancel"
-  },
-  "lite_decision_history": {
-    "back": "Back",
-    "loading": "Loading…",
-    "error": "Failed to load decisions."
   },
   "view_report": "Report",
   "report": {
@@ -2251,9 +2232,7 @@
     "filter_workspace_off": "Chat-only mode ignores the workspace filter",
     "all_workspaces": "All workspaces",
     "workspaces": "Workspaces",
-    "workspace_session_count": "{{count}} sessions",
-    "chat_mode": "Chat only",
-    "filter_chat_tip": "Show only pure-chat sessions; when off, chat sessions appear under all workspaces too",
+    "workspace_session_count": "{{count}} groups",
     "only_active": "Active only",
     "filter_active_tip": "Show only sessions still running or waiting for input",
     "mark_all_read": "Mark all read",

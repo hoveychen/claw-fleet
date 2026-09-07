@@ -16,7 +16,6 @@ const CHAT = "/Users/foo/.fleet/chat";
 
 /** Swapped per test to stand for "this machine has rca hosts" vs "it has none". */
 let sshHosts: unknown[] = [];
-const openSettings = vi.fn(async () => undefined);
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string) => {
@@ -24,7 +23,6 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "get_sources_config") return [{ tool: "claude", enabled: true, installed: true }];
     if (cmd === "list_ssh_hosts") return sshHosts;
     if (cmd === "list_remote_workspaces") return { workspaces: [] };
-    if (cmd === "open_settings_window") return openSettings();
     return null;
   }),
 }));
@@ -33,7 +31,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
 import i18n from "../i18n";
 import { NewSessionForm } from "./NewSessionForm";
 import { useComposerDraftStore } from "../composerDraft";
-import { useSessionsStore } from "../store";
+import { useSessionsStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -54,10 +52,9 @@ Object.defineProperty(window, "localStorage", {
   },
 });
 
-// `openSettingsWindow` resolves the theme, which reads `window.matchMedia` —
-// absent in this jsdom build. Without the stub it throws before reaching invoke
-// and the rejection is swallowed, so the row looks inert for a reason that has
-// nothing to do with the row.
+// The composer's theme resolution reads `window.matchMedia`, absent in this
+// jsdom build. Without the stub it throws and the rejection is swallowed, so
+// the row looks inert for a reason that has nothing to do with the row.
 Object.defineProperty(window, "matchMedia", {
   configurable: true,
   value: (query: string) => ({
@@ -92,7 +89,7 @@ beforeEach(() => {
     ],
   });
   sshHosts = [];
-  openSettings.mockClear();
+  useUIStore.getState().setSettingsOpen(false);
 });
 
 afterEach(() => {
@@ -153,15 +150,11 @@ describe("NewSessionForm rca entry", () => {
     );
     expect(row, "the add-host row is not a clickable menu item").toBeTruthy();
     await click(row!);
-    // The settings window is asked to open ON the integration tab — the seam is
-    // the localStorage key the settings window consumes on mount.
+    // Settings is asked to open ON the integration tab — the seam is the
+    // localStorage key the panel consumes on mount.
     expect(window.localStorage.getItem("settings-open-tab")).toBe("integration");
-    // The row fires the window open without awaiting it (the menu must not hang
-    // on a window), so let the invoke's microtask land before asserting on it.
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(openSettings).toHaveBeenCalled();
+    // …and the overlay itself is a store flag now, not a second window.
+    expect(useUIStore.getState().settingsOpen).toBe(true);
   });
 
   /** The existing behaviour must survive: a machine that HAS an rca host still

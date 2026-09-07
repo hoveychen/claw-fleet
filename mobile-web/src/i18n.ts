@@ -282,6 +282,10 @@ const DICT: Record<string, string> = {
   配对: "Pairing",
   关于: "About",
 
+  // ── 终端（「更多」页进去的全屏页）──
+  终端: "Terminal",
+  "在桌面端主机的某个目录里开一个 shell": "Open a shell in a directory on the desktop host",
+
   // ── 知识库（「更多」页进去的全屏页）──
   "agent 沉淀下来的调研与文档": "Research and docs agents archived for later",
   刷新: "Refresh",
@@ -724,7 +728,6 @@ const DICT: Record<string, string> = {
   组织: "Organization",
   套餐: "Plan",
   用量来源: "Usage source",
-  "foxy-switcher（本地守护进程）": "foxy-switcher (local daemon)",
   "Anthropic 接口": "Anthropic API",
   "Claude 账号读取失败：{0}": "Failed to read the Claude account: {0}",
   未知原因: "unknown reason",

@@ -24,7 +24,9 @@ export const RAILS: Partial<Record<ViewMode, RailConfig>> = {
   history: { storageKey: "history-rail-width", min: 240, max: 640, initial: 300 },
   audit: { storageKey: "audit-rail-width", min: 280, max: 720, initial: 380, side: "right" },
   memory: { storageKey: "memory-rail-width", min: 200, max: 640, initial: 340 },
-  wiki: { storageKey: "wiki-rail-width", min: 170, max: 420, initial: 240 },
+  /* min raised from 170: the rail now carries the page banner (title + search),
+     which has no readable layout below ~210px. */
+  wiki: { storageKey: "wiki-rail-width", min: 210, max: 420, initial: 260 },
   skills: { storageKey: "skills-rail-width", min: 200, max: 640, initial: 340 },
   files: { storageKey: "files-rail-width", min: 200, max: 640, initial: 340 },
   terminal: { storageKey: "terminal-rail-width", min: 200, max: 640, initial: 300 },

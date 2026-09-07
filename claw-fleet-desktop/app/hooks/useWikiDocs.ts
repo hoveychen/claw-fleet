@@ -59,7 +59,7 @@ export function useWikiDocs(): { docs: WikiDoc[]; loaded: boolean } {
 
 /**
  * Hand a slug to the 知识库 page, selected. The fallback for prose rendered where
- * no tab strip exists (the global drawer, Lite mode), and the escape hatch a
+ * no tab strip exists (the global drawer), and the escape hatch a
  * wiki tab offers for the actions that need that page's dialogs.
  *
  * Reads the store imperatively because both callers are event handlers, not

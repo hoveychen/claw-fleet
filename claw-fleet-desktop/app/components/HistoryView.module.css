@@ -3,20 +3,22 @@
    rail's *content* (launcher + filters + session list), the banner action,
    and the detail column that fills the main container. */
 
-/* "全部已读" — clears every unread session's dot in one call. Icon-only so it
-   remains in the page banner; dimmed and inert when nothing is unread. */
+/* "全部已读" — clears every unread session's dot in one call. Lives in the
+   rail's workspace row, so it takes the same pill shape as .active_toggle
+   below; dimmed and inert when nothing is unread. */
 .read_btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  padding: 4px 6px;
-  border-radius: var(--radius-sm);
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 7px;
   border: 1px solid var(--color-border);
   background: var(--color-bg);
   color: var(--color-text-dim);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, opacity 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
 }
 
 .read_btn:hover:not(:disabled) {
@@ -27,6 +29,11 @@
 .read_btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.read_btn_count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .new_btn {
@@ -93,35 +100,6 @@
   font-size: 12px;
   color: var(--color-text-dim);
   font-weight: 500;
-}
-
-/* Chat mode — the pure-chat workspace pulled out of the <select> beside it into
-   a mode of its own. Same pill shape as .active_toggle (row 2), tinted with the
-   accent instead of the success colour so the two read as different filters. */
-.chat_toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  padding: 4px 7px;
-  font-size: 11px;
-  color: var(--color-text-dim);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-
-.chat_toggle:hover {
-  background: var(--color-bg-card-hover);
-}
-
-.chat_toggle_on {
-  color: var(--color-text);
-  border-color: var(--color-accent);
-  background: rgba(var(--color-accent-rgb), 0.12);
 }
 
 /* Row 2 keeps non-directory filters compact under the workspace title. */
@@ -260,21 +238,18 @@
 }
 
 /* Row-atom styling (.row_wrap / .row / .row_* / .group_expand / .group_chevron)
-   moved to SessionRow.module.css so LiteApp's rail shares it. This file keeps
+   moved to SessionRow.module.css, the shared row atom. This file keeps
    only .mark_toggle (also used by MarkControl) and the relay-group wrappers
    (.group_wrap / .group_children / .group_more) rendered by SessionRail. */
 
 /* Relay-group wrappers (.group_wrap / .group_children / .group_more) and
-   .mark_toggle moved to SessionRail.module.css / SessionRow.module.css so the
-   grouped rail is shared with LiteApp. */
+   .mark_toggle moved to SessionRail.module.css / SessionRow.module.css, which
+   own the grouped rail. */
 
 /* ── Inline detail column ────────────────────────────────────────────────── */
 
-/* Fills PageShell's main container: the tab strip stacked over the detail body.
-   Keep this level — see the comment at its call site in HistoryView.tsx. */
-/* The split axis. Children are editor groups; `data-orientation` decides whether
- * a split lays them out side by side or stacked. With one group this is the same
- * single-column box it always was. */
+/* Fills PageShell's main container: one pane, the session you picked in the
+   rail (or the new-session composer). */
 .detail {
   flex: 1;
   min-width: 0;
@@ -282,32 +257,8 @@
   overflow: hidden;
   display: flex;
 }
-.detail[data-orientation="row"] {
-  flex-direction: row;
-}
-.detail[data-orientation="column"] {
-  flex-direction: column;
-}
 
-/* One editor group: its tab strip above its pane stack. Groups share the axis
- * equally. `min-*: 0` in *both* directions is load-bearing — a flex child
- * defaults to min-content in the main axis, and a group holding a wide
- * transcript would otherwise refuse to shrink and push its sibling off-screen
- * instead of splitting the space. */
-.group {
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-/* The line between groups is <GroupDivider>, a real element — it has to be
- * draggable, and a border isn't. Nothing to draw here. */
-
-/* Holds the open tabs' panes plus the compose/pending/empty overlays — all of
- * which are siblings competing for the same space, so it stays a flex row and
- * whichever one is visible takes it with flex: 1. */
+/* Holds the pane — the session view, the composer, or the spawn spinner. */
 .detail_body {
   flex: 1;
   min-height: 0;
@@ -316,10 +267,7 @@
   overflow: hidden;
 }
 
-/* One open tab's SessionDetail. Every tab stays *mounted* and is hidden with
- * visibility:hidden rather than display:none/unmounting, so its WebKit scroll
- * layer, messages, scroll position and view-tab survive a switch away and back.
- * Hidden panes are handed `paused`, which freezes their pollers. */
+/* The pane itself. */
 .pane {
   flex: 1;
   min-width: 0;
@@ -327,29 +275,6 @@
   display: flex;
 }
 
-/* A pane holding something other than a session — a repo file, a wiki doc, a web
- * page. SessionDetail brings its own frame and padding; these three are bare
- * content, so the gutter lives here rather than being repeated in each. */
-.other_pane {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 8px 10px 10px;
-}
-
-.detail_empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--color-text-dim);
-  font-size: 12px;
-}
 
 /* ── Starting placeholder (spawned, waiting for the scanner) ─────────────── */
 

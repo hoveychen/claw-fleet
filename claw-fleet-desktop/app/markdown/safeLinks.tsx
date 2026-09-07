@@ -50,7 +50,8 @@ export const OPEN_IN_TAB_HINT = "Opens in a tab · ⌘/Ctrl-click or middle-clic
  *
  * The browser call is surfaced rather than swallowed: when a window's capability
  * is missing `opener:default`, the ACL rejects it and the link silently does
- * nothing — which is exactly how that bug hid in the decision-float window.
+ * nothing — which is exactly how that bug hid in the (since removed)
+ * decision-float window.
  */
 export function openExternal(
   href: string,

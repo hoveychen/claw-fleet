@@ -35,7 +35,6 @@ const ALL_KEYS = [
   // on boot, otherwise the migration re-runs every launch and re-wipes whatever
   // the user has since chosen.
   "feature-tristate-migrated",
-  "liteMode",
   "lang",
   "sidebar-width",
   "sidebar-collapsed",
@@ -58,6 +57,9 @@ const ALL_KEYS = [
   "plans-expand-overrides",
   "plans-show-completed",
   "plans-done-items",
+  // Auxiliary column inside a session detail pane (facet panels, live-subagent
+  // cards, docs opened from agent prose).
+  "detail-aux-width",
   // File-tree columns inside a detail pane (SkillsView / FilesView / ScratchpadView).
   "skills-tree-width",
   "files-tree-width",
@@ -68,9 +70,6 @@ const ALL_KEYS = [
   // it stays in-memory only.
   "history-mark-filter",
   "history-workspace-filter",
-  // Chat mode — the pure-chat workspace filtered on its own, mutually exclusive
-  // with the directory filter above (see store.ts readHistoryWorkspaceFilters).
-  "history-chat-only",
   "history-active-only",
   "history-group-handoff",
   "onboarding-dismissed",
@@ -102,7 +101,6 @@ const ALL_KEYS = [
   "usage-auto-refresh",
   // DecisionPanel presentation.
   "decision-panel-collapsed",
-  "floating-decision-panel",
   // Read-state for audit entries, stored as a JSON blob.
   "audit-read-keys",
   // The most recent daily-report date the user has viewed (YYYY-MM-DD). Drives
@@ -111,7 +109,9 @@ const ALL_KEYS = [
   // The 任务 (HistoryView) detail column's open tabs: {tabIds, activeId}.
   // Restored on boot and pruned against the first scan, so ids of sessions that
   // have since been deleted drop out instead of accumulating forever.
-  "launchpad-tabs",
+  // Which session (or the new-session composer) the 任务 page detail column
+  // was showing when the app last closed.
+  "launchpad-open",
 ] as const;
 
 // ── Onboarding feature registry ─────────────────────────────────────────────
@@ -229,7 +229,6 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   "tts-muted": false,
   "personalized-mascot": false,
   "mascot-visible": false,
-  "floating-decision-panel": false,
   "skill-autosync-enabled": false,
 };
 

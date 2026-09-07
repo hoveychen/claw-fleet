@@ -35,15 +35,11 @@ function lastQuestionSentence(text: string): string {
  * Subscribe to backend decision events and push them into the decision store.
  *
  * Must be mounted at the App root (unconditionally) so events are never
- * dropped while the DecisionPanel itself is unmounted (e.g. lite mode with
- * no pending decisions). Backend emits are one-shot — if no listener is
+ * dropped while the DecisionPanel itself is unmounted (no pending
+ * decisions). Backend emits are one-shot — if no listener is
  * attached at emit time, the event is gone.
- *
- * `silent: true` skips `playDecisionAlert` — used by the decision-float
- * window so the main window stays the single source of audio.
  */
-export function useDecisionEvents(options: { silent?: boolean } = {}) {
-  const silent = options.silent ?? false;
+export function useDecisionEvents() {
   const addGuardRequest = useDecisionStore((s) => s.addGuardRequest);
   const addElicitationRequest = useDecisionStore((s) => s.addElicitationRequest);
   const addFleetAskRequest = useDecisionStore((s) => s.addFleetAskRequest);
@@ -64,11 +60,8 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   // listeners are attached — so the decision panel never reappears and the
   // agent stays blocked until its (default 600s) timeout. Pull the current
   // pending set once on mount and seed the store directly; the add* actions
-  // dedup by id, so this is safe even when a live event also arrives. Only the
-  // main window pulls — the decision-float window (silent) mirrors the
-  // snapshot handed to it by App.tsx.
+  // dedup by id, so this is safe even when a live event also arrives.
   useEffect(() => {
-    if (silent) return;
     let cancelled = false;
     invoke<PendingDecisions>("list_pending_decisions")
       .then((p) => {
@@ -87,7 +80,6 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
       cancelled = true;
     };
   }, [
-    silent,
     addGuardRequest,
     addElicitationRequest,
     addFleetAskRequest,
@@ -99,7 +91,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   useEffect(() => {
     const unlisten = listen<GuardRequest>("guard-request", (e) => {
       const r = e.payload;
-      if (!silent && !announcedIds.current.has(r.id)) {
+      if (!announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const spoken = [r.workspaceName, r.aiTitle, r.toolName || r.commandSummary]
           .filter((s): s is string => !!s && s.length > 0)
@@ -111,14 +103,14 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [addGuardRequest, silent]);
+  }, [addGuardRequest]);
 
   useEffect(() => {
     const unlisten = listen<ElicitationRequest>("elicitation-request", (e) => {
       const r = e.payload;
       // A parked card is an old question being re-listed, not a new ask — chiming
       // for it would re-announce the same question on every app restart.
-      if (!silent && !r.parked && !announcedIds.current.has(r.id)) {
+      if (!r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const body = r.questions[0]?.question ?? "";
         const [intro, after] = splitOnDivider(body);
@@ -133,14 +125,14 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [addElicitationRequest, silent]);
+  }, [addElicitationRequest]);
 
   useEffect(() => {
     const unlisten = listen<FleetAskRequest>("fleet-ask-request", (e) => {
       const r = e.payload;
       // A parked card is an old question being re-listed, not a new ask — chiming
       // for it would re-announce the same question on every app restart.
-      if (!silent && !r.parked && !announcedIds.current.has(r.id)) {
+      if (!r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const body = r.questions[0]?.question ?? "";
         const [intro, after] = splitOnDivider(body);
@@ -157,14 +149,14 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [addFleetAskRequest, silent]);
+  }, [addFleetAskRequest]);
 
   useEffect(() => {
     const unlisten = listen<A2uiRenderRequest>("a2ui-render-request", (e) => {
       const r = e.payload;
       // A parked card is an old question being re-listed, not a new ask — chiming
       // for it would re-announce the same question on every app restart.
-      if (!silent && !r.parked && !announcedIds.current.has(r.id)) {
+      if (!r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         // A2UI surfaces are opaque to Fleet — speak the workspace + title
         // only; the actual UI is announced by `@a2ui/react` accessibility.
@@ -178,14 +170,14 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [addA2uiRenderRequest, silent]);
+  }, [addA2uiRenderRequest]);
 
   useEffect(() => {
     const unlisten = listen<PlanApprovalRequest>("plan-approval-request", (e) => {
       const r = e.payload;
       // A parked card is an old question being re-listed, not a new ask — chiming
       // for it would re-announce the same question on every app restart.
-      if (!silent && !r.parked && !announcedIds.current.has(r.id)) {
+      if (!r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const spoken = [r.workspaceName, r.aiTitle ?? ""]
           .filter((s): s is string => !!s && s.length > 0)
@@ -197,13 +189,13 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [addPlanApprovalRequest, silent]);
+  }, [addPlanApprovalRequest]);
 
 
   useEffect(() => {
     const unlisten = listen<PermissionPromptRequest>("permission-prompt-request", (e) => {
       const r = e.payload;
-      if (!silent && !announcedIds.current.has(r.id)) {
+      if (!announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         // Same urgency as guard: the headless agent is blocked until answered.
         const spoken = [r.workspaceName, r.aiTitle, r.toolName]
@@ -216,7 +208,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [addPermissionPromptRequest, silent]);
+  }, [addPermissionPromptRequest]);
 
   // Park events — a card the panel is already showing just timed out. It does
   // NOT go away: the backend interrupted the session's turn and is holding the

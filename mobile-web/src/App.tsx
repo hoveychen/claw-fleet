@@ -1051,13 +1051,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             sessionsLoaded={sessionsLoaded}
             onOpenSession={(s: WithDevice<SessionInfo>) => openSessionRoot(s.deviceId, s.id)}
             onMarkRead={markRead}
-            onOpenTerminal={(workspace) => setTerminal({ workspace })}
           />
         ) : tab === "artifacts" ? (
           <ArtifactsView client={client} />
         ) : (
           <MoreView
             endpointLabel={client?.endpointLabel ?? ""}
+            onOpenTerminal={() => setTerminal({ workspace: null })}
             devices={book.devices}
             activeDeviceId={deviceId}
             activeKind={current?.kind ?? (NEEDS_PAIRING && !MOCK ? "relay" : "http")}

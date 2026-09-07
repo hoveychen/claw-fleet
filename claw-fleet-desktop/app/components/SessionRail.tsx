@@ -25,7 +25,7 @@ type SessionRailProps = {
   /** Session currently shown in the detail column (rendered as .row_active). */
   activeId: string | null;
   /** Sessions open in a background tab but not on screen (.row_open). Pass an
-   *  empty set where there are no tabs (lite mode). */
+   *  empty set where there are no tabs. */
   openIds: Set<string>;
   /** FTS snippet for a row's transcript, or undefined when the query is too
    *  short / didn't match. Parent owns the query threshold. */
@@ -45,13 +45,14 @@ type SessionRailProps = {
 type WorkspaceRailSectionProps = {
   path: string;
   name: string;
+  /** 折叠后的组数（一条折叠的接力链算一组），不是会话总数。 */
   count: number;
   children: ReactNode;
 };
 
 /** A repository heading around one SessionRail. Directory grouping is kept
  * outside SessionRail itself so the relay-chain renderer stays unchanged and
- * can still be reused by LiteApp as a flat list. */
+ * can still be reused as a flat list. */
 export function WorkspaceRailSection({
   path,
   name,
@@ -76,7 +77,7 @@ export function WorkspaceRailSection({
         <span className={styles.workspace_name}>{name}</span>
         <span
           className={styles.workspace_count}
-          aria-label={t("history.workspace_session_count", "{{count}} 个会话", { count })}
+          aria-label={t("history.workspace_session_count", "{{count}} 组会话", { count })}
         >
           {count}
         </span>
@@ -94,7 +95,7 @@ export function WorkspaceRailSection({
 
 /**
  * The grouped session list — the "二级侧边栏" rail shared by the desktop task
- * page (HistoryView) and lite mode (LiteApp). Renders standalone rows and
+ * page (HistoryView). Renders standalone rows and
  * collapsed handoff-relay chains (a tip header that expands to show earlier
  * hops), owning only the local expand / page-in state; everything data-shaped
  * (which sessions, their order, snippets, read/active state) is supplied by the

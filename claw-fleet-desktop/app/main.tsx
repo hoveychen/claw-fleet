@@ -6,7 +6,6 @@ import { primePromoStorage, promoSceneFromSearch } from "./mock/promo-scene";
 
 const params = new URLSearchParams(window.location.search);
 const isMockMode = params.has("mock") || import.meta.env.VITE_MOCK === "true";
-const forceLite = params.has("lite");
 const mockQaMode = params.has("qa");
 const promoScene = promoSceneFromSearch(window.location.search);
 // `?mock&demo` — the promo screencast board (real translated sessions + the
@@ -63,7 +62,7 @@ async function boot() {
     }
   }
 
-  const { initStorage, setItem, migrateSessionViewDefault, migrateFeatureTristate } =
+  const { initStorage, migrateSessionViewDefault, migrateFeatureTristate } =
     await import("./storage");
 
   // Load persisted settings into memory before anything reads them.
@@ -71,7 +70,7 @@ async function boot() {
 
   // Roll out gallery as the default session view for existing users whose disk
   // still carries a stale "list". Must run before the UIStore is constructed
-  // (i.e. before ./App is imported below), same window as the ?lite pre-flip.
+  // (i.e. before ./App is imported below).
   migrateSessionViewDefault();
 
   // Reset the changed-default feature keys to the "default" (unset) state once,
@@ -79,12 +78,6 @@ async function boot() {
   // value left by the old mount reconciliation. Must run before any feature
   // read (SettingsPanel/Onboarding state inits, hook auto-apply).
   migrateFeatureTristate();
-
-  // `?lite` — pre-flip the lite-mode flag so UIStore picks it up at construction.
-  // Mock-only shortcut so we can iterate on the portrait UI without tauri dev.
-  if (forceLite) {
-    setItem("liteMode", "true");
-  }
 
   // i18n must be imported after storage is ready (it reads "lang" synchronously).
   await import("./i18n");

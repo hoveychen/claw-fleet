@@ -60,25 +60,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  /* 聊天开关从下拉里拆出来后这一行多了一个控件；窄屏上让它换行，
-     而不是把目录下拉挤成一条缝。 */
+  /* 窄屏上按钮换行，而不是互相挤成一条缝。 */
   flex-wrap: wrap;
-}
-
-.workspaceSelect {
-  flex: 1;
-  min-width: 0;
-  background: var(--color-bg-input);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 6px 8px;
-  color: var(--color-text);
-  font-size: var(--t-aux, 12px);
-}
-
-/* 聊天模式下失效——置灰而非隐藏：目录选择还在，关掉开关就回来。 */
-.workspaceSelect:disabled {
-  opacity: 0.45;
 }
 
 .filterToggle {
@@ -234,6 +217,57 @@
   gap: 10px;
 }
 
+/* 文件夹分区 —— 与桌面端启动台的仓库分组同构：表头写目录名与会话数，点一下折叠。
+   聊天目录恒定排在最前(见 groupTaskSections)。 */
+.workspaceSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workspaceHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 2px 2px 0;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+
+.workspaceFolder {
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.workspaceName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+}
+
+.workspaceCount {
+  color: var(--color-text-dim);
+  font-size: var(--t-aux, 12px);
+  font-variant-numeric: tabular-nums;
+}
+
+.workspaceChevron {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  transition: transform 0.15s;
+}
+
+.workspaceChevron[data-open="true"] {
+  transform: rotate(90deg);
+}
+
 .empty {
   text-align: center;
   color: var(--color-text-dim);
@@ -377,7 +411,6 @@
 
 /* Meta line under the title — project (folder), handoff chip, live runtime.
    Mirrors the desktop launchpad row's meta line. */
-.project,
 .handoff,
 .runtime {
   display: inline-flex;
@@ -397,12 +430,6 @@
   font-size: var(--t-aux, 12px);
   color: #b91c1c;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -576,8 +603,8 @@
   animation: spin 0.7s linear infinite;
 }
 
-/* 合并列表里的归属设备。与 .project 同一档次的次要信息，用同样的字号与颜色，
-   只是换一个图标——它回答的是「哪台机器」，而 .project 回答「哪个项目」。 */
+/* 合并列表里的归属设备。与 .handoff 同一档次的次要信息，用同样的字号与颜色，
+   只是换一个图标——它回答的是「哪台机器」。目录名已经写在分区表头上了。 */
 .device {
   display: inline-flex;
   align-items: center;

@@ -261,7 +261,7 @@ const KNOWN_WEB_GAPS = [
  * asserts them from this list instead of calling them and making jsdom log a
  * "Not implemented" for each run.
  */
-const SIDE_EFFECT_ONLY = ["restart_app", "print_webview", "open_settings_window"];
+const SIDE_EFFECT_ONLY = ["restart_app", "print_webview"];
 
 /** Same scan as `liveProxy.test.ts`, over the whole app. */
 function invokedCommands(dir: string, out = new Set<string>()): Set<string> {
