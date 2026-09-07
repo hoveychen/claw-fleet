@@ -6,7 +6,7 @@
 use crate::commands::session::read_fleet_session_id;
 use crate::WatchCommands;
 
-pub(crate) fn cmd_watch(action: WatchCommands) {
+pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
     use claw_fleet_core::watch;
     match action {
         WatchCommands::Fire { id, generation } => {
@@ -61,7 +61,6 @@ pub(crate) fn cmd_watch(action: WatchCommands) {
             note,
             poll,
             timeout,
-            session,
         } => create(until, capture, note, poll, timeout, session),
     }
 }
@@ -72,7 +71,7 @@ fn create(
     note: Option<String>,
     poll: Option<String>,
     timeout: Option<String>,
-    session: Option<String>,
+    session: Option<&str>,
 ) {
     use claw_fleet_core::watch;
 
@@ -111,7 +110,7 @@ fn create(
     // FLEET_SESSION_ID can be stamped per session and the agent must name its own
     // id (which its per-turn Fleet context tells it). An explicit id outranks the
     // env, which in that shell describes the *server*, not the session.
-    let explicit = explicit_sid(session.as_deref());
+    let explicit = explicit_sid(session);
     let Some(sid) = explicit.clone().or_else(read_fleet_session_id) else {
         eprintln!(
             "Error: cannot resolve this session's id (FLEET_SESSION_ID / \

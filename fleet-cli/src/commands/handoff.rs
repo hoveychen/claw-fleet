@@ -1,7 +1,7 @@
 //! `fleet handoff` — register (or manage) a session relay (接力). The successor
 //! session is spawned by the Stop hook when this session next yields its turn.
 
-use crate::commands::session::read_fleet_session_id;
+use crate::commands::session::{inherit_context_maybe_scanning, resolve_session_id};
 use crate::HandoffCommands;
 
 /// Bare `fleet handoff --note ...` registers; subcommands manage/inspect.
@@ -14,10 +14,11 @@ pub(crate) fn cmd_handoff(
     model: Option<&str>,
     effort: Option<&str>,
     action: Option<HandoffCommands>,
+    session: Option<&str>,
 ) {
     match action {
         Some(HandoffCommands::Cancel) => {
-            let Some(sid) = read_fleet_session_id() else {
+            let Some(sid) = resolve_session_id(session) else {
                 eprintln!("Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set).");
                 std::process::exit(2);
             };
@@ -62,7 +63,7 @@ pub(crate) fn cmd_handoff(
         );
         std::process::exit(2);
     };
-    let Some(sid) = read_fleet_session_id() else {
+    let Some(sid) = resolve_session_id(session) else {
         eprintln!("Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set).");
         std::process::exit(2);
     };
@@ -87,7 +88,7 @@ pub(crate) fn cmd_handoff(
     // session — and that worktree is removed when the plan merges, which would
     // delete the successor's own cwd; the resolved workspace reads the
     // transcript's authoritative cwd instead, falling back to the shell cwd.
-    let ctx = claw_fleet_core::session::inherit_launch_context(Some(&sid));
+    let ctx = inherit_context_maybe_scanning(Some(&sid), session.is_some());
     // An explicit `--model` / `--effort` flag wins over the inherited value. The
     // model override matters because the auto-resolved value is unreliable when
     // the last turn ran on a rate-limit fallback — exactly why the flag exists.

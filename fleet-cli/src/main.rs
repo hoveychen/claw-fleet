@@ -90,6 +90,13 @@ enum Commands {
     Notes {
         #[command(subcommand)]
         action: NotesCommands,
+        /// The session these commands act for. Normally read from the
+        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here
+        /// when your harness has no per-session environment — every dsh session
+        /// runs inside one shared `dsh web`, so a dsh agent must pass its own
+        /// session id (its per-turn Fleet context tells it what that is).
+        #[arg(long, global = true)]
+        session: Option<String>,
     },
     /// Search / read this session's own transcript (and its handoff
     /// predecessors') to recover details a compaction dropped. CLI face of the
@@ -276,6 +283,13 @@ enum Commands {
     Plan {
         #[command(subcommand)]
         action: PlanCommands,
+        /// The session these commands act for. Normally read from the
+        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here
+        /// when your harness has no per-session environment — every dsh session
+        /// runs inside one shared `dsh web`, so a dsh agent must pass its own
+        /// session id (its per-turn Fleet context tells it what that is).
+        #[arg(long, global = true)]
+        session: Option<String>,
     },
     /// Register a session handoff (接力): when this session next ends its
     /// turn, Fleet spawns a fresh successor session in the same workspace to
@@ -307,6 +321,12 @@ enum Commands {
         effort: Option<String>,
         #[command(subcommand)]
         action: Option<HandoffCommands>,
+        /// The session handing off. Normally read from the environment
+        /// (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here when your
+        /// harness has no per-session environment — every dsh session runs inside
+        /// one shared `dsh web`, so a dsh agent must pass its own session id.
+        #[arg(long, global = true)]
+        session: Option<String>,
     },
     /// Manage PRD Discipline mode guidance (the generated
     /// ~/.claude/fleet-prd-discipline.md + its @import in ~/.claude/CLAUDE.md).
@@ -342,6 +362,13 @@ enum Commands {
     Loop {
         #[command(subcommand)]
         action: LoopCommands,
+        /// The session these commands act for. Normally read from the
+        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here
+        /// when your harness has no per-session environment — every dsh session
+        /// runs inside one shared `dsh web`, so a dsh agent must pass its own
+        /// session id (its per-turn Fleet context tells it what that is).
+        #[arg(long, global = true)]
+        session: Option<String>,
     },
     /// Monitor / background Bash / ScheduleWakeup — background tasks that silently
     /// die with a headless `claude -p` session — a Fleet watch survives the turn
@@ -352,6 +379,13 @@ enum Commands {
     Watch {
         #[command(subcommand)]
         action: WatchCommands,
+        /// The session these commands act for. Normally read from the
+        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here
+        /// when your harness has no per-session environment — every dsh session
+        /// runs inside one shared `dsh web`, so a dsh agent must pass its own
+        /// session id (its per-turn Fleet context tells it what that is).
+        #[arg(long, global = true)]
+        session: Option<String>,
     },
     /// Schedule a one-shot prompt to fire at an absolute future time — the
     /// sibling of `fleet loop`. A loop repeats on an interval and is capped at
@@ -363,6 +397,13 @@ enum Commands {
     Schedule {
         #[command(subcommand)]
         action: ScheduleCommands,
+        /// The session these commands act for. Normally read from the
+        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here
+        /// when your harness has no per-session environment — every dsh session
+        /// runs inside one shared `dsh web`, so a dsh agent must pass its own
+        /// session id (its per-turn Fleet context tells it what that is).
+        #[arg(long, global = true)]
+        session: Option<String>,
     },
     /// Install a headless Fleet host's control plane: idempotently apply the
     /// guard / elicitation / plan-approval hooks + PRD / interaction / wiki /
@@ -562,14 +603,6 @@ pub(crate) enum WatchCommands {
         /// `2h` (default 2h, max 7d).
         #[arg(long)]
         timeout: Option<String>,
-        /// The session to resume when the condition fires. Normally read from the
-        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here
-        /// when your harness has no per-session environment to read — every dsh
-        /// session runs inside one shared `dsh web`, so a dsh agent must pass its
-        /// own session id. The id is looked up to resolve which harness owns it,
-        /// so the resume goes to dsh rather than `claude --resume`.
-        #[arg(long)]
-        session: Option<String>,
     },
     /// List all registered watches.
     #[command(alias = "ls")]
@@ -1131,7 +1164,7 @@ fn main() {
         Commands::Memory { file, json } => commands::memory::cmd_memory(file, json),
         Commands::Artifact { action } => commands::artifact::cmd_artifact(action),
         Commands::Wiki { action } => commands::wiki::cmd_wiki(action),
-        Commands::Notes { action } => commands::notes::cmd_notes(action),
+        Commands::Notes { action, session } => commands::notes::cmd_notes(action, session.as_deref()),
         Commands::History { action } => commands::notes::cmd_history(action),
         Commands::Search { query, limit, json } => commands::search::cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => commands::audit::cmd_audit(&level, filter.as_deref(), json),
@@ -1197,7 +1230,7 @@ fn main() {
                 commands::session::cmd_codex_notify(&payload)
             }
         },
-        Commands::Plan { action } => commands::plan::cmd_plan(action),
+        Commands::Plan { action, session } => commands::plan::cmd_plan(action, session.as_deref()),
         Commands::Handoff {
             note,
             plan,
@@ -1205,6 +1238,7 @@ fn main() {
             model,
             effort,
             action,
+            session,
         } => commands::handoff::cmd_handoff(
             note.as_deref(),
             plan.as_deref(),
@@ -1212,10 +1246,11 @@ fn main() {
             model.as_deref(),
             effort.as_deref(),
             action,
+            session.as_deref(),
         ),
-        Commands::Loop { action } => commands::loop_cmd::cmd_loop(action),
-        Commands::Watch { action } => commands::watch::cmd_watch(action),
-        Commands::Schedule { action } => commands::schedule::cmd_schedule(action),
+        Commands::Loop { action, session } => commands::loop_cmd::cmd_loop(action, session.as_deref()),
+        Commands::Watch { action, session } => commands::watch::cmd_watch(action, session.as_deref()),
+        Commands::Schedule { action, session } => commands::schedule::cmd_schedule(action, session.as_deref()),
         Commands::Bootstrap { locale, title, model, json } => {
             commands::bootstrap::cmd_bootstrap(locale, title, model, json)
         }

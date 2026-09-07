@@ -3,10 +3,10 @@
 //! of `fleet loop`: a loop repeats on an interval, a schedule fires once at a
 //! named time (`--at "2026-07-25 09:00"` or `--in 5d`) with no 7-day ceiling.
 
-use crate::commands::session::read_fleet_session_id;
+use crate::commands::session::{inherit_context_maybe_scanning, resolve_session_id};
 use crate::ScheduleCommands;
 
-pub(crate) fn cmd_schedule(action: ScheduleCommands) {
+pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
     use claw_fleet_core::schedule;
     match action {
         ScheduleCommands::Fire { id, generation } => {
@@ -202,8 +202,8 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
             // exactly like `fleet loop` and handoff — so a schedule created from a
             // fable-5 codex session fires on fable-5 codex, in the session's real
             // cwd (not a worktree that may later be removed).
-            let sid = read_fleet_session_id();
-            let ctx = claw_fleet_core::session::inherit_launch_context(sid.as_deref());
+            let sid = resolve_session_id(session);
+            let ctx = inherit_context_maybe_scanning(sid.as_deref(), session.is_some());
             // An explicit --model/--effort flag overrides the value inherited from
             // the creating session (mirrors handoff's --model/--effort override),
             // and a model naming another harness re-points the fired session at

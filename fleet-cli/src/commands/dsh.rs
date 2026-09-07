@@ -62,6 +62,20 @@ pub(crate) fn cmd_dsh_context(
         sections.push(serde_json::json!({ "name": name, "text": body }));
     }
 
+    // The session's own id. Not part of `render_dsh_sections` on purpose: those
+    // bodies are also written to the machine-wide AGENTS.md, and this one is
+    // per-session. It sits next to the plan reminder because that is the section
+    // whose commands need the `--session` flag it explains.
+    if let Some(body) = session
+        .as_deref()
+        .and_then(claw_fleet_core::dsh_guidance::render_dsh_session_id_block)
+    {
+        sections.push(serde_json::json!({
+            "name": claw_fleet_core::dsh_guidance::SECTION_SESSION_ID,
+            "text": body,
+        }));
+    }
+
     // PRD / TASKS.md — the same renderer the Claude hook and the codex
     // prompt-prepend path use. `None` means no TASKS.md, or a clean file with
     // no active plan: inject nothing rather than an empty header.
