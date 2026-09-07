@@ -1023,14 +1023,19 @@ pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
 /// translation drops the typed `source` metadata dsh hangs off each record.
 /// [`crate::dsh_cost`] needs exactly that metadata (the provider's generation
 /// id), so it reads the events themselves.
+/// The read goes through the same paged walk [`AgentSource::get_messages`] uses.
+/// It used to POST a standalone `session.history`, which 0.1.2 answers 404
+/// twice over: endpoints are now `<service>/<method>` (a dotted name parses as
+/// one segment), and the standalone history read was itself replaced by the
+/// paged `session/page`. The walk's records *are* the durable events, so nothing
+/// here has to re-derive them — and unlike a one-shot read it reaches the whole
+/// history rather than whatever one page happened to hold.
 pub fn session_events(uri: &str) -> Result<Vec<Value>, String> {
     let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
-    let value = DshSource::new().with_client(|client| {
-        client
-            .call("session.history", json!({ "sessionId": id }))
-            .map_err(Into::into)
-    })?;
-    Ok(history_events(&value))
+    let source = DshSource::new();
+    history_with(id, None, |before, max| {
+        source.fetch_history(id, before, max)
+    })
 }
 
 /// Pull the raw `SessionEvent`s out of a `session.history` answer.

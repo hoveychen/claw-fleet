@@ -318,3 +318,34 @@ fn measure_interactive_read_latency_under_scan_load() {
     claw_fleet_core::dsh_source::shutdown();
     println!("request log: {}", log.display());
 }
+
+/// `session_events` must read history through the endpoint dsh 0.1.2 actually
+/// serves.
+///
+/// It is the raw-event read `dsh_cost` uses to recover provider generation ids.
+/// It used to POST `session.history` — 0.1.1's spelling for a standalone history
+/// call that 0.1.2 both renamed (endpoints are now `<service>/<method>`, and a
+/// dotted name is one path segment) and *replaced* with the paged `session/page`.
+/// Against a real server that is a 404 on every call, which is why the fixture
+/// answers unknown endpoints with 404 too: a stale endpoint name must fail here
+/// rather than sail through and only break in front of a user.
+#[test]
+fn session_events_reads_history_through_a_live_endpoint() {
+    let _serial = serial();
+    let Some(_fleet_home) = arrange(LIST_DELAY_MS, None) else {
+        eprintln!("skipped: node not on PATH, the dsh fixture cannot run");
+        return;
+    };
+
+    let events = within(BOOT_BUDGET, "session_events", || {
+        claw_fleet_core::dsh_source::session_events("dsh://session-probe")
+    });
+    claw_fleet_core::dsh_source::shutdown();
+
+    let events = events.expect("session_events must reach a served endpoint");
+    assert_eq!(
+        events.len(),
+        2,
+        "the fixture's two durable events must come back: {events:?}"
+    );
+}

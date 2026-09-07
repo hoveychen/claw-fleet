@@ -70,6 +70,19 @@ const SESSION_CWD = process.env.FAKE_DSH_SESSION_CWD ?? process.cwd();
 // real cursor, so the two must agree.
 const CURSOR = 8;
 
+// The endpoints this fixture answers. A live `/api` answers anything else with
+// 404 rather than an envelope error — including dsh 0.1.1's dotted
+// `service.method` spelling, which 0.1.2 parses as a single path segment — so
+// this set is what keeps a stale endpoint name from passing here and failing
+// against a real dsh.
+const ENDPOINTS = new Set([
+  'settings/describe',
+  'session/list',
+  'session/page',
+  'session/modelCatalog',
+  'session/attachment',
+]);
+
 function valueFor(method) {
   switch (method) {
     case 'session/list':
@@ -177,6 +190,12 @@ const server = http.createServer((req, res) => {
     // The endpoint is the URL path; the envelope echoes it in `method`.
     const method = envelope.method ?? url.pathname.replace(/^\/api\//, '');
     const rpcId = envelope.rpcId ?? '';
+    if (!ENDPOINTS.has(method)) {
+      log(`404 ${method}`);
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: `no such endpoint: ${method}` }));
+      return;
+    }
     log(`enter ${method}`);
     setTimeout(() => {
       log(`leave ${method}`);
