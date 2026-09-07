@@ -163,3 +163,84 @@ fn a_missing_prd_block_alone_does_not_uninstall_the_dsh_plugin() {
         "an explicit opt-out recorded in control_plane_prefs must still uninstall"
     );
 }
+
+/// The codex half of the same asymmetry: an unrecorded negative read must not
+/// strip codex's `AGENTS.md` blocks, but an explicit opt-out must.
+#[test]
+fn a_missing_prd_block_alone_does_not_strip_codex_agents_md() {
+    let _guard = claw_fleet_core::paths::fleet_home_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let claude_dir = temp.path().join(".claude");
+    let codex_home = temp.path().join(".codex");
+    let fleet_home = temp.path().join(".fleet");
+    for d in [&claude_dir, &codex_home, &fleet_home] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    // PRD's @import is missing from CLAUDE.md and nothing is recorded as off.
+    std::fs::write(claude_dir.join("CLAUDE.md"), "# just user content\n").unwrap();
+
+    let prev = (
+        std::env::var_os("CLAUDE_CONFIG_DIR"),
+        std::env::var_os("CODEX_HOME"),
+        std::env::var_os("FLEET_HOME"),
+    );
+    unsafe {
+        std::env::set_var("CLAUDE_CONFIG_DIR", &claude_dir);
+        std::env::set_var("CODEX_HOME", &codex_home);
+        std::env::set_var("FLEET_HOME", &fleet_home);
+    }
+
+    // Start from a codex AGENTS.md that has the PRD block installed.
+    claw_fleet_core::codex_guidance::reconcile_codex_agents_md(
+        claw_fleet_core::codex_guidance::CodexGuidanceSet {
+            prd: true,
+            interaction: false,
+            wiki: false,
+            model: false,
+            lessons: false,
+        },
+        "Boss",
+        "en",
+    )
+    .unwrap();
+    let installed_at_start = claw_fleet_core::codex_guidance::is_codex_prd_installed();
+
+    let kept = claw_fleet_core::codex_guidance::reconcile_codex_from_claude_state("Boss", "en")
+        .map(|()| claw_fleet_core::codex_guidance::is_codex_prd_installed());
+
+    claw_fleet_core::control_plane_prefs::mark_disabled(
+        claw_fleet_core::control_plane_prefs::Feature::PrdDiscipline,
+    )
+    .unwrap();
+    let after_optout =
+        claw_fleet_core::codex_guidance::reconcile_codex_from_claude_state("Boss", "en")
+            .map(|()| claw_fleet_core::codex_guidance::is_codex_prd_installed());
+
+    unsafe {
+        match prev.0 {
+            Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+            None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+        }
+        match prev.1 {
+            Some(v) => std::env::set_var("CODEX_HOME", v),
+            None => std::env::remove_var("CODEX_HOME"),
+        }
+        match prev.2 {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+    }
+
+    assert!(installed_at_start, "setup: codex PRD block should start installed");
+    assert_eq!(
+        kept,
+        Ok(true),
+        "one CLAUDE.md read with no PRD block stripped codex's AGENTS.md block — \
+         and no later pass writes it back"
+    );
+    assert_eq!(
+        after_optout,
+        Ok(false),
+        "an explicit opt-out recorded in control_plane_prefs must still strip it"
+    );
+}
