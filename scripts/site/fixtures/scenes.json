@@ -1,0 +1,166 @@
+{
+  "en": {
+    "projects": [
+      "Launch studio",
+      "Customer research",
+      "Revenue insights",
+      "Brand workshop"
+    ],
+    "tasks": [
+      [
+        "Prepare the autumn product launch",
+        "Landing page, launch film and press kit ready for review."
+      ],
+      [
+        "Turn 24 interviews into a research brief",
+        "Five patterns found; comparing quotes across customer segments."
+      ],
+      [
+        "Explain the September revenue lift",
+        "Revenue up 18.6%; separating expansion from new accounts."
+      ],
+      [
+        "Explore three visual directions",
+        "Editorial, geometric and photographic concepts with usage examples."
+      ],
+      [
+        "Build the launch landing page",
+        "Responsive layout ready. Checking keyboard navigation and contrast."
+      ],
+      [
+        "Edit a 45-second product film",
+        "Rough cut assembled; matching captions to the narration."
+      ],
+      [
+        "Compare the onboarding experiments",
+        "Variant B lifts activation by 12%. Full cohort breakdown attached."
+      ],
+      [
+        "Package the brand assets",
+        "Logos, social covers and the typography guide are ready."
+      ],
+      [
+        "Draft the customer announcement",
+        "Email and in-app copy prepared for three audience segments."
+      ],
+      [
+        "Check the pricing page on mobile",
+        "All 16 purchase paths pass. Reviewing the small-screen layout."
+      ],
+      [
+        "Map the next six weeks",
+        "Milestones, owners and dependencies collected into one release brief."
+      ],
+      [
+        "Summarize this week's progress",
+        "Eight deliverables ready; two creative decisions need your input."
+      ]
+    ],
+    "brief": "Prepare the autumn launch for our new workspace. Bring together the customer research, landing page and launch assets. Give me a concrete recommendation and the materials to review.",
+    "reply": "## The launch package is ready\n\nThe story is built around one customer need: **less coordination, more finished work.**\n\n| Workstream | Result | Status |\n| --- | --- | --- |\n| Customer research | 24 interviews · 5 recurring needs | Reviewed |\n| Landing page | Desktop + mobile · 2 languages | Ready |\n| Launch film | 45-second cut · captions included | Ready |\n| Press kit | Product story, screenshots, brand assets | Ready |\n\n### My recommendation\nLead with the finished work, then show how a person reviews a decision. The research participants responded best to concrete examples.\n\n**Next decision:** choose the editorial visual direction or the product-led direction. The comparison and rollout checklist are attached for review.",
+    "decision": "Choose the visual direction for the autumn launch.",
+    "context": "Both concepts use the approved story and customer findings. The editorial direction performed best in the five-person concept review.",
+    "options": [
+      "Use the editorial direction",
+      "Use the product-led direction"
+    ],
+    "descriptions": [
+      "A warm, story-driven launch. Ready to produce today.",
+      "More interface detail. Requires one more day of layout work."
+    ],
+    "reviewTitle": "Launch direction comparison",
+    "artifacts": [
+      "Autumn launch · creative brief",
+      "September revenue report",
+      "Brand direction · Field notes",
+      "Customer interview synthesis",
+      "Launch rollout checklist",
+      "Activation experiment results",
+      "Social campaign · issue 01",
+      "Six-week product roadmap"
+    ],
+    "reviewBody": "# Launch direction comparison\n\n## A · Editorial\n**A warm introduction to the work people finish.**\n\nLead with a large creative deliverable, a short customer story and a quiet product walkthrough.\n\n## B · Product-led\n**Put the workspace at the center of the story.**\n\nLead with the task board, show a real decision, then open the finished files.\n\n| Concept review · 5 people | Editorial | Product-led |\n| --- | --- | --- |\n| First choice | 4 | 1 |\n| Main strength | Clear human story | Clear workflow |\n| Production | Ready today | One more day |\n\n### Recommendation\nUse the editorial direction for launch. Keep the product walkthrough in the second section.\n\n*Illustrative project data.*"
+  },
+  "zh": {
+    "projects": [
+      "秋季发布",
+      "用户研究",
+      "经营分析",
+      "品牌工作室"
+    ],
+    "tasks": [
+      [
+        "筹备秋季产品发布",
+        "官网、发布短片与媒体资料包已备齐，等待审阅。"
+      ],
+      [
+        "把 24 场访谈整理成研究简报",
+        "找到五类共同需求，正在对比不同客群的原话。"
+      ],
+      [
+        "拆解九月收入增长的原因",
+        "收入增长 18.6%，正在区分老客增购与新客贡献。"
+      ],
+      [
+        "探索三个品牌视觉方向",
+        "编辑感、几何与摄影三套方案，配好应用示例。"
+      ],
+      [
+        "制作发布专题页",
+        "响应式布局已完成，正在检查键盘操作与文字对比度。"
+      ],
+      [
+        "剪辑 45 秒产品发布短片",
+        "粗剪已完成，正在对齐旁白与字幕。"
+      ],
+      [
+        "对比新用户引导实验",
+        "B 方案激活率提升 12%，已附完整分群数据。"
+      ],
+      [
+        "打包品牌交付素材",
+        "标志、社交封面与字体使用指南已整理完毕。"
+      ],
+      [
+        "起草客户发布通知",
+        "邮件与站内文案已按三类客户分别准备。"
+      ],
+      [
+        "检查手机端定价页面",
+        "16 条购买路径全部通过，正在复核小屏布局。"
+      ],
+      [
+        "排出未来六周的产品计划",
+        "里程碑、负责人和依赖关系已汇总成发布简报。"
+      ],
+      [
+        "整理本周工作成果",
+        "八份成果已就绪，还有两项创意决策需要确认。"
+      ]
+    ],
+    "brief": "为新工作台筹备秋季发布。把用户研究、专题页和发布素材串起来，给我明确的推荐方案，以及能直接审阅的材料。",
+    "reply": "## 发布资料已经备齐\n\n这次的叙事围绕一个真实需求：**少花时间协调，多拿到完成的成果。**\n\n| 工作线 | 交付内容 | 进度 |\n| --- | --- | --- |\n| 用户研究 | 24 场访谈 · 5 类共同需求 | 已审阅 |\n| 发布专题页 | 桌面与手机 · 中英双语 | 已就绪 |\n| 产品短片 | 45 秒成片 · 完整字幕 | 已就绪 |\n| 媒体资料包 | 产品故事、截图、品牌素材 | 已就绪 |\n\n### 我的建议\n先展示做出的成果，再展示人如何接手一个决定。访谈中的用户对具体案例反应最好。\n\n**下一步需要你判断：**选编辑感的视觉方向，还是以产品界面为主的方向。对比材料与发布清单已附上，可以一起审阅。",
+    "decision": "秋季发布采用哪个视觉方向？",
+    "context": "两套方案沿用已确认的产品叙事与用户研究。五人概念评审中，编辑感方案的反馈更好。",
+    "options": [
+      "采用编辑感方案",
+      "采用产品主导方案"
+    ],
+    "descriptions": [
+      "温暖、重叙事，今天就能开始制作。",
+      "展示更多界面细节，需要再做一天排版。"
+    ],
+    "reviewTitle": "发布视觉方向对比",
+    "artifacts": [
+      "秋季发布 · 创意简报",
+      "九月经营分析报告",
+      "品牌方向 · 田野笔记",
+      "用户访谈研究汇总",
+      "产品发布执行清单",
+      "激活率实验结果",
+      "社交传播 · 第一期",
+      "未来六周产品路线图"
+    ],
+    "reviewBody": "# 发布视觉方向对比\n\n## A · 编辑感\n**从人做出的作品，讲一个温暖的故事。**\n\n用大幅创意成果开场，接一段客户故事，再用克制的界面演示说明过程。\n\n## B · 产品主导\n**把工作台放在叙事的中心。**\n\n从任务面板开始，展示一个真实决定，最后打开做好的文件。\n\n| 五人概念评审 | 编辑感 | 产品主导 |\n| --- | --- | --- |\n| 首选人数 | 4 | 1 |\n| 主要优势 | 故事容易共鸣 | 流程清晰 |\n| 制作时间 | 今天可以开始 | 再做一天 |\n\n### 推荐方案\n发布采用编辑感方向，第二屏保留完整的产品流程演示。\n\n*以上为示例项目数据。*"
+  }
+}

@@ -23,8 +23,8 @@ def build(lang, c):
     more=''.join(f'<article><h3>{h}</h3><p>{p}</p></article>' for h,p in c['moreItems'])
     steps=''.join(f'<li><h3>{h}</h3><p>{p}</p></li>' for h,p in c['steps'])
     faq=''.join(f'<details><summary>{h}<span aria-hidden="true">+</span></summary><p>{p}</p></details>' for h,p in c['faqs'])
-    shots=[f'work-{lang}.png',f'review-{lang}.png','results.png']
-    dimensions=[(1500,1000),(1440,920),(1500,1000)]
+    shots=[f'work-{lang}.png',f'review-{lang}.png',f'results-{lang}.png']
+    dimensions=[(1206,820),(1000,700),(1206,720)]
     panels=''
     for i,shot in enumerate(shots):
         w,h=dimensions[i]
@@ -36,7 +36,7 @@ def build(lang, c):
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{c['title']}</title><meta name="description" content="{escape(c['description'],quote=True)}">
-<meta name="color-scheme" content="light"><meta property="og:title" content="{c['title']}"><meta property="og:description" content="{escape(c['description'],quote=True)}"><meta property="og:type" content="website"><meta property="og:image" content="https://hoveychen.github.io/claw-fleet/screenshots/current/work-en.png"><meta name="twitter:card" content="summary_large_image">
+<meta name="color-scheme" content="light"><meta property="og:title" content="{c['title']}"><meta property="og:description" content="{escape(c['description'],quote=True)}"><meta property="og:type" content="website"><meta property="og:image" content="https://hoveychen.github.io/claw-fleet/screenshots/current/work-{lang}.png"><meta name="twitter:card" content="summary_large_image">
 <link rel="alternate" hreflang="en" href="{base}index.html"><link rel="alternate" hreflang="zh-CN" href="{base}zh/index.html"><link rel="alternate" hreflang="x-default" href="{base}index.html">
 <script src="{base}locale.js"></script><link rel="icon" href="{base}icon.png"><link rel="stylesheet" href="{base}site.css"><script src="{base}site.js" defer></script>
 </head>

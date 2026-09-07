@@ -158,6 +158,6 @@
   "sourceCode": "源代码",
   "license": "开源协议",
   "screenshotAlt": "当前 Fleet 项目工作区，包含任务列表与新建会话输入器",
-  "mobileAlt": "当前 Fleet 手机新会话，包含项目选择和语音输入",
+  "mobileAlt": "Fleet 手机端审阅发布方案，展示决策背景与两个具体选项",
   "guide": "项目指南"
 }

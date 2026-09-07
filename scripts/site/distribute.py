@@ -60,7 +60,7 @@ def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cl
                  'icon-apple.svg', 'icon-windows.svg', 'icon-linux.svg',
                  'screenshots/current/work-en.png', 'screenshots/current/work-zh.png',
                  'screenshots/current/review-en.png', 'screenshots/current/review-zh.png',
-                 'screenshots/current/results.png', 'screenshots/current/mobile-en.png',
+                 'screenshots/current/results-en.png', 'screenshots/current/results-zh.png', 'screenshots/current/mobile-en.png',
                  'screenshots/current/mobile-zh.png'):
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -117,7 +117,7 @@ def publish(output, manifest, public_url):
     # Upload dependencies first, both HTML documents next, manifest last.
     site_paths = [output/p for p in ('site.css','site.js','locale.js','icon.png','hero.png','icon-apple.svg',
         'icon-windows.svg','icon-linux.svg','screenshots/current/work-en.png','screenshots/current/work-zh.png',
-        'screenshots/current/review-en.png','screenshots/current/review-zh.png','screenshots/current/results.png',
+        'screenshots/current/review-en.png','screenshots/current/review-zh.png','screenshots/current/results-en.png', 'screenshots/current/results-zh.png',
         'screenshots/current/mobile-en.png','screenshots/current/mobile-zh.png',
         'index.html','zh/index.html')]
     for path in site_paths:

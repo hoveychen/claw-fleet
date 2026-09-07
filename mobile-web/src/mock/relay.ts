@@ -38,6 +38,24 @@ import {
   MOCK_WIKI_ENTRY_B64,
 } from "./data";
 
+import scenes from "../../../scripts/site/fixtures/scenes.json";
+const websiteLang = new URLSearchParams(location.search).get("website");
+const websiteScene = websiteLang === "zh" || websiteLang === "en" ? scenes[websiteLang] : null;
+if (websiteScene) {
+  const seed = MOCK_SESSIONS[0];
+  MOCK_SESSIONS.splice(0, MOCK_SESSIONS.length, ...websiteScene.tasks.map(([title, preview], i) => ({
+    ...structuredClone(seed), id: `website-${i}`, aiTitle: title, slug: null, isSubagent: false,
+    workspaceName: websiteScene.projects[i % 4], workspacePath: `/Users/demo/workspace/${['launch', 'research', 'revenue', 'brand'][i % 4]}`,
+    lastMessagePreview: preview, status: (["waitingInput", "thinking", "executing", "idle"] as const)[i % 4],
+    agentSource: (["claude-code", "codex", "dsh"] as const)[i % 3], lastActivityMs: Date.now() - (i + 1) * 60000,
+  })));
+  Object.assign(MOCK_FLEET_ASK, {
+    sessionId: "website-0", workspaceName: websiteScene.projects[0], aiTitle: websiteScene.decision,
+    questions: [{question: websiteScene.decision + "\n\n" + websiteScene.context, header: websiteScene.projects[0], multiSelect: false,
+      options: websiteScene.options.map((label, i) => ({label, description: websiteScene.descriptions[i]}))}],
+  });
+}
+
 // 判断本身搬去了 ../mockMode（零依赖），这里 re-export 保持既有 import 有效。
 export { isMockMode } from "../mockMode";
 
@@ -115,10 +133,10 @@ export class MockRelayClient extends RelayClient {
           // 决策卡来源 row reads it to tell the desktop apart from a stray
           // agent answering in its place.
           agent: { host: "studio", pid: 4242, home: "/Users/boss", ver: "0.0.0" },
-          guard: [MOCK_GUARD].filter((r) => !this.answered.has(r.id)),
-          elicitation: [MOCK_ELICITATION].filter((r) => !this.answered.has(r.id)),
+          guard: (websiteScene ? [] : [MOCK_GUARD]).filter((r) => !this.answered.has(r.id)),
+          elicitation: (websiteScene ? [] : [MOCK_ELICITATION]).filter((r) => !this.answered.has(r.id)),
           fleetAsk: [MOCK_FLEET_ASK].filter((r) => !this.answered.has(r.id)),
-          permissionPrompt: [MOCK_PERMISSION_PROMPT].filter((r) => !this.answered.has(r.id)),
+          permissionPrompt: (websiteScene ? [] : [MOCK_PERMISSION_PROMPT]).filter((r) => !this.answered.has(r.id)),
         };
       // Deliberately slow, like the real LLM round-trip — the card shows its
       // "Analyzing…" state first, which is part of what gets screenshotted.
