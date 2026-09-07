@@ -589,6 +589,9 @@ export function SessionDetail({
           });
         return;
       }
+      // Fallback: no byte cursor for this source (dsh://) or the cursor read
+      // failed. Re-request a window and grow it only by what actually arrived —
+      // see `liveTailWindow` for what the old unconditional +1000 cost.
       const tail = localTailRef.current;
       invoke<RawMessage[]>("get_messages_tail", {
         jsonlPath: standaloneJsonlPath,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { LIVE_TAIL_FLOOR, nextLiveTail } from "./liveTailWindow";
+import { nextLiveTail } from "./liveTailWindow";
+import { INITIAL_TAIL } from "./store";
 
 /**
  * Replay the poll loop the way `SessionDetail` runs it: every tick asks for the
@@ -19,7 +20,7 @@ function replayPolls({
   ticks: number;
   arrivedPerTick?: number;
 }): number[] {
-  let tail = LIVE_TAIL_FLOOR;
+  let tail = INITIAL_TAIL;
   let length = fileLength;
   const windows: number[] = [];
   for (let i = 0; i < ticks; i++) {
