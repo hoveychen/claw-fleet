@@ -56,6 +56,11 @@ Cargo.toml.bak
 TASKS.md
 .worktrees/
 
+# Per-machine cargo config (sccache wrapper). Must stay untracked: CI images
+# have no sccache, and `build.rustc-wrapper` pointing at a missing binary is a
+# hard build failure.
+.cargo/
+
 # Mobile app signing material — private keys, NEVER commit. Back these up
 # out-of-band: losing the keystore means already-installed builds can no
 # longer be upgraded in place.
