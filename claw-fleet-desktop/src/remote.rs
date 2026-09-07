@@ -502,6 +502,41 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn get_messages_since(
+        &self,
+        path: &str,
+        offset: Option<u64>,
+    ) -> Result<(Vec<serde_json::Value>, u64), String> {
+        // Both halves already exist on the probe: `/file_size` is the cursor
+        // the desktop watcher starts from, `/tail` is the same source-aware
+        // incremental follow `emit_tail_lines` uses locally.
+        let Some(offset) = offset else {
+            #[derive(serde::Deserialize)]
+            struct SizeBody {
+                size: u64,
+            }
+            let body: SizeBody = self.probe.get(&format!(
+                "{}?path={}",
+                claw_fleet_core::routes::FILE_SIZE,
+                encode_path(path)
+            ))?;
+            return Ok((Vec::new(), body.size));
+        };
+        #[derive(serde::Deserialize)]
+        struct TailBody {
+            lines: Vec<serde_json::Value>,
+            #[serde(rename = "newOffset")]
+            new_offset: u64,
+        }
+        let body: TailBody = self.probe.get(&format!(
+            "{}?path={}&offset={}",
+            claw_fleet_core::routes::TAIL,
+            encode_path(path),
+            offset
+        ))?;
+        Ok((body.lines, body.new_offset))
+    }
+
     fn get_tool_result_full(
         &self,
         path: &str,

@@ -296,6 +296,29 @@ pub trait Backend: Send + Sync {
         let start = all.len().saturating_sub(n);
         Ok(all[start..].to_vec())
     }
+    /// Follow a live session without re-reading what has already been read.
+    ///
+    /// `offset: None` asks only where the transcript currently ends — it
+    /// returns no messages, just the cursor a follower starts from. `Some(n)`
+    /// returns everything appended since byte `n`, plus the new cursor.
+    ///
+    /// This exists because the standalone detail pane cannot use the desktop's
+    /// pushed `session-tail`: that watcher is single-slot, and the 任务 page
+    /// keeps several panes open at once. Re-requesting a whole window every
+    /// 1.5s instead is what let one 4513-record session spend 1–3s per poll
+    /// against a 1.5s interval (see `liveTailWindow.ts`). A cursor makes the
+    /// steady-state read proportional to what the agent wrote, not to how much
+    /// it has ever written.
+    ///
+    /// Default impl reports an empty transcript at offset 0, which degrades to
+    /// "nothing new, ever" rather than to a wrong answer; backends override.
+    fn get_messages_since(
+        &self,
+        _path: &str,
+        _offset: Option<u64>,
+    ) -> Result<(Vec<Value>, u64), String> {
+        Ok((Vec::new(), 0))
+    }
     /// Full, untrimmed tool output for one `tool_use_id` in `path`. The tail
     /// payload from `get_messages_tail` truncates oversized tool output for
     /// transport (see [`crate::message_trim`]); the frontend calls this when the

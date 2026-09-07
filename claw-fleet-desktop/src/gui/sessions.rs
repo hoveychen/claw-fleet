@@ -104,6 +104,42 @@ pub(crate) fn get_messages_tail(
     out
 }
 
+/// One step of a live follow: everything appended since byte `offset`, plus the
+/// cursor to pass next time. `offset: None` returns no messages, only where the
+/// transcript currently ends — how a follower gets its first cursor.
+///
+/// This is what a detail pane polls instead of re-requesting a whole window.
+/// The window path re-read a 4513-record transcript every 1.5s and took 1–3s
+/// doing it (see `liveTailWindow.ts`); a cursor makes the steady-state read
+/// proportional to what the agent just wrote.
+///
+/// `(async)` for the same reason as `get_messages_tail` — it touches the file.
+#[tauri::command(async)]
+pub(crate) fn get_messages_since(
+    jsonl_path: String,
+    offset: Option<u64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<TailDelta, String> {
+    let mut probe = crate::cmd_probe::CmdProbe::start("get_messages_since", &jsonl_path);
+    let backend = state.backend.read().unwrap();
+    probe.locked();
+    let out = backend.get_messages_since(&jsonl_path, offset);
+    probe.done(|| match &out {
+        Ok((msgs, off)) => format!("{} msgs, offset {off}", msgs.len()),
+        Err(e) => format!("error: {e}"),
+    });
+    out.map(|(messages, offset)| TailDelta { messages, offset })
+}
+
+/// Result of [`get_messages_since`]. A struct rather than a tuple so the
+/// frontend reads `.messages` / `.offset` instead of `[0]` / `[1]`.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TailDelta {
+    messages: Vec<Value>,
+    offset: u64,
+}
+
 /// Full, untrimmed tool output for one `tool_use_id`. `get_messages_tail`
 /// truncates oversized tool output for transport; the frontend calls this when
 /// the reader expands a card flagged `_fleetTruncated`. `(async)` for the same

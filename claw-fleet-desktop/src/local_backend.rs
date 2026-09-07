@@ -1808,6 +1808,33 @@ impl Backend for LocalBackend {
         }
     }
 
+    fn get_messages_since(
+        &self,
+        path: &str,
+        offset: Option<u64>,
+    ) -> Result<(Vec<Value>, u64), String> {
+        let source = find_source_for_path(&self.sources, path)
+            .ok_or_else(|| format!("No agent source can handle path: {path}"))?;
+        let Some(offset) = offset else {
+            // Cursor-only: where does the transcript end right now? Sources
+            // without a file on disk (dsh) report 0, which their
+            // `tail_incremental` treats as "from the beginning" — the same
+            // contract the watcher already relies on.
+            let size = source
+                .resolve_file_path(path)
+                .and_then(|p| std::fs::metadata(p).ok())
+                .map(|m| m.len())
+                .unwrap_or(0);
+            return Ok((Vec::new(), size));
+        };
+        let (mut lines, new_offset) = source.tail_incremental(path, offset)?;
+        // Same trim as `get_messages_tail` and the watcher's `emit_tail_lines`:
+        // oversized tool output is recovered on expand via
+        // `get_tool_result_full`, never shipped whole through the IPC boundary.
+        claw_fleet_core::message_trim::trim_messages_for_transport(&mut lines);
+        Ok((lines, new_offset))
+    }
+
     fn interrupt_agent_session(&self, path: String) -> Result<(), String> {
         // No rescan kick here, unlike the pid paths: the source that owns the
         // session pushes its own status (dsh's `turn/end` arrives on the mux
@@ -3852,6 +3879,68 @@ mod tests {
             seen.iter().any(|v| v.get("i").and_then(|i| i.as_i64()) == Some(3)),
             "record following the recovered block must also arrive, got {seen:?}"
         );
+    }
+
+    /// The contract `Backend::get_messages_since` is built on: take the cursor
+    /// at EOF, and a later read from it returns exactly what was appended in
+    /// between — no re-read of the history, nothing skipped.
+    ///
+    /// This is the whole point of the incremental follow. The window path it
+    /// replaces re-read every fetched record on every 1.5s tick, which on a
+    /// 4513-record transcript cost 1-3s per poll against a 1.5s interval.
+    #[test]
+    fn cursor_then_read_returns_only_what_was_appended() {
+        use claw_fleet_core::agent_source::AgentSource;
+        use claw_fleet_core::claude_source::ClaudeCodeSource;
+        use std::io::Write as _;
+        let source = ClaudeCodeSource::new();
+        let path = std::env::temp_dir().join(format!(
+            "fleet-since-cursor-{}-{}.jsonl",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+
+        // A transcript with history the follower must NOT be handed again.
+        let history: String = (0..200)
+            .map(|i| format!("{{\"type\":\"user\",\"i\":{i}}}\n"))
+            .collect();
+        fs::write(&path, history.as_bytes()).unwrap();
+        let path_str = path.to_string_lossy().into_owned();
+
+        // The cursor, taken the way `get_messages_since(_, None)` takes it.
+        let cursor = source
+            .resolve_file_path(&path_str)
+            .and_then(|p| fs::metadata(p).ok())
+            .map(|m| m.len())
+            .unwrap_or(0);
+        assert_eq!(cursor, history.len() as u64, "cursor must sit at EOF");
+
+        // Nothing appended yet: a read from the cursor returns nothing at all.
+        let (idle, off_idle) = source.tail_incremental(&path_str, cursor).unwrap();
+        assert!(idle.is_empty(), "idle poll must return nothing, got {idle:?}");
+        assert_eq!(off_idle, cursor, "an idle poll must not move the cursor");
+
+        // Two records land.
+        {
+            let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+            f.write_all(b"{\"type\":\"assistant\",\"i\":200}\n{\"type\":\"user\",\"i\":201}\n")
+                .unwrap();
+            f.flush().unwrap();
+        }
+        let (fresh, off_fresh) = source.tail_incremental(&path_str, cursor).unwrap();
+        assert_eq!(fresh.len(), 2, "only the appended records, got {fresh:?}");
+        assert_eq!(fresh[0]["i"], json!(200));
+        assert_eq!(fresh[1]["i"], json!(201));
+        assert!(off_fresh > cursor, "the cursor must advance past what was read");
+
+        // And the follower stays caught up rather than re-reading.
+        let (again, _) = source.tail_incremental(&path_str, off_fresh).unwrap();
+        assert!(again.is_empty(), "a caught-up poll must return nothing, got {again:?}");
+
+        fs::remove_file(&path).ok();
     }
 
     #[test]
