@@ -17,7 +17,7 @@ import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollo
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
-import { nextLiveTail } from "../liveTailWindow";
+import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
 import {
   initialFollowState,
@@ -201,6 +201,9 @@ export function SessionDetail({
   localTailRef.current = localTail;
   const localLoadingRef = useRef(localLoading);
   localLoadingRef.current = localLoading;
+  /** Last record of the previous poll's window — how the next poll measures
+   *  what the agent appended. Cleared with the messages it describes. */
+  const prevLastIdRef = useRef<string | null>(null);
 
   // Optimistic follow-ups: submitting a resume/enqueue spawns a detached
   // `claude --resume` that only writes the message into the JSONL once the CLI
@@ -218,6 +221,7 @@ export function SessionDetail({
     if (sessionInfo && sessionInfo.id !== localSession?.id) {
       setLocalSession(sessionInfo);
       setLocalMessages([]);
+      prevLastIdRef.current = null;
       setLocalLoadingEarlier(false);
       setLocalTail(INITIAL_TAIL);
       setLocalFullyLoaded(false);
@@ -321,6 +325,7 @@ export function SessionDetail({
       if (isStandalone) {
         setLocalSession(s);
         setLocalMessages([]);
+        prevLastIdRef.current = null;
         setLocalTail(INITIAL_TAIL);
         setLocalFullyLoaded(false);
       } else {
@@ -530,9 +535,12 @@ export function SessionDetail({
           setLocalMessages((prev) => reconcileMessages(prev, msgs));
           setLocalFullyLoaded(msgs.length < tail);
           // Keep the window's start pinned as the transcript grows, so nothing
-          // the reader has scrolled back to slides out of the top. See
+          // the reader has scrolled back to slides out of the top. Growth is
+          // measured against the previous window's last record — see
           // `liveTailWindow` for the rule and what it costs to get wrong.
-          const grown = nextLiveTail({ tail, returned: msgs.length });
+          const arrived = arrivedSince(prevLastIdRef.current, msgs);
+          prevLastIdRef.current = recordId(msgs[msgs.length - 1]);
+          const grown = nextLiveTail({ tail, returned: msgs.length, arrived });
           if (grown !== tail) setLocalTail(grown);
         })
         .catch(() => {})
