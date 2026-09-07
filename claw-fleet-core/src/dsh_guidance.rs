@@ -189,11 +189,14 @@ neither flag is needed.\n\
 create and were not handed.\n\
   - `fleet plan add <id> <P> --text \"...\"` — append a pending task.\n\
   - `fleet plan list` / `get <id>` — read.\n\
-- **Attribution is best-effort on dsh and may be missing.** `fleet plan` \
-records \"which session is on which plan\" from `FLEET_SESSION_ID`, but every \
-dsh session shares one `dsh web` process, so there is no per-session value to \
-read. The checkbox edit itself always lands — that is the part that matters. \
-Never hand-edit TASKS.md to work around a missing-session-id warning.\n\
+- **Pass `--session <your session id>` to every `fleet` command that acts on \
+\"this session\"** — `plan`, `watch`, `handoff`, `loop`, `schedule`, `notes`. \
+Every dsh session shares one `dsh web` process, so Fleet cannot stamp a \
+per-session `FLEET_SESSION_ID` in your shell the way it does for Claude and \
+Codex; without the flag `fleet plan` records no attribution (your plan/P shows \
+blank on the desktop card) and `fleet watch` / `fleet handoff` refuse outright. \
+Your id is injected each turn in the \"Your Fleet session id\" section. Never \
+hand-edit TASKS.md to work around a missing-session-id warning.\n\
 - Each plan lives inside a sentinel pair with a unique kebab-case `id`:\n\
 \n\
 ```markdown\n\
@@ -284,7 +287,7 @@ When your context is running long mid-plan, do NOT grind until it dies and do \
 NOT silently wrap up early. Register a relay from your shell:\n\
 \n\
 ```\n\
-fleet handoff --note \"<shift-change briefing>\" [--plan <plan-id>] [--next <P>]\n\
+fleet handoff --note \"<shift-change briefing>\" [--plan <plan-id>] [--next <P>] --session <your session id>\n\
 ```\n\
 \n\
 - `--note` is mandatory: what's done, what's in flight, key files, gotchas, \
@@ -302,13 +305,14 @@ a foreground poll loop or a background job waiting for it: a Fleet turn ends \
 and anything still waiting is lost. Register a watch and end the turn:\n\
 \n\
 ```\n\
-fleet watch create --until \"<shell cmd that exits 0 when done>\" --capture \"<shell cmd whose stdout to report>\" --note \"<what you await>\"\n\
+fleet watch create --until \"<shell cmd that exits 0 when done>\" --capture \"<shell cmd whose stdout to report>\" --note \"<what you await>\" --session <your session id>\n\
 ```\n\
 \n\
 - A detached timer polls the condition; the moment it succeeds Fleet resumes \
 THIS session and hands the captured output to your next turn. `fleet watch \
-stop <id>` cancels. It inherits this session's model / effort / source, so a \
-dsh session resumes as dsh.\n\
+stop <id>` cancels. `--session` is what makes the resume land on dsh: the id \
+tells Fleet which harness owns the session, so it inherits this session's \
+model / effort / source instead of being resumed as claude.\n\
 - Pick the scheduling relay by *need*: **repeat periodically (cron) → \
 `fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns a fresh \
 session each interval); **fire once at a future time → `fleet schedule`** \
@@ -768,6 +772,59 @@ fn sentinels_for(name: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+/// Plugin section name for the per-session id block. Deliberately **not** in
+/// [`sentinels_for`]: this body is per-session, and AGENTS.md is a file shared by
+/// every session on the machine.
+pub const SECTION_SESSION_ID: &str = "fleet-session-id";
+
+/// Tell a dsh session its own id, and what to spend it on.
+///
+/// This is the other half of the `--session` flag. Claude and Codex sessions
+/// learn their id from the environment (`CLAUDE_CODE_SESSION_ID`, or the
+/// `FLEET_SESSION_ID` / launch token Fleet stamps at spawn); a dsh session
+/// cannot, because every dsh session runs inside one shared `dsh web` and there
+/// is no per-session environment to stamp. The id was never actually unknown —
+/// Fleet's plugin passes it to `fleet dsh-context --session <id>` on every step
+/// to render the plan reminder — it just never reached the agent, so a dsh
+/// session asking for a watch or a handoff was refused for want of a value it
+/// was already being described by.
+///
+/// `None` for a blank id: injecting a section that names no id would be worse
+/// than injecting nothing, since the agent would then pass an empty `--session`.
+pub fn render_dsh_session_id_block(session_id: &str) -> Option<String> {
+    let sid = session_id.trim();
+    if sid.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "# Your Fleet session id (managed by Claw Fleet — do not edit this block)\n\
+\n\
+This session's id is `{sid}`.\n\
+\n\
+Every dsh session runs inside one shared `dsh web` process, so Fleet cannot put \
+your id in the shell environment the way it does for Claude and Codex sessions. \
+Any `fleet` command that acts on \"this session\" therefore needs it spelled out \
+as `--session {sid}`:\n\
+\n\
+```\n\
+fleet watch create --until '<cmd>' --capture '<cmd>' --note '<what you await>' --session {sid}\n\
+fleet handoff --note '<briefing>' [--plan <plan-id> --next <P>] --session {sid}\n\
+fleet plan check <plan-id> <P> --session {sid}\n\
+fleet loop create --title '<a few words>' --interval <secs> --prompt '<...>' --session {sid}\n\
+fleet schedule create --title '<a few words>' --in <dur> --prompt '<...>' --session {sid}\n\
+fleet notes append <path> '<text>' --session {sid}\n\
+```\n\
+\n\
+Without it, `watch` and `handoff` refuse (they must know which session to \
+reanimate), `plan` still ticks the checkbox but records no attribution, and \
+`loop` / `schedule` fire their successor as a *claude* session in the wrong \
+directory. The flag also works before the subcommand \
+(`fleet plan --session {sid} check <plan-id> <P>`).\n\
+\n\
+This is your own id. Never pass another session's."
+    ))
+}
+
 /// Render the enabled guidance blocks in their stable order, as
 /// `(section name, body)` pairs.
 ///
@@ -1076,9 +1133,63 @@ mod tests {
         );
         assert!(
             g.contains("FLEET_SESSION_ID") && g.contains("shares one"),
-            "must state the shared-server attribution caveat rather than promising \
-             attribution dsh cannot deliver"
+            "must explain WHY the flag is needed (one shared server, no per-session \
+             FLEET_SESSION_ID), not just demand it"
         );
+        // The block used to end at the caveat — \"attribution is best-effort, it
+        // may just be missing\" — which read as a dead end and left agents ticking
+        // boxes with no session recorded. `--session` is the way out; the block
+        // must name it, or the flag exists and nobody uses it.
+        assert!(
+            g.contains("--session"),
+            "must teach the flag that makes attribution work on dsh"
+        );
+    }
+
+    /// The per-session block is the *only* place a dsh agent learns its own id,
+    /// so it has to carry the id itself and the commands worth spending it on.
+    #[test]
+    fn session_id_block_names_the_id_and_its_uses() {
+        let b = render_dsh_session_id_block("dsh-uuid-1").expect("a real id renders");
+        assert!(b.contains("dsh-uuid-1"), "must state the id");
+        for cmd in ["fleet watch create", "fleet handoff", "fleet plan check"] {
+            assert!(b.contains(cmd), "must show {cmd} taking --session");
+        }
+        assert!(
+            b.matches("--session dsh-uuid-1").count() >= 3,
+            "the examples must be copy-pasteable, i.e. carry the real id"
+        );
+    }
+
+    /// A blank id must inject nothing: a section saying \"your id is ``\" would
+    /// teach the agent to pass an empty `--session`, which is worse than the
+    /// env-only status quo.
+    #[test]
+    fn blank_session_id_renders_no_block() {
+        assert!(render_dsh_session_id_block("").is_none());
+        assert!(render_dsh_session_id_block("   ").is_none());
+    }
+
+    /// AGENTS.md is one machine-wide file shared by every dsh session, so the
+    /// per-session block must never be part of the set that gets written there.
+    #[test]
+    fn session_id_block_is_not_a_static_guidance_section() {
+        let set = DshGuidanceSet {
+            prd: true,
+            interaction: true,
+            wiki: true,
+            model: true,
+            lessons: true,
+        };
+        let names: Vec<&str> = render_dsh_sections(set, "Boss", "en")
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert!(
+            !names.contains(&SECTION_SESSION_ID),
+            "a per-session id must not reach the shared AGENTS.md"
+        );
+        assert!(sentinels_for(SECTION_SESSION_ID).is_none());
     }
 
     #[test]

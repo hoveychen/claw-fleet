@@ -6,7 +6,7 @@
 use crate::commands::session::read_fleet_session_id;
 use crate::WatchCommands;
 
-pub(crate) fn cmd_watch(action: WatchCommands) {
+pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
     use claw_fleet_core::watch;
     match action {
         WatchCommands::Fire { id, generation } => {
@@ -61,7 +61,7 @@ pub(crate) fn cmd_watch(action: WatchCommands) {
             note,
             poll,
             timeout,
-        } => create(until, capture, note, poll, timeout),
+        } => create(until, capture, note, poll, timeout, session),
     }
 }
 
@@ -71,6 +71,7 @@ fn create(
     note: Option<String>,
     poll: Option<String>,
     timeout: Option<String>,
+    session: Option<&str>,
 ) {
     use claw_fleet_core::watch;
 
@@ -103,11 +104,19 @@ fn create(
     // A watch resumes the session that registered it, so it MUST know which
     // session that is. No id ⇒ nothing to reanimate — refuse rather than register
     // a watch that could never deliver its event.
-    let Some(sid) = read_fleet_session_id() else {
+    //
+    // `--session` is the explicit channel for a harness with no per-session
+    // environment: every dsh session runs inside one shared `dsh web`, so no
+    // FLEET_SESSION_ID can be stamped per session and the agent must name its own
+    // id (which its per-turn Fleet context tells it). An explicit id outranks the
+    // env, which in that shell describes the *server*, not the session.
+    let explicit = explicit_sid(session);
+    let Some(sid) = explicit.clone().or_else(read_fleet_session_id) else {
         eprintln!(
             "Error: cannot resolve this session's id (FLEET_SESSION_ID / \
-             CLAUDE_CODE_SESSION_ID unset). `fleet watch` reanimates the calling \
-             session, so it can only run inside one."
+             CLAUDE_CODE_SESSION_ID unset, no --session given). `fleet watch` \
+             reanimates the calling session, so it must know which one that is — \
+             pass `--session <id>` if your harness has no per-session environment."
         );
         std::process::exit(2);
     };
@@ -142,10 +151,27 @@ fn create(
         std::process::exit(2);
     }
 
+    // An explicitly named id has to exist: a typo would register a watch whose
+    // fire resumes nothing, and the failure would only surface hours later when
+    // the condition fired. The env path stays permissive on a scan miss for the
+    // reason above (a just-spawned session may not be scannable yet) — there the
+    // id came from the harness itself, not from a hand-typed flag.
+    if explicit.is_some() && !sessions.iter().any(|s| s.id == sid) {
+        eprintln!(
+            "Error: no session with id {sid} was found on this machine, so a watch \
+             registered for it could never be resumed. Check the id — a dsh session \
+             is told its own id in its per-turn Fleet context."
+        );
+        std::process::exit(2);
+    }
+
     // Inherit the session's real cwd (not a worktree that may later be removed),
     // model, effort, and agent source — exactly like `fleet loop` / handoff, so a
-    // fable-5 codex session resumes as fable-5 codex.
-    let ctx = claw_fleet_core::session::inherit_launch_context(Some(&sid));
+    // fable-5 codex session resumes as fable-5 codex. The roster overlay is what
+    // makes this right for dsh: its source/cwd/model live in no env and no
+    // transcript, only in the scanned session list (see
+    // `inherit_launch_context_from_roster`).
+    let ctx = claw_fleet_core::session::inherit_launch_context_from_roster(&sid, &sessions);
 
     match watch::create(
         &sid,
@@ -224,6 +250,16 @@ fn fmt_duration_ms(ms: u64) -> String {
     }
 }
 
+/// The `--session` value, normalised: a blank or whitespace-only flag is the
+/// same as not passing one (so `--session "$SOME_UNSET_VAR"` falls back to the
+/// env rather than registering a watch on an empty id).
+fn explicit_sid(session: Option<&str>) -> Option<String> {
+    session
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// The IDE a session is attached to, if any — the reason to refuse registering a
 /// watch on it. Pure over a scanned session list so the guard is testable without
 /// a live scan. Returns `None` when the session isn't found (allow — never
@@ -260,6 +296,13 @@ mod tests {
         // ide_name None ⇒ headless / Fleet-owned (stripped) ⇒ resumable
         let sessions = vec![sess("s1", None)];
         assert_eq!(ide_block_reason("s1", &sessions), None);
+    }
+
+    #[test]
+    fn blank_session_flag_falls_back_to_the_env() {
+        assert_eq!(explicit_sid(None), None);
+        assert_eq!(explicit_sid(Some("   ")), None);
+        assert_eq!(explicit_sid(Some(" dsh-uuid-1 ")).as_deref(), Some("dsh-uuid-1"));
     }
 
     #[test]

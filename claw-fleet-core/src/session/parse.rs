@@ -604,6 +604,68 @@ pub fn inherit_launch_context(session_id: Option<&str>) -> LaunchContext {
     }
 }
 
+/// [`inherit_launch_context`] plus what an already-scanned session roster knows
+/// about `session_id` — the path a caller takes when the id was named
+/// **explicitly** (`fleet watch --session <id>`) rather than read off the env.
+///
+/// Why the roster is needed at all: `inherit_launch_context` learns the agent
+/// source from `FLEET_AGENT_SOURCE` and the cwd/model from a transcript file.
+/// Both channels are per-process, and **every dsh session runs inside one shared
+/// `dsh web`**, so a dsh session's shell carries no id, no source, and there is
+/// no `.jsonl` to resolve either. Registering a watch from there used to record
+/// `agent_source: None` → the fire path would hand a dsh session id to
+/// `claude --resume`, which cannot resume it.
+///
+/// The roster entry is keyed by the same id (`SessionInfo.id` *is* the dsh
+/// session id — `dsh_source::session_info_from_list_item`), so it is
+/// authoritative for the source: an id belongs to whichever harness owns it,
+/// whatever the registering process's env says. Callers pass a list they already
+/// have — `scan_all_sources` reads every transcript on the machine and is far too
+/// expensive to run here implicitly.
+pub fn inherit_launch_context_from_roster(
+    session_id: &str,
+    sessions: &[super::SessionInfo],
+) -> LaunchContext {
+    let ctx = inherit_launch_context(Some(session_id));
+    match sessions.iter().find(|s| s.id == session_id) {
+        Some(info) => overlay_roster_entry(
+            ctx,
+            &info.agent_source,
+            &info.workspace_path,
+            info.model.as_deref(),
+        ),
+        None => ctx,
+    }
+}
+
+/// Pure core of [`inherit_launch_context_from_roster`]: fold one roster entry's
+/// knowledge into a context resolved from the environment.
+///
+/// - **source** — the roster wins outright (see above: the id names its owner).
+/// - **workspace** — only when the env path fell back to the shell cwd, i.e.
+///   there was no transcript to resolve. A transcript-resolved cwd is the
+///   session's own record and stays.
+/// - **model** — only when the env path resolved none. A launch-spec / transcript
+///   model spec carries its `[1m]`-style suffix; the roster's may not.
+pub(crate) fn overlay_roster_entry(
+    mut ctx: LaunchContext,
+    agent_source: &str,
+    workspace_path: &str,
+    model: Option<&str>,
+) -> LaunchContext {
+    let source = agent_source.trim();
+    if !source.is_empty() {
+        ctx.source = Some(source.to_string());
+    }
+    if ctx.workspace == ctx.shell_cwd && !workspace_path.trim().is_empty() {
+        ctx.workspace = workspace_path.to_string();
+    }
+    if ctx.model.is_none() {
+        ctx.model = model.map(str::to_string).filter(|m| !m.trim().is_empty());
+    }
+    ctx
+}
+
 pub(crate) fn has_thinking_blocks(last_lines: &[Value]) -> bool {
     for msg in last_lines.iter() {
         if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
@@ -938,5 +1000,69 @@ mod extract_last_text_tests {
             assistant("<synthetic>", "No response requested."),
         ];
         assert_eq!(extract_last_text(&lines), None);
+    }
+}
+
+#[cfg(test)]
+mod roster_overlay_tests {
+    use super::{overlay_roster_entry, LaunchContext};
+
+    /// Env-only context as a dsh session's shell produces it: no source (every
+    /// dsh session shares one `dsh web`, so nothing is stamped), and no
+    /// transcript to resolve a cwd from — so `workspace` fell back to `shell_cwd`.
+    fn env_only() -> LaunchContext {
+        LaunchContext {
+            shell_cwd: "/shell/cwd".into(),
+            workspace: "/shell/cwd".into(),
+            model: None,
+            effort: None,
+            source: None,
+        }
+    }
+
+    #[test]
+    fn roster_supplies_source_workspace_and_model() {
+        let ctx = overlay_roster_entry(
+            env_only(),
+            "dsh",
+            "/repo/claude-fleet",
+            Some("openrouter/anthropic/claude-opus-5"),
+        );
+        // Without this the watch fires `claude --resume <dsh uuid>`, which can
+        // never resume a dsh session.
+        assert_eq!(ctx.source.as_deref(), Some("dsh"));
+        assert_eq!(ctx.workspace, "/repo/claude-fleet");
+        assert_eq!(ctx.model.as_deref(), Some("openrouter/anthropic/claude-opus-5"));
+    }
+
+    #[test]
+    fn roster_source_outranks_env_source() {
+        // A dsh session's shell may inherit whatever source the process that
+        // started `dsh web` carried. The id names its owner; the roster wins.
+        let mut ctx = env_only();
+        ctx.source = Some("claude".into());
+        let ctx = overlay_roster_entry(ctx, "dsh", "", None);
+        assert_eq!(ctx.source.as_deref(), Some("dsh"));
+    }
+
+    #[test]
+    fn transcript_resolved_workspace_and_model_survive() {
+        // A claude session: the transcript already answered both, and its model
+        // spec carries the `[1m]` suffix the roster's resolved id lacks.
+        let mut ctx = env_only();
+        ctx.workspace = "/repo/from-transcript".into();
+        ctx.model = Some("claude-opus-5[1m]".into());
+        let ctx = overlay_roster_entry(ctx, "claude-code", "/repo/from-roster", Some("claude-opus-5"));
+        assert_eq!(ctx.workspace, "/repo/from-transcript");
+        assert_eq!(ctx.model.as_deref(), Some("claude-opus-5[1m]"));
+        assert_eq!(ctx.source.as_deref(), Some("claude-code"));
+    }
+
+    #[test]
+    fn blank_roster_fields_change_nothing() {
+        let ctx = overlay_roster_entry(env_only(), "  ", "  ", Some("  "));
+        assert_eq!(ctx.source, None);
+        assert_eq!(ctx.workspace, "/shell/cwd");
+        assert_eq!(ctx.model, None);
     }
 }

@@ -1,10 +1,10 @@
 //! `fleet loop` — a recurring prompt Fleet re-runs on an interval by spawning a
 //! fresh detached session each time, so it survives the turn boundary.
 
-use crate::commands::session::read_fleet_session_id;
+use crate::commands::session::{inherit_context_maybe_scanning, resolve_session_id};
 use crate::LoopCommands;
 
-pub(crate) fn cmd_loop(action: LoopCommands) {
+pub(crate) fn cmd_loop(action: LoopCommands, session: Option<&str>) {
     use claw_fleet_core::agent_loop;
     match action {
         LoopCommands::Fire { id, generation } => {
@@ -163,8 +163,8 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
             // may later be removed). `FLEET_AGENT_SOURCE` absent → None, which
             // `fire_once` resolves to the claude source, so a loop created from a
             // codex session wakes up as codex.
-            let sid = read_fleet_session_id();
-            let ctx = claw_fleet_core::session::inherit_launch_context(sid.as_deref());
+            let sid = resolve_session_id(session);
+            let ctx = inherit_context_maybe_scanning(sid.as_deref(), session.is_some());
             let until = until.as_deref().filter(|c| !c.trim().is_empty());
 
             match agent_loop::create(

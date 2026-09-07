@@ -6,12 +6,12 @@
 //! argument shape the MCP tool receives, so the two front ends print
 //! byte-identical output and cannot drift.
 
-use crate::commands::session::read_fleet_session_id;
+use crate::commands::session::{read_fleet_session_id, resolve_session_id};
 use crate::{HistoryCommands, NotesCommands};
 use serde_json::{json, Value};
 
-fn run(tool: &str, args: Value) {
-    let sid = read_fleet_session_id();
+fn run(tool: &str, args: Value, session: Option<&str>) {
+    let sid = resolve_session_id(session);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     match claw_fleet_core::mcp_control::handle(tool, &args, sid.as_deref(), &cwd) {
         Ok(text) => println!("{text}"),
@@ -22,7 +22,7 @@ fn run(tool: &str, args: Value) {
     }
 }
 
-pub(crate) fn cmd_notes(action: NotesCommands) {
+pub(crate) fn cmd_notes(action: NotesCommands, session: Option<&str>) {
     let args = match action {
         NotesCommands::Write { path, text } => json!({"action":"write","path":path,"text":text}),
         NotesCommands::Append { path, text } => json!({"action":"append","path":path,"text":text}),
@@ -35,7 +35,7 @@ pub(crate) fn cmd_notes(action: NotesCommands) {
             "max_files":max_files,"max_matches_per_file":max_matches_per_file
         }),
     };
-    run("fleet__notes", args);
+    run("fleet__notes", args, session);
 }
 
 /// `fleet notes-hint` — the `SessionStart` hook entrypoint. Claude Code sends
@@ -77,5 +77,5 @@ pub(crate) fn cmd_history(action: HistoryCommands) {
             "offset_chars":offset_chars,"limit_chars":limit_chars
         }),
     };
-    run("fleet__history", args);
+    run("fleet__history", args, None);
 }

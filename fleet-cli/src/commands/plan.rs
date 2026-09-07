@@ -4,13 +4,13 @@
 //! id from env, dispatches, and prints — so the `fleet__plan` MCP tool executes
 //! the identical logic.
 
-use crate::commands::session::read_fleet_session_id;
+use crate::commands::session::resolve_session_id;
 use crate::PlanCommands;
 use claw_fleet_core::plan_ops;
 
-pub(crate) fn cmd_plan(action: PlanCommands) {
+pub(crate) fn cmd_plan(action: PlanCommands, session: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let sid = read_fleet_session_id();
+    let sid = resolve_session_id(session);
     let result: Result<(), String> = match action {
         PlanCommands::Check { plan_id, task } => {
             emit(plan_ops::mutate_checkbox(&cwd, &plan_id, &task, true, sid.as_deref()))

@@ -251,3 +251,60 @@ pub(crate) fn read_fleet_session_id() -> Option<String> {
     // session id across both Claude and Codex.
     claw_fleet_core::codex_launch::resolve_fleet_session_id_from_env()
 }
+
+/// [`read_fleet_session_id`] with an explicit `--session <id>` override.
+///
+/// The override exists for a harness with **no per-session environment to read**:
+/// every dsh session runs inside one shared `dsh web`, so Fleet cannot stamp a
+/// per-session `FLEET_SESSION_ID` the way it does for Claude and Codex, and a dsh
+/// agent asking for a watch / handoff / plan tick was refused for want of an id
+/// it actually knows (its per-turn Fleet context is generated from that very id).
+/// An explicit value therefore outranks the env, which in that shell describes
+/// the server process, not the session. Blank is treated as absent.
+pub(crate) fn resolve_session_id(explicit: Option<&str>) -> Option<String> {
+    explicit
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(read_fleet_session_id)
+}
+
+/// The launch context a `fleet loop` / `fleet schedule` successor inherits, with
+/// the roster consulted **only** when the caller named the session explicitly.
+///
+/// `inherit_launch_context` reads the agent source off `FLEET_AGENT_SOURCE` and
+/// the cwd/model off a transcript — neither of which exists for a dsh session, so
+/// a loop created from one would fire a *claude* session in the shell cwd. The
+/// scanned roster has all three, but `scan_all_sources` reads every transcript on
+/// the machine (tens of seconds on a busy box), so it is not something to do on
+/// the common path: an env-resolved id already carries its source.
+///
+/// Hence the gate is `explicit`, not "source is missing" — a hand-started Claude
+/// session also has no `FLEET_AGENT_SOURCE`, and making *it* pay for a full scan
+/// to rediscover the default source would be a plain regression.
+pub(crate) fn inherit_context_maybe_scanning(
+    sid: Option<&str>,
+    explicit: bool,
+) -> claw_fleet_core::session::LaunchContext {
+    match (sid, explicit) {
+        (Some(sid), true) => {
+            let sources = claw_fleet_core::agent_source::build_sources();
+            let sessions = claw_fleet_core::session::scan_all_sources(&sources);
+            claw_fleet_core::session::inherit_launch_context_from_roster(sid, &sessions)
+        }
+        _ => claw_fleet_core::session::inherit_launch_context(sid),
+    }
+}
+
+#[cfg(test)]
+mod session_id_tests {
+    use super::resolve_session_id;
+
+    #[test]
+    fn explicit_id_is_trimmed_and_blank_falls_through() {
+        assert_eq!(resolve_session_id(Some(" dsh-uuid-1 ")).as_deref(), Some("dsh-uuid-1"));
+        // A blank flag must not register anything under an empty id; it means
+        // "not given", so the env decides (None here in a test process).
+        assert_eq!(resolve_session_id(Some("   ")), resolve_session_id(None));
+    }
+}
