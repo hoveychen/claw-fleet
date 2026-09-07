@@ -40,6 +40,7 @@ let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 /** Callbacks of every IntersectionObserver the component created. */
 let observers: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = [];
+const streamingComponents = {};
 
 beforeEach(() => {
   observers = [];
@@ -76,7 +77,7 @@ function renderStreaming(body: string) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root!.render(<ProgressiveMarkdown body={body} components={{}} streaming />));
+  act(() => root!.render(<ProgressiveMarkdown body={body} components={streamingComponents} streaming />));
   return container!;
 }
 
@@ -112,7 +113,7 @@ describe("ProgressiveMarkdown", () => {
       root!.render(
         <ProgressiveMarkdown
           body={"stable paragraph.\n\nlive tail keeps growing"}
-          components={{}}
+          components={streamingComponents}
           streaming
         />,
       ),
