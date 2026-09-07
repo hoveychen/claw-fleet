@@ -34,7 +34,6 @@ import type { FleetTransport } from "../transport";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isFleetOwnedTask, isSessionUnread } from "../types";
 import { useDraft } from "../draft";
-import { useDeviceDraft } from "../deviceScope";
 import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
@@ -186,33 +185,6 @@ type MarkFilter = "all" | "pending" | "done";
  *  attention, so it collapses into "pending" — only an explicit done leaves. */
 function markBucket(s: SessionInfo): SessionMark {
   return s.userMark === "done" ? "done" : "pending";
-}
-
-/** Values the workspace filter used to take back when the pure-chat workspace
- *  was still an option inside the `<select>`, and later a 仅聊天 toggle. Both are
- *  retired — chat is a pinned folder section now — so either collapses to "".
- *  "" is "all" and every real value is an absolute path, so these bare words
- *  could never collide with one. Read-only: migrated away on the first render
- *  that finds one persisted (see the effect in TasksView). */
-const LEGACY_CHAT_ONLY = "chat";
-const LEGACY_CHAT_HIDDEN = "no-chat";
-
-/** Does `s` pass the workspace filter? "" is 全部目录; a concrete value narrows
- *  to one folder. Chat is no longer a mode of its own — it is one of the folder
- *  sections, pinned to the top (see {@link groupTaskSections}). */
-export function matchesWorkspaceFilter(
-  s: SessionInfo & { deviceId?: string },
-  filter: string,
-): boolean {
-  if (!filter) return true;
-  // 选项值是仓库根(与文件夹分组同一把钥匙),所以跑在 `<repo>/.worktrees/<task>`
-  // 里的会话要折回根去比,精确比路径会把它从视图里静默漏掉。
-  const root = repoRootPath(s.workspacePath);
-  // 多设备时筛选值是 `<deviceId>::<workspacePath>`:两台机器上同路径的
-  // `/repos/foo` 是两个不同的仓库,合到一个选项里筛出来的列表是混的。
-  const sep = filter.indexOf("::");
-  if (sep < 0) return root === filter;
-  return s.deviceId === filter.slice(0, sep) && root === filter.slice(sep + 2);
 }
 
 /** 任务列表的一个文件夹分区 —— 与桌面端启动台的仓库分组同构。 */
@@ -431,10 +403,6 @@ export function TasksView({
   // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/仅活跃/分段都保持不变，
   // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
   const [search, setSearch] = useDraft<string>("tasks:search", "");
-  // 设备作用域:筛选值是一个 workspace 路径,它在另一台机器上根本不存在,不分家
-  // 切过去只会得到一个筛掉全部任务的空列表。搜索词与几个开关是纯 UI 偏好,属于
-  // 这台手机,仍然全局。
-  const [workspace, setWorkspace] = useDeviceDraft<string>("tasks:workspace", "");
   const [activeOnly, setActiveOnly] = useDraft<boolean>("tasks:activeOnly", false);
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
   // Group handoff-relay chains into one collapsible card. Default on; the setter
@@ -483,56 +451,9 @@ export function TasksView({
   // activity puts it instead of being pinned on a guess.
   const chatPath = useChatWorkspace(client);
 
-  // Chat is an ordinary folder now (pinned to the top of the list), so it is no
-  // longer held out of the directory dropdown or the terminal targets.
+  // 列表按文件夹分区展示（Chat 置顶），所以任务页不再有目录下拉：要看哪个目录
+  // 就折叠掉别的分区。「终端」按钮因此不带初始目录，由终端页自己的目录选择器接手。
   const multiDevice = deviceLabelOf !== undefined;
-  const allSections = useMemo(
-    () => groupTaskSections(all, { chatPath, multiDevice, deviceLabelOf }),
-    [all, chatPath, multiDevice, deviceLabelOf],
-  );
-
-  const workspaces = useMemo(
-    () =>
-      allSections
-        .map((sec) => [sec.key, sec.name] as const)
-        .sort((a, b) => a[1].localeCompare(b[1])),
-    [allSections],
-  );
-
-  // 下拉的 value 是「设备::路径」的编码串，而开终端要的是拆开的三件套。这里按
-  // value 反查，省得在按钮那儿再解析一次编码（编码规则只该有一处知道）。
-  const terminalTargets = useMemo(() => {
-    const byValue = new Map<string, TerminalWorkspace>();
-    for (const sec of allSections) {
-      byValue.set(sec.key, {
-        deviceId: sec.deviceId,
-        path: sec.path,
-        name: sec.name,
-      });
-    }
-    return byValue;
-  }, [allSections]);
-
-  // 迁移：聊天还是下拉里一条选项、或后来那个「仅聊天」开关时存下来的值。两者
-  // 都退休了（聊天现在就是置顶的那个文件夹分区），一律归零。要抢在下面那个孤儿
-  // 路径回退之前跑，否则会先被当成一个不存在的目录处理。
-  useEffect(() => {
-    if (workspace === LEGACY_CHAT_ONLY || workspace === LEGACY_CHAT_HIDDEN) {
-      setWorkspace("");
-    }
-  }, [workspace, setWorkspace]);
-
-  // A persisted workspace path can outlive its sessions (all done + pruned, or a
-  // repo we haven't touched this launch). Left as-is it would silently filter the
-  // list to empty while the <select> falls back to showing "全部目录" — looks like
-  // a bug. Once the first snapshot has landed, drop an orphaned real path back to
-  // "all".
-  useEffect(() => {
-    if (!sessionsLoaded) return;
-    if (!workspace || workspace === LEGACY_CHAT_ONLY || workspace === LEGACY_CHAT_HIDDEN) return;
-    if (workspaces.some(([path]) => path === workspace)) return;
-    setWorkspace("");
-  }, [sessionsLoaded, workspace, workspaces, setWorkspace]);
 
   const activeCount = useMemo(() => all.filter((s) => LIVE.includes(s.status)).length, [all]);
 
@@ -542,7 +463,6 @@ export function TasksView({
   const preMark = useMemo(() => {
     const q = search.trim().toLowerCase();
     return all.filter((s) => {
-      if (!matchesWorkspaceFilter(s, workspace)) return false;
       if (activeOnly && !LIVE.includes(s.status)) return false;
       if (q) {
         const clientMatch =
@@ -558,7 +478,7 @@ export function TasksView({
       }
       return true;
     });
-  }, [all, search, workspace, activeOnly, ftsMatchPaths]);
+  }, [all, search, activeOnly, ftsMatchPaths]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -1002,23 +922,9 @@ export function TasksView({
           {searching && <span className={styles.searchSpinner} />}
         </div>
         <div className={styles.filterRow}>
-          {/* 目录下拉把列表收到某一个文件夹；不选就是全部目录，此时列表按文件夹
-              分区展示（聊天置顶）。聊天不再有自己的开关——它就是其中一个分区。*/}
-          <select
-            className={styles.workspaceSelect}
-            value={workspace}
-            onChange={(e) => setWorkspace(e.target.value)}
-          >
-            <option value="">{t("全部目录")}</option>
-            {workspaces.map(([path, name]) => (
-              <option key={path} value={path}>
-                {name}
-              </option>
-            ))}
-          </select>
           <button
             className={styles.filterToggle}
-            onClick={() => onOpenTerminal(terminalTargets.get(workspace) ?? null)}
+            onClick={() => onOpenTerminal(null)}
             title={t("在这台主机上开一个终端")}
           >
             <SquareTerminal size={13} />

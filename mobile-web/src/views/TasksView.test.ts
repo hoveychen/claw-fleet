@@ -4,44 +4,11 @@ import {
   buildRenderItems,
   workspaceFilterValue,
   groupOpenReadTargets,
-  matchesWorkspaceFilter,
   groupTaskSections,
   statusTone,
 } from "./TasksView";
 import type { SessionInfo } from "../types";
 import type { WithDevice } from "../deviceRuntime";
-
-/**
- * The tasks list mixes chat sessions with project ones. The chat workspace path
- * comes from the desktop over the relay (`chat_workspace`), so the phone can be
- * asked to filter by it before — or without ever — learning it.
- */
-function session(workspacePath: string): SessionInfo {
-  return { id: "s", workspacePath, workspaceName: "n" } as unknown as SessionInfo;
-}
-
-describe("matchesWorkspaceFilter", () => {
-  const CHAT = "/Users/foo/.fleet/chat";
-  const chat = session(CHAT);
-  const repo = session("/Users/foo/repo");
-
-  it("passes everything under 全部目录", () => {
-    expect(matchesWorkspaceFilter(chat, "")).toBe(true);
-    expect(matchesWorkspaceFilter(repo, "")).toBe(true);
-  });
-
-  it("narrows to one folder", () => {
-    expect(matchesWorkspaceFilter(repo, "/Users/foo/repo")).toBe(true);
-    expect(matchesWorkspaceFilter(chat, "/Users/foo/repo")).toBe(false);
-  });
-
-  // 选项值是仓库根,而会话可能跑在 `<repo>/.worktrees/<task>` 里 —— 精确比路径
-  // 会把它从这个目录的视图里静默漏掉。
-  it("matches a worktree checkout against its repo root", () => {
-    const wt = session("/Users/foo/repo/.worktrees/fix-bug");
-    expect(matchesWorkspaceFilter(wt, "/Users/foo/repo")).toBe(true);
-  });
-});
 
 describe("groupTaskSections", () => {
   const CHAT = "/Users/foo/.fleet/chat";
@@ -259,28 +226,13 @@ describe("device tag survives grouping", () => {
   });
 });
 
-// 两台机器上同路径的 /repos/foo 是两个不同的仓库。目录筛选若只按路径匹配，
-// 选中一个就会把另一台同名目录的会话也筛进来 —— 列表看着对，点进去却是另一台
-// 的会话。
-describe("workspace filter across devices", () => {
-  const row = (deviceId: string, workspacePath: string) =>
-    ({ id: "s", deviceId, workspacePath, workspaceName: "foo", status: "idle" }) as unknown as
-      SessionInfo & { deviceId: string };
-
-  it("scopes the filter value by device when several are paired", () => {
+// 两台机器上同路径的 /repos/foo 是两个不同的仓库 —— 分区键若只按路径，两台的
+// 会话会合进同一个文件夹分区，点进去是混的（分区拆分本身见 groupTaskSections）。
+describe("workspaceFilterValue", () => {
+  it("scopes the section key by device when several are paired", () => {
     expect(workspaceFilterValue("dev-a", "/repos/foo", true)).toBe("dev-a::/repos/foo");
     // 单设备保持原样：老草稿里存的是裸路径，值一变筛选就会静默失效。
     expect(workspaceFilterValue("dev-a", "/repos/foo", false)).toBe("/repos/foo");
-  });
-
-  it("does not let one device's folder pick in the other device's sessions", () => {
-    const filter = workspaceFilterValue("dev-a", "/repos/foo", true);
-    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), filter)).toBe(true);
-    expect(matchesWorkspaceFilter(row("dev-b", "/repos/foo"), filter)).toBe(false);
-  });
-
-  it("still matches by bare path for a single-device filter value", () => {
-    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), "/repos/foo")).toBe(true);
   });
 });
 
