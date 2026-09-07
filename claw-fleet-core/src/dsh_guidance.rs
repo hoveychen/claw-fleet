@@ -821,7 +821,14 @@ reanimate), `plan` still ticks the checkbox but records no attribution, and \
 directory. The flag also works before the subcommand \
 (`fleet plan --session {sid} check <plan-id> <P>`).\n\
 \n\
-This is your own id. Never pass another session's."
+This is your own id. Never pass another session's.\n\
+\n\
+One thing to expect the first time: every one of these commands writes under \
+`~/.fleet`, which is outside your workspace, so under the `workspace-write` \
+sandbox the write is denied. **That is not the command failing** — the flag and \
+the path are right. Re-run it the way dsh's denial tells you to (escalate the \
+call); do not go looking for a different command, and do not decide the feature \
+is unavailable."
     ))
 }
 
@@ -1158,6 +1165,26 @@ mod tests {
         assert!(
             b.matches("--session dsh-uuid-1").count() >= 3,
             "the examples must be copy-pasteable, i.e. carry the real id"
+        );
+    }
+
+    /// Measured 2026-09-07 on a real dsh session: its first `fleet watch
+    /// create` was denied by the `workspace-write` sandbox (every fleet command
+    /// writes under `~/.fleet`, outside the workspace), and it spent a whole
+    /// round-trip re-deciding what to do. dsh's sandbox has no allow-list knob —
+    /// only the three modes, bounded by the session cwd — so the only thing
+    /// Fleet can do is say it up front.
+    #[test]
+    fn session_id_block_warns_about_the_sandbox_denial() {
+        let b = render_dsh_session_id_block("dsh-uuid-1").expect("a real id renders");
+        assert!(
+            b.contains("~/.fleet") && b.contains("workspace-write"),
+            "must name the path and the mode that cause the denial"
+        );
+        assert!(
+            b.contains("not the command failing"),
+            "must say the denial is not a broken command, or the agent gives up \
+             on the feature instead of escalating"
         );
     }
 
