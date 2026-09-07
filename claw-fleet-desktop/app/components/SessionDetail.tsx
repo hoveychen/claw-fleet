@@ -44,6 +44,7 @@ import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { effortChipLabel, effortTitle, formatModel } from "./SessionCard";
 import { inlineCodexFleetAsk, withCodexDecisionHistory } from "./codexDecision";
+import { useDocCardWidth } from "../hooks/useDocCardWidth";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
@@ -448,6 +449,9 @@ export function SessionDetail({
   // last message hides underneath it. Measured, not guessed: the box grows with
   // the draft, the option pills and the queued-follow-up chips.
   const dockRef = useRef<HTMLDivElement>(null);
+  /* The messages pane. The expanded doc card's width is a ratio of *this* box,
+     and the transcript reserves the same number as a right-hand band. */
+  const messagesPaneRef = useRef<HTMLDivElement>(null);
   const [dockHeight, setDockHeight] = useState(0);
   /* The conversation is no longer one tab among many — it owns this column for
      good. Beside it are two surfaces, at two different levels: a permanent rail
@@ -1155,6 +1159,12 @@ export function SessionDetail({
      invent which facet to show, which is how pressing it on a fresh session
      landed on Skills — an answer to a question nobody asked. */
   const railOpen = railOverride ?? railCards > 0;
+  /* Width of the expanded doc card, and the grip that changes it. Owned here
+     rather than in the rail because the conversation needs the same number: it
+     holds a band of exactly this width clear (`--rail-band` below), which is
+     what stops the card from covering the prose it was opened from. */
+  const docExpanded = railOpen && aux.expanded != null;
+  const { width: docCardW, onGripDown } = useDocCardWidth(messagesPaneRef, docExpanded);
   const toggleRail = useCallback(() => {
     setRailOverride((prev) => !(prev ?? railCards > 0));
   }, [railCards]);
@@ -1175,7 +1185,18 @@ export function SessionDetail({
               and the aux tab strip do (Tauri's shim reads e.target, not an
               ancestor). The resize handle inside it is a child without the
               attribute, so col-resize dragging still wins there. */}
-          <div className={styles.body_row} data-tauri-drag-region>
+          <div
+            className={styles.body_row}
+            data-tauri-drag-region
+            /* The band the transcript, the composer and the drawer all hold
+               clear on the right. It is the rail's own width until a doc card
+               expands, and that card's width while it is open. */
+            style={
+              docCardW > 0
+                ? ({ "--rail-band": `${docCardW}px` } as React.CSSProperties)
+                : undefined
+            }
+          >
             <div className={styles.main_col}>
               {/* Hero banner. The session's identity and the controls that act
                   on it, as one surface rather than a title row with a tab strip
@@ -1373,7 +1394,7 @@ export function SessionDetail({
                 )}
               </div>
 
-              <div className={styles.messages_pane}>
+              <div className={styles.messages_pane} ref={messagesPaneRef}>
                 {syncingLatest && (
                   <div className={styles.syncing_latest} role="status" aria-live="polite">
                     <LoaderCircle size={14} aria-hidden="true" />
@@ -1463,6 +1484,8 @@ export function SessionDetail({
                   onToggleDoc={pickDoc}
                   onCloseDoc={dropDoc}
                   onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
+                  cardWidth={docCardW}
+                  onGripDown={onGripDown}
                 />
               </div>
             </div>

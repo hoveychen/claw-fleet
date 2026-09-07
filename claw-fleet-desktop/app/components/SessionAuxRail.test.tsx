@@ -46,6 +46,8 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
         onToggleDoc={() => {}}
         onCloseDoc={() => {}}
         onOpenWiki={() => {}}
+        cardWidth={420}
+        onGripDown={() => {}}
         {...props}
       />,
     ),
