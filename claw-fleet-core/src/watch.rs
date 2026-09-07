@@ -876,6 +876,37 @@ mod tests {
         .contains("timeout must be greater than zero"));
     }
 
+    /// A dsh session's watch must persist `agent_source: "dsh"`, because the
+    /// fire path routes the resume through it (`spawn_resume` defaults to
+    /// claude). A dsh session id handed to `claude --resume` resumes nothing —
+    /// which is exactly what happened while the registering CLI could only read
+    /// the source off `FLEET_AGENT_SOURCE`, an env no dsh session carries.
+    #[test]
+    fn dsh_source_survives_the_round_trip_to_disk() {
+        let d = dir();
+        let rec = create_in(
+            d.path(),
+            "dsh-uuid-1",
+            "/repo",
+            "true",
+            None,
+            None,
+            30,
+            60,
+            Some("openrouter/anthropic/claude-opus-5"),
+            None,
+            Some("dsh"),
+            "w-dsh",
+            1_000_000,
+        )
+        .unwrap();
+        assert_eq!(rec.agent_source.as_deref(), Some("dsh"));
+        let reread = get_in(d.path(), "w-dsh").expect("record on disk");
+        assert_eq!(reread.agent_source.as_deref(), Some("dsh"));
+        assert_eq!(reread.session_id, "dsh-uuid-1");
+        assert_eq!(reread.model.as_deref(), Some("openrouter/anthropic/claude-opus-5"));
+    }
+
     #[test]
     fn create_clamps_poll_and_timeout() {
         let d = dir();

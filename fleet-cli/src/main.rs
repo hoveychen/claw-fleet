@@ -562,6 +562,14 @@ pub(crate) enum WatchCommands {
         /// `2h` (default 2h, max 7d).
         #[arg(long)]
         timeout: Option<String>,
+        /// The session to resume when the condition fires. Normally read from the
+        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here
+        /// when your harness has no per-session environment to read — every dsh
+        /// session runs inside one shared `dsh web`, so a dsh agent must pass its
+        /// own session id. The id is looked up to resolve which harness owns it,
+        /// so the resume goes to dsh rather than `claude --resume`.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// List all registered watches.
     #[command(alias = "ls")]
