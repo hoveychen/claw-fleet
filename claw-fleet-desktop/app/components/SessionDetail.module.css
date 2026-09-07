@@ -384,6 +384,70 @@
   overflow: hidden;
 }
 
+/* ── Docs opened from agent prose ───────────────────────────────────────────
+   A chip per file / wiki doc / page the reader opened from the transcript. */
+.aux_docs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.aux_docs::-webkit-scrollbar { display: none; }
+
+.aux_doc_chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-secondary);
+  max-width: 160px;
+}
+.aux_doc_chip_active {
+  border-color: var(--color-border);
+  background: var(--color-bg-card);
+}
+
+.aux_doc_chip_label {
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--color-text);
+  cursor: pointer;
+  padding: 3px 2px 3px 7px;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aux_doc_chip_close {
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 6px 3px 3px;
+}
+.aux_doc_chip_close:hover {
+  color: var(--color-text);
+}
+
+/* The reader itself — ExternalFilePreview / WikiTabPane / WebTabPane all
+   expect to fill their box. */
+.aux_doc_pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* ── Live subagent deck ─────────────────────────────────────────────────────
    Pinned above whatever else the panel holds, and capped in height so a wide
    fan-out can't push the facet panel off the bottom. */

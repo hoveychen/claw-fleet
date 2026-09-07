@@ -36,7 +36,7 @@ import type { WikiLinkContext } from "../markdown/wikiLinks";
 import type { DetailTabOpener } from "../tabKind";
 import { WikiLinksProvider } from "../markdown/wikiLinksContext";
 import { WebLinkProvider } from "../markdown/webLinks";
-import { revealSlugInWikiPage, useWikiDocs } from "../hooks/useWikiDocs";
+import { useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
@@ -48,11 +48,14 @@ import { isWorkflowAgent } from "../workflowAgent";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
 import {
   auxVisible,
+  closeDoc,
   initialAux,
   isAuxFacet,
+  openDoc,
   pruneFacet,
   syncLiveAgents,
   toggleFacet,
+  type AuxDocKind,
   type AuxFacet,
   type AuxState,
 } from "../detailAux";
@@ -60,6 +63,7 @@ import { useResizableWidth } from "../hooks/useResizableWidth";
 import { SessionAuxPanel } from "./SessionAuxPanel";
 import { SessionFacetPanel } from "./SessionFacetPanel";
 import { SubagentLiveCards } from "./SubagentLiveCards";
+import { SessionAuxDoc, SessionAuxDocStrip } from "./SessionAuxDoc";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
 
@@ -400,7 +404,6 @@ export function SessionDetail({
 
   const sessions = useSessionsStore((s) => s.sessions);
   const connection = useConnectionStore((s) => s.connection);
-  const requestFileNav = useUIStore((s) => s.requestFileNav);
   const liveSession = useMemo(() => {
     if (!session) return null;
     return sessions.find((s) => s.id === session.id) ?? session;
@@ -645,6 +648,15 @@ export function SessionDetail({
   const workspacePath = liveSession?.workspacePath;
   const sessionId = liveSession?.id;
 
+  /** Open a doc — a repo file, a wiki doc or a url the agent named — in the
+   *  auxiliary column. Every surface that renders agent prose routes here:
+   *  the thing the transcript named opens beside the sentence that named it,
+   *  instead of taking over the window (the 仓库 / 知识库 pages) or landing in
+   *  the window's tab strip, where reading it cost sight of the conversation. */
+  const openAuxDoc = useCallback((kind: AuxDocKind, ref: string) => {
+    setAux((st) => openDoc(st, kind, ref));
+  }, []);
+
   // Paths the agent wrote in backticks become clickable chips. Memoised because
   // MessageRow is memo'd — a fresh object each render would re-render every row.
   const pathLinks = useMemo<PathLinkContext | undefined>(() => {
@@ -652,15 +664,9 @@ export function SessionDetail({
     return {
       workspaceRoot: workspacePath,
       isLocal: connection?.type !== "remote",
-      // In a tab strip the file opens beside the prose that named it — the
-      // whole point of an IDE's split. Elsewhere (the drawer) there is no
-      // strip, so it still goes to the 仓库 page.
-      openInFiles: (absPath, line) =>
-        tabOpener
-          ? tabOpener.openFile(absPath, line)
-          : requestFileNav({ workspacePath, absPath, line }),
+      openInFiles: (absPath) => openAuxDoc("file", absPath),
     };
-  }, [workspacePath, connection?.type, requestFileNav, tabOpener]);
+  }, [workspacePath, connection?.type, openAuxDoc]);
 
   // `[[slug]]` refs the agent wrote become links. Agents are told to publish
   // findings to the wiki and to cross-reference them that way, so the refs were
@@ -676,11 +682,10 @@ export function SessionDetail({
     const slugs = new Set(wikiDocs.map((d) => d.slug));
     return {
       hasSlug: (slug) => slugs.has(slug),
-      // A tab beside the prose where there is a strip; the 知识库 page otherwise
-      // — the same split as a clicked path.
-      openSlug: tabOpener ? tabOpener.openWiki : revealSlugInWikiPage,
+      // Beside the prose, same as a clicked path.
+      openSlug: (slug) => openAuxDoc("wiki", slug),
     };
-  }, [wikiDocs, tabOpener]);
+  }, [wikiDocs, openAuxDoc]);
 
   useEffect(() => {
     if (!workspacePath || !sessionId) {
@@ -759,6 +764,18 @@ export function SessionDetail({
   }, []);
   const closeAuxPanel = useCallback(() => {
     setAux((st) => ({ ...st, active: null, agentsDismissed: true }));
+  }, []);
+  const openWebInAux = useCallback(
+    (url: string) => {
+      openAuxDoc("web", url);
+    },
+    [openAuxDoc],
+  );
+  const pickDoc = useCallback((id: string) => {
+    setAux((st) => ({ ...st, active: id, agentsDismissed: false }));
+  }, []);
+  const dropDoc = useCallback((id: string) => {
+    setAux((st) => closeDoc(st, id));
   }, []);
 
   // Pane width drives the overlay/side-by-side choice.
@@ -1032,6 +1049,7 @@ export function SessionDetail({
   ]);
 
   const activeFacet = aux.active != null && isAuxFacet(aux.active) ? aux.active : null;
+  const activeDoc = activeFacet ? null : aux.docs.find((d) => d.id === aux.active) ?? null;
   const auxOpen = auxVisible(aux, liveSubagents.length);
   // Overlay until the pane is wide enough for two columns. `paneWidth === 0` is
   // the pre-measure frame; treat it as wide so the panel doesn't flash as an
@@ -1039,16 +1057,18 @@ export function SessionDetail({
   const auxOverlay = paneWidth > 0 && paneWidth < AUX_OVERLAY_PX;
   const auxTitle = activeFacet
     ? facetButtons.find((b) => b.facet === activeFacet)?.label ?? ""
-    : liveSubagents.length > 0
-      ? t("detail.live_agents", { count: liveSubagents.length })
-      : t("detail.aux_title", "辅助信息");
+    : activeDoc
+      ? activeDoc.label
+      : liveSubagents.length > 0
+        ? t("detail.live_agents", { count: liveSubagents.length })
+        : t("detail.aux_title", "辅助信息");
 
   return (
     // Both link capabilities cover the whole component, so the reader modal and
-    // every tool-block renderer inherit them too. `openWeb` is null outside a
-    // tab strip, which is precisely "send it to the browser".
+    // every tool-block renderer inherit them too — and both now land in the
+    // auxiliary column, which every instance of this component has.
     <WikiLinksProvider value={wikiLinks}>
-      <WebLinkProvider value={tabOpener?.openWeb ?? null}>
+      <WebLinkProvider value={openWebInAux}>
       <div
         ref={rootRef}
         className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""}`}
@@ -1329,6 +1349,19 @@ export function SessionDetail({
                 {/* Pinned above whatever else the panel holds: the live agents
                     stay visible while you read a token receipt or a doc. */}
                 <SubagentLiveCards agents={liveSubagents} onOpen={open} />
+                <SessionAuxDocStrip
+                  docs={aux.docs}
+                  activeId={aux.active}
+                  onPick={pickDoc}
+                  onClose={dropDoc}
+                />
+                {activeDoc && (
+                  <SessionAuxDoc
+                    doc={activeDoc}
+                    onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
+                    onClose={() => dropDoc(activeDoc.id)}
+                  />
+                )}
                 {activeFacet && (
                   <SessionFacetPanel
                     facet={activeFacet}
