@@ -37,6 +37,15 @@ pub(crate) fn set_user_title(title: String, state: tauri::State<AppState>) {
 /// startup, not only when the Settings panel is opened. Both carry the real
 /// title/locale the frontend just pushed, unlike `setup()` whose AppState still
 /// holds the `en` / empty-title defaults.
+///
+/// **This path refreshes; it never installs.** Every arm below returns early
+/// when its carrier is absent from disk, because "not installed" here is
+/// indistinguishable from "the user turned it off". Installing a default-ON
+/// feature that was never installed is the frontend's job
+/// (`app/controlPlaneSelfHeal.ts`, run from `App.tsx` on every start), where
+/// the localStorage tristate — the actual source of truth for that choice — is
+/// readable. Do not turn these into unconditional applies: that would
+/// resurrect carriers 老板 deliberately removed.
 pub(crate) fn reapply_all_guidance_if_installed(
     state: &tauri::State<AppState>,
     title_override: &str,
