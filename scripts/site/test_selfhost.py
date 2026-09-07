@@ -50,7 +50,7 @@ class SelfhostTests(unittest.TestCase):
         manifest = json.loads((live / 'downloads.json').read_text())
         self.assertEqual(manifest['version'], 'v2.6.0')
         self.assertEqual(manifest['china']['provider'], 'Shenzhen')
-        for page in ['index.html', 'zh/index.html']:
+        for page in ['index.html', 'zh/index.html', 'locale.js']:
             self.assertEqual((live / page).read_bytes(), (self.old / page).read_bytes())
         for name in distribute.REQUIRED:
             old = self.old / 'releases/v2.5.0' / name
