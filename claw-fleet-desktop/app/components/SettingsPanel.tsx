@@ -8,6 +8,7 @@ import { isWebBuild } from "../hostEnv";
 import {
   getItem,
   setItem,
+  resolveFeature,
   getFeatureState,
   setFeatureState,
   resolveFeatureState,
