@@ -37,6 +37,7 @@ import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
 import { NAV_GROUPS, navGroupOf, type NavGroup } from "./navGroups";
+import { fmtBadgeCount } from "../railNumbers";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
@@ -272,7 +273,9 @@ export function SessionList() {
         <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
         <span className={styles.nav_label}>{t("view_audit")}</span>
         {unreadCriticalCount > 0 && (
-          <span className={styles.nav_badge}>{unreadCriticalCount}</span>
+          <span className={styles.nav_badge} title={`${unreadCriticalCount}`}>
+            {fmtBadgeCount(unreadCriticalCount)}
+          </span>
         )}
       </button>
       <button
@@ -337,7 +340,9 @@ export function SessionList() {
         <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5V4Z"/></svg></span>
         <span className={styles.nav_label}>{t("view_files", "仓库")}</span>
         {runningProcCount > 0 && (
-          <span className={styles.nav_badge_running}>{runningProcCount}</span>
+          <span className={styles.nav_badge_running} title={`${runningProcCount}`}>
+            {fmtBadgeCount(runningProcCount)}
+          </span>
         )}
       </button>
       <button
@@ -432,10 +437,14 @@ export function SessionList() {
                   {/* Only while this tab's own nav is hidden — an active tab's
                       items carry their own badges. */}
                   {!selected && badge.alert > 0 && (
-                    <span className={styles.nav_tab_badge}>{badge.alert}</span>
+                    <span className={styles.nav_tab_badge} title={`${badge.alert}`}>
+                      {fmtBadgeCount(badge.alert)}
+                    </span>
                   )}
                   {!selected && badge.running > 0 && (
-                    <span className={styles.nav_tab_badge_running}>{badge.running}</span>
+                    <span className={styles.nav_tab_badge_running} title={`${badge.running}`}>
+                      {fmtBadgeCount(badge.running)}
+                    </span>
                   )}
                   {!selected && badge.alert === 0 && badge.dot && (
                     <span className={styles.nav_tab_dot} />
@@ -469,9 +478,15 @@ export function SessionList() {
         {/* Scrollable sidebar content — charts + usage hidden for the
             task-focused views (projects / tasks) to keep that rail clean. */}
         <div className={styles.sidebar_content}>
-          <TodayUsageBadge collapsed={sidebarCollapsed} />
-          <LiveStats collapsed={sidebarCollapsed} />
-          <UsagePanel collapsed={sidebarCollapsed} />
+          {/* Collapsed, the three panels degrade to bare number tiles. They
+              share one column here so the stack keeps a single gap and a
+              single edge inset — each panel used to bring its own margin and
+              the rail read as three misaligned boxes. */}
+          <div className={sidebarCollapsed ? styles.rail_tiles : undefined}>
+            <TodayUsageBadge collapsed={sidebarCollapsed} />
+            <LiveStats collapsed={sidebarCollapsed} />
+            <UsagePanel collapsed={sidebarCollapsed} />
+          </div>
 
           {!sidebarCollapsed && mascotVisible && (
             <div className={styles.mascot_section}>

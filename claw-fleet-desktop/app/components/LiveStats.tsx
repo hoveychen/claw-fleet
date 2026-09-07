@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { Line, LineChart, ResponsiveContainer } from "recharts";
 import { useSessionsStore } from "../store";
+import { fmtRailCount, fmtRailMoney } from "../railNumbers";
+import { RailStatTile } from "./RailStatTile";
 import styles from "./LiveStats.module.css";
 
 function Spark({
@@ -50,24 +52,16 @@ export function LiveStats({
   if (collapsed) {
     return (
       <div className={styles.tiles} data-wizard="token-speed">
-        <div
-          className={styles.tile}
+        <RailStatTile
+          value={fmtRailCount(currentSpeed)}
+          label={t("chart.unit")}
           title={`${t("chart.title")}: ${currentSpeed.toFixed(1)} ${t("chart.unit")}`}
-        >
-          <span className={styles.tile_value}>
-            {Math.round(currentSpeed)}
-          </span>
-          <span className={styles.tile_label}>{t("chart.unit")}</span>
-        </div>
-        <div
-          className={styles.tile}
+        />
+        <RailStatTile
+          value={fmtRailMoney(currentCost)}
+          label={t("cost_chart.unit")}
           title={`${t("cost_chart.title")}: $${currentCost.toFixed(2)} ${t("cost_chart.unit")}`}
-        >
-          <span className={styles.tile_value}>
-            ${currentCost.toFixed(2)}
-          </span>
-          <span className={styles.tile_label}>{t("cost_chart.unit")}</span>
-        </div>
+        />
       </div>
     );
   }

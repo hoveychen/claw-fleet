@@ -1,0 +1,78 @@
+/* One number tile in the 64px collapsed rail. Single source of truth for the
+   whole collapsed stack — 今日累计 / tok/s / $每分钟 / 用量 all render through
+   this, so they can no longer drift apart in size or padding. */
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  /* Fills the rail's tile column (see .rail_tiles in SessionList.module.css). */
+  width: 100%;
+  /* 2px side padding, not 4–8: the 64px rail leaves ~46px of tile and a
+     6-glyph value ($312.40 → $312, $10.50) needs every one of them. */
+  padding: 6px 2px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  user-select: none;
+  cursor: default;
+  /* Reset button chrome for the clickable variant. */
+  font: inherit;
+  color: inherit;
+  text-align: center;
+}
+
+.clickable {
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.clickable:hover {
+  border-color: var(--color-accent);
+}
+
+.value {
+  /* 12px, measured: at 13px a 6-glyph value ($10.50) clipped to "$10…". */
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--color-text);
+  /* Digits must not reflow tile-to-tile as the value ticks. */
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  /* A formatter miss (or a locale with wider glyphs) must clip inside the tile
+     rather than push the pill past the rail edge like $3165.41 used to. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile_accent .value {
+  color: var(--color-accent);
+}
+
+.label {
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--color-text-dim);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* macOS vibrancy: the flat --color-bg-secondary fill reads as a hard patch on
+   the translucent sidebar, so the tiles use a wash instead (same treatment the
+   three original copies carried). */
+:global([data-platform="macos"]) .tile {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global([data-platform="macos"][data-theme="light"]) .tile {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+}
