@@ -5,9 +5,11 @@ import {
   workspaceFilterValue,
   groupOpenReadTargets,
   matchesWorkspaceFilter,
+  groupTaskSections,
   statusTone,
 } from "./TasksView";
 import type { SessionInfo } from "../types";
+import type { WithDevice } from "../deviceRuntime";
 
 /**
  * The tasks list mixes chat sessions with project ones. The chat workspace path
@@ -20,43 +22,77 @@ function session(workspacePath: string): SessionInfo {
 
 describe("matchesWorkspaceFilter", () => {
   const CHAT = "/Users/foo/.fleet/chat";
-  /** The relay never answered `chat_workspace` — neither half of the filter can
-   *  be honoured, so both go inert. */
-  const CHAT_UNKNOWN = null;
   const chat = session(CHAT);
   const repo = session("/Users/foo/repo");
 
-  it("keeps only chat sessions while the chat toggle is on", () => {
-    expect(matchesWorkspaceFilter(chat, "", CHAT, true)).toBe(true);
-    expect(matchesWorkspaceFilter(repo, "", CHAT, true)).toBe(false);
+  it("passes everything under 全部目录", () => {
+    expect(matchesWorkspaceFilter(chat, "")).toBe(true);
+    expect(matchesWorkspaceFilter(repo, "")).toBe(true);
   });
 
-  // Chat mode owns the whole list — a directory left selected underneath must
-  // not narrow it.
-  it("ignores the directory filter while the chat toggle is on", () => {
-    expect(matchesWorkspaceFilter(chat, "/Users/foo/repo", CHAT, true)).toBe(true);
-    expect(matchesWorkspaceFilter(repo, "/Users/foo/repo", CHAT, true)).toBe(false);
+  it("narrows to one folder", () => {
+    expect(matchesWorkspaceFilter(repo, "/Users/foo/repo")).toBe(true);
+    expect(matchesWorkspaceFilter(chat, "/Users/foo/repo")).toBe(false);
   });
 
-  // The toggle is chat-*only*, not chat-on/chat-off: with it off the list is
-  // unfiltered by mode, so "all directories" includes the chat sessions too.
-  it("includes chat sessions under the all-directories filter", () => {
-    expect(matchesWorkspaceFilter(chat, "", CHAT, false)).toBe(true);
-    expect(matchesWorkspaceFilter(repo, "", CHAT, false)).toBe(true);
+  // 选项值是仓库根,而会话可能跑在 `<repo>/.worktrees/<task>` 里 —— 精确比路径
+  // 会把它从这个目录的视图里静默漏掉。
+  it("matches a worktree checkout against its repo root", () => {
+    const wt = session("/Users/foo/repo/.worktrees/fix-bug");
+    expect(matchesWorkspaceFilter(wt, "/Users/foo/repo")).toBe(true);
+  });
+});
+
+describe("groupTaskSections", () => {
+  const CHAT = "/Users/foo/.fleet/chat";
+  function row(id: string, workspacePath: string, workspaceName: string) {
+    return {
+      id,
+      workspacePath,
+      workspaceName,
+      deviceId: "d1",
+    } as unknown as WithDevice<SessionInfo>;
+  }
+
+  it("pins the chat folder to the top however stale it is", () => {
+    const secs = groupTaskSections(
+      [row("a", "/work/repo", "repo"), row("b", CHAT, "Chat")],
+      { chatPath: CHAT, multiDevice: false },
+    );
+    expect(secs.map((s) => s.path)).toEqual([CHAT, "/work/repo"]);
   });
 
-  it("still matches a plain workspace path", () => {
-    expect(matchesWorkspaceFilter(repo, "/Users/foo/repo", CHAT, false)).toBe(true);
-    expect(matchesWorkspaceFilter(chat, "/Users/foo/repo", CHAT, false)).toBe(false);
+  it("keeps the incoming order otherwise — the freeze must survive grouping", () => {
+    const secs = groupTaskSections(
+      [row("a", "/work/a", "a"), row("b", "/work/b", "b"), row("c", "/work/a", "a")],
+      { chatPath: null, multiDevice: false },
+    );
+    expect(secs.map((s) => s.path)).toEqual(["/work/a", "/work/b"]);
+    expect(secs[0].sessions.map((s) => s.id)).toEqual(["a", "c"]);
   });
 
-  it("degrades to a plain directory filter when the desktop never sent a chat path", () => {
-    // An older desktop doesn't know the `chat_workspace` method. Showing every
-    // session beats blanking the list.
-    for (const s of [chat, repo]) {
-      expect(matchesWorkspaceFilter(s, "", CHAT_UNKNOWN, true)).toBe(true);
-      expect(matchesWorkspaceFilter(s, "", CHAT_UNKNOWN, false)).toBe(true);
-    }
+  it("folds a worktree checkout into its repository section", () => {
+    const secs = groupTaskSections(
+      [row("a", "/work/repo", "repo"), row("b", "/work/repo/.worktrees/fix", "repo")],
+      { chatPath: null, multiDevice: false },
+    );
+    expect(secs).toHaveLength(1);
+    expect(secs[0].path).toBe("/work/repo");
+  });
+
+  // 两台机器上同路径的 /repos/foo 是两个不同的仓库,合成一个分区点进去是混的。
+  it("splits the same path on two devices, labelling each", () => {
+    const rows = [
+      { ...row("a", "/repos/foo", "foo"), deviceId: "dev-a" },
+      { ...row("b", "/repos/foo", "foo"), deviceId: "dev-b" },
+    ] as Array<WithDevice<SessionInfo>>;
+    const secs = groupTaskSections(rows, {
+      chatPath: null,
+      multiDevice: true,
+      deviceLabelOf: (id) => (id === "dev-a" ? "MBP" : "Studio"),
+    });
+    expect(secs.map((s) => s.key)).toEqual(["dev-a::/repos/foo", "dev-b::/repos/foo"]);
+    expect(secs.map((s) => s.name)).toEqual(["MBP · foo", "Studio · foo"]);
   });
 });
 
@@ -239,14 +275,12 @@ describe("workspace filter across devices", () => {
 
   it("does not let one device's folder pick in the other device's sessions", () => {
     const filter = workspaceFilterValue("dev-a", "/repos/foo", true);
-    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), filter, null, false)).toBe(true);
-    expect(matchesWorkspaceFilter(row("dev-b", "/repos/foo"), filter, null, false)).toBe(false);
+    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), filter)).toBe(true);
+    expect(matchesWorkspaceFilter(row("dev-b", "/repos/foo"), filter)).toBe(false);
   });
 
   it("still matches by bare path for a single-device filter value", () => {
-    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), "/repos/foo", null, false)).toBe(
-      true,
-    );
+    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), "/repos/foo")).toBe(true);
   });
 });
 
