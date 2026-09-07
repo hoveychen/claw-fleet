@@ -13,9 +13,10 @@ import {
 } from "../store";
 import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
-import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
+import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow, messageToText } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
+import { appendTailDelta } from "../tailDelta";
 import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
 import {
@@ -206,6 +207,9 @@ export function SessionDetail({
   /** Last record of the previous poll's window — how the next poll measures
    *  what the agent appended. Cleared with the messages it describes. */
   const prevLastIdRef = useRef<string | null>(null);
+  /** Byte cursor for incremental follow, or null when this pane is on the
+   *  whole-window path (source without a file behind it, or a failed read). */
+  const tailOffsetRef = useRef<number | null>(null);
 
   // Optimistic follow-ups: submitting a resume/enqueue spawns a detached
   // `claude --resume` that only writes the message into the JSONL once the CLI
@@ -224,6 +228,7 @@ export function SessionDetail({
       setLocalSession(sessionInfo);
       setLocalMessages([]);
       prevLastIdRef.current = null;
+      tailOffsetRef.current = null;
       setLocalLoadingEarlier(false);
       setLocalTail(INITIAL_TAIL);
       setLocalFullyLoaded(false);
@@ -255,14 +260,34 @@ export function SessionDetail({
         }
       : null;
     probeDsh?.("fired");
+    // Take the live-follow cursor and *then* read the window — awaited, not
+    // raced. A record written between the two arrives in both and is deduped by
+    // `appendTailDelta`; the other order would place it before a cursor that
+    // never delivers it, and it would be lost. The cost is one metadata read
+    // (a `stat` locally, one round trip remotely) before the transcript paints.
+    //
+    // A failure — or an offset of 0, meaning no file stands behind this path
+    // (dsh://) — leaves the cursor null and the poll below stays on the
+    // whole-window path it used before incremental follow existed.
+    tailOffsetRef.current = null;
+    const withCursor = invoke<TailDelta>("get_messages_since", {
+      jsonlPath: localSession.jsonlPath,
+      offset: null,
+    })
+      .then((d) => {
+        if (!cancelled && d.offset > 0) tailOffsetRef.current = d.offset;
+      })
+      .catch(() => {});
     // Deadline, not abort: `get_messages_tail` can stay pending forever when the
     // backend stops answering (proven by freezing dsh's web server — the pane
     // sat on 「加载中…」 for 80s+ with no error). A late result still renders.
     withStallWatch(
-      invoke<RawMessage[]>("get_messages_tail", {
-        jsonlPath: localSession.jsonlPath,
-        tail,
-      }),
+      withCursor.then(() =>
+        invoke<RawMessage[]>("get_messages_tail", {
+          jsonlPath: localSession.jsonlPath,
+          tail,
+        }),
+      ),
       () => {
         probeDsh?.(cancelled ? "stalled(cancelled)" : "stalled");
         if (cancelled) return;
@@ -328,6 +353,7 @@ export function SessionDetail({
         setLocalSession(s);
         setLocalMessages([]);
         prevLastIdRef.current = null;
+        tailOffsetRef.current = null;
         setLocalTail(INITIAL_TAIL);
         setLocalFullyLoaded(false);
       } else {
@@ -533,6 +559,37 @@ export function SessionDetail({
       // window and would race a stale-tail overwrite from us.
       if (inFlight || localLoadingRef.current) return;
       inFlight = true;
+      // Incremental follow: read only what the agent appended since last tick.
+      // The window path below re-read the whole fetched window every 1.5s,
+      // which on a 4513-record transcript took 1–3s per poll — longer than the
+      // interval scheduling it. Falls back the moment the cursor is gone
+      // (unsupported source, or an error that invalidated it).
+      const offset = tailOffsetRef.current;
+      if (offset !== null) {
+        invoke<TailDelta>("get_messages_since", {
+          jsonlPath: standaloneJsonlPath,
+          offset,
+        })
+          .then((d) => {
+            if (cancelled) return;
+            tailOffsetRef.current = d.offset;
+            if (d.messages.length > 0) {
+              setLocalMessages((prev) => appendTailDelta(prev, d.messages));
+            }
+          })
+          .catch(() => {
+            // Drop back to the window path rather than going quiet: a follower
+            // that stops delivering messages looks exactly like an idle agent.
+            if (!cancelled) tailOffsetRef.current = null;
+          })
+          .finally(() => {
+            inFlight = false;
+          });
+        return;
+      }
+      // Fallback: no byte cursor for this source (dsh://) or the cursor read
+      // failed. Re-request a window and grow it only by what actually arrived —
+      // see `liveTailWindow` for what the old unconditional +1000 cost.
       const tail = localTailRef.current;
       invoke<RawMessage[]>("get_messages_tail", {
         jsonlPath: standaloneJsonlPath,

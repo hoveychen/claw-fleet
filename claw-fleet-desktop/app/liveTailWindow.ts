@@ -5,6 +5,13 @@
  * already in hand. This is the *fetch* window: the `tail` argument the
  * standalone poll in `SessionDetail` hands `get_messages_tail` every 1.5s.
  *
+ * **This is now the fallback path, not the main one.** A pane whose source has
+ * a byte cursor (any transcript backed by a file) follows incrementally via
+ * `get_messages_since` and never re-requests a window at all. What still lands
+ * here: sources with no file behind them (`dsh://`), and a pane whose cursor
+ * read failed. Those keep re-reading a window, so the growth rule below is the
+ * only thing standing between them and the runaway it documents.
+ *
  * The window has to grow as the agent writes, or records the reader has already
  * scrolled back to fall off the top of a fixed-size tail. Getting that growth
  * rule wrong is expensive in a way a render window never is: every extra record
@@ -15,9 +22,6 @@
  */
 
 import type { RawMessage } from "./types";
-
-/** Records fetched initially, and the floor the window never drops below. */
-export const LIVE_TAIL_FLOOR = 150;
 
 /**
  * Ceiling on the fetch window.

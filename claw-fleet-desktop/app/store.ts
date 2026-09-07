@@ -7,6 +7,7 @@ import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
 import { getItem, resolveFeature, setItem } from "./storage";
+import { appendTailDelta } from "./tailDelta";
 import i18n from "./i18n";
 import { playChime } from "./audio";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
@@ -875,19 +876,8 @@ export const useDetailStore = create<DetailState>((set, get) => ({
 
   appendMessages: (msgs) => {
     set((state) => {
-      if (msgs.length === 0) return state;
-      // Dedup by uuid. Claude's `session-tail` is a byte-offset delta (never
-      // overlaps), so this is a no-op there. Codex's live follow re-normalizes a
-      // trailing window each poll (its rollout is folded — see
-      // `CodexSource::tail_incremental`), so consecutive pushes overlap and the
-      // event→response_item swap re-emits the same reply under its stable uuid;
-      // deduping here keeps each reply once. Records without a uuid are always
-      // kept (nothing to key on).
-      const seen = new Set(
-        state.messages.map((m) => m.uuid).filter((u): u is string => !!u),
-      );
-      const fresh = msgs.filter((m) => !m.uuid || !seen.has(m.uuid));
-      return fresh.length > 0 ? { messages: [...state.messages, ...fresh] } : state;
+      const merged = appendTailDelta(state.messages, msgs);
+      return merged === state.messages ? state : { messages: merged };
     });
   },
 }));

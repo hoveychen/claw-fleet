@@ -312,6 +312,14 @@ export interface MessageUsage {
   cache_read_input_tokens?: number;
 }
 
+/** One step of a live follow — the payload of the `get_messages_since` command.
+ *  `messages` is what the agent appended since the cursor that was passed in;
+ *  `offset` is the cursor to pass next time. */
+export interface TailDelta {
+  messages: RawMessage[];
+  offset: number;
+}
+
 export interface RawMessage {
   type: "user" | "assistant" | "progress" | "queue-operation" | "last-prompt" | "file-history-snapshot";
   uuid?: string;
