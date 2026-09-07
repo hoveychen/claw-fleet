@@ -402,7 +402,7 @@
      land here now, and the file preview used to get a doc-tab-sized column. */
   width: min(94%, 560px);
   z-index: 6;
-  box-shadow: -10px 0 28px rgb(0 0 0 / 28%);
+  box-shadow: var(--shadow-drawer);
   animation: aux_drawer_in 160ms ease-out;
 }
 
