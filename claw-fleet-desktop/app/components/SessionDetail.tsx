@@ -15,8 +15,9 @@ import {
 import { CalendarClock, LoaderCircle } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
-import { messageToText } from "../messageRows";
+import { isRenderableRow, messageToText } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
+import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
 import {
   initialFollowState,
@@ -200,6 +201,9 @@ export function SessionDetail({
   localTailRef.current = localTail;
   const localLoadingRef = useRef(localLoading);
   localLoadingRef.current = localLoading;
+  /** Last record of the previous poll's window — how the next poll measures
+   *  what the agent appended. Cleared with the messages it describes. */
+  const prevLastIdRef = useRef<string | null>(null);
 
   // Optimistic follow-ups: submitting a resume/enqueue spawns a detached
   // `claude --resume` that only writes the message into the JSONL once the CLI
@@ -217,6 +221,7 @@ export function SessionDetail({
     if (sessionInfo && sessionInfo.id !== localSession?.id) {
       setLocalSession(sessionInfo);
       setLocalMessages([]);
+      prevLastIdRef.current = null;
       setLocalLoadingEarlier(false);
       setLocalTail(INITIAL_TAIL);
       setLocalFullyLoaded(false);
@@ -320,6 +325,7 @@ export function SessionDetail({
       if (isStandalone) {
         setLocalSession(s);
         setLocalMessages([]);
+        prevLastIdRef.current = null;
         setLocalTail(INITIAL_TAIL);
         setLocalFullyLoaded(false);
       } else {
@@ -528,10 +534,14 @@ export function SessionDetail({
           if (cancelled) return;
           setLocalMessages((prev) => reconcileMessages(prev, msgs));
           setLocalFullyLoaded(msgs.length < tail);
-          // Window saturated: the next transcript write would slide already-
-          // rendered messages out of the top. Grow the window so the visible
-          // history stays anchored while the tail keeps extending.
-          if (msgs.length >= tail) setLocalTail(tail + LOAD_EARLIER_STEP);
+          // Keep the window's start pinned as the transcript grows, so nothing
+          // the reader has scrolled back to slides out of the top. Growth is
+          // measured against the previous window's last record — see
+          // `liveTailWindow` for the rule and what it costs to get wrong.
+          const arrived = arrivedSince(prevLastIdRef.current, msgs);
+          prevLastIdRef.current = recordId(msgs[msgs.length - 1]);
+          const grown = nextLiveTail({ tail, returned: msgs.length, arrived });
+          if (grown !== tail) setLocalTail(grown);
         })
         .catch(() => {})
         .finally(() => {
@@ -825,6 +835,24 @@ export function SessionDetail({
   // resizes the webview, which is the very thing known to clear the freeze: the
   // act of going to look would destroy the state being looked at.
   const [snapshots, setSnapshots] = useState<string[]>([]);
+  // Render-synced so the keydown listener (mounted once) reads current values
+  // without re-subscribing. What the DOM cannot say about itself: a pane
+  // measured holding one message while its owner had 1621 renderable records is
+  // only a contradiction once both halves are in the same reading.
+  const probeCountsRef = useRef<Record<string, string | number | boolean>>({});
+  probeCountsRef.current = {
+    msgs: messages.length,
+    displayed: displayedMessages.length,
+    renderable: displayedMessages.filter(isRenderableRow).length,
+    tail: isStandalone ? localTail : global.loadedTail ?? -1,
+    fullyLoaded,
+    isLoading,
+    stalled: loadStalled,
+    following: followRef.current.following,
+    detached: followRef.current.detached,
+    tab: viewTab,
+    dockH: dockHeight,
+  };
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       if (!ev.altKey || !ev.shiftKey || ev.code !== "KeyS") return;
@@ -832,7 +860,9 @@ export function SessionDetail({
       if (!el) return;
       ev.preventDefault();
       const stamp = new Date().toTimeString().slice(0, 8);
-      const text = formatSnapshot(takeScrollSnapshot(el, currentViewMetrics(), stamp));
+      const text = formatSnapshot(
+        takeScrollSnapshot(el, currentViewMetrics(), stamp, probeCountsRef.current),
+      );
       setSnapshots((prev) => [...prev, text]);
     };
     window.addEventListener("keydown", onKey);

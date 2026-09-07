@@ -107,6 +107,46 @@ describe("takeScrollSnapshot", () => {
   });
 });
 
+describe("takeScrollSnapshot — DOM row counts", () => {
+  /** A scroller holding a message list with `rows` rendered rows. */
+  function withList(el: HTMLDivElement, rows: number) {
+    const list = document.createElement("div");
+    el.appendChild(list);
+    for (let i = 0; i < rows; i++) {
+      const row = document.createElement("div");
+      row.setAttribute("data-msg-idx", String(i));
+      list.appendChild(row);
+    }
+  }
+
+  it("counts the rows the DOM actually holds", () => {
+    const el = makeScroller({ scrollHeight: 5000, clientHeight: 600, movable: true });
+    withList(el, 37);
+    const snap = takeScrollSnapshot(el, VIEW, "live");
+    expect(snap.dom.msgIdxNodes).toBe(37);
+    expect(snap.dom.listChildren).toBe(37);
+  });
+
+  it("reads zero on a scroller with no list at all", () => {
+    const el = makeScroller({ scrollHeight: 600, clientHeight: 600, movable: true });
+    const snap = takeScrollSnapshot(el, VIEW, "empty");
+    expect(snap.dom).toEqual({ msgIdxNodes: 0, listChildren: 0 });
+  });
+
+  it("puts the DOM count and the owner's count side by side", () => {
+    // The whole reason the counts were added: a pane measured holding one
+    // message while its owner had 1621 renderable records in hand. Neither
+    // half is remarkable alone; together they are the contradiction.
+    const el = makeScroller({ scrollHeight: 761, clientHeight: 623, movable: true });
+    withList(el, 1);
+    const text = formatSnapshot(
+      takeScrollSnapshot(el, VIEW, "stuck", { msgs: 4513, renderable: 1621, tail: 5150 }),
+    );
+    expect(text).toContain("dom msgIdxNodes=1");
+    expect(text).toContain("state msgs=4513 renderable=1621 tail=5150");
+  });
+});
+
 describe("formatSnapshot", () => {
   it("puts every number on a pasteable line", () => {
     const el = makeScroller({ scrollHeight: 5000, clientHeight: 600, movable: true });
@@ -116,5 +156,10 @@ describe("formatSnapshot", () => {
     expect(text).toContain("clientHeight=600");
     expect(text).toContain("writeTest=120");
     expect(text).toContain("innerH=900");
+  });
+
+  it("omits the state line when the caller passed no counts", () => {
+    const el = makeScroller({ scrollHeight: 5000, clientHeight: 600, movable: true });
+    expect(formatSnapshot(takeScrollSnapshot(el, VIEW, "bare"))).not.toContain("state ");
   });
 });
