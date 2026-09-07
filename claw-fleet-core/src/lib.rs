@@ -138,6 +138,7 @@ pub mod session_mark;
 pub mod session_notes;
 pub mod session_snapshot;
 pub mod session_title;
+pub mod session_title_guidance;
 pub mod session_todos;
 pub mod skill_history;
 pub mod skill_sync;

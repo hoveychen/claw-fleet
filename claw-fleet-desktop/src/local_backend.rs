@@ -2833,6 +2833,14 @@ impl Backend for LocalBackend {
         crate::model_guidance::remove_model_guidance()
     }
 
+    fn apply_session_title_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
+        crate::session_title_guidance::apply_session_title_guidance(user_title, locale)
+    }
+
+    fn remove_session_title_guidance(&self) -> Result<(), String> {
+        crate::session_title_guidance::remove_session_title_guidance()
+    }
+
     fn interaction_diagnostics(
         &self,
     ) -> Vec<crate::interaction_mode_diagnostics::DiagnosticCheck> {

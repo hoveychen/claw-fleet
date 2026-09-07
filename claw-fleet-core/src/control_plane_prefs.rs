@@ -46,6 +46,7 @@ pub enum Feature {
     PrdDiscipline,
     WikiGuidance,
     ModelGuidance,
+    SessionTitleGuidance,
 }
 
 impl Feature {
@@ -64,11 +65,12 @@ impl Feature {
             Feature::PrdDiscipline => "prd_discipline",
             Feature::WikiGuidance => "wiki_guidance",
             Feature::ModelGuidance => "model_guidance",
+            Feature::SessionTitleGuidance => "session_title_guidance",
         }
     }
 
     /// Every feature heal knows how to install.
-    pub const ALL: [Feature; 10] = [
+    pub const ALL: [Feature; 11] = [
         Feature::GuardHook,
         Feature::ElicitationHook,
         Feature::PlanApprovalHook,
@@ -79,6 +81,7 @@ impl Feature {
         Feature::PrdDiscipline,
         Feature::WikiGuidance,
         Feature::ModelGuidance,
+        Feature::SessionTitleGuidance,
     ];
 }
 

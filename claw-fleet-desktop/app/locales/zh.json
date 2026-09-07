@@ -1872,6 +1872,8 @@
     "prd_mode_enabled": "启用 PRD 自律模式",
     "model_guidance_desc": "注入一份 Claude 与 Codex 两家模型的能力/成本/effort 速查表，让 Agent 给 subagent、workflow agent、新会话选模型时有据可依。同时对 Claude 与 Fleet 启动的 Codex 会话生效。",
     "model_guidance_enabled": "启用模型选择速查指引",
+    "session_title_guidance_desc": "让 Agent 在话题清楚后用 fleet__set_session_title 给自己的会话起名，任务卡上显示的是标题而不是第一条 prompt。你手动改过的名字永远优先。同时对 Claude 与 Fleet 启动的 Codex 会话生效。",
+    "session_title_guidance_enabled": "让 Agent 自己给会话起标题",
     "skill_autosync_enabled": "启用 Skill 自动互通",
     "wiki_guidance_desc": "让 Agent 把完成的 HTML 报告、demo、markdown 文档用 `fleet wiki publish` 归档进知识库，在「知识库」板块统一浏览，不再散落在工作目录里。同时对 Claude 与 Fleet 启动的 Codex 会话生效。",
     "wiki_guidance_enabled": "启用知识库归档指引",
