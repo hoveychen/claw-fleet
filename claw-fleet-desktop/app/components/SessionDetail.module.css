@@ -534,6 +534,17 @@
 }
 .rail::-webkit-scrollbar { display: none; }
 
+/* Only ever seen when the switch pinned the column open with nothing in it.
+   No card, no frame: a line of dim text on the sunken ground, so the empty
+   rail still reads as ground rather than as a card that failed to fill. */
+.rail_empty {
+  margin: 0;
+  padding: 8px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-dim);
+}
+
 /* Windows frameless: the rail owns the pane's right edge whenever it is there,
    so the first card starts below the caption buttons. */
 .root:not(.inline) .rail {

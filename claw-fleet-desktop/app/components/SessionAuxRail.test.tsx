@@ -38,6 +38,7 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
   act(() =>
     root!.render(
       <SessionAuxRail
+        open
         agents={[]}
         docs={[]}
         activeId={null}
@@ -52,10 +53,20 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
 }
 
 describe("SessionAuxRail", () => {
-  // The reason the rail can be permanent: with nothing in play it is not a
-  // narrow empty frame, it is not there at all.
-  it("costs no width when nothing is in play", () => {
-    expect(render().childElementCount).toBe(0);
+  // The reason the rail can be permanent: closed, it is not a narrow empty
+  // frame, it is not there at all. SessionDetail closes it by default whenever
+  // nothing is in play.
+  it("costs no width when closed", () => {
+    expect(render({ open: false }).childElementCount).toBe(0);
+  });
+
+  // Held open by the header switch on a session with nothing in play: say so,
+  // rather than showing a blank column that reads as a failure to load.
+  it("says why it is empty when the reader pinned it open", () => {
+    const el = render({ open: true });
+
+    expect(el.querySelector("aside")).not.toBeNull();
+    expect(el.querySelector("aside > p")?.textContent).toBeTruthy();
   });
 
   it("shows a card per live subagent", () => {

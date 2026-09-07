@@ -22,16 +22,18 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
  * "how many are there" is answered by counting shapes rather than reading a
  * strip.
  *
- * Renders `null` when there is nothing in play, which is what makes the column
- * cost zero width rather than holding an empty frame open. That is the whole
- * reason it can be permanent: it is only ever there when it has something to
- * say.
+ * Visibility is controlled by `open`, whose default in SessionDetail follows
+ * the content: nothing in play means `null` and zero width rather than an empty
+ * frame held open. That is the whole reason it can be permanent — it is only
+ * ever there when it has something to say, or when the reader pinned it open
+ * with the header's switch.
  *
  * Clicking a doc card reads it in the drawer (`SessionAuxPanel`) at full width —
  * the rail is the inventory, the drawer is the reader. Clicking a subagent card
  * navigates to that subagent's transcript, the same as it always did.
  */
 export function SessionAuxRail({
+  open,
   agents,
   docs,
   activeId,
@@ -39,6 +41,9 @@ export function SessionAuxRail({
   onOpenDoc,
   onCloseDoc,
 }: {
+  /** Whether the column is on screen at all. The header's switch owns this;
+   *  its default follows the content (see SessionDetail's `railOpen`). */
+  open: boolean;
   /** Live subagents, most-recently-active first. */
   agents: SessionInfo[];
   docs: AuxDoc[];
@@ -49,9 +54,14 @@ export function SessionAuxRail({
   onCloseDoc: (id: string) => void;
 }) {
   const { t } = useTranslation();
-  if (agents.length === 0 && docs.length === 0) return null;
+  if (!open) return null;
+  const empty = agents.length === 0 && docs.length === 0;
   return (
     <aside className={styles.rail} data-tauri-drag-region>
+      {/* Held open by the switch with nothing in it. Saying so beats an empty
+          column, which reads as the rail having failed to load rather than as
+          "there is genuinely nothing running and nothing opened yet". */}
+      {empty && <p className={styles.rail_empty}>{t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}</p>}
       <SubagentLiveCards agents={agents} onOpen={onOpenAgent} />
       {/* Newest first: the file the agent just named is the one you are most
           likely to be reaching for, and it lands nearest the live agents. */}

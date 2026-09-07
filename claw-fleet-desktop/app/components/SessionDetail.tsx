@@ -54,7 +54,6 @@ import {
   isAuxFacet,
   openDoc,
   pruneTab,
-  reopenAuxId,
   showTab,
   toggleTab,
   type AuxDocKind,
@@ -459,6 +458,13 @@ export function SessionDetail({
      one doc at full width). See detailAux.ts for the state and why the two are
      no longer one tab strip. */
   const [aux, setAux] = useState<AuxState>(initialAux);
+  /* The rail's visibility, when the reader has an opinion about it. `null` is
+     the default and means "follow the content": present exactly when there are
+     cards, zero width otherwise. The toolbar switch writes a boolean here, so
+     it always flips what is actually on screen — that is the whole contract of
+     a switch, and it is why this is an override rather than a plain boolean
+     that would have to fight the auto behaviour. Reset per session below. */
+  const [railOverride, setRailOverride] = useState<boolean | null>(null);
   /* The header's numeric chips — spend, tokens, reasoning share, compactions —
      are reference figures you look up, not identity you read at a glance. Seven
      of them in a row turned the title area into a status bar, so they collapse
@@ -644,6 +650,9 @@ export function SessionDetail({
     // Switching sessions must not carry another session's pending echo over.
     setOptimisticSends([]);
     setResumeGrace(false);
+    // "I pinned the rail open on that session" is not an opinion about the next
+    // one — hand the new session back to the content-follows default.
+    setRailOverride(null);
   }, [liveSession?.id]);
 
   // Resume entry: only for "新会话"-launched main sessions (transcript
@@ -1136,14 +1145,18 @@ export function SessionDetail({
   const drawerTitle = activeFacet
     ? auxFacets.find((f) => f.id === activeFacet)?.label ?? activeFacet
     : activeDoc?.label ?? "";
-  // The rail is not something you open — it is there exactly when it has cards.
   const railCards = liveSubagents.length + aux.docs.length;
-  // The toolbar switch drives the drawer only: hide it when it is showing, and
-  // put back whatever it showed last when it is not.
-  const reopenTabId = reopenAuxId(aux) ?? "skills";
-  const toggleAuxPanel = useCallback(() => {
-    setAux((st) => (st.active == null ? showTab(st, reopenTabId) : closeAux(st)));
-  }, [reopenTabId]);
+  /* The rail follows its content by default — present when it has cards, zero
+     width when it does not — until the reader says otherwise with the toolbar
+     switch. The switch owns *this* layer, not the drawer: the drawer is a place
+     you go look one thing up, and it is reached by naming that thing (the ···
+     menu's facets, or a rail card). A switch that opened the drawer had to
+     invent which facet to show, which is how pressing it on a fresh session
+     landed on Skills — an answer to a question nobody asked. */
+  const railOpen = railOverride ?? railCards > 0;
+  const toggleRail = useCallback(() => {
+    setRailOverride((prev) => !(prev ?? railCards > 0));
+  }, [railCards]);
 
   return (
     // Both link capabilities cover the whole component, so the reader modal and
@@ -1152,7 +1165,7 @@ export function SessionDetail({
     <WikiLinksProvider value={wikiLinks}>
       <WebLinkProvider value={openWebInAux}>
       <div
-        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railCards > 0 ? styles.rail_open : ""}`}
+        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railOpen ? styles.rail_open : ""}`}
       >
         {liveSession && (
           <>
@@ -1301,20 +1314,19 @@ export function SessionDetail({
                     </button>
                   </div>
                   </div>
-                  {/* Toolbar. The drawer's switch leads it: with the facet
-                      buttons gone from this side, this is how you get the last
-                      thing you looked up back once it is closed. It carries no
-                      running-agent badge any more — the rail beside the
-                      conversation is where live agents live, and it is visible
-                      whether the drawer is open or not. */}
+                  {/* Toolbar. The rail's switch leads it — this is the control
+                      for the column beside the conversation, and nothing else.
+                      The drawer has no switch on purpose: you open it by naming
+                      what you want in it (the ··· menu below, or a rail card),
+                      and it closes with its own ✕. */}
                   <div className={styles.hero_tools} data-tauri-drag-region>
                     <button
                       type="button"
-                      className={`${styles.hero_tool} ${auxOpen ? styles.hero_tool_on : ""}`}
-                      onClick={toggleAuxPanel}
-                      aria-pressed={auxOpen}
-                      title={auxOpen ? t("detail.drawer_hide", "收起详情抽屉") : t("detail.drawer_show", "展开详情抽屉")}
-                      aria-label={auxOpen ? t("detail.drawer_hide", "收起详情抽屉") : t("detail.drawer_show", "展开详情抽屉")}
+                      className={`${styles.hero_tool} ${railOpen ? styles.hero_tool_on : ""}`}
+                      onClick={toggleRail}
+                      aria-pressed={railOpen}
+                      title={railOpen ? t("detail.rail_hide", "收起辅助栏") : t("detail.rail_show", "展开辅助栏")}
+                      aria-label={railOpen ? t("detail.rail_hide", "收起辅助栏") : t("detail.rail_show", "展开辅助栏")}
                     >
                       <PanelRight size={14} strokeWidth={1.8} />
                     </button>
@@ -1440,8 +1452,9 @@ export function SessionDetail({
 
             {/* The ambient layer. A real column — it narrows the conversation —
                 which it earns by not rendering at all when there is nothing in
-                play. */}
+                play and the reader has not asked for it. */}
             <SessionAuxRail
+              open={railOpen}
               agents={liveSubagents}
               docs={aux.docs}
               activeId={activeTab}

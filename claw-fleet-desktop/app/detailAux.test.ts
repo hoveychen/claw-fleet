@@ -8,7 +8,6 @@ import {
   MAX_AUX_DOCS,
   openDoc,
   pruneTab,
-  reopenAuxId,
   showTab,
   toggleTab,
   type AuxState,
@@ -94,31 +93,10 @@ describe("closeDoc", () => {
   });
 });
 
-describe("reopenAuxId", () => {
-  it("has no memory before anything has been opened", () => {
-    expect(reopenAuxId(initialAux)).toBe(null);
-  });
-
-  it("remembers the last thing the drawer showed after it is closed", () => {
-    expect(reopenAuxId(closeAux(toggleTab(initialAux, "tokens")))).toBe("tokens");
-  });
-
-  it("forgets a doc whose card the reader dismissed", () => {
-    let st = openDoc(initialAux, "file", "/a.rs");
-    st = closeDoc(st, docId("file", "/a.rs"));
-    expect(reopenAuxId(st)).toBe(null);
-  });
-});
-
 describe("pruneTab", () => {
   it("drops a facet the session no longer offers", () => {
     const st = toggleTab(initialAux, "bgtasks");
     expect(pruneTab(st, () => false).active).toBe(null);
-  });
-
-  it("forgets a remembered facet the session no longer offers", () => {
-    const st = closeAux(toggleTab(initialAux, "bgtasks"));
-    expect(reopenAuxId(pruneTab(st, () => false))).toBe(null);
   });
 
   it("keeps content that still exists", () => {
