@@ -44,6 +44,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Hovering the sparkline rewrites the KPI above it with that instant's value;
+   the accent colour is what says "this is not the live number any more". */
+.kpi_value_past {
+  color: var(--color-accent);
+}
+
 .kpi_unit {
   font-size: 10px;
   color: var(--color-text-dim);
@@ -52,6 +58,7 @@
 .spark {
   margin-top: 4px;
   height: 24px;
+  cursor: crosshair;
 }
 
 .spark_placeholder {
