@@ -19,6 +19,24 @@ export interface GroupSessionsOptions {
    *  without it the freeze would be undone right here, since the frozen list is
    *  re-sorted the moment it is grouped. */
   preserveOrder?: boolean;
+  /** A repository root that is hoisted to the top of the list regardless of how
+   *  recently it was active — the rail pins the pure-chat workspace there so it
+   *  is always the first section, instead of sinking among the repos whenever a
+   *  project is busier. Ignored when no group matches the path (and honoured
+   *  under `preserveOrder` too: the freeze is about the *rows* not moving under
+   *  the cursor, and the pinned section is already at the top). */
+  pinnedPath?: string | null;
+}
+
+/** Move the pinned section (if present) to the front, leaving the rest as-is. */
+function hoistPinned(
+  groups: WorkspaceSessionGroup[],
+  pinnedPath: string | null | undefined,
+): WorkspaceSessionGroup[] {
+  if (!pinnedPath) return groups;
+  const at = groups.findIndex((g) => g.path === pinnedPath);
+  if (at <= 0) return groups;
+  return [groups[at], ...groups.slice(0, at), ...groups.slice(at + 1)];
 }
 
 /**
@@ -29,7 +47,7 @@ export interface GroupSessionsOptions {
  */
 export function groupSessionsByWorkspace(
   sessions: SessionInfo[],
-  { preserveOrder = false }: GroupSessionsOptions = {},
+  { preserveOrder = false, pinnedPath = null }: GroupSessionsOptions = {},
 ): WorkspaceSessionGroup[] {
   const groups = new Map<string, WorkspaceSessionGroup>();
 
@@ -53,14 +71,17 @@ export function groupSessionsByWorkspace(
 
   // Insertion order already mirrors the caller's order, so preserving it is
   // simply skipping both sorts.
-  if (preserveOrder) return [...groups.values()];
+  if (preserveOrder) return hoistPinned([...groups.values()], pinnedPath);
 
   for (const group of groups.values()) {
     group.sessions.sort((a, b) => activityMs(b) - activityMs(a));
   }
 
-  return [...groups.values()].sort(
-    (a, b) =>
-      b.latestActivityMs - a.latestActivityMs || a.name.localeCompare(b.name),
+  return hoistPinned(
+    [...groups.values()].sort(
+      (a, b) =>
+        b.latestActivityMs - a.latestActivityMs || a.name.localeCompare(b.name),
+    ),
+    pinnedPath,
   );
 }

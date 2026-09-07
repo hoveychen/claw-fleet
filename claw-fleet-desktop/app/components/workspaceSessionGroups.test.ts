@@ -65,6 +65,47 @@ describe("groupSessionsByWorkspace", () => {
     ]);
   });
 
+  it("pins the given path to the top however stale it is", () => {
+    const groups = groupSessionsByWorkspace(
+      [
+        session("busy", "/work/repo", "repo", 900),
+        session("quiet", "/home/me/.fleet/chat", "Chat", 1),
+      ],
+      { pinnedPath: "/home/me/.fleet/chat" },
+    );
+
+    expect(groups.map((group) => group.path)).toEqual([
+      "/home/me/.fleet/chat",
+      "/work/repo",
+    ]);
+  });
+
+  it("pins under preserveOrder too, leaving the rest of the order intact", () => {
+    const groups = groupSessionsByWorkspace(
+      [
+        session("a", "/work/a", "a", 10),
+        session("b", "/work/b", "b", 30),
+        session("chat", "/home/me/.fleet/chat", "Chat", 1),
+      ],
+      { preserveOrder: true, pinnedPath: "/home/me/.fleet/chat" },
+    );
+
+    expect(groups.map((group) => group.path)).toEqual([
+      "/home/me/.fleet/chat",
+      "/work/a",
+      "/work/b",
+    ]);
+  });
+
+  it("ignores a pinned path with no section of its own", () => {
+    const groups = groupSessionsByWorkspace(
+      [session("a", "/work/a", "a", 10), session("b", "/work/b", "b", 30)],
+      { pinnedPath: "/home/me/.fleet/chat" },
+    );
+
+    expect(groups.map((group) => group.path)).toEqual(["/work/b", "/work/a"]);
+  });
+
   it("uses the directory name as a deterministic tie-breaker", () => {
     const groups = groupSessionsByWorkspace([
       session("z", "/work/zebra", "zebra", 50),
