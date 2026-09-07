@@ -47,47 +47,5 @@
 
 /* ── Collapsed rail mode ─────────────────────────────────────────────────── */
 
-.badge_collapsed {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  padding: 6px 4px;
-  margin: 6px 8px 0;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  user-select: none;
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
-  width: calc(100% - 16px);
-}
-
-.badge_collapsed:hover {
-  border-color: var(--color-accent, var(--color-text-dim));
-}
-
-.badge_collapsed .cost {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.tile_label {
-  font-size: 9px;
-  color: var(--color-text-dim);
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:global([data-platform="macos"]) .badge_collapsed {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
-}
-
-:global([data-platform="macos"][data-theme="light"]) .badge_collapsed {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.08);
-}
+/* Lives in RailStatTile.module.css now — shared with LiveStats and UsagePanel
+   so the whole collapsed stack renders at one size instead of three. */

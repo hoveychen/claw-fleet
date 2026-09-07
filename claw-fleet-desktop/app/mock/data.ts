@@ -2112,6 +2112,274 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         ],
       },
     },
+    // ── The five control tools that used to render as a raw args blob, plus
+    //    the non-control ones the generic card now labels. Keep these: they are
+    //    the only place each row is visible without a live agent.
+    // The screenshot case: this row was `{"action":"list","all":true}` and nothing else.
+    {
+      type: "assistant",
+      uuid: "msg-fleet-inspect-list",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-9",
+            name: "mcp__fleet__fleet__inspect",
+            input: { action: "list", all: true },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-inspect-list-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-9",
+            content: "3 agent(s)\n  a1b2c3d4  claude-fleet  running  opus-5    88% ctx\n  e5f6a7b8  netferry      idle     sonnet-5  12% ctx\n  c9d0e1f2  maliang       waiting  opus-5    41% ctx",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-inspect-account",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-10",
+            name: "mcp__fleet__fleet__inspect",
+            input: { action: "account" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-inspect-account-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-10",
+            content: "dev <dev@example.com>\n  org:    Example Team\n  plan:   Claude Team\n  usage:\n    5h      72%  resets in 4h\n    7d      47%  resets in 4d",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-notes-append",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-11",
+            name: "mcp__fleet__fleet__notes",
+            input: { action: "append", path: "checkpoint.md", text: "P4 绿灯：parity 测试抓到 permission_prompt 漏项，已补。" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-notes-append-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-11",
+            content: "ok: append checkpoint.md (1284 bytes)",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-history-search",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-12",
+            name: "mcp__fleet__fleet__history",
+            input: { action: "search", query: "FLEET_CONTROL_TOOLS" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-history-search-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-12",
+            content: "2 hit(s) for 'FLEET_CONTROL_TOOLS' — read one with action=read, session=<id>, line_no=<n>:\n  f3ca85ff line 412  const FLEET_CONTROL_TOOLS = [\n  f3ca85ff line 907  FLEET_CONTROL_TOOLS mirrors CONTROL_TOOL_NAMES\nsessions: f3ca85ff-1a3d-4aca-baaa-27a0aed23494",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-artifact-add",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-13",
+            name: "mcp__fleet__fleet__artifact",
+            input: { action: "add", path: "/Users/dev/proj/out/report.pdf", title: "工具行修复验收报告", note: "给老板过目" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-artifact-add-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-13",
+            content: "Stored artifact 7f1e2d3c — 工具行修复验收报告 (pdf, 284119 bytes), hard-linked. It is now on the 产出 page.",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-control-interrupt",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-14",
+            name: "mcp__fleet__fleet__control",
+            input: { action: "interrupt", id: "e5f6a7b8" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-control-interrupt-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-14",
+            content: "ok: interrupted e5f6a7b8 (netferry) pid 40122; the session stays resumable",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-title",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-15",
+            name: "mcp__fleet__fleet__set_session_title",
+            input: { title: "修会话详情里的 Fleet 工具行" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-title-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-15",
+            content: "ok: title set",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-image",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-16",
+            name: "mcp__fleet__fleet__image",
+            input: { description: "A flat-illustration fox mascot holding a wrench, teal palette, 1024x1024" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6780, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-image-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-16",
+            content: "thread_id: th_9a2b  (pass this to fleet__image_edit to revise)\n\n1 new image(s):\n  /Users/dev/.codex/generated_images/th_9a2b/fox.png",
+          },
+        ],
+      },
+    },
   ],
 
   // API server session — shorter

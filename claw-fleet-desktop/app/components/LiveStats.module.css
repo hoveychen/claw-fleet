@@ -68,49 +68,10 @@
 
 /* ── Collapsed tile (rail mode) ─────────────────────────────────────────── */
 
+/* Both rail tiles join the rail's own tile column (.rail_tiles in
+   SessionList.module.css) rather than forming a nested box — that column owns
+   the gap and padding for the whole collapsed stack. The wrapper stays for the
+   `data-wizard` anchor. Tile visuals: RailStatTile.module.css. */
 .tiles {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 8px;
-}
-
-.tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 6px 4px;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  gap: 1px;
-  user-select: none;
-  cursor: default;
-}
-
-.tile_value {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text);
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-
-.tile_label {
-  font-size: 9px;
-  color: var(--color-text-dim);
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:global([data-platform="macos"]) .tile {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
-}
-
-:global([data-platform="macos"][data-theme="light"]) .tile {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.08);
+  display: contents;
 }

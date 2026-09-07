@@ -1090,7 +1090,12 @@ export function SessionDetail({
       >
         {liveSession && (
           <>
-          <div className={styles.body_row}>
+          {/* The gutter around the two slabs is now what reaches the window's
+              top edge, so it carries its own drag region — same reason the hero
+              and the aux tab strip do (Tauri's shim reads e.target, not an
+              ancestor). The resize handle inside it is a child without the
+              attribute, so col-resize dragging still wins there. */}
+          <div className={styles.body_row} data-tauri-drag-region>
             <div className={styles.main_col}>
               {/* Hero banner. The session's identity and the controls that act
                   on it, as one surface rather than a title row with a tab strip

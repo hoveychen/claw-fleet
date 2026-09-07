@@ -56,9 +56,19 @@
 }
 
 /* Free-text intent preview (note/prompt/text) shown after the summary label on
-   the collapsed header. Takes the remaining row width and truncates. */
+   the collapsed header. Takes the remaining row width and truncates.
+
+   `flex-basis: 0` rather than `auto` is what keeps that promise. With `auto`
+   the intent's own (long) text counted toward the row's base size, so a row
+   carrying one overflowed the header and flex shrank BOTH children — the note
+   preview stole width from the label naming the operation, and `Notes ·
+   Appended to note checkpoint.md` rendered as `Notes · Appended t… · P4 绿灯…`.
+   The label is the part the reader needs; the preview is a bonus. Basing the
+   intent at 0 means it only ever claims what the label left over, and it is the
+   one that ellipsises. A pathologically long summary still shrinks on its own
+   (`.summary` keeps `flex-shrink: 1`), so the row can never overflow. */
 .intent {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
