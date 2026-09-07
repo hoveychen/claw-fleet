@@ -317,9 +317,13 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --color-bg-user: #e9d7c9;
   --color-bg-modal: #fbfaf7;
   --color-bg-modal-overlay: rgba(32, 28, 18, 0.4);
-  /* Light's modal is the card colour, so the card→hover step already works
-     here; named explicitly so both themes share one token. */
-  --color-bg-modal-hover: #f1eee7;
+  /* Light's modal is the card colour, so --color-bg-hover (#f1eee7) was already
+     visible here — but only just: ΔL* 4.12 against the modal, against 6.02 for
+     dark's step and 6.31 for the app-wide card→hover baseline. A pale step on a
+     cream surface reads weaker than the same step on a dark one, so light takes
+     the card-selected value instead (ΔL* 7.27) and the two themes land on a
+     comparable amount of feedback. */
+  --color-bg-modal-hover: #e9e5db;
 
   --color-text: #1f2023;
   --color-text-secondary: #5d6168;
