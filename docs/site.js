@@ -92,7 +92,12 @@
             selector.value !== "china";
         });
       selector.addEventListener("change", changeSource);
-      if (document.body.dataset.locale === "zh") selector.value = "china";
+      const requestedSource = new URL(location.href).searchParams.get("source");
+      if (requestedSource === "china" || requestedSource === "github") {
+        selector.value = requestedSource;
+      } else if (document.body.dataset.locale === "zh") {
+        selector.value = "china";
+      }
       changeSource();
     })
     .catch(() => {

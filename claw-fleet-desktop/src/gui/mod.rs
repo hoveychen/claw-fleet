@@ -152,8 +152,11 @@ fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn check_app_version() -> version_check::VersionCheckResult {
-    version_check::check_app_version()
+fn check_app_version(
+    force: Option<bool>,
+    locale: Option<String>,
+) -> version_check::VersionCheckResult {
+    version_check::check_app_version(force.unwrap_or(false), locale.as_deref().unwrap_or("en"))
 }
 
 #[tauri::command]

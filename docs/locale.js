@@ -31,6 +31,9 @@
     const target = new URL(link.href);
     const lang = target.pathname === new URL('zh/index.html', base).pathname ? 'zh' : 'en';
     // Explicit query works in a new tab and when browser storage is disabled.
+    for (const [key, value] of new URL(location.href).searchParams) {
+      if (key !== 'lang') target.searchParams.set(key, value);
+    }
     target.searchParams.set('lang', lang);
     target.hash = location.hash;
     link.href = target.href;
