@@ -387,6 +387,14 @@ impl DshSource {
             .and_then(|w| w.phase_of(session_id))
     }
 
+    /// When the sockets last saw an event for this session — the activity clock
+    /// [`overlay_activity`] folds over the poll's `updatedAt`.
+    fn live_activity_ms(&self, session_id: &str) -> Option<u64> {
+        lock(watcher_slot())
+            .as_ref()
+            .and_then(|w| w.last_event_at_ms(session_id))
+    }
+
     /// Strip the `dsh://` scheme off a session URI.
     ///
     /// `pub(crate)` for [`crate::dsh_cost`], which namespaces its frozen metered
@@ -674,6 +682,34 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
     })
 }
 
+/// Fold the mux's event clock into a polled session's activity timestamps.
+///
+/// **`session/list`'s `updatedAt` is a persistence timestamp, not a
+/// last-activity one.** Measured against a live 0.1.2 server on 2026-09-07: a
+/// running session whose `projections.asOfSeq` climbed 62587 → 62874 over 40
+/// seconds reported the same `updatedAt` throughout, and that value was the
+/// moment its turn's prompt went in — 18 minutes earlier. The desktop card
+/// renders `agent_last_activity_ms` as a "time ago", so on the poll alone a
+/// mid-turn session reads as idle for as long as the turn takes.
+///
+/// The socket knows better, and knows it for free: [`pump`] follows every
+/// session the host reports running, so an active session's events reach
+/// [`crate::dsh_events::LiveView`] whether or not anyone opened it.
+///
+/// `max` rather than a plain overwrite, because between turns the poll is the
+/// fresher of the two — dsh persists the session at turn end, while the sockets
+/// go quiet — and a session nobody has followed has no event clock at all.
+/// `created_at_ms` is left on the poll: it is wrong there too (it is the same
+/// `updatedAt`), but a "last write" timestamp is no closer to a creation time
+/// than the event clock is.
+///
+/// [`pump`]: crate::dsh_events
+fn overlay_activity(info: &mut SessionInfo, last_event_at_ms: Option<u64>) {
+    let Some(ms) = last_event_at_ms else { return };
+    info.last_activity_ms = info.last_activity_ms.max(ms);
+    info.agent_last_activity_ms = info.agent_last_activity_ms.max(ms);
+}
+
 impl AgentSource for DshSource {
     fn name(&self) -> &'static str {
         "dsh"
@@ -723,6 +759,11 @@ impl AgentSource for DshSource {
                             if let Some(phase) = self.live_phase(&info.id) {
                                 info.status = phase;
                             }
+                            // …and the poll's `updatedAt` is only a persistence
+                            // timestamp, so the socket's event clock is what
+                            // keeps a mid-turn session's "last activity" alive.
+                            let live_ms = self.live_activity_ms(&info.id);
+                            overlay_activity(&mut info, live_ms);
                             info
                         })
                         .collect()

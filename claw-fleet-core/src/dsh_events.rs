@@ -463,6 +463,13 @@ pub struct LiveSession {
     pub phase: SessionStatus,
     /// When that phase was set — drives [`LIVE_STATUS_TTL_MS`].
     pub phase_at_ms: u64,
+    /// When the newest event of *any* kind arrived, by Fleet's clock.
+    ///
+    /// Distinct from [`Self::phase_at_ms`] on purpose: that one only moves for
+    /// events the phase machine understands, while this is the session's
+    /// last-activity clock and has to move for bookkeeping events too. `None`
+    /// until the sockets report on this session at all.
+    pub last_event_at_ms: Option<u64>,
     /// Newest log position this follow stream has reported — the opening
     /// snapshot's `cursor`, then every event's `seq`. `session/page` refuses a
     /// `throughSeq` past the real cursor, so this only ever tracks positions the
@@ -537,6 +544,10 @@ impl LiveView {
                     // Every event advances the cut a history read may ask for,
                     // whether or not it means anything to the phase machine.
                     entry.cursor = Some(entry.cursor.map_or(seq, |c| c.max(seq)));
+                    // …and the activity clock, for the same reason: a reconnect
+                    // replays frames, so neither may regress.
+                    entry.last_event_at_ms =
+                        Some(entry.last_event_at_ms.map_or(now_ms, |t| t.max(now_ms)));
                 }
                 if kind == "turn/end" {
                     // `aborted` (session/cancel) is the one other kind observed
@@ -657,6 +668,20 @@ impl LiveView {
             std::thread::sleep(Duration::from_millis(50));
         }
         None
+    }
+
+    /// When this session's newest event arrived, by Fleet's clock.
+    ///
+    /// The overlay `scan_sessions` folds into the polled `last_activity_ms`:
+    /// dsh's own `updatedAt` is a persistence timestamp, so mid-turn it names
+    /// the moment the prompt went in rather than the moment anything last
+    /// happened.
+    pub fn last_event_at_ms(&self, session_id: &str) -> Option<u64> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(session_id)
+            .and_then(|s| s.last_event_at_ms)
     }
 
     /// The newest log position this session's follow stream has reported.
@@ -803,6 +828,12 @@ impl DshEventWatcher {
     /// nothing fresher than the poll.
     pub fn phase_of(&self, session_id: &str) -> Option<SessionStatus> {
         self.live.phase_of(session_id, now_ms())
+    }
+
+    /// When `session_id`'s newest event arrived. See
+    /// [`LiveView::last_event_at_ms`].
+    pub fn last_event_at_ms(&self, session_id: &str) -> Option<u64> {
+        self.live.last_event_at_ms(session_id)
     }
 
     /// The log cut a history read may ask `session/page` for, opening the
@@ -1626,6 +1657,7 @@ mod tests {
             running: true,
             phase: SessionStatus::Executing,
             phase_at_ms: 1_000,
+            last_event_at_ms: Some(1_000),
             cursor: None,
         };
         assert_eq!(
@@ -1642,6 +1674,7 @@ mod tests {
             running: false,
             phase: SessionStatus::WaitingInput,
             phase_at_ms: 1_000,
+            last_event_at_ms: Some(1_000),
             cursor: None,
         };
         assert_eq!(
