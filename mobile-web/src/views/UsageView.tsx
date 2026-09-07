@@ -24,7 +24,17 @@ interface Props {
 /** 各源在标题里的显示名；未知源回落到原始 id。 */
 const SOURCE_LABEL: Record<string, string> = {
   codex: "Codex",
+  dsh: "dsh",
 };
+
+/** 按 provider 报的币种格式化金额。两家不一样——DeepSeek 结的是人民币，
+ *  OpenRouter 是美元——所以币种跟着每一笔走，认不出的币种原样前缀，不猜。 */
+function fmtMoney(amount: number, currency: string | null): string {
+  const n = amount.toFixed(2);
+  if (currency === "CNY") return `¥${n}`;
+  if (currency === "USD") return `$${n}`;
+  return currency ? `${currency} ${n}` : n;
+}
 
 /** 紧凑 token 数：1.2M / 34.5K / 780。 */
 function fmtTokens(n: number): string {
@@ -268,6 +278,10 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
                   }
                 />
               )}
+              {/* 预付余额：自带 key 的源（dsh）只有这个，没有限流窗口。 */}
+              {(s.balances ?? []).map((b) => (
+                <Row key={b.label} label={b.label} value={fmtMoney(b.amount, b.currency)} />
+              ))}
               {s.bars.length > 0 ? (
                 <div className={styles.bars}>
                   {s.bars.map((b) => (
@@ -275,7 +289,9 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
                   ))}
                 </div>
               ) : (
-                <div className={styles.hint}>{t("这个来源没有限流数据。")}</div>
+                (s.balances ?? []).length === 0 && (
+                  <div className={styles.hint}>{t("这个来源没有限流数据。")}</div>
+                )
               )}
               {/* codex 近 24h 占用率曲线（对应桌面端 codex 账号区的历史图）。 */}
               {s.source === "codex" && (
