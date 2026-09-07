@@ -1,0 +1,57 @@
+name: Publish China website and downloads
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Stable release tag (vX.Y.Z), or latest to refresh the website'
+        required: true
+        default: latest
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      COS_SECRET_ID:
+        required: false
+      COS_SECRET_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: china-distribution
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: vars.CHINA_DISTRIBUTION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: china-distribution
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Tencent COS SDK
+        run: pip install cos-python-sdk-v5==1.9.38
+      - name: Generate bilingual pages
+        run: python scripts/site/build.py
+      - name: Verify release, upload packages, then publish website
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          COS_BUCKET: ${{ vars.COS_BUCKET }}
+          COS_REGION: ${{ vars.COS_REGION }}
+          COS_PUBLIC_URL: ${{ vars.COS_PUBLIC_URL }}
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+        run: >-
+          python scripts/site/distribute.py
+          --tag "$RELEASE_TAG"
+          --public-url "$COS_PUBLIC_URL"
+          --output "$RUNNER_TEMP/china-site"
+          --publish

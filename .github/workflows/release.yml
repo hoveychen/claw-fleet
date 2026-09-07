@@ -339,3 +339,12 @@ jobs:
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  china-distribution:
+    name: Mirror stable release to China
+    needs: [resolve, publish]
+    if: vars.CHINA_DISTRIBUTION_ENABLED == 'true' && !contains(needs.resolve.outputs.tag, '-')
+    uses: ./.github/workflows/china-distribution.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+    secrets: inherit
