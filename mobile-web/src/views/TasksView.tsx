@@ -215,8 +215,10 @@ export interface TaskSection {
 }
 
 /**
- * 把已排好序的会话切成文件夹分区。**不重排**:分区按各自第一名成员出现的先后
- * 排列,分区内保持传入顺序 —— 上面那套冻结顺序的用心在这里必须原样守住。
+ * 把已排好序的会话切成文件夹分区。分区内**不重排**,保持传入顺序 —— 上面那套
+ * 冻结顺序的用心在这里必须原样守住。分区之间按名字字母序(桌面端
+ * `groupSessionsByWorkspace` 同款):文件夹是稳定的目录清单,始终在同一个位置,
+ * 只有文件夹里的任务随活跃时间浮动。字母序与活跃度无关,所以不会破坏冻结。
  *
  * 纯聊天工作区恒定置顶(桌面端 `groupSessionsByWorkspace` 的 `pinnedPath` 同款):
  * 它是最常回去的一个,不该因为某个项目更活跃就沉到列表深处。多设备时每台机器的
@@ -249,7 +251,9 @@ export function groupTaskSections(
       sessions: [s],
     });
   }
-  const sections = [...byKey.values()];
+  const sections = [...byKey.values()].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key),
+  );
   if (!chatPath) return sections;
   const chat = sections.filter((sec) => sec.path === chatPath);
   if (chat.length === 0) return sections;

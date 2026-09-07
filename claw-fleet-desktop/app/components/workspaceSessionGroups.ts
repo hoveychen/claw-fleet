@@ -39,11 +39,20 @@ function hoistPinned(
   return [groups[at], ...groups.slice(0, at), ...groups.slice(at + 1)];
 }
 
+/** Folder sections read as a stable directory listing: alphabetical by display
+ *  name, path as the tie-breaker for two repositories that share one. */
+function byName(a: WorkspaceSessionGroup, b: WorkspaceSessionGroup): number {
+  return a.name.localeCompare(b.name) || a.path.localeCompare(b.path);
+}
+
 /**
  * Turn the task rail's flat session result into repository-sized sections.
  * Fleet worktrees belong to their durable repository root, matching the new
- * session launcher's workspace picker. Recently active repositories stay near
- * the top; alphabetical order keeps equal timestamps deterministic.
+ * session launcher's workspace picker. Sections are ordered alphabetically so a
+ * folder always sits in the same place; only the rows *inside* a folder move
+ * with activity. This holds under `preserveOrder` too — the freeze exists to
+ * stop rows sliding under the cursor, and an activity-independent order cannot
+ * slide.
  */
 export function groupSessionsByWorkspace(
   sessions: SessionInfo[],
@@ -70,18 +79,13 @@ export function groupSessionsByWorkspace(
   }
 
   // Insertion order already mirrors the caller's order, so preserving it is
-  // simply skipping both sorts.
-  if (preserveOrder) return hoistPinned([...groups.values()], pinnedPath);
-
-  for (const group of groups.values()) {
-    group.sessions.sort((a, b) => activityMs(b) - activityMs(a));
+  // simply skipping the within-section sort. The section order is alphabetical
+  // either way.
+  if (!preserveOrder) {
+    for (const group of groups.values()) {
+      group.sessions.sort((a, b) => activityMs(b) - activityMs(a));
+    }
   }
 
-  return hoistPinned(
-    [...groups.values()].sort(
-      (a, b) =>
-        b.latestActivityMs - a.latestActivityMs || a.name.localeCompare(b.name),
-    ),
-    pinnedPath,
-  );
+  return hoistPinned([...groups.values()].sort(byName), pinnedPath);
 }
