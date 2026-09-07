@@ -41,12 +41,20 @@
   transition: background 0.14s;
 }
 
+/* The row sits on the canvas, so it uses the canvas-plane hover tokens, not the
+   card-plane ones — in light the card hover is the canvas colour to within one
+   luminance unit, which is how this row ended up with no hover feedback at all.
+   Selected takes the deeper step so it can still be told apart from hover. */
 .row:hover {
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-row-hover);
 }
 
 .row_active {
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-row-selected);
+}
+
+.row_active .row_title {
+  font-weight: 600;
 }
 
 /* Open in a background tab. This is NOT a fourth axis competing with the three
@@ -55,7 +63,7 @@
    So it shares the background channel rather than inventing a new mark, and is
    only applied when .row_active isn't (see the className in SessionRow). */
 .row_open {
-  background: color-mix(in srgb, var(--color-bg-card-hover) 45%, transparent);
+  background: color-mix(in srgb, var(--color-bg-row-selected) 45%, transparent);
 }
 
 /* The row carries two orthogonal axes and each gets its own visual channel,
@@ -87,6 +95,10 @@
 .row_title {
   font-size: 12px;
   color: var(--color-text);
+  /* 500, not 400: at 400 the title sits at the same weight as the grey preview
+     line under it and the whole row reads as a paragraph of prose rather than a
+     list entry you can click. The selected row goes one step further (600). */
+  font-weight: 500;
   line-height: 1.35;
   /* One line, always: a mixed 1-/2-line rail makes rows read as different
      heights and the eye loses the column. The overflow lives in the row's
@@ -133,7 +145,7 @@
   gap: 3px;
   font-size: 10px;
   color: var(--color-text-dim);
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-tool);
   border-radius: 5px;
   padding: 1px 5px;
   max-width: 130px;
@@ -152,7 +164,7 @@
   gap: 3px;
   font-size: 10px;
   color: var(--color-accent-tool);
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-tool);
   border-radius: 5px;
   padding: 1px 5px;
   white-space: nowrap;
@@ -167,7 +179,7 @@
   gap: 3px;
   font-size: 10px;
   color: var(--color-text-dim);
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-tool);
   border-radius: 5px;
   padding: 1px 5px;
   white-space: nowrap;
@@ -184,7 +196,7 @@
   gap: 3px;
   font-size: 10px;
   color: var(--color-success);
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-tool);
   border-radius: 5px;
   padding: 1px 5px;
   white-space: nowrap;

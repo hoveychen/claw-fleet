@@ -128,6 +128,14 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --color-bg-card-hover: #292b2f;
   --color-bg-card-selected: #2d2f33;
   --color-bg-hover: var(--color-bg-card-hover);
+  /* Hover/selected for a row that sits directly ON THE CANVAS (the task list
+     column, whose background is --color-bg), not on a card. The card-plane
+     tokens above are measured against --color-bg-card and must not be reused
+     here: in light, canvas #f1efea vs card-hover #f1eee7 is a 3/255 step on one
+     channel — no hover feedback at all. Dark's canvas is far enough below the
+     card plane that the same hexes still read, so dark keeps them. */
+  --color-bg-row-hover: #292b2f;
+  --color-bg-row-selected: #2d2f33;
   --color-bg-tool: var(--color-bg-sunken);
   --color-bg-tool-hover: var(--color-bg-card-hover);
   --color-bg-user: #1f2534;
@@ -303,6 +311,13 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --color-bg-card-hover: #f1eee7;
   --color-bg-card-selected: #e9e5db;
   --color-bg-hover: var(--color-bg-card-hover);
+  /* Canvas-plane hover/selected — see the dark block for why these exist.
+     Light is the theme that needs them: the card-plane hover lands within 1
+     luminance unit of the canvas. These step DOWN from #f1efea instead (hover
+     ≈ the existing tool-hover step, selected one further), so a row on the task
+     list reads as pressable and the selected one stays distinct from hover. */
+  --color-bg-row-hover: #e6e2d9;
+  --color-bg-row-selected: #dcd7cb;
   --color-bg-tool: #ece9e2;
   --color-bg-tool-hover: #e5e1d8;
   /* The user bubble was #f0e8dd — 1.06:1 against the #f1efea canvas, which is
