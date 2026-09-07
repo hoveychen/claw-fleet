@@ -28,11 +28,8 @@ import {
 } from "./tabGroups";
 import { closeTab, DRAFT_TAB_ID } from "./sessionTabs";
 import {
-  fileTabId,
   sessionViewTabId,
   tabSurvivesScan,
-  webTabId,
-  wikiTabId,
 } from "./tabKind";
 
 /** Terse group literal. `weight` defaults to an equal share, which doubles as
@@ -440,134 +437,6 @@ describe("activeGroup / findGroupOf", () => {
   });
 });
 
-describe("tabAffinity", () => {
-  it("counts sessions and the new-session draft as primary", () => {
-    expect(tabAffinity("7c9e6679-7425-40de-944b-e07fc1f90ae7")).toBe("primary");
-    expect(tabAffinity(DRAFT_TAB_ID)).toBe("primary");
-  });
-
-  it("counts a second view of a session as primary too", () => {
-    // It is a session pane, so a path clicked inside it must route to the docs
-    // half rather than landing on top of the transcript it was clicked in.
-    expect(tabAffinity(sessionViewTabId("7c9e6679-7425-40de-944b-e07fc1f90ae7"))).toBe(
-      "primary",
-    );
-  });
-
-  it("counts the reading material as side", () => {
-    expect(tabAffinity(fileTabId("/repo/main.rs"))).toBe("side");
-    expect(tabAffinity(wikiTabId("arch/overview"))).toBe("side");
-    expect(tabAffinity(webTabId("https://example.com"))).toBe("side");
-  });
-});
-
-/**
- * The routing heuristic: conversations collect in one group, the material they
- * cite in another, without the user arranging it by hand every time.
- */
-describe("openTabRouted", () => {
-  const SESSION = "sess-a";
-  const OTHER_SESSION = "sess-b";
-  const FILE = fileTabId("/repo/main.rs");
-  const FILE2 = fileTabId("/repo/lib.rs");
-  const WIKI = wikiTabId("arch/overview");
-
-  it("opens the first side tab in a group of its own, splitting to make room", () => {
-    const s = st([g("g1", [SESSION], SESSION)], "g1");
-    const out = openTabRouted(s, FILE, true);
-
-    expect(out.groups.map((x) => x.tabIds)).toEqual([[SESSION], [FILE]]);
-    // Focus follows what you just opened, as clicking a tab does.
-    expect(out.activeGroupId).toBe(out.groups[1].id);
-    expectInvariants(out);
-  });
-
-  it("puts the next side tab in the side group that now exists", () => {
-    const s = st([g("g1", [SESSION], SESSION), g("g2", [FILE], FILE)], "g1");
-    const out = openTabRouted(s, WIKI, true);
-
-    expect(out.groups.length).toBe(2);
-    expect(out.groups[1].tabIds).toEqual([FILE, WIKI]);
-    expect(out.activeGroupId).toBe("g2");
-    expectInvariants(out);
-  });
-
-  it("sends a session back to the group holding the conversations", () => {
-    // Focus is parked in the side group (you were reading a doc) and you click a
-    // session row: it belongs with the other conversation, not among the docs.
-    const s = st([g("g1", [SESSION], SESSION), g("g2", [FILE], FILE)], "g2");
-    const out = openTabRouted(s, OTHER_SESSION, true);
-
-    expect(out.groups.length).toBe(2);
-    expect(out.groups[0].tabIds).toEqual([SESSION, OTHER_SESSION]);
-    expect(out.activeGroupId).toBe("g1");
-    expectInvariants(out);
-  });
-
-  it("keeps a tab that is already open where it is, and reveals it", () => {
-    const s = st([g("g1", [SESSION], SESSION), g("g2", [FILE, WIKI], WIKI)], "g1");
-    const out = openTabRouted(s, FILE, true);
-
-    expect(out.groups.map((x) => x.tabIds)).toEqual([[SESSION], [FILE, WIKI]]);
-    expect(out.groups[1].activeId).toBe(FILE);
-    expect(out.activeGroupId).toBe("g2");
-    expectInvariants(out);
-  });
-
-  it("fills an empty group the user just split open, whatever the kind", () => {
-    // They made room on purpose; routing past it would leave a blank half.
-    const s = st([g("g1", [SESSION], SESSION), g("g2", [], null)], "g2");
-    const out = openTabRouted(s, FILE, true);
-
-    expect(out.groups.map((x) => x.tabIds)).toEqual([[SESSION], [FILE]]);
-    expect(out.activeGroupId).toBe("g2");
-    expectInvariants(out);
-  });
-
-  it("stays in the focused group when the column is too narrow to split", () => {
-    // The width gate wins: a split that produced unreadable slivers is worse
-    // than a mixed group.
-    const s = st([g("g1", [SESSION], SESSION)], "g1");
-    const out = openTabRouted(s, FILE, false);
-
-    expect(out.groups.length).toBe(1);
-    expect(out.groups[0].tabIds).toEqual([SESSION, FILE]);
-    expectInvariants(out);
-  });
-
-  it("respects a group the user mixed by hand instead of splitting again", () => {
-    // A file dragged in beside a session makes that group a home for both, so
-    // the heuristic stops fighting the arrangement.
-    const s = st([g("g1", [SESSION, FILE], SESSION)], "g1");
-    const out = openTabRouted(s, FILE2, true);
-
-    expect(out.groups.length).toBe(1);
-    expect(out.groups[0].tabIds).toEqual([SESSION, FILE, FILE2]);
-    expectInvariants(out);
-  });
-
-  it("picks the nearest matching group, preferring the one to the right", () => {
-    const s = st(
-      [g("g1", [FILE], FILE), g("g2", [SESSION], SESSION), g("g3", [FILE2], FILE2)],
-      "g2",
-    );
-    const out = openTabRouted(s, WIKI, true);
-
-    expect(out.groups.length).toBe(3);
-    expect(out.groups[2].tabIds).toEqual([FILE2, WIKI]);
-    expect(out.activeGroupId).toBe("g3");
-    expectInvariants(out);
-  });
-
-  it("splits along the column's current axis, not always sideways", () => {
-    const s = st([g("g1", [SESSION], SESSION)], "g1", "column");
-    const out = openTabRouted(s, FILE, true);
-
-    expect(out.orientation).toBe("column");
-    expectInvariants(out);
-  });
-});
-
 /**
  * The second view: one session, two panes, so a conversation and the artefacts
  * it produced can sit side by side.
@@ -575,7 +444,7 @@ describe("openTabRouted", () => {
 describe("openSecondView", () => {
   const SESSION = "sess-a";
   const VIEW = sessionViewTabId(SESSION);
-  const FILE = fileTabId("/repo/main.rs");
+  const OTHER = "sess-b";
 
   it("splits a lone group and puts the copy in the new half", () => {
     const s = st([g("g1", [SESSION], SESSION)], "g1");
@@ -588,29 +457,29 @@ describe("openSecondView", () => {
   });
 
   it("does NOT land the copy in the conversation's own group", () => {
-    // The whole point. Routing by kind would do exactly this, since both views
-    // are the same kind — which is why this has its own reducer.
+    // The whole point, and why this has its own reducer: opening it the normal
+    // way would put the copy in the very group the conversation is in.
     const s = st([g("g1", [SESSION], SESSION)], "g1");
     const out = openSecondView(s, SESSION, true);
     expect(out.groups[0].tabIds).toEqual([SESSION]);
   });
 
   it("reuses the neighbouring group rather than splitting again", () => {
-    const s = st([g("g1", [SESSION], SESSION), g("g2", [FILE], FILE)], "g1");
+    const s = st([g("g1", [SESSION], SESSION), g("g2", [OTHER], OTHER)], "g1");
     const out = openSecondView(s, SESSION, true);
 
     expect(out.groups).toHaveLength(2);
-    expect(out.groups[1].tabIds).toEqual([FILE, VIEW]);
+    expect(out.groups[1].tabIds).toEqual([OTHER, VIEW]);
     expect(out.groups[1].activeId).toBe(VIEW);
     expect(out.activeGroupId).toBe("g2");
     expectInvariants(out);
   });
 
   it("reveals the copy instead of opening a third pane", () => {
-    const s = st([g("g1", [SESSION], SESSION), g("g2", [VIEW, FILE], FILE)], "g1");
+    const s = st([g("g1", [SESSION], SESSION), g("g2", [VIEW, OTHER], OTHER)], "g1");
     const out = openSecondView(s, SESSION, true);
 
-    expect(out.groups.map((x) => x.tabIds)).toEqual([[SESSION], [VIEW, FILE]]);
+    expect(out.groups.map((x) => x.tabIds)).toEqual([[SESSION], [VIEW, OTHER]]);
     expect(out.groups[1].activeId).toBe(VIEW);
     expect(out.activeGroupId).toBe("g2");
     expectInvariants(out);
@@ -628,10 +497,10 @@ describe("openSecondView", () => {
   });
 
   it("splits from the focused group when the session isn't open at all", () => {
-    const s = st([g("g1", [FILE], FILE)], "g1");
+    const s = st([g("g1", [OTHER], OTHER)], "g1");
     const out = openSecondView(s, SESSION, true);
 
-    expect(out.groups.map((x) => x.tabIds)).toEqual([[FILE], [VIEW]]);
+    expect(out.groups.map((x) => x.tabIds)).toEqual([[OTHER], [VIEW]]);
     expectInvariants(out);
   });
 

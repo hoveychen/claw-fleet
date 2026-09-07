@@ -64,7 +64,6 @@ import {
   moveTabToGroup,
   openSecondView,
   openTabInActiveGroup,
-  openTabRouted,
   parsePersistedGroups,
   pruneMissingGroupTabs,
   replaceTabAnywhere,
@@ -81,18 +80,11 @@ import {
   type ChordState,
 } from "../splitShortcuts";
 import {
-  fileTabId,
   parseTabKind,
-  tabKindLabel,
   tabSessionId,
   tabSurvivesScan,
-  webTabId,
-  wikiTabId,
   type DetailTabOpener,
 } from "../tabKind";
-import { ExternalFilePreview } from "./FilesView";
-import { WikiTabPane } from "./WikiTabPane";
-import { WebTabPane } from "./WebTabPane";
 import { getItem, setItem } from "../storage";
 import { canControl, stopMode, performStop } from "./StopControl";
 import { SessionRail, WorkspaceRailSection } from "./SessionRail";
@@ -560,9 +552,8 @@ export function HistoryView() {
     [sessions],
   );
   // Each group's strip entries. A session tab resolves against the live scan,
-  // and one that resolves to nothing (a vanished session) drops out as before.
-  // The other kinds carry their content *in the id* (a path, a slug, a url), so
-  // they need no lookup — and must not be dropped for lack of one.
+  // and one that resolves to nothing (a vanished session) drops out; the draft
+  // carries its own label.
   const itemsByGroup = useMemo(() => {
     const out = new Map<string, TabItem[]>();
     for (const grp of groupsState.groups) {
@@ -575,24 +566,8 @@ export function HistoryView() {
               return { id, session: null, label: t("new_session.button") };
             // Both views of a session resolve the same way — the second one is
             // the same live session under a different tab id.
-            if (kind.kind === "session" || kind.kind === "sessionview") {
-              const s = sessionById.get(kind.sessionId);
-              return s ? { id, session: s } : null;
-            }
-            return {
-              id,
-              session: null,
-              // Basename / last slug segment / host — short enough for a
-              // strip. The full thing goes in the tooltip, where a session
-              // tab shows its workspace.
-              label: tabKindLabel(kind) ?? id,
-              tooltip:
-                kind.kind === "file"
-                  ? kind.absPath
-                  : kind.kind === "wiki"
-                    ? kind.slug
-                    : kind.url,
-            };
+            const s = sessionById.get(kind.sessionId);
+            return s ? { id, session: s } : null;
           })
           .filter((x): x is TabItem => x != null),
       );
@@ -658,11 +633,10 @@ export function HistoryView() {
     [applyGroups],
   );
 
-  // Every "open this" path goes through the routing heuristic, so conversations
-  // collect in one group and the material they cite in another (see
-  // `openTabRouted`) without the user arranging the column by hand each time.
+  // Every "open this" path lands in the focused group — or reveals the tab
+  // where it already is, if another group holds it.
   const openRouted = useCallback(
-    (tabId: string) => applyGroups((st) => openTabRouted(st, tabId, canSplitRef.current)),
+    (tabId: string) => applyGroups((st) => openTabInActiveGroup(st, tabId)),
     [applyGroups],
   );
 
@@ -1101,36 +1075,24 @@ export function HistoryView() {
   );
   const railActiveId = activeId == null ? null : tabSessionId(activeId) ?? activeId;
 
-  // The column's "open this beside what I'm reading" capability, handed to
-  // every pane that renders links: a path, a `[[slug]]` or an external url
-  // clicked in prose becomes a tab in the focused group — the same move as
-  // clicking a session row — instead of navigating the window elsewhere.
-  //
-  // `openTabRouted` handles the case where the thing is already open in another
-  // group: it moves focus there rather than opening a second copy.
-  // Memoised on `applyGroups` (itself stable), so the memoised link contexts
+  // The column's "put a second pane beside this one" capability, handed to the
+  // session panes. Material a pane's prose cites no longer travels through
+  // here: it opens in that pane's own auxiliary column.
+  // Memoised on `applyGroups` (itself stable), so the memoised contexts
   // downstream don't churn on every scan.
   const detailTabs = useMemo<DetailTabOpener>(
     () => ({
-      openFile: (absPath) => openRouted(fileTabId(absPath)),
-      openWiki: (slug) => openRouted(wikiTabId(slug)),
-      openWeb: (url) => openRouted(webTabId(url)),
-      // Not `openRouted`: both views are the same *kind*, so the routing
-      // heuristic would put the copy in the conversation's own group — the one
-      // place it is useless. See `openSecondView`.
+      // Not `openRouted`: that would put the copy in the conversation's own
+      // group — the one place it is useless. See `openSecondView`.
       openSecondView: (sessionId) =>
         applyGroups((st) => openSecondView(st, sessionId, canSplitRef.current)),
     }),
-    [openRouted, applyGroups],
+    [applyGroups],
   );
 
   /**
    * What one tab's pane holds, by kind. Sessions get the transcript view; the
-   * draft gets the compose form (or the spawn spinner once it has fired); a
-   * file, wiki doc or web page gets its own reader.
-   *
-   * The three readers are the *same components* the 仓库 and 知识库 pages use, so
-   * a file or doc looks identical whether it is open here or there.
+   * draft gets the compose form (or the spawn spinner once it has fired).
    */
   // A half with nothing open rests on the compose form rather than on a "pick
   // something" hint: the one thing you can do from an empty column is start
@@ -1176,30 +1138,6 @@ export function HistoryView() {
           </div>
         ) : (
           <NewSessionForm onCreated={handleCreated} onCancel={cancelDraft} />
-        );
-      case "file":
-        return (
-          <div className={styles.other_pane}>
-            <ExternalFilePreview
-              path={kind.absPath}
-              // Read-only, and — unlike the 仓库 page's use of this component —
-              // usually a file that IS inside a workspace.
-              label={t("tabs.file_readonly", "只读预览")}
-              onClose={() => closeTab(tab.id)}
-            />
-          </div>
-        );
-      case "wiki":
-        return (
-          <div className={styles.other_pane}>
-            <WikiTabPane slug={kind.slug} onOpenSlug={detailTabs.openWiki} />
-          </div>
-        );
-      case "web":
-        return (
-          <div className={styles.other_pane}>
-            <WebTabPane url={kind.url} />
-          </div>
         );
       // Both views of a session render the same pane. They are two *instances*,
       // and standalone mode holds its messages, scroll and view-tab per
