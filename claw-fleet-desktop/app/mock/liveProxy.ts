@@ -685,6 +685,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { from: q(a.from), to: q(a.to) },
   }),
 
+  list_task_reviews: (a) => ({
+    method: "GET",
+    path: "/task_reviews",
+    query: { date: q(a.date) },
+  }),
+
   find_explorer_path: (a) => ({
     method: "GET",
     path: "/explorer_find",

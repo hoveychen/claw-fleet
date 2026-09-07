@@ -1765,6 +1765,7 @@ pub fn run() {
             generate_daily_report_lessons,
             append_lesson_to_claude_md,
             list_managed_lessons,
+            list_task_reviews,
             remove_managed_lesson,
         ])
         .build(tauri::generate_context!())

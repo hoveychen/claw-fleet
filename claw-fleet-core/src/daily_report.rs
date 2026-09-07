@@ -1375,7 +1375,12 @@ pub fn generate_lessons(
 /// The task retrospectives whose task ended on `date` (local time). Soft: an
 /// unreadable / absent store yields none, and the day-level pass proceeds as it
 /// did before per-task reviews existed.
-fn task_reviews_for_date(date: &str) -> Vec<crate::task_review::TaskReview> {
+///
+/// Public because the report UI reads the same set through the `Backend` trait:
+/// "which reviews belong to this date" must have exactly one definition, or the
+/// panel and the lessons pass would disagree about a task that ended near
+/// midnight.
+pub fn task_reviews_for_date(date: &str) -> Vec<crate::task_review::TaskReview> {
     use chrono::TimeZone;
     let Some(start) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
         .ok()

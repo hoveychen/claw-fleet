@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
 import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
@@ -981,6 +981,12 @@ interface ReportState {
   // show "added" state in the report card and to drive the Memory-panel list.
   managedLessons: ManagedLesson[];
 
+  // The selected day's per-task retrospectives (one per task that reached a
+  // terminal state that day). Keyed by nothing — reloaded whenever the date
+  // changes, so a stale day's reviews can never render under a new date.
+  taskReviews: TaskReview[];
+  taskReviewsDate: string;
+
   // "New report" red dot on the 每日报告 nav item. `latestReportDate` is the most
   // recent date that has report data; `lastSeenReportDate` is the newest date the
   // user has actually opened the report view at (persisted). A dot shows while the
@@ -1023,6 +1029,8 @@ interface ReportState {
   appendLessonToClaudeMd: (lesson: Lesson) => Promise<void>;
   /** Refresh the managed-lessons list from ~/.claude/fleet-lessons.md. */
   loadManagedLessons: () => Promise<void>;
+  /** Load the day's per-task retrospectives for the report's task-review card. */
+  loadTaskReviews: (date: string) => Promise<void>;
   /** Remove a managed lesson by id and refresh the list. */
   removeManagedLesson: (id: string) => Promise<void>;
   loadTimelinePage: () => Promise<void>;
@@ -1063,6 +1071,9 @@ export const useReportStore = create<ReportState>((set, get) => ({
   generatingLessons: false,
 
   managedLessons: [],
+
+  taskReviews: [],
+  taskReviewsDate: "",
 
   latestReportDate: "",
   lastSeenReportDate: getItem("daily-report-last-seen") ?? "",
@@ -1212,6 +1223,18 @@ export const useReportStore = create<ReportState>((set, get) => ({
       set({ managedLessons: lessons });
     } catch {
       // leave existing list on failure
+    }
+  },
+
+  loadTaskReviews: async (date: string) => {
+    try {
+      const reviews = await invoke<TaskReview[]>("list_task_reviews", { date });
+      // Stamp the date alongside the rows so the card can tell "this day has no
+      // finished tasks" from "the fetch for this day hasn't landed yet" — the
+      // two look identical if you only look at an empty array.
+      set({ taskReviews: reviews, taskReviewsDate: date });
+    } catch {
+      set({ taskReviews: [], taskReviewsDate: date });
     }
   },
 

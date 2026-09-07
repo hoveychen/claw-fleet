@@ -100,6 +100,20 @@ pub(crate) async fn append_lesson_to_claude_md(
     }).await.map_err(|e| format!("join: {e}"))?
 }
 
+/// The day's per-task retrospectives, for the report's task-review card.
+/// `spawn_blocking` like its neighbours: this is a SQLite read, and blocking the
+/// async runtime on disk I/O is what freezes the whole webview.
+#[tauri::command]
+pub(crate) async fn list_task_reviews(
+    date: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::task_review::TaskReview>, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || {
+        backend.list_task_reviews(&date)
+    }).await.map_err(|e| format!("join: {e}"))
+}
+
 #[tauri::command]
 pub(crate) async fn list_managed_lessons(
     state: tauri::State<'_, AppState>,

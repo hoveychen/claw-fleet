@@ -56,6 +56,20 @@ pub(crate) fn route_daily_report_stats(
                 );
             }
 
+/// `GET /task_reviews?date=YYYY-MM-DD` — the day's per-task retrospectives.
+/// Reads through `daily_report::task_reviews_for_date` so the remote answer and
+/// the local one cannot disagree about which day a task belongs to.
+pub(crate) fn route_task_reviews(
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+) {
+    let date = query.get("date").cloned().unwrap_or_default();
+    let reviews = crate::daily_report::task_reviews_for_date(&date);
+    let body = serde_json::to_string(&reviews).unwrap_or_else(|_| "[]".into());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_daily_report_generate(
     ctx: &ServeCtx,
     request: tiny_http::Request,

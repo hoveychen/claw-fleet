@@ -747,3 +747,120 @@
 .dc_ok {
   color: var(--color-success);
 }
+
+/* ── 当日任务复盘卡 ───────────────────────────────────────────────────────
+   一行一个终结的任务，可折叠。刻意复用 .lessons_list 的间距，让它和紧邻的
+   lesson 卡读起来是同一栏东西。左侧一条 3px 竖条按终态着色，是行级别唯一的
+   颜色承重件——图标和徽标都在它旁边，不必再各自上色。 */
+.tr_row {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-border);
+  overflow: hidden;
+}
+
+.tr_row[data-outcome="completed"] {
+  border-left-color: var(--color-success);
+}
+
+.tr_row[data-outcome="abandoned"] {
+  border-left-color: var(--color-warning);
+}
+
+.tr_head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.tr_head:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.tr_icon_done {
+  color: var(--color-success);
+  flex-shrink: 0;
+}
+
+.tr_icon_given_up {
+  color: var(--color-warning);
+  flex-shrink: 0;
+}
+
+.tr_title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「agent 说完成、老板却按了放弃」——本卡最值钱的一行信号，所以给它整卡里
+   唯一的实心徽标，别人都是描边。 */
+.tr_mismatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  background: var(--color-error-solid);
+  color: var(--color-on-error);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  font-size: 10px;
+}
+
+/* 反方向的不一致（agent 没说完成、老板按了结束）只是值得一提，不是问题，
+   所以是安静的描边。 */
+.tr_underclaim {
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.tr_meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--color-text-dim);
+}
+
+.tr_body {
+  padding: 0 14px 12px 14px;
+}
+
+.tr_summary {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.tr_lessons {
+  margin: 10px 0 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tr_lesson_content {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+.tr_lesson_reason {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  margin-top: 2px;
+}

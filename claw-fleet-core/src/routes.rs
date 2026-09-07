@@ -83,6 +83,7 @@ pub const DAILY_REPORT_APPEND_LESSON: &str = "/daily_report/append_lesson";
 pub const DAILY_REPORT_GENERATE: &str = "/daily_report/generate";
 pub const DAILY_REPORT_LESSONS: &str = "/daily_report/lessons";
 pub const DAILY_REPORT_STATS: &str = "/daily_report_stats";
+pub const TASK_REVIEWS: &str = "/task_reviews";
 /// Managed lessons store (`~/.claude/fleet-lessons.md`): list + remove.
 pub const MANAGED_LESSONS: &str = "/managed_lessons";
 pub const MANAGED_LESSON_REMOVE: &str = "/managed_lessons/remove";

@@ -2281,9 +2281,16 @@
     "dc_no_rec": "no rec.",
     "total_cost": "Total Cost",
     "dc_task_outcome": "done/given up",
+    "task_reviews": "Task retrospectives",
+    "no_task_reviews": "No task was finished or abandoned today.",
+    "task_review_untitled": "(untitled task)",
+    "task_review_overclaimed": "claimed done",
+    "task_review_overclaimed_hint": "The agent judged the task complete, but you pressed Abandon — closing that gap is what this review is for.",
+    "task_review_underclaimed": "claimed unfinished",
+    "task_review_underclaimed_hint": "The agent did not judge the task complete, yet you finished it — it may have under-reported its progress.",
+    "task_review_hops": "{{count}} hops",
     "popup_title": "Your daily report is ready",
-    "popup_open_full": "Open full report"
-  },
+    "popup_open_full": "Open full report"  },
   "command": {
     "nested": {
       "bash": "embedded bash -c",
