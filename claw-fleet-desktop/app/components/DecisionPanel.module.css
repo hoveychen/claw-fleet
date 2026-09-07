@@ -18,7 +18,7 @@
   box-shadow:
     0 0 0 1px rgba(var(--color-accent-rgb), 0.15),
     0 0 20px rgba(var(--color-accent-rgb), 0.25),
-    0 8px 32px rgba(0, 0, 0, 0.35);
+    var(--shadow-float);
   background: var(--color-bg);
   animation: panelSlideIn 0.3s ease;
   transition: opacity 0.12s ease;
@@ -51,7 +51,7 @@
   box-shadow:
     0 0 0 1px rgba(229, 62, 62, 0.15),
     0 0 20px rgba(229, 62, 62, 0.25),
-    0 8px 32px rgba(0, 0, 0, 0.35);
+    var(--shadow-float);
 }
 
 .panel_guard::before {
@@ -238,7 +238,7 @@
   cursor: pointer;
   box-shadow:
     0 0 0 1px rgba(var(--color-accent-rgb), 0.15),
-    0 4px 16px rgba(0, 0, 0, 0.25);
+    var(--shadow-float);
   transition: opacity 0.12s ease, background 0.12s ease;
   animation: panelSlideIn 0.2s ease;
 }
@@ -264,13 +264,13 @@
   border-color: var(--color-error);
   box-shadow:
     0 0 0 1px rgba(229, 62, 62, 0.15),
-    0 4px 16px rgba(0, 0, 0, 0.25);
+    var(--shadow-float);
 }
 .panel_collapsed_bar.panel_plan {
   border-color: #8a5cf6;
   box-shadow:
     0 0 0 1px rgba(138, 92, 246, 0.15),
-    0 4px 16px rgba(0, 0, 0, 0.25);
+    var(--shadow-float);
 }
 
 /* ── Card area: scrollable, shows the active decision card ───────────────── */
@@ -949,7 +949,7 @@
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-float);
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -1564,7 +1564,7 @@
   box-shadow:
     0 0 0 1px rgba(138, 92, 246, 0.15),
     0 0 20px rgba(138, 92, 246, 0.25),
-    0 8px 32px rgba(0, 0, 0, 0.35);
+    var(--shadow-float);
 }
 
 .panel_plan::before {

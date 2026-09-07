@@ -343,7 +343,7 @@
   padding: 20px 22px;
   max-width: 400px;
   width: 100%;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-modal);
 }
 .modal_wide {
   max-width: 520px;

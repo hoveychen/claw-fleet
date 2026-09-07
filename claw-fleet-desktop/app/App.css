@@ -172,6 +172,15 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
      but it is doing that job together with the scrim's falloff now, so it is a
      wide soft spread plus a tight contact edge rather than one heavy blur. */
   --shadow-drawer: -18px 0 40px rgba(0, 0, 0, 0.34), -2px 0 6px rgba(0, 0, 0, 0.22);
+  /* The other two float tiers. Before these existed, every dialog and menu
+     carried its own hand-picked pure-black blur — 0 16px 48px .4 here, 0 24px
+     60px .5 there, 0 8px 24px .18/.28/.3/.35 across a dozen menus — all tuned
+     against the dark theme and all far too heavy on the light one, where a
+     black blur reads as a smudge rather than as lift. Two tiers is the whole
+     vocabulary: `modal` for a centred surface that owns the screen, `float`
+     for a menu, popover, toast or tooltip that hangs off something. */
+  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.2);
 
   --color-accent: #d97757;
   --color-accent-bright: #f0a070;
@@ -359,6 +368,9 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   /* Same two-layer shape as dark, warm-tinted and far lighter: on the paper
      surface a 28%-black blur reads as a smudge, not as lift. */
   --shadow-drawer: -18px 0 40px rgba(32, 28, 18, 0.13), -2px 0 6px rgba(32, 28, 18, 0.07);
+  /* Same two tiers, warm-tinted and roughly a third of the dark opacities. */
+  --shadow-modal: 0 24px 60px rgba(32, 28, 18, 0.18), 0 2px 8px rgba(32, 28, 18, 0.1);
+  --shadow-float: 0 8px 24px rgba(32, 28, 18, 0.12), 0 1px 3px rgba(32, 28, 18, 0.07);
 
   --color-accent: #c25232;
   --color-accent-bright: #b3442a;
