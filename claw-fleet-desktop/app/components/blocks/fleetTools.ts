@@ -1,22 +1,34 @@
 /**
  * Shared parsing layer for Fleet's MCP *control* tools — `fleet__plan`,
  * `fleet__handoff`, `fleet__watch`, `fleet__loop`, `fleet__schedule`,
- * `fleet__wiki`. These render through the generic tool card by default, which
- * dumps `{"action":"check","plan_id":…}` as a key/value blob. `FleetToolCard`
- * replaces that with a structured, human-readable card.
+ * `fleet__wiki`, `fleet__artifact`, `fleet__inspect`, `fleet__control`,
+ * `fleet__notes`, `fleet__history`. These render through the generic tool card
+ * by default, which dumps `{"action":"check","plan_id":…}` as a key/value blob
+ * — and in the work-run rail, where the tool name is hidden, that blob is the
+ * *entire* row (`{"action":"list","all":true}` and nothing else).
+ * `FleetToolCard` replaces it with a structured, human-readable card.
  *
- * Ground truth from `claw-fleet-core/src/mcp_control.rs`: a control tool's
- * *return text* is NOT uniformly JSON. It comes in four shapes:
+ * Ground truth from `claw-fleet-core/src/mcp_control.rs` +
+ * `mcp_inspect.rs`: a control tool's *return text* is NOT uniformly JSON. It
+ * comes in five shapes:
  *   - line text : `plan list`/`plan get`, `wiki list`/`wiki search`
  *   - pretty JSON: `handoff`/`watch`/`loop`/`schedule` list/get
- *   - file body : `wiki cat` (markdown / html)
- *   - confirm   : every mutate action (`ok: …`)
+ *   - file body : `wiki cat` (markdown / html), `notes read`
+ *   - prose text: every `inspect`/`history` action, `notes list`/`search`,
+ *                 `artifact list`/`get` — already formatted for the eye by the
+ *                 Rust side, so it is passed through verbatim
+ *   - confirm   : every mutate action (`ok: …` / `Stored artifact …`)
  *
  * The only always-structured source is the *input* (`action` + params), so the
  * card leans on that; the return text is classified into `FleetResult` below.
  */
 
-/** The six MCP control tools, keyed by the tail segment of their tool name. */
+/**
+ * The MCP control tools, keyed by the tail segment of their tool name. Mirrors
+ * `CONTROL_TOOL_NAMES` in `claw-fleet-core/src/mcp_control.rs` — a tool missing
+ * from this list falls back to the generic card and leaks its raw args JSON, so
+ * the two lists must be kept in step.
+ */
 export const FLEET_CONTROL_TOOLS = [
   "plan",
   "handoff",
@@ -24,6 +36,11 @@ export const FLEET_CONTROL_TOOLS = [
   "loop",
   "schedule",
   "wiki",
+  "artifact",
+  "inspect",
+  "control",
+  "notes",
+  "history",
 ] as const;
 
 export type FleetTool = (typeof FLEET_CONTROL_TOOLS)[number];
@@ -43,11 +60,13 @@ export function isFleetTool(name: string): FleetTool | null {
 
 /**
  * i18n key for a Fleet MCP tool's human-readable label, keyed by the tail
- * segment of its wire name (`mcp__fleet__fleet__<tail>`). Covers the six
- * control tools plus `ask` / `render_a2ui` / `set_session_title`. Used to
- * relabel the raw `mcp__fleet__fleet__…` id wherever it would otherwise leak
- * verbatim — e.g. the ToolSearch "loading tools" summary, where a tool is just
- * a string in the `select:` query and never reaches its dedicated card.
+ * segment of its wire name (`mcp__fleet__fleet__<tail>`). Covers every one of
+ * the eleven control tools plus the four non-control ones (`ask`,
+ * `render_a2ui`, `set_session_title`, `image`, `image_edit`). Used to relabel
+ * the raw `mcp__fleet__fleet__…` id wherever it would otherwise leak verbatim —
+ * e.g. the ToolSearch "loading tools" summary, where a tool is just a string in
+ * the `select:` query and never reaches its dedicated card, and which is where
+ * the seven previously-missing entries surfaced as `fleet·fleet__inspect`.
  */
 export const FLEET_TOOL_LABEL_KEYS: Record<string, string> = {
   ask: "detail.fleet_tool.ask",
@@ -58,7 +77,14 @@ export const FLEET_TOOL_LABEL_KEYS: Record<string, string> = {
   loop: "detail.fleet_tool.loop",
   schedule: "detail.fleet_tool.schedule",
   wiki: "detail.fleet_tool.wiki",
+  artifact: "detail.fleet_tool.artifact",
+  inspect: "detail.fleet_tool.inspect",
+  control: "detail.fleet_tool.control",
+  notes: "detail.fleet_tool.notes",
+  history: "detail.fleet_tool.history",
   set_session_title: "detail.fleet_tool.set_session_title",
+  image: "detail.fleet_tool.image",
+  image_edit: "detail.fleet_tool.image_edit",
 };
 
 /**
@@ -214,6 +240,25 @@ function isJsonRecordAction(tool: FleetTool, action: string): boolean {
 }
 
 /**
+ * The five tools whose returns the Rust side already formats for the eye
+ * (`mcp_inspect.rs` agent tables, `render_note_files`, `render_history_hits`,
+ * the artifact listing) rather than as parseable records. Their read actions go
+ * straight to `raw`, which renders in a `<pre>` and so keeps the alignment the
+ * Rust formatter built. The remaining actions — listed per tool below — are
+ * mutates that return one `ok: …` / `Stored artifact …` line and read better as
+ * a `confirm`. Splitting them is the point: the pre-existing catch-all sent
+ * *every* unrecognised action to `confirm`, whose single-line div would have
+ * collapsed a multi-line agent table into an unreadable run of text.
+ */
+const PROSE_TOOL_MUTATES: Partial<Record<FleetTool, readonly string[]>> = {
+  inspect: [],
+  history: [],
+  notes: ["write", "append"],
+  artifact: ["add", "delete"],
+  control: ["stop", "interrupt"],
+};
+
+/**
  * Classify a control tool's return text into a structured `FleetResult`. Falls
  * back to `raw` (never drops the text) when a parse doesn't apply or fails.
  */
@@ -249,6 +294,16 @@ export function classifyResult(
   if (isJsonRecordAction(tool, action)) {
     const records = tryParseRecords(text);
     return records ? { kind: "records", records } : { kind: "raw", text };
+  }
+  // `notes read` returns the note file's body — the same "a file, verbatim"
+  // shape as `wiki cat`, so it gets the same markdown rendering. Notes are
+  // markdown by convention (`checkpoint.md`).
+  if (tool === "notes" && action === "read") {
+    return { kind: "wiki-cat", body: content };
+  }
+  const mutates = PROSE_TOOL_MUTATES[tool];
+  if (mutates) {
+    return mutates.includes(action) ? { kind: "confirm", text } : { kind: "raw", text };
   }
   // Mutate actions (create/check/uncheck/add/resume/stop/cancel/update/run) and
   // anything else: the `ok: …` confirmation line.
