@@ -445,8 +445,8 @@ task\", closing it as UNFINISHED. Only claim true when the work is genuinely \
 finished — the terminal state feeds Fleet's retrospective, and \"agent said \
 done, user abandoned it\" is its strongest signal.\n\
 - **Session-end exemption:** when the tool returns `TASK FINISHED` or `TASK \
-ABANDONED` (the terminal button), or {title} picks an option that clearly \
-closes the conversation (\"收工\", \"done\"), end with a one-line plain-text \
+ABANDONED` (the terminal button), or {title} says in free text that you are \
+done (\"收工\", \"done\"), end with a one-line plain-text \
 acknowledgement instead of another card. This is the only case where a \
 terminal turn is plain text.\n\
 - **When this whole part does NOT apply:** if `fleet__ask` is not in your \
