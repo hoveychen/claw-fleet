@@ -79,9 +79,10 @@
 .recentList {
   display: flex;
   flex-direction: column;
-  border-radius: 14px;
+  border-radius: var(--r-md, 14px);
   overflow: hidden;
-  border: 1px solid var(--color-border);
+  border: none;
+  box-shadow: var(--shadow-1);
   background: var(--color-bg-card);
 }
 
@@ -533,7 +534,7 @@
   align-items: flex-end;
   gap: 6px;
   padding: 4px 4px 4px 6px;
-  border-radius: 24px;
+  border-radius: var(--r-lg, 20px);
   /* 玻璃材质：转录内容从它底下滚过去，所以它必须自己撑住可读性——半透明底 +
      背景模糊 + 一道内高光边（顶栏 --color-bg-glass 是同一套语言）。 */
   border: 1px solid var(--color-border-strong);

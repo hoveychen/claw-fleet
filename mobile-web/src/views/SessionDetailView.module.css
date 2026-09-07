@@ -241,10 +241,12 @@
 .userBubble {
   max-width: 78%;
   background: var(--color-bg-user);
-  border-radius: 8px 8px 2px 8px;
-  padding: 8px 12px;
-  font-size: var(--t-ui, 14px);
-  line-height: 1.5;
+  /* 纸感派把气泡的角放大一档（尖角那一只保留，它是「谁在说话」的唯一线索），
+     行距跟正文一起走 1.7 —— 气泡里也是被读的字。 */
+  border-radius: var(--r-md, 14px) var(--r-md, 14px) 3px var(--r-md, 14px);
+  padding: 9px 13px;
+  font-size: var(--t-body, 16px);
+  line-height: 1.7;
   word-break: break-word;
 }
 

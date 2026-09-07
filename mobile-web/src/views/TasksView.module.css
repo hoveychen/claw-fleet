@@ -27,8 +27,9 @@
 .search {
   width: 100%;
   background: var(--color-bg-input);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border: none;
+  box-shadow: var(--shadow-1);
+  border-radius: var(--r-sm, 10px);
   padding: 8px 12px 8px 32px;
   color: var(--color-text);
   font-size: var(--t-ui, 14px);
@@ -214,10 +215,13 @@
   font-size: var(--t-ui, 14px);
 }
 
+/* 纸感派：卡片靠影子从纸面浮起来，不再画一圈线。边框在暖纸上会显得像表格，
+   而这一屏本来是一叠卡片。 */
 .card {
   background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border: none;
+  border-radius: var(--r-md, 14px);
+  box-shadow: var(--shadow-1);
   padding: 12px 14px;
 }
 
