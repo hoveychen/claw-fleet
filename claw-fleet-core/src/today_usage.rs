@@ -249,8 +249,8 @@ pub struct ModelReceiptLine {
     /// Raw model id as it appears in the transcript (e.g. `claude-opus-4-8`,
     /// `gpt-5.6-sol`). The frontend prettifies for display.
     pub model: String,
-    /// Agent source that ran this model: `claude-code`, `codex`, or `fleet`
-    /// (Fleet's own guard / audit / report-summary LLM calls).
+    /// Agent source that ran this model: `claude-code`, `codex`, `dsh`, or
+    /// `fleet` (Fleet's own guard / audit / report-summary LLM calls).
     pub source: String,
     /// Net input tokens — cache writes and reads are itemised separately below,
     /// so this must NOT be the all-inclusive "tokens sent to the API" figure
@@ -274,6 +274,15 @@ pub struct ModelReceiptLine {
     /// Line cost = Σ per-turn `turn_cost_usd` for this (source, model). Equals
     /// the sum of this line's itemised rows.
     pub cost_usd: f64,
+    /// True when this line's `cost_usd` is the **provider's** own figure rather
+    /// than `Σ tokens × Fleet's official $/M rate`. dsh routes through an open
+    /// model space where the same model costs different amounts per provider, so
+    /// its spend is read off the provider's receipt ([`crate::dsh_cost`]) and the
+    /// per-row `*_price` columns are Fleet's reference rates, NOT what was charged.
+    /// The receipt renders such a line as tokens + real spend and does not expect
+    /// `Σ rows == cost_usd`. Never true for `claude-code` / `codex` / report
+    /// backfill, which are always priced by the rate table.
+    pub priced_by_provider: bool,
 }
 
 /// Today's per-model receipt — the itemised breakdown behind the sidebar badge.
@@ -442,6 +451,12 @@ fn build_lines(
             // the 5-minute row is the remainder. saturating_sub keeps a
             // malformed pair from wrapping the row into nonsense.
             let write_1h = acc.cache_creation_1h.min(acc.cache_creation);
+            // dsh spend comes from the provider's own receipt, not the rate
+            // table: the per-row prices below are Fleet's reference rates (which
+            // are NOT what an open model space charged), so the UI must render
+            // this line as tokens + real spend and stop expecting `Σ rows =
+            // cost_usd`. Every other source is priced by the table and reconciles.
+            let priced_by_provider = source == "dsh";
             ModelReceiptLine {
                 model,
                 source,
@@ -456,6 +471,7 @@ fn build_lines(
                 cache_write_1h_price: c.cache_write_1h,
                 cache_read_price: c.cache_read,
                 cost_usd: acc.cost,
+                priced_by_provider,
             }
         })
         .collect();
@@ -482,6 +498,17 @@ pub(crate) fn sessions_usage_for_date(
     let mut cache = usage_cache().lock().unwrap();
     let mut result = Vec::with_capacity(sessions.len());
     for session in sessions {
+        // dsh is deliberately skipped here: its spend is the provider's own
+        // charge for an open model space, which this surface would have to store
+        // per-model and then re-attribute on read-back with
+        // `infer_report_source` — mis-labelling every dsh model as Claude Code
+        // and breaking the receipt's `Σ rows == subtotal` invariant on the
+        // backfilled historical days. The daily-report/receipt口径 unification
+        // that handles dsh attribution properly is a separate plan; this receipt
+        // fix scopes itself to the live per-turn fold (today / near windows).
+        if session.agent_source == "dsh" {
+            continue;
+        }
         let mut by_model = std::collections::HashMap::new();
         let mut by_day = std::collections::BTreeMap::new();
         let cells = cache.cells(session);
@@ -931,6 +958,67 @@ fn codex_cells_are_approximate(cells: &SessionCells) -> bool {
     cells.keys().any(|(d, _)| d.is_empty())
 }
 
+/// Project one dsh session into a single `(last-activity-day, model)` cell.
+///
+/// dsh routes through an open model space where the same model costs different
+/// amounts per provider (OpenRouter alone fronts dozens of sellers), so — unlike
+/// Claude/Codex — this is NOT priced with Fleet's rate table. The spend is the
+/// provider's own figure from [`crate::dsh_cost::dsh_session_cost`], and the
+/// token buckets come off the session's own projections
+/// ([`crate::dsh_source::dsh_token_breakdown`]). Both are cumulative over the
+/// whole session, so the entire session lands on its last-activity day — the
+/// same whole-session attribution the codex fold uses for a rollout with no
+/// per-turn timestamps. The line is flagged `priced_by_provider` so the UI stops
+/// expecting `Σ rows == cost`. Returns empty cells on error / zero usage, so an
+/// unreachable dsh server degrades to "no dsh spend" rather than erroring the
+/// whole receipt.
+fn fold_dsh_session_cells(s: &SessionInfo) -> SessionCells {
+    let Ok(tokens) = crate::dsh_source::dsh_token_breakdown(&s.jsonl_path) else {
+        return SessionCells::new();
+    };
+    if tokens.total_tokens == 0 {
+        return SessionCells::new();
+    }
+    // Provider-priced: `cost_usd` is the real charge; the per-row prices the UI
+    // draws are Fleet's reference rates and will not add up to it.
+    let cost = crate::dsh_cost::dsh_session_cost(&s.jsonl_path)
+        .ok()
+        .and_then(|c| c.total_usd);
+    dsh_cells(s.model.as_deref(), s.last_activity_ms, &tokens, cost)
+}
+
+/// Pure core of [`fold_dsh_session_cells`]: one session's `(model, last-activity,
+/// token buckets, provider cost)` → the single cell. Split out so it is testable
+/// without a live dsh server or a network round trip. `cost` is `None` when the
+/// provider did not price the session — the cell still carries the tokens but
+/// zero spend, so an unpriceable dsh session never fabricates a number.
+fn dsh_cells(
+    model: Option<&str>,
+    last_activity_ms: u64,
+    tokens: &crate::dsh_source::DshTokenBreakdown,
+    cost: Option<f64>,
+) -> SessionCells {
+    let mut cells = SessionCells::new();
+    let model = model.map(str::to_string).unwrap_or_else(|| "unknown".to_string());
+    // `last_activity_ms` is u64; a 0 (unknown) dates to the epoch and is excluded
+    // from every day-bounded window, which under-counts rather than over-counts.
+    let date = local_date_str(last_activity_ms as i64);
+    cells
+        .entry((date, model))
+        .or_default()
+        .add(
+            tokens.uncached_input_tokens,
+            // dsh reports a single cache-write bucket with no 1h TTL split, so
+            // the 1h subset stays 0 and all writes price at the route's rate.
+            tokens.cache_write_tokens,
+            0,
+            tokens.cache_read_tokens,
+            tokens.output_tokens,
+            cost.unwrap_or(0.0),
+        );
+    cells
+}
+
 /// Sum cells whose non-empty date is within `[from_date, to_date]` (undated
 /// dropped) into both `by_model` and the per-day trend `by_day`. Dates
 /// are `YYYY-MM-DD`, so lexicographic comparison is chronological.
@@ -1043,10 +1131,16 @@ impl UsageBreakdownCache {
 }
 
 /// Fold one session's JSONL/rollout into cells — the expensive read+parse a cache
-/// hit avoids. Codex uses the URI-aware reader; Claude reads the file directly.
+/// hit avoids. Codex uses the URI-aware reader; dsh reads the provider-priced
+/// projections/cost off its own server; Claude reads the file directly.
 fn fold_session_cells(s: &SessionInfo) -> SessionCells {
     if s.agent_source == "codex" {
         fold_codex_session_cells(&s.jsonl_path, s.created_at_ms as i64)
+    } else if s.agent_source == "dsh" {
+        // `jsonl_path` is a `dsh://` URI, not a filesystem path — a naive
+        // `read_to_string` below would return "" and silently drop the session's
+        // spend. This is the branch that makes dsh spend appear on the receipt.
+        fold_dsh_session_cells(s)
     } else {
         let jsonl = std::fs::read_to_string(&s.jsonl_path).unwrap_or_default();
         fold_claude_session_cells(&jsonl)
@@ -2920,5 +3014,83 @@ mod range_breakdown_tests {
                 )
             })
             .collect()
+    }
+
+    /// dsh spend is provider-priced: the pure mapping must carry the real cost,
+    /// the four token buckets (dsh's single cache-write bucket with no 1h TTL
+    /// split), the harvested route model, and the session's last-activity date.
+    #[test]
+    fn dsh_cell_maps_tokens_model_cost_and_date() {
+        use crate::dsh_source::DshTokenBreakdown;
+        let tokens = DshTokenBreakdown {
+            uncached_input_tokens: 100,
+            cache_write_tokens: 20,
+            cache_read_tokens: 300,
+            output_tokens: 40,
+            ..Default::default()
+        };
+        let at = 1_752_000_000_000i64;
+        let cells = dsh_cells(Some("openrouter/anthropic/claude-opus-5"), at as u64, &tokens, Some(0.1234));
+        assert_eq!(cells.len(), 1);
+        let ((date, model), acc) = cells.iter().next().unwrap();
+        assert_eq!(model, "openrouter/anthropic/claude-opus-5");
+        assert_eq!(*date, local_date_str(at));
+        assert_eq!(acc.input, 100);
+        assert_eq!(acc.cache_creation, 20, "dsh cache write → 5m bucket");
+        assert_eq!(acc.cache_creation_1h, 0, "dsh has no 1h TTL split");
+        assert_eq!(acc.cache_read, 300);
+        assert_eq!(acc.output, 40);
+        assert!((acc.cost - 0.1234).abs() < 1e-9, "provider cost carried verbatim");
+    }
+
+    /// An unpriced dsh session still counts its tokens but contributes $0 — it
+    /// never fabricates a number, and an unknown route falls back to `unknown`.
+    #[test]
+    fn dsh_cell_defaults_model_and_zero_when_unpriced() {
+        use crate::dsh_source::DshTokenBreakdown;
+        let tokens = DshTokenBreakdown {
+            uncached_input_tokens: 5,
+            output_tokens: 2,
+            ..Default::default()
+        };
+        let cells = dsh_cells(None, 1_752_000_000_000u64, &tokens, None);
+        let ((_, model), acc) = cells.iter().next().unwrap();
+        assert_eq!(model, "unknown");
+        assert_eq!(acc.cost, 0.0);
+        assert_eq!(acc.input, 5);
+    }
+
+    /// `build_lines` tags every `dsh` source line as provider-priced (so the UI
+    /// stops expecting `Σ rows == subtotal`) while leaving Claude/Codex priced by
+    /// the rate table (which does reconcile).
+    #[test]
+    fn build_lines_marks_dsh_provider_priced_and_others_not() {
+        let mut by_model = std::collections::HashMap::new();
+        let mut dsh_acc = LineAcc::default();
+        dsh_acc.add(10, 2, 0, 30, 4, 0.42);
+        by_model.insert(
+            ("dsh".to_string(), "deepseek-v4-flash-vision-exp".to_string()),
+            dsh_acc,
+        );
+        let mut claude_acc = LineAcc::default();
+        claude_acc.add(10, 2, 2, 30, 4, 0.05);
+        by_model.insert(
+            ("claude-code".to_string(), "claude-sonnet-4-6".to_string()),
+            claude_acc,
+        );
+
+        let lines = build_lines(by_model);
+        let dsh = lines.iter().find(|l| l.source == "dsh").expect("dsh line");
+        assert!(dsh.priced_by_provider, "dsh must be flagged provider-priced");
+        assert!((dsh.cost_usd - 0.42).abs() < 1e-9);
+        assert_eq!(dsh.cache_creation_tokens, 2);
+        assert_eq!(dsh.cache_creation_1h_tokens, 0);
+
+        let claude = lines
+            .iter()
+            .find(|l| l.source == "claude-code")
+            .expect("claude line");
+        assert!(!claude.priced_by_provider, "rate-table sources are not provider-priced");
+        assert_eq!(claude.cache_creation_1h_tokens, 2, "claude TTL split preserved");
     }
 }

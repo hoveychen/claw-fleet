@@ -783,6 +783,7 @@
     "trend_title": "Daily spend",
     "trend_scale_hint": "√ scale",
     "codex_note": "A Codex rollout had turns with no timestamp; those were placed on the session's start day, so the trend is approximate",
+    "provider_priced": "This line's spend is what the provider actually charged, not the official $/M reference rate, so rows are not itemised per price",
     "row_input": "Input",
     "row_cache_write_1h": "Cache write (1h)",
     "row_cache_write": "Cache write",
