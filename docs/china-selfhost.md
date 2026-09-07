@@ -118,3 +118,14 @@ ssh own-api-sz 'systemctl enable --now fleet-site-update.timer'
 ```
 
 源码：`scripts/site/selfhost.py`（原子更新与锁）、`scripts/site/distribute.py`（来源/摘要验证）、`docs/deploy/fleet-site-update.{service,timer}`（服务器服务）。部署这些文件后执行 `systemctl daemon-reload`。`--rebuild-current` 仅用于实际验证已发布版本的完整校验和切换路径，不绕过摘要校验、不替换相同 URL 的内容。
+
+
+### 自动同步验收（2026-09-07）
+
+12 项本地测试通过，包括完整升级时下载全部完成前入口不变、缺包/损坏/同版本内容变更拒绝发布、无更新不下载、保留历史包与双语站点、重建和禁止降级。
+
+深圳真机通过 GitHub API 获取 v2.6.0 的 7 个附件，再以 `fleet-site` 用户执行 `--rebuild-current`：全部真实摘要校验通过，入口切换至 `/srv/claw-fleet-site/deployments/auto-v2.6.0-a066c21e34bf`。旧部署仍存在；macOS 包新旧路径 inode 均为 131427，确认历史文件共享存储且字节未改。
+
+随后实际启动 systemd service：`Result=success`、`ExecMainStatus=0`，输出 `Up to date: v2.6.0; no downloads or site changes`。timer 为 enabled / active，已登记下次执行；服务用户 `fleet-site`，可写路径仅 `/srv/claw-fleet-site`。systemd 配置检查无本服务错误；仅提示服务器既有 cloudmonitor 服务的旧配置警告，本次未修改它。
+
+原子切换后重新运行正式域名的 23 项浏览器断言全部通过。尚不存在更新的真实稳定版，因此「未来新版本到达后的自动发现」以本地升级测试和真机当前版重建路径验证，没有伪造发布新版。
