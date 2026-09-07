@@ -452,6 +452,25 @@ mod tests {
     }
 
     #[test]
+    fn same_millisecond_events_have_stable_distinct_transcript_ids() {
+        let mut events = vec![user_message(), agent_instructions(), plugin_snapshot(),
+            assistant_with_tool_call(), tool_result()];
+        for event in &mut events {
+            event["time"] = json!(1788819423876i64);
+        }
+        let out = normalize(&events);
+        let ids: Vec<_> = out.iter().map(|m| m["uuid"].as_str().expect("durable event identity")).collect();
+        assert_eq!(ids.iter().collect::<std::collections::HashSet<_>>().len(), events.len());
+        // The same event retains its identity regardless of page boundaries.
+        for (event, record) in events.iter().zip(&out) {
+            assert_eq!(normalize(std::slice::from_ref(event))[0]["uuid"], record["uuid"]);
+        }
+        assert!(out[0].get("isMeta").is_none());
+        assert_eq!(out[1]["isMeta"], true);
+        assert_eq!(out[0]["message"]["content"], events[0]["data"]["content"]);
+    }
+
+    #[test]
     fn a_user_message_keeps_its_content_blocks() {
         let out = normalize(&[user_message()]);
         assert_eq!(out.len(), 1);
