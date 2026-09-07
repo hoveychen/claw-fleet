@@ -1575,8 +1575,9 @@ fn rescan_and_emit(
 }
 
 /// Build the session list an incremental rescan should produce: keep the
-/// sessions of clean sources (aged out), re-scan only the dirty ones, then
-/// re-apply the scan-time enrichers over the merged list.
+/// sessions of clean sources (aged out, unless the source polls — see below),
+/// re-scan only the dirty ones, then re-apply the scan-time enrichers over the
+/// merged list.
 ///
 /// Split out of `incremental_rescan_and_emit` so it can be tested without an
 /// `AppHandle` — the enrichers are exactly what this path used to get wrong.
@@ -1594,15 +1595,40 @@ fn build_incremental_sessions(
         .filter_map(|&i| sources.get(i).map(|s| s.name()))
         .collect();
 
+    // Sources whose status is a roster answer rather than a file mtime, and so
+    // must not be aged out here. `age_out_status` exists for filesystem sources:
+    // their status is *derived* from how long ago the transcript was last
+    // written, so a retained row whose file stopped moving really has gone idle.
+    // A polling source has no such file — dsh's status comes off `session/list`'s
+    // `running` bit while its `last_activity_ms` is dsh's `updatedAt`, which sits
+    // still for minutes across one long turn. Since a filesystem-watcher tick
+    // always leaves dsh clean, aging it out here turned every such tick into
+    // `Active ⇒ Idle`, and the 3s dsh poll tick then rescanned it back to
+    // `Active` — two writers alternating on one list, which is exactly the
+    // launchpad run dot blinking green / gone / green every couple of seconds.
+    // The poll interval *is* the freshness guarantee: a stale row can only
+    // survive until the next tick, which also drops it outright if the server
+    // has gone away (`is_available` false ⇒ the dirty source contributes
+    // nothing).
+    let poll_source_names: HashSet<&str> = sources
+        .iter()
+        .filter(|s| matches!(s.watch_strategy(), WatchStrategy::Poll(_)))
+        .map(|s| s.name())
+        .collect();
+
     // Keep sessions from clean sources, rescan only dirty ones.
-    // Re-apply age_out_status to retained sessions so their status still
-    // transitions to Idle when the underlying file hasn't been touched.
+    // Re-apply age_out_status to retained filesystem-source sessions so their
+    // status still transitions to Idle when the underlying file hasn't been
+    // touched.
     let mut s: Vec<SessionInfo> = existing
         .iter()
         .filter(|sess| !dirty_names.contains(sess.agent_source.as_str()))
         .cloned()
         .collect();
     for sess in &mut s {
+        if poll_source_names.contains(sess.agent_source.as_str()) {
+            continue;
+        }
         let age_secs = now_ms.saturating_sub(sess.last_activity_ms) as f64 / 1000.0;
         crate::session::age_out_status(sess, age_secs);
     }
