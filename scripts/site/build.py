@@ -25,6 +25,10 @@ def build(lang, c):
         links=dl(*ASSETS[i]) if i<2 else dl(*ASSETS[2])+dl(*ASSETS[3])
         rows+=f'<div class="download-row"><div class="platform"><img src="{base}icon-{["apple","windows","linux"][i]}.svg" width="28" height="28" alt=""><h3>{name}</h3></div><div class="architecture"><strong>{arch}</strong><span>{desc}</span></div><div class="download-actions">{links}</div></div>'
     features=''.join(f'<article><h3>{h}</h3><p>{p}</p></article>' for h,p in c['features'])
+    relay=('<span class="relay-arrow" aria-hidden="true">→</span>').join(
+        f'<div class="relay-node"><strong>{escape(name)}</strong><span>{escape(role)}</span></div>'
+        for name,role in c['relayNodes'])
+    harness_points=''.join(f'<article><h3>{h}</h3><p>{p}</p></article>' for h,p in c['harnessPoints'])
     more=''.join(f'<article><h3>{h}</h3><p>{p}</p></article>' for h,p in c['moreItems'])
     steps=''.join(f'<li><h3>{h}</h3><p>{p}</p></li>' for h,p in c['steps'])
     faq=''.join(f'<details><summary>{h}<span aria-hidden="true">+</span></summary><p>{p}</p></details>' for h,p in c['faqs'])
@@ -69,6 +73,7 @@ def build(lang, c):
 {panels}<p class="mobile-sample">{c['sample']}</p>
 </section>
 <section class="overview wrap"><div class="section-heading"><h2>{c['sectionHeading']}</h2><p>{c['sectionText']}</p></div><div class="feature-columns">{features}</div></section>
+<section class="harness wrap" id="harness"><div class="section-heading"><h2>{c['harnessHeading']}</h2><p>{c['harnessCopy']}</p></div><div class="relay"><div class="relay-lane">{relay}</div><p class="relay-note">{c['relayNote']}</p></div><div class="feature-columns">{harness_points}</div></section>
 <section class="mobile-section wrap" id="mobile"><div class="mobile-art"><div class="phone"><img src="{asset(f'screenshots/current/mobile-{lang}.png')}" width="{mobile_w}" height="{mobile_h}" loading="lazy" alt="{c['mobileAlt']}"></div><p>{c['mobileCaption']}</p></div><div class="mobile-copy"><h2>{c['mobileHeading']}</h2><p>{c['mobileCopy']}</p><ul>{''.join(f'<li>{p}</li>' for p in c['mobilePoints'])}</ul><a class="text-link" href="#getting-started">{c['mobileCta']} <span aria-hidden="true">↗</span></a></div></section>
 <section class="work-depth wrap"><div class="section-heading"><h2>{c['moreHeading']}</h2><p>{c['moreCopy']}</p></div><div class="depth-list">{more}</div><div class="source-strip"><p>{c['sourceNames']}</p><span>{c['sourceBlurb']}</span></div></section>
 {capabilities}

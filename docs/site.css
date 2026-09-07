@@ -1176,3 +1176,75 @@ html[lang="zh-CN"] .hero-copy .intro {
  .capability-group ul { grid-template-columns:1fr;gap:20px; }
  .nav-capabilities { display:none; }
 }
+.harness {
+  padding-block: 0 118px;
+}
+.relay {
+  margin-top: 52px;
+  padding: 32px 34px;
+  background: #f4f6f5;
+  border-radius: 12px;
+}
+.relay-lane {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 14px;
+}
+.relay-node {
+  flex: 1 1 190px;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 17px 20px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.relay-node strong {
+  font-size: 16px;
+  font-weight: 550;
+  letter-spacing: -0.02em;
+}
+.relay-node span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.relay-arrow {
+  align-self: center;
+  color: var(--muted);
+  font-size: 17px;
+}
+.relay-note {
+  margin-top: 21px;
+  max-width: 720px;
+  font-size: 14px;
+  color: var(--muted);
+}
+@media (max-width: 740px) {
+  .harness {
+    padding-block: 0 66px;
+  }
+  .relay {
+    margin-top: 30px;
+    padding: 22px;
+  }
+  .relay-lane {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .relay-node {
+    flex: 0 0 auto;
+    padding: 14px 18px;
+  }
+  .relay-arrow {
+    align-self: start;
+    margin-left: 20px;
+    line-height: 1;
+    transform: rotate(90deg);
+  }
+  .relay-note {
+    margin-top: 17px;
+    font-size: 13px;
+  }
+}

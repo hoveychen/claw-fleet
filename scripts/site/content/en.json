@@ -46,6 +46,37 @@
       "Open a deliverable, export it, and return to it later. Keep reusable conclusions in a versioned project wiki."
     ]
   ],
+  "harnessHeading": "One piece of work.<br>More than one agent.",
+  "harnessCopy": "Planning, implementation and review don’t have to run on the same tool. You decide who takes which step.",
+  "relayNodes": [
+    [
+      "Claude Code",
+      "breaks down the plan"
+    ],
+    [
+      "dsh (DeepSeek Harness)",
+      "works through it"
+    ],
+    [
+      "Codex",
+      "reviews and wraps up"
+    ]
+  ],
+  "relayNote": "The split is only an example. Every task picks its own tool and model; name another tool’s model in a handoff and the next session runs there.",
+  "harnessPoints": [
+    [
+      "A tool per task.",
+      "Choose the agent tool when you brief the task, then pick a model from that tool’s own catalogue. When several are running, the session list shows which tool each task is on."
+    ],
+    [
+      "A handoff carries more than a note.",
+      "The workspace, the plan and its current step, and the notes the previous session left behind all travel to the next one. Whoever picks it up doesn’t rebuild the context."
+    ],
+    [
+      "The record belongs to the work.",
+      "Plans, the project wiki, deliverables and notes live in Fleet, not inside one tool. What Claude Code writes down, Codex and dsh can read back."
+    ]
+  ],
   "mobileHeading": "Away from your desk.<br>Still part of the work.",
   "mobileCopy": "An idea doesn’t have to wait until you get home. Start a task from your phone, choose the project and device, and come back when a decision needs you.",
   "mobilePoints": [
