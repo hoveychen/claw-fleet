@@ -2,7 +2,15 @@
 // through the relay's `upload_attachment` (bytes → desktop's user-attachments
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import {
   Check,
   FolderSearch,
@@ -173,6 +181,19 @@ export function resumeConfigChips({
   ];
   if (tool !== "codex" && tool !== "dsh") chips.push(permissionLabel || copy.defaultPermission);
   return chips;
+}
+
+/**
+ * 回复胶囊占住的下边界，供转录区补底部留白用。
+ *
+ * 只吃布局值：`offsetHeight` 是元素自身的布局高度，`bottomCss` 是
+ * `getComputedStyle(el).bottom` 解析出来的 px —— 两者都不含 transform，所以
+ * 折叠动画进行到哪一帧都量得到终值。用 rect 就会在展开的首帧量到一个近乎 0 的
+ * 留白（那时元素还被 translateY 推在屏幕外），最后几行消息因此被胶囊盖住。
+ */
+export function composerInset(offsetHeight: number, bottomCss: string): number {
+  const inset = Number.parseFloat(bottomCss);
+  return Math.round(offsetHeight + (Number.isFinite(inset) ? inset : 0));
 }
 
 /** 10 MiB — mirrors MAX_UPLOAD_BYTES on the relay side. */
@@ -1271,13 +1292,38 @@ export function ResumeComposer({
   // 底部留白，否则最后一条消息会永远压在胶囊底下。折叠时报 0 —— 那一刻它确实
   // 不遮挡任何东西。
   const boxRef = useRef<HTMLDivElement>(null);
+  const [measureNonce, remeasure] = useReducer((n: number) => n + 1, 0);
   useLayoutEffect(() => {
     const el = boxRef.current;
     if (!el) return;
     // 报的是「从视口底到本组件顶」的距离，而不是自身高度：胶囊还会被决策折叠条
     // （--peek-inset）往上顶，那段空隙同样是转录区不能用的地方。
-    onHeight?.(collapsed ? 0 : Math.round(window.innerHeight - el.getBoundingClientRect().top));
+    //
+    // 但这段距离必须从**布局值**（offsetHeight + computed bottom）算，不能用
+    // getBoundingClientRect：折叠动画是 transform: translateY(100% + 24px)，
+    // 而 rect 把 transform 算在内。展开的那一帧 data-hidden 刚摘掉、过渡才起步，
+    // 元素还停在屏幕外，rect 量出来的留白几乎是 0；此后本组件不会再重渲染，
+    // 于是那个 0 就是转录区拿到的最终值——最后几行消息被胶囊盖死，正是这个。
+    // offsetHeight 与 computed bottom 都跟 transform 无关，首帧量到的就是终值。
+    onHeight?.(collapsed ? 0 : composerInset(el.offsetHeight, getComputedStyle(el).bottom));
   });
+  // 高度会在本组件不重渲染的情况下变：附件缩略图加载完撑高、textarea 自增高度
+  // 是直接写 style 的、决策折叠条把 --peek-inset 写在 documentElement 上把整根
+  // 胶囊顶上去。任一发生都要重新量一次，否则父级手里是个陈旧的留白。
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => remeasure());
+    ro.observe(el);
+    if (typeof MutationObserver === "undefined") return () => ro.disconnect();
+    const mo = new MutationObserver(() => remeasure());
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] });
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, []);
+  void measureNonce;
   // 卸载时把留白还回去：会话从「可续写」翻成「运行中」会换掉这个组件，留一个
   // 陈旧的高度在父级手里，转录底下就永远空着一块没人遮的白。
   useEffect(() => () => onHeight?.(0), [onHeight]);

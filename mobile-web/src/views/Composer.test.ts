@@ -3,6 +3,7 @@ import {
   CODEX_MODEL_CHOICES,
   carryPromptToDevice,
   codexEffortChoices,
+  composerInset,
   defaultWorkspace,
   newSessionConfigSummary,
   newSessionLocationSummary,
@@ -336,5 +337,25 @@ describe("recentWorkspaceRows", () => {
   it("全是闲置时 running 为 0", () => {
     const rows = recentWorkspaceRows([live("/home/repo", "Repo", 100, "idle")], null);
     expect(rows[0].running).toBe(0);
+  });
+});
+
+describe("composerInset", () => {
+  it("布局高度加上 bottom 偏移，就是转录区要让开的那一截", () => {
+    expect(composerInset(196, "22px")).toBe(218);
+  });
+
+  it("决策折叠条把胶囊顶高时，让开的距离跟着变大", () => {
+    // --peek-inset 生效后 computed bottom 从 22px 涨到 78px。
+    expect(composerInset(196, "78px")).toBe(274);
+  });
+
+  it("bottom 解析不出来（auto）时只算自身高度，绝不报 NaN", () => {
+    expect(composerInset(196, "auto")).toBe(196);
+  });
+
+  it("折叠动画期间量到的仍是终值 —— 入参是布局值，transform 进不来", () => {
+    // 这条锁住的是取值口径：换回 getBoundingClientRect 会在展开首帧量到 ~0。
+    expect(composerInset(196.4, "21.6px")).toBe(218);
   });
 });

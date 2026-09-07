@@ -3,7 +3,16 @@
 // relay method (no watcher push over the relay); live thinking polls its own
 // sidecar method while the session is working.
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Bot,
   ChevronDown,
@@ -1056,6 +1065,10 @@ export function SessionDetailView({
   // 回复窗浮在转录之上、不占布局高度，所以滚动区要自己让出被遮住的那一截。
   // 用实测值而不是写死一个数：胶囊会随输入内容、附件、排队消息一起长高。
   const [composerHeight, setComposerHeight] = useState(0);
+  // onScroll 是个稳定的 callback，读实测高度得走 ref，不然每次高度变化都要重挂
+  // 一次 scroll 监听。
+  const composerHeightRef = useRef(0);
+  composerHeightRef.current = composerHeight;
   const composerHiddenRef = useRef(false);
   const composerSettleUntil = useRef(0);
   const lastScrollTop = useRef(0);
@@ -1247,7 +1260,14 @@ export function SessionDetailView({
     if (fromBottom < 80) {
       scrollAccum.current = 0;
       setComposerFolded(false);
-    } else if (scrollAccum.current > COMPOSER_HIDE_DELTA && fromBottom > COMPOSER_HIDE_FLOOR) {
+    } else if (
+      scrollAccum.current > COMPOSER_HIDE_DELTA &&
+      // 地板要盖过胶囊自己的高度：折叠会把同样多的底部留白一次性撤走，剩下的可
+      // 滚区间不够时浏览器会 clamp scrollTop，整篇文字就在手指底下往下跳一大截
+      // ——老板看到的「滚着滚着位置自己变了」。带附件/排队消息的胶囊能长到远超
+      // 那个写死的 320，所以按实测高度来。
+      fromBottom > Math.max(COMPOSER_HIDE_FLOOR, composerHeightRef.current + 80)
+    ) {
       scrollAccum.current = 0;
       setComposerFolded(true);
     } else if (scrollAccum.current < -COMPOSER_SHOW_DELTA) {
@@ -1256,10 +1276,13 @@ export function SessionDetailView({
     }
   }, [setComposerFolded]);
 
-  useEffect(() => {
+  // composerHeight 也在 deps 里：底部留白是加在内容**下方**的，加多少 scrollTop
+  // 都不会自己跟上。于是「滚到底 → 胶囊展开 → 留白从 0 涨到一整根胶囊的高度」
+  // 之后，最后一条消息还停在原处，也就是正好停在胶囊底下。贴底时重新贴一次。
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [messages, shownLiveThinking]);
+  }, [messages, shownLiveThinking, composerHeight]);
 
   // Safety net for the fold: a pane with nothing left to scroll emits no scroll
   // events, so a composer folded into that state could never be scrolled back
