@@ -222,7 +222,7 @@ fn apply_model_guidance_inner(locale: &str) -> Result<(), String> {
         } else {
             format!("{stripped}\n\n{block}")
         };
-        fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))
+        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))
     })
 }
 
@@ -242,7 +242,7 @@ fn remove_model_guidance_inner() -> Result<(), String> {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
                 let stripped = strip_sentinel_block(&existing);
                 if stripped != existing {
-                    fs::write(&claude_md, stripped).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
                 }
             }
             Ok::<(), String>(())

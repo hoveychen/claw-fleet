@@ -448,7 +448,7 @@ fn ensure_import_installed() -> Result<(), String> {
         let existing = fs::read_to_string(&claude_md).unwrap_or_default();
         let new_content = inject_import(&existing, &path.display().to_string());
         if new_content != existing {
-            fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+            crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
         }
         Ok::<(), String>(())
     })?;
@@ -463,7 +463,7 @@ fn remove_import() -> Result<(), String> {
         if let Ok(existing) = fs::read_to_string(&claude_md) {
             let stripped = strip_import(&existing);
             if stripped != existing {
-                fs::write(&claude_md, stripped).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
             }
         }
         Ok::<(), String>(())
@@ -487,7 +487,7 @@ pub fn migrate_legacy_lessons() -> Result<usize, String> {
         if lessons.is_empty() {
             return Ok(Vec::new());
         }
-        fs::write(&claude_md, remaining).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+        crate::atomic_json::write_atomic(&claude_md, remaining.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
         Ok::<Vec<Lesson>, String>(lessons)
     })?;
     if lessons.is_empty() {

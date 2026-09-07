@@ -1349,7 +1349,7 @@ fn apply_prd_discipline_inner(user_title: &str, locale: &str) -> Result<(), Stri
     crate::claude_md_lock::with_lock(&claude_md, || {
         let existing = fs::read_to_string(&claude_md).unwrap_or_default();
         let new_content = compose_claude_md(&existing, &block);
-        fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))
+        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))
     })?;
     Ok(())
 }
@@ -1384,7 +1384,7 @@ fn remove_prd_discipline_inner() -> Result<(), String> {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
                 let stripped = strip_sentinel_block(&existing);
                 if stripped != existing {
-                    fs::write(&claude_md, stripped).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
                 }
             }
             Ok::<(), String>(())

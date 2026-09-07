@@ -244,3 +244,48 @@ fn a_missing_prd_block_alone_does_not_strip_codex_agents_md() {
         "an explicit opt-out recorded in control_plane_prefs must still strip it"
     );
 }
+
+/// Drift-guard: no `CLAUDE.md` write may go through plain `fs::write`.
+///
+/// `fs::write` truncates and then writes, so a reader that samples the file in
+/// between sees it empty or half-written — and every `is_*_installed()` reader
+/// is unlocked by design (they are cheap stats called from UI paths). A probe on
+/// 2026-09-07 measured 2418 of 8064 concurrent reads missing the sentinel during
+/// a tight rewrite loop. `atomic_json::write_atomic` renames a temp file over
+/// the target instead, so a reader sees either the old file or the new one.
+///
+/// The lock does not make this redundant: writers serialize against each other,
+/// readers do not take it at all.
+#[test]
+fn no_claude_md_write_uses_plain_fs_write() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut offenders = Vec::new();
+    let mut stack = vec![src];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let body = std::fs::read_to_string(&path).unwrap_or_default();
+            for (i, line) in body.lines().enumerate() {
+                let is_write = line.contains("fs::write(");
+                let names_claude_md = line.contains("claude_md");
+                if is_write && names_claude_md {
+                    offenders.push(format!("{}:{}  {}", path.display(), i + 1, line.trim()));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these writes truncate CLAUDE.md in place, so an unlocked reader can see \
+         it empty and conclude the guidance is uninstalled — use \
+         `atomic_json::write_atomic`:\n{}",
+        offenders.join("\n")
+    );
+}
