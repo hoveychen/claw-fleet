@@ -7,7 +7,7 @@ import { MarkControl } from "./MarkControl";
 import { AgentSourceIcon } from "./SessionCard";
 import styles from "./SessionRow.module.css";
 
-function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
+export function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
   const diff = Date.now() - ms;
   if (diff < 60_000) return t("just_now");
   if (diff < 3_600_000) return t("m_ago", { n: Math.floor(diff / 60_000) });

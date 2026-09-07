@@ -57,6 +57,9 @@ const ALL_KEYS = [
   "plans-expand-overrides",
   "plans-show-completed",
   "plans-done-items",
+  // Auxiliary column inside a session detail pane (facet panels, live-subagent
+  // cards, docs opened from agent prose).
+  "detail-aux-width",
   // File-tree columns inside a detail pane (SkillsView / FilesView / ScratchpadView).
   "skills-tree-width",
   "files-tree-width",

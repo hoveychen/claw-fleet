@@ -33,31 +33,99 @@
   border-left: none;
 }
 
-/* Header */
-.header {
+/* Marker — read by the Windows caption-inset rules below to decide which
+   element sits at the pane's right edge. Carries a declaration on purpose: an
+   empty rule can be dropped, and a dropped class is `undefined` in the module. */
+.aux_open {
+  --aux-open: 1;
+}
+
+/* ── Hero banner ────────────────────────────────────────────────────────────
+   The left column's head: who this session is, and the controls that act on
+   it. Deliberately NOT a tab strip — nothing on this side switches what the
+   column shows any more, so nothing here should look like it might. A soft
+   tint separates it from the transcript without a hard chrome bar. */
+.hero {
   display: flex;
   flex-direction: column;
   padding: 12px 16px 10px;
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg);
+  background: linear-gradient(180deg, var(--color-bg-secondary) 0%, var(--color-bg) 100%);
   flex-shrink: 0;
   gap: 6px;
 }
 
-/* Windows frameless: leave room on the right for the three caption
-   buttons drawn by <WindowsFrameOverlay> (3 × 46px). Skipped for the
-   inline form, which sits below a host chrome that already accounts for
-   the buttons. */
-.root:not(.inline) .header {
+/* Windows frameless: leave room on the right for the three caption buttons
+   drawn by <WindowsFrameOverlay> (3 x 46px). Only when the hero actually
+   reaches the pane's right edge — with the auxiliary column open, that edge
+   belongs to its tab strip (see .aux_head below). Skipped for the inline form,
+   which sits below a host chrome that already accounts for the buttons. */
+.root:not(.inline):not(.aux_open) .hero {
   padding-right: calc(16px + var(--win-caption-inset-x));
 }
 
-.header_row {
+/* Identity on the left, toolbar on the right. */
+.hero_top {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.hero_ident {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hero_tools {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 24px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* Icon buttons. Quiet until hovered — the banner is identity first. */
+.hero_tool {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.hero_tool:hover {
+  color: var(--color-text);
+  background: var(--color-bg-card);
+}
+.hero_tool_on {
+  color: var(--color-text);
+  background: var(--color-bg-card);
+}
+
+/* Live subagent count, on the auxiliary-column switch — so a closed panel
+   still says how many agents are running behind it. */
+.hero_tool_badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: var(--badge-executing-fg);
+  color: var(--color-bg);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
 }
 
 .meta_row {
@@ -71,10 +139,9 @@
 /* The session's own title, and the only thing in the header set at heading
    weight — the workspace name sits below it as a chip. */
 .header_title {
-  flex: 1;
   min-width: 0;
-  font-weight: 600;
-  font-size: 15px;
+  font-weight: 650;
+  font-size: 16px;
   letter-spacing: -0.01em;
   line-height: 1.3;
   color: var(--color-text);
@@ -236,19 +303,263 @@
   box-sizing: border-box;
 }
 
-/* Tab bar (agent segmented control + view tabs combined) */
-.tab_bar {
+/* ── Two-column body ────────────────────────────────────────────────────────
+   The conversation keeps the left column for good; the auxiliary panel takes
+   the right one (or floats over it when the pane is too narrow — see
+   SessionAuxPanel). Positioned so the overlay form has something to anchor to. */
+.body_row {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.main_col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Auxiliary column ───────────────────────────────────────────────────────*/
+.aux {
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+/* Narrow pane: float over the conversation instead of halving it. */
+.aux_overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(92%, 420px);
+  z-index: 6;
+  box-shadow: -8px 0 24px rgb(0 0 0 / 18%);
+}
+
+.aux_scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: rgb(0 0 0 / 24%);
+}
+
+/* Drag handle, straddling the shared edge. */
+.aux_resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 2;
+}
+.aux_resizer:hover {
+  background: var(--color-border);
+}
+.aux_dragging {
+  user-select: none;
+}
+
+.aux_head {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 5px 6px 5px 8px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: linear-gradient(180deg, var(--color-bg-secondary) 0%, var(--color-bg) 100%);
+}
+
+/* Windows frameless: with the panel open, IT owns the pane's right edge. */
+.root:not(.inline) .aux_head {
+  padding-right: calc(6px + var(--win-caption-inset-x));
+}
+
+/* One flat strip: the agent deck, the session's facets, and every open doc. */
+.aux_tabs {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px 0;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg);
-  flex-shrink: 0;
+  gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
 }
-.tab_bar::-webkit-scrollbar { display: none; }
+.aux_tabs::-webkit-scrollbar { display: none; }
+
+.aux_tab {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-xs);
+  border: 1px solid transparent;
+  max-width: 160px;
+  flex-shrink: 0;
+}
+.aux_tab:hover {
+  background: var(--color-bg-card);
+}
+.aux_tab_active {
+  background: var(--color-bg-card);
+  border-color: var(--color-border);
+}
+
+.aux_tab_label {
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  padding: 4px 8px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aux_tab_active .aux_tab_label {
+  color: var(--color-text);
+}
+
+.aux_tab_close {
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 9px;
+  line-height: 1;
+  padding: 4px 6px 4px 0;
+}
+.aux_tab_close:hover {
+  color: var(--color-text);
+}
+
+.aux_close {
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: var(--radius-xs);
+  flex-shrink: 0;
+  align-self: center;
+}
+.aux_close:hover {
+  color: var(--color-text);
+  background: var(--color-bg-card);
+}
+
+.aux_body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The reader itself — ExternalFilePreview / WikiTabPane / WebTabPane all expect
+   to fill their box, and all three are bare content, so the gutter lives here
+   rather than being repeated in each. */
+.aux_doc_pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px 10px 10px;
+}
+
+/* ── Live subagent deck ─────────────────────────────────────────────────────
+   Pinned above whatever else the panel holds, and capped in height so a wide
+   fan-out can't push the facet panel off the bottom. */
+.agents_deck {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent_card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.agent_card:hover {
+  border-color: var(--color-text-dim);
+}
+
+.agent_card_head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent_card_type {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent_card_title {
+  font-size: 11px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The agent's latest line — two rows at most, so one verbose agent can't
+   crowd out the others. */
+.agent_card_preview {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.agent_card_meta {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--color-text-dim);
+}
+
+.agents_deck_more {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  padding: 2px 2px 0;
+}
 
 /* Status dot — leads each row in the agent scope dropdown (AgentScopeSwitcher),
    colour-coded by the subagent's live status. */
@@ -266,28 +577,6 @@
 .tab_dot[data-status="waitingInput"]{ background: var(--badge-waiting-fg); }
 .tab_dot[data-status="active"]      { background: var(--badge-active-fg); }
 .tab_dot[data-status="delegating"]  { background: var(--badge-delegating-fg); }
-
-/* View tabs (Decisions / Skills / Messages) — now the only occupants of the
-   .tab_bar row; the agent scope selector moved to the header dropdown. */
-.view_tab {
-  padding: 6px 12px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-dim);
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s;
-}
-.view_tab:hover {
-  color: var(--color-text);
-}
-.view_tab_active {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent, #60a5fa);
-}
 
 .skills_panel {
   flex: 1;
