@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   MapPin,
   Paperclip,
+  Plus,
   Send,
   SlidersHorizontal,
   X,
@@ -144,6 +145,35 @@ export function newSessionConfigSummary({
     title: `${toolLabel} · ${modelLabel || copy.defaultModel} · ${effortLabel || copy.defaultEffort}`,
     detail: permissionLabel || copy.defaultPermission,
   };
+}
+
+/** 回复窗的配置胶囊文案。
+ *
+ * 三个常驻下拉（模型 / 思考强度 / 权限）在回复窗里一年到头不动一次，却每次都占
+ * 掉 44px 的常驻高度。收成胶囊后它们只报告当前值，点开才展开选择器 —— 这是把
+ * 「随时可改」降级成「随时可见、点一下可改」，不是把功能藏起来。
+ *
+ * 模型与档位合成一颗（它们总是一起看），权限单独一颗且只对 Claude 出：codex 和
+ * dsh 没有 `--permission-mode` 这个概念。 */
+export function resumeConfigChips({
+  tool,
+  modelLabel,
+  effortLabel,
+  permissionLabel,
+  labels,
+}: {
+  tool: string;
+  modelLabel: string;
+  effortLabel: string;
+  permissionLabel: string;
+  labels?: { defaultModel: string; defaultPermission: string };
+}): string[] {
+  const copy = labels ?? { defaultModel: "默认模型", defaultPermission: "沿用权限" };
+  const chips = [
+    [modelLabel || copy.defaultModel, effortLabel].filter(Boolean).join(" · "),
+  ];
+  if (tool !== "codex" && tool !== "dsh") chips.push(permissionLabel || copy.defaultPermission);
+  return chips;
 }
 
 /** 10 MiB — mirrors MAX_UPLOAD_BYTES on the relay side. */
@@ -1151,6 +1181,9 @@ interface ResumeProps {
    *  unsent draft, a focused field, a picked attachment or a queued follow-up
    *  all outrank it — nothing the user is mid-way through may vanish. */
   hidden?: boolean;
+  /** 本组件当前遮挡的高度（折叠时为 0）。它浮在转录之上、不占布局高度，父级
+   *  据此给滚动区补底部留白，最后一条消息才不会被压在胶囊底下。 */
+  onHeight?: (px: number) => void;
 }
 
 export function ResumeComposer({
@@ -1160,6 +1193,7 @@ export function ResumeComposer({
   onOptimisticSend,
   onSubmitInFlight,
   hidden,
+  onHeight,
 }: ResumeProps) {
   const enqueueing = mode === "enqueue";
   // 会话所属的源决定给哪套 model/effort 清单——认不出的源退回 Claude，那是
@@ -1193,12 +1227,41 @@ export function ResumeComposer({
     `resume:${session.id}:attachments`,
   );
   const [focused, setFocused] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  // 胶囊上报告的当前配置。dsh 的模型目录是主机运行时给的，这里认不出 id 就
+  // 原样显示 —— 显示一个真实但陌生的 id，好过显示一个错的友好名字。
+  const modelLabel = useMemo(() => {
+    const table = tool === "codex" ? CODEX_MODEL_CHOICES : tool === "dsh" ? [] : MODEL_CHOICES;
+    const hit = table.find(([v]) => v === model);
+    return hit ? t(hit[1]) : model;
+  }, [tool, model]);
+  const configChips = useMemo(
+    () =>
+      resumeConfigChips({
+        tool,
+        modelLabel,
+        effortLabel: effort,
+        permissionLabel: permissionMode ? t(PERMISSION_LABEL[permissionMode] ?? permissionMode) : "",
+      }),
+    [tool, modelLabel, effort, permissionMode],
+  );
   const voice = useVoiceRecorder({
     value: prompt,
     onChange: setPrompt,
     onSend: () => void submit(),
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
+  // 输入框按内容自增高。先把 height 归零再按 scrollHeight 量 —— 不归零的话
+  // scrollHeight 永远不小于当前高度，删字时框只会越撑越高。封顶交给 CSS 的
+  // max-height（超了就框内滚动），这里不再重复写死一个像素数。
+  const shownText = voice.showingPreview ? voice.preview : prompt;
+  useLayoutEffect(() => {
+    const el = voiceTailRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [shownText, voiceTailRef]);
   // Folded only when the parent asked AND the user has nothing in flight here.
   const collapsed =
     !!hidden &&
@@ -1206,18 +1269,20 @@ export function ResumeComposer({
     !prompt.trim() &&
     attachments.length === 0 &&
     pendingMessages.length === 0;
-  // The fold slides the box out and reclaims its space by cancelling its own
-  // height with a negative margin — measured rather than animated as a height,
-  // so an expanded box is never capped (a dragged-taller textarea or a long
-  // queue would be clipped by a max-height).
+  // 实测高度上报给父级：浮起后本组件不占布局高度，转录区要靠这个数字给自己补
+  // 底部留白，否则最后一条消息会永远压在胶囊底下。折叠时报 0 —— 那一刻它确实
+  // 不遮挡任何东西。
   const boxRef = useRef<HTMLDivElement>(null);
-  const [openHeight, setOpenHeight] = useState(0);
   useLayoutEffect(() => {
     const el = boxRef.current;
-    if (!el || collapsed) return;
-    const h = el.offsetHeight;
-    setOpenHeight((prev) => (prev === h ? prev : h));
+    if (!el) return;
+    // 报的是「从视口底到本组件顶」的距离，而不是自身高度：胶囊还会被决策折叠条
+    // （--peek-inset）往上顶，那段空隙同样是转录区不能用的地方。
+    onHeight?.(collapsed ? 0 : Math.round(window.innerHeight - el.getBoundingClientRect().top));
   });
+  // 卸载时把留白还回去：会话从「可续写」翻成「运行中」会换掉这个组件，留一个
+  // 陈旧的高度在父级手里，转录底下就永远空着一块没人遮的白。
+  useEffect(() => () => onHeight?.(0), [onHeight]);
 
   // Chips still worth rendering — gates the "已排队" label too, so cancelling
   // the last one doesn't leave a header standing over an empty list.
@@ -1319,7 +1384,6 @@ export function ResumeComposer({
       className={styles.resumeBox}
       ref={boxRef}
       data-hidden={collapsed || undefined}
-      style={collapsed && openHeight ? { marginBottom: -openHeight } : undefined}
       aria-hidden={collapsed || undefined}
     >
       {visiblePending.length > 0 && (
@@ -1340,68 +1404,135 @@ export function ResumeComposer({
           ))}
         </div>
       )}
-      <textarea
-        ref={voiceTailRef}
-        className={styles.promptInput}
-        placeholder={
-          enqueueing
-            ? t("会话运行中，发送后排队，本轮结束自动接上…")
-            : voice.available
-              ? t("继续这个会话，也可点麦克风说…")
-              : t("继续这个会话（留空 = continue）…")
-        }
-        rows={2}
-        value={voice.showingPreview ? voice.preview : prompt}
-        readOnly={voice.showingPreview}
-        onChange={(e) => setPrompt(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-      />
-      <AttachmentRow
-        attachments={attachments}
-        uploading={uploading}
-        onPick={(f) => void addFiles(f)}
-        onRemove={remove}
-        client={client}
-        previews={previews}
-        voice={voice}
-      />
-      <div className={styles.resumeActions}>
-        {!enqueueing && (
-          <OptionSelects
-            tool={tool}
+      {/* 缩略图单独一行，只在真有附件时才占高度 —— 原来它和 📎/🎤 挤在一条
+          常驻 44px 的 attachRow 里，空着也占位。 */}
+      {attachments.length > 0 && !voice.active && (
+        <div className={styles.resumeThumbs}>
+          <AttachmentThumbs
+            paths={attachments.map((a) => a.path)}
             client={client}
-            model={model}
-            effort={effort}
-            permissionMode={permissionMode}
-            permissionDefaultLabel="沿用权限"
-            onChange={(p) => {
-              if (p.model !== undefined) setModel(p.model);
-              if (p.effort !== undefined) setEffort(p.effort);
-              if (p.permissionMode !== undefined) setPermissionMode(p.permissionMode);
+            previews={previews}
+            onRemove={remove}
+            compact
+          />
+        </div>
+      )}
+      {/* 排队模式不给配置：这条消息会跟着当前这一轮的设置跑，显示一组改不动的
+          胶囊只会误导。 */}
+      {!enqueueing && !voice.active && (
+        <div className={styles.resumeChips}>
+          {configChips.map((label) => (
+            <button
+              key={label}
+              type="button"
+              className={styles.resumeChip}
+              onClick={() => setPickerOpen(true)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {voice.active ? (
+        <VoiceBar rec={voice} />
+      ) : (
+        <div className={styles.pill}>
+          <button
+            className={styles.pillBtn}
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+            aria-label={uploading ? t("上传中…") : t("附件")}
+          >
+            {uploading ? (
+              <LoaderCircle size={19} className={styles.spin} />
+            ) : (
+              <Plus size={20} />
+            )}
+          </button>
+          <textarea
+            ref={voiceTailRef}
+            className={styles.resumeInput}
+            /* 胶囊里一行只放得下十来个汉字，长 placeholder 会在静息态就把框撑成
+               两行 —— 那正是这次要消灭的东西。麦克风就在右边，不必再用文案介绍；
+               「留空 = continue」的行为没变，只是不再写在框里。 */
+            placeholder={enqueueing ? t("排队一条追问…") : t("继续这个会话…")}
+            rows={1}
+            value={voice.showingPreview ? voice.preview : prompt}
+            readOnly={voice.showingPreview}
+            onChange={(e) => setPrompt(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+          />
+          {/* 有字了就把麦克风让位给发送：两颗一直并排会让右侧挤成两个 40px 的
+              目标，而这一刻用户要的只有一个。 */}
+          {voice.available && !prompt.trim() && (
+            <span className={styles.pillMic}>
+              <VoiceMicButton rec={voice} />
+            </span>
+          )}
+          <button
+            className={styles.sendBtn}
+            data-success={sent || undefined}
+            disabled={busy || uploading || !client || (enqueueing && !prompt.trim())}
+            onClick={() => void submit()}
+            aria-label={
+              busy
+                ? enqueueing
+                  ? t("排队中…")
+                  : t("发送中…")
+                : enqueueing
+                  ? t("排队")
+                  : t("继续会话")
+            }
+          >
+            {busy ? (
+              <LoaderCircle size={17} className={styles.spin} />
+            ) : sent ? (
+              <Check size={17} />
+            ) : (
+              <Send size={16} />
+            )}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              void addFiles(e.target.files);
+              e.target.value = "";
             }}
           />
-        )}
-        <button
-          className={styles.submit}
-          disabled={busy || uploading || !client || (enqueueing && !prompt.trim())}
-          onClick={() => void submit()}
-        >
-          {busy ? (
-            enqueueing ? t("排队中…") : t("发送中…")
-          ) : sent ? (
-            <>
-              <Check size={15} />
-              {enqueueing ? t("已排队") : t("已发送")}
-            </>
-          ) : (
-            <>
-              <Send size={15} />
-              {enqueueing ? t("排队") : t("继续会话")}
-            </>
-          )}
-        </button>
-      </div>
+        </div>
+      )}
+      {pickerOpen && (
+        <div className={styles.resumePicker}>
+          <div className={styles.pickerBackdrop} onClick={() => setPickerOpen(false)} />
+          <div className={styles.pickerSheet} role="dialog" aria-label={t("运行配置")}>
+            <div className={styles.pickerGrabber} />
+            <div className={styles.pickerHead}>
+              <span />
+              <strong>{t("运行配置")}</strong>
+              <button onClick={() => setPickerOpen(false)}>{t("完成")}</button>
+            </div>
+            <div className={styles.pickerBody}>
+              <OptionSelects
+                tool={tool}
+                client={client}
+                model={model}
+                effort={effort}
+                permissionMode={permissionMode}
+                permissionDefaultLabel="沿用权限"
+                onChange={(p) => {
+                  if (p.model !== undefined) setModel(p.model);
+                  if (p.effort !== undefined) setEffort(p.effort);
+                  if (p.permissionMode !== undefined) setPermissionMode(p.permissionMode);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

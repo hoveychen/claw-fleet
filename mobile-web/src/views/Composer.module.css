@@ -529,26 +529,49 @@
   }
 }
 
+/* 浮起，不占布局高度。
+ *
+ * 原来它是 .page 里的一个 flex 兄弟，于是它有多高，转录区就少多高 —— 静息
+ * ≈400px 全都是从阅读区里扣掉的。改成绝对定位后转录内容从它底下滚过去；下方
+ * 需要留出的空白由 SessionDetailView 按实测高度给 .scroll 补 padding，那样
+ * 内容长高时留白跟着变，不用在这里写死一个数。 */
 .resumeBox {
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
-  padding: 10px 12px;
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  /* 决策折叠条（DecisionDrawer 的 .peek）也是全局 fixed 的，会正好压在这根胶囊
+     上。它把自己占住的下边界发布成 --peek-inset，这里往上让开；没有卡时该变量
+     不存在，退回贴底。 */
+  bottom: max(calc(6px + env(safe-area-inset-bottom)), var(--peek-inset, 0px));
+  z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  flex-shrink: 0;
+  gap: 6px;
   transition:
     transform 0.18s ease,
-    margin-bottom 0.18s ease,
     opacity 0.14s ease;
 }
 
+/* 胶囊底下那层渐隐。玻璃只挡住胶囊自己那一块，胶囊上方的配置 chip 仍然直接压在
+   转录文字上 —— 眼验时那两颗 chip 和底下的段落糊在一起。这层从背景色渐隐到透明，
+   让文字在撞到 chip 之前先化掉。它跟着 resumeBox 一起折叠。 */
+.resumeBox::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  right: -8px;
+  bottom: -44px;
+  height: calc(100% + 88px);
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--color-bg) 46%, transparent);
+}
+
 /* Folded while the reader scrolls back through the transcript: it slides down
-   out of view and gives its space back (the negative margin is set inline from
-   its measured height — see ResumeComposer). */
+   out of view. 浮起之后它本来就不占位，所以不再需要用负 margin 把自己的高度
+   抵消掉；多滑 24px 是为了越过 bottom 的那点偏移与安全区。 */
 .resumeBox[data-hidden] {
-  transform: translateY(100%);
+  transform: translateY(calc(100% + 24px));
   opacity: 0;
   pointer-events: none;
 }
@@ -559,23 +582,162 @@
   }
 }
 
-.resumeActions {
+/* 会话内回复框自己的输入框。
+ *
+ * 和新会话页的 .promptInput 分家：那个类在「新会话页重做」（8b2ec4f4）里被改成
+ * min-height:190px + 去边框，因为它从此被套进全屏页的 .promptCard 里。回复框没有
+ * 那层卡片，继承过去的结果是 —— 写着 rows={2} 却被 190px 顶掉，边框圆角也一起没了，
+ * 整个回复区静息高度 ≈400px，吃掉 iPhone 14 的 47% 屏。
+ *
+ * 这里一行起步、按内容自增（高度由 JS 量 scrollHeight 写上来），封顶 30dvh。 */
+.resumeInput {
+  width: 100%;
+  min-height: 42px;
+  max-height: 30dvh;
+  background: transparent;
+  border: none;
+  padding: 10px 2px;
+  color: var(--color-text);
+  font-size: var(--t-body, 17px);
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
+  font-family: inherit;
+  outline: none;
+}
+
+/* 配置胶囊行。只报告当前值，点开才是选择器 —— 见 resumeConfigChips 的注释。 */
+.resumeChips {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.resumeChip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+  line-height: 1;
+}
+
+.resumeChip:active {
+  background: var(--color-bg-card-hover);
+}
+
+/* 附件缩略图行。只在真有附件时渲染，所以这里不设 min-height —— 空着就该是 0。 */
+.resumeThumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+/* 输入胶囊：＋ / 输入框 / 麦克风 / 发送 同排。align-items:flex-end 让自增高的
+   输入框往上长，两侧的圆按钮始终贴着底边，不会被拽到中间去。 */
+.pill {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 4px 4px 4px 6px;
+  border-radius: 24px;
+  /* 玻璃材质：转录内容从它底下滚过去，所以它必须自己撑住可读性——半透明底 +
+     背景模糊 + 一道内高光边（顶栏 --color-bg-glass 是同一套语言）。 */
+  border: 1px solid var(--color-border-strong);
+  background: color-mix(in srgb, var(--color-bg-input) 74%, transparent);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow:
+    0 8px 26px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* 不支持 backdrop-filter 的 webview（部分低端安卓 / 旧鸿蒙壳）上，半透明底会让
+   转录文字直接透上来糊成一片。那里退回实心底：丢的是材质，守住的是可读性。 */
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  .pill {
+    background: var(--color-bg-input);
+  }
+}
+
+.pill:focus-within {
+  border-color: var(--color-accent);
+}
+
+.pillBtn,
+.sendBtn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+}
+
+.pillBtn {
+  background: none;
+  color: var(--color-text-secondary);
+}
+
+.pillBtn:active {
+  background: var(--color-bg-card-hover);
+}
+
+.sendBtn {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.sendBtn:disabled {
+  opacity: 0.4;
+}
+
+.sendBtn[data-success="true"] {
+  background: var(--color-success);
+  opacity: 1;
+}
+
+/* 麦克风按钮自带 44px + 一圈描边（它原本是行里唯一的圆按钮）。进了胶囊之后
+   它有了 ＋ 和发送两个同伴，尺寸得对齐，那圈描边在胶囊底色上也只是脏。
+   用后代选择器而不是 [class*=btn]：CSS Modules 会把类名哈希掉，子串匹配是
+   碰运气。 */
+.pillMic > button {
+  width: 38px;
+  height: 38px;
+  border-color: transparent;
+}
+
+/* 配置选择器的浮层根。picker 的背板/面板都是 absolute 定位，在新会话页里以
+   全屏 .sheet 为包含块；回复窗没有那个全屏容器，所以这里自己给一个 fixed 的。 */
+.resumePicker {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
 }
 
 /* Queued follow-ups waiting for the running turn to end. */
 .queuedList {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
-  margin-bottom: 6px;
 }
 
+/* 浮起之后这行字直接压在转录上，裸文字会和底下的内容糊在一起——给它自己的底。 */
 .queuedLabel {
   font-size: var(--t-meta, 11px);
   color: var(--color-text-secondary);
+  background: var(--color-bg-card);
+  border-radius: 6px;
+  padding: 2px 6px;
 }
 
 .queuedChip {
