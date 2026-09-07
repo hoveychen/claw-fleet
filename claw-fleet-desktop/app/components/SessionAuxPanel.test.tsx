@@ -7,8 +7,6 @@ import "../i18n";
 import { SessionAuxPanel } from "./SessionAuxPanel";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-Element.prototype.scrollIntoView = vi.fn();
-
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
@@ -24,13 +22,7 @@ function renderDrawer(onClose = vi.fn()) {
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => root!.render(
-    <SessionAuxPanel
-      tabs={[{ id: "skills", label: "Skills" }]}
-      activeId="skills"
-      onPick={() => {}}
-      onCloseTab={() => {}}
-      onClose={onClose}
-    >
+    <SessionAuxPanel title="Skills" onClose={onClose}>
       <div>skill content</div>
     </SessionAuxPanel>,
   ));
@@ -46,6 +38,17 @@ describe("SessionAuxPanel", () => {
     expect(aside?.style.width).toBe("");
     expect(aside?.previousElementSibling).not.toBeNull();
     expect(aside?.textContent).toContain("skill content");
+  });
+
+  // The strip is what mixed the two levels of information: a running subagent,
+  // a token receipt and an open file sat in one row of equals. The rail owns
+  // the plural layer now, so the drawer names exactly one thing.
+  it("names the one thing it shows and offers no tab strip", () => {
+    const { container } = renderDrawer();
+
+    expect(container.querySelector('[role="tablist"]')).toBeNull();
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+    expect(container.querySelector("aside")?.textContent).toContain("Skills");
   });
 
   it("closes when the scrim is clicked", () => {

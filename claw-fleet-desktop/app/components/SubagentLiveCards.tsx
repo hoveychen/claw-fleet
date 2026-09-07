@@ -10,15 +10,19 @@ import styles from "./SessionDetail.module.css";
 export const LIVE_CARD_CAP = 6;
 
 /**
- * The subagents this session has in flight, one card each, pinned to the top of
- * the auxiliary column.
+ * The subagents this session has in flight, one card each, at the top of the
+ * auxiliary rail.
  *
  * Before this, a running subagent was only visible if you went looking: the
  * scope dropdown in the header (which navigates *away* from the parent) or the
  * 后台任务 tab (a last-Stop snapshot, minutes stale for a subagent). Neither
  * answered "what is everything working on right now" without clicking. These
- * cards do, and the tab disappears the moment the last one finishes — the panel
- * is a picture of what is live, not a log.
+ * cards do, and they disappear the moment the last one finishes — the rail is a
+ * picture of what is live, not a log.
+ *
+ * Renders bare cards, no container: the rail owns the stack (and its scroll),
+ * because the doc cards below these are siblings in one column, not a second
+ * section under a divider.
  */
 export function SubagentLiveCards({
   agents,
@@ -34,12 +38,12 @@ export function SubagentLiveCards({
   const hidden = agents.length - shown.length;
 
   return (
-    <div className={styles.agents_deck}>
+    <>
       {shown.map((a) => (
         <button
           key={a.id}
           type="button"
-          className={styles.agent_card}
+          className={`${styles.rail_card} ${styles.agent_card}`}
           onClick={() => onOpen(a)}
           title={t("detail.bgtask_open_hint")}
         >
@@ -72,6 +76,6 @@ export function SubagentLiveCards({
           {t("detail.live_agents_more", { count: hidden })}
         </div>
       )}
-    </div>
+    </>
   );
 }
