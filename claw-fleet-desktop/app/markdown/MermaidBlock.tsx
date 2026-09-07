@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useDocumentTheme } from "../hooks/useDocumentTheme";
 import styles from "./MermaidBlock.module.css";
 import { repairMermaidContrastInSvg } from "./mermaidContrast";
 import { applyDiagramWidth } from "./mermaidFit";
@@ -6,13 +7,6 @@ import { type MermaidMode, mermaidThemeConfig } from "./mermaidTheme";
 
 /** Distinct ids per render — mermaid mounts a scratch node keyed by this. */
 let seq = 0;
-
-/** Reads the theme the app stamps on <html> (absent means dark; see App.css). */
-function currentTheme(): MermaidMode {
-  return document.documentElement.getAttribute("data-theme") === "light"
-    ? "light"
-    : "dark";
-}
 
 /**
  * A ```mermaid fenced block, rendered to SVG.
@@ -25,18 +19,9 @@ function currentTheme(): MermaidMode {
 export function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [theme, setTheme] = useState(currentTheme);
+  // Re-renders on theme flips so a diagram doesn't stay dark-on-paper.
+  const theme: MermaidMode = useDocumentTheme();
   const hostRef = useRef<HTMLDivElement>(null);
-
-  // Re-render on theme flips so a diagram doesn't stay dark-on-paper.
-  useEffect(() => {
-    const obs = new MutationObserver(() => setTheme(currentTheme()));
-    obs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["data-theme"],
-    });
-    return () => obs.disconnect();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;

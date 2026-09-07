@@ -19,6 +19,7 @@ import { AttachmentRow } from "./blocks/AttachmentRow";
 import { decisionAssetUrl } from "../decisionAssets";
 import { AutoHeightFrame } from "./AutoHeightFrame";
 import styles from "./DecisionHistory.module.css";
+import { useDocumentTheme } from "../hooks/useDocumentTheme";
 
 /**
  * Block + inline markdown variants for one record, with that workspace's paths
@@ -218,6 +219,8 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
  * history view to avoid replaying arbitrary HTML the agent emitted.
  */
 function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
+  // Cross-origin iframe: the theme travels as a value, not as a CSS variable.
+  const theme = useDocumentTheme();
   const { t } = useTranslation();
   const md = useRecordMarkdown(rec.sessionId);
 
@@ -260,7 +263,11 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                   width: "100%",
                   border: "1px solid var(--decision-card-border, #ccc)",
                   borderRadius: "0.4rem",
-                  background: "#fff",
+                  // Transparent + color-scheme, same as the live card: an
+                  // opaque白 frame turns a transparent-body preview authored
+                  // for the dark theme into unreadable light-on-white.
+                  background: "transparent",
+                  colorScheme: theme,
                 }}
               />
             ) : (
