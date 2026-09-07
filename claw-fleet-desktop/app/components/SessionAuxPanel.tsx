@@ -7,8 +7,8 @@ import styles from "./SessionDetail.module.css";
  *
  * It floats over the conversation from the right edge, so opening a lookup
  * surface never narrows or reflows the transcript underneath it, and it stops
- * short of the card rail (see `--rail-space`): the rail is the other layer of
- * information and stays readable while you read this one.
+ * short of the floating card rail (see `--rail-space`): the rail is the other
+ * layer of information and stays readable while you read this one.
  *
  * One thing at a time, named in the head — a facet the reader picked from the
  * header menu, or the full-width reader for one card in the rail. It has no tab

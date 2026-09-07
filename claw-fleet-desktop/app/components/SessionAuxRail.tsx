@@ -14,13 +14,19 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
 /**
  * The auxiliary rail — the *ambient* half of the auxiliary surfaces.
  *
- * A permanent column beside the conversation holding one rounded, raised card
- * per thing currently in play: each subagent running right now, and each file /
- * wiki doc / page the agent named that the reader opened. No tabs, no headings,
- * no dividers — the cards sit directly on the recessed ground between the two
- * slabs, so their own edge and shadow is the only separation they need, and
- * "how many are there" is answered by counting shapes rather than reading a
- * strip.
+ * One rounded, raised card per thing currently in play: each subagent running
+ * right now, and each file / wiki doc / page the agent named that the reader
+ * opened. No tabs, no headings, no dividers — a card's own edge and shadow is
+ * the only separation it needs, and "how many are there" is answered by
+ * counting shapes rather than reading a strip.
+ *
+ * The cards *float over* the transcript's right side (absolutely positioned
+ * inside the messages pane) rather than filling a column beside it. They used
+ * to be a second slab in the row, which read as a separate window and — the
+ * tell — left the transcript's scrollbar stranded in the middle of the pane
+ * with another surface to the right of it. The conversation now keeps the whole
+ * pane and its scrollbar keeps the right edge; the reading column just holds
+ * clear of the band the cards occupy.
  *
  * Visibility is controlled by `open`, whose default in SessionDetail follows
  * the content: nothing in play means `null` and zero width rather than an empty
@@ -56,8 +62,10 @@ export function SessionAuxRail({
   const { t } = useTranslation();
   if (!open) return null;
   const empty = agents.length === 0 && docs.length === 0;
+  // No drag region on the <aside>: the column is pointer-events:none between
+  // the cards so the transcript underneath keeps the wheel and the clicks.
   return (
-    <aside className={styles.rail} data-tauri-drag-region>
+    <aside className={styles.rail}>
       {/* Held open by the switch with nothing in it. Saying so beats an empty
           column, which reads as the rail having failed to load rather than as
           "there is genuinely nothing running and nothing opened yet". */}
