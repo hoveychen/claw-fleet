@@ -8,7 +8,7 @@ import { EmptyState } from "./EmptyState";
 import { splitMarker } from "./planMatrix";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
-import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
+import { mdComponents } from "../markdown/components";
 import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type {
@@ -607,7 +607,7 @@ function HandoffLinkCard({
         <div className={styles.markdown}>
           <ReactMarkdown
             remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}
-            components={mermaidMarkdownComponents}
+            components={mdComponents}
           >
             {link.note}
           </ReactMarkdown>

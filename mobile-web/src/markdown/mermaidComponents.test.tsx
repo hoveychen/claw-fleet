@@ -48,8 +48,11 @@ describe("SessionDetailTabs 的决策正文组件表", () => {
     expect(rendersDiagram(render(MERMAID, MD_INLINE))).toBe(true);
   });
 
-  it("链接仍然是 inert 的 <span>，没被覆盖掉", () => {
-    const html = render("[x](https://example.com)", MD_BLOCK);
-    expect(html).not.toContain("<a ");
+  // 曾经这里断言链接必须是 inert 的 <span>：外链在手机上点不开的那条 bug 就
+  // 长在这个断言底下。现在外链一律交给系统浏览器（壳里由 launchIntent /
+  // onLoadIntercept 接管），认不出的 scheme 才继续不可点。
+  it("外链是真 <a>，未知 scheme 仍不可点", () => {
+    expect(render("[x](https://example.com)", MD_BLOCK)).toContain("<a ");
+    expect(render("[x](./a.md)", MD_BLOCK)).not.toContain("href=");
   });
 });

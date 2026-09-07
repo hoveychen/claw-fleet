@@ -6,7 +6,7 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
-import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
+import { mdComponents } from "../markdown/components";
 import { t } from "../i18n";
 import { classifyResult, type FleetResult, type FleetTool } from "./fleetTools";
 import styles from "./FleetBody.module.css";
@@ -358,7 +358,7 @@ function ResultView({ result, tool }: { result: FleetResult; tool: FleetTool }) 
           <ReactMarkdown
             remarkPlugins={mdRemarkPlugins}
             rehypePlugins={mdRehypePlugins}
-            components={mermaidMarkdownComponents}
+            components={mdComponents}
           >
             {result.body}
           </ReactMarkdown>
