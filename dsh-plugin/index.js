@@ -54,40 +54,60 @@ function deepFreeze(value) {
  * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string}} config
  * @param {string} cwd - the session's working directory
  * @param {string} sessionId
- * @returns {Promise<Array<{name: string, text: string}>>}
+ * @returns {Promise<{sections: Array<{name: string, text: string}>, sandboxMode: string | undefined}>}
  */
-export function fetchSections(config, cwd, sessionId) {
+export function fetchContext(config, cwd, sessionId) {
   const args = ['dsh-context', '--cwd', cwd, '--session', sessionId]
   if (config.userTitle) args.push('--title', config.userTitle)
   if (config.locale) args.push('--locale', config.locale)
+  const nothing = { sections: [], sandboxMode: undefined }
   return new Promise((resolve) => {
     execFile(
       config.fleetBin,
       args,
       { timeout: config.timeoutMs, maxBuffer: 4 * 1024 * 1024 },
       (error, stdout) => {
-        if (error) return resolve([])
+        if (error) return resolve(nothing)
         let parsed
         try {
           parsed = JSON.parse(stdout)
         } catch {
-          return resolve([])
+          return resolve(nothing)
         }
-        const sections = parsed?.sections
-        if (!Array.isArray(sections)) return resolve([])
-        resolve(
-          sections.filter(
-            (s) =>
-              s !== null &&
-              typeof s === 'object' &&
-              typeof s.name === 'string' &&
-              typeof s.text === 'string' &&
-              s.text.trim().length > 0,
-          ),
-        )
+        const sections = Array.isArray(parsed?.sections)
+          ? parsed.sections.filter(
+              (s) =>
+                s !== null &&
+                typeof s === 'object' &&
+                typeof s.name === 'string' &&
+                typeof s.text === 'string' &&
+                s.text.trim().length > 0,
+            )
+          : []
+        // A mode is only honoured when the CLI names one as a non-empty string.
+        // Anything else — absent, null, a number — leaves the session on dsh's
+        // own default, which is the safe direction: escalation must be an
+        // explicit decision Fleet made, never a parsing accident.
+        const mode = parsed?.sandboxMode
+        resolve({
+          sections,
+          sandboxMode: typeof mode === 'string' && mode.length > 0 ? mode : undefined,
+        })
       },
     )
   })
+}
+
+/**
+ * The sections alone, for callers that do not care about the sandbox decision.
+ *
+ * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string}} config
+ * @param {string} cwd - the session's working directory
+ * @param {string} sessionId
+ * @returns {Promise<Array<{name: string, text: string}>>}
+ */
+export async function fetchSections(config, cwd, sessionId) {
+  return (await fetchContext(config, cwd, sessionId)).sections
 }
 
 /**
@@ -144,6 +164,47 @@ export function latestInjectedText(agent, sectionName) {
 }
 
 /**
+ * Switch this session's dsh sandbox mode, once.
+ *
+ * The switch IS its event: `setSandboxMode` in `@deepseek-ai/dsh-sandbox-policy`
+ * is exactly `session.append('sandbox/mode', { mode })`, log-only, replayable and
+ * scoped to the one session. Appending it here rather than importing that
+ * package is deliberate — this plugin is loaded by absolute path, so it resolves
+ * none of dsh's own packages.
+ *
+ * Why Fleet asks at all: every `fleet` command writes under `~/.fleet`, outside
+ * any workspace, and dsh's sandbox has no allow-list, so a Fleet-driven session
+ * on `workspace-write` pays an approval round-trip for each one. Which sessions
+ * get this is NOT decided here — the CLI only names a mode for sessions Fleet
+ * spawned; a session the user opened himself is never given one.
+ *
+ * Appending once per session is the point: a `sandbox/mode` already in the log
+ * may be the user's own later choice, and re-appending ours every step would
+ * silently overrule him.
+ *
+ * Defensive throughout, like {@link sessionEvents}: this runs inside
+ * `agent/pre-step`, where a `TypeError` does not degrade the injection but ends
+ * the turn.
+ *
+ * @param {any} agent
+ * @param {string} mode
+ * @returns {boolean} whether this call appended the event
+ */
+export function ensureSandboxMode(agent, mode) {
+  const session = agent?.session
+  if (typeof session?.append !== 'function') return false
+  if (sessionEvents(session).some((e) => e?.type === 'sandbox/mode')) return false
+  try {
+    session.append('sandbox/mode', { mode })
+    return true
+  } catch {
+    // A dsh build that does not know this event must cost the escalation, not
+    // the turn.
+    return false
+  }
+}
+
+/**
  * Build the message carrying one section.
  * @param {{name: string, text: string}} section
  */
@@ -184,7 +245,13 @@ export function apply(ctx, config) {
       const cwd = agent.session.header.cwd
       if (typeof cwd !== 'string' || cwd.length === 0) return decision
 
-      const sections = await fetchSections(resolved, cwd, agent.session.id)
+      const { sections, sandboxMode } = await fetchContext(resolved, cwd, agent.session.id)
+
+      // Before the early return below: on a steady-state step every section is
+      // unchanged and we return without injecting, so a switch gated behind that
+      // would never happen on a resumed session.
+      if (sandboxMode) ensureSandboxMode(agent, sandboxMode)
+
       if (sections.length === 0 || signal.aborted) return decision
 
       // Re-injecting an unchanged section every step would spend the whole

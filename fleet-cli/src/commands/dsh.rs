@@ -85,5 +85,17 @@ pub(crate) fn cmd_dsh_context(
         sections.push(serde_json::json!({ "name": "fleet-prd", "text": reminder }));
     }
 
-    println!("{}", serde_json::json!({ "sections": sections }));
+    // The sandbox mode this session should switch to, if any. Sent alongside the
+    // sections rather than inside one: it is an instruction for the plugin, not
+    // text for the model. Absent for a session Fleet did not spawn — see
+    // `dsh_guidance::sandbox_mode_for_session` for why ownership is the gate.
+    let mut payload = serde_json::json!({ "sections": sections });
+    if let Some(mode) = session
+        .as_deref()
+        .and_then(claw_fleet_core::dsh_guidance::sandbox_mode_for_session)
+    {
+        payload["sandboxMode"] = serde_json::Value::String(mode.to_string());
+    }
+
+    println!("{payload}");
 }

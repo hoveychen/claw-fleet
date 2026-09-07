@@ -777,6 +777,37 @@ fn sentinels_for(name: &str) -> Option<(&'static str, &'static str)> {
 /// every session on the machine.
 pub const SECTION_SESSION_ID: &str = "fleet-session-id";
 
+/// dsh's "no file sandbox at all" mode — the only one that can write outside the
+/// session cwd.
+const SANDBOX_FULL_ACCESS: &str = "danger-full-access";
+
+/// The dsh sandbox mode Fleet asks a session to switch to, or `None` to leave
+/// the session on dsh's own default.
+///
+/// **Only sessions Fleet spawned are escalated.** Every `fleet` command writes
+/// under `~/.fleet`, which is outside any workspace, so under dsh's default
+/// `workspace-write` a Fleet-driven session cannot register a watch, tick a plan
+/// or take notes without an escalation round-trip on each attempt. dsh's sandbox
+/// has three modes and no allow-list (verified against
+/// `@deepseek-ai/dsh-sandbox-policy`: `Config` is `mode` + a `workspaceRoot`
+/// fallback, and the boundary is the session's immutable cwd), so "let it write
+/// `~/.fleet`" and "turn the file sandbox off" are the same switch.
+///
+/// That is why the gate is Fleet ownership rather than "all dsh sessions": 老板
+/// took the trade deliberately for the sessions Fleet drives, and a session he
+/// opens in dsh himself must keep dsh's own boundary — including the prompt that
+/// asks him before anything writes outside the workspace.
+///
+/// `false` from [`crate::launch_spec::was_fleet_spawned`] is the safe direction:
+/// an unrecognised session simply keeps dsh's default.
+pub fn sandbox_mode_for_session(session_id: &str) -> Option<&'static str> {
+    let sid = session_id.trim();
+    if sid.is_empty() {
+        return None;
+    }
+    crate::launch_spec::was_fleet_spawned(sid).then_some(SANDBOX_FULL_ACCESS)
+}
+
 /// Tell a dsh session its own id, and what to spend it on.
 ///
 /// This is the other half of the `--session` flag. Claude and Codex sessions
@@ -1186,6 +1217,46 @@ mod tests {
             "must say the denial is not a broken command, or the agent gives up \
              on the feature instead of escalating"
         );
+    }
+
+    /// Only sessions Fleet spawned are escalated out of dsh's sandbox. A session
+    /// 老板 opened in dsh himself keeps dsh's boundary — and the confirmation it
+    /// puts in front of him before anything writes outside his workspace.
+    #[test]
+    fn only_fleet_spawned_sessions_are_escalated() {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", tmp.path()) };
+
+        // A session Fleet launched: the spawn record is the evidence.
+        crate::launch_spec::record_with_entrypoint(
+            "session-fleet-1",
+            Some("openrouter/anthropic/claude-opus-5"),
+            None,
+            Some("schedule"),
+        );
+
+        let fleet_spawned = sandbox_mode_for_session("session-fleet-1");
+        let hand_opened = sandbox_mode_for_session("session-hand-opened");
+        let blank = sandbox_mode_for_session("   ");
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
+            None => unsafe { std::env::remove_var("FLEET_HOME") },
+        }
+
+        assert_eq!(
+            fleet_spawned,
+            Some("danger-full-access"),
+            "a Fleet-driven session must be able to write ~/.fleet without an \
+             escalation round-trip on every fleet command"
+        );
+        assert_eq!(
+            hand_opened, None,
+            "a session 老板 opened himself must keep dsh's own sandbox"
+        );
+        assert_eq!(blank, None, "a blank id is not evidence of anything");
     }
 
     /// A blank id must inject nothing: a section saying \"your id is ``\" would
