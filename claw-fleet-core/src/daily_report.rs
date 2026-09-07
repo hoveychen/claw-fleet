@@ -2345,10 +2345,11 @@ mod tests {
         let jsonl1_path = dir.join("session1.jsonl");
         let jsonl2_path = dir.join("session2.jsonl");
 
-        let line1 = r#"{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","name":"Edit","id":"tu_1","input":{}}],"usage":{"input_tokens":100,"output_tokens":50},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
-        let line2 = r#"{"type":"assistant","message":{"id":"msg_2","content":[{"type":"tool_use","name":"Bash","id":"tu_2","input":{}}],"usage":{"input_tokens":200,"output_tokens":80},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
+        let line1 = r#"{"type":"assistant","timestamp":"2026-03-31T12:00:00Z","message":{"id":"msg_1","content":[{"type":"tool_use","name":"Edit","id":"tu_1","input":{}}],"usage":{"input_tokens":100,"output_tokens":50},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
+        let previous_day = r#"{"type":"assistant","timestamp":"2026-03-30T12:00:00Z","message":{"id":"msg_old","content":[{"type":"tool_use","name":"Read","id":"tu_old","input":{}}],"usage":{"input_tokens":900,"output_tokens":400},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
+        let line2 = r#"{"type":"assistant","timestamp":"2026-03-31T13:00:00Z","message":{"id":"msg_2","content":[{"type":"tool_use","name":"Bash","id":"tu_2","input":{}}],"usage":{"input_tokens":200,"output_tokens":80},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
 
-        std::fs::write(&jsonl1_path, line1).unwrap();
+        std::fs::write(&jsonl1_path, format!("{previous_day}\n{line1}")).unwrap();
         std::fs::write(&jsonl2_path, line2).unwrap();
 
         let s1 = crate::session::SessionInfo {
@@ -2455,19 +2456,40 @@ mod tests {
             mirror_write: None,
         };
 
-        let sessions: Vec<&crate::session::SessionInfo> = vec![&s1, &s2];
+        let codex_path = dir.join("codex-rollout.jsonl");
+        let codex_lines = [
+            serde_json::json!({"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}).to_string(),
+            serde_json::json!({
+                "type":"event_msg",
+                "timestamp":"2026-03-31T14:00:00Z",
+                "payload":{"type":"token_count","info":{"total_token_usage":{
+                    "input_tokens":1000,"cached_input_tokens":600,"output_tokens":10
+                }}}
+            }).to_string(),
+        ];
+        std::fs::write(&codex_path, codex_lines.join("\n")).unwrap();
+        let mut s3 = s1.clone();
+        s3.id = "s3".to_string();
+        s3.workspace_path = "/project-a".to_string();
+        s3.workspace_name = "project-a".to_string();
+        s3.jsonl_path = format!("codex://{}", codex_path.to_string_lossy());
+        s3.agent_source = "codex".to_string();
+
+        let sessions: Vec<&crate::session::SessionInfo> = vec![&s1, &s2, &s3];
         let report = generate_report_from_sessions("2026-03-31", "UTC", &sessions);
 
         assert_eq!(report.date, "2026-03-31");
-        assert_eq!(report.metrics.total_sessions, 2);
+        assert_eq!(report.metrics.total_sessions, 3);
         assert_eq!(report.metrics.total_subagents, 1);
         assert_eq!(report.metrics.projects.len(), 2);
-        assert_eq!(report.metrics.total_output_tokens, 130); // 50 + 80
+        assert_eq!(report.metrics.total_input_tokens, 1300); // Claude 300 + Codex raw input 1000
+        assert_eq!(report.metrics.total_output_tokens, 140); // Claude 130 + Codex 10
         assert_eq!(report.metrics.total_tool_calls, 2); // 1 Edit + 1 Bash
-        assert_eq!(report.session_ids, vec!["s1", "s2"]);
+        assert_eq!(report.session_ids, vec!["s1", "s2", "s3"]);
 
         // Verify source breakdown
         assert_eq!(report.metrics.source_breakdown.get("claude-code"), Some(&2));
+        assert_eq!(report.metrics.source_breakdown.get("codex"), Some(&1));
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&dir);
