@@ -61,7 +61,7 @@ import {
   getMessagesForSession,
 } from "./data";
 
-import { installWebsiteFixtures, websiteScene } from "./website";
+import { installWebsiteFixtures, websiteScene, websiteReview } from "./website";
 installWebsiteFixtures();
 
 // ── Dynamic session state (simulates live updates) ──────────────────────────
@@ -617,7 +617,7 @@ async function handleIPC(
       return MOCK_WIKI_BODIES[(args.slug as string) ?? ""]
         ?? "# Not published\n\nThis document has no mock body.";
     case "read_review_doc": {
-      if (websiteScene) return {format: "markdown", title: websiteScene.reviewTitle, body: websiteScene.reviewBody};
+      if (websiteScene) return {format: "html", title: websiteScene.reviewTitle, body: websiteReview};
       const doc = (args.doc ?? {}) as { kind?: string; ref?: string; title?: string };
       if (doc.kind === "wiki") {
         return {

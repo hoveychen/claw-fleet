@@ -45,7 +45,7 @@ if (websiteScene) {
   const seed = MOCK_SESSIONS[0];
   MOCK_SESSIONS.splice(0, MOCK_SESSIONS.length, ...websiteScene.tasks.map(([title, preview], i) => ({
     ...structuredClone(seed), id: `website-${i}`, aiTitle: title, slug: null, isSubagent: false,
-    workspaceName: websiteScene.projects[i % 4], workspacePath: `/Users/demo/workspace/${['launch', 'research', 'revenue', 'brand'][i % 4]}`,
+    workspaceName: websiteScene.projects[i % 6], workspacePath: `/Users/demo/workspace/${['ember-coffee','customer-research','home-studio','balcony-garden','city-walks','app-workshop'][i % 6]}`,
     lastMessagePreview: preview, status: (["waitingInput", "thinking", "executing", "idle"] as const)[i % 4],
     agentSource: (["claude-code", "codex", "dsh"] as const)[i % 3], lastActivityMs: Date.now() - (i + 1) * 60000,
   })));

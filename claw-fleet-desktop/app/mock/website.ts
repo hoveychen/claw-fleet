@@ -1,15 +1,21 @@
 /** Website-only fixtures; ordinary mock/QA scenes retain their original data. */
+import { useComposerDraftStore } from '../composerDraft';
+import assets from '../../../scripts/site/fixtures/assets.json';
+import reviewEn from '../../../scripts/site/fixtures/en/review.html?raw';
+import reviewZh from '../../../scripts/site/fixtures/zh/review.html?raw';
 import scenes from '../../../scripts/site/fixtures/scenes.json';
 import { MOCK_SESSIONS, MOCK_MESSAGES, MOCK_ARTIFACTS, MOCK_ARTIFACT_USAGE } from './data';
 export const websiteLang = new URLSearchParams(location.search).get('website');
 export const websiteScene = websiteLang === 'en' || websiteLang === 'zh' ? scenes[websiteLang] : null;
+export const websiteReview = websiteLang === "zh" ? reviewZh : reviewEn;
+const projects = ["ember-coffee","customer-research","home-studio","balcony-garden","city-walks","app-workshop"];
 export function installWebsiteFixtures() {
   const c = websiteScene;
   if (!c) return;
   const seed = MOCK_SESSIONS[0];
   MOCK_SESSIONS.splice(0, MOCK_SESSIONS.length, ...c.tasks.map(([title, preview], i) => ({
     ...structuredClone(seed), id: `website-${i}`, aiTitle: title, slug: null,
-    workspaceName: c.projects[i % 4], workspacePath: `/Users/demo/workspace/${['launch','research','revenue','brand'][i % 4]}`,
+    workspaceName: c.projects[i % 6], workspacePath: `/Users/demo/workspace/${projects[i % 6]}`,
     status: (['waitingInput', 'thinking', 'executing', 'idle'] as const)[i % 4],
     isSubagent: false, parentSessionId: null, runningSubagentCount: 0, watches: [],
     agentSource: (['claude-code', 'codex', 'dsh'] as const)[i % 3], model: ['claude-opus-4-8', 'gpt-5.6-sol', 'gpt-5.6-sol'][i % 3],
@@ -24,11 +30,20 @@ export function installWebsiteFixtures() {
     ];
   }
   const artifactSeed = MOCK_ARTIFACTS[0];
+  const files = assets[websiteLang as 'en' | 'zh'];
   MOCK_ARTIFACTS.splice(0, MOCK_ARTIFACTS.length, ...c.artifacts.map((title, i) => ({
-    ...artifactSeed, id: `website-${websiteLang}-${i}`, name: `deliverable-${i}.${i === 3 || i === 4 ? 'md' : 'html'}`,
-    title, note: c.tasks[i][1], kind: 'text', mime: i === 3 || i === 4 ? 'text/markdown' : 'text/html',
-    sizeBytes: 4200 + i * 731, workspaceName: c.projects[[0,2,3,1,0,1,3,0][i]], workspacePath: `/Users/demo/workspace/${["launch","revenue","brand","research","launch","research","brand","launch"][i]}`,
+    ...artifactSeed, ...files[i], title, note: '',
+    workspaceName: c.projects[[0,0,0,4,0,3,0,5][i]], workspacePath: `/Users/demo/workspace/${projects[[0,0,0,4,0,3,0,5][i]]}`,
     starred: i < 2, drifted: false, createdMs: Date.now() - i * 3600000,
   })));
+  useComposerDraftStore.getState().patchDraft('new', {
+    workspace: '/Users/demo/workspace/ember-coffee', prompt: c.brief,
+    tool: 'claude', model: 'claude-opus-4-8', effort: 'high', permissionMode: 'acceptEdits',
+    attachments: [
+      {path:'/Users/demo/workspace/ember-coffee/brand-brief.pdf',name:websiteLang==='zh'?'品牌简报.pdf':'Brand brief.pdf'},
+      {path:'/Users/demo/workspace/ember-coffee/budget.xlsx',name:websiteLang==='zh'?'开店预算.xlsx':'Launch budget.xlsx'},
+      {path:'/Users/demo/workspace/ember-coffee/references.png',name:websiteLang==='zh'?'包装参考.png':'Packaging reference.png',previewUrl:`/artifact_blob?id=website-${websiteLang}-4`},
+    ],
+  });
   Object.assign(MOCK_ARTIFACT_USAGE, {count: MOCK_ARTIFACTS.length, totalBytes: MOCK_ARTIFACTS.reduce((sum, a) => sum + a.sizeBytes, 0)});
 }
