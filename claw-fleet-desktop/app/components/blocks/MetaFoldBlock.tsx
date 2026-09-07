@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextBlock } from "./TextBlock";
+import { useBandOpen } from "./useBandOpen";
 import { parseSkillInjection } from "../../skillInjection";
 import styles from "./MetaFoldBlock.module.css";
 
@@ -11,9 +11,9 @@ interface Props {
    * they collapse into one divider instead of stacking N identical rows.
    */
   segments: string[];
-  /** True while the active search hit lives inside this fold. The fold follows
-   *  the search: it opens when the reader steps onto the hit and closes again
-   *  when they step off (manual toggles still work in between). */
+  /** True while the active search hit lives inside this fold. It *opens* the
+   *  fold and never closes it — stepping off the hit leaves it open, and a
+   *  manual toggle is never stomped. See `useBandOpen`. */
   forceOpen?: boolean;
 }
 
@@ -36,8 +36,7 @@ function formatSize(n: number): string {
  */
 export function MetaFoldBlock({ segments, forceOpen }: Props) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(!!forceOpen);
-  useEffect(() => setOpen(!!forceOpen), [forceOpen]);
+  const [open, setOpen] = useBandOpen(false, !!forceOpen);
 
   const total = segments.reduce((n, s) => n + s.length, 0);
   const merged = segments.length > 1;

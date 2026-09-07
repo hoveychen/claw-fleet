@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { markdownUrlTransform } from "../../markdown/plugins";
@@ -13,6 +13,7 @@ import { summarizeWorkRun, workRunTitle } from "../workRuns";
 import { formatMsgTime } from "../../messageRows";
 import { ContentBlocks } from "./ContentBlocks";
 import { RailDone } from "./Rail";
+import { useBandOpen } from "./useBandOpen";
 import styles from "./WorkRunBlock.module.css";
 
 interface Props {
@@ -30,30 +31,6 @@ interface Props {
   /** True while the active search hit lives inside this run. Opens the band on
    *  the hit; stepping off leaves it open (same latch as `defaultOpen`). */
   forceOpen?: boolean;
-}
-
-/**
- * Open/closed state of one band.
- *
- * Both signals are *momentary*: `defaultOpen` is "this band is the last render
- * unit AND the session status is a working one", and each half flips several
- * times inside a single turn — a band drops out of last place the moment the
- * agent writes one prose record (prose is not a work row, so it becomes its own
- * unit), and the status leaves the working set whenever a tool outlives the
- * backend's freshness windows (`detect.rs`'s 60s `tool_use` window, the 5-minute
- * hook expiry). Mirroring them both ways made a live band flap open/closed
- * while the reader was mid-sentence, and stomped a manual toggle on every flip.
- *
- * So the signal is a *latch*: it opens the band and never closes it. Once a
- * band has been opened — by the live tail or by the active search hit — only a
- * click on the header closes it again.
- */
-export function useBandOpen(defaultOpen: boolean, forceOpen: boolean) {
-  const [open, setOpen] = useState(defaultOpen || forceOpen);
-  useEffect(() => {
-    if (defaultOpen || forceOpen) setOpen(true);
-  }, [defaultOpen, forceOpen]);
-  return [open, setOpen] as const;
 }
 
 /** Compact token count for the band tail: 843 → "843", 12 340 → "12.3k". */
