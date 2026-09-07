@@ -3,7 +3,17 @@
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, FolderSearch, LoaderCircle, Paperclip, Send, X } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  FolderSearch,
+  LoaderCircle,
+  MapPin,
+  Paperclip,
+  Send,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { randomId } from "../clientId";
 import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import { scopedKey, useDeviceDraft, useDeviceScope } from "../deviceScope";
@@ -84,6 +94,57 @@ const PERMISSION_LABEL: Record<string, string> = {
   plan: "计划模式",
   bypassPermissions: "跳过权限",
 };
+
+export function newSessionLocationSummary({
+  deviceLabel,
+  connected,
+  isChat,
+  workspaceName,
+  workspacePath,
+  labels,
+}: {
+  deviceLabel: string;
+  connected: boolean;
+  isChat: boolean;
+  workspaceName: string;
+  workspacePath: string;
+  labels?: { online: string; offline: string; chat: string; noProject: string };
+}): { title: string; detail: string } {
+  const copy = labels ?? {
+    online: "在线",
+    offline: "离线",
+    chat: "纯聊天",
+    noProject: "不绑定任何项目目录",
+  };
+  return {
+    title: `${deviceLabel} · ${isChat ? copy.chat : workspaceName}`,
+    detail: `${connected ? copy.online : copy.offline} · ${isChat ? copy.noProject : workspacePath}`,
+  };
+}
+
+export function newSessionConfigSummary({
+  toolLabel,
+  modelLabel,
+  effortLabel,
+  permissionLabel,
+  labels,
+}: {
+  toolLabel: string;
+  modelLabel: string;
+  effortLabel: string;
+  permissionLabel: string;
+  labels?: { defaultModel: string; defaultEffort: string; defaultPermission: string };
+}): { title: string; detail: string } {
+  const copy = labels ?? {
+    defaultModel: "默认模型",
+    defaultEffort: "默认努力度",
+    defaultPermission: "按 Agent 默认权限运行",
+  };
+  return {
+    title: `${toolLabel} · ${modelLabel || copy.defaultModel} · ${effortLabel || copy.defaultEffort}`,
+    detail: permissionLabel || copy.defaultPermission,
+  };
+}
 
 /** 10 MiB — mirrors MAX_UPLOAD_BYTES on the relay side. */
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -357,63 +418,75 @@ function OptionSelects({
       : EFFORT_CHOICES;
   return (
     <div className={styles.optionRow}>
-      <select
-        className={styles.optionSelect}
-        value={model}
-        onChange={(e) => {
-          const nextModel = e.target.value;
-          const supportedEfforts = codexEffortChoices(nextModel).map(([value]) => value);
-          onChange({
-            model: nextModel,
-            ...(isCodex && !supportedEfforts.includes(effort) ? { effort: "" } : {}),
-          });
-        }}
-      >
-        {isDsh ? (
-          <>
-            <option value="">{t("默认模型")}</option>
-            {dshGroups.map((g) => (
-              <optgroup key={g.label} label={g.label}>
-                {g.models.map(([v, label]) => (
-                  <option key={v} value={v}>
-                    {label}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </>
-        ) : (
-          modelChoices.map(([v, label]) => (
-            <option key={v} value={v}>
-              {t(label)}
-            </option>
-          ))
-        )}
-      </select>
-      <select
-        className={styles.optionSelect}
-        value={effort}
-        onChange={(e) => onChange({ effort: e.target.value })}
-      >
-        {effortChoices.map(([v, label]) => (
-          <option key={v} value={v}>
-            {t(label)}
-          </option>
-        ))}
-      </select>
-      {!isCodex && !isDsh && (
+      <label className={styles.optionField}>
+        <span>{t("模型")}</span>
         <select
           className={styles.optionSelect}
-          value={permissionMode}
-          onChange={(e) => onChange({ permissionMode: e.target.value })}
+          value={model}
+          aria-label={t("模型")}
+          onChange={(e) => {
+            const nextModel = e.target.value;
+            const supportedEfforts = codexEffortChoices(nextModel).map(([value]) => value);
+            onChange({
+              model: nextModel,
+              ...(isCodex && !supportedEfforts.includes(effort) ? { effort: "" } : {}),
+            });
+          }}
         >
-          <option value="">{t(permissionDefaultLabel)}</option>
-          {Object.entries(PERMISSION_LABEL).map(([v, label]) => (
+          {isDsh ? (
+            <>
+              <option value="">{t("默认模型")}</option>
+              {dshGroups.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.models.map(([v, label]) => (
+                    <option key={v} value={v}>
+                      {label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </>
+          ) : (
+            modelChoices.map(([v, label]) => (
+              <option key={v} value={v}>
+                {t(label)}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+      <label className={styles.optionField}>
+        <span>{t("思考强度")}</span>
+        <select
+          className={styles.optionSelect}
+          value={effort}
+          aria-label={t("思考强度")}
+          onChange={(e) => onChange({ effort: e.target.value })}
+        >
+          {effortChoices.map(([v, label]) => (
             <option key={v} value={v}>
               {t(label)}
             </option>
           ))}
         </select>
+      </label>
+      {!isCodex && !isDsh && (
+        <label className={styles.optionField}>
+          <span>{t("权限")}</span>
+          <select
+            className={styles.optionSelect}
+            value={permissionMode}
+            aria-label={t("权限")}
+            onChange={(e) => onChange({ permissionMode: e.target.value })}
+          >
+            <option value="">{t(permissionDefaultLabel)}</option>
+            {Object.entries(PERMISSION_LABEL).map(([v, label]) => (
+              <option key={v} value={v}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
     </div>
   );
@@ -424,8 +497,8 @@ function OptionSelects({
 interface NewSessionProps {
   sessions: SessionInfo[];
   client: FleetTransport | null;
-  /** 可选的目标设备清单。只有 ≥2 台时 App 才传 —— 单设备下那个选择器是纯噪音。
-   *  只要 id 与显示名,不要密钥：这东西会进 React key 和 DOM。 */
+  /** 目标设备清单。单设备时只用于摘要里的显示名，不渲染选择器。
+   *  只读 id 与显示名,不要把密钥写进 React key 或 DOM。 */
   devices?: readonly { id: string; label: string }[];
   /** 这次要开在哪台上（`devices` 里的一个 id）。 */
   targetDeviceId?: string;
@@ -595,7 +668,16 @@ export function NewSessionSheet({
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
   const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
   const [picking, setPicking] = useState(false);
+  const [picker, setPicker] = useState<"location" | "config" | null>(null);
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    },
+    [],
+  );
   const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
     client,
     NEW_SESSION_ATTACH_KEY,
@@ -657,7 +739,48 @@ export function NewSessionSheet({
 
   const isChat = Boolean(chatPath) && workspace === chatPath;
   const effectiveWorkspace = workspace === "__custom__" ? customWorkspace.trim() : workspace;
-  const canSubmit = Boolean(client && effectiveWorkspace && prompt.trim() && !busy && !uploading);
+  const canSubmit = Boolean(
+    client && effectiveWorkspace && prompt.trim() && !busy && !created && !uploading,
+  );
+
+  const deviceLabel =
+    devices?.find((device) => device.id === targetDeviceId)?.label ?? t("当前设备");
+  const workspaceName =
+    workspace === "__custom__"
+      ? basename(effectiveWorkspace) || t("自定义路径")
+      : recents.find(([path]) => path === workspace)?.[1] || basename(effectiveWorkspace);
+  const locationSummary = newSessionLocationSummary({
+    deviceLabel,
+    connected: relayReady !== false,
+    isChat,
+    workspaceName,
+    workspacePath: effectiveWorkspace,
+    labels: {
+      online: t("在线"),
+      offline: t("离线"),
+      chat: t("纯聊天"),
+      noProject: t("不绑定任何项目目录"),
+    },
+  });
+  const toolLabel = t(toolChoices.find(([value]) => value === tool)?.[1] ?? tool);
+  const modelLabel = model
+    ? t(
+        (tool === "codex" ? CODEX_MODEL_CHOICES : MODEL_CHOICES).find(
+          ([value]) => value === model,
+        )?.[1] ?? model,
+      )
+    : "";
+  const configSummary = newSessionConfigSummary({
+    toolLabel,
+    modelLabel,
+    effortLabel: effort,
+    permissionLabel: sendsPermissionMode ? t(PERMISSION_LABEL[permissionMode] ?? "默认权限") : "",
+    labels: {
+      defaultModel: t("默认模型"),
+      defaultEffort: t("默认努力度"),
+      defaultPermission: t("按 Agent 默认权限运行"),
+    },
+  });
 
   const submit = async () => {
     if (!client || !canSubmit) return;
@@ -683,9 +806,14 @@ export function NewSessionSheet({
       settled = true;
       // 记住这次用的 repo，下次打开新会话 sheet 默认选中它（独立键，不受 clearDraft 影响）。
       saveDraft(scopedKey(deviceId, LAST_WORKSPACE_KEY), effectiveWorkspace);
+      setCreated(true);
+      // ack 到达就清掉已发送草稿；哪怕系统返回键在 650ms 成功态期间关闭页面，
+      // 下次也不会把已经发出的任务恢复出来。短暂停留只用于呈现确认反馈。
       clearDraft();
       reset();
-      onClose();
+      closeTimerRef.current = window.setTimeout(() => {
+        onClose();
+      }, 650);
     };
     // 方案 A:收到桌面早 ack 即乐观关闭——提交已抵达桌面,不必干等 reply。
     const send = () => client.request("spawn_session", params, undefined, succeed);
@@ -724,87 +852,266 @@ export function NewSessionSheet({
   };
 
   return (
-    <div className={styles.sheetBackdrop} onClick={onClose}>
-      <div className={styles.sheet} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.sheetBackdrop}>
+      <div className={styles.sheet} role="dialog" aria-label={t("新会话")}>
         <div className={styles.sheetHead}>
-          <span className={styles.sheetTitle}>{t("新会话")}</span>
-          <button className={styles.sheetClose} onClick={onClose} aria-label={t("关闭")}>
-            <X size={18} />
-          </button>
-        </div>
-        {/* 目标设备。放在最上面是因为它决定了下面每一项的来源:目录清单、纯聊天
-            路径、模型/profile 清单、附件都属于选中那台机器。只有 ≥2 台时 App 才
-            把 `devices` 传进来。 */}
-        {devices && devices.length > 1 && (
-          <div className={styles.deviceRow}>
-            <span className={styles.deviceRowLabel}>{t("开在")}</span>
-            <select
-              className={styles.deviceSelect}
-              value={targetDeviceId ?? ""}
-              aria-label={t("开在哪台设备上")}
-              onChange={(e) => switchDevice(e.target.value)}
-            >
-              {devices.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        {/* 纯聊天是一个模式，不是下拉里的一个特殊目录：给它自己的开关，打开时
-            目录选择器整个消失（聊天本来就没有目录可选）。relay 没报出聊天目录
-            时不显示——那时它没法生效。*/}
-        {chatPath && (
           <button
-            className={styles.chatToggle}
-            data-active={isChat}
-            aria-pressed={isChat}
-            onClick={() =>
-              patch({ workspace: isChat ? (recents[0]?.[0] ?? "__custom__") : chatPath })
-            }
+            className={styles.sheetClose}
+            onClick={onClose}
+            aria-label={t("关闭")}
+            disabled={created}
           >
-            💬 {t("纯聊天")}
-            <span className={styles.chatToggleSub}>{t("不绑定任何项目目录")}</span>
+            <X size={21} />
           </button>
-        )}
-        {!isChat && (
-          <select
-            className={styles.workspaceSelect}
-            value={workspace}
-            onChange={(e) => patch({ workspace: e.target.value })}
-          >
-            {recents.map(([path, name]) => (
-              <option key={path} value={path}>
-                {name} — {path}
-              </option>
-            ))}
-            <option value="__custom__">{t("自定义路径…")}</option>
-          </select>
-        )}
-        {workspace === "__custom__" && (
-          // 手输仍然保留（粘贴路径最快），但主路径是「浏览…」——手机用户看不见
-          // 桌面上有什么目录，靠盲敲绝对路径本来就是这个入口坏掉的根因之一。
-          <div className={styles.customPathRow}>
-            <input
-              className={styles.customPath}
-              placeholder={t("~/workspace/项目 或点右侧浏览")}
-              value={customWorkspace}
-              onChange={(e) => patch({ customWorkspace: e.target.value })}
-            />
+          <span className={styles.sheetTitle}>{t("新会话")}</span>
+          <span
+            className={styles.connectionDot}
+            data-online={relayReady !== false}
+            aria-label={relayReady === false ? t("离线") : t("在线")}
+          />
+        </div>
+
+        <div className={styles.sheetBody}>
+          <section className={styles.formSection}>
+            <span className={styles.sectionLabel}>{t("运行位置")}</span>
             <button
-              className={styles.browseBtn}
-              onClick={() => setPicking(true)}
-              disabled={!client}
+              className={styles.summaryRow}
+              onClick={() => setPicker("location")}
+              aria-label={`${t("运行位置")}：${locationSummary.title}，${locationSummary.detail}`}
             >
-              <FolderSearch size={15} />
-              {t("浏览…")}
+              <span className={styles.summaryIcon}><MapPin size={17} /></span>
+              <span className={styles.summaryCopy}>
+                <strong>{locationSummary.title}</strong>
+                <small>{locationSummary.detail}</small>
+              </span>
+              <ChevronRight size={20} className={styles.summaryChevron} />
             </button>
-          </div>
+          </section>
+
+          <section className={styles.promptSection}>
+            <span className={styles.sectionLabel}>{t("第一条指令")}</span>
+            <div className={styles.promptCard}>
+              <textarea
+                ref={voiceTailRef}
+                className={styles.promptInput}
+                aria-label={t("第一条指令")}
+                placeholder={
+                  voice.available
+                    ? t("要让 agent 做什么？也可点麦克风说")
+                    : t("要让 agent 做什么？")
+                }
+                rows={6}
+                value={voice.showingPreview ? voice.preview : prompt}
+                readOnly={voice.showingPreview}
+                onChange={(e) => patch({ prompt: e.target.value })}
+              />
+              <div className={styles.promptTools}>
+                <AttachmentRow
+                  attachments={attachments}
+                  uploading={uploading}
+                  onPick={(f) => void addFiles(f)}
+                  onRemove={remove}
+                  client={client}
+                  previews={previews}
+                  voice={voice}
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className={styles.formSection}>
+            <span className={styles.sectionLabel}>{t("运行配置")}</span>
+            <button
+              className={styles.summaryRow}
+              onClick={() => setPicker("config")}
+              aria-label={`${t("运行配置")}：${configSummary.title}，${configSummary.detail}`}
+            >
+              <span className={styles.summaryIcon}><SlidersHorizontal size={17} /></span>
+              <span className={styles.summaryCopy}>
+                <strong>{configSummary.title}</strong>
+                <small>{configSummary.detail}</small>
+              </span>
+              <ChevronRight size={20} className={styles.summaryChevron} />
+            </button>
+            {sendsPermissionMode && (
+              <span
+                className={styles.permissionHint}
+                data-danger={permissionMode === "bypassPermissions"}
+              >
+                {permissionMode === "bypassPermissions"
+                  ? t("高风险：Agent 将不再请求命令或文件操作确认")
+                  : permissionMode === "plan"
+                    ? t("Agent 只分析和规划，不修改项目文件")
+                    : t("Agent 可以修改项目文件；执行命令仍按权限规则处理")}
+              </span>
+            )}
+          </section>
+        </div>
+
+        <div className={styles.sheetFooter}>
+          <button
+            className={styles.submit}
+            data-success={created}
+            disabled={!canSubmit}
+            onClick={() => void submit()}
+          >
+            {created ? (
+              <>
+                <Check size={18} />
+                {t("已启动")}
+              </>
+            ) : busy ? (
+              t("创建中…")
+            ) : (
+              <>
+                <Send size={17} />
+                {t("启动会话")}
+              </>
+            )}
+          </button>
+          <span className={styles.submitHint} aria-live="polite">
+            {created
+              ? t("目标设备已确认收到")
+              : busy
+                ? t("正在发往 {0}…", deviceLabel)
+                : !prompt.trim()
+                  ? t("输入任务后即可启动")
+                  : locationSummary.title}
+          </span>
+        </div>
+
+        {picker && (
+          <>
+            <HistoryLayer onBack={() => setPicker(null)} />
+            <div className={styles.pickerBackdrop} onClick={() => setPicker(null)} />
+            <div
+              className={styles.pickerSheet}
+              role="dialog"
+              aria-modal="true"
+              aria-label={picker === "location" ? t("运行位置") : t("运行配置")}
+            >
+              <span className={styles.pickerGrabber} />
+              <div className={styles.pickerHead}>
+                <span />
+                <strong>{picker === "location" ? t("运行位置") : t("运行配置")}</strong>
+                <button onClick={() => setPicker(null)}>{t("完成")}</button>
+              </div>
+              <div className={styles.pickerBody}>
+                {picker === "location" ? (
+                  <>
+                    {chatPath && (
+                      <div
+                        className={styles.modeSwitch}
+                        role="group"
+                        aria-label={t("会话类型")}
+                      >
+                        <button
+                          data-active={!isChat}
+                          onClick={() =>
+                            patch({ workspace: recents[0]?.[0] ?? "__custom__" })
+                          }
+                        >
+                          {t("项目")}
+                        </button>
+                        <button
+                          data-active={isChat}
+                          onClick={() => patch({ workspace: chatPath })}
+                        >
+                          {t("纯聊天")}
+                        </button>
+                      </div>
+                    )}
+                    {devices && devices.length > 1 && (
+                      <label className={styles.pickerField}>
+                        <span>{t("设备")}</span>
+                        <select
+                          className={styles.deviceSelect}
+                          value={targetDeviceId ?? ""}
+                          aria-label={t("开在哪台设备上")}
+                          onChange={(e) => switchDevice(e.target.value)}
+                        >
+                          {devices.map((device) => (
+                            <option key={device.id} value={device.id}>{device.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {!isChat && (
+                      <label className={styles.pickerField}>
+                        <span>{t("项目目录")}</span>
+                        <select
+                          className={styles.workspaceSelect}
+                          value={workspace}
+                          aria-label={t("选择工作目录")}
+                          onChange={(e) => patch({ workspace: e.target.value })}
+                        >
+                          {recents.map(([path, name]) => (
+                            <option key={path} value={path}>{name} — {path}</option>
+                          ))}
+                          <option value="__custom__">{t("自定义路径…")}</option>
+                        </select>
+                      </label>
+                    )}
+                    {workspace === "__custom__" && !isChat && (
+                      <div className={styles.customPathRow}>
+                        <input
+                          className={styles.customPath}
+                          aria-label={t("自定义路径")}
+                          placeholder={t("~/workspace/项目 或点右侧浏览")}
+                          value={customWorkspace}
+                          onChange={(e) => patch({ customWorkspace: e.target.value })}
+                        />
+                        <button
+                          className={styles.browseBtn}
+                          onClick={() => setPicking(true)}
+                          disabled={!client}
+                        >
+                          <FolderSearch size={17} />
+                          {t("浏览…")}
+                        </button>
+                      </div>
+                    )}
+                    {devices && devices.length > 1 && relayReady === false && (
+                      <span className={styles.deviceOffline}>
+                        {t("这台设备当前离线，创建请求可能要等它连上才生效")}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {toolChoices.length > 1 && (
+                      <label className={styles.pickerField}>
+                        <span>{t("Agent")}</span>
+                        <select
+                          className={styles.optionSelect}
+                          value={tool}
+                          aria-label={t("Agent")}
+                          onChange={(e) => setTool(e.target.value)}
+                        >
+                          {toolChoices.map(([value, label]) => (
+                            <option key={value} value={value}>{t(label)}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <OptionSelects
+                      tool={tool}
+                      client={client}
+                      model={model}
+                      effort={effort}
+                      permissionMode={permissionMode}
+                      permissionDefaultLabel="默认权限"
+                      onChange={(next) => patch(next)}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          </>
         )}
+
         {picking && (
           <>
-            {/* 目录选择器压在新会话面板之上：返回一次收起它，再返回才关面板。 */}
             <HistoryLayer onBack={() => setPicking(false)} />
             <DirPicker
               client={client}
@@ -817,72 +1124,6 @@ export function NewSessionSheet({
             />
           </>
         )}
-        {/* 录音时输入框显示 preview（已定稿 + 还在飘的那一段），并转成只读:
-            实时转写就上在真正的输入框里,多行、可滚、不截断 —— 原来它挤在附件行
-            末尾一行 12px 的灰字里,说到第八个字就被 ellipsis 吃掉了。 */}
-        <textarea
-          ref={voiceTailRef}
-          className={styles.promptInput}
-          placeholder={
-            voice.available ? t("要让 agent 做什么？也可点麦克风说") : t("要让 agent 做什么？")
-          }
-          rows={5}
-          value={voice.showingPreview ? voice.preview : prompt}
-          readOnly={voice.showingPreview}
-          onChange={(e) => patch({ prompt: e.target.value })}
-        />
-        <AttachmentRow
-          attachments={attachments}
-          uploading={uploading}
-          onPick={(f) => void addFiles(f)}
-          onRemove={remove}
-          client={client}
-          previews={previews}
-          voice={voice}
-        />
-        {toolChoices.length > 1 && (
-          <div className={styles.optionRow}>
-            <select
-              className={styles.optionSelect}
-              value={tool}
-              onChange={(e) => setTool(e.target.value)}
-            >
-              {toolChoices.map(([v, label]) => (
-                <option key={v} value={v}>
-                  {t(label)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <OptionSelects
-          tool={tool}
-          client={client}
-          model={model}
-          effort={effort}
-          permissionMode={permissionMode}
-          permissionDefaultLabel="默认权限"
-          onChange={(p) => patch(p)}
-        />
-        {/* 目标设备当下没连上。只提示、**不禁用**提交:connected 会随重连抖动,
-            而提交本身已经为丢帧铺了三层兜底(早 ack / 超时重发 / 宽限期盯快照),
-            禁用反而会在抖动那一瞬挡住用户。多设备下这条尤其要有 —— 用户是主动
-            挑了这台的,得让他在打字之前就知道它是离线的。 */}
-        {devices && devices.length > 1 && relayReady === false && (
-          <span className={styles.deviceOffline}>
-            {t("这台设备当前离线，创建请求可能要等它连上才生效")}
-          </span>
-        )}
-        <button className={styles.submit} disabled={!canSubmit} onClick={() => void submit()}>
-          {busy ? (
-            t("创建中…")
-          ) : (
-            <>
-              <Send size={15} />
-              {t("创建会话")}
-            </>
-          )}
-        </button>
       </div>
     </div>
   );

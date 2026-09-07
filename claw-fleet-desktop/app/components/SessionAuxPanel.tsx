@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import styles from "./SessionDetail.module.css";
 
@@ -57,6 +57,13 @@ export function SessionAuxPanel({
   children: ReactNode;
 }) {
   const { t } = useTranslation();
+  // Keep the selected tab on screen. Opening a doc from the transcript appends
+  // its tab at the far right of a strip that may already be scrolled — without
+  // this, the click looks like it did nothing.
+  const activeRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeId]);
   return (
     <>
       {/* Only in overlay mode: the conversation underneath is still visible, so
@@ -79,6 +86,7 @@ export function SessionAuxPanel({
             {tabs.map((tab) => (
               <span
                 key={tab.id}
+                ref={activeId === tab.id ? activeRef : undefined}
                 className={`${styles.aux_tab} ${activeId === tab.id ? styles.aux_tab_active : ""}`}
               >
                 <button

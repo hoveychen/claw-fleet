@@ -349,8 +349,6 @@ interface Props {
   onBack: () => void;
   /** Push a session id as a new drill-down layer (subagent / parent nav). */
   onOpenSessionId: (id: string) => void;
-  /** Fired after a 2s dwell — marks the session read (same as the desktop). */
-  onDwellRead?: () => void;
 }
 
 /** ReactMarkdown + remarkGfm parse is heavy; mounting a few hundred of them
@@ -951,13 +949,11 @@ export function SessionDetailView({
   client,
   onBack,
   onOpenSessionId,
-  onDwellRead,
 }: Props) {
   const [tab, setTab] = useState<DetailTab>("messages");
   /** Header detail panel (tap the title, or the ☰ menu's first item). Folded by
    *  default — it costs transcript height, and most visits don't need the ids. */
   const [infoOpen, setInfoOpen] = useState(false);
-  const dwellFired = useRef(false);
   // Subagent drill-down nav (same table-lookup model as the desktop): resolve
   // `agent-<id>` in the live session array; `open` pushes it as a new layer.
   const nav = useMemo(
@@ -1012,7 +1008,6 @@ export function SessionDetailView({
   }, [session, sessions]);
 
   useEffect(() => {
-    dwellFired.current = false;
     // A drill-down into a subagent starts folded again: the panel that was open
     // described the session you just left.
     setInfoOpen(false);
@@ -1025,13 +1020,6 @@ export function SessionDetailView({
     composerSettleUntil.current = 0;
     lastScrollTop.current = 0;
     scrollAccum.current = 0;
-    const timer = window.setTimeout(() => {
-      if (!dwellFired.current) {
-        dwellFired.current = true;
-        onDwellRead?.();
-      }
-    }, 2000);
-    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id]);
   const [messages, setMessages] = useState<RawMessage[] | null>(null);

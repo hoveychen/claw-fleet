@@ -12,6 +12,7 @@ import {
   Gauge,
   ListTree,
   QrCode,
+  SquareTerminal,
 } from "lucide-react";
 import { useDraft } from "../draft";
 import { dateLocale, useI18n, type Lang } from "../i18n";
@@ -58,6 +59,7 @@ interface Props {
   onOpenPlans: () => void;
   onOpenWiki: () => void;
   onOpenUsage: () => void;
+  onOpenTerminal: () => void;
   /** 这台手机配对过的每一台 Fleet，按加入顺序。 */
   devices: PairedDevice[];
   /** 当前作用域那一台的 id；一台都没配对时 null（同源形态恒为 null）。 */
@@ -91,6 +93,7 @@ export function MoreView({
   onOpenPlans,
   onOpenWiki,
   onOpenUsage,
+  onOpenTerminal,
   devices,
   activeDeviceId,
   activeKind,
@@ -176,6 +179,17 @@ export function MoreView({
             <span className={styles.navText}>
               <span className={styles.navLabel}>{t("知识库")}</span>
               <span className={styles.navSub}>{t("agent 沉淀下来的调研与文档")}</span>
+            </span>
+            <ChevronRight size={18} className={styles.navChevron} />
+          </button>
+          <div className={styles.divider} />
+          <button className={styles.navRow} onClick={onOpenTerminal}>
+            <span className={styles.navIcon}>
+              <SquareTerminal size={18} />
+            </span>
+            <span className={styles.navText}>
+              <span className={styles.navLabel}>{t("终端")}</span>
+              <span className={styles.navSub}>{t("在桌面端主机的某个目录里开一个 shell")}</span>
             </span>
             <ChevronRight size={18} className={styles.navChevron} />
           </button>

@@ -5,7 +5,13 @@ use serde::Serialize;
 
 /// Create a symlink at /usr/local/bin/fleet pointing to the bundled fleet binary.
 /// Requires the user to approve via osascript (admin password prompt).
-#[tauri::command]
+// Threadpool, not the main thread: this spawns `osascript … with administrator
+// privileges` and blocks on its `output()` until the user answers the macOS
+// password dialog. Inline on the event loop that froze the entire app for as
+// long as the dialog stood open. The frontend already guards re-entry with its
+// `cliInstallState === "installing"` flag, and the write itself is an idempotent
+// `ln -sf`, so leaving the main thread costs no serialization we relied on.
+#[tauri::command(async)]
 pub(crate) fn install_fleet_cli(app: tauri::AppHandle) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
@@ -180,7 +186,10 @@ pub(crate) async fn save_skill_file() -> Result<String, String> {
 }
 
 /// Install the fleet skill to all detected AI tool directories.
-#[tauri::command]
+// Threadpool: writes SKILL.md into every detected tool directory. Each write is
+// the same constant payload to a fixed path, so concurrent calls are idempotent
+// rather than a read-then-write race.
+#[tauri::command(async)]
 pub(crate) fn install_fleet_skill() -> Result<SkillInstallResult, String> {
     let home = home_dir()?;
     let mut installed = vec![];

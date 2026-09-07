@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { markdownUrlTransform } from "../../markdown/plugins";
@@ -13,6 +13,7 @@ import { summarizeWorkRun, workRunTitle } from "../workRuns";
 import { formatMsgTime } from "../../messageRows";
 import { ContentBlocks } from "./ContentBlocks";
 import { RailDone } from "./Rail";
+import { useBandOpen } from "./useBandOpen";
 import styles from "./WorkRunBlock.module.css";
 
 interface Props {
@@ -23,13 +24,12 @@ interface Props {
   decisionRecords: DecisionHistoryRecord[];
   searchTerms?: string[] | null;
   paths?: PathLinkContext;
-  /** True while this run is the live tail of a working session. The band
-   *  follows it both ways: open to show the tools streaming in, closed again
-   *  once the agent moves on — a just-finished run tidies itself up. */
+  /** True while this run is the live tail of a working session. It *opens* the
+   *  band and never closes it — see `useBandOpen` for why following it both
+   *  ways made a live band flap. */
   defaultOpen: boolean;
-  /** True while the active search hit lives inside this run. Like
-   *  `defaultOpen`, the band follows the signal both ways — open on the hit,
-   *  closed again once the reader steps off it. */
+  /** True while the active search hit lives inside this run. Opens the band on
+   *  the hit; stepping off leaves it open (same latch as `defaultOpen`). */
   forceOpen?: boolean;
 }
 
@@ -67,8 +67,7 @@ export function WorkRunBlock({
   forceOpen,
 }: Props) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(defaultOpen || !!forceOpen);
-  useEffect(() => setOpen(defaultOpen || !!forceOpen), [defaultOpen, forceOpen]);
+  const [open, setOpen] = useBandOpen(defaultOpen, !!forceOpen);
 
   const summary = summarizeWorkRun(msgs);
   // A thinking-derived headline (the model's own summary sentence) beats the

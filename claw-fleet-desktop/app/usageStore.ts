@@ -70,7 +70,38 @@ export interface CodexUsageItem {
   usageSource?: string | null;
 }
 
-export type UsageSourceKey = "claude" | "codex";
+/** One provider's money position behind a dsh install.
+ *
+ *  dsh is a bring-your-own-key harness: it publishes no account, quota or
+ *  balance API of its own (its `/api` catalog has no `account.*` / `usage.*`),
+ *  so the number can only come from whichever provider the user配置了 key.
+ *  That makes the shape money-first rather than window-first — `balance` is a
+ *  remaining amount with no denominator, and only OpenRouter's per-key ceiling
+ *  (`limit`/`used`) is a utilization anything can draw a bar from. */
+export interface DshProviderBalance {
+  /** dsh's provider id, e.g. "deepseek-official" / "openrouter". */
+  provider: string;
+  /** Display name for the card row. */
+  label: string;
+  /** ISO-ish currency code the amounts are in ("CNY", "USD"); null when the
+   *  provider only reports a unitless credit count. */
+  currency?: string | null;
+  /** Money left. Null when the lookup failed — see `error`. */
+  balance?: number | null;
+  /** Spend ceiling on this key, when the provider enforces one. */
+  limit?: number | null;
+  /** Spend already counted against `limit`. */
+  used?: number | null;
+  /** Why this provider has no numbers (unconfigured key, HTTP failure). */
+  error?: string | null;
+}
+
+/** `get_source_usage { source: "dsh" }`. */
+export interface DshUsageItem {
+  balances: DshProviderBalance[];
+}
+
+export type UsageSourceKey = "claude" | "codex" | "dsh";
 
 export interface SourceState<T> {
   data: T | null;
@@ -83,6 +114,7 @@ export interface SourceState<T> {
 interface UsageStoreState {
   claude: SourceState<AccountInfoData>;
   codex: SourceState<CodexUsageItem>;
+  dsh: SourceState<DshUsageItem>;
   load: (source: UsageSourceKey) => Promise<void>;
   setAutoRefresh: (source: UsageSourceKey, enabled: boolean) => void;
 }
@@ -122,11 +154,13 @@ function initialSource<T>(source: UsageSourceKey): SourceState<T> {
 const timers: Record<UsageSourceKey, ReturnType<typeof setInterval> | null> = {
   claude: null,
   codex: null,
+  dsh: null,
 };
 
 const inflight: Record<UsageSourceKey, Promise<void> | null> = {
   claude: null,
   codex: null,
+  dsh: null,
 };
 
 async function fetchOne(source: UsageSourceKey): Promise<unknown> {
@@ -154,6 +188,7 @@ function armClaudeTimer(get: () => UsageStoreState): void {
 export const useUsageStore = create<UsageStoreState>((set, get) => ({
   claude: initialSource<AccountInfoData>("claude"),
   codex: initialSource<CodexUsageItem>("codex"),
+  dsh: initialSource<DshUsageItem>("dsh"),
 
   load: (source) => {
     if (inflight[source]) return inflight[source]!;
@@ -211,7 +246,7 @@ export const useUsageStore = create<UsageStoreState>((set, get) => ({
 // Respects the per-source toggle persisted in storage.ts (defaults to on).
 // Claude is special-cased: its cadence is always on and adapts to
 // usage_source (foxy=10s / anthropic=5m) — see armClaudeTimer.
-const SOURCES: UsageSourceKey[] = ["claude", "codex"];
+const SOURCES: UsageSourceKey[] = ["claude", "codex", "dsh"];
 for (const src of SOURCES) {
   const store = useUsageStore.getState();
   store.load(src);

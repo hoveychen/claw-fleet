@@ -101,7 +101,6 @@ const ALL_KEYS = [
   "usage-auto-refresh",
   // DecisionPanel presentation.
   "decision-panel-collapsed",
-  "floating-decision-panel",
   // Read-state for audit entries, stored as a JSON blob.
   "audit-read-keys",
   // The most recent daily-report date the user has viewed (YYYY-MM-DD). Drives
@@ -110,7 +109,9 @@ const ALL_KEYS = [
   // The 任务 (HistoryView) detail column's open tabs: {tabIds, activeId}.
   // Restored on boot and pruned against the first scan, so ids of sessions that
   // have since been deleted drop out instead of accumulating forever.
-  "launchpad-tabs",
+  // Which session (or the new-session composer) the 任务 page detail column
+  // was showing when the app last closed.
+  "launchpad-open",
 ] as const;
 
 // ── Onboarding feature registry ─────────────────────────────────────────────
@@ -228,7 +229,6 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   "tts-muted": false,
   "personalized-mascot": false,
   "mascot-visible": false,
-  "floating-decision-panel": false,
   "skill-autosync-enabled": false,
 };
 

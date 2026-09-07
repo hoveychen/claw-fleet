@@ -2224,6 +2224,40 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
       },
     },
   ],
+
+  // auth-service swarm — the transcript that exercises every link kind the
+  // detail pane can open in its auxiliary column: an inline-code repo path, a
+  // `[[slug]]` wiki ref, and an external url. Without one of these in the mock,
+  // "click a link → it opens beside the conversation" cannot be seen in ?mock
+  // at all, which is how it went unverified when the panel was built.
+  "sess-auth-main": [
+    {
+      type: "user",
+      uuid: "auth-msg-1",
+      timestamp: new Date(NOW - 50 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: "Rotate the v2.4 signing keys and stand up a JWKS endpoint. Three subagents: call-site map, rotation tests, key ceremony docs.",
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "auth-msg-2",
+      timestamp: new Date(NOW - 48 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "text",
+            text: "The rotation itself lands in `src/auth/jwks.rs`, with the key ceremony written up in [[arch/overview]]. The wire format follows the JWK spec: https://datatracker.ietf.org/doc/html/rfc7517",
+          },
+        ],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1500, output_tokens: 260 },
+      },
+    },
+  ],
 };
 
 // Provide a default set of messages for any session not explicitly mocked

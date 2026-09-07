@@ -1,26 +1,23 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import "./fonts";
 import "./App.css";
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { Onboarding } from "./components/Onboarding";
 import { SessionDetail } from "./components/SessionDetail";
 import { SessionList } from "./components/SessionList";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { WaitingAlerts } from "./components/WaitingAlerts";
 import { DecisionPanel } from "./components/DecisionPanel";
 import { FindBar } from "./components/FindBar";
 import { useFindController } from "./find/useFindController";
 import { UpdateNotice } from "./components/UpdateNotice";
-import { OPEN_FILE_EVENT, type OpenFilePayload } from "./hooks/usePathLinks";
 import { Wizard } from "./components/Wizard";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
-import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
-import { decisionSurfaces } from "./decisionSurface";
-import { isWebBuild } from "./hostEnv";
-import { type Connection, applyWindowTheme, navigateToSessionDetail, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
+import { type Connection, applyWindowTheme, navigateToSessionDetail, useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
@@ -43,70 +40,26 @@ function App() {
   // App root so events aren't dropped while DecisionPanel is unmounted
   // (e.g. no pending decisions).
   useDecisionEvents();
-  useDecisionPeerSync();
 
   // The rca registry, fetched once for the whole app: the session card, list
   // and tab strip all badge remote workspaces from it, and a per-card fetch
   // would be one IPC round trip per card per board render.
   useRemoteWorkspacesSync();
 
+  // Settings overlay. Lives in the store rather than component state because
+  // the tray/app menu (a Rust-side event) and the sidebar gear button are both
+  // entry points, and the panel used to be a separate window every caller
+  // reached through an `invoke`.
+  const settingsOpen = useUIStore((s) => s.settingsOpen);
+  const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
+  const closeSettings = useCallback(() => setSettingsOpen(false), [setSettingsOpen]);
+
   // In-app Cmd/Ctrl+F find bar. The controller's key listener is global, so the
   // bar can be summoned from any view; we render it in the searchable returns.
   const find = useFindController();
 
-  // Bridge: pop the floating decision window when the user can't see the in-app
-  // DecisionPanel — either because the main window is minimized, or because the
-  // user toggled "always use the standalone window" in Settings.
-  const [mainMinimized, setMainMinimized] = useState(false);
-  const decisions = useDecisionStore((s) => s.decisions);
-  const floatingDecisionPanel = useUIStore((s) => s.floatingDecisionPanel);
   const viewMode = useUIStore((s) => s.viewMode);
   const isSessionView = viewMode === "list" || viewMode === "gallery";
-  const prevShouldShow = useRef(false);
-
-  useEffect(() => {
-    const unlisten = listen<boolean>(
-      "main-window-minimize-state-changed",
-      (e) => setMainMinimized(!!e.payload),
-    );
-    invoke<boolean>("is_main_window_minimized")
-      .then((v) => setMainMinimized(!!v))
-      .catch(() => {});
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  // The decision-float window has no explorer of its own, so a path clicked on
-  // a floating card hops here (it also calls show_main_window).
-  useEffect(() => {
-    const unlisten = listen<OpenFilePayload>(OPEN_FILE_EVENT, (e) => {
-      useUIStore.getState().requestFileNav(e.payload);
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  // Which surfaces can actually draw a card in this host. In the browser build
-  // that is inline-only — see decisionSurface.ts for why the three float
-  // triggers must not be honoured in a tab.
-  const surfaces = decisionSurfaces({
-    webBuild: isWebBuild(),
-    floatingPreferred: floatingDecisionPanel,
-    mainMinimized,
-  });
-  const { inline: inlineDecisionPanel, float: floatDecisionWindow } = surfaces;
-
-  useEffect(() => {
-    const shouldShow = floatDecisionWindow && decisions.length > 0;
-    if (shouldShow && !prevShouldShow.current) {
-      invoke("show_decision_float", { snapshot: decisions }).catch(() => {});
-    } else if (!shouldShow && prevShouldShow.current) {
-      invoke("hide_decision_float").catch(() => {});
-    }
-    prevShouldShow.current = shouldShow;
-  }, [floatDecisionWindow, decisions]);
 
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {
     const dismissed = !!getItem(ONBOARDING_DISMISSED_KEY);
@@ -147,7 +100,7 @@ function App() {
     };
   }, [disconnect]);
 
-  // Sync theme/lang from other windows (standalone Settings, overlay).
+  // Sync theme/lang from the tray/overlay mascot process.
   useEffect(() => {
     const unThemePromise = listen<string>("overlay-theme-changed", (e) => {
       const next = e.payload as "dark" | "light" | "system";
@@ -165,19 +118,10 @@ function App() {
         useUIStore.setState({ mascotVisible: e.payload });
       }
     });
-    const unFloatingDecisionPromise = listen<boolean>(
-      "overlay-floating-decision-panel-changed",
-      (e) => {
-        if (useUIStore.getState().floatingDecisionPanel !== e.payload) {
-          useUIStore.setState({ floatingDecisionPanel: e.payload });
-        }
-      },
-    );
     return () => {
       unThemePromise.then((fn) => fn());
       unLangPromise.then((fn) => fn());
       unMascotPromise.then((fn) => fn());
-      unFloatingDecisionPromise.then((fn) => fn());
     };
   }, []);
 
@@ -188,6 +132,11 @@ function App() {
 
     ps.push(listen<"system" | "light" | "dark">("menu-theme", (e) => {
       setTheme(e.payload);
+    }));
+    // The native app / tray menu's Settings item. Rust shows the main window
+    // first, then emits this — there is no second window to build any more.
+    ps.push(listen("menu-settings", () => {
+      setSettingsOpen(true);
     }));
     ps.push(listen("menu-daily-report", () => {
       setViewMode("report");
@@ -212,7 +161,7 @@ function App() {
     return () => {
       ps.forEach((p) => p.then((fn) => fn()).catch(() => {}));
     };
-  }, [setTheme, setViewMode]);
+  }, [setTheme, setViewMode, setSettingsOpen]);
 
   // Open a session detail when the user clicks an agent in the tray menu.
   // Fleet-spawned sessions route to the 任务 page's inline detail; others keep
@@ -315,7 +264,8 @@ function App() {
         <SessionList />
         {isSessionView && <SessionDetail />}
       </div>
-      {inlineDecisionPanel && <DecisionPanel />}
+      <DecisionPanel />
+      {settingsOpen && <SettingsPanel onClose={closeSettings} />}
       <WaitingAlerts />
       <UpdateNotice />
       <FindBar controller={find} />

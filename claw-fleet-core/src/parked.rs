@@ -121,7 +121,7 @@ pub fn parkable_workspace(session_id: &str) -> Option<String> {
 
 /// Move a timed-out request into the parked store. `request` is the channel's
 /// own request struct; it is stored (near-)verbatim and handed back to the
-/// desktop, the phone and the decision-float window as an ordinary pending card.
+/// desktop and the phone as an ordinary pending card.
 ///
 /// The one mutation is `parked: true`, stamped into the stored payload here — at
 /// the single point where a request becomes parked — so no listing, relay or

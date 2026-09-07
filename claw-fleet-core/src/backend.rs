@@ -148,6 +148,24 @@ pub struct UsageBar {
     pub resets_at: Option<String>,
 }
 
+/// One prepaid balance (e.g. "DeepSeek", "OpenRouter").
+///
+/// Separate from [`UsageBar`] because it answers a different question and has
+/// no denominator: a bar says how much of a window is used, a balance says how
+/// much money is left. Sources that meter against a plan report bars; a
+/// bring-your-own-key source (dsh) can only report balances, since the quota
+/// belongs to the provider behind the key and not to the harness.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageBalance {
+    pub label: String,
+    pub amount: f64,
+    /// `"CNY"` / `"USD"`; `None` when the provider reports a unitless credit
+    /// count. Carried per balance because two providers behind one source need
+    /// not agree — DeepSeek settles in CNY, OpenRouter in USD.
+    pub currency: Option<String>,
+}
+
 /// Normalised usage snapshot for one agent source.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -158,6 +176,10 @@ pub struct SourceUsageSummary {
     pub plan: Option<String>,
     /// Rate-limit windows, each with a utilization bar.
     pub bars: Vec<UsageBar>,
+    /// Prepaid balances. Empty for plan-metered sources (Claude, Codex), which
+    /// have windows instead. `#[serde(default)]` keeps older payloads readable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub balances: Vec<UsageBalance>,
     /// Where the numbers came from — `"foxy-switcher"` when read from the local
     /// foxy daemon, else the provider's own path (`"anthropic"` /
     /// `"codex-app-server"`). `None` when the source reported nothing.
@@ -201,6 +223,7 @@ impl SourceUsageSummary {
             source: "claude".into(),
             plan: if info.plan.is_empty() { None } else { Some(info.plan.clone()) },
             bars,
+            balances: Vec::new(),
             usage_source: if info.usage_source.is_empty() {
                 None
             } else {
@@ -236,8 +259,39 @@ impl SourceUsageSummary {
             source: "codex".into(),
             plan,
             bars,
+            balances: Vec::new(),
             usage_source: val["usageSource"].as_str().map(|s| s.to_string()),
             email: val["email"].as_str().map(|s| s.to_string()),
+        }
+    }
+
+    /// Convert dsh's balance snapshot into a unified summary.
+    ///
+    /// dsh contributes **no bars**: it is a bring-your-own-key harness with no
+    /// quota of its own, and the only denominator anywhere in its numbers is
+    /// OpenRouter's per-key ceiling — which belongs to that key, not to a
+    /// resetting window, so drawing it here alongside 5h/7d pools would say
+    /// something false about when it refills. Rows carrying an error (or no
+    /// amount) are dropped rather than rendered as a zero: the detailed panel
+    /// shows the failure, this summary is the tray's one-line read.
+    pub fn from_dsh(item: &crate::dsh_balance::DshUsageItem) -> Self {
+        SourceUsageSummary {
+            source: "dsh".into(),
+            plan: None,
+            bars: Vec::new(),
+            balances: item
+                .balances
+                .iter()
+                .filter_map(|b| {
+                    Some(UsageBalance {
+                        label: b.label.clone(),
+                        amount: b.balance?,
+                        currency: b.currency.clone(),
+                    })
+                })
+                .collect(),
+            usage_source: None,
+            email: None,
         }
     }
 }
@@ -509,13 +563,6 @@ pub trait Backend: Send + Sync {
         session_id: String,
         workspace_path: String,
         title: Option<String>,
-    ) -> Result<(), String>;
-    /// Mark a batch of sessions read as of now. "Unread" is derived
-    /// (`last_activity_ms > last_read_ms`), so this only stamps the read time;
-    /// a single mark is a batch of one, "mark all read" a batch of many.
-    fn mark_sessions_read(
-        &self,
-        items: Vec<crate::session_read::SessionReadItem>,
     ) -> Result<(), String>;
 
     // ── Workspace command runner (文件 page) ────────────────────────────────
@@ -1433,7 +1480,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,            compact_count: 0,
+            task_plan: None, handoff: None, user_mark: None, title_override: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,

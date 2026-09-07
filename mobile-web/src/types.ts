@@ -127,8 +127,6 @@ export interface SessionInfo {
   pidPrecise?: boolean;
   entrypoint?: string | null;
   userMark?: SessionMark | null;
-  /** Unread = lastActivityMs > (lastReadMs ?? 0). */
-  lastReadMs?: number | null;
   /** True when the session's agent process is still alive. */
   procAlive?: boolean;
   /** Follow-ups queued while the session was mid-turn, delivered via
@@ -181,10 +179,6 @@ export function isFleetOwnedTask(s: SessionInfo): boolean {
     isFleetOwnedEntrypoint(s.entrypoint) &&
     s.fleetSpawned !== false
   );
-}
-
-export function isSessionUnread(s: SessionInfo): boolean {
-  return s.lastActivityMs > (s.lastReadMs ?? 0);
 }
 
 const IN_FLIGHT: SessionStatus[] = [
@@ -511,11 +505,25 @@ export interface ClaudeAccount {
   bars: UsageBar[];
 }
 
-/** 非 Claude 源（codex）的归一化用量（`SourceUsageSummary`）。 */
+/** 一笔预付余额。与 `claw_fleet_core::backend::UsageBalance` 一致。
+ *
+ *  限流条问的是「这个窗口用掉多少」，余额问的是「还剩多少钱」——后者没有分母，
+ *  画不出条。dsh 这类自带 key 的源只报得出后者，所以它单独成一类而不是硬塞进
+ *  `bars`。 */
+export interface UsageBalance {
+  label: string;
+  amount: number;
+  /** "CNY" / "USD"；provider 只给无单位额度时为空。 */
+  currency: string | null;
+}
+
+/** 非 Claude 源（codex / dsh）的归一化用量（`SourceUsageSummary`）。 */
 export interface SourceUsage {
   source: string;
   plan: string | null;
   bars: UsageBar[];
+  /** 预付余额。只有自带 key 的源（dsh）会带；旧后端不带此字段。 */
+  balances?: UsageBalance[];
   /** 数字的来源："foxy-switcher" 读本地守护进程，否则是各家自己的通道
    *  （"anthropic" / "codex-app-server"）。旧后端不带此字段。 */
   usageSource?: string | null;

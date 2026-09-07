@@ -714,48 +714,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [],
   );
 
-  // Optimistic read stamps: the server re-derives lastReadMs on its next scan,
-  // so until that push arrives we overlay the local click/dwell time.
-  const [localReadMs, setLocalReadMs] = useState<Record<string, number>>({});
-  const markRead = useCallback(
-    (items: Array<WithDevice<SessionInfo>>) => {
-      if (items.length === 0) return;
-      // 一批里可能混着不同设备的会话(合并列表里「全部标记已读」),所以按设备
-      // 分组各发一次 —— 发错设备的话对方根本不认识这些 id。
-      const byDevice = new Map<string, Array<WithDevice<SessionInfo>>>();
-      for (const s of items) {
-        const list = byDevice.get(s.deviceId) ?? [];
-        list.push(s);
-        byDevice.set(s.deviceId, list);
-      }
-      for (const [id, list] of byDevice) {
-        handlesRef.current[id]?.transport
-          .request("session_read", {
-            items: list.map((s) => ({ sessionId: s.id, workspacePath: s.workspacePath })),
-          })
-          .catch(() => {});
-      }
-      const now = Date.now();
-      setLocalReadMs((prev) => {
-        const next = { ...prev };
-        for (const s of items) next[itemKey(s.deviceId, s.id)] = now;
-        return next;
-      });
-    },
-    [],
-  );
-
-  // 任务列表也是**合并**的:全部设备的会话排在一起,每条带着归属设备。本地那份
-  // 乐观已读时间戳按复合键覆盖上去(服务端下次扫描会重新算出 lastReadMs)。
+  // 任务列表也是**合并**的:全部设备的会话排在一起,每条带着归属设备。
   const mergedSessions = useMemo<Array<WithDevice<SessionInfo>>>(
     () =>
-      aggregateSessions(states, deviceOrder)
-        .map((s) => {
-          const local = localReadMs[itemKey(s.deviceId, s.id)];
-          return local && local > (s.lastReadMs ?? 0) ? { ...s, lastReadMs: local } : s;
-        })
-        .sort((a, b) => (b.lastActivityMs ?? 0) - (a.lastActivityMs ?? 0)),
-    [states, deviceOrder, localReadMs],
+      aggregateSessions(states, deviceOrder).sort(
+        (a, b) => (b.lastActivityMs ?? 0) - (a.lastActivityMs ?? 0),
+      ),
+    [states, deviceOrder],
   );
 
   /** 当前作用域那一台的会话。按设备作用域的页面(新会话、计划、会话详情里的
@@ -843,7 +808,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // it), so the drawer would only duplicate them there. Everywhere else (other
   // tabs, or any tab with a detail page open) the drawer is the surface.
   const showDecisionDrawer =
-    decisions.length > 0 && (tab !== "decisions" || overlayOpen);
+    decisions.length > 0 && !showNewSession && (tab !== "decisions" || overlayOpen);
 
   /** 当前打开的是哪个浮层。拿它当浮层那层渲染兜底的 resetKey —— 关掉再开、或
    *  换到另一个浮层时自动清错重试,一次渲染失败不该把这个入口永久钉死。 */
@@ -1050,14 +1015,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             agentOnline={agentOnline}
             sessionsLoaded={sessionsLoaded}
             onOpenSession={(s: WithDevice<SessionInfo>) => openSessionRoot(s.deviceId, s.id)}
-            onMarkRead={markRead}
-            onOpenTerminal={(workspace) => setTerminal({ workspace })}
           />
         ) : tab === "artifacts" ? (
           <ArtifactsView client={client} />
         ) : (
           <MoreView
             endpointLabel={client?.endpointLabel ?? ""}
+            onOpenTerminal={() => setTerminal({ workspace: null })}
             devices={book.devices}
             activeDeviceId={deviceId}
             activeKind={current?.kind ?? (NEEDS_PAIRING && !MOCK ? "relay" : "http")}
@@ -1113,7 +1077,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           client={transportFor(detailSession.deviceId)}
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
           onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
-          onDwellRead={() => markRead([detailSession])}
         />
       )}
 
@@ -1214,7 +1177,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               key={newSessionTargetId}
               sessions={newSessionSessions}
               client={transportFor(newSessionTargetId)}
-              devices={runtimeDevices.length > 1 ? runtimeDevices : undefined}
+              devices={runtimeDevices}
               targetDeviceId={newSessionTargetId}
               onTargetDevice={setNewSessionDeviceId}
               initialFiles={sharedFiles}

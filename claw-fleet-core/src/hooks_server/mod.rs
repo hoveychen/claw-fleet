@@ -1317,7 +1317,6 @@ fn handle_request(
             crate::routes::SESSION_TITLE => route_session_title(ctx, request, &query, json_header, path),
 
             // ── Session read (batch mark-read; unread is derived) ─────────────
-            crate::routes::SESSION_READ => route_session_read(ctx, request, &query, json_header, path),
 
             // ── Workspace command runner (proc_runner) ───────────────────────
             crate::routes::PROCS => route_procs(ctx, request, &query, json_header, path),

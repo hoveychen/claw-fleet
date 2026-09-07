@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  resolveTheme,
   useDecisionStore,
   useSessionsStore,
   useUIStore,
@@ -910,33 +909,6 @@ function SharedOptionsBlock({
 
   const focusedPreview = question.options.find((o) => o.label === focusedLabel)?.preview;
 
-  // Compact (narrow) hosts — the inline card inside SessionDetail — push the
-  // preview into a floating Tauri subwindow instead of the inline grid, so the
-  // narrow column isn't split in half. Full-width cards keep the side-by-side
-  // layout and leave the subwindow untouched.
-  useEffect(() => {
-    if (!compact) return;
-    if (hasPreview) {
-      const theme = resolveTheme(useUIStore.getState().theme);
-      invoke("open_preview_window", {
-        markdown: focusedPreview ?? "",
-        title: focusedLabel || null,
-        theme,
-      }).catch(() => {});
-    } else {
-      invoke("close_preview_window").catch(() => {});
-    }
-  }, [compact, hasPreview, focusedPreview, focusedLabel]);
-
-  // Tear down the subwindow when the card unmounts (decision resolved or tab
-  // switched). Only relevant in compact mode.
-  useEffect(() => {
-    if (!compact) return;
-    return () => {
-      invoke("close_preview_window").catch(() => {});
-    };
-  }, [compact]);
-
   const list = (
     <div className={styles.elicitation_options}>
       {question.options.map((opt) => {
@@ -1010,17 +982,35 @@ function SharedOptionsBlock({
     </div>
   );
 
-  // In compact hosts the preview lives in a floating subwindow — don't split
-  // the column in half. Full-width cards keep the side-by-side grid.
-  if (!hasPreview || compact) return list;
+  if (!hasPreview) return list;
+  const preview = (
+    <div className={styles.elicitation_preview}>
+      {focusedPreview ? (
+        <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(focusedPreview)}</ReactMarkdown>
+      ) : null}
+    </div>
+  );
+  // Compact hosts — the inline card inside SessionDetail — stack the preview
+  // under the options instead of splitting the narrow column in half. This used
+  // to open an always-on-top Tauri subwindow; stacking keeps the preview inside
+  // the card, which is where the option it belongs to is. The focused option's
+  // label is captioned because the side-by-side layout's spatial pairing is
+  // what stacking gives up.
+  if (compact) {
+    return (
+      <div className={styles.elicitation_options_stacked_preview}>
+        {list}
+        <div className={styles.elicitation_preview_caption}>
+          {focusedLabel || t("elicitation.preview", "Preview")}
+        </div>
+        {preview}
+      </div>
+    );
+  }
   return (
     <div className={styles.elicitation_options_with_preview}>
       {list}
-      <div className={styles.elicitation_preview}>
-        {focusedPreview ? (
-          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(focusedPreview)}</ReactMarkdown>
-        ) : null}
-      </div>
+      {preview}
     </div>
   );
 }
@@ -1868,23 +1858,7 @@ function tabLabel(d: PendingDecision): string {
 
 // ── Main panel ───────────────────────────────────────────────────────────
 
-export function DecisionPanel({
-  float = false,
-  onInlineDetailChange,
-}: {
-  /** Standalone decision-float window mode. Unlike the main-window overlay
-   *  (which floats `position: fixed` over the app), the float window *is*
-   *  the panel and sizes
-   *  itself to the card's natural height. So the panel must flow in normal
-   *  document layout — not `position: fixed`, no `max-height` cap — otherwise
-   *  it contributes zero height to the wrapper the float window measures
-   *  (a fixed-position element is out of flow), the window never grows, and
-   *  only a sliver of the card shows. */
-  float?: boolean;
-  /** Fired when the inline SessionDetail column toggles. The standalone
-   *  decision-float window uses this to widen itself when detail expands. */
-  onInlineDetailChange?: (open: boolean) => void;
-} = {}) {
+export function DecisionPanel() {
   const { t } = useTranslation();
   const {
     decisions,
@@ -1909,6 +1883,11 @@ export function DecisionPanel({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || !activeDecisionId) return;
+      // The Settings overlay sits on top of the panel and takes Escape for
+      // itself. Both listeners live on `window`, so stopPropagation there
+      // cannot reach this one — the panel has to yield explicitly, or one
+      // Escape would close Settings *and* decline a pending guard.
+      if (useUIStore.getState().settingsOpen) return;
       const active = decisions.find((d) => d.id === activeDecisionId);
       if (active?.kind === "guard") {
         respond(active.id, false);
@@ -1978,10 +1957,7 @@ export function DecisionPanel({
     }
   }, [decisionPanelCollapsed, active?.kind, setDecisionPanelCollapsed]);
 
-  // The standalone float window never collapses: it exists solely to show
-  // the card, and the collapsed state is shared via localStorage with the
-  // main window, so honoring it here would leave the float a bare pill.
-  const effectiveCollapsed = decisionPanelCollapsed && !float;
+  const effectiveCollapsed = decisionPanelCollapsed;
 
   const hasPreview =
     (active?.kind === "elicitation" || active?.kind === "fleet-ask") &&
@@ -2046,10 +2022,6 @@ export function DecisionPanel({
   // The docs panel and the SessionDetail history share the one side column;
   // docs win when both would be open (they reset closed on card change).
   const sideColumnActive = docsColumnActive || inlineDetailActive;
-
-  useEffect(() => {
-    onInlineDetailChange?.(sideColumnActive);
-  }, [sideColumnActive, onInlineDetailChange]);
 
   // Bump tier when the card area overflows vertically, until no overflow or
   // we hit the maximum tier.
@@ -2126,11 +2098,9 @@ export function DecisionPanel({
   // side without dropping below their min-widths (detail 420 + card 380 = 800),
   // the two flex columns overflow the clamped panel and the card gets shoved
   // off-screen. Below this threshold, stack them vertically instead (card on
-  // top, detail below) so everything stays inside the panel. The float window
-  // manages its own width (it widens to ~920px for the side-by-side layout), so
-  // it never needs stacking.
+  // top, detail below) so everything stays inside the panel.
   const STACK_DETAIL_BELOW = 900;
-  const stackDetail = sideColumnActive && !float && vpClamp < STACK_DETAIL_BELOW;
+  const stackDetail = sideColumnActive && vpClamp < STACK_DETAIL_BELOW;
   const targetTotalWidth = sideColumnActive && !stackDetail
     ? DETAIL_COLUMN_WIDTH + currentWidth
     : currentWidth;
@@ -2138,8 +2108,8 @@ export function DecisionPanel({
 
   return (
     <div
-      className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${float ? styles.panel_float : ""} ${peeking ? styles.panel_peeking : ""} ${sideColumnActive ? (stackDetail ? styles.panel_with_detail_stacked : styles.panel_with_detail) : ""}`}
-      style={float ? undefined : { width: `${panelWidth}px` }}
+      className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${peeking ? styles.panel_peeking : ""} ${sideColumnActive ? (stackDetail ? styles.panel_with_detail_stacked : styles.panel_with_detail) : ""}`}
+      style={{ width: `${panelWidth}px` }}
     >
       {sideColumnActive && (
         <div className={styles.detail_column}>
@@ -2157,7 +2127,7 @@ export function DecisionPanel({
         {/* Panel toolbar: aligns the panel-level controls (collapse + history)
          *  into one slim top strip instead of two orphaned, absolutely-positioned
          *  buttons floating in the left gutter. Covers all card kinds (guard /
-         *  plan / elicitation / fleet-ask) plus the standalone float window. */}
+         *  plan / elicitation / fleet-ask). */}
         <div className={styles.panel_toolbar}>
           <button
             type="button"

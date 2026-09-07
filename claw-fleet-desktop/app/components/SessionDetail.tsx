@@ -35,7 +35,6 @@ import { WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
-import type { DetailTabOpener } from "../tabKind";
 import { WikiLinksProvider } from "../markdown/wikiLinksContext";
 import { WebLinkProvider } from "../markdown/webLinks";
 import { useWikiDocs } from "../hooks/useWikiDocs";
@@ -165,8 +164,6 @@ export function SessionDetail({
   sessionInfo = null,
   searchQuery: standaloneSearchQuery = null,
   paused = false,
-  tabOpener,
-  secondView = false,
 }: {
   inline?: boolean;
   /** When set, the component runs in standalone mode: its own local
@@ -187,17 +184,6 @@ export function SessionDetail({
    *  every 700ms and `get_messages_tail` every 1.5s in the background. Coming
    *  back to the foreground refetches the tail once, immediately. */
   paused?: boolean;
-  /** Present when this instance lives in a tab strip (the 任务 page's detail
-   *  column): a path the agent named then opens as a tab *beside* the
-   *  conversation instead of switching the whole window to the 仓库 page. Absent
-   *  in the global drawer, which has nowhere to put a tab and so keeps the
-   *  page-switching behaviour. */
-  tabOpener?: DetailTabOpener;
-  /** This pane is the *second* view of a session already open in the column.
-   *  Only drops the header's "open beside" item — it would offer to open the
-   *  very pane you are looking at. Everything else about the two is identical,
-   *  which is the point: the copy is a second look, not a lesser mode. */
-  secondView?: boolean;
 } = {}) {
   const { t } = useTranslation();
   const isStandalone = sessionInfo != null;
@@ -1313,15 +1299,6 @@ export function SessionDetail({
                       jsonlPath={liveSession.jsonlPath}
                       workspacePath={liveSession.workspacePath}
                       isLocal={connection?.type !== "remote"}
-                      // Absent without a tab strip (the global drawer) — there
-                      // is nowhere to put the second pane — and absent in the
-                      // second pane itself, where it would offer to open this
-                      // one.
-                      onOpenSecondView={
-                        tabOpener && !secondView
-                          ? () => tabOpener.openSecondView(liveSession.id)
-                          : undefined
-                      }
                     />
                     {!inline && (
                       <button

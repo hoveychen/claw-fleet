@@ -36,16 +36,15 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   },
 }));
 
-/** Open the standalone Settings window, seeding it with the current connection. */
-export async function openSettingsWindow(): Promise<void> {
-  const { connection } = useConnectionStore.getState();
-  const { theme } = useUIStore.getState();
-  await invoke("open_settings_window", {
-    connection: connection ? JSON.stringify(connection) : null,
-    theme: resolveTheme(theme),
-  }).catch((e) => {
-    console.error("open_settings_window failed:", e);
-  });
+/** Open the in-app Settings overlay.
+ *
+ * Settings used to live in its own `settings.html` webview window, which meant
+ * a second window with its own copy of every store, a `connection` query param
+ * to seed it, and cross-window theme/lang events to keep the two in sync. It is
+ * now an overlay inside the main window, so all of that is just a boolean: the
+ * panel reads the same stores the rest of the app already has. */
+export function openSettings(): void {
+  useUIStore.getState().setSettingsOpen(true);
 }
 
 // ── Theme store ───────────────────────────────────────────────────────────────
@@ -289,15 +288,14 @@ interface UIState {
   /** Explicitly set `view`'s secondary sidebar collapsed state. */
   setSecondarySidebar: (view: ViewMode, collapsed: boolean) => void;
   setMascotVisible: (on: boolean) => void;
+  /** Settings overlay visibility. Deliberately not persisted — a settings
+   *  panel restored on boot is not a preference, it is a surprise. */
+  settingsOpen: boolean;
+  setSettingsOpen: (on: boolean) => void;
   /** When true, the DecisionPanel renders as a minimized bar at the bottom
    *  of the screen instead of the full card. Guard decisions force-expand. */
   decisionPanelCollapsed: boolean;
   setDecisionPanelCollapsed: (on: boolean) => void;
-  /** When true, pending decisions are always presented in the standalone
-   *  decision-float window instead of the in-app DecisionPanel, regardless
-   *  of whether the main window is minimized. */
-  floatingDecisionPanel: boolean;
-  setFloatingDecisionPanel: (on: boolean) => void;
   /** A pending "reveal this file in the 文件 page" request, raised when the
    *  user clicks a path in agent prose. FilesView owns the explorer's
    *  selection state internally, so a request travels through the store
@@ -544,7 +542,6 @@ export const useUIStore = create<UIState>((set) => ({
     set({ historyGroupHandoff: on });
   },
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
-  floatingDecisionPanel: getItem("floating-decision-panel") === "true",
   setTheme: (t) => {
     setItem("theme", t);
     emit("overlay-theme-changed", t).catch(() => {});
@@ -626,6 +623,8 @@ export const useUIStore = create<UIState>((set) => ({
       setItem("secondary-sidebar-collapsed", JSON.stringify(next));
       return { secondarySidebarCollapsed: next };
     }),
+  settingsOpen: false,
+  setSettingsOpen: (on) => set({ settingsOpen: on }),
   setMascotVisible: (on) => {
     setItem("mascot-visible", on ? "true" : "false");
     emit("overlay-mascot-visible-changed", on).catch(() => {});
@@ -634,11 +633,6 @@ export const useUIStore = create<UIState>((set) => ({
   setDecisionPanelCollapsed: (on) => {
     setItem("decision-panel-collapsed", on ? "true" : "false");
     set({ decisionPanelCollapsed: on });
-  },
-  setFloatingDecisionPanel: (on) => {
-    setItem("floating-decision-panel", on ? "true" : "false");
-    emit("overlay-floating-decision-panel-changed", on).catch(() => {});
-    set({ floatingDecisionPanel: on });
   },
 }));
 
@@ -1037,48 +1031,6 @@ export const useAuditStore = create<AuditState>((set, get) => ({
       ).length;
       return { criticalEvents: events, unreadCriticalCount };
     }),
-}));
-
-// ── Session read/unread store ─────────────────────────────────────────────────
-//
-// Unread is derived from `SessionInfo.lastReadMs` (stamped by the backend scan)
-// vs `lastActivityMs`. The scan lags a few seconds behind a dwell-read, so this
-// store holds optimistic client-side read stamps that make the red dot clear (and
-// the sidebar badge decrement) immediately; they're harmless once the scan
-// catches up because `sessionUnread` takes the max of both.
-
-interface ReadState {
-  /** session id → optimistic read timestamp (epoch ms). */
-  overrides: Record<string, number>;
-  /** Mark one session read locally + persist to the backend (batch of one). */
-  markRead: (session: SessionInfo) => void;
-  /** Mark many sessions read locally + persist in a single backend call. */
-  markManyRead: (sessions: SessionInfo[]) => void;
-}
-
-export const useReadStore = create<ReadState>((set) => ({
-  overrides: {},
-  markRead: (session) => useReadStore.getState().markManyRead([session]),
-  markManyRead: (sessions) => {
-    if (sessions.length === 0) return;
-    const now = Date.now();
-    set((state) => {
-      const next = { ...state.overrides };
-      for (const s of sessions) {
-        next[s.id] = Math.max(next[s.id] ?? 0, now);
-      }
-      return { overrides: next };
-    });
-    invoke("mark_sessions_read", {
-      items: sessions.map((s) => ({
-        sessionId: s.id,
-        workspacePath: s.workspacePath,
-      })),
-    }).catch(() => {
-      // Best-effort: the optimistic override still hides the dot this session;
-      // a failed persist just means the dot returns after the next scan.
-    });
-  },
 }));
 
 // ── Report store ────────────────────────────────────────────────────────────

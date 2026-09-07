@@ -12,10 +12,10 @@ import { describe, expect, it } from "vitest";
  * `opener:allow-open-path`, `opener:default` does not include it (it is
  * `allow-open-url` + `allow-reveal-item-in-dir` + `allow-default-urls`), so the
  * ACL rejected the command and the unawaited promise swallowed the rejection.
- * The same bug had already happened once before, in the decision-float window
- * missing `opener:default` — see the comment on `openExternal` in
- * `markdown/safeLinks.tsx`. Nothing but a manual click-through of every view in
- * every window would have caught either one.
+ * The same bug had already happened once before, in the (since removed)
+ * decision-float window missing `opener:default` — see the comment on
+ * `openExternal` in `markdown/safeLinks.tsx`. Nothing but a manual
+ * click-through of every view would have caught either one.
  *
  * Everything here is derived rather than hand-listed, so it stays true as
  * plugins and capabilities change:
@@ -385,12 +385,7 @@ describe("capability coverage", () => {
   it("finds the windows, their entries and the plugin APIs they reach", () => {
     // A silent parse failure anywhere above would make the real assertion pass
     // by checking nothing, which is the one way this guard could rot unnoticed.
-    expect([...windowEntries().keys()].sort()).toEqual([
-      "decision-float",
-      "main",
-      "preview",
-      "settings",
-    ]);
+    expect([...windowEntries().keys()].sort()).toEqual(["main"]);
     // Both halves must actually find something. A regex that silently stops
     // matching would leave the real assertion below passing over an empty list,
     // which is the one way this guard could rot without anyone noticing.

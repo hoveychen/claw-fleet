@@ -4,6 +4,8 @@ import {
   carryPromptToDevice,
   codexEffortChoices,
   defaultWorkspace,
+  newSessionConfigSummary,
+  newSessionLocationSummary,
   recentWorkspaces,
 } from "./Composer";
 import { loadDraft, saveDraft, type DraftStorage } from "../draft";
@@ -146,6 +148,66 @@ describe("defaultWorkspace", () => {
 
   it("纯聊天路径可作为上次用过的目标被记住", () => {
     expect(defaultWorkspace("", recents, "/home/chat", "/home/chat")).toBe("/home/chat");
+  });
+});
+
+describe("new-session summaries", () => {
+  it("把设备与项目压成一条可扫读的位置摘要", () => {
+    expect(
+      newSessionLocationSummary({
+        deviceLabel: "Mac Studio",
+        connected: true,
+        isChat: false,
+        workspaceName: "api-server",
+        workspacePath: "/Users/demo/workspace/api-server",
+      }),
+    ).toEqual({
+      title: "Mac Studio · api-server",
+      detail: "在线 · /Users/demo/workspace/api-server",
+    });
+  });
+
+  it("纯聊天摘要不泄漏原 workspace", () => {
+    expect(
+      newSessionLocationSummary({
+        deviceLabel: "Mac Studio",
+        connected: false,
+        isChat: true,
+        workspaceName: "api-server",
+        workspacePath: "/Users/demo/workspace/api-server",
+      }),
+    ).toEqual({
+      title: "Mac Studio · 纯聊天",
+      detail: "离线 · 不绑定任何项目目录",
+    });
+  });
+
+  it("把 Agent、模型、effort 与权限压成配置摘要", () => {
+    expect(
+      newSessionConfigSummary({
+        toolLabel: "Claude",
+        modelLabel: "Opus 5",
+        effortLabel: "xhigh",
+        permissionLabel: "自动接受编辑",
+      }),
+    ).toEqual({
+      title: "Claude · Opus 5 · xhigh",
+      detail: "自动接受编辑",
+    });
+  });
+
+  it("默认模型与 effort 仍明确显示，不留空白摘要", () => {
+    expect(
+      newSessionConfigSummary({
+        toolLabel: "Codex",
+        modelLabel: "",
+        effortLabel: "",
+        permissionLabel: "",
+      }),
+    ).toEqual({
+      title: "Codex · 默认模型 · 默认努力度",
+      detail: "按 Agent 默认权限运行",
+    });
   });
 });
 

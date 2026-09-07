@@ -188,21 +188,6 @@ export function canEnqueueSession(s: SessionInfo): boolean {
   );
 }
 
-/**
- * Whether a session counts as *unread*: it has newer activity than the last
- * time it was read. `overrideReadMs` is the optimistic client-side read stamp
- * (from `useReadStore`) that covers the window between a dwell-read and the next
- * backend scan re-stamping `lastReadMs`. Never-read sessions (both stamps
- * absent → 0) are unread as long as they have any activity.
- */
-export function sessionUnread(
-  s: SessionInfo,
-  overrideReadMs?: number,
-): boolean {
-  const lastRead = Math.max(s.lastReadMs ?? 0, overrideReadMs ?? 0);
-  return s.lastActivityMs > lastRead;
-}
-
 // ── Frontend-only session types ──────────────────────────────────────────────
 
 export type SessionOutcome =
