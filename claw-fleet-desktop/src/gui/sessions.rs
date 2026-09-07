@@ -117,9 +117,8 @@ pub(crate) fn get_messages_since(
     offset: Option<u64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<TailDelta, String> {
-    let mut probe = crate::cmd_probe::CmdProbe::start("get_messages_since", &jsonl_path);
-    let backend = state.backend.read().unwrap();
-    probe.locked();
+    let probe = crate::cmd_probe::CmdProbe::start("get_messages_since", &jsonl_path);
+    let backend = &state.backend;
     let out = backend.get_messages_since(&jsonl_path, offset);
     probe.done(|| match &out {
         Ok((msgs, off)) => format!("{} msgs, offset {off}", msgs.len()),
