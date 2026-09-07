@@ -668,8 +668,16 @@ export function NewSessionSheet({
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
   const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
   const [picking, setPicking] = useState(false);
   const [picker, setPicker] = useState<"location" | "config" | null>(null);
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    },
+    [],
+  );
   const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
     client,
     NEW_SESSION_ATTACH_KEY,
@@ -731,7 +739,9 @@ export function NewSessionSheet({
 
   const isChat = Boolean(chatPath) && workspace === chatPath;
   const effectiveWorkspace = workspace === "__custom__" ? customWorkspace.trim() : workspace;
-  const canSubmit = Boolean(client && effectiveWorkspace && prompt.trim() && !busy && !uploading);
+  const canSubmit = Boolean(
+    client && effectiveWorkspace && prompt.trim() && !busy && !created && !uploading,
+  );
 
   const deviceLabel =
     devices?.find((device) => device.id === targetDeviceId)?.label ?? t("当前设备");
@@ -796,9 +806,14 @@ export function NewSessionSheet({
       settled = true;
       // 记住这次用的 repo，下次打开新会话 sheet 默认选中它（独立键，不受 clearDraft 影响）。
       saveDraft(scopedKey(deviceId, LAST_WORKSPACE_KEY), effectiveWorkspace);
+      setCreated(true);
+      // ack 到达就清掉已发送草稿；哪怕系统返回键在 650ms 成功态期间关闭页面，
+      // 下次也不会把已经发出的任务恢复出来。短暂停留只用于呈现确认反馈。
       clearDraft();
       reset();
-      onClose();
+      closeTimerRef.current = window.setTimeout(() => {
+        onClose();
+      }, 650);
     };
     // 方案 A:收到桌面早 ack 即乐观关闭——提交已抵达桌面,不必干等 reply。
     const send = () => client.request("spawn_session", params, undefined, succeed);
@@ -840,7 +855,12 @@ export function NewSessionSheet({
     <div className={styles.sheetBackdrop}>
       <div className={styles.sheet} role="dialog" aria-label={t("新会话")}>
         <div className={styles.sheetHead}>
-          <button className={styles.sheetClose} onClick={onClose} aria-label={t("关闭")}>
+          <button
+            className={styles.sheetClose}
+            onClick={onClose}
+            aria-label={t("关闭")}
+            disabled={created}
+          >
             <X size={21} />
           </button>
           <span className={styles.sheetTitle}>{t("新会话")}</span>
@@ -929,8 +949,18 @@ export function NewSessionSheet({
         </div>
 
         <div className={styles.sheetFooter}>
-          <button className={styles.submit} disabled={!canSubmit} onClick={() => void submit()}>
-            {busy ? (
+          <button
+            className={styles.submit}
+            data-success={created}
+            disabled={!canSubmit}
+            onClick={() => void submit()}
+          >
+            {created ? (
+              <>
+                <Check size={18} />
+                {t("已启动")}
+              </>
+            ) : busy ? (
               t("创建中…")
             ) : (
               <>
@@ -939,8 +969,14 @@ export function NewSessionSheet({
               </>
             )}
           </button>
-          <span className={styles.submitHint}>
-            {!prompt.trim() ? t("输入任务后即可启动") : locationSummary.title}
+          <span className={styles.submitHint} aria-live="polite">
+            {created
+              ? t("目标设备已确认收到")
+              : busy
+                ? t("正在发往 {0}…", deviceLabel)
+                : !prompt.trim()
+                  ? t("输入任务后即可启动")
+                  : locationSummary.title}
           </span>
         </div>
 
@@ -951,6 +987,7 @@ export function NewSessionSheet({
             <div
               className={styles.pickerSheet}
               role="dialog"
+              aria-modal="true"
               aria-label={picker === "location" ? t("运行位置") : t("运行配置")}
             >
               <span className={styles.pickerGrabber} />
@@ -963,7 +1000,11 @@ export function NewSessionSheet({
                 {picker === "location" ? (
                   <>
                     {chatPath && (
-                      <div className={styles.modeSwitch} aria-label={t("会话类型")}>
+                      <div
+                        className={styles.modeSwitch}
+                        role="group"
+                        aria-label={t("会话类型")}
+                      >
                         <button
                           data-active={!isChat}
                           onClick={() =>

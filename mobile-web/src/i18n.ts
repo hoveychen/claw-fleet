@@ -612,6 +612,8 @@ const DICT: Record<string, string> = {
   自定义路径: "Custom path",
   启动会话: "Start session",
   已启动: "Started",
+  "正在发往 {0}…": "Sending to {0}…",
+  目标设备已确认收到: "The target device confirmed receipt",
   输入任务后即可启动: "Enter a task to start",
   "按 Agent 默认权限运行": "Uses the agent's default permissions",
   "高风险：Agent 将不再请求命令或文件操作确认":

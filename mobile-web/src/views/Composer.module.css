@@ -379,6 +379,11 @@
   opacity: 0.45;
 }
 
+.submit[data-success="true"] {
+  background: var(--color-success);
+  opacity: 1;
+}
+
 .submitHint {
   display: block;
   min-height: 17px;
