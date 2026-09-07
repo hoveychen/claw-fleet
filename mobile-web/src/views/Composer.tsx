@@ -1181,6 +1181,13 @@ export function ResumeComposer({
   // it for real; keyed by index+content so a stale key never hides the wrong row
   // after the list re-indexes.
   const [cancelledKeys, setCancelledKeys] = useState<Set<string>>(new Set());
+  // A fresh snapshot is authoritative, so drop the optimistic hides: without
+  // this the set grows forever and a *new* follow-up that happens to land on
+  // the same index with the same text would be hidden permanently.
+  const pendingKey = pendingMessages.join(" ");
+  useEffect(() => {
+    setCancelledKeys((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [pendingKey]);
   const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
     client,
     `resume:${session.id}:attachments`,
@@ -1211,6 +1218,12 @@ export function ResumeComposer({
     const h = el.offsetHeight;
     setOpenHeight((prev) => (prev === h ? prev : h));
   });
+
+  // Chips still worth rendering — gates the "已排队" label too, so cancelling
+  // the last one doesn't leave a header standing over an empty list.
+  const visiblePending = pendingMessages
+    .map((text, index) => ({ text, index }))
+    .filter(({ text, index }) => !cancelledKeys.has(`${index}:${text}`));
 
   const cancelQueued = async (index: number, text: string) => {
     if (!client) return;
@@ -1309,24 +1322,22 @@ export function ResumeComposer({
       style={collapsed && openHeight ? { marginBottom: -openHeight } : undefined}
       aria-hidden={collapsed || undefined}
     >
-      {pendingMessages.length > 0 && (
+      {visiblePending.length > 0 && (
         <div className={styles.queuedList}>
           <div className={styles.queuedLabel}>{t("已排队，本轮结束后自动发送")}</div>
-          {pendingMessages.map((m, i) =>
-            cancelledKeys.has(`${i}:${m}`) ? null : (
-              <div key={i} className={styles.queuedChip}>
-                <span className={styles.queuedText}>{m}</span>
-                <button
-                  type="button"
-                  className={styles.queuedCancel}
-                  onClick={() => cancelQueued(i, m)}
-                  aria-label={t("取消这条排队消息")}
-                >
-                  ×
-                </button>
-              </div>
-            ),
-          )}
+          {visiblePending.map(({ text: m, index: i }) => (
+            <div key={i} className={styles.queuedChip}>
+              <span className={styles.queuedText}>{m}</span>
+              <button
+                type="button"
+                className={styles.queuedCancel}
+                onClick={() => cancelQueued(i, m)}
+                aria-label={t("取消这条排队消息")}
+              >
+                ×
+              </button>
+            </div>
+          ))}
         </div>
       )}
       <textarea
