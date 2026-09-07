@@ -8,7 +8,6 @@ import { isWebBuild } from "../hostEnv";
 import {
   getItem,
   setItem,
-  resolveFeature,
   getFeatureState,
   setFeatureState,
   resolveFeatureState,
@@ -18,6 +17,7 @@ import {
   modeDefault,
   type FeatureState,
 } from "../storage";
+import { runControlPlaneSelfHeal } from "../controlPlaneSelfHeal";
 import { TriStateToggle } from "./TriStateToggle";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
 import { AccountInfo } from "./AccountInfo";
@@ -397,64 +397,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     invoke<HookSetupPlan>("get_hooks_setup_plan").then((plan) => {
       setHooksPlan(plan);
-      // Auto-apply hooks that the UI shows as enabled but were never actually installed
-      // (e.g. user dismissed onboarding without toggling the default-on checkboxes)
-      if (resolveFeature("guard-enabled") && !plan.guardInstalled) {
-        invoke("apply_guard_hook").catch((e: unknown) =>
-          console.error("auto-apply guard hook:", e),
-        );
-      }
-      if (resolveFeature("elicitation-enabled") && !plan.elicitationInstalled) {
-        invoke("apply_elicitation_hook").catch((e: unknown) =>
-          console.error("auto-apply elicitation hook:", e),
-        );
-      }
-      // These are default-ON: the localStorage checkbox is the source of truth
-      // for the user's choice (absent → on), and disk is healed to match. Apply
-      // is idempotent, so it installs the sentinel when missing and refreshes
-      // title/locale when present. A stored "false" means the user explicitly
-      // turned it off in Settings — respected here (no auto-apply). This mirrors
-      // the guard/elicitation pattern above; we deliberately do NOT write the
-      // key back from disk, which would strand the default-on the moment disk
-      // showed not-yet-installed.
-      if (resolveFeature("interaction-mode-enabled")) {
-        invoke("apply_interaction_mode").catch((e: unknown) =>
-          console.error("auto-apply interaction mode:", e),
-        );
-      }
-      if (resolveFeature("plan-approval-enabled") && !plan.planApprovalInstalled) {
-        invoke("apply_plan_approval_hook").catch((e: unknown) =>
-          console.error("auto-apply plan approval:", e),
-        );
-      }
-      if (resolveFeature("prd-mode-enabled")) {
-        invoke("apply_prd_mode").catch((e: unknown) =>
-          console.error("auto-apply prd mode:", e),
-        );
-      }
-      if (resolveFeature("wiki-guidance-enabled")) {
-        invoke("apply_wiki_guidance").catch((e: unknown) =>
-          console.error("auto-apply wiki guidance:", e),
-        );
-      }
-      if (resolveFeature("model-guidance-enabled")) {
-        invoke("apply_model_guidance").catch((e: unknown) =>
-          console.error("auto-apply model guidance:", e),
-        );
-      }
-      if (resolveFeature("session-title-guidance-enabled")) {
-        invoke("apply_session_title_guidance").catch((e: unknown) =>
-          console.error("auto-apply session title guidance:", e),
-        );
-      }
-      // Codex guidance is derived, not a separate toggle: mirror the Claude
-      // concept toggles (interaction / PRD / wiki / model) onto
-      // ~/.codex/AGENTS.md on startup. reconcile reads the Claude sentinels
-      // (disk source of truth), refreshes title/locale, and migrates away any
-      // legacy monolithic codex-guidance block from before the split.
-      invoke("reconcile_codex_guidance").catch((e: unknown) =>
-        console.error("startup reconcile codex guidance:", e),
-      );
+      // Same self-heal the app shell runs on every start (App.tsx) — kept here
+      // too because opening 设置 is exactly when a stale disk state is most
+      // visible, and every command in it is idempotent. The list itself lives
+      // in one place so the two callers cannot drift.
+      runControlPlaneSelfHeal((command) => invoke(command), plan);
     }).catch(() => {});
   }, []);
 
