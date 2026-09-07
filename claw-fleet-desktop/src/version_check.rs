@@ -39,6 +39,12 @@ struct CacheFile {
 #[derive(Deserialize)]
 struct GithubRelease {
     tag_name: String,
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Deserialize)]
+struct GithubAsset {
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -47,6 +53,11 @@ struct ChinaManifest {
     version: String,
     china: serde_json::Value,
 }
+
+const REQUIRED_DESKTOP_ASSETS: [&str; 2] = [
+    "claw-fleet-macos.pkg",
+    "claw-fleet-windows-x64-setup.exe",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReleaseSource {
@@ -107,12 +118,28 @@ fn parse_release_version(source: ReleaseSource, body: &str) -> Result<String, St
         ReleaseSource::Github => {
             let release: GithubRelease =
                 serde_json::from_str(body).map_err(|e| format!("github json: {e}"))?;
+            if REQUIRED_DESKTOP_ASSETS
+                .iter()
+                .any(|required| !release.assets.iter().any(|asset| asset.name == *required))
+            {
+                return Err("GitHub release is missing desktop installers".into());
+            }
             normalise_release_version(&release.tag_name)
         }
         ReleaseSource::ChinaManifest => {
             let manifest: ChinaManifest =
                 serde_json::from_str(body).map_err(|e| format!("china manifest json: {e}"))?;
-            if manifest.schema != 1 || !manifest.china.is_object() {
+            let assets = manifest
+                .china
+                .get("assets")
+                .and_then(serde_json::Value::as_object);
+            if manifest.schema != 1
+                || assets.is_none_or(|assets| {
+                    REQUIRED_DESKTOP_ASSETS
+                        .iter()
+                        .any(|required| !assets.contains_key(*required))
+                })
+            {
                 return Err("unsupported or incomplete China manifest".into());
             }
             normalise_release_version(&manifest.version)
@@ -262,20 +289,38 @@ mod tests {
     #[test]
     fn parses_both_release_sources_and_rejects_bad_mirror_schema() {
         assert_eq!(
-            parse_release_version(ReleaseSource::Github, r#"{"tag_name":"v2.7.1"}"#).unwrap(),
+            parse_release_version(
+                ReleaseSource::Github,
+                r#"{"tag_name":"v2.7.1","assets":[{"name":"claw-fleet-macos.pkg"},{"name":"claw-fleet-windows-x64-setup.exe"}]}"#,
+            )
+            .unwrap(),
             "2.7.1"
         );
         assert_eq!(
             parse_release_version(
                 ReleaseSource::ChinaManifest,
-                r#"{"schema":1,"version":"v2.7.1","china":{"assets":{}}}"#,
+                r#"{"schema":1,"version":"v2.7.1","china":{"assets":{"claw-fleet-macos.pkg":{},"claw-fleet-windows-x64-setup.exe":{}}}}"#,
             )
             .unwrap(),
             "2.7.1"
         );
         assert!(parse_release_version(
             ReleaseSource::ChinaManifest,
-            r#"{"schema":2,"version":"v2.7.1","china":{"assets":{}}}"#,
+            r#"{"schema":2,"version":"v2.7.1","china":{"assets":{"claw-fleet-macos.pkg":{},"claw-fleet-windows-x64-setup.exe":{}}}}"#,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn incomplete_release_is_rejected_during_publish_window() {
+        assert!(parse_release_version(
+            ReleaseSource::Github,
+            r#"{"tag_name":"v2.7.1","assets":[]}"#,
+        )
+        .is_err());
+        assert!(parse_release_version(
+            ReleaseSource::ChinaManifest,
+            r#"{"schema":1,"version":"v2.7.1","china":{"assets":{"claw-fleet-macos.pkg":{}}}}"#,
         )
         .is_err());
     }
