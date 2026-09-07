@@ -9,9 +9,10 @@
  *    page the agent named and the reader opened. This is "what is going on and
  *    what am I looking at" — ambient, plural, glanceable, and gone entirely
  *    (zero width) when there is nothing in it. Its content is *derived*: live
- *    subagents come from the sessions store, docs from `docs` below. There is no
- *    open/close state for it, because a column with nothing in it does not
- *    render at all.
+ *    subagents come from the sessions store, docs from `docs` below. Its only
+ *    state is the reader's override of the auto behaviour, and that lives in
+ *    the component: a column with nothing in it does not render at all unless
+ *    the toolbar switch says to.
  *
  * 2. **The drawer** — an overlay panel that floats over the transcript and
  *    shows exactly one thing at a time: a session facet (Skills, 决策, Token,
@@ -79,13 +80,9 @@ export interface AuxState {
   /** What the drawer is showing: a facet name or a doc id. `null` means the
    *  drawer is closed — which says nothing about the rail. */
   active: string | null;
-  /** The last thing the drawer showed, so the toolbar's switch can put it back
-   *  instead of guessing. Survives closing; cleared when the thing itself is
-   *  gone (`closeDoc`, `pruneTab`). */
-  last: string | null;
 }
 
-export const initialAux: AuxState = { docs: [], active: null, last: null };
+export const initialAux: AuxState = { docs: [], active: null };
 
 /** Cap on remembered doc cards. A long session can name dozens of files; the
  *  rail is a "what I have been reading" stack, not a history. Oldest drops
@@ -130,11 +127,10 @@ export function toggleTab(state: AuxState, id: string): AuxState {
 }
 
 /** Open something in the drawer without the toggle-off half — for the header
- *  menu's facet items, the toolbar switch, and jumps from elsewhere (a clicked
- *  plan row). */
+ *  menu's facet items and jumps from elsewhere (a clicked plan row). */
 export function showTab(state: AuxState, id: string): AuxState {
   if (state.active === id) return state;
-  return { ...state, active: id, last: id };
+  return { ...state, active: id };
 }
 
 /** Open a doc: card it if new (never a second copy), then read it in the
@@ -147,7 +143,7 @@ export function openDoc(state: AuxState, kind: AuxDocKind, ref: string): AuxStat
   // The doc we are about to open is last, so trimming from the front can never
   // drop it.
   if (docs.length > MAX_AUX_DOCS) docs = docs.slice(docs.length - MAX_AUX_DOCS);
-  return { ...state, docs, active: doc.id, last: doc.id };
+  return { ...state, docs, active: doc.id };
 }
 
 /**
@@ -161,11 +157,7 @@ export function closeDoc(state: AuxState, id: string): AuxState {
   const idx = state.docs.findIndex((d) => d.id === id);
   if (idx < 0) return state;
   const docs = state.docs.filter((d) => d.id !== id);
-  return {
-    docs,
-    active: state.active === id ? null : state.active,
-    last: state.last === id ? null : state.last,
-  };
+  return { ...state, docs, active: state.active === id ? null : state.active };
 }
 
 /** The drawer's own close button (and its scrim). The rail is untouched — the
@@ -174,23 +166,14 @@ export function closeAux(state: AuxState): AuxState {
   return { ...state, active: null };
 }
 
-/** What the toolbar switch should reopen, or `null` when the drawer has never
- *  shown anything the session still offers (the caller picks a default). */
-export function reopenAuxId(state: AuxState): string | null {
-  return state.last;
-}
-
 /**
  * Drop drawer content whose subject no longer exists.
  *
  * 后台任务 empties as soon as the session takes another turn, and switching
- * sessions can strand the drawer on a facet the new one doesn't offer. The
- * remembered `last` is pruned on the same terms, or the toolbar switch would
- * reopen onto nothing.
+ * sessions can strand the drawer on a facet the new one doesn't offer.
  */
 export function pruneTab(state: AuxState, exists: (id: string) => boolean): AuxState {
   const active = state.active != null && !exists(state.active) ? null : state.active;
-  const last = state.last != null && !exists(state.last) ? null : state.last;
-  if (active === state.active && last === state.last) return state;
-  return { ...state, active, last };
+  if (active === state.active) return state;
+  return { ...state, active };
 }
