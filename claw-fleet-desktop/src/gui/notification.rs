@@ -46,6 +46,7 @@ pub(crate) fn reapply_all_guidance_if_installed(
     reapply_prd_mode_if_installed(state, title_override, locale_override);
     reapply_wiki_guidance_if_installed(state, locale_override);
     reapply_model_guidance_if_installed(state, locale_override);
+    reapply_session_title_guidance_if_installed(state, title_override, locale_override);
     reapply_codex_guidance(state, title_override, locale_override);
 }
 
@@ -122,6 +123,26 @@ pub(crate) fn reapply_model_guidance_if_installed(
     };
     if let Err(e) = backend.apply_model_guidance(&locale) {
         eprintln!("re-apply model guidance failed: {e}");
+    }
+}
+
+/// Session-title guidance carries the user title, so it re-syncs on both a
+/// title and a locale change (unlike the two locale-only blocks above).
+pub(crate) fn reapply_session_title_guidance_if_installed(
+    state: &tauri::State<AppState>,
+    title_override: &str,
+    locale_override: Option<&str>,
+) {
+    let backend = state.backend.read().unwrap();
+    if !backend.get_hooks_plan().session_title_guidance_installed {
+        return;
+    }
+    let locale = match locale_override {
+        Some(l) => l.to_string(),
+        None => state.locale.lock().unwrap().clone(),
+    };
+    if let Err(e) = backend.apply_session_title_guidance(title_override, &locale) {
+        eprintln!("re-apply session title guidance failed: {e}");
     }
 }
 

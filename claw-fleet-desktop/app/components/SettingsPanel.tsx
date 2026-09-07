@@ -446,6 +446,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
           console.error("auto-apply model guidance:", e),
         );
       }
+      if (resolveFeature("session-title-guidance-enabled")) {
+        invoke("apply_session_title_guidance").catch((e: unknown) =>
+          console.error("auto-apply session title guidance:", e),
+        );
+      }
       // Codex guidance is derived, not a separate toggle: mirror the Claude
       // concept toggles (interaction / PRD / wiki / model) onto
       // ~/.codex/AGENTS.md on startup. reconcile reads the Claude sentinels
@@ -630,6 +635,27 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       console.error("model guidance toggle failed:", e);
     }
   }, [reconcileCodexGuidance]);
+
+  // ── Session-title guidance state (default on) ──────────────────────────
+  const [sessionTitleGuidanceState, setSessionTitleGuidanceState] = useState<FeatureState>(
+    () => getFeatureState("session-title-guidance-enabled"),
+  );
+
+  const handleToggleSessionTitleGuidance = useCallback(async (state: FeatureState) => {
+    setSessionTitleGuidanceState(state);
+    setFeatureState("session-title-guidance-enabled", state);
+    const enabled = resolveFeatureState(state, "session-title-guidance-enabled");
+    try {
+      if (enabled) {
+        await invoke("apply_session_title_guidance");
+      } else {
+        await invoke("remove_session_title_guidance");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("session title guidance toggle failed:", e);
+    }
+  }, []);
 
   const handleToggleElicitation = useCallback(async (state: FeatureState) => {
     setElicitationState(state);
@@ -2255,6 +2281,19 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     value={modelGuidanceState}
                     defaultOn={featureDefault("model-guidance-enabled")}
                     onChange={handleToggleModelGuidance}
+                  />
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.session_title_guidance_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.session_title_guidance_enabled")}</span>
+                  <TriStateToggle
+                    value={sessionTitleGuidanceState}
+                    defaultOn={featureDefault("session-title-guidance-enabled")}
+                    onChange={handleToggleSessionTitleGuidance}
                   />
                 </div>
                 <div className={styles.row}>

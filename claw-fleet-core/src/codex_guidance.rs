@@ -369,25 +369,7 @@ Use `reviewDocs` (an array of `{{ \"kind\": \"wiki\"|\"file\", \"ref\": \
 / report / plan file you produced: Fleet renders each as a tab beside the \
 card so {title} reads it in place instead of hunting down the path.\n\
 \n\
-## Session title\n\
-\n\
-Once the conversation has a stable topic, call `fleet__set_session_title` to \
-give the current session a concise, descriptive title. Do this once per \
-session as soon as the topic is clear enough to name; do not merely copy the \
-user's first message. Keep the title specific (name the concrete task or \
-question), avoid generic labels such as \"Help\" or \"Coding task\", and do \
-not ask {title} to supply a title. If the conversation's topic materially \
-changes, call it again with the new title; otherwise do not rename on every \
-turn.\n\
-\n\
-Like other Fleet MCP tools, Codex may defer it from the upfront tool list; \
-invoke it inside the outer `exec` with the exact direct-call shape \
-`await tools.mcp__fleet__fleet__set_session_title({{ title: \"<concise title>\" }});`. \
-**Do not inspect `ALL_TOOLS`, search tool lists, gate the call on apparent \
-availability, or use dynamic lookup:** deferred MCP tools are absent from \
-those lists even when they are callable. This tool is non-blocking. If the \
-direct call returns a not-registered / unknown-tool error, continue the task \
-without retrying or interrupting {title}.\n\
+{session_title}\
 \n\
 ### Deferred-tool wait invariant\n\
 \n\
@@ -461,6 +443,15 @@ where a terminal turn is plain text.\n\
 toolset this turn (rare), respond with plain text as normal.",
         title = title,
         ix_lang = ix_lang,
+        // The codex interaction block is English-only today (locale only picks
+        // the `ix_lang` line), so the shared section is rendered in English too
+        // — otherwise a `zh` host would get one Chinese section wedged into an
+        // otherwise English block.
+        session_title = crate::session_title_guidance::render_session_title_section(
+            &title,
+            "en",
+            crate::session_title_guidance::Harness::Codex,
+        ),
     )
 }
 
@@ -1071,6 +1062,29 @@ mod tests {
             g.contains("tools.mcp__fleet__fleet__set_session_title")
                 && g.contains("Do not inspect `ALL_TOOLS`"),
             "must give the exact direct-call shape and forbid the deferred-tool list trap"
+        );
+    }
+
+    /// The naming semantics are shared with the Claude-side guidance file
+    /// (`session_title_guidance`). Asserting the block *embeds* that renderer —
+    /// rather than re-checking its wording here — is what keeps a future edit
+    /// from being applied to one harness and forgotten on the other.
+    #[test]
+    fn session_title_section_comes_from_the_shared_renderer() {
+        let shared = crate::session_title_guidance::render_session_title_section(
+            "Boss",
+            "en",
+            crate::session_title_guidance::Harness::Codex,
+        );
+        assert!(
+            render_codex_interaction_block("", "en").contains(&shared),
+            "codex block must embed the shared session-title section verbatim"
+        );
+        // …and the zh block too: the section stays English there on purpose, so
+        // a locale switch must not silently drop it.
+        assert!(
+            render_codex_interaction_block("", "zh").contains(&shared),
+            "zh codex block must carry the same English session-title section"
         );
     }
 

@@ -47,6 +47,24 @@ pub(crate) fn remove_model_guidance(state: tauri::State<'_, AppState>) -> Result
 }
 
 #[tauri::command(async)]
+pub(crate) fn apply_session_title_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let title = state.user_title.lock().unwrap().clone();
+    let locale = state.locale.lock().unwrap().clone();
+    state
+        .backend
+        .write()
+        .unwrap()
+        .apply_session_title_guidance(&title, &locale)
+}
+
+#[tauri::command(async)]
+pub(crate) fn remove_session_title_guidance(
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.write().unwrap().remove_session_title_guidance()
+}
+
+#[tauri::command(async)]
 pub(crate) fn get_interaction_diagnostics(
     state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::interaction_mode_diagnostics::DiagnosticCheck> {

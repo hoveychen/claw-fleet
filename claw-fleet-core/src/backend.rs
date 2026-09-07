@@ -1140,6 +1140,13 @@ pub trait Backend: Send + Sync {
     // ── Model guidance (global CLAUDE.md block) ─────────────────────────────
     fn apply_model_guidance(&self, locale: &str) -> Result<(), String>;
     fn remove_model_guidance(&self) -> Result<(), String>;
+
+    // ── Session-title guidance (global CLAUDE.md block) ─────────────────────
+    // Takes the user title as well as the locale (like interaction mode, unlike
+    // the two guidance blocks above) because the text addresses the user by
+    // name.
+    fn apply_session_title_guidance(&self, user_title: &str, locale: &str) -> Result<(), String>;
+    fn remove_session_title_guidance(&self) -> Result<(), String>;
     /// QA diagnostics: report on the four backend-observable checkpoints in
     /// the AskUserQuestion → Decision Card pipeline. The frontend appends a
     /// fifth row (Tauri listener self-test) it owns.

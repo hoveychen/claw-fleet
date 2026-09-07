@@ -324,6 +324,12 @@ enum Commands {
         #[command(subcommand)]
         action: ModelGuidanceCommands,
     },
+    /// Manage the block in ~/.claude/CLAUDE.md that asks the agent to name its
+    /// own session through the `fleet__set_session_title` MCP tool.
+    SessionTitleGuidance {
+        #[command(subcommand)]
+        action: SessionTitleGuidanceCommands,
+    },
     /// Recurring / cron-style scheduler: run something periodically. A prompt
     /// Fleet re-runs on an interval by spawning a fresh session each time — reach
     /// for this for any "do X every N minutes / hourly / daily / on a schedule"
@@ -1056,6 +1062,24 @@ pub(crate) enum ModelGuidanceCommands {
     Status,
 }
 
+#[derive(Subcommand)]
+pub(crate) enum SessionTitleGuidanceCommands {
+    /// Write ~/.claude/fleet-session-title.md and inject its @import into
+    /// ~/.claude/CLAUDE.md (idempotent)
+    Apply {
+        /// What agents call the user (defaults to the locale's Boss/老板)
+        #[arg(long, default_value = "")]
+        title: String,
+        /// Guidance locale: `en` or `zh`
+        #[arg(long, default_value = "en")]
+        locale: String,
+    },
+    /// Strip the sentinel block and delete the guidance file (idempotent)
+    Remove,
+    /// Print whether the guidance block is installed (exit 1 if not)
+    Status,
+}
+
 fn main() {
     claw_fleet_core::console::init_utf8();
 
@@ -1238,6 +1262,38 @@ fn main() {
             }
             ModelGuidanceCommands::Status => {
                 if claw_fleet_core::model_guidance::is_model_guidance_installed() {
+                    println!("installed");
+                } else {
+                    println!("not installed");
+                    std::process::exit(1);
+                }
+            }
+        },
+        Commands::SessionTitleGuidance { action } => match action {
+            SessionTitleGuidanceCommands::Apply { title, locale } => {
+                match claw_fleet_core::session_title_guidance::apply_session_title_guidance(
+                    &title, &locale,
+                ) {
+                    Ok(()) => println!(
+                        "Session-title guidance installed (~/.claude/fleet-session-title.md + CLAUDE.md import)."
+                    ),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            SessionTitleGuidanceCommands::Remove => {
+                match claw_fleet_core::session_title_guidance::remove_session_title_guidance() {
+                    Ok(()) => println!("Session-title guidance removed."),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            SessionTitleGuidanceCommands::Status => {
+                if claw_fleet_core::session_title_guidance::is_session_title_guidance_installed() {
                     println!("installed");
                 } else {
                     println!("not installed");

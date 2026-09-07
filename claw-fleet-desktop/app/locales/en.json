@@ -1878,6 +1878,8 @@
     "prd_mode_enabled": "Enable PRD discipline mode",
     "model_guidance_desc": "Inject a Claude + Codex model capability/cost/effort cheat-sheet so agents pick a model deliberately for subagents, workflow agents, and new sessions. Applies to both Claude and Fleet-launched Codex sessions.",
     "model_guidance_enabled": "Enable model-selection guidance",
+    "session_title_guidance_desc": "Ask the agent to name its own session once the topic is clear, via the fleet__set_session_title tool, so task cards read as titles instead of the first prompt. A title you set by hand always wins. Applies to both Claude and Fleet-launched Codex sessions.",
+    "session_title_guidance_enabled": "Let agents title their own sessions",
     "skill_autosync_enabled": "Enable automatic skill interop",
     "wiki_guidance_desc": "Tell agents to archive finished HTML reports, demos and markdown docs into the Fleet wiki (`fleet wiki publish`) so they show up in the Wiki board instead of getting lost in workdirs. Applies to both Claude and Fleet-launched Codex sessions.",
     "wiki_guidance_enabled": "Enable wiki publish guidance",
