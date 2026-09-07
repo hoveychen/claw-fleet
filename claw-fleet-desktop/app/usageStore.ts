@@ -44,12 +44,21 @@ export interface CodexRateLimitWindow {
   resetsAt?: number | null;
 }
 
+export interface CodexRateLimitBucket {
+  limitId?: string | null;
+  limitName?: string | null;
+  normalModelSlug?: string | null;
+  primary?: CodexRateLimitWindow | null;
+  secondary?: CodexRateLimitWindow | null;
+}
+
 export interface CodexUsageItem {
   limitId?: string | null;
   limitName?: string | null;
   planType?: string | null;
   primary?: CodexRateLimitWindow | null;
   secondary?: CodexRateLimitWindow | null;
+  rateLimitBuckets?: CodexRateLimitBucket[];
   credits?: { hasCredits: boolean; unlimited: boolean; balance?: string | null } | null;
   /** Where the numbers came from: "foxy-switcher" (read from the local foxy
    *  daemon) or "codex-app-server" (queried from codex itself). The codex
