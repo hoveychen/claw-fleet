@@ -403,8 +403,18 @@ function ReceiptLine({ line }: { line: ModelReceiptLine }) {
         <div className={styles.codex_note}>
           {t(
             "token_receipt.provider_priced",
-            "该行消费为 provider 实际收费,非官方 $/M 参考价,故不逐行计价",
+            "该行消费按 provider 发票或官方标价折算,非 Fleet 的 $/M 参考价,故不逐行计价。实际扣费以账户币种为准",
           )}
+        </div>
+      )}
+      {line.unpricedCalls > 0 && (
+        // Tokens without money. A fresh OpenRouter generation 404s for some
+        // minutes, and a route with no published rate never prices at all —
+        // both would otherwise read as "this part was free".
+        <div className={styles.codex_note}>
+          {t("token_receipt.unpriced_calls", "另有 {{count}} 次调用暂无法定价,其 token 已计入、金额未计入", {
+            count: line.unpricedCalls,
+          })}
         </div>
       )}
     </div>

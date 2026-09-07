@@ -99,7 +99,8 @@ cacheCreationTokens: number,
 cacheCreation1hTokens: number, cacheReadTokens: number, outputTokens: number, 
 inputPrice: number, outputPrice: number, cacheWritePrice: number, cacheWrite1hPrice: number, cacheReadPrice: number, 
 costUsd: number, 
-pricedByProvider: boolean, };
+pricedByProvider: boolean, 
+unpricedCalls: number, };
 
 export type TodayUsageBreakdown = { 
 date: string, 
