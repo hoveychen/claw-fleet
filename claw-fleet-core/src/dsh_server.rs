@@ -56,11 +56,27 @@ const HEALTH_ENDPOINT: &str = "settings/describe";
 
 /// Locate the `dsh` executable.
 ///
-/// PATH first, then the standard global-npm install locations. Fleet never
-/// falls back to `npx`: a cold `npx @deepseek-ai/dsh` downloads ~300 MB before
-/// it serves anything, which would turn "start a session" into a multi-minute
-/// stall with no way to report progress. A user who wants dsh installs it
-/// (`npm i -g @deepseek-ai/dsh`), exactly like Claude Code and Codex.
+/// Scans the augmented PATH — the process PATH plus every dir an `npm i -g`
+/// binary can land in (homebrew, `/usr/local`, `~/.npm-global`, `~/.local`,
+/// nvm / fnm / volta, and the wizard's own `~/.fleet/node`). Not a plain
+/// `which`: a GUI app's PATH is only the system dirs, so a dsh installed
+/// under a version-managed Node would be invisible to it even though the
+/// wizard had just installed it through the official channel
+/// ([`crate::harness_install`] locates `npm` across the same dirs, and the two
+/// must agree about what "installed" means).
+///
+/// Then the npx cache. dsh's own README says to run
+/// `npx @deepseek-ai/dsh web`, so plenty of machines have a working dsh that
+/// was never installed globally: `npx` puts nothing on PATH, it unpacks the
+/// package at `<npm cache>/_npx/<content hash>/node_modules/.bin/dsh`. The
+/// hash is unpredictable but the directory holding the hashes is not, so
+/// those bin dirs are enumerable — see [`npx_cache_bin_dirs`].
+///
+/// What Fleet still refuses is `npx` as a *launcher*: shelling out to
+/// `npx @deepseek-ai/dsh web` on a cold cache downloads ~300 MB before it
+/// serves anything, turning "start a session" into a multi-minute stall with
+/// no way to report progress. Reading a cache that already exists costs one
+/// `read_dir` and downloads nothing.
 pub fn discover() -> Option<PathBuf> {
     // Explicit override, same escape hatch `claude_binary` gives for a Claude
     // install Fleet cannot find. Also the only way to point at an `npx`-cached
@@ -73,20 +89,86 @@ pub fn discover() -> Option<PathBuf> {
         }
     }
 
-    if let Some(p) = crate::process_util::which("dsh") {
-        return Some(PathBuf::from(p));
-    }
+    crate::session_launch::find_in_dirs(&search_dirs(), binary_names())
+}
 
-    let home = dirs::home_dir();
-    let candidates = [
-        home.as_ref()
-            .map(|h| h.join(".npm-global").join("bin").join("dsh")),
-        Some(PathBuf::from("/opt/homebrew/bin/dsh")),
-        Some(PathBuf::from("/usr/local/bin/dsh")),
-        home.as_ref()
-            .map(|h| h.join(".local").join("bin").join("dsh")),
-    ];
-    candidates.into_iter().flatten().find(|p| p.exists())
+/// Filenames an installed dsh can carry. npm's global bin on Windows is a
+/// generated `dsh.cmd` shim next to the extensionless shell script; ordering
+/// puts the runnable one first.
+fn binary_names() -> &'static [&'static str] {
+    #[cfg(windows)]
+    {
+        &["dsh.cmd", "dsh.exe", "dsh"]
+    }
+    #[cfg(not(windows))]
+    {
+        &["dsh"]
+    }
+}
+
+/// The directories [`discover`] scans, in order: real installs first, npx
+/// cache last — a globally installed dsh is the one the user maintains, an
+/// npx copy is whatever version they happened to run once.
+fn search_dirs() -> Vec<PathBuf> {
+    let mut dirs = crate::session_launch::augmented_path_dirs();
+    dirs.extend(npx_cache_bin_dirs());
+    dirs
+}
+
+/// npm's cache root: `$npm_config_cache` when set, else the platform default
+/// (`~/.npm` on unix, `%LocalAppData%\npm-cache` on Windows). Read rather than
+/// asked for — `npm config get cache` is a Node startup per probe, and this
+/// runs on every wizard-panel open.
+fn npm_cache_root() -> Option<PathBuf> {
+    for key in ["npm_config_cache", "NPM_CONFIG_CACHE"] {
+        if let Some(v) = std::env::var_os(key) {
+            if !v.is_empty() {
+                return Some(PathBuf::from(v));
+            }
+        }
+    }
+    let home = crate::session::real_home_dir()?;
+    #[cfg(windows)]
+    {
+        let local = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("AppData").join("Local"));
+        Some(local.join("npm-cache"))
+    }
+    #[cfg(not(windows))]
+    {
+        Some(home.join(".npm"))
+    }
+}
+
+/// Every `_npx/<hash>/node_modules/.bin` that actually holds a dsh, newest
+/// cache entry first.
+///
+/// Filtering by "contains dsh" here rather than letting the caller probe each
+/// dir keeps unrelated cache entries (there are dozens on a busy machine) out
+/// of the search list, and the mtime ordering means a user who re-ran `npx`
+/// after a dsh release gets the copy they just used, not the stalest one.
+fn npx_cache_bin_dirs() -> Vec<PathBuf> {
+    let Some(root) = npm_cache_root() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(root.join("_npx")) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .map(|e| e.path().join("node_modules").join(".bin"))
+        .filter(|bin| binary_names().iter().any(|n| bin.join(n).is_file()))
+        .map(|bin| {
+            let mtime = std::fs::metadata(&bin)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            (mtime, bin)
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.into_iter().map(|(_, p)| p).collect()
 }
 
 /// Is dsh installed on this machine?
@@ -537,6 +619,125 @@ fn read_launch_line(child: &mut Child) -> Result<(u16, String), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// dsh installs through `npm i -g`, so it lands in whatever bin dir the
+    /// active Node.js runtime owns — and when Node comes from nvm / fnm /
+    /// volta, or from the environment wizard's own bootstrap under
+    /// `~/.fleet/node`, that dir is none of the four classic globals. A GUI
+    /// app's PATH is only the system dirs, so the `which` step misses it too:
+    /// the wizard would install dsh through its official channel and then
+    /// still report it as not installed.
+    ///
+    /// The installer side already scans the augmented PATH
+    /// (`harness_install::find_in_augmented_path`); discovery must search the
+    /// same set, or the two disagree about what "installed" means.
+    #[test]
+    fn search_dirs_cover_the_runtime_managed_node_bin_dirs() {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", tmp.path()) };
+
+        let dirs = search_dirs();
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
+            None => unsafe { std::env::remove_var("FLEET_HOME") },
+        }
+
+        let home = tmp.path();
+        for expected in [
+            home.join(".fleet").join("node").join("bin"),
+            home.join(".volta").join("bin"),
+            home.join("Library/Application Support/fnm/aliases/default/bin"),
+            home.join(".local/share/fnm/aliases/default/bin"),
+        ] {
+            assert!(
+                dirs.contains(&expected),
+                "discover() does not search {}; dirs = {dirs:?}",
+                expected.display()
+            );
+        }
+    }
+
+    /// dsh's own README tells people to run `npx @deepseek-ai/dsh web`, and
+    /// that works — so a user who followed it has a perfectly good dsh on the
+    /// machine and no reason to suspect Fleet cannot see it. npx installs
+    /// nothing on PATH, but it does leave the package unpacked at a fixed
+    /// shape: `<npm cache>/_npx/<content hash>/node_modules/.bin/dsh`. The
+    /// hash is unpredictable; the directory holding the hashes is not, so the
+    /// bin dirs are enumerable and discovery must include them.
+    ///
+    /// Scanning an existing cache costs a `read_dir` and downloads nothing —
+    /// it is not the `npx`-as-launcher fallback `discover` still refuses.
+    #[test]
+    fn search_dirs_include_an_npx_cached_dsh() {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+
+        // One hash dir holding dsh, one holding something else — only the
+        // former may be offered, and it must be the .bin dir, not the root.
+        let dsh_bin = tmp
+            .path()
+            .join(".npm/_npx/deadbeef00000001/node_modules/.bin");
+        std::fs::create_dir_all(&dsh_bin).unwrap();
+        std::fs::write(dsh_bin.join("dsh"), b"#!/usr/bin/env node\n").unwrap();
+        let other_bin = tmp
+            .path()
+            .join(".npm/_npx/deadbeef00000002/node_modules/.bin");
+        std::fs::create_dir_all(&other_bin).unwrap();
+        std::fs::write(other_bin.join("tsc"), b"#!/usr/bin/env node\n").unwrap();
+
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", tmp.path()) };
+        let dirs = search_dirs();
+        match prev {
+            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
+            None => unsafe { std::env::remove_var("FLEET_HOME") },
+        }
+
+        assert!(
+            dirs.contains(&dsh_bin),
+            "an npx-cached dsh is not discoverable; dirs = {dirs:?}"
+        );
+        assert!(
+            !dirs.contains(&other_bin),
+            "unrelated npx cache entries must not be searched; dirs = {dirs:?}"
+        );
+    }
+
+    /// The same scan against a cache a real `npx` wrote, rather than a
+    /// hand-built fixture — the fixture only proves the code does what I
+    /// believe npx's layout to be.
+    ///
+    /// Populate one and run it (a plain `npx @deepseek-ai/dsh` on a machine
+    /// that already has a global dsh installs nothing — npm exec puts the npm
+    /// prefix's bin on PATH and runs that, so the prefix has to be isolated
+    /// too):
+    ///
+    /// ```text
+    /// env -i HOME=/tmp/fh PATH=/tmp/nodebin:/usr/bin:/bin \
+    ///   npm_config_cache=/tmp/npxcache npm_config_prefix=/tmp/fp \
+    ///   npx -y @deepseek-ai/dsh --version
+    /// npm_config_cache=/tmp/npxcache cargo test -p claw-fleet-core --lib \
+    ///   -- --ignored live_finds_a_real_npx_cached_dsh --nocapture
+    /// ```
+    #[test]
+    #[ignore = "needs an npm cache a real npx populated; set npm_config_cache"]
+    fn live_finds_a_real_npx_cached_dsh() {
+        let dirs = npx_cache_bin_dirs();
+        println!("npx cache bin dirs: {dirs:?}");
+        let bin = dirs
+            .first()
+            .map(|d| d.join("dsh"))
+            .expect("no npx-cached dsh found — is npm_config_cache pointing at a populated cache?");
+        assert!(bin.is_file(), "{} is not a file", bin.display());
+        assert!(
+            bin.to_string_lossy().contains("_npx"),
+            "{} is not in the npx cache",
+            bin.display()
+        );
+    }
 
     /// The registry is blind to servers spawned under a throwaway `FLEET_HOME`
     /// (tests, harness scripts): their records evaporate with the temp dir and

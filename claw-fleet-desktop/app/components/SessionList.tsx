@@ -488,37 +488,40 @@ export function SessionList() {
             the profile card. The toggles used to live inside the card, but at
             narrow sidebar widths they crowded out the app name — so they get
             their own bar. Mirrors the banner's `view_toggle` segmented control
-            for visual consistency. Hidden when the sidebar is collapsed. */}
+            for visual consistency. The whole footer — toolbar and profile card
+            alike — is dropped when the sidebar is collapsed: at 64px the card
+            degenerates into a bare app icon plus a gear, which reads as clutter
+            at the bottom of an icon rail. Settings stay reachable from the tray
+            menu (contextMenu.ts) and from the new-session form. */}
+        {!sidebarCollapsed && (
         <div className={styles.footer} data-wizard="settings-footer">
-          {!sidebarCollapsed && (
-            <div className={styles.footer_toolbar} role="group" aria-label={t("settings.title")}>
-              {keepAwakeSupported && (
-                <button
-                  type="button"
-                  className={`${styles.footer_toolbar_btn} ${keepAwake ? styles.footer_toolbar_btn_active : ""}`}
-                  onClick={() => setKeepAwake(!keepAwake)}
-                  title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-                  aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-                  aria-pressed={keepAwake}
-                >
-                  <Coffee size={14} strokeWidth={1.5} />
-                </button>
-              )}
+          <div className={styles.footer_toolbar} role="group" aria-label={t("settings.title")}>
+            {keepAwakeSupported && (
               <button
                 type="button"
-                className={`${styles.footer_toolbar_btn} ${styles.footer_theme_btn}`}
-                onClick={() =>
-                  // Cycle light → dark → system → light. setTheme is global and
-                  // already re-skins the app + overlays, so no extra wiring.
-                  setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")
-                }
-                title={t(`theme.${theme}`)}
-                aria-label={t(`theme.${theme}`)}
+                className={`${styles.footer_toolbar_btn} ${keepAwake ? styles.footer_toolbar_btn_active : ""}`}
+                onClick={() => setKeepAwake(!keepAwake)}
+                title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                aria-pressed={keepAwake}
               >
-                {theme === "light" ? "☀" : theme === "dark" ? "☽" : "⊙"}
+                <Coffee size={14} strokeWidth={1.5} />
               </button>
-            </div>
-          )}
+            )}
+            <button
+              type="button"
+              className={`${styles.footer_toolbar_btn} ${styles.footer_theme_btn}`}
+              onClick={() =>
+                // Cycle light → dark → system → light. setTheme is global and
+                // already re-skins the app + overlays, so no extra wiring.
+                setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")
+              }
+              title={t(`theme.${theme}`)}
+              aria-label={t(`theme.${theme}`)}
+            >
+              {theme === "light" ? "☀" : theme === "dark" ? "☽" : "⊙"}
+            </button>
+          </div>
           {/* role=button, not <button>: keyboard a11y restored via
               tabIndex + onKeyDown. */}
           <div
@@ -537,14 +540,13 @@ export function SessionList() {
             <div className={styles.footer_avatar}>
               <img src="/app-icon.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
-            {!sidebarCollapsed && (
-              <div className={styles.footer_info}>
-                <span className={styles.footer_name}>{t("title")}</span>
-              </div>
-            )}
+            <div className={styles.footer_info}>
+              <span className={styles.footer_name}>{t("title")}</span>
+            </div>
             <span className={styles.footer_gear}>⚙</span>
           </div>
         </div>
+        )}
 
         {/* Resize handle — hidden when collapsed */}
         {!sidebarCollapsed && (

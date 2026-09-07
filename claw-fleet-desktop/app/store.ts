@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, WaitingAlert } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome } from "./types";
 import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
@@ -909,41 +909,6 @@ export function navigateToSessionDetail(session: SessionInfo) {
     useDetailStore.getState().open(session);
   }
 }
-
-// ── Waiting alerts store ────────────────────────────────────────────────────
-
-interface WaitingAlertsState {
-  alerts: WaitingAlert[];
-  /** Session IDs the user has acknowledged (dismissed) in this app session */
-  dismissedIds: Set<string>;
-  setAlerts: (alerts: WaitingAlert[]) => void;
-  dismiss: (sessionId: string) => void;
-  /** Acknowledge every currently-loaded alert at once (same semantics as dismiss) */
-  dismissAll: () => void;
-  refresh: () => Promise<void>;
-}
-
-export const useWaitingAlertsStore = create<WaitingAlertsState>((set) => ({
-  alerts: [],
-  dismissedIds: new Set(),
-  setAlerts: (alerts) => set({ alerts }),
-  dismiss: (sessionId) =>
-    set((state) => {
-      const next = new Set(state.dismissedIds);
-      next.add(sessionId);
-      return { dismissedIds: next };
-    }),
-  dismissAll: () =>
-    set((state) => {
-      const next = new Set(state.dismissedIds);
-      for (const a of state.alerts) next.add(a.sessionId);
-      return { dismissedIds: next };
-    }),
-  refresh: async () => {
-    const alerts = await invoke<WaitingAlert[]>("get_waiting_alerts");
-    set({ alerts });
-  },
-}));
 
 // ── Audit read-state store ──────────────────────────────────────────────────
 
