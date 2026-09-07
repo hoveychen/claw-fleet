@@ -1,23 +1,30 @@
-//! `fleet serve` must take its `dsh web` with it when it is terminated.
+//! A terminated `fleet serve` must **leave** its `dsh web` running — and the
+//! next Fleet process must adopt that same one rather than start a second.
 //!
-//! `serve()` installs its exit path through `ctrlc::try_set_handler`, which is
-//! where `dsh_source::shutdown()` (and the injector releases) live. ctrlc refuses
-//! to install when SIGINT, SIGTERM or SIGHUP already has a non-`SIG_DFL`
-//! disposition — `platform::unix::init_os_handler` returns `EEXIST`, surfacing as
-//! `MultipleHandlers`. A non-interactive shell sets SIGINT to `SIG_IGN` for
-//! background jobs and `nohup` ignores SIGHUP, so a `fleet serve` started the way
-//! Fleet's own harnesses and launchers start it inherits exactly that, logs
-//! "ctrlc handler install failed", and dies on SIGTERM with no cleanup — leaving
-//! its `dsh web` reparented to init, still holding its port.
+//! This file used to assert the opposite. Until `d9632e22` (2026-09-07,
+//! "fix(dsh): preserve server across Fleet restarts") a `serve` exit killed its
+//! `dsh web`, and the test that landed on 2026-08-18 guarded that. The contract
+//! was then deliberately inverted: one `dsh web` serves every dsh session on the
+//! machine, so tearing it down when Fleet restarts kills sessions mid-turn.
+//! `serve`'s ctrlc handler now releases the two injectors and exits, with the
+//! reason stated at the call site — "the authenticated dsh service is
+//! machine-level and must survive a `fleet serve` restart while a turn is still
+//! running".
 //!
-//! Measured before the fix, same binary and same SIGTERM:
-//!   - spawned with SIGINT ignored (this test's shape) → dsh web survived, ppid=1
-//!   - spawned with default dispositions              → dsh web reaped
-//! Twelve such orphans had accumulated on one developer machine.
+//! So the surviving process is the *feature*. What keeps "survives" from meaning
+//! "leaks" is the registry at `$FLEET_HOME/dsh-server.json`: a record carrying a
+//! launch token is retained for adoption, `DshServer::adopt_existing` reconnects
+//! to it (authenticating with that token, health-probing `settings/describe`
+//! first), and only token-less legacy records are killed by `reap_orphans`.
+//! Both halves are asserted below, because "still alive" on its own is exactly
+//! what an orphan looks like.
 //!
-//! So the test reproduces the inherited disposition rather than the shell: it
-//! sets `SIG_IGN` in the child between fork and exec, which is precisely what a
-//! background job inherits.
+//! Signal handling is still load-bearing and still tested by proxy: the exit
+//! path only runs if `ctrlc::try_set_handler` installed, which it refuses to do
+//! when SIGINT/SIGTERM/SIGHUP arrives as `SIG_IGN`. A background job in a
+//! non-interactive shell inherits exactly that, so the child here sets `SIG_IGN`
+//! between fork and exec, and `clear_inherited_signal_ignores` has to undo it —
+//! otherwise the injector releases never run either.
 
 #![cfg(unix)]
 
@@ -28,9 +35,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// How long the `dsh web` gets to disappear after serve is signalled. Generous:
-/// the handler only has to kill and reap one child.
-const CLEANUP_BUDGET: Duration = Duration::from_secs(8);
+/// How long we watch after signalling serve, to be sure the `dsh web` is not
+/// merely slow to die. Generous on purpose: the assertion is that nothing kills
+/// it, so a short window would pass even on a regression that kills it late.
+const SURVIVAL_WINDOW: Duration = Duration::from_secs(5);
 
 fn unique_tempdir(label: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -165,19 +173,52 @@ fn alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
+/// The registry records Fleet keeps for live `dsh web` servers, read straight
+/// from the file `dsh_server`'s registry helpers own. Only the two fields this
+/// test reasons about are pulled out.
+///
+/// Note the `.fleet` component: `get_fleet_dir()` treats `FLEET_HOME` as a *home*
+/// and appends `.fleet` to it, so the registry of a serve started with
+/// `FLEET_HOME=<dir>` lands at `<dir>/.fleet/dsh-server.json`.
+fn registry_servers(fleet_home: &Path) -> Vec<(u32, bool)> {
+    let raw = std::fs::read_to_string(fleet_home.join(".fleet").join("dsh-server.json"))
+        .unwrap_or_default();
+    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+    parsed
+        .get("servers")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|r| {
+                    let pid = r
+                        .get("server")
+                        .and_then(|s| s.get("pid"))
+                        .and_then(|p| p.as_u64())
+                        .unwrap_or(0) as u32;
+                    let has_token = r
+                        .get("launchToken")
+                        .map(|t| !t.is_null())
+                        .unwrap_or(false);
+                    (pid, has_token)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[test]
-fn terminating_serve_takes_its_dsh_web_with_it() {
+fn a_terminated_serve_leaves_its_dsh_web_for_the_next_fleet_to_adopt() {
     if claw_fleet_core::process_util::which("node").is_none() {
         eprintln!("skipped: node not on PATH, the dsh fixture cannot run");
         return;
     }
 
-    let fleet_home = unique_tempdir("sigterm");
-    let port_file = fleet_home.join("port");
+    let fleet_home = unique_tempdir("adopt");
     let token = "orphan-test-token";
 
-    let mut serve = spawn_serve_with_sigint_ignored(&fleet_home, &port_file, token);
-    let port = wait_for_port_file(&port_file, Duration::from_secs(20), &mut serve);
+    let mut serve = spawn_serve_with_sigint_ignored(&fleet_home, &fleet_home.join("port"), token);
+    let port = wait_for_port_file(&fleet_home.join("port"), Duration::from_secs(20), &mut serve);
     let serve_pid = serve.child.id();
 
     // A scan is what starts `dsh web`; nothing spawns it before the first call.
@@ -185,7 +226,7 @@ fn terminating_serve_takes_its_dsh_web_with_it() {
     assert!(
         body.contains("session-fake-slow"),
         "the fixture's session is missing, so no dsh web was started and there \
-         would be nothing to orphan: {}",
+         is nothing to hand over: {}",
         body.chars().take(300).collect::<String>()
     );
 
@@ -199,22 +240,63 @@ fn terminating_serve_takes_its_dsh_web_with_it() {
 
     // The signal a supervisor, a script's cleanup trap, or `pkill` sends.
     unsafe { libc::kill(serve_pid as libc::pid_t, libc::SIGTERM) };
+    let _ = serve.child.wait();
 
-    let deadline = Instant::now() + CLEANUP_BUDGET;
-    while alive(dsh_pid) && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(100));
+    // Watch the whole window: a regression that kills the service late must fail.
+    let deadline = Instant::now() + SURVIVAL_WINDOW;
+    while Instant::now() < deadline {
+        assert!(
+            alive(dsh_pid),
+            "dsh web {dsh_pid} died with the serve process that started it. That \
+             was the contract until d9632e22 and is no longer: one dsh web serves \
+             every dsh session on this machine, so a Fleet restart that takes it \
+             down kills sessions mid-turn. serve log:\n{}",
+            std::fs::read_to_string(&serve.log).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(200));
     }
 
-    let still_there = alive(dsh_pid);
-    if still_there {
-        // Do not leave the machine dirtier than the test found it, whatever the
-        // assertion decides.
-        unsafe { libc::kill(dsh_pid as libc::pid_t, libc::SIGKILL) };
-    }
+    // Surviving is only correct because the service is claimable. A record with
+    // no launch token is precisely what `reap_orphans` kills, so a token-less
+    // record here would mean the survivor is unreachable — an orphan holding a
+    // port, which is the failure this file originally existed to catch.
+    let records = registry_servers(&fleet_home);
+    assert_eq!(
+        records,
+        vec![(dsh_pid, true)],
+        "registry must retain exactly the surviving server, with its launch \
+         token, so the next Fleet can authenticate to it"
+    );
+
+    // The other half of "not a leak": a second serve adopts it instead of
+    // starting its own.
+    let port_file_2 = fleet_home.join("port2");
+    let mut serve2 = spawn_serve_with_sigint_ignored(&fleet_home, &port_file_2, token);
+    let port2 = wait_for_port_file(&port_file_2, Duration::from_secs(20), &mut serve2);
+    let body2 = get(port2, "/sessions", token);
+    let serve2_pid = serve2.child.id();
+    let own_children = dsh_children(serve2_pid);
+    let records_after = registry_servers(&fleet_home);
+
+    // Leave the machine no dirtier than we found it, whatever the asserts say.
+    drop(serve2);
+    unsafe { libc::kill(dsh_pid as libc::pid_t, libc::SIGKILL) };
+
     assert!(
-        !still_there,
-        "dsh web {dsh_pid} outlived the serve process that started it (its exit \
-         path never ran, so nothing stopped it and it kept its port). serve log:\n{}",
-        std::fs::read_to_string(&serve.log).unwrap_or_default()
+        body2.contains("session-fake-slow"),
+        "the second serve could not talk to the surviving dsh web, so the \
+         retained launch token bought nothing: {}",
+        body2.chars().take(300).collect::<String>()
+    );
+    assert!(
+        own_children.is_empty(),
+        "the second serve started its own dsh web ({own_children:?}) instead of \
+         adopting pid {dsh_pid} — two servers on one machine is the duplicate \
+         this registry exists to prevent"
+    );
+    assert_eq!(
+        records_after,
+        vec![(dsh_pid, true)],
+        "after adoption the registry must still describe one server, the same one"
     );
 }
