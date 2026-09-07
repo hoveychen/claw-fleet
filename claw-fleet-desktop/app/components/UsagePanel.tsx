@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ClaudeIcon, CodexIcon } from "./SessionCard";
+import { ClaudeIcon, CodexIcon, FoxyIcon } from "./SessionCard";
 import styles from "./UsagePanel.module.css";
 import {
   useUsageStore,
@@ -139,6 +139,27 @@ function CodexWindowBar({ window }: { window: CodexRateLimitWindow }) {
   );
 }
 
+// ── Usage-source mark (shared) ───────────────────────────────────────────────
+
+/** Foxy's fox head, shown on a card whose numbers came from the local
+ *  foxy-switcher daemon. An icon rather than the old "Foxy Switcher" text
+ *  badge: the header is one flex line shared with the plan badge, and two text
+ *  badges pushed the provider mark out of the Codex card entirely. The other
+ *  source ("anthropic" / "codex-app-server") is the provider itself, which the
+ *  header's own mark and title already say — so it renders nothing. */
+function UsageSourceMark({ source }: { source: string | null | undefined }) {
+  const { t } = useTranslation();
+  if (source !== "foxy-switcher") return null;
+  return (
+    <span
+      className={styles.source_icon}
+      title={`${t("account.usage_source")}: ${t("account.usage_source_foxy")}`}
+    >
+      <FoxyIcon />
+    </span>
+  );
+}
+
 // ── Section footer (shared) ──────────────────────────────────────────────────
 
 function SectionFooter({
@@ -206,8 +227,12 @@ function ClaudeUsageSection() {
   return (
     <div className={styles.tool_section}>
       <div className={styles.tool_header}>
-        <ClaudeIcon /> Claude Code
-        {info?.plan && <span className={styles.plan_badge}>{info.plan}</span>}
+        <ClaudeIcon />
+        <span className={styles.tool_name}>Claude Code</span>
+        {info?.plan && (
+          <span className={styles.plan_badge} title={info.plan}>{info.plan}</span>
+        )}
+        <UsageSourceMark source={info?.usage_source} />
       </div>
       {info?.email && (
         <div className={styles.account_line} title={t("account.email")}>
@@ -281,16 +306,18 @@ function CodexUsageSection() {
   return (
     <div className={styles.tool_section}>
       <div className={styles.tool_header}>
-        <CodexIcon /> Codex
-        {data?.planType && <span className={styles.plan_badge}>{data.planType}</span>}
-        {data?.usageSource && (
-          <span className={styles.plan_badge} title={t("account.usage_source")}>
-            {data.usageSource === "foxy-switcher"
-              ? t("account.usage_source_foxy")
-              : t("account.usage_source_codex_app_server")}
-          </span>
+        <CodexIcon />
+        <span className={styles.tool_name}>Codex</span>
+        {data?.planType && (
+          <span className={styles.plan_badge} title={data.planType}>{data.planType}</span>
         )}
+        <UsageSourceMark source={data?.usageSource} />
       </div>
+      {data?.email && (
+        <div className={styles.account_line} title={t("account.email")}>
+          {data.email}
+        </div>
+      )}
       {loading && !data && <p className={styles.dim}>{t("account.loading")}</p>}
       {error && (
         <div className={styles.error}>

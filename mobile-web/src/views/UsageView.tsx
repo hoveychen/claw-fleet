@@ -235,6 +235,7 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
           <div key={s.source} className={styles.section}>
             <div className={styles.sectionLabel}>{SOURCE_LABEL[s.source] ?? s.source}</div>
             <div className={styles.card}>
+              {s.email && <Row label={t("账号")} value={s.email} />}
               {s.plan && <Row label={t("套餐")} value={s.plan} />}
               {s.usageSource && (
                 <Row

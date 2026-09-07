@@ -164,6 +164,12 @@ pub struct SourceUsageSummary {
     /// `#[serde(default)]` keeps older serialized payloads deserializable.
     #[serde(default)]
     pub usage_source: Option<String>,
+    /// Which account these numbers belong to, so a foxy-managed machine can
+    /// name the account in use on every source, not just Claude. `None` when
+    /// the source cannot tell (e.g. Codex on API-key auth, which writes no
+    /// `id_token`). `#[serde(default)]` for older serialized payloads.
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 impl SourceUsageSummary {
@@ -200,6 +206,7 @@ impl SourceUsageSummary {
             } else {
                 Some(info.usage_source.clone())
             },
+            email: if info.email.is_empty() { None } else { Some(info.email.clone()) },
         }
     }
 
@@ -236,6 +243,7 @@ impl SourceUsageSummary {
             plan,
             bars,
             usage_source: val["usageSource"].as_str().map(|s| s.to_string()),
+            email: val["email"].as_str().map(|s| s.to_string()),
         }
     }
 }

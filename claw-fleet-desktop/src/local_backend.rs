@@ -4127,6 +4127,7 @@ mod tests {
                     plan: Some("pro".into()),
                     bars: vec![UsageBar { label: "5h".into(), utilization: 0.3, resets_at: None }],
                     usage_source: None,
+                    email: None,
                 }),
                 ..MockSource::new("a", "a", "a://")
             }),
@@ -4137,6 +4138,7 @@ mod tests {
                     plan: None,
                     bars: vec![],
                     usage_source: None,
+                    email: None,
                 }),
                 ..MockSource::new("b", "b", "b://")
             }),

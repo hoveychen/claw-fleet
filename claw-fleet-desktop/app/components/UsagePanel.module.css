@@ -58,6 +58,28 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+
+/* The provider mark and the foxy mark are flex items with no intrinsic min
+   width, so a long plan label used to squeeze them to zero — that is how the
+   Codex card lost its OpenAI mark while its "Self_serve_business_prolite"
+   badge overflowed the card. Only the plan badge may shrink, and it ellipsizes
+   rather than wrapping the header onto a second line. */
+.tool_header > svg,
+.source_icon {
+  flex: 0 0 auto;
+}
+
+.source_icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-dim);
+}
+
+.tool_name {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .plan_badge {
@@ -68,11 +90,15 @@
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   text-transform: capitalize;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Account email shown directly under the Claude tool_header so the user can
-   see which foxy-managed account is currently in use without leaving the
-   usage panel. */
+/* Account email shown directly under each tool_header (Claude and Codex alike)
+   so the user can see which foxy-managed account is currently in use without
+   leaving the usage panel. */
 .account_line {
   font-size: 10px;
   color: var(--color-text-dim);

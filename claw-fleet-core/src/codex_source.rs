@@ -1881,7 +1881,8 @@ pub fn codex_stale_rollout_paths(sessions: &[crate::session::SessionInfo]) -> Ve
 #[cfg(test)]
 mod tests {
     use super::{
-        build_session_from_sqlite, clamp_dead_session_status, codex_cost_and_input,
+        build_session_from_sqlite, clamp_dead_session_status, codex_account_email_from_auth_json,
+        codex_cost_and_input,
         codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
         codex_token_breakdown_from_lines, codex_token_deltas_from_lines, codex_usage_from_foxy,
@@ -3947,6 +3948,69 @@ mod tests {
         assert_eq!(primary.used_percent, 1);
         assert_eq!(primary.resets_at, Some(1_787_622_736));
         assert!(item.secondary.is_none());
+    }
+
+    #[test]
+    fn foxy_snapshot_carries_the_account_email() {
+        // The usage panel names the Codex account the way it names the Claude
+        // one; foxy is the only source that already knows which account is in
+        // use, so dropping the email here left the card anonymous.
+        let item = codex_usage_from_foxy(foxy_codex_account());
+        assert_eq!(item.email.as_deref(), Some("you@example.com"));
+    }
+
+    #[test]
+    fn foxy_snapshot_without_an_email_reports_none() {
+        let mut account = foxy_codex_account();
+        account.email = String::new();
+        assert_eq!(codex_usage_from_foxy(account).email, None);
+    }
+
+    /// Build an unsigned JWT whose payload is `claims` — the shape codex writes
+    /// into `auth.json` (`tokens.id_token`).
+    fn id_token(claims: serde_json::Value) -> String {
+        use base64::Engine as _;
+        let enc = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        format!(
+            "{}.{}.{}",
+            enc.encode(br#"{"alg":"RS256"}"#),
+            enc.encode(serde_json::to_vec(&claims).unwrap()),
+            enc.encode(b"sig"),
+        )
+    }
+
+    #[test]
+    fn app_server_account_email_comes_from_the_id_token_claim() {
+        // Claim names verified against a live ~/.codex/auth.json.
+        let auth = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "id_token": id_token(serde_json::json!({
+                    "email": "you@example.com",
+                    "email_verified": true,
+                    "name": "Harry C",
+                })),
+                "access_token": "at",
+                "account_id": "acc",
+            },
+        });
+        assert_eq!(
+            codex_account_email_from_auth_json(&auth).as_deref(),
+            Some("you@example.com"),
+        );
+    }
+
+    #[test]
+    fn api_key_auth_json_yields_no_account_email() {
+        // API-key logins write no `tokens.id_token` at all.
+        let auth = serde_json::json!({ "OPENAI_API_KEY": "sk-test" });
+        assert_eq!(codex_account_email_from_auth_json(&auth), None);
+    }
+
+    #[test]
+    fn malformed_id_token_yields_no_account_email() {
+        let auth = serde_json::json!({ "tokens": { "id_token": "not-a-jwt" } });
+        assert_eq!(codex_account_email_from_auth_json(&auth), None);
     }
 
     #[test]
@@ -6160,6 +6224,13 @@ pub struct CodexUsageItem {
     pub secondary: Option<CodexRateLimitWindow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credits: Option<CodexCreditsSnapshot>,
+    /// Which ChatGPT account these numbers belong to, so the usage panel can
+    /// name it the way the Claude card names its own (`AccountInfo::email`).
+    /// Sourced from foxy's account row when foxy serves the snapshot, else
+    /// decoded from `<CODEX_HOME>/auth.json`'s `id_token`. `None` when neither
+    /// is readable (API-key auth writes no `id_token`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
     /// Which window (if any) the account has actually hit: `"primary"` /
     /// `"secondary"`, or `None`/absent when not currently rate-limited. This is
     /// the authoritative "am I limited right now" signal from the app-server
@@ -6199,12 +6270,50 @@ pub const USAGE_SOURCE_APP_SERVER: &str = "codex-app-server";
 fn codex_usage_from_foxy(a: crate::foxy::FoxyCodexAccount) -> CodexUsageItem {
     CodexUsageItem {
         plan_type: plan_type_from_foxy_label(&a.plan),
+        email: (!a.email.is_empty()).then_some(a.email),
         rate_limit_reached_type: reached_window_from_percentages(&a.primary, &a.secondary),
         primary: a.primary,
         secondary: a.secondary,
         usage_source: USAGE_SOURCE_FOXY.to_string(),
         ..Default::default()
     }
+}
+
+/// The signed-in ChatGPT account's email, read from `<CODEX_HOME>/auth.json`.
+///
+/// Used to label the app-server-sourced usage snapshot; the foxy path gets the
+/// email from foxy's own account row instead. Reading the file (rather than
+/// spawning `codex login status`) matches how [`crate::harness_status`] probes
+/// the same store.
+fn codex_account_email() -> Option<String> {
+    let home = crate::codex_launch::codex_home()?;
+    let raw = std::fs::read_to_string(home.join("auth.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    codex_account_email_from_auth_json(&v)
+}
+
+/// Pure half of [`codex_account_email`]: pull the `email` claim out of the
+/// `tokens.id_token` JWT.
+///
+/// The claim set is verified against this machine's live `auth.json` (fields
+/// `email`, `name`, `https://api.openai.com/auth.chatgpt_plan_type`, …). The
+/// signature is *not* checked — this is a display label read out of a file only
+/// the local user can write, not an authorization decision.
+fn codex_account_email_from_auth_json(v: &serde_json::Value) -> Option<String> {
+    let token = v.pointer("/tokens/id_token")?.as_str()?;
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64_url_decode(payload)?;
+    let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let email = claims.get("email")?.as_str()?;
+    (!email.is_empty()).then(|| email.to_string())
+}
+
+/// Decode one base64url JWT segment (no padding, per RFC 7515).
+fn base64_url_decode(segment: &str) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(segment)
+        .ok()
 }
 
 /// Derive Codex's `rateLimitReachedType` from the window percentages.
@@ -6668,6 +6777,10 @@ fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageIt
                         // Codex has no notion of Fleet's source labels, so the
                         // field arrives at its serde default and is stamped here.
                         snapshot.usage_source = USAGE_SOURCE_APP_SERVER.to_string();
+                        // `account/rateLimits/read` returns limits only, so the
+                        // account label comes from auth.json — the same store
+                        // the CLI itself reads.
+                        snapshot.email = codex_account_email();
                         return Ok(snapshot);
                     }
                 }
