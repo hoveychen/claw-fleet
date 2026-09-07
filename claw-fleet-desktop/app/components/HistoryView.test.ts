@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFrozenOrder,
-  sessionPaneStyle,
 } from "./HistoryView";
 import { chainBarColor, dwellReadTargets } from "./sessionGroups";
 import { sessionEq } from "./SessionRow";
@@ -239,21 +238,3 @@ describe("applyFrozenOrder", () => {
  * repaints it. Hidden session tabs must therefore stay laid out while being
  * invisible, so their scroll layer and ResizeObserver never collapse to zero.
  */
-describe("sessionPaneStyle", () => {
-  it("keeps a hidden pane in layout without accepting input", () => {
-    expect(sessionPaneStyle(false)).toEqual({
-      visibility: "hidden",
-      position: "absolute",
-      inset: 0,
-      pointerEvents: "none",
-    });
-  });
-
-  it("lets the active pane participate in the detail flex row", () => {
-    expect(sessionPaneStyle(true)).toEqual({
-      visibility: "visible",
-      position: "relative",
-      pointerEvents: "auto",
-    });
-  });
-});

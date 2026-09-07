@@ -110,7 +110,9 @@ const ALL_KEYS = [
   // The 任务 (HistoryView) detail column's open tabs: {tabIds, activeId}.
   // Restored on boot and pruned against the first scan, so ids of sessions that
   // have since been deleted drop out instead of accumulating forever.
-  "launchpad-tabs",
+  // Which session (or the new-session composer) the 任务 page detail column
+  // was showing when the app last closed.
+  "launchpad-open",
 ] as const;
 
 // ── Onboarding feature registry ─────────────────────────────────────────────

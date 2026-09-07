@@ -402,7 +402,9 @@
   border-radius: var(--radius-xs);
   border: 1px solid transparent;
   max-width: 160px;
-  flex-shrink: 0;
+  /* Never squeezed: past a few open docs the strip scrolls instead of
+     shrinking every label to one letter. */
+  flex: 0 0 auto;
 }
 .aux_tab:hover {
   background: var(--color-bg-card);
@@ -413,6 +415,7 @@
 }
 
 .aux_tab_label {
+  flex: 0 0 auto;
   border: none;
   background: none;
   font-family: inherit;
