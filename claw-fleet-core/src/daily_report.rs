@@ -603,7 +603,7 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
 }
 
 /// Extract the non-token activity that belongs to one local calendar day.
-/// Token and cost fields come from `today_usage::session_usage_for_date`; this
+/// Token and cost fields come from `today_usage::sessions_usage_for_date`; this
 /// companion fold keeps report-only tool/search counters on the same boundary.
 fn extract_session_activity_for_date(
     jsonl_content: &str,
