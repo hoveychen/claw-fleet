@@ -51,16 +51,20 @@ function fmtPrice(n: number): string {
   return `$${n.toFixed(2)}/M`;
 }
 
-/** Drop the `claude-` noise; leave gpt / others as-is. */
+/** Drop the `claude-` noise and any `<provider>/<org>/` prefix; leave gpt /
+ * others as-is. A dsh route ships as e.g. `openrouter/anthropic/claude-opus-5`,
+ * so this reduces it to `opus-5` for the receipt's model column. */
 function prettyModel(model: string): string {
   if (!model) return "unknown";
-  return model.replace(/^claude-/, "");
+  const base = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
+  return base.replace(/^claude-/, "");
 }
 
 const SOURCE_LABEL: Record<string, string> = {
   "claude-code": "Claude",
   claude: "Claude",
   codex: "Codex",
+  dsh: "dsh",
   fleet: "Fleet",
 };
 
@@ -335,6 +339,12 @@ function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
 
 function ReceiptLine({ line }: { line: ModelReceiptLine }) {
   const { t } = useTranslation();
+  // Provider-priced (dsh): the spend is the provider's own charge for an open
+  // model space, which Fleet's reference $/M table cannot reproduce — so the
+  // per-row "× $X/M" column is deliberately withheld and only the tokens + real
+  // subtotal are shown. For every other source the rows reconcile to the
+  // subtotal to the cent.
+  const priced = line.pricedByProvider;
   // Cache writes are billed by TTL — a 1-hour write costs 2× the model's input
   // rate, a 5-minute write 1.25× — so they get one row each. Blending them into
   // a single row would leave `Σ rows ≠ subtotal`, which is exactly the receipt
@@ -374,10 +384,14 @@ function ReceiptLine({ line }: { line: ModelReceiptLine }) {
           <div key={r.label} className={styles.tok_row}>
             <span className={styles.tok_label}>{r.label}</span>
             <span className={styles.tok_count}>{fmtTok(r.tokens)}</span>
-            <span className={styles.tok_price}>× {fmtPrice(r.price)}</span>
-            <span className={styles.tok_sub}>
-              {fmtUsd((r.tokens / 1_000_000) * r.price)}
-            </span>
+            {!priced && (
+              <>
+                <span className={styles.tok_price}>× {fmtPrice(r.price)}</span>
+                <span className={styles.tok_sub}>
+                  {fmtUsd((r.tokens / 1_000_000) * r.price)}
+                </span>
+              </>
+            )}
           </div>
         ) : null,
       )}
@@ -385,6 +399,14 @@ function ReceiptLine({ line }: { line: ModelReceiptLine }) {
         <span>{t("token_receipt.subtotal", "小计")}</span>
         <span className={styles.line_total_value}>{fmtUsd(line.costUsd)}</span>
       </div>
+      {priced && (
+        <div className={styles.codex_note}>
+          {t(
+            "token_receipt.provider_priced",
+            "该行消费为 provider 实际收费,非官方 $/M 参考价,故不逐行计价",
+          )}
+        </div>
+      )}
     </div>
   );
 }

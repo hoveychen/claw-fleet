@@ -121,6 +121,14 @@ fn real_receipt_rows_reconcile_to_their_subtotals() {
             // unpriced with char-estimated tokens), which is why the surface is
             // agent-only.
             assert_ne!(l.source, "fleet", "{label}: Fleet's own spend is back on the receipt");
+            // Provider-priced (dsh) lines carry the provider's own charge for an
+            // open model space, which Fleet's reference $/M table cannot
+            // reproduce — so per-row pricing does not reconcile by design. Same
+            // treatment as `unknown` below: reported, not asserted.
+            if l.priced_by_provider {
+                worst = worst.max(drift);
+                continue;
+            }
             // `unknown` is not a model: it is where report rows whose session
             // model was never recorded land (including rows written before the
             // `<synthetic>` guard). Real money, but no published price to itemise
