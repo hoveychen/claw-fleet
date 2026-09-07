@@ -61,7 +61,8 @@
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
+  /* Sits on .bar (--color-bg-modal), which --color-bg-hover matches in dark. */
+  background: var(--color-bg-modal-hover);
   color: var(--color-text);
 }
 

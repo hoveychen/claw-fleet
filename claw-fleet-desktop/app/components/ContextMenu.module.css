@@ -30,8 +30,9 @@
   cursor: default;
 }
 
+/* Modal-surface hover: --color-bg-hover is the modal colour itself in dark. */
 .item:hover {
-  background: var(--color-bg-hover);
+  background: var(--color-bg-modal-hover);
 }
 
 .item_icon {

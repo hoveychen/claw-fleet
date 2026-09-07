@@ -97,7 +97,8 @@ function buildMenuItem(label: string, onClick: () => void): HTMLElement {
     "white-space: nowrap",
   ].join(";");
   item.addEventListener("mouseenter", () => {
-    item.style.background = "var(--color-bg-hover)";
+    // Modal-surface hover: --color-bg-hover equals --color-bg-modal in dark.
+    item.style.background = "var(--color-bg-modal-hover)";
   });
   item.addEventListener("mouseleave", () => {
     item.style.background = "";
@@ -234,7 +235,9 @@ async function showAboutDialog() {
   button.style.cssText = [
     "padding: 6px 18px",
     "font: inherit",
-    "background: var(--color-bg-hover)",
+    // Sits on the About panel (--color-bg-modal), which --color-bg-hover
+    // matches exactly in dark — the button had no fill of its own.
+    "background: var(--color-bg-modal-hover)",
     "color: var(--color-text)",
     "border: 1px solid var(--color-border-strong)",
     "border-radius: 6px",

@@ -133,6 +133,12 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --color-bg-user: #1f2534;
   --color-bg-modal: #292b2f;
   --color-bg-modal-overlay: rgba(0, 0, 0, 0.75);
+  /* Hover *on top of* a modal/menu surface. --color-bg-hover is a step above
+     --color-bg-card, and in dark it lands on exactly #292b2f — the modal
+     colour itself — so every menu item's hover was invisible (the header
+     overflow menu, the app-wide context menu, the dir-picker rows). Same
+     luminance step as card→hover, just taken from the modal step instead. */
+  --color-bg-modal-hover: #36383d;
 
   --color-text: #f7f8f8;
   --color-text-secondary: #8a8f98;
@@ -311,6 +317,9 @@ html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
   --color-bg-user: #e9d7c9;
   --color-bg-modal: #fbfaf7;
   --color-bg-modal-overlay: rgba(32, 28, 18, 0.4);
+  /* Light's modal is the card colour, so the card→hover step already works
+     here; named explicitly so both themes share one token. */
+  --color-bg-modal-hover: #f1eee7;
 
   --color-text: #1f2023;
   --color-text-secondary: #5d6168;
