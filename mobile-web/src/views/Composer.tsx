@@ -1199,6 +1199,16 @@ export function ResumeComposer({
     onSend: () => void submit(),
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
+  // 输入框按内容自增高。先把 height 归零再按 scrollHeight 量 —— 不归零的话
+  // scrollHeight 永远不小于当前高度，删字时框只会越撑越高。封顶交给 CSS 的
+  // max-height（超了就框内滚动），这里不再重复写死一个像素数。
+  const shownText = voice.showingPreview ? voice.preview : prompt;
+  useLayoutEffect(() => {
+    const el = voiceTailRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [shownText, voiceTailRef]);
   // Folded only when the parent asked AND the user has nothing in flight here.
   const collapsed =
     !!hidden &&
@@ -1342,7 +1352,7 @@ export function ResumeComposer({
       )}
       <textarea
         ref={voiceTailRef}
-        className={styles.promptInput}
+        className={styles.resumeInput}
         placeholder={
           enqueueing
             ? t("会话运行中，发送后排队，本轮结束自动接上…")
@@ -1350,7 +1360,7 @@ export function ResumeComposer({
               ? t("继续这个会话，也可点麦克风说…")
               : t("继续这个会话（留空 = continue）…")
         }
-        rows={2}
+        rows={1}
         value={voice.showingPreview ? voice.preview : prompt}
         readOnly={voice.showingPreview}
         onChange={(e) => setPrompt(e.target.value)}

@@ -559,6 +559,30 @@
   }
 }
 
+/* 会话内回复框自己的输入框。
+ *
+ * 和新会话页的 .promptInput 分家：那个类在「新会话页重做」（8b2ec4f4）里被改成
+ * min-height:190px + 去边框，因为它从此被套进全屏页的 .promptCard 里。回复框没有
+ * 那层卡片，继承过去的结果是 —— 写着 rows={2} 却被 190px 顶掉，边框圆角也一起没了，
+ * 整个回复区静息高度 ≈400px，吃掉 iPhone 14 的 47% 屏。
+ *
+ * 这里一行起步、按内容自增（高度由 JS 量 scrollHeight 写上来），封顶 30dvh。 */
+.resumeInput {
+  width: 100%;
+  min-height: 42px;
+  max-height: 30dvh;
+  background: transparent;
+  border: none;
+  padding: 10px 2px;
+  color: var(--color-text);
+  font-size: var(--t-body, 17px);
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
+  font-family: inherit;
+  outline: none;
+}
+
 .resumeActions {
   display: flex;
   flex-direction: column;
