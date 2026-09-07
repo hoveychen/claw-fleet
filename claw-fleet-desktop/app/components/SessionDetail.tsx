@@ -50,7 +50,6 @@ import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
 import {
   closeAux,
   closeDoc,
-  initialAux,
   isAuxFacet,
   openDoc,
   pruneTab,
@@ -58,8 +57,8 @@ import {
   toggleTab,
   type AuxDocKind,
   type AuxFacetItem,
-  type AuxState,
 } from "../detailAux";
+import { useSessionAux } from "../useSessionAux";
 import { SessionAuxPanel } from "./SessionAuxPanel";
 import { SessionAuxRail } from "./SessionAuxRail";
 import { SessionFacetPanel } from "./SessionFacetPanel";
@@ -457,7 +456,10 @@ export function SessionDetail({
      thing at a time (Skills, 决策, Token, 任务, 后台任务, 临时文件, Workflow, or
      one doc at full width). See detailAux.ts for the state and why the two are
      no longer one tab strip. */
-  const [aux, setAux] = useState<AuxState>(initialAux);
+  /* Scoped to this session: the component is re-pointed rather than remounted,
+     so the hook is what keeps one conversation's doc cards out of the next
+     one's rail. See useSessionAux. */
+  const [aux, setAux] = useSessionAux(liveSession?.id);
   /* The rail's visibility, when the reader has an opinion about it. `null` is
      the default and means "follow the content": present exactly when there are
      cards, zero width otherwise. The toolbar switch writes a boolean here, so
