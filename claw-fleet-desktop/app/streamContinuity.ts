@@ -1,12 +1,26 @@
 import type { LiveThinking, RawMessage } from "./types";
 
-/** Keep visible reasoning mounted through an empty sample from a growing sidecar. */
+/**
+ * Keep visible reasoning mounted through an empty sample from a growing
+ * sidecar — but only for the session we are actually showing.
+ *
+ * The retain-through-empty rule is what makes the sidecar/transcript handoff
+ * seamless, and it is also what leaked reasoning across sessions: SessionDetail
+ * is not remounted on a session switch, and a session with no sidecar at all
+ * samples back exactly like a session between two chunks. `sessionId` is the
+ * discriminator that tells those two apart, so a retained block is dropped the
+ * moment it no longer belongs to the open session, and a sample that raced in
+ * for the session we just left is ignored rather than shown under the new one.
+ */
 export function retainLiveThinking(
   previous: LiveThinking | null,
   incoming: LiveThinking | null,
+  sessionId: string,
 ): LiveThinking | null {
+  const retained = previous && previous.sessionId === sessionId ? previous : null;
+  if (incoming !== null && incoming.sessionId !== sessionId) return retained;
   if (incoming === null || (incoming.streaming && incoming.thinking.length === 0)) {
-    return previous;
+    return retained;
   }
   return incoming;
 }

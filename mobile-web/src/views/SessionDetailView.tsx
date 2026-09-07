@@ -1208,6 +1208,13 @@ export function SessionDetailView({
     };
   }, [client, session.id, working, tab]);
 
+  // This view is not remounted when the open session changes, and the poller
+  // above deliberately keeps the last reasoning through a failed or skipped
+  // sample (offline agent, hidden tab, submit in flight). Both together let one
+  // session's reasoning show under another, so ownership is checked at render.
+  const shownLiveThinking =
+    liveThinking && liveThinking.sessionId === session.id ? liveThinking : null;
+
   // ── Auto-scroll: stick to bottom unless the user scrolled up ──────────
   //
   // The same handler drives the composer's auto-hide. Reading back through the
@@ -1249,7 +1256,7 @@ export function SessionDetailView({
   useEffect(() => {
     const el = scrollRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [messages, liveThinking]);
+  }, [messages, shownLiveThinking]);
 
   // Safety net for the fold: a pane with nothing left to scroll emits no scroll
   // events, so a composer folded into that state could never be scrolled back
@@ -1521,17 +1528,17 @@ export function SessionDetailView({
             );
           });
         })()}
-        {liveThinking && (
+        {shownLiveThinking && (
           <div className={styles.liveThinking}>
             <div className={styles.liveThinkingHead}>
               <span className={styles.livePulse} />
               <Sparkles size={13} />
               {t("正在思考…")}
             </div>
-            <div className={styles.liveThinkingBody}>{liveThinking.thinking}</div>
+            <div className={styles.liveThinkingBody}>{shownLiveThinking.thinking}</div>
           </div>
         )}
-        {messages !== null && mainRows.length === 0 && !liveThinking && (
+        {messages !== null && mainRows.length === 0 && !shownLiveThinking && (
           <EmptyState compact icon={MessageSquareDashed} title={t("暂无可显示的消息")} />
         )}
       </div>
