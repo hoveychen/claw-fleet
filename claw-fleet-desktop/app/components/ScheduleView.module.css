@@ -461,7 +461,8 @@
   cursor: pointer;
 }
 .btn_ghost:hover {
-  background: var(--color-bg-hover);
+  /* Sits on the modal surface, which --color-bg-hover matches in dark. */
+  background: var(--color-bg-modal-hover);
 }
 .btn_primary {
   padding: 6px 16px;

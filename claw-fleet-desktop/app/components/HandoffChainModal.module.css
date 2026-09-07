@@ -80,7 +80,8 @@
   cursor: pointer;
 }
 .handoff_leg_clickable:hover {
-  background: var(--color-bg-hover);
+  /* Sits on .modal (--color-bg-modal), which --color-bg-hover matches in dark. */
+  background: var(--color-bg-modal-hover);
   color: var(--color-text);
 }
 

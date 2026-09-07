@@ -144,7 +144,8 @@
 }
 
 .newBtn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
+  /* Sits on the modal surface, which --color-bg-hover matches in dark. */
+  background: var(--color-bg-modal-hover);
 }
 
 .newBtn:disabled {
@@ -190,7 +191,8 @@
 }
 
 .cancel:hover {
-  background: var(--color-bg-hover);
+  /* Sits on the modal surface, which --color-bg-hover matches in dark. */
+  background: var(--color-bg-modal-hover);
 }
 
 .confirm {
