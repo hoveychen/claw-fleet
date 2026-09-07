@@ -27,6 +27,28 @@ fn heartbeat_path() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("consumer.heartbeat"))
 }
 
+/// How late the heartbeat loop may be before its lateness is worth a log line.
+pub const STALL_WARN: Duration = Duration::from_millis(2000);
+
+/// How long a single [`write_heartbeat`] may take before it is worth a log line.
+pub const SLOW_WRITE_WARN: Duration = Duration::from_millis(500);
+
+/// Scheduling latency for one heartbeat iteration, with the file write removed.
+///
+/// The loop measures `gap` from one iteration's top to the next, and the
+/// previous iteration's [`write_heartbeat`] runs *inside* that span. So a slow
+/// filesystem lands in `gap` looking exactly like the thread being descheduled
+/// — which is how 2532 log lines came to assert "process likely
+/// suspended/throttled" about what an isolation experiment showed to be write
+/// latency (`~/.fleet/` writes of 3.2s while a bare-sleep thread in the same
+/// process saw zero drift; wiki `desktop/heartbeat-stall-is-io`).
+///
+/// Subtracting `write_in_gap` leaves scheduling alone, so the two causes get
+/// reported separately instead of one impersonating the other.
+pub fn scheduling_gap(gap: Duration, write_in_gap: Duration) -> Duration {
+    gap.saturating_sub(write_in_gap)
+}
+
 pub fn write_heartbeat() {
     let Some(path) = heartbeat_path() else { return };
     if let Some(parent) = path.parent() {
@@ -400,5 +422,48 @@ mod tests {
             writes.load(Ordering::Relaxed),
             reads.load(Ordering::Relaxed),
         );
+    }
+
+    /// The measured case from the 2026-09-06 isolation run: a `write_heartbeat`
+    /// that itself took 3.224s produced a 3.730s loop gap. The thread was never
+    /// starved — a bare-sleep thread in the same process saw zero drift in the
+    /// same window — so this must NOT be reported as a stall.
+    #[test]
+    fn a_slow_write_is_not_a_scheduling_stall() {
+        let gap = Duration::from_millis(3730);
+        let write = Duration::from_millis(3224);
+
+        let sched = scheduling_gap(gap, write);
+
+        assert!(
+            sched < STALL_WARN,
+            "a 3.224s write inside a 3.730s gap left {sched:?} of scheduling latency, \
+             which was reported as a stall — the write is impersonating starvation",
+        );
+    }
+
+    /// The symmetric guard: with the write subtracted out, a genuinely starved
+    /// iteration must still be reported. Otherwise the fix would simply blind
+    /// the watchdog to the thing it was built for.
+    #[test]
+    fn real_starvation_still_reports() {
+        let gap = Duration::from_millis(3000);
+        let write = Duration::from_millis(4);
+
+        let sched = scheduling_gap(gap, write);
+
+        assert!(
+            sched >= STALL_WARN,
+            "a 3s gap containing only a 4ms write is real starvation, but {sched:?} \
+             fell under the warn threshold",
+        );
+    }
+
+    /// A write slower than the whole gap (clock skew, or a write that outran the
+    /// next tick) must clamp to zero rather than wrap around.
+    #[test]
+    fn write_longer_than_gap_clamps_to_zero() {
+        let sched = scheduling_gap(Duration::from_millis(500), Duration::from_millis(900));
+        assert_eq!(sched, Duration::ZERO);
     }
 }
