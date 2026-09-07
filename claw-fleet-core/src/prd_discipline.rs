@@ -542,7 +542,10 @@ Fleet 托管、durable，每个 interval spawn 一个全新的**本地** detache
 - **等一个外部条件满足后再继续*本*会话 → `fleet watch`**（上面那段）。\n\
 - **把工作交给一个全新后继者继续 → `fleet handoff`**。\n\
 \n\
-`fleet loop` 与 `fleet schedule` 都接受一个可选的 `--until <shell 命令>` 作为\
+`fleet loop` 与 `fleet schedule` 都接受一个 `--title <几个字>`：**创建时务必给一个**，\
+计划任务列表拿它当条目名，不给就只能显示 prompt 的头两行，一眼看不出这条是干什么的。\n\
+\n\
+两者也都接受一个可选的 `--until <shell 命令>` 作为\
 **廉价的非 LLM 门**：每个 tick（schedule 是到点后）先跑这条便宜探测，\
 **只有它退出 0 才 spawn 会花钱的 LLM 会话**，否则跳过（loop 不计入 iteration、\
 进位下个 interval；schedule 在 `--timeout` 内按 `--poll` 轮询，仍不满足则放弃\
@@ -1221,7 +1224,11 @@ that survives.\n\
 (above).\n\
 - **Hand the work to a fresh successor → `fleet handoff`**.\n\
 \n\
-Both `fleet loop` and `fleet schedule` take an optional `--until <shell cmd>` \
+Both `fleet loop` and `fleet schedule` take a `--title <a few words>`: \
+**always pass one on create** — the scheduled-task list uses it as the entry \
+name, and without it all you see is the first two lines of the prompt.\n\
+\n\
+Both also take an optional `--until <shell cmd>` \
 as a **cheap non-LLM gate**: each tick (or once due) a cheap shell probe runs \
 first and the **paid LLM session spawns only when it exits 0**, else the tick \
 is skipped (loop consumes no iteration and carries to the next interval; a \

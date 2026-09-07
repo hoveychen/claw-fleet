@@ -22,7 +22,7 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 return;
             }
             let now = now_ms_wall();
-            println!("{:<10}  {:<8}  {:<8}  {:<10}  PROMPT", "ID", "EVERY", "DONE", "NEXT");
+            println!("{:<10}  {:<8}  {:<8}  {:<10}  TITLE / PROMPT", "ID", "EVERY", "DONE", "NEXT");
             for l in loops {
                 let cap = l
                     .max_iterations
@@ -33,7 +33,10 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 } else {
                     fmt_duration_ms(l.due_in_ms(now))
                 };
-                let prompt = l.prompt.replace('\n', " ");
+                // The title is what the loop is *for*; fall back to the prompt
+                // for records created before titles existed.
+                let label = l.title.as_deref().unwrap_or(&l.prompt);
+                let prompt = label.replace('\n', " ");
                 let prompt = if prompt.chars().count() > 48 {
                     format!("{}…", prompt.chars().take(48).collect::<String>())
                 } else {
@@ -56,6 +59,9 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 } else {
                     let now = now_ms_wall();
                     println!("id:        {}", rec.id);
+                    if let Some(t) = &rec.title {
+                        println!("title:     {t}");
+                    }
                     println!("every:     {}", fmt_interval_secs(rec.interval_secs));
                     println!(
                         "next:      {}",
@@ -83,6 +89,7 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
             id,
             interval,
             prompt,
+            title,
             max,
         } => {
             let interval_secs = match interval.as_deref() {
@@ -95,7 +102,7 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 },
                 None => None,
             };
-            match agent_loop::update(&id, interval_secs, prompt.as_deref(), max) {
+            match agent_loop::update(&id, interval_secs, prompt.as_deref(), title.as_deref(), max) {
                 Ok(rec) => {
                     // Re-arm so the new schedule/generation takes effect; the old
                     // timer exits as superseded on its next wake.
@@ -134,6 +141,7 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
         LoopCommands::Create {
             interval,
             prompt,
+            title,
             max,
             until,
         } => {
@@ -162,6 +170,7 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
             match agent_loop::create(
                 &ctx.workspace,
                 prompt,
+                title.as_deref(),
                 interval_secs,
                 max,
                 ctx.model.as_deref(),

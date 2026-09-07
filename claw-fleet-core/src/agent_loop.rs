@@ -75,6 +75,12 @@ pub struct LoopRecord {
     pub workspace_path: String,
     /// The prompt every iteration runs.
     pub prompt: String,
+    /// Short human label for the loop, so lists can show a name instead of the
+    /// first two lines of `prompt`. Optional and blank-normalised to `None`;
+    /// absent on records written before titles existed, and every consumer falls
+    /// back to `prompt` when it is `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub title: Option<String>,
     pub interval_secs: u64,
     /// Epoch ms of the next scheduled spawn.
     pub next_fire_at: u64,
@@ -213,6 +219,7 @@ fn write_record(dir: &Path, rec: &LoopRecord) -> Result<(), String> {
 pub fn create(
     workspace_path: &str,
     prompt: &str,
+    title: Option<&str>,
     interval_secs: u64,
     max_iterations: Option<u32>,
     model: Option<&str>,
@@ -226,6 +233,7 @@ pub fn create(
         &dir,
         workspace_path,
         prompt,
+        title,
         interval_secs,
         max_iterations,
         model,
@@ -243,6 +251,7 @@ fn create_in(
     dir: &Path,
     workspace_path: &str,
     prompt: &str,
+    title: Option<&str>,
     interval_secs: u64,
     max_iterations: Option<u32>,
     model: Option<&str>,
@@ -270,6 +279,8 @@ fn create_in(
         id: id.to_string(),
         workspace_path: workspace_path.to_string(),
         prompt: prompt.to_string(),
+        // A blank title is no title — consumers fall back to the prompt.
+        title: title.filter(|t| !blank(t)).map(|t| t.trim().to_string()),
         interval_secs,
         next_fire_at: now + interval_secs * 1000,
         iterations_done: 0,
@@ -337,8 +348,9 @@ fn stop_in(dir: &Path, id: &str) -> bool {
     fs::remove_file(record_path(dir, id)).is_ok()
 }
 
-/// Adjust a loop in place: change its interval, prompt, and/or max iterations.
-/// `None` for a field leaves it unchanged. Bumps `generation` so any detached
+/// Adjust a loop in place: change its interval, prompt, title, and/or max
+/// iterations. `None` for a field leaves it unchanged; `title: Some("")` clears
+/// the title back to the prompt fallback. Bumps `generation` so any detached
 /// timer sleeping on the old schedule exits as superseded when it next wakes —
 /// the caller (`fleet loop update`) re-arms a fresh timer from the returned
 /// record. A changed interval reschedules the next fire one full interval from
@@ -347,17 +359,20 @@ pub fn update(
     id: &str,
     interval_secs: Option<u64>,
     prompt: Option<&str>,
+    title: Option<&str>,
     max: Option<u32>,
 ) -> Result<LoopRecord, String> {
     let dir = loops_dir().ok_or("cannot determine home dir")?;
-    update_in(&dir, id, interval_secs, prompt, max, now_ms())
+    update_in(&dir, id, interval_secs, prompt, title, max, now_ms())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_in(
     dir: &Path,
     id: &str,
     interval_secs: Option<u64>,
     prompt: Option<&str>,
+    title: Option<&str>,
     max: Option<u32>,
     now: u64,
 ) -> Result<LoopRecord, String> {
@@ -377,6 +392,16 @@ fn update_in(
             return Err("loop prompt cannot be empty".to_string());
         }
         rec.prompt = p.to_string();
+    }
+    if let Some(t) = title {
+        // Empty string is the documented "clear it" signal; anything else is a
+        // trimmed replacement.
+        let t = t.trim();
+        rec.title = if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        };
     }
     if let Some(m) = max {
         if m == 0 {
@@ -964,7 +989,7 @@ mod tests {
     }
 
     fn make(d: &Path, id: &str, now: u64) -> LoopRecord {
-        create_in(d, "/ws", "check the deploy", 300, None, None, None, None, Some("s1"), None, id, now)
+        create_in(d, "/ws", "check the deploy", None, 300, None, None, None, None, Some("s1"), None, id, now)
             .unwrap()
     }
 
@@ -1005,11 +1030,11 @@ mod tests {
     #[test]
     fn create_rejects_empty_prompt_and_zero_iterations() {
         let d = dir();
-        assert!(create_in(d.path(), "/ws", "  ", 300, None, None, None, None, None, None, "x", 1)
+        assert!(create_in(d.path(), "/ws", "  ", None, 300, None, None, None, None, None, None, "x", 1)
             .unwrap_err()
             .contains("prompt is required"));
         assert!(
-            create_in(d.path(), "/ws", "p", 300, Some(0), None, None, None, None, None, "x", 1)
+            create_in(d.path(), "/ws", "p", None, 300, Some(0), None, None, None, None, None, "x", 1)
                 .unwrap_err()
                 .contains("at least 1")
         );
@@ -1019,7 +1044,7 @@ mod tests {
     fn update_changes_interval_prompt_max_and_bumps_generation() {
         let d = dir();
         make(d.path(), "l1", 0); // interval 300, next_fire 300_000
-        let u = update_in(d.path(), "l1", Some(600), Some("new prompt"), Some(3), 1_000_000).unwrap();
+        let u = update_in(d.path(), "l1", Some(600), Some("new prompt"), None, Some(3), 1_000_000).unwrap();
         assert_eq!(u.interval_secs, 600);
         assert_eq!(u.next_fire_at, 1_000_000 + 600 * 1000, "reschedule from now");
         assert_eq!(u.prompt, "new prompt");
@@ -1032,20 +1057,55 @@ mod tests {
         let d = dir();
         make(d.path(), "l1", 0);
         // prompt only leaves interval + schedule alone
-        let u = update_in(d.path(), "l1", None, Some("p2"), None, 0).unwrap();
+        let u = update_in(d.path(), "l1", None, Some("p2"), None, None, 0).unwrap();
         assert_eq!(u.interval_secs, 300);
         assert_eq!(u.next_fire_at, 300_000);
         assert_eq!(u.prompt, "p2");
         // sub-minute interval rejected
-        assert!(update_in(d.path(), "l1", Some(10), None, None, 0).unwrap_err().contains("minimum"));
+        assert!(update_in(d.path(), "l1", Some(10), None, None, None, 0).unwrap_err().contains("minimum"));
         // empty prompt rejected
-        assert!(update_in(d.path(), "l1", None, Some("  "), None, 0).unwrap_err().contains("cannot be empty"));
+        assert!(update_in(d.path(), "l1", None, Some("  "), None, None, 0).unwrap_err().contains("cannot be empty"));
         // zero max rejected
-        assert!(update_in(d.path(), "l1", None, None, Some(0), 0).unwrap_err().contains("at least 1"));
+        assert!(update_in(d.path(), "l1", None, None, None, Some(0), 0).unwrap_err().contains("at least 1"));
         // max clamped to ceiling
-        assert_eq!(update_in(d.path(), "l1", None, None, Some(99_999), 0).unwrap().max_iterations, Some(MAX_ITERATIONS));
+        assert_eq!(update_in(d.path(), "l1", None, None, None, Some(99_999), 0).unwrap().max_iterations, Some(MAX_ITERATIONS));
         // unknown id
-        assert!(update_in(d.path(), "nope", None, Some("x"), None, 0).unwrap_err().contains("no loop with id"));
+        assert!(update_in(d.path(), "nope", None, Some("x"), None, None, 0).unwrap_err().contains("no loop with id"));
+    }
+
+    /// The title is the label the Schedule view shows instead of two clamped
+    /// lines of prompt, so it has to survive a round-trip, normalise blanks away,
+    /// and be clearable back to the prompt fallback with an empty string.
+    #[test]
+    fn title_set_blank_normalised_and_clearable() {
+        let d = dir();
+        // Blank at create time is no title at all.
+        let rec = create_in(d.path(), "/ws", "p", Some("   "), 300, None, None, None, None, None, None, "l1", 0).unwrap();
+        assert_eq!(rec.title, None, "blank title normalises to None");
+        // A real title is trimmed and persisted.
+        let rec = create_in(d.path(), "/ws", "p", Some("  每日更新日志  "), 300, None, None, None, None, None, None, "l2", 0).unwrap();
+        assert_eq!(rec.title.as_deref(), Some("每日更新日志"));
+        assert_eq!(get_in(d.path(), "l2").unwrap().title.as_deref(), Some("每日更新日志"));
+        // update sets it on a record that had none…
+        let u = update_in(d.path(), "l1", None, None, Some("补个名字"), None, 0).unwrap();
+        assert_eq!(u.title.as_deref(), Some("补个名字"));
+        // …and an empty string clears it back to the prompt fallback.
+        let u = update_in(d.path(), "l1", None, None, Some(""), None, 0).unwrap();
+        assert_eq!(u.title, None, r#"Some("") clears the title"#);
+        // Omitting the field leaves an existing title alone.
+        let u = update_in(d.path(), "l2", None, Some("p2"), None, None, 0).unwrap();
+        assert_eq!(u.title.as_deref(), Some("每日更新日志"), "None leaves it untouched");
+    }
+
+    /// Records written before titles existed must still deserialize.
+    #[test]
+    fn title_absent_in_legacy_json() {
+        let d = dir();
+        let legacy = r#"{"id":"old","workspacePath":"/ws","prompt":"p","intervalSecs":300,
+            "nextFireAt":1,"iterationsDone":0,"generation":0,"created":0}"#;
+        fs::write(record_path(d.path(), "old"), legacy).unwrap();
+        let rec = get_in(d.path(), "old").expect("legacy record still parses");
+        assert_eq!(rec.title, None);
     }
 
     #[test]
@@ -1135,7 +1195,7 @@ mod tests {
     #[test]
     fn a_bounded_loop_retires_itself_on_the_final_iteration() {
         let d = dir();
-        create_in(d.path(), "/ws", "twice", 60, Some(2), None, None, None, None, None, "l1", 0).unwrap();
+        create_in(d.path(), "/ws", "twice", None, 60, Some(2), None, None, None, None, None, "l1", 0).unwrap();
         let first = claim_fire_in(d.path(), "l1", 0, 60_000).unwrap();
         assert_eq!(first.iterations_done, 1);
         assert!(get_in(d.path(), "l1").is_some(), "one iteration left");
@@ -1155,7 +1215,7 @@ mod tests {
     fn max_iterations_is_clamped_to_the_hard_ceiling() {
         let d = dir();
         let rec =
-            create_in(d.path(), "/ws", "p", 60, Some(99_999), None, None, None, None, None, "l1", 0).unwrap();
+            create_in(d.path(), "/ws", "p", None, 60, Some(99_999), None, None, None, None, None, "l1", 0).unwrap();
         assert_eq!(rec.max_iterations, Some(MAX_ITERATIONS));
     }
 
@@ -1171,7 +1231,7 @@ mod tests {
     fn due_loops_selects_only_live_and_due() {
         let d = dir();
         make(d.path(), "soon", 0); // due at 300_000
-        create_in(d.path(), "/ws", "p", 3600, None, None, None, None, None, None, "later", 0).unwrap();
+        create_in(d.path(), "/ws", "p", None, 3600, None, None, None, None, None, None, "later", 0).unwrap();
         let due = due_loops_in(d.path(), 400_000);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, "soon");
@@ -1214,7 +1274,7 @@ mod tests {
     fn fire_once_claims_spawns_and_records_the_session() {
         let d = dir();
         create_in(
-            d.path(), "/ws", "check the deploy", 300, None,
+            d.path(), "/ws", "check the deploy", None, 300, None,
             Some("claude-fable-5"), Some("high"), None, None, None, "l1", 0,
         )
         .unwrap();
@@ -1250,7 +1310,7 @@ mod tests {
     fn history_accumulates_and_caps_at_max() {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path();
-        create_in(dir, "/ws", "p", 60, None, None, None, None, None, None, "l1", 0).unwrap();
+        create_in(dir, "/ws", "p", None, 60, None, None, None, None, None, None, "l1", 0).unwrap();
 
         // Record more runs than the cap; each with a distinct id and timestamp.
         let total = MAX_HISTORY + 5;
@@ -1319,7 +1379,7 @@ mod tests {
     fn reconcile_rearms_only_stranded_loops() {
         let d = dir();
         // "healthy": due in the future — a timer is presumably driving it
-        create_in(d.path(), "/ws", "p", 300, None, None, None, None, None, None, "healthy", 1_000_000).unwrap();
+        create_in(d.path(), "/ws", "p", None, 300, None, None, None, None, None, None, "healthy", 1_000_000).unwrap();
         // "napping": due, but only just — inside the grace window, timer likely mid-nap
         let mut napping = make(d.path(), "napping", 0);
         napping.next_fire_at = 1_000_000 - 10_000; // 10s overdue < grace
@@ -1341,7 +1401,7 @@ mod tests {
         let d = dir();
         // exhausted: max 1 iteration, already done — overdue but must not re-arm
         let mut done =
-            create_in(d.path(), "/ws", "p", 60, Some(1), None, None, None, None, None, "done", 0).unwrap();
+            create_in(d.path(), "/ws", "p", None, 60, Some(1), None, None, None, None, None, "done", 0).unwrap();
         done.iterations_done = 1;
         done.next_fire_at = 0; // very overdue
         write_record(d.path(), &done).unwrap();
@@ -1368,6 +1428,7 @@ mod tests {
             d.path(),
             "/ws",
             "p",
+            None,
             300,
             None,
             Some("claude-fable-5"),
@@ -1382,7 +1443,7 @@ mod tests {
         assert_eq!(rec.model.as_deref(), Some("claude-fable-5"));
         assert_eq!(rec.effort.as_deref(), Some("high"));
         // blank strings are not a model
-        let rec = create_in(d.path(), "/ws", "p", 300, None, Some("  "), Some(""), None, None, None, "l2", 0)
+        let rec = create_in(d.path(), "/ws", "p", None, 300, None, Some("  "), Some(""), None, None, None, "l2", 0)
             .unwrap();
         assert_eq!(rec.model, None);
         assert_eq!(rec.effort, None);
@@ -1395,7 +1456,7 @@ mod tests {
     #[test]
     fn codex_loop_fires_iterations_on_codex_source() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", 60, None, None, None, Some("codex"), None, None, "cx", 0)
+        create_in(d.path(), "/ws", "p", None, 60, None, None, None, Some("codex"), None, None, "cx", 0)
             .unwrap();
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cx", 0, 300_000, &ok_spawner(&calls, "cx-sid")).unwrap();
@@ -1409,7 +1470,7 @@ mod tests {
     #[test]
     fn loop_without_source_defaults_to_claude() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", 60, None, None, None, None, None, None, "cl", 0).unwrap();
+        create_in(d.path(), "/ws", "p", None, 60, None, None, None, None, None, None, "cl", 0).unwrap();
         assert_eq!(get_in(d.path(), "cl").unwrap().agent_source, None, "no source stored");
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cl", 0, 300_000, &ok_spawner(&calls, "cl-sid")).unwrap();
@@ -1459,7 +1520,7 @@ mod tests {
     fn create_stamps_until_cmd_and_drops_blank() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", 60, None, None, None, None, None,
+            d.path(), "/ws", "p", None, 60, None, None, None, None, None,
             Some("test -f /tmp/ready"), "g1", 0,
         )
         .unwrap();
@@ -1469,7 +1530,7 @@ mod tests {
         assert!(raw.contains("\"untilCmd\""));
 
         let rec = create_in(
-            d.path(), "/ws", "p", 60, None, None, None, None, None, Some("   "), "g2", 0,
+            d.path(), "/ws", "p", None, 60, None, None, None, None, None, Some("   "), "g2", 0,
         )
         .unwrap();
         assert!(!rec.has_gate(), "blank gate command ⇒ no gate");
@@ -1493,7 +1554,7 @@ mod tests {
     fn decide_gated_fires_when_met_skips_when_unmet() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", 300, None, None, None, None, None, Some("gate"), "g1", 0,
+            d.path(), "/ws", "p", None, 300, None, None, None, None, None, Some("gate"), "g1", 0,
         )
         .unwrap(); // due at 300_000
         assert_eq!(decide(&rec, 0, 300_000, || true), LoopStep::Fire);
@@ -1525,7 +1586,7 @@ mod tests {
     #[test]
     fn skipping_does_not_exhaust_a_bounded_loop() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", 60, Some(1), None, None, None, None, Some("gate"), "l1", 0)
+        create_in(d.path(), "/ws", "p", None, 60, Some(1), None, None, None, None, Some("gate"), "l1", 0)
             .unwrap();
         // skip several ticks; each advances gen + next_fire but leaves the single
         // iteration unspent, so the loop is never retired.

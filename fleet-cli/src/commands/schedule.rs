@@ -24,7 +24,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 return;
             }
             let now = now_ms_wall();
-            println!("{:<10}  {:<16}  {:<9}  {:<10}  PROMPT", "ID", "WHEN", "STATUS", "IN");
+            println!("{:<10}  {:<16}  {:<9}  {:<10}  TITLE / PROMPT", "ID", "WHEN", "STATUS", "IN");
             for s in items {
                 let status = match s.status {
                     schedule::ScheduleStatus::Pending => "pending",
@@ -39,7 +39,9 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 } else {
                     "—".to_string()
                 };
-                let prompt = s.prompt.replace('\n', " ");
+                // The title is what the schedule is *for*; fall back to the
+                // prompt for records created before titles existed.
+                let prompt = s.title.as_deref().unwrap_or(&s.prompt).replace('\n', " ");
                 let prompt = if prompt.chars().count() > 44 {
                     format!("{}…", prompt.chars().take(44).collect::<String>())
                 } else {
@@ -61,6 +63,9 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                     println!("{}", serde_json::to_string_pretty(&rec).unwrap_or_default());
                 } else {
                     println!("id:        {}", rec.id);
+                    if let Some(t) = &rec.title {
+                        println!("title:     {t}");
+                    }
                     println!("fire_at:   {}", fmt_local(rec.fire_at));
                     println!(
                         "status:    {}",
@@ -85,7 +90,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 std::process::exit(1);
             }
         },
-        ScheduleCommands::Update { id, at, r#in, prompt, model, effort } => {
+        ScheduleCommands::Update { id, at, r#in, prompt, title, model, effort } => {
             let now = now_ms_wall();
             let fire_at = match (at.as_deref(), r#in.as_deref()) {
                 (Some(_), Some(_)) => {
@@ -110,16 +115,18 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
             };
             if fire_at.is_none()
                 && prompt.is_none()
+                && title.is_none()
                 && model.is_none()
                 && effort.is_none()
             {
-                eprintln!("Error: nothing to update — pass --at/--in, --prompt, --model and/or --effort.");
+                eprintln!("Error: nothing to update — pass --at/--in, --prompt, --title, --model and/or --effort.");
                 std::process::exit(2);
             }
             match schedule::update(&schedule::ScheduleUpdate {
                 id: id.clone(),
                 fire_at,
                 prompt,
+                title,
                 model,
                 effort,
                 ..Default::default()
@@ -159,7 +166,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 std::process::exit(1);
             }
         },
-        ScheduleCommands::Create { at, r#in, prompt, model: model_flag, effort: effort_flag, until, poll, timeout } => {
+        ScheduleCommands::Create { at, r#in, prompt, title, model: model_flag, effort: effort_flag, until, poll, timeout } => {
             let now = now_ms_wall();
             // Exactly one of --at / --in.
             let fire_at = match (at.as_deref(), r#in.as_deref()) {
@@ -254,6 +261,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
             match schedule::create(
                 &ctx.workspace,
                 prompt,
+                title.as_deref(),
                 fire_at,
                 route.model.as_deref(),
                 route.effort.as_deref(),

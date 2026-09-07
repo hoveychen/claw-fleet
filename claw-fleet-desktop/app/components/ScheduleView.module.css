@@ -84,6 +84,36 @@
   flex: 1;
   min-width: 0;
 }
+/* Titled rows lead with the title and keep the prompt behind the toggle — a list
+   of raw prompts is unreadable. Untitled (pre-title) records fall back to the
+   clamped prompt as the row's headline. */
+.title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  min-width: 0;
+}
+.title:hover {
+  color: var(--color-accent);
+}
+.title_text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.title_chev {
+  flex: none;
+  opacity: 0.55;
+  transition: transform 120ms ease;
+}
+.title_chev_open {
+  transform: rotate(90deg);
+}
 .prompt {
   color: var(--color-text);
   font-size: 13px;
@@ -92,6 +122,13 @@
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+/* The prompt revealed under a title reads as secondary detail, not the headline. */
+.prompt_under_title {
+  margin-top: 4px;
+  padding-left: 15px;
+  font-size: 12px;
+  color: var(--color-text-dim);
 }
 .prompt_clickable {
   cursor: pointer;
@@ -363,6 +400,13 @@
   font-weight: 600;
   color: var(--color-text-dim);
   margin-bottom: 6px;
+}
+/* Quiet "optional" marker next to a field label. */
+.field_optional {
+  margin-left: 6px;
+  font-weight: 400;
+  font-size: 10px;
+  opacity: 0.6;
 }
 .time_input {
   width: 100%;

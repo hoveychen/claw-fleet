@@ -690,6 +690,7 @@ async function handleIPC(
           id: "a1b2c3d4",
           workspacePath: "/Users/dev/workspace/netferry",
           prompt: "检查 CI 是否有夜间构建失败，有的话汇总失败的 job 和错误摘要。",
+          title: "夜间 CI 失败巡检",
           intervalSecs: 86400,
           nextFireAt: Date.now() + 5 * 3600 * 1000,
           iterationsDone: 3,
@@ -703,6 +704,7 @@ async function handleIPC(
           id: "9f8e7d6c",
           workspacePath: "/Users/dev/workspace/claude-fleet",
           prompt: "5 天后回来检查 fleet schedule 上线后的真实使用情况，看有没有 stranded 的计时器需要处理。",
+          title: "复查 schedule 上线后的计时器",
           fireAt: Date.now() + 3 * 86400 * 1000 + 4 * 3600 * 1000,
           status: "pending",
           model: "claude-opus-4-8",
@@ -711,6 +713,8 @@ async function handleIPC(
         {
           id: "1a2b3c4d",
           workspacePath: "/Users/dev/workspace/talk-cli",
+          // Deliberately untitled: exercises the pre-title fallback where the
+          // clamped prompt is the row headline.
           prompt: "发布后巡检：确认 npm 包已可安装并跑通 smoke。",
           fireAt: Date.now() - 2 * 3600 * 1000,
           status: "fired",
@@ -730,6 +734,7 @@ async function handleIPC(
         id: u.id ?? "9f8e7d6c",
         workspacePath: "/Users/dev/workspace/claude-fleet",
         prompt: u.prompt ?? "",
+        title: u.title || undefined,
         fireAt: u.fireAt ?? Date.now() + 3600 * 1000,
         status: "pending",
         model: u.model || undefined,

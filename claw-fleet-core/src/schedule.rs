@@ -89,6 +89,12 @@ pub struct ScheduleRecord {
     pub workspace_path: String,
     /// The prompt the fired session runs — the schedule's full context.
     pub prompt: String,
+    /// Short human label for the schedule, so lists can show a name instead of
+    /// the first two lines of `prompt`. Optional and blank-normalised to `None`;
+    /// absent on records written before titles existed, and every consumer falls
+    /// back to `prompt` when it is `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub title: Option<String>,
     /// Epoch ms of the scheduled fire.
     pub fire_at: u64,
     #[serde(default)]
@@ -286,6 +292,7 @@ fn to_epoch_ms_local(naive: chrono::NaiveDateTime) -> Result<u64, String> {
 pub fn create(
     workspace_path: &str,
     prompt: &str,
+    title: Option<&str>,
     fire_at: u64,
     model: Option<&str>,
     effort: Option<&str>,
@@ -298,6 +305,7 @@ pub fn create(
         &dir,
         workspace_path,
         prompt,
+        title,
         fire_at,
         model,
         effort,
@@ -314,6 +322,7 @@ fn create_in(
     dir: &Path,
     workspace_path: &str,
     prompt: &str,
+    title: Option<&str>,
     fire_at: u64,
     model: Option<&str>,
     effort: Option<&str>,
@@ -344,6 +353,8 @@ fn create_in(
         id: id.to_string(),
         workspace_path: workspace_path.to_string(),
         prompt: prompt.to_string(),
+        // A blank title is no title — consumers fall back to the prompt.
+        title: title.filter(|t| !blank(t)).map(|t| t.trim().to_string()),
         fire_at,
         status: ScheduleStatus::Pending,
         fired_at: None,
@@ -412,7 +423,8 @@ fn cancel_in(dir: &Path, id: &str) -> bool {
 
 /// A requested change to a still-`Pending` schedule. Every field is optional:
 /// `None` = leave that field untouched (CLI partial update). For the three
-/// inherited spawn knobs (`model` / `effort` / `agent_source`), `Some("")` (or
+/// inherited spawn knobs (`model` / `effort` / `agent_source`) — and for `title`,
+/// whose empty value clears back to the prompt fallback — `Some("")` (or
 /// whitespace) clears the field back to "inherit the CLI default" — this mirrors
 /// the desktop pickers' `""`-means-default convention, so an edit form that
 /// always sends every field can both set and clear. Crosses the `fleet serve`
@@ -425,6 +437,9 @@ pub struct ScheduleUpdate {
     pub fire_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+    /// `Some("")` clears the title back to the prompt fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -443,8 +458,8 @@ fn norm_knob(s: &str) -> Option<String> {
     }
 }
 
-/// Adjust a still-`Pending` schedule: change its fire time, prompt, and/or the
-/// inherited spawn knobs (model / effort / agent source). Bumps `generation` so
+/// Adjust a still-`Pending` schedule: change its fire time, prompt, title, and/or
+/// the inherited spawn knobs (model / effort / agent source). Bumps `generation` so
 /// any detached timer sleeping on the old time exits as superseded when it next
 /// wakes — the caller (`fleet schedule update`, or the desktop edit form via
 /// `Backend::update_schedule`) re-arms a fresh timer from the returned record. A
@@ -477,6 +492,11 @@ fn update_in(dir: &Path, u: &ScheduleUpdate, now: u64) -> Result<ScheduleRecord,
             return Err("schedule prompt cannot be empty".to_string());
         }
         rec.prompt = p.to_string();
+    }
+    // Title: Some("") clears back to the prompt fallback (same convention as the
+    // spawn knobs below), so an edit form that always sends the field can clear it.
+    if let Some(t) = &u.title {
+        rec.title = norm_knob(t);
     }
     // Spawn knobs: Some("") clears to inherit-default (None); Some(x) sets; None leaves.
     if let Some(m) = &u.model {
@@ -1070,6 +1090,7 @@ mod tests {
             d,
             "/ws",
             "check the deploy",
+            None,
             fire_at,
             None,
             None,
@@ -1106,20 +1127,20 @@ mod tests {
     #[test]
     fn create_rejects_empty_prompt_past_time_and_beyond_horizon() {
         let d = dir();
-        assert!(create_in(d.path(), "/ws", "  ", 2_000, None, None, None, None, None, "x", 1_000)
+        assert!(create_in(d.path(), "/ws", "  ", None, 2_000, None, None, None, None, None, "x", 1_000)
             .unwrap_err()
             .contains("prompt is required"));
         // in the past
-        assert!(create_in(d.path(), "/ws", "p", 500, None, None, None, None, None, "x", 1_000)
+        assert!(create_in(d.path(), "/ws", "p", None, 500, None, None, None, None, None, "x", 1_000)
             .unwrap_err()
             .contains("in the past"));
         // exactly now is still the past (must be strictly future)
-        assert!(create_in(d.path(), "/ws", "p", 1_000, None, None, None, None, None, "x", 1_000)
+        assert!(create_in(d.path(), "/ws", "p", None, 1_000, None, None, None, None, None, "x", 1_000)
             .unwrap_err()
             .contains("in the past"));
         // beyond the 365-day horizon
         let too_far = 1_000 + MAX_HORIZON_MS + 1;
-        assert!(create_in(d.path(), "/ws", "p", too_far, None, None, None, None, None, "x", 1_000)
+        assert!(create_in(d.path(), "/ws", "p", None, too_far, None, None, None, None, None, "x", 1_000)
             .unwrap_err()
             .contains("horizon"));
     }
@@ -1269,6 +1290,7 @@ mod tests {
             d.path(),
             "/ws",
             "check the deploy",
+            None,
             300_000,
             Some("claude-fable-5"),
             Some("high"),
@@ -1328,7 +1350,7 @@ mod tests {
     #[test]
     fn codex_schedule_fires_on_codex_source() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", 300_000, None, None, Some("codex"), None, None, "cx", 0).unwrap();
+        create_in(d.path(), "/ws", "p", None, 300_000, None, None, Some("codex"), None, None, "cx", 0).unwrap();
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cx", 0, 300_000, &ok_spawner(&calls, "cx-sid")).unwrap();
         assert_eq!(calls.into_inner()[0].agent_source, "codex");
@@ -1337,7 +1359,7 @@ mod tests {
     #[test]
     fn schedule_without_source_defaults_to_claude() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", 300_000, None, None, None, None, None, "cl", 0).unwrap();
+        create_in(d.path(), "/ws", "p", None, 300_000, None, None, None, None, None, "cl", 0).unwrap();
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cl", 0, 300_000, &ok_spawner(&calls, "cl-sid")).unwrap();
         assert_eq!(calls.into_inner()[0].agent_source, "claude");
@@ -1434,6 +1456,68 @@ mod tests {
         assert_eq!(u.prompt, "just prompt");
     }
 
+    /// The title is the label the Schedule view shows instead of two clamped
+    /// lines of prompt, so it has to survive a round-trip, normalise blanks away,
+    /// and be clearable back to the prompt fallback with an empty string.
+    #[test]
+    fn title_set_blank_normalised_and_clearable() {
+        let d = dir();
+        // Blank at create time is no title at all.
+        let rec =
+            create_in(d.path(), "/ws", "p", Some("  "), 300_000, None, None, None, None, None, "s1", 0)
+                .unwrap();
+        assert_eq!(rec.title, None, "blank title normalises to None");
+        // A real title is trimmed and persisted.
+        let rec = create_in(
+            d.path(),
+            "/ws",
+            "p",
+            Some("  发版前跑一遍回归  "),
+            300_000,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "s2",
+            0,
+        )
+        .unwrap();
+        assert_eq!(rec.title.as_deref(), Some("发版前跑一遍回归"));
+        assert_eq!(get_in(d.path(), "s2").unwrap().title.as_deref(), Some("发版前跑一遍回归"));
+        // update sets it on a record that had none…
+        let u = update_in(
+            d.path(),
+            &ScheduleUpdate { title: Some("补个名字".into()), ..upd("s1") },
+            0,
+        )
+        .unwrap();
+        assert_eq!(u.title.as_deref(), Some("补个名字"));
+        // …and an empty string clears it back to the prompt fallback.
+        let u =
+            update_in(d.path(), &ScheduleUpdate { title: Some("".into()), ..upd("s1") }, 0).unwrap();
+        assert_eq!(u.title, None, r#"Some("") clears the title"#);
+        // Omitting the field leaves an existing title alone.
+        let u = update_in(
+            d.path(),
+            &ScheduleUpdate { prompt: Some("p2".into()), ..upd("s2") },
+            0,
+        )
+        .unwrap();
+        assert_eq!(u.title.as_deref(), Some("发版前跑一遍回归"), "None leaves it untouched");
+    }
+
+    /// Records written before titles existed must still deserialize.
+    #[test]
+    fn title_absent_in_legacy_json() {
+        let d = dir();
+        let legacy = r#"{"id":"old","workspacePath":"/ws","prompt":"p","fireAt":1,
+            "generation":0,"created":0}"#;
+        fs::write(record_path(d.path(), "old"), legacy).unwrap();
+        let rec = get_in(d.path(), "old").expect("legacy record still parses");
+        assert_eq!(rec.title, None);
+    }
+
     /// model / effort / agent_source: `Some(x)` sets, `Some("")` clears to
     /// inherit-default (`None`), `None` leaves the field untouched.
     #[test]
@@ -1443,6 +1527,7 @@ mod tests {
             d.path(),
             "/ws",
             "p",
+            None,
             300_000,
             Some("claude-opus-4-8"),
             Some("high"),
@@ -1491,7 +1576,7 @@ mod tests {
     fn update_to_a_cross_harness_model_moves_the_source() {
         let d = dir();
         create_in(
-            d.path(), "/ws", "p", 300_000,
+            d.path(), "/ws", "p", None, 300_000,
             Some("claude-opus-5"), Some("xhigh"), Some("claude-code"),
             None, None, "s1", 0,
         )
@@ -1621,6 +1706,7 @@ mod tests {
             d.path(),
             "/ws",
             "p",
+            None,
             300_000,
             Some("claude-fable-5"),
             Some("high"),
@@ -1634,7 +1720,7 @@ mod tests {
         assert_eq!(rec.model.as_deref(), Some("claude-fable-5"));
         assert_eq!(rec.effort.as_deref(), Some("high"));
         // blank strings are not a model
-        let rec = create_in(d.path(), "/ws", "p", 300_000, Some("  "), Some(""), None, None, None, "s2", 0)
+        let rec = create_in(d.path(), "/ws", "p", None, 300_000, Some("  "), Some(""), None, None, None, "s2", 0)
             .unwrap();
         assert_eq!(rec.model, None);
         assert_eq!(rec.effort, None);
@@ -1686,7 +1772,7 @@ mod tests {
     fn create_stamps_gate_and_clamps_poll_floor() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
             Some(gate("test -f /tmp/ready", 1, 3600)), // poll below the 5s floor
             "g1", 0,
         )
@@ -1700,7 +1786,7 @@ mod tests {
 
         // a blank gate command ⇒ no gate
         let rec = create_in(
-            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
             Some(gate("   ", 30, 3600)), "g2", 0,
         )
         .unwrap();
@@ -1713,7 +1799,7 @@ mod tests {
     fn gate_fields_serialize_camelcase() {
         let d = dir();
         create_in(
-            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
             Some(gate("true", 30, 3600)), "g1", 0,
         )
         .unwrap();
@@ -1743,7 +1829,7 @@ mod tests {
     fn decide_gated_naps_until_met_then_fires() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
             Some(gate("gate", 30, 3600)), "g1", 0,
         )
         .unwrap();
@@ -1761,7 +1847,7 @@ mod tests {
     fn decide_gated_abandons_past_deadline() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
             Some(gate("gate", 30, 60)), "g1", 0, // 60s window past due (300_000)
         )
         .unwrap();
@@ -1779,7 +1865,7 @@ mod tests {
     fn abandon_marks_fired_timed_out() {
         let d = dir();
         create_in(
-            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            d.path(), "/ws", "p", None, 300_000, None, None, None, None,
             Some(gate("gate", 30, 60)), "g1", 0,
         )
         .unwrap();
