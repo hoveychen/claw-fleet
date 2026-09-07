@@ -13,6 +13,8 @@
 
 use std::time::Instant;
 
+use claw_fleet_core::agent_source::AgentSource;
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -156,4 +158,76 @@ fn real_receipt_rows_reconcile_to_their_subtotals() {
         }
         eprintln!("{label:>5} — {} lines, worst drift ${worst:.4}\n", b.lines.len());
     }
+}
+
+/// Reproduce the user-visible invariant on an arbitrary real local date: the
+/// daily report card and the receipt trend point must show the same tokens and
+/// dollars when fed the same multi-source session snapshot.
+#[test]
+#[ignore = "reads real ~/.fleet/session-cache.json; set FLEET_REALDATA_DATE"]
+fn real_daily_report_matches_receipt_day() {
+    let date = std::env::var("FLEET_REALDATA_DATE").expect("set FLEET_REALDATA_DATE=YYYY-MM-DD");
+    let home = claw_fleet_core::session::real_home_dir().expect("home dir");
+    let raw = std::fs::read(home.join(".fleet/session-cache.json")).expect("session cache");
+    let root: serde_json::Value = serde_json::from_slice(&raw).expect("valid session cache");
+    let mut sessions: Vec<claw_fleet_core::session::SessionInfo> = root["entries"]
+        .as_object()
+        .expect("entries map")
+        .values()
+        .filter_map(|entry| serde_json::from_value(entry["info"].clone()).ok())
+        .filter(|s| claw_fleet_core::daily_report::session_overlaps_date(s, &date))
+        .collect();
+    let mut known: std::collections::HashSet<_> = sessions
+        .iter()
+        .map(|s| (s.agent_source.clone(), s.id.clone()))
+        .collect();
+    for session in claw_fleet_core::codex_source::CodexSource::new().scan_sessions() {
+        let key = (session.agent_source.clone(), session.id.clone());
+        if claw_fleet_core::daily_report::session_overlaps_date(&session, &date)
+            && known.insert(key)
+        {
+            sessions.push(session);
+        }
+    }
+    assert!(!sessions.is_empty(), "no sessions overlap {date}");
+
+    let refs: Vec<_> = sessions.iter().collect();
+    let report = claw_fleet_core::daily_report::generate_report_from_sessions(&date, "local", &refs);
+
+    let ids: std::collections::HashSet<_> = sessions.iter().map(|s| s.id.as_str()).collect();
+    let usage_cache = std::fs::read(home.join(".fleet/usage-breakdown-cache.json"))
+        .expect("usage breakdown cache");
+    let usage: serde_json::Value = serde_json::from_slice(&usage_cache).expect("valid usage cache");
+    let mut receipt_cost = 0.0;
+    let mut receipt_tokens = 0u64;
+    for (id, entry) in usage["entries"].as_object().expect("usage entries") {
+        if !ids.contains(id.as_str()) {
+            continue;
+        }
+        for cell in entry["cells"].as_array().expect("cells") {
+            if cell["date"].as_str() != Some(date.as_str()) {
+                continue;
+            }
+            receipt_cost += cell["cost"].as_f64().unwrap_or(0.0);
+            receipt_tokens = receipt_tokens
+                .saturating_add(cell["input"].as_u64().unwrap_or(0))
+                .saturating_add(cell["cache_creation"].as_u64().unwrap_or(0))
+                .saturating_add(cell["cache_read"].as_u64().unwrap_or(0))
+                .saturating_add(cell["output"].as_u64().unwrap_or(0));
+        }
+    }
+
+    eprintln!(
+        "{date}: report ${:.2} / {} tok / {} sessions; receipt ${:.2} / {} tok",
+        report.metrics.total_cost_usd,
+        report.metrics.total_input_tokens + report.metrics.total_output_tokens,
+        report.metrics.total_sessions,
+        receipt_cost,
+        receipt_tokens,
+    );
+    assert!((report.metrics.total_cost_usd - receipt_cost).abs() < 0.005);
+    assert_eq!(
+        report.metrics.total_input_tokens + report.metrics.total_output_tokens,
+        receipt_tokens,
+    );
 }

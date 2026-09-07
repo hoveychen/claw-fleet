@@ -686,8 +686,8 @@ pub fn generate_report_from_sessions(
     }
 
     let mut session_data: Vec<SessionData> = Vec::new();
-    for (i, si) in sessions.iter().enumerate() {
-        let model_lines = crate::today_usage::session_usage_for_date(si, date);
+    let daily_usage = crate::today_usage::sessions_usage_for_date(sessions, date);
+    for ((i, si), model_lines) in sessions.iter().enumerate().zip(daily_usage) {
         let jsonl_content = if si.agent_source == "claude-code" {
             std::fs::read_to_string(&si.jsonl_path).unwrap_or_default()
         } else {
