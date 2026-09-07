@@ -21,7 +21,7 @@ export function hostClasses(userAgent: string, hasTauri: boolean): string[] {
 
 /** Stamp the host classes onto `<html>`.
  *
- * Every window entry (main, settings, tray, decision-float, preview) must call
+ * Every window entry (main, tray, preview) must call
  * this synchronously before React mounts — they all import App.css, whose
  * scrollbar and title-bar rules key off these classes, and a late stamp flashes
  * the wrong chrome on first paint.

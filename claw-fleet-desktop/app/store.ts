@@ -35,16 +35,15 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   },
 }));
 
-/** Open the standalone Settings window, seeding it with the current connection. */
-export async function openSettingsWindow(): Promise<void> {
-  const { connection } = useConnectionStore.getState();
-  const { theme } = useUIStore.getState();
-  await invoke("open_settings_window", {
-    connection: connection ? JSON.stringify(connection) : null,
-    theme: resolveTheme(theme),
-  }).catch((e) => {
-    console.error("open_settings_window failed:", e);
-  });
+/** Open the in-app Settings overlay.
+ *
+ * Settings used to live in its own `settings.html` webview window, which meant
+ * a second window with its own copy of every store, a `connection` query param
+ * to seed it, and cross-window theme/lang events to keep the two in sync. It is
+ * now an overlay inside the main window, so all of that is just a boolean: the
+ * panel reads the same stores the rest of the app already has. */
+export function openSettings(): void {
+  useUIStore.getState().setSettingsOpen(true);
 }
 
 // ── Theme store ───────────────────────────────────────────────────────────────
@@ -295,15 +294,14 @@ interface UIState {
   /** Explicitly set `view`'s secondary sidebar collapsed state. */
   setSecondarySidebar: (view: ViewMode, collapsed: boolean) => void;
   setMascotVisible: (on: boolean) => void;
+  /** Settings overlay visibility. Deliberately not persisted — a settings
+   *  panel restored on boot is not a preference, it is a surprise. */
+  settingsOpen: boolean;
+  setSettingsOpen: (on: boolean) => void;
   /** When true, the DecisionPanel renders as a minimized bar at the bottom
    *  of the screen instead of the full card. Guard decisions force-expand. */
   decisionPanelCollapsed: boolean;
   setDecisionPanelCollapsed: (on: boolean) => void;
-  /** When true, pending decisions are always presented in the standalone
-   *  decision-float window instead of the in-app DecisionPanel, regardless
-   *  of whether the main window is minimized. */
-  floatingDecisionPanel: boolean;
-  setFloatingDecisionPanel: (on: boolean) => void;
   /** A pending "reveal this file in the 文件 page" request, raised when the
    *  user clicks a path in agent prose. FilesView owns the explorer's
    *  selection state internally, so a request travels through the store
@@ -559,7 +557,6 @@ export const useUIStore = create<UIState>((set) => ({
     set({ historyGroupHandoff: on });
   },
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
-  floatingDecisionPanel: getItem("floating-decision-panel") === "true",
   setTheme: (t) => {
     setItem("theme", t);
     emit("overlay-theme-changed", t).catch(() => {});
@@ -641,6 +638,8 @@ export const useUIStore = create<UIState>((set) => ({
       setItem("secondary-sidebar-collapsed", JSON.stringify(next));
       return { secondarySidebarCollapsed: next };
     }),
+  settingsOpen: false,
+  setSettingsOpen: (on) => set({ settingsOpen: on }),
   setMascotVisible: (on) => {
     setItem("mascot-visible", on ? "true" : "false");
     emit("overlay-mascot-visible-changed", on).catch(() => {});
@@ -649,11 +648,6 @@ export const useUIStore = create<UIState>((set) => ({
   setDecisionPanelCollapsed: (on) => {
     setItem("decision-panel-collapsed", on ? "true" : "false");
     set({ decisionPanelCollapsed: on });
-  },
-  setFloatingDecisionPanel: (on) => {
-    setItem("floating-decision-panel", on ? "true" : "false");
-    emit("overlay-floating-decision-panel-changed", on).catch(() => {});
-    set({ floatingDecisionPanel: on });
   },
 }));
 

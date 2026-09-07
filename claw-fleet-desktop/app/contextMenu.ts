@@ -1,7 +1,7 @@
 /**
  * App-wide right-click context menu.
  *
- * Installed in every webview entry point to replace the default WKWebView /
+ * Installed in the app's webview entry point to replace the default WKWebView /
  * WebView2 context menu (which otherwise shows "Reload", "Back", "Forward",
  * etc.) with an app-relevant menu: Settings / About / Quit.
  *
@@ -43,13 +43,6 @@ function currentLang(): "zh" | "en" {
 
 function tr(key: LangKey): string {
   return STRINGS[currentLang()][key];
-}
-
-function isDark(): boolean {
-  const themeAttr = document.documentElement.getAttribute("data-theme");
-  if (themeAttr === "dark") return true;
-  if (themeAttr === "light") return false;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
 function closeMenu(menu: HTMLElement) {
@@ -126,7 +119,6 @@ function openContextMenu(x: number, y: number) {
     activeMenu = null;
   }
 
-  const dark = isDark();
   const menu = document.createElement("div");
   menu.setAttribute("data-app-context-menu", "");
   menu.style.cssText = [
@@ -144,8 +136,12 @@ function openContextMenu(x: number, y: number) {
 
   menu.appendChild(
     buildMenuItem(tr("settings"), () => {
-      invoke("open_settings_window", { theme: dark ? "dark" : "light" })
-        .catch((e) => console.error("open_settings_window failed:", e));
+      // Settings is an in-app overlay, so this is a store write rather than a
+      // window build. Imported lazily to keep this module (installed before
+      // React mounts) off the store's import graph.
+      import("./store")
+        .then((m) => m.openSettings())
+        .catch((e) => console.error("openSettings failed:", e));
     }),
   );
   menu.appendChild(

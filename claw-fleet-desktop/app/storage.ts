@@ -101,7 +101,6 @@ const ALL_KEYS = [
   "usage-auto-refresh",
   // DecisionPanel presentation.
   "decision-panel-collapsed",
-  "floating-decision-panel",
   // Read-state for audit entries, stored as a JSON blob.
   "audit-read-keys",
   // The most recent daily-report date the user has viewed (YYYY-MM-DD). Drives
@@ -228,7 +227,6 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   "tts-muted": false,
   "personalized-mascot": false,
   "mascot-visible": false,
-  "floating-decision-panel": false,
   "skill-autosync-enabled": false,
 };
 

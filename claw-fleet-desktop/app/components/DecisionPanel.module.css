@@ -1087,6 +1087,29 @@
   min-width: 0;
 }
 
+/* Compact (narrow inline card) layout: options above, preview below. The
+   side-by-side grid needs ~400px to seat both columns above their min widths,
+   which the inline card inside SessionDetail does not have. */
+.elicitation_options_stacked_preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.elicitation_preview_caption {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  padding: 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.elicitation_options_stacked_preview .elicitation_preview {
+  max-height: 30vh;
+}
+
 .elicitation_preview {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
@@ -1426,78 +1449,6 @@
 /* Spacer between left (Decline) and right (Back/Next/Submit) buttons */
 .actions_spacer {
   flex: 1;
-}
-
-/* ── Float (standalone decision-float window) mode ───────────────────────────
- * The float window *is* the panel: a dedicated Tauri window that resizes itself
- * to the card's natural height (DecisionFloatApp observes the wrapper and pushes
- * the height to Rust). For that to work the panel must flow in normal document
- * layout — a `position: fixed` panel is out of flow and reports zero height to
- * the wrapper, so the window never grows and only a sliver of the card shows.
- *
- * Hence: static positioning, full window width, and NO `max-height` cap (the OS
- * window — clamped to a fraction of the monitor in Rust — bounds the size; if a
- * very tall card exceeds that clamp, DecisionFloatApp's outer `overflow-y:auto`
- * provides the single scroll context). The OS window frame replaces the panel's
- * own border / rounded corners / pulse glow. */
-.panel_float {
-  position: static;
-  left: auto;
-  right: auto;
-  bottom: auto;
-  transform: none;
-  width: 100% !important;
-  max-width: 100% !important;
-  max-height: none;
-  height: auto;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  animation: none;
-}
-
-.panel_float::before {
-  display: none;
-}
-
-/* WKWebView suspends the CSS animation clock while the float window is hidden
- * and does not resume it when the window is re-shown (`hide()`/`show()` reuse).
- * Any descendant entry animation that starts from `opacity: 0` (cardFadeIn,
- * panelSlideIn) then freezes at 0% and the element renders invisible — the
- * card body paints zero pixels while non-animated siblings paint fine. The
- * panel itself already opts out (`animation: none` above); extend that to
- * every descendant so a frozen clock can never hide content in this window. */
-.panel_float *,
-.panel_float::after,
-.panel_float *::before,
-.panel_float *::after {
-  animation: none !important;
-}
-
-/* In float mode the window sizes to the card's natural height, so the card's
- * internal scroll caps (the flex-none footer's `max-height: 55vh`, the body's
- * `overflow-y:auto`) are counter-productive: they'd clamp the footer and force
- * the window-resize loop to converge over several frames, flashing a transient
- * scrollbar. Let the whole card flow as one block and let the window grow. The
- * long-content sub-regions (preceding narration, preview, plan body) keep their
- * own vh-bounded scroll — those are deliberate and stay generous once the
- * window has grown. */
-.panel_float .card_scroll {
-  overflow-y: visible;
-}
-
-.panel_float .card_footer {
-  max-height: none;
-  overflow-y: visible;
-}
-
-/* Detail-open in the float window: the row layout needs a bounded height to give
- * the two stretched columns something to fill. The window is widened to ~920px
- * by DecisionFloatApp; cap the height to the viewport rather than the content so
- * the embedded SessionDetail's own scroll region works. */
-.panel_float.panel_with_detail {
-  height: calc(100vh - 2px);
-  max-height: calc(100vh - 2px);
 }
 
 /* ── Plan-approval card styles ──────────────────────────────────────────── */

@@ -204,38 +204,12 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     // There is one window here and the browser owns its chrome, so these are
     // no-ops rather than gaps: the callers fire and forget, and reporting a
     // gap for each would bury the ones that matter.
-    // The Settings panel is its own entry point (`settings.html`), which the
-    // desktop opens as a second webview. A second tab is the same thing here,
-    // and it is the *only* way to reach settings in the browser build — the
-    // no-op this used to be left the web UI with no settings panel at all.
-    // `connection` rides the query string exactly as the desktop passes it, so
-    // the panel can render "current connection" without a round trip.
-    case "open_settings_window": {
-      const conn = args.connection;
-      const qs = typeof conn === "string" && conn
-        ? `?connection=${encodeURIComponent(conn)}`
-        : "";
-      window.open(`settings.html${qs}`, "_blank", "noopener");
-      return { handled: true, value: null };
-    }
-
+    // Settings no longer needs a case at all: it is an in-app overlay in both
+    // hosts now, so the browser build reaches it the same way the desktop does
+    // (a store write), not through a second tab.
     case "show_main_window":
-    // Not `window.open`-able: the desktop pushes the preview's content over an
-    // app event *after* the window exists, and a fresh tab has its own event
-    // bus, so it would open empty.
-    case "open_preview_window":
-    case "close_preview_window":
-    case "show_decision_float":
-    case "hide_decision_float":
-    case "resize_decision_float":
     case "quit_app":
     case "nudge_traffic_lights":
-      return { handled: true, value: null };
-    case "is_main_window_minimized":
-      return { handled: true, value: false };
-    // The float window does not exist here, so it holds no snapshot. Typed
-    // `PendingDecision[] | null` by its caller, so null is in-contract.
-    case "get_decision_float_snapshot":
       return { handled: true, value: null };
     // `app.restart()`'s honest browser equivalent.
     case "restart_app":

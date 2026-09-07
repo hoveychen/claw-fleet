@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
+import { openSettings, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWebBuild, showsMobilePanel } from "../hostEnv";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -545,11 +545,11 @@ export function SessionList() {
             className={styles.footer_card}
             role="button"
             tabIndex={0}
-            onClick={openSettingsWindow}
+            onClick={openSettings}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                openSettingsWindow();
+                openSettings();
               }
             }}
             title={t("settings.title")}

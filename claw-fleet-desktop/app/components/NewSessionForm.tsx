@@ -3,7 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder, FolderOpen, MessageCircle, Server } from "lucide-react";
-import { openSettingsWindow, useConnectionStore, useSessionsStore } from "../store";
+import { openSettings, useConnectionStore, useSessionsStore } from "../store";
 import { classifyHarnessError, requestSettingsTab } from "../harnessErrors";
 import {
   ChatComposer,
@@ -677,7 +677,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
                 icon: <Server size={13} strokeWidth={1.7} className={pillStyles.menu_icon} />,
                 onSelect: () => {
                   requestSettingsTab("integration");
-                  void openSettingsWindow();
+                  openSettings();
                 },
               },
             ]
@@ -785,7 +785,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
                   className={styles.error_action}
                   onClick={() => {
                     requestSettingsTab("environment");
-                    void openSettingsWindow();
+                    openSettings();
                   }}
                 >
                   {t("env.open_env_panel")}

@@ -69,9 +69,9 @@ describe("PathChip broken-path feedback", () => {
     expect(html).not.toMatch(/class="[^"]*path_chip_failed/);
   });
 
-  // The decision-float window hands its clicks to the main window and never
-  // hears the outcome, so it must not guess.
-  it("stays neutral when no receipt channel exists (float window)", () => {
+  // A surface that dispatches its clicks elsewhere never hears the outcome,
+  // so it must not guess.
+  it("stays neutral when no receipt channel exists", () => {
     const html = render("public/app-icon.png", { unresolved: undefined });
     expect(html).not.toMatch(/class="[^"]*path_chip_failed/);
   });
