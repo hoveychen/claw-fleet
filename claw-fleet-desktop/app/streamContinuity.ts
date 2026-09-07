@@ -1,4 +1,4 @@
-import type { LiveThinking } from "./types";
+import type { LiveThinking, RawMessage } from "./types";
 
 /** Keep visible reasoning mounted through an empty sample from a growing sidecar. */
 export function retainLiveThinking(
@@ -9,6 +9,20 @@ export function retainLiveThinking(
     return previous;
   }
   return incoming;
+}
+
+/** True once the durable transcript contains the live reasoning snapshot. */
+export function liveThinkingLanded(messages: RawMessage[], live: LiveThinking): boolean {
+  for (let i = messages.length - 1; i >= Math.max(0, messages.length - 4); i -= 1) {
+    const content = messages[i]?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block.type !== "thinking") continue;
+      const settled = (block as { thinking?: string }).thinking ?? "";
+      if (settled.includes(live.thinking)) return true;
+    }
+  }
+  return false;
 }
 
 export type FollowGrowthBehavior = ScrollBehavior | null;

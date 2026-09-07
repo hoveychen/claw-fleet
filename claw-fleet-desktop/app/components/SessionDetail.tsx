@@ -69,7 +69,7 @@ import { SubagentLiveCards } from "./SubagentLiveCards";
 import { SessionAuxDoc } from "./SessionAuxDoc";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
-import { followGrowthBehavior, retainLiveThinking } from "../streamContinuity";
+import { followGrowthBehavior, liveThinkingLanded, retainLiveThinking } from "../streamContinuity";
 
 
 /** Max subagents listed in the scope dropdown (AgentScopeSwitcher). Active ones
@@ -541,6 +541,16 @@ export function SessionDetail({
       window.clearInterval(timer);
     };
   }, [liveSessionId, liveActive, paused]);
+
+  // The sidecar and transcript are separate transports. Keep the live block
+  // through an empty sidecar sample, then retire it in the same render that its
+  // durable assistant message arrives so the handoff neither flashes nor
+  // duplicates the reasoning.
+  useEffect(() => {
+    setLiveThinking((previous) =>
+      previous && liveThinkingLanded(messages, previous) ? null : previous,
+    );
+  }, [messages]);
 
   // Standalone-mode live tail: the initial fetch above is a one-shot, which
   // was fine when the only standalone consumer was DecisionPanel (a pending
