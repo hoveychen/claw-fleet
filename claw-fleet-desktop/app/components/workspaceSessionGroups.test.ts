@@ -34,31 +34,43 @@ describe("groupSessionsByWorkspace", () => {
     expect(groups[0].sessions.map((item) => item.id)).toEqual(["branch", "main"]);
   });
 
-  it("groups distinct directories and orders groups by their latest activity", () => {
+  it("orders folders alphabetically and their rows by latest activity", () => {
     const groups = groupSessionsByWorkspace([
-      session("older-a", "/work/a", "a", 10),
-      session("newer-a", "/work/a", "a", 40),
-      session("only-b", "/work/b", "b", 30),
+      session("only-z", "/work/zebra", "zebra", 900),
+      session("older-a", "/work/apple", "apple", 10),
+      session("newer-a", "/work/apple", "apple", 40),
     ]);
 
-    expect(groups.map((group) => group.path)).toEqual(["/work/a", "/work/b"]);
-    expect(groups[0].sessions.map((item) => item.id)).toEqual(["newer-a", "older-a"]);
+    // `zebra` is by far the busiest folder and still sits second: folder order
+    // is a stable directory listing, activity only orders rows within a folder.
+    expect(groups.map((group) => group.path)).toEqual([
+      "/work/apple",
+      "/work/zebra",
+    ]);
+    expect(groups[0].sessions.map((item) => item.id)).toEqual([
+      "newer-a",
+      "older-a",
+    ]);
   });
 
-  it("keeps the caller's order when told to preserve it", () => {
+  it("keeps the caller's row order when told to preserve it, folders still alphabetical", () => {
     // The rail freezes row order while the pointer is parked over it, then
     // hands the frozen list here. Re-sorting by activity would undo the freeze
-    // both inside a repository section and across sections.
+    // inside a repository section. Folder order is alphabetical regardless —
+    // `zebra` leads the input and still sorts last.
     const groups = groupSessionsByWorkspace(
       [
-        session("older-a", "/work/a", "a", 10),
-        session("only-b", "/work/b", "b", 30),
-        session("newer-a", "/work/a", "a", 40),
+        session("only-z", "/work/zebra", "zebra", 30),
+        session("older-a", "/work/apple", "apple", 10),
+        session("newer-a", "/work/apple", "apple", 40),
       ],
       { preserveOrder: true },
     );
 
-    expect(groups.map((group) => group.path)).toEqual(["/work/a", "/work/b"]);
+    expect(groups.map((group) => group.path)).toEqual([
+      "/work/apple",
+      "/work/zebra",
+    ]);
     expect(groups[0].sessions.map((item) => item.id)).toEqual([
       "older-a",
       "newer-a",
@@ -103,15 +115,18 @@ describe("groupSessionsByWorkspace", () => {
       { pinnedPath: "/home/me/.fleet/chat" },
     );
 
-    expect(groups.map((group) => group.path)).toEqual(["/work/b", "/work/a"]);
+    expect(groups.map((group) => group.path)).toEqual(["/work/a", "/work/b"]);
   });
 
-  it("uses the directory name as a deterministic tie-breaker", () => {
+  it("falls back to the path when two folders share a display name", () => {
     const groups = groupSessionsByWorkspace([
-      session("z", "/work/zebra", "zebra", 50),
-      session("a", "/work/apple", "apple", 50),
+      session("z", "/work/z/manta", "manta", 50),
+      session("a", "/work/a/manta", "manta", 900),
     ]);
 
-    expect(groups.map((group) => group.name)).toEqual(["apple", "zebra"]);
+    expect(groups.map((group) => group.path)).toEqual([
+      "/work/a/manta",
+      "/work/z/manta",
+    ]);
   });
 });

@@ -28,13 +28,22 @@ describe("groupTaskSections", () => {
     expect(secs.map((s) => s.path)).toEqual([CHAT, "/work/repo"]);
   });
 
-  it("keeps the incoming order otherwise — the freeze must survive grouping", () => {
+  it("keeps the incoming row order otherwise — the freeze must survive grouping", () => {
     const secs = groupTaskSections(
       [row("a", "/work/a", "a"), row("b", "/work/b", "b"), row("c", "/work/a", "a")],
       { chatPath: null, multiDevice: false },
     );
     expect(secs.map((s) => s.path)).toEqual(["/work/a", "/work/b"]);
     expect(secs[0].sessions.map((s) => s.id)).toEqual(["a", "c"]);
+  });
+
+  // 文件夹是稳定的目录清单:zebra 的任务最新(排在传入列表最前)也不能把它顶到前面。
+  it("orders folders alphabetically, not by their first member's position", () => {
+    const secs = groupTaskSections(
+      [row("z", "/work/zebra", "zebra"), row("a", "/work/apple", "apple")],
+      { chatPath: null, multiDevice: false },
+    );
+    expect(secs.map((s) => s.path)).toEqual(["/work/apple", "/work/zebra"]);
   });
 
   it("folds a worktree checkout into its repository section", () => {
