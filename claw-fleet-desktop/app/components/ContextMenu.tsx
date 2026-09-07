@@ -17,6 +17,13 @@ export interface ContextMenuItem {
   sub?: string;
   /** Renders in the danger colour and sits below a separator. */
   danger?: boolean;
+  /** Marks the item as the one currently in effect — the facet the auxiliary
+   *  panel is showing, say. Rendered as a trailing dot, not a checkbox: it is a
+   *  "you are here", not a setting you toggled. */
+  active?: boolean;
+  /** Draws a separator above this item, so one menu can hold two families
+   *  (things that change the layout vs. things that hand you a string). */
+  dividerBefore?: boolean;
   onSelect: () => void;
 }
 
@@ -79,28 +86,39 @@ export function ContextMenu({
   const normal = items.filter((i) => !i.danger);
   const danger = items.filter((i) => i.danger);
 
-  const renderItem = (item: ContextMenuItem) => (
-    <button
-      key={item.id}
-      className={`${styles.item} ${item.danger ? styles.item_danger : ""}`}
-      onClick={() => {
-        onClose();
-        item.onSelect();
-      }}
-    >
-      <span className={styles.item_icon}>{item.icon}</span>
-      {item.sub ? (
-        <span className={styles.item_text}>
-          <span>{item.label}</span>
-          <span className={styles.item_sub} title={item.sub}>
-            {item.sub}
+  const renderItem = (item: ContextMenuItem) => {
+    const button = (
+      <button
+        key={item.id}
+        className={`${styles.item} ${item.danger ? styles.item_danger : ""} ${item.active ? styles.item_active : ""}`}
+        aria-current={item.active ? "true" : undefined}
+        onClick={() => {
+          onClose();
+          item.onSelect();
+        }}
+      >
+        <span className={styles.item_icon}>{item.icon}</span>
+        {item.sub ? (
+          <span className={styles.item_text}>
+            <span>{item.label}</span>
+            <span className={styles.item_sub} title={item.sub}>
+              {item.sub}
+            </span>
           </span>
-        </span>
-      ) : (
-        <span>{item.label}</span>
-      )}
-    </button>
-  );
+        ) : (
+          <span>{item.label}</span>
+        )}
+        {item.active && <span className={styles.item_dot} aria-hidden="true" />}
+      </button>
+    );
+    if (!item.dividerBefore) return button;
+    return (
+      <div key={`${item.id}-group`} className={styles.item_group}>
+        <div className={styles.separator} />
+        {button}
+      </div>
+    );
+  };
 
   return createPortal(
     <div ref={ref} className={styles.menu} style={{ left: pos.x, top: pos.y }}>

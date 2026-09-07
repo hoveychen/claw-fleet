@@ -71,6 +71,31 @@
   background: rgba(var(--color-error-rgb), 0.12);
 }
 
+/* "You are here" — the facet the auxiliary panel is currently showing. The dot
+   sits at the far right so the label column stays aligned with every other
+   item's. */
+.item_active {
+  color: var(--color-accent);
+}
+
+.item_active .item_icon {
+  color: var(--color-accent);
+}
+
+.item_dot {
+  width: 5px;
+  height: 5px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+/* Wraps a divider and the item it precedes, so one `renderItem` return still
+   carries a single key. */
+.item_group {
+  display: contents;
+}
+
 .separator {
   height: 1px;
   margin: 4px 6px;
