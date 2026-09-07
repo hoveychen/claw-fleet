@@ -4221,6 +4221,96 @@ mod tests {
         );
     }
 
+    /// A polling source's status is a roster answer, not a file mtime — so the
+    /// retain branch must not age it out. dsh is the only `WatchStrategy::Poll`
+    /// source: `session/list` hands over a `running` bit (→ `Active`) while
+    /// `last_activity_ms` is dsh's `updatedAt`, which sits still for minutes
+    /// during one long turn. Every filesystem-watcher tick leaves dsh clean, so
+    /// the retained row got `Active && age >= 30s ⇒ Idle` — and the 3s dsh poll
+    /// tick then rescanned it back to `Active`. The two writers alternating on
+    /// the same list is what made the launchpad's run dot blink green / gone /
+    /// green every couple of seconds (dsh also carries no `proc_alive`, so the
+    /// frontend's quiet-alive latch could not hold a faded green either).
+    #[test]
+    fn incremental_rescan_keeps_polling_source_status() {
+        let _lock = claw_fleet_core::paths::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        // A dsh session the last poll reported as running, whose `updatedAt`
+        // is six minutes stale (one long turn in flight).
+        let mut dsh_sess = mk_session("dsh-1", "dsh");
+        dsh_sess.status = SessionStatus::Active;
+        dsh_sess.last_activity_ms = 0;
+        let now_ms = 6 * 60 * 1000;
+
+        // The tick is driven by a filesystem event, so only the fs source is
+        // dirty; dsh is retained.
+        let sources: Vec<Box<dyn AgentSource>> = vec![
+            Box::new(MockSource {
+                watch_fs: true,
+                ..MockSource::new("claude-code", "claude", "")
+            }),
+            Box::new(MockSource {
+                sessions: vec![dsh_sess.clone()],
+                ..MockSource::new("dsh", "dsh", "dsh://")
+            }),
+        ];
+        let out =
+            build_incremental_sessions(&sources, &[dsh_sess], &HashSet::from([0]), now_ms);
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].status,
+            SessionStatus::Active,
+            "a polling source's status must survive the retain branch — aging it \
+             out here fights the poll tick and blinks the run dot",
+        );
+    }
+
+    /// Filesystem sources keep the age-out: their status is derived from the
+    /// transcript's own mtime, so a retained row whose file stopped moving
+    /// genuinely has gone idle.
+    #[test]
+    fn incremental_rescan_still_ages_out_filesystem_source() {
+        let _lock = claw_fleet_core::paths::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        let mut sess = mk_session("claude-1", "claude-code");
+        sess.status = SessionStatus::Active;
+        sess.last_activity_ms = 0;
+
+        let sources: Vec<Box<dyn AgentSource>> = vec![
+            Box::new(MockSource {
+                watch_fs: true,
+                ..MockSource::new("claude-code", "claude", "")
+            }),
+            Box::new(MockSource::new("dsh", "dsh", "dsh://")),
+        ];
+        // dsh is the dirty one this tick, so the claude session is retained.
+        let out = build_incremental_sessions(&sources, &[sess], &HashSet::from([1]), 60 * 1000);
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].status,
+            SessionStatus::Idle,
+            "a retained filesystem-source session must still age out",
+        );
+    }
+
     /// Minimal mock for local_backend tests (duplicated to avoid cross-module test deps).
     struct MockSource {
         name: &'static str,
