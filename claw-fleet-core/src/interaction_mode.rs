@@ -842,24 +842,27 @@ fn apply_interaction_mode_inner(user_title: &str, locale: &str) -> Result<(), St
     let guidance = render_guidance(user_title, locale);
     fs::write(&guidance_path, guidance).map_err(|e| format!("write guidance file: {e}"))?;
 
-    // Inject sentinel block into CLAUDE.md (idempotent).
+    // Inject sentinel block into CLAUDE.md (idempotent), under the shared lock
+    // — see `claude_md_lock` on why read-modify-write here must be serialized.
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-    let stripped = strip_sentinel_block(&existing);
     let block = format!(
         "{begin}\n@{path}\n{end}\n",
         begin = BEGIN_MARKER,
         end = END_MARKER,
         path = guidance_path.display(),
     );
-    let new_content = if stripped.is_empty() {
-        block
-    } else if stripped.ends_with('\n') {
-        format!("{stripped}\n{block}")
-    } else {
-        format!("{stripped}\n\n{block}")
-    };
-    fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+    crate::claude_md_lock::with_lock(&claude_md, || {
+        let existing = fs::read_to_string(&claude_md).unwrap_or_default();
+        let stripped = strip_sentinel_block(&existing);
+        let new_content = if stripped.is_empty() {
+            block
+        } else if stripped.ends_with('\n') {
+            format!("{stripped}\n{block}")
+        } else {
+            format!("{stripped}\n\n{block}")
+        };
+        fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))
+    })?;
     Ok(())
 }
 
@@ -875,12 +878,15 @@ pub fn remove_interaction_mode() -> Result<(), String> {
 
 fn remove_interaction_mode_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
-        if let Ok(existing) = fs::read_to_string(&claude_md) {
-            let stripped = strip_sentinel_block(&existing);
-            if stripped != existing {
-                fs::write(&claude_md, stripped).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+        crate::claude_md_lock::with_lock(&claude_md, || {
+            if let Ok(existing) = fs::read_to_string(&claude_md) {
+                let stripped = strip_sentinel_block(&existing);
+                if stripped != existing {
+                    fs::write(&claude_md, stripped).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                }
             }
-        }
+            Ok::<(), String>(())
+        })?;
     }
     if let Some(path) = guidance_file_path() {
         if path.exists() {

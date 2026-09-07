@@ -65,6 +65,10 @@ describe("startupSelfHealCommands", () => {
 });
 
 describe("runControlPlaneSelfHeal", () => {
+  const flush = async () => {
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+  };
+
   it("一条失败不拖累其余 —— 每条命令各自 catch", async () => {
     const seen: string[] = [];
     const invoke = vi.fn((command: string) => {
@@ -76,12 +80,59 @@ describe("runControlPlaneSelfHeal", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const planned = runControlPlaneSelfHeal(invoke, NOTHING_INSTALLED, allDefault);
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
 
     expect(seen).toEqual(planned);
     expect(seen).toContain("apply_session_title_guidance");
     expect(errors).toHaveBeenCalledOnce();
     errors.mockRestore();
+  });
+
+  /**
+   * 并发触发就是 2026-09-07 把 CLAUDE.md 打成单块的那个动作：六条命令各自
+   * 读-改-写同一个文件。core 侧已经上锁，这里再从源头串起来。
+   */
+  it("串行执行 —— 上一条 settle 之后才发下一条", async () => {
+    const inflight: string[] = [];
+    let maxConcurrent = 0;
+    const resolvers: Array<() => void> = [];
+    const invoke = vi.fn((command: string) => {
+      inflight.push(command);
+      maxConcurrent = Math.max(maxConcurrent, inflight.length);
+      return new Promise<null>((resolve) => {
+        resolvers.push(() => {
+          inflight.splice(inflight.indexOf(command), 1);
+          resolve(null);
+        });
+      });
+    });
+
+    const planned = runControlPlaneSelfHeal(invoke, NOTHING_INSTALLED, allDefault);
+    // 一条都没 settle 时,只允许有一条在飞。
+    await flush();
+    expect(invoke).toHaveBeenCalledOnce();
+
+    while (resolvers.length) {
+      resolvers.shift()!();
+      await flush();
+    }
+    expect(invoke).toHaveBeenCalledTimes(planned.length);
+    expect(maxConcurrent).toBe(1);
+  });
+
+  it("codex 镜像收尾时,前面的 apply 已经真的落盘（而不是只发出去）", async () => {
+    const settled: string[] = [];
+    const invoke = vi.fn(async (command: string) => {
+      await Promise.resolve();
+      settled.push(command);
+      return null;
+    });
+
+    runControlPlaneSelfHeal(invoke, NOTHING_INSTALLED, allDefault);
+    await flush();
+
+    expect(settled[settled.length - 1]).toBe(CODEX_RECONCILE_COMMAND);
+    expect(settled).toContain("apply_session_title_guidance");
   });
 });
 

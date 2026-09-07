@@ -78,9 +78,20 @@ export function startupSelfHealCommands(
 }
 
 /**
- * Fire the plan. Each command is independent — one failure must not strand the
- * rest, which is why they are not chained. Returns what it fired, so callers
- * (and tests) can assert on it.
+ * Fire the plan **one command at a time**, each failure isolated so it cannot
+ * strand the rest. Returns the list it will run, synchronously, so callers (and
+ * tests) can assert on the plan without awaiting.
+ *
+ * Sequential on purpose, twice over:
+ *  - Most of these commands do a read-modify-write on the same
+ *    `~/.claude/CLAUDE.md`. Core now holds a lock around that region, so firing
+ *    them together is no longer *corrupting* — but serializing here means they
+ *    never queue on that lock in the first place. (Firing all six at once is
+ *    exactly what emptied 老板's CLAUDE.md down to a single block on
+ *    2026-09-07, before the lock existed.)
+ *  - `reconcile_codex_guidance` mirrors the Claude sentinels onto
+ *    `~/.codex/AGENTS.md` by reading them off disk, so it has to run after the
+ *    applies have actually landed — not merely after they were dispatched.
  */
 export function runControlPlaneSelfHeal(
   invoke: (command: string) => Promise<unknown>,
@@ -88,10 +99,14 @@ export function runControlPlaneSelfHeal(
   resolve?: (key: string) => boolean,
 ): string[] {
   const commands = startupSelfHealCommands(installed, resolve);
-  for (const command of commands) {
-    Promise.resolve()
-      .then(() => invoke(command))
-      .catch((e: unknown) => console.error(`control-plane self-heal ${command}:`, e));
-  }
+  void (async () => {
+    for (const command of commands) {
+      try {
+        await invoke(command);
+      } catch (e: unknown) {
+        console.error(`control-plane self-heal ${command}:`, e);
+      }
+    }
+  })();
   return commands;
 }
