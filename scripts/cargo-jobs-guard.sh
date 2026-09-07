@@ -28,6 +28,7 @@
 #   FLEET_BUILD_JOBS=<n>           force CARGO_BUILD_JOBS, skips the memory calc
 #   FLEET_CARGO_GUARD_QUIET=1      suppress the "waiting for a slot" notices
 #   FLEET_CARGO_SLOT_ROOT=<dir>    relocate the slot store (tests use this)
+#   FLEET_CARGO_ALLOW_CLEAN=1      permit `cargo clean` against a shared target dir
 
 set -uo pipefail
 
@@ -103,19 +104,57 @@ is_heavy() {
     esac
   done
 
-  local subcmd=""
-  for arg in "$@"; do
-    case "$arg" in
-      -*) continue ;;
-      *) subcmd="$arg"; break ;;
-    esac
-  done
-
-  case "$subcmd" in
+  case "$(subcommand_of "$@")" in
     build|b|test|t|check|c|clippy|run|r|bench|doc|d|rustc|install|nextest) return 0 ;;
     *) return 1 ;;
   esac
 }
+
+# First non-flag argument, i.e. the subcommand. Empty for a bare `cargo` or
+# `cargo --version`.
+subcommand_of() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      -*) continue ;;
+      *) printf '%s\n' "$arg"; return ;;
+    esac
+  done
+}
+
+# ── Refuse `cargo clean` when the target dir is shared ───────────────────────
+# `build.target-dir` in this repo's .cargo/config.toml points every checkout
+# and every `.worktrees/<id>/` at one shared target dir. That is a large win —
+# cargo skips already-built dependency units outright instead of recompiling
+# them per worktree — but it turns `cargo clean` from a local reset into a
+# machine-wide wipe. Measured 2026-09-06: 43G in the shared dir with a dozen
+# concurrent plans reading from it. Cargo has no "clean only my share", so the
+# only protection is not running it.
+if [[ "$(subcommand_of "$@")" == "clean" && "${FLEET_CARGO_ALLOW_CLEAN:-0}" != "1" ]]; then
+  # Ask cargo rather than reimplementing the lookup: the effective target dir
+  # comes from CARGO_TARGET_DIR, build.target-dir, or a config file found by
+  # walking up from cwd, and a hand-rolled copy of that would drift.
+  guard_meta="$("$REAL_CARGO" metadata --format-version 1 --no-deps 2>/dev/null)"
+  guard_tdir="$(printf '%s' "$guard_meta" | grep -o '"target_directory":"[^"]*"' | head -1 | cut -d'"' -f4)"
+  guard_wroot="$(printf '%s' "$guard_meta" | grep -o '"workspace_root":"[^"]*"' | head -1 | cut -d'"' -f4)"
+  # Fail open when metadata does not resolve (not a cargo project, unreadable
+  # manifest): blocking a clean nobody can explain is worse than allowing one.
+  if [[ -n "$guard_tdir" && -n "$guard_wroot" && "$guard_tdir" != "$guard_wroot"/* ]]; then
+    cat >&2 <<EOF
+==> cargo-jobs-guard: refusing \`cargo clean\`.
+
+    target dir:     $guard_tdir
+    this workspace: $guard_wroot
+
+    The target dir is outside this workspace, so it is shared with every other
+    checkout and worktree on this machine. Cleaning it discards their build
+    artifacts too and forces a full rebuild in every concurrent session.
+
+    Override deliberately with:  FLEET_CARGO_ALLOW_CLEAN=1 cargo clean
+EOF
+    exit 1
+  fi
+fi
 
 if ! is_heavy "$@"; then
   exec "$REAL_CARGO" "$@"
