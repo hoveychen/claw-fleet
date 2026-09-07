@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
-import type { RemoteConnection } from "./components/ConnectionDialog";
 import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, WaitingAlert } from "./types";
 import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
@@ -12,35 +11,10 @@ import i18n from "./i18n";
 import { playChime } from "./audio";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 
-// ── Connection store ──────────────────────────────────────────────────────────
-
-export type Connection =
-  | { type: "local" }
-  | { type: "remote"; connection: RemoteConnection };
-
-interface ConnectionState {
-  /** `null` = not yet connected (dialog is shown) */
-  connection: Connection | null;
-  setConnection: (conn: Connection) => void;
-  disconnect: () => Promise<void>;
-}
-
-export const useConnectionStore = create<ConnectionState>((set) => ({
-  connection: null,
-  setConnection: (conn) => set({ connection: conn }),
-  disconnect: async () => {
-    await invoke("disconnect_remote").catch(() => {});
-    useSessionsStore.getState().setScanReady(false);
-    set({ connection: null });
-  },
-}));
-
-/** Open the standalone Settings window, seeding it with the current connection. */
+/** Open the standalone Settings window. */
 export async function openSettingsWindow(): Promise<void> {
-  const { connection } = useConnectionStore.getState();
   const { theme } = useUIStore.getState();
   await invoke("open_settings_window", {
-    connection: connection ? JSON.stringify(connection) : null,
     theme: resolveTheme(theme),
   }).catch((e) => {
     console.error("open_settings_window failed:", e);

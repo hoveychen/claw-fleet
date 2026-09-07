@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
+import { openSettingsWindow, runningProcTotal, useAuditStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWebBuild, showsMobilePanel } from "../hostEnv";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -76,7 +76,6 @@ export function SessionList() {
     },
     [viewMode, setViewMode, toggleSecondarySidebar],
   );
-  const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const hasNewReport = useReportStore((s) => s.hasNewReport);
   // Unread launchpad sessions — same scope the 启动台 (HistoryView) lists
@@ -260,8 +259,6 @@ export function SessionList() {
       );
     });
   }
-
-  const isRemote = connection?.type === "remote";
 
   const COLLAPSED_WIDTH = 64;
   const effectiveWidth = sidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
@@ -581,10 +578,6 @@ export function SessionList() {
             {!sidebarCollapsed && (
               <div className={styles.footer_info}>
                 <span className={styles.footer_name}>{t("title")}</span>
-                <span className={styles.footer_status}>
-                  <span className={`${styles.footer_dot} ${isRemote ? styles.footer_dot_remote : ""}`} />
-                  {isRemote ? t("settings.remote") : t("settings.local")}
-                </span>
               </div>
             )}
             <span className={styles.footer_gear}>⚙</span>

@@ -27,13 +27,11 @@ export function SessionHeaderMenu({
   sessionId,
   jsonlPath,
   workspacePath,
-  isLocal,
   onOpenSecondView,
 }: {
   sessionId: string;
   jsonlPath: string;
   workspacePath: string;
-  isLocal: boolean;
   /** Open a second pane on this session beside the first. Absent where there is
    *  no tab strip to hold it, and in the second pane itself. */
   onOpenSecondView?: () => void;
@@ -95,9 +93,8 @@ export function SessionHeaderMenu({
     },
   );
 
-  // A remote workspace's files are not on this machine — nothing to reveal.
-  // Nor can a browser tab open a file manager; see canReveal.ts.
-  if (canRevealPath(isLocal)) {
+  // A browser tab cannot open a file manager; see canReveal.ts.
+  if (canRevealPath()) {
     items.push({
       id: "reveal",
       label: t(revealKey),

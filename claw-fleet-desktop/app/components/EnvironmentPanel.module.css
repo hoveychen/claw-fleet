@@ -17,15 +17,6 @@
   font-size: 12px;
 }
 
-.remote_note {
-  padding: 8px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-warning-bg);
-  color: var(--color-text);
-  font-size: 12px;
-}
-
 .card {
   border: 1px solid var(--color-border);
   border-radius: 10px;

@@ -36,7 +36,6 @@ afterEach(() => {
 
 const ctx: PathLinkContext = {
   workspaceRoot: "/home/u/repo",
-  isLocal: true,
   openInFiles: () => {},
 };
 

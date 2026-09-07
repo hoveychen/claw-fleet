@@ -279,14 +279,11 @@ async function handleIPC(
     case "start_watching_session":
     case "stop_watching_session":
     case "set_locale":
-    case "disconnect_remote":
     case "set_source_enabled":
     case "apply_hooks_setup":
     case "interrupt_session":
     case "kill_session":
     case "kill_workspace_sessions":
-    case "delete_connection":
-    case "connect_remote":
     case "set_lite_mode":
     case "show_main_window":
     case "respond_to_guard":
@@ -931,8 +928,6 @@ async function handleIPC(
       return MOCK_DETECTED_TOOLS;
     case "get_log_path":
       return "/tmp/claw-fleet.log";
-    case "list_saved_connections":
-      return [];
     case "list_ssh_profiles":
       return ["personal-server", "work-devbox", "staging-bastion"];
     case "pick_file":

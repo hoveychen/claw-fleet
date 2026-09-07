@@ -26,8 +26,6 @@ function revealKey(): string {
 export interface PathLinkContext {
   /** Workspace root that relative paths resolve against. */
   workspaceRoot: string;
-  /** False for a remote connection: Finder cannot reach those files. */
-  isLocal: boolean;
   /** Open in the 文件 page. `absPath` is already resolved. */
   openInFiles: (absPath: string, line: number | null) => void;
   /**
@@ -95,7 +93,6 @@ export function PathChip({
           }
         }}
         onContextMenu={(e) => {
-          if (!ctx.isLocal) return; // fall through to the app-wide menu
           e.preventDefault();
           setMenu({ x: e.clientX, y: e.clientY });
         }}
@@ -115,7 +112,7 @@ export function PathChip({
             // Reveal only where a file manager can actually open — see
             // canReveal.ts; in a tab the invoke resolves to null and the click
             // produces nothing at all, not even the failed-path flash.
-            ...(canRevealPath(ctx.isLocal)
+            ...(canRevealPath()
               ? [{ id: "reveal", label: t(revealKey()), onSelect: reveal }]
               : []),
           ]}

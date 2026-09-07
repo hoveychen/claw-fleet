@@ -5,7 +5,7 @@ import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import { pathAwareMarkdownComponents, safeMarkdownComponents } from "../markdown/safeLinks";
-import { useConnectionStore, useSessionsStore, useUIStore, type FileNavRequest } from "../store";
+import { useSessionsStore, useUIStore, type FileNavRequest } from "../store";
 
 /** Cross-window request to open a file in the 文件 page. Raised by the
  *  decision-float window, which has no explorer of its own. */
@@ -42,7 +42,6 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
   const workspacePath = useSessionsStore(
     (s) => s.sessions.find((x) => x.id === sessionId)?.workspacePath,
   );
-  const connection = useConnectionStore((s) => s.connection);
   const requestFileNav = useUIStore((s) => s.requestFileNav);
   const unresolvedPaths = useUIStore((s) => s.unresolvedPaths);
   const float = useMemo(isFloatWindow, []);
@@ -52,7 +51,6 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
     if (!workspacePath) return undefined;
     return {
       workspaceRoot: workspacePath,
-      isLocal: connection?.type !== "remote",
       // The float window's clicks are served by the *main* window's explorer,
       // whose findings never come back across the window boundary — so a chip
       // there has nothing to go on and stays neutral.
@@ -67,7 +65,7 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
         }
       },
     };
-  }, [sessionId, workspacePath, connection?.type, requestFileNav, float, unresolvedPaths]);
+  }, [sessionId, workspacePath, requestFileNav, float, unresolvedPaths]);
 }
 
 /**

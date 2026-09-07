@@ -6,7 +6,6 @@ import { useTranslation } from "react-i18next";
 import {
   INITIAL_TAIL,
   LOAD_EARLIER_STEP,
-  useConnectionStore,
   useDecisionStore,
   useDetailStore,
   useSessionsStore,
@@ -390,7 +389,6 @@ export function SessionDetail({
   }, []);
 
   const sessions = useSessionsStore((s) => s.sessions);
-  const connection = useConnectionStore((s) => s.connection);
   const requestFileNav = useUIStore((s) => s.requestFileNav);
   const liveSession = useMemo(() => {
     if (!session) return null;
@@ -633,7 +631,6 @@ export function SessionDetail({
     if (!workspacePath) return undefined;
     return {
       workspaceRoot: workspacePath,
-      isLocal: connection?.type !== "remote",
       // In a tab strip the file opens beside the prose that named it — the
       // whole point of an IDE's split. Elsewhere (drawer, Lite) there is no
       // strip, so it still goes to the 仓库 page.
@@ -642,7 +639,7 @@ export function SessionDetail({
           ? tabOpener.openFile(absPath, line)
           : requestFileNav({ workspacePath, absPath, line }),
     };
-  }, [workspacePath, connection?.type, requestFileNav, tabOpener]);
+  }, [workspacePath, requestFileNav, tabOpener]);
 
   // `[[slug]]` refs the agent wrote become links. Agents are told to publish
   // findings to the wiki and to cross-reference them that way, so the refs were
@@ -954,7 +951,6 @@ export function SessionDetail({
                 sessionId={liveSession.id}
                 jsonlPath={liveSession.jsonlPath}
                 workspacePath={liveSession.workspacePath}
-                isLocal={connection?.type !== "remote"}
                 // Absent without a tab strip (the global drawer, Lite mode) —
                 // there is nowhere to put the second pane — and absent in the
                 // second pane itself, where it would offer to open this one.

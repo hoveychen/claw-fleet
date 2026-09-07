@@ -129,7 +129,7 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     // `webDialogOpen`. What is left here is the directory case, which no browser
     // dialog can serve: there is no way to obtain a *host* directory path from
     // a tab. Those call sites switch to `DirPickerDialog` (backend-driven,
-    // over `browse_dir`) instead, the same swap a remote connection makes, so
+    // over `browse_dir`) instead, so
     // reaching this line means the caller has no directory to offer and `null`
     // — the plugin's "cancelled" — is the honest answer.
     case "plugin:dialog|open":
@@ -208,16 +208,9 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     // desktop opens as a second webview. A second tab is the same thing here,
     // and it is the *only* way to reach settings in the browser build — the
     // no-op this used to be left the web UI with no settings panel at all.
-    // `connection` rides the query string exactly as the desktop passes it, so
-    // the panel can render "current connection" without a round trip.
-    case "open_settings_window": {
-      const conn = args.connection;
-      const qs = typeof conn === "string" && conn
-        ? `?connection=${encodeURIComponent(conn)}`
-        : "";
-      window.open(`settings.html${qs}`, "_blank", "noopener");
+    case "open_settings_window":
+      window.open("settings.html", "_blank", "noopener");
       return { handled: true, value: null };
-    }
 
     case "show_main_window":
     // Not `window.open`-able: the desktop pushes the preview's content over an
@@ -317,13 +310,11 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
       console.debug("[frontend]", args.msg);
       return { handled: true, value: null };
 
-    // SSH connection management. The front door only ever talks to the backend
-    // inside the app that served this page, so there is nothing to list — but
-    // the answer must still be a *list*: `ConnectionDialog` reads `.length` off
-    // it during render, and a `null` there throws mid-render and leaves the
-    // whole tree unmounted (root stays empty, no console error, `boot()` still
-    // resolves). That is the failure this pair exists to prevent.
-    case "list_saved_connections":
+    // `~/.ssh/config` aliases live on the caller's machine, which a tab cannot
+    // read, so there is nothing to list — but the answer must still be a
+    // *list*: the settings panel's host picker reads `.length` off it during
+    // render, and a `null` there throws mid-render and leaves the whole tree
+    // unmounted (root stays empty, no console error, `boot()` still resolves).
     case "list_ssh_profiles":
       return { handled: true, value: [] };
 
@@ -340,10 +331,10 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     //     filesystem that the *user* chooses; a tab's nearest equivalent is a
     //     download, which is a different operation.
     //   - test_decision_frontend_only, test_fleet_ask_* — emit onto the
-    //     desktop's own app-event bus / have no RemoteBackend override.
-    //   - connect_remote, disconnect_remote, delete_connection,
-    //     install_rca_remote, update_rca_remote — SSH connection management.
-    //     The tab only ever talks to the server that served it.
+    //     desktop's own app-event bus.
+    //   - install_rca_remote, update_rca_remote — open an ssh connection FROM
+    //     the caller's machine. The tab only ever talks to the server that
+    //     served it.
     default:
       return { handled: false };
   }

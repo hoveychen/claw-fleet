@@ -26,7 +26,6 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
-  useConnectionStore,
   useReadStore,
   useSessionsStore,
   useUIStore,
@@ -284,10 +283,6 @@ export function HistoryView() {
   const readOverrides = useReadStore((s) => s.overrides);
   const markRead = useReadStore((s) => s.markRead);
   const markManyRead = useReadStore((s) => s.markManyRead);
-  // Remote workspaces live on the probe host — their files can't be revealed in
-  // the local file manager, so the row menu hides that item for them.
-  const connection = useConnectionStore((s) => s.connection);
-  const isLocal = connection?.type !== "remote";
 
   // Rail filters live in the store, not here: this component is unmounted every
   // time `viewMode` leaves "history", which would otherwise reset them behind
@@ -768,7 +763,7 @@ export function HistoryView() {
         icon: <Folder size={13} />,
         onSelect: () => copyText(s.workspacePath),
       });
-      if (canRevealPath(isLocal)) {
+      if (canRevealPath()) {
         items.push({
           id: "reveal",
           label: t(revealKey),
@@ -791,7 +786,7 @@ export function HistoryView() {
       }
       return items;
     },
-    [t, readOverrides, isLocal, handleRowClick, markRead, copyText],
+    [t, readOverrides, handleRowClick, markRead, copyText],
   );
 
   // Close paths. `closeTab` takes no group id on purpose — the ✕, middle-click

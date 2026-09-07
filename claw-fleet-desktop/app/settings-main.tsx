@@ -46,19 +46,6 @@ async function boot() {
     console.warn("[settings] get_platform failed:", e);
   }
 
-  // Seed the connection store from the URL query param so the Settings window
-  // can render "current connection" without pinging the backend.
-  const connParam = params.get("connection");
-  if (connParam) {
-    try {
-      const { useConnectionStore } = await import("./store");
-      const parsed = JSON.parse(connParam);
-      useConnectionStore.getState().setConnection(parsed);
-    } catch (e) {
-      console.warn("[settings] failed to parse connection param:", e);
-    }
-  }
-
   const { installAppContextMenu } = await import("./contextMenu");
   installAppContextMenu();
 

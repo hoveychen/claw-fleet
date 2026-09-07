@@ -3,7 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder, FolderOpen, MessageCircle, Server } from "lucide-react";
-import { openSettingsWindow, useConnectionStore, useSessionsStore } from "../store";
+import { openSettingsWindow, useSessionsStore } from "../store";
 import { classifyHarnessError, requestSettingsTab } from "../harnessErrors";
 import {
   ChatComposer,
@@ -21,7 +21,7 @@ import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
 import { isWebBuild } from "../hostEnv";
 import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
-import { sshTargetOf, type RemoteConnection } from "./ConnectionDialog";
+import { sshTargetOf, type SshHost } from "../sshHosts";
 import styles from "./NewSessionForm.module.css";
 import { rcaErrorMessage } from "../rcaErrors";
 
@@ -231,14 +231,11 @@ export function defaultWorkspace(
 export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
-  const { connection } = useConnectionStore();
-  const isRemote = connection?.type === "remote";
   // Tauri's native directory dialog browses the machine the *desktop* runs on.
-  // That is the wrong machine under a remote connection (the session spawns on
-  // the probe), and in the browser build there is no such dialog at all — a tab
-  // can only hand back bytes, never a host path. Both cases go through
-  // `DirPickerDialog`, which lists whatever host the backend is bound to.
-  const needsBackendDirPicker = isRemote || isWebBuild();
+  // In the browser build there is no such dialog at all — a tab can only hand
+  // back bytes, never a host path — so that case goes through
+  // `DirPickerDialog`, which lists the host the backend runs on.
+  const needsBackendDirPicker = isWebBuild();
   // Only offer the agent tools whose source is actually being monitored (source
   // enabled in settings AND the CLI installed). Codex must not appear in the
   // launcher when its source is off — selecting it would only fail at spawn.
@@ -366,27 +363,27 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   // install with no remote hosts registered just gets two empty arrays here and
   // the picker looks exactly as it did before.
   const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspace[]>([]);
-  const [rcaHosts, setRcaHosts] = useState<RemoteConnection[]>([]);
+  const [rcaHosts, setRcaHosts] = useState<SshHost[]>([]);
   useEffect(() => {
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
       .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
       .catch(() => {});
     // Only hosts that actually have rca can execute a workspace; one without it
     // would fail at spawn, so it is not offered as a place to browse.
-    invoke<RemoteConnection[]>("list_ssh_hosts")
+    invoke<SshHost[]>("list_ssh_hosts")
       .then((hosts) => setRcaHosts((hosts ?? []).filter((h) => !!h.rcaPath)))
       .catch(() => {});
   }, []);
 
   // Which host the directory picker is browsing. `null` = the backend host's
   // own disk (the pre-existing behaviour).
-  const [browsingHost, setBrowsingHost] = useState<RemoteConnection | null>(null);
+  const [browsingHost, setBrowsingHost] = useState<SshHost | null>(null);
   const [registerError, setRegisterError] = useState<string | null>(null);
 
   // Picking a directory on a host IS the registration. The user never types the
   // path, so it cannot disagree between the two machines — which was the whole
   // failure mode of the settings-page form this replaces.
-  const registerRemoteWorkspace = async (host: RemoteConnection, path: string) => {
+  const registerRemoteWorkspace = async (host: SshHost, path: string) => {
     setRegisterError(null);
     try {
       const cfg = await invoke<RemoteWorkspacesConfig>("upsert_remote_workspace", {

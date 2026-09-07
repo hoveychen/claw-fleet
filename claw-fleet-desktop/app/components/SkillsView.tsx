@@ -6,7 +6,7 @@ import { Copy, FolderOpen, Share2, Sparkles, Trash2, Unlink } from "lucide-react
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
-import { useConnectionStore, useUIStore } from "../store";
+import { useUIStore } from "../store";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { PageShell } from "./PageShell";
@@ -210,7 +210,6 @@ export function SkillsView() {
     }
   }, [load, syncing, t]);
 
-  const isLocal = useConnectionStore((s) => s.connection?.type === "local");
 
   // Row context menu — anchor + subject held together, mirroring WikiView.
   const [ctxMenu, setCtxMenu] = useState<{ skill: SkillItem; anchor: ContextMenuAnchor } | null>(
@@ -280,7 +279,7 @@ export function SkillsView() {
       sub: skill.path,
       onSelect: () => void writeText(skill.path).catch(() => {}),
     });
-    if (canRevealPath(isLocal)) {
+    if (canRevealPath()) {
       const revealKey =
         document.documentElement.getAttribute("data-platform") === "windows"
           ? "paths.reveal_in_explorer"
@@ -477,9 +476,6 @@ function SkillDetail({
   onDeleted: (path: string) => void;
 }) {
   const { t } = useTranslation();
-  const isLocal = useConnectionStore(
-    (s) => s.connection?.type === "local",
-  );
   const [files, setFiles] = useState<SkillFileEntry[] | null>(null);
   const { activeFilePath, collapsedPaths, fileQuery } = useUIStore(
     (s) => s.mainViewState.skills,
@@ -651,7 +647,7 @@ function SkillDetail({
               {t("skills.unlink_target")}
             </button>
           )}
-          {isLocal && activeFile && (
+          {canRevealPath() && activeFile && (
             <button
               className={styles.promote_btn}
               onClick={reveal}

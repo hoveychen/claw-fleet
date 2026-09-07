@@ -4,7 +4,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./fonts";
 import "./App.css";
-import { ConnectionDialog } from "./components/ConnectionDialog";
 import { LiteApp } from "./components/LiteApp";
 import { Onboarding } from "./components/Onboarding";
 import { SessionDetail } from "./components/SessionDetail";
@@ -21,7 +20,7 @@ import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
 import { decisionSurfaces } from "./decisionSurface";
 import { isWebBuild } from "./hostEnv";
-import { type Connection, applyWindowTheme, navigateToSessionDetail, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
+import { applyWindowTheme, navigateToSessionDetail, useDecisionStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
@@ -38,7 +37,6 @@ function computeUnseenFeatures(): OnboardingFeatureId[] {
 
 function App() {
   const { theme, liteMode, setTheme, setLiteMode, setViewMode } = useUIStore();
-  const { connection, setConnection, disconnect } = useConnectionStore();
 
   // Always-mounted listeners for backend decision events. Must live at the
   // App root so events aren't dropped while DecisionPanel is unmounted
@@ -140,16 +138,6 @@ function App() {
       }
     });
   }, []);
-
-  useEffect(() => {
-    const unlisten = listen("switch-connection", () => {
-      useDetailStore.getState().close();
-      disconnect();
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [disconnect]);
 
   // Sync theme/lang from other windows (standalone Settings, overlay).
   useEffect(() => {
@@ -280,13 +268,6 @@ function App() {
     }
   }, [theme]);
 
-  const handleConnected = useCallback(
-    (conn: Connection) => {
-      setConnection(conn);
-    },
-    [setConnection]
-  );
-
   const finishOnboarding = useCallback(() => {
     setOnboardingMode(null);
     setItem(ONBOARDING_DISMISSED_KEY, "1");
@@ -305,16 +286,6 @@ function App() {
   useEffect(() => {
     invoke("set_lite_mode", { enabled: liteMode }).catch(() => {});
   }, [liteMode]);
-
-  // Show connection dialog until the user picks local or remote
-  if (!connection) {
-    return (
-      <div className="app">
-        <WindowsFrameOverlay />
-        <ConnectionDialog onConnected={handleConnected} />
-      </div>
-    );
-  }
 
   if (liteMode) {
     return (
