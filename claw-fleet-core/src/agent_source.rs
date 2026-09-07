@@ -489,6 +489,159 @@ pub(crate) fn normalize_tool(tool: &str) -> &str {
     }
 }
 
+// ── model → source routing ───────────────────────────────────────────────────
+
+/// The agent source a model spec names, decided by the *shape* of the spec.
+///
+/// Fleet stores one plain model string per launch, but each harness spells its
+/// selection differently, and three of those spellings are unambiguous:
+///
+/// - `profile:<name>` — Codex's marker for a profile-v2 file
+///   (`codex_launch::push_model_args` splits it into `-p <name>`).
+/// - `<provider>/<model>` — dsh's provider-scoped id
+///   (`dsh_source::split_model`; e.g. `openrouter/anthropic/claude-opus-5`).
+/// - `claude…` / a bare Claude alias, optionally with a `[1m]` context suffix.
+/// - `gpt…` — Codex's own catalog (`gpt-6-astra`, `gpt-5.6-sol`, …).
+///
+/// Returns config/`agent_source` names ("claude-code" / "codex" / "dsh").
+/// `None` means "not recognisable" — a third-party id served through a Codex
+/// provider block, say — and callers must then keep whatever source they
+/// already had rather than guess.
+pub fn source_for_model(model: &str) -> Option<&'static str> {
+    let m = model.trim();
+    if m.is_empty() {
+        return None;
+    }
+    if m.starts_with("profile:") {
+        return Some("codex");
+    }
+    if m.contains('/') {
+        return Some("dsh");
+    }
+    // `claude-opus-5[1m]` — the bracketed context suffix is Fleet's, not part of
+    // any model id, and it rides along on the spec string.
+    let base = m.split('[').next().unwrap_or(m).trim().to_ascii_lowercase();
+    let claude_alias = ["opus", "sonnet", "haiku", "fable"]
+        .iter()
+        .any(|a| base == *a || base.starts_with(&format!("{a}-")));
+    if base.starts_with("claude") || claude_alias {
+        return Some("claude-code");
+    }
+    if base.starts_with("gpt") {
+        return Some("codex");
+    }
+    None
+}
+
+/// Where a successor launch (handoff / schedule / loop / watch) should run,
+/// after reconciling the inherited context with an explicit model override.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LaunchRoute {
+    /// Config/`agent_source` name the successor must be spawned with.
+    pub agent_source: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// The source the launch was moved *away* from, set only when the model
+    /// override changed harness. Callers surface it so the agent sees that
+    /// naming another harness's model re-pointed the whole launch.
+    pub switched_from: Option<String>,
+}
+
+impl LaunchRoute {
+    /// A clause naming the harness switch, for the "ok: …" line the CLI and the
+    /// MCP tools print back. Empty when nothing was re-pointed, so callers can
+    /// splice it in unconditionally.
+    ///
+    /// The agent asked for a model and got a different *tool* than the one it is
+    /// running on; saying so is what keeps that from looking like a silent
+    /// mis-launch when the successor shows up as a Codex session.
+    pub fn switch_note(&self) -> String {
+        match &self.switched_from {
+            None => String::new(),
+            Some(from) => format!(
+                "（模型 {} 属于 {}，已从 {} 改为用 {} 启动）",
+                self.model.as_deref().unwrap_or_default(),
+                self.agent_source,
+                from,
+                self.agent_source
+            ),
+        }
+    }
+}
+
+/// Resolve the launch route for a successor created from `ctx`.
+///
+/// The override rule the CLI and the MCP tools both used to open-code was
+/// `flag.or(ctx.model)` plus "source = whatever this session runs on". That
+/// silently mis-routes the one case where the flag exists at all: a Claude
+/// session asking for `--model gpt-5.6-sol` got a *Claude* successor launched
+/// with `--model gpt-5.6-sol`, which dies on "model not found". A model spec
+/// that unambiguously names another harness re-points the launch at that
+/// harness instead.
+///
+/// Effort does not survive a harness switch unless it was named explicitly:
+/// the ladders differ (Claude has `xhigh`/`max`, Codex has `minimal`), so
+/// carrying the old session's value over would hand the new harness a level it
+/// rejects.
+pub fn route_launch(
+    ctx: &crate::session::LaunchContext,
+    model_flag: Option<&str>,
+    effort_flag: Option<&str>,
+) -> Result<LaunchRoute, String> {
+    route_launch_with(ctx, model_flag, effort_flag, |tool| {
+        find_source_by_api_name(&build_sources(), tool).is_some()
+    })
+}
+
+/// [`route_launch`] against an injectable availability probe, so tests decide
+/// which sources exist instead of inheriting the developer's
+/// `fleet-sources.json` and installed binaries.
+pub fn route_launch_with(
+    ctx: &crate::session::LaunchContext,
+    model_flag: Option<&str>,
+    effort_flag: Option<&str>,
+    is_available: impl Fn(&str) -> bool,
+) -> Result<LaunchRoute, String> {
+    let clean = |s: Option<&str>| {
+        s.map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    let model_flag = clean(model_flag);
+    let effort_flag = clean(effort_flag);
+    let inherited = clean(ctx.source.as_deref()).unwrap_or_else(|| "claude-code".to_string());
+    let model = model_flag.clone().or_else(|| ctx.model.clone());
+
+    let target = model_flag
+        .as_deref()
+        .and_then(source_for_model)
+        .filter(|t| normalize_tool(t) != normalize_tool(&inherited));
+    let Some(target) = target else {
+        return Ok(LaunchRoute {
+            agent_source: inherited,
+            model,
+            effort: effort_flag.or_else(|| ctx.effort.clone()),
+            switched_from: None,
+        });
+    };
+    if !is_available(normalize_tool(target)) {
+        return Err(format!(
+            "model '{}' belongs to the '{}' agent source, but that source is not available here \
+             (not installed, or disabled in ~/.fleet/fleet-sources.json). Enable/install it, or \
+             name a '{}' model instead.",
+            model.as_deref().unwrap_or_default(),
+            target,
+            inherited
+        ));
+    }
+    Ok(LaunchRoute {
+        agent_source: target.to_string(),
+        model,
+        effort: effort_flag,
+        switched_from: Some(inherited),
+    })
+}
+
 /// Find a source by its API name (e.g. "claude", "codex").
 pub fn find_source_by_api_name<'a>(
     sources: &'a [Box<dyn AgentSource>],
@@ -550,6 +703,144 @@ pub fn fetch_usage_summaries_from_sources(sources: &[Box<dyn AgentSource>]) -> V
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A `LaunchContext` for a session running `source` on `model`.
+    fn ctx(source: &str, model: &str, effort: &str) -> crate::session::LaunchContext {
+        crate::session::LaunchContext {
+            shell_cwd: "/ws".into(),
+            workspace: "/ws".into(),
+            model: (!model.is_empty()).then(|| model.to_string()),
+            effort: (!effort.is_empty()).then(|| effort.to_string()),
+            source: (!source.is_empty()).then(|| source.to_string()),
+        }
+    }
+
+    /// Every source exists — the common machine, and what isolates the routing
+    /// decision from availability.
+    fn all_available(_: &str) -> bool {
+        true
+    }
+
+    /// Each harness spells its model selection differently, and three of those
+    /// spellings are unambiguous. A spec Fleet cannot place (a third-party id
+    /// behind a Codex provider block) must stay unplaced rather than be guessed.
+    #[test]
+    fn model_specs_name_their_harness() {
+        for m in ["claude-opus-5", "claude-opus-5[1m]", "opus", "sonnet-4-6", "  fable  "] {
+            assert_eq!(source_for_model(m), Some("claude-code"), "{m}");
+        }
+        for m in ["gpt-5.6-sol", "gpt-6-astra", "profile:deepseek-flash"] {
+            assert_eq!(source_for_model(m), Some("codex"), "{m}");
+        }
+        for m in ["deepseek-official/deepseek-v4-pro", "openrouter/anthropic/claude-opus-5"] {
+            assert_eq!(source_for_model(m), Some("dsh"), "{m}");
+        }
+        for m in ["", "   ", "my-finetune-v3"] {
+            assert_eq!(source_for_model(m), None, "{m}");
+        }
+    }
+
+    /// The bug this routing exists for: a Claude session naming a Codex model
+    /// used to keep `agent_source = claude-code`, so the successor was launched
+    /// as `claude --model gpt-5.6-sol` and died on "model not found". The model
+    /// override must re-point the whole launch at the harness that owns it.
+    #[test]
+    fn explicit_cross_harness_model_repoints_the_launch() {
+        let route = route_launch_with(
+            &ctx("claude-code", "claude-opus-5", "xhigh"),
+            Some("gpt-5.6-sol"),
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(route.agent_source, "codex");
+        assert_eq!(route.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(route.switched_from.as_deref(), Some("claude-code"));
+        // Claude's `xhigh` is not on Codex's ladder — carrying it over would
+        // hand the new harness a level it rejects.
+        assert_eq!(route.effort, None);
+    }
+
+    /// The reverse direction, and dsh, route the same way.
+    #[test]
+    fn codex_session_can_name_a_claude_or_dsh_model() {
+        let to_claude = route_launch_with(
+            &ctx("codex", "gpt-5.6-sol", "medium"),
+            Some("claude-opus-5[1m]"),
+            Some("max"),
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(to_claude.agent_source, "claude-code");
+        assert_eq!(to_claude.model.as_deref(), Some("claude-opus-5[1m]"));
+        // An explicitly named effort is the caller's call and survives the switch.
+        assert_eq!(to_claude.effort.as_deref(), Some("max"));
+
+        let to_dsh = route_launch_with(
+            &ctx("claude-code", "claude-opus-5", "high"),
+            Some("deepseek-official/deepseek-v4-pro"),
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(to_dsh.agent_source, "dsh");
+    }
+
+    /// Same-harness and unrecognisable models leave the inherited source alone,
+    /// and effort keeps being inherited — the pre-existing behaviour every
+    /// non-cross-harness relay depends on.
+    #[test]
+    fn same_harness_and_unknown_models_keep_the_inherited_source() {
+        let same = route_launch_with(
+            &ctx("claude-code", "claude-opus-5", "high"),
+            Some("claude-fable-5-1"),
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(same.agent_source, "claude-code");
+        assert_eq!(same.effort.as_deref(), Some("high"));
+        assert_eq!(same.switched_from, None);
+
+        let unknown = route_launch_with(
+            &ctx("codex", "gpt-5.6-sol", "medium"),
+            Some("my-finetune-v3"),
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(unknown.agent_source, "codex");
+        assert_eq!(unknown.model.as_deref(), Some("my-finetune-v3"));
+        assert_eq!(unknown.effort.as_deref(), Some("medium"));
+
+        // No override at all: pure inheritance, including a blank source that
+        // falls back to the historical Claude default.
+        let inherited = route_launch_with(
+            &ctx("", "claude-opus-5", "high"),
+            None,
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(inherited.agent_source, "claude-code");
+        assert_eq!(inherited.model.as_deref(), Some("claude-opus-5"));
+    }
+
+    /// Routing to a harness this machine cannot spawn must fail at registration
+    /// with a readable reason, not spawn-time — a handoff that errors when the
+    /// Stop hook fires leaves the work with no successor and nobody watching.
+    #[test]
+    fn routing_to_an_unavailable_harness_fails_loudly() {
+        let err = route_launch_with(
+            &ctx("claude-code", "claude-opus-5", "high"),
+            Some("gpt-5.6-sol"),
+            None,
+            |tool| tool != "codex",
+        )
+        .unwrap_err();
+        assert!(err.contains("codex"), "{err}");
+        assert!(err.contains("gpt-5.6-sol"), "{err}");
+    }
 
     /// A configurable mock for unit-testing code that accepts `dyn AgentSource`.
     pub struct MockAgentSource {
