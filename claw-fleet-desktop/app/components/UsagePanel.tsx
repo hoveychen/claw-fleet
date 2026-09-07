@@ -8,11 +8,10 @@ import {
   type UsageStats,
   type CodexRateLimitWindow,
 } from "../usageStore";
+import { codexRateLimitBars, type TFunc } from "../codexUsage";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { UsageHistoryModal } from "./UsageHistoryModal";
 import { CodexUsageHistoryModal } from "./CodexUsageHistoryModal";
-
-export type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
 function formatResetIn(resets_at: string, t: TFunc): string {
   const diff = new Date(resets_at).getTime() - Date.now();
@@ -98,19 +97,7 @@ function UsageBar({ label, stats }: { label: string; stats: UsageStats | null })
 // that duration, not from the primary/secondary slot — a Team plan, for
 // example, returns a single 7-day window in the `primary` slot, and hardcoding
 // "会话 (5小时)" there produced the self-contradicting "会话 (5小时) (7d)".
-export function codexWindowLabel(mins: number | null | undefined, t: TFunc): string {
-  if (mins == null || !Number.isFinite(mins)) return t("account.usage");
-  const isWeekly = mins >= 1440;
-  const duration = isWeekly
-    ? t("account.resets_days", { n: Math.round(mins / 1440) })
-    : mins >= 60
-      ? t("account.resets_hours", { n: Math.round(mins / 60) })
-      : t("account.resets_mins", { n: Math.round(mins) });
-  const kind = isWeekly ? t("account.codex_weekly") : t("account.codex_session");
-  return `${kind} (${duration})`;
-}
-
-function CodexWindowBar({ window }: { window: CodexRateLimitWindow }) {
+function CodexWindowBar({ label, window }: { label: string; window: CodexRateLimitWindow }) {
   const { t } = useTranslation();
   const pct = window.usedPercent;
   const resetIso = window.resetsAt
@@ -121,7 +108,7 @@ function CodexWindowBar({ window }: { window: CodexRateLimitWindow }) {
     <div className={styles.usage_item}>
       <div className={styles.usage_header}>
         <span className={styles.usage_label}>
-          {codexWindowLabel(window.windowDurationMins, t)}
+          {label}
         </span>
         <span className={styles.usage_pct}>{pct}%</span>
       </div>
@@ -301,7 +288,8 @@ function CodexUsageSection() {
   const refresh = () => { load("codex"); };
   const onAutoRefreshChange = (v: boolean) => setAutoRefresh("codex", v);
 
-  const hasBars = data && (data.primary || data.secondary);
+  const bars = data ? codexRateLimitBars(data, t) : [];
+  const hasBars = bars.length > 0;
 
   return (
     <div className={styles.tool_section}>
@@ -327,8 +315,9 @@ function CodexUsageSection() {
       )}
       {hasBars && (
         <div className={styles.bars}>
-          {data.primary && <CodexWindowBar window={data.primary} />}
-          {data.secondary && <CodexWindowBar window={data.secondary} />}
+          {bars.map((bar) => (
+            <CodexWindowBar key={bar.key} label={bar.label} window={bar.window} />
+          ))}
         </div>
       )}
       {data && !hasBars && (

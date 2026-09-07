@@ -42,6 +42,24 @@ pub struct CodexUsageHistoryPoint {
     pub primary_window_mins: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_window_mins: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bars: Vec<CodexUsageHistoryBar>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexUsageHistoryBar {
+    pub key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub normal_model_slug: Option<String>,
+    pub window_kind: String,
+    pub pct: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_mins: Option<i64>,
 }
 
 fn history_path() -> Option<std::path::PathBuf> {
@@ -85,12 +103,44 @@ fn prune_old(history: &mut Vec<CodexUsageHistoryPoint>, now_ms: i64) {
 
 /// Project a live `CodexUsageItem` into a persistable history point at `now_ms`.
 fn point_from_usage(usage: &CodexUsageItem, now_ms: i64) -> CodexUsageHistoryPoint {
+    let bars = usage
+        .rate_limit_buckets
+        .iter()
+        .enumerate()
+        .flat_map(|(index, bucket)| {
+            [
+                ("primary", bucket.primary.as_ref()),
+                ("secondary", bucket.secondary.as_ref()),
+            ]
+            .into_iter()
+            .filter_map(move |(window_kind, window)| {
+                let window = window?;
+                let bucket_key = bucket
+                    .limit_id
+                    .clone()
+                    .unwrap_or_else(|| format!("bucket-{index}"));
+                Some(CodexUsageHistoryBar {
+                    key: format!("{bucket_key}:{window_kind}"),
+                    limit_id: bucket.limit_id.clone(),
+                    limit_name: bucket.limit_name.clone(),
+                    normal_model_slug: bucket.normal_model_slug.clone(),
+                    window_kind: window_kind.to_string(),
+                    pct: window.used_percent,
+                    window_mins: window.window_duration_mins,
+                })
+            })
+        })
+        .collect();
     CodexUsageHistoryPoint {
         ts: now_ms,
         primary_pct: usage.primary.as_ref().map(|w| w.used_percent),
         secondary_pct: usage.secondary.as_ref().map(|w| w.used_percent),
         primary_window_mins: usage.primary.as_ref().and_then(|w| w.window_duration_mins),
-        secondary_window_mins: usage.secondary.as_ref().and_then(|w| w.window_duration_mins),
+        secondary_window_mins: usage
+            .secondary
+            .as_ref()
+            .and_then(|w| w.window_duration_mins),
+        bars,
     }
 }
 
@@ -99,7 +149,7 @@ fn point_from_usage(usage: &CodexUsageItem, now_ms: i64) -> CodexUsageHistoryPoi
 /// Called as a side effect of every successful `fetch_codex_usage`, exactly the
 /// way `fetch_account_info` records the Claude snapshot.
 pub fn record_snapshot(usage: &CodexUsageItem) {
-    if usage.primary.is_none() && usage.secondary.is_none() {
+    if usage.primary.is_none() && usage.secondary.is_none() && usage.rate_limit_buckets.is_empty() {
         return;
     }
     let path = match history_path() {
@@ -147,7 +197,7 @@ pub fn load_codex_usage_history(from_ms: i64, to_ms: i64) -> Vec<CodexUsageHisto
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codex_source::CodexRateLimitWindow;
+    use crate::codex_source::{CodexRateLimitBucket, CodexRateLimitWindow};
 
     fn window(used: i32, mins: i64) -> CodexRateLimitWindow {
         CodexRateLimitWindow {
@@ -165,7 +215,10 @@ mod tests {
         let path = dir.path().join("codex-history.json");
         std::fs::write(&path, "[{\"ts\":1 GARBAGE").unwrap();
 
-        let usage = CodexUsageItem { primary: Some(window(50, 300)), ..Default::default() };
+        let usage = CodexUsageItem {
+            primary: Some(window(50, 300)),
+            ..Default::default()
+        };
         record_snapshot_at(&path, &usage, 2_000_000);
 
         let backups: Vec<_> = std::fs::read_dir(dir.path())
@@ -173,7 +226,11 @@ mod tests {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().contains(".corrupt"))
             .collect();
-        assert_eq!(backups.len(), 1, "corrupt codex history must be backed up, not destroyed");
+        assert_eq!(
+            backups.len(),
+            1,
+            "corrupt codex history must be backed up, not destroyed"
+        );
     }
 
     // `record_snapshot` fires on every fetch_codex_usage (~10s); throttle it.
@@ -182,10 +239,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("codex-history.json");
         let base = 1_000_000_000_i64;
-        let seed = vec![CodexUsageHistoryPoint { ts: base, ..Default::default() }];
+        let seed = vec![CodexUsageHistoryPoint {
+            ts: base,
+            ..Default::default()
+        }];
         std::fs::write(&path, serde_json::to_string(&seed).unwrap()).unwrap();
 
-        let usage = CodexUsageItem { primary: Some(window(50, 300)), ..Default::default() };
+        let usage = CodexUsageItem {
+            primary: Some(window(50, 300)),
+            ..Default::default()
+        };
         record_snapshot_at(&path, &usage, base + 10_000); // 10s later — throttled
         assert_eq!(
             load_from(&path).len(),
@@ -227,13 +290,58 @@ mod tests {
     }
 
     #[test]
+    fn point_from_usage_projects_every_dynamic_bucket() {
+        let usage = CodexUsageItem {
+            rate_limit_buckets: vec![
+                CodexRateLimitBucket {
+                    limit_id: Some("codex".into()),
+                    primary: Some(window(12, 300)),
+                    ..Default::default()
+                },
+                CodexRateLimitBucket {
+                    limit_id: Some("base_model_inference".into()),
+                    limit_name: Some("Luna Reserve".into()),
+                    normal_model_slug: Some("gpt-reserve".into()),
+                    primary: Some(window(48, 10080)),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let point = point_from_usage(&usage, 500);
+        assert_eq!(point.bars.len(), 2);
+        assert_eq!(point.bars[1].limit_name.as_deref(), Some("Luna Reserve"));
+        assert_eq!(point.bars[1].window_mins, Some(10080));
+        assert_eq!(point.bars[1].pct, 48);
+    }
+
+    #[test]
+    fn old_history_point_without_bars_still_deserializes() {
+        let point: CodexUsageHistoryPoint = serde_json::from_value(serde_json::json!({
+            "ts": 1000, "primaryPct": 7, "primaryWindowMins": 10080
+        }))
+        .unwrap();
+        assert_eq!(point.primary_pct, Some(7));
+        assert!(point.bars.is_empty());
+    }
+
+    #[test]
     fn prune_drops_only_points_older_than_retention() {
         let now = 100 * 24 * 3600 * 1000; // some day-100 epoch-like value
         let day = 24 * 3600 * 1000;
         let mut history = vec![
-            CodexUsageHistoryPoint { ts: now - 9 * day, ..Default::default() }, // stale
-            CodexUsageHistoryPoint { ts: now - 7 * day, ..Default::default() }, // kept
-            CodexUsageHistoryPoint { ts: now, ..Default::default() },           // kept
+            CodexUsageHistoryPoint {
+                ts: now - 9 * day,
+                ..Default::default()
+            }, // stale
+            CodexUsageHistoryPoint {
+                ts: now - 7 * day,
+                ..Default::default()
+            }, // kept
+            CodexUsageHistoryPoint {
+                ts: now,
+                ..Default::default()
+            }, // kept
         ];
         prune_old(&mut history, now);
         let kept: Vec<i64> = history.iter().map(|p| p.ts).collect();
@@ -244,11 +352,21 @@ mod tests {
     fn prune_keeps_exactly_the_retention_boundary() {
         let now = 100 * 24 * 3600 * 1000;
         let mut history = vec![
-            CodexUsageHistoryPoint { ts: now - HISTORY_RETENTION_MS, ..Default::default() },
-            CodexUsageHistoryPoint { ts: now - HISTORY_RETENTION_MS - 1, ..Default::default() },
+            CodexUsageHistoryPoint {
+                ts: now - HISTORY_RETENTION_MS,
+                ..Default::default()
+            },
+            CodexUsageHistoryPoint {
+                ts: now - HISTORY_RETENTION_MS - 1,
+                ..Default::default()
+            },
         ];
         prune_old(&mut history, now);
         let kept: Vec<i64> = history.iter().map(|p| p.ts).collect();
-        assert_eq!(kept, vec![now - HISTORY_RETENTION_MS], "boundary point retained, 1ms older dropped");
+        assert_eq!(
+            kept,
+            vec![now - HISTORY_RETENTION_MS],
+            "boundary point retained, 1ms older dropped"
+        );
     }
 }

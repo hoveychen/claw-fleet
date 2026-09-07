@@ -28,7 +28,7 @@ use serde_json::{json, Value};
 
 use crate::agent_source::{AgentSource, WatchStrategy};
 use crate::backend::SourceUsageSummary;
-use crate::session::{SessionInfo, SessionStatus, compute_context_percent};
+use crate::session::{compute_context_percent, SessionInfo, SessionStatus};
 
 /// URI prefix for Codex session identifiers.
 const CODEX_URI_PREFIX: &str = "codex://";
@@ -79,7 +79,6 @@ struct SqliteThread {
     archived: bool,
     first_user_message: String,
 }
-
 
 impl CodexSource {
     pub fn new() -> Self {
@@ -132,10 +131,8 @@ fn build_uri(path: &Path) -> Option<String> {
 
 /// Read and decompress a .jsonl.zst file.
 fn read_zst_file(path: &Path) -> Result<String, String> {
-    let file =
-        fs::File::open(path).map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
-    let mut decoder =
-        zstd::Decoder::new(file).map_err(|e| format!("zstd decode error: {e}"))?;
+    let file = fs::File::open(path).map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
+    let mut decoder = zstd::Decoder::new(file).map_err(|e| format!("zstd decode error: {e}"))?;
     let mut content = String::new();
     decoder
         .read_to_string(&mut content)
@@ -525,9 +522,8 @@ fn is_injected_codex_context(role: &str, text: &str) -> bool {
         return false;
     }
     let trimmed = text.trim_start();
-    let wrapped_in = |tag: &str| {
-        trimmed.starts_with(&format!("<{tag}>")) && text.contains(&format!("</{tag}>"))
-    };
+    let wrapped_in =
+        |tag: &str| trimmed.starts_with(&format!("<{tag}>")) && text.contains(&format!("</{tag}>"));
     let is_agents_md_instructions =
         trimmed.starts_with("# AGENTS.md instructions") && text.contains("<INSTRUCTIONS>");
     wrapped_in("recommended_plugins")
@@ -620,9 +616,7 @@ fn extract_last_text(lines: &[Value]) -> Option<String> {
                         for block in content.iter().rev() {
                             let block_type = block.get("type").and_then(|t| t.as_str());
                             if block_type == Some("output_text") {
-                                if let Some(text) =
-                                    block.get("text").and_then(|t| t.as_str())
-                                {
+                                if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                                     let preview: String = text.chars().take(200).collect();
                                     return Some(preview);
                                 }
@@ -750,9 +744,7 @@ fn streaming_substatus(last_lines: &[Value]) -> SessionStatus {
     let has_tool_in_progress = last_lines.iter().rev().take(10).any(|v| {
         let lt = v.get("type").and_then(|t| t.as_str());
         let payload = v.get("payload");
-        let item_type = payload
-            .and_then(|p| p.get("type"))
-            .and_then(|t| t.as_str());
+        let item_type = payload.and_then(|p| p.get("type")).and_then(|t| t.as_str());
         let status = payload
             .and_then(|p| p.get("status"))
             .and_then(|s| s.as_str());
@@ -841,7 +833,9 @@ fn turn_in_flight(last_lines: &[Value]) -> bool {
             .and_then(|t| t.as_str())
         {
             Some("task_started") | Some("turn_started") => return true,
-            Some("task_complete") | Some("turn_complete") | Some("turn_aborted")
+            Some("task_complete")
+            | Some("turn_complete")
+            | Some("turn_aborted")
             | Some("error") => return false,
             _ => {}
         }
@@ -876,12 +870,9 @@ fn clamp_dead_session_status(
         return status;
     }
     match status {
-        S::Thinking
-        | S::Executing
-        | S::Streaming
-        | S::Delegating
-        | S::Processing
-        | S::Active => S::WaitingInput,
+        S::Thinking | S::Executing | S::Streaming | S::Delegating | S::Processing | S::Active => {
+            S::WaitingInput
+        }
         other => other,
     }
 }
@@ -898,9 +889,7 @@ fn compute_token_stats(lines: &[Value]) -> (f64, u64, u64) {
         // token_count events in event_msg
         if line_type == "event_msg" {
             let payload = line.get("payload");
-            let msg_type = payload
-                .and_then(|p| p.get("type"))
-                .and_then(|t| t.as_str());
+            let msg_type = payload.and_then(|p| p.get("type")).and_then(|t| t.as_str());
 
             if msg_type == Some("token_count") {
                 if let Some(info) = payload.and_then(|p| p.get("info")) {
@@ -1330,8 +1319,7 @@ fn scan_codex_processes() -> Vec<CodexProcess> {
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::nothing()
-            .with_cmd(UpdateKind::Always),
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
     );
 
     // Collect matched PIDs and their cmd args before phase 2.
@@ -1366,8 +1354,7 @@ fn scan_codex_processes() -> Vec<CodexProcess> {
         sys.refresh_processes_specifics(
             ProcessesToUpdate::Some(&matched_pids),
             true,
-            ProcessRefreshKind::nothing()
-                .with_cwd(UpdateKind::Always),
+            ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always),
         );
     }
 
@@ -1441,10 +1428,7 @@ struct SourceInfo {
 fn parse_source(source: &str) -> SourceInfo {
     // Try parsing as JSON first (subagent case).
     if let Ok(parsed) = serde_json::from_str::<Value>(source) {
-        if let Some(spawn) = parsed
-            .get("subagent")
-            .and_then(|s| s.get("thread_spawn"))
-        {
+        if let Some(spawn) = parsed.get("subagent").and_then(|s| s.get("thread_spawn")) {
             return SourceInfo {
                 ide_name: None,
                 is_subagent: true,
@@ -1579,98 +1563,94 @@ fn build_session_from_sqlite(
     let age_secs = (now_secs as f64 - last_activity_ms as f64 / 1000.0).max(0.0);
 
     // For recently active sessions, read the rollout file for precise status.
-    let (status, token_speed, total_output_tokens, reasoning_output_tokens, last_message_preview, model, thinking_level, effort, context_percent, rate_limit, codex_cost, total_input_tokens) =
-        if age_secs < 600.0 && rollout_path.exists() {
-            // Update last_activity_ms from file mtime for sub-second precision.
-            if let Ok(meta) = fs::metadata(&rollout_path) {
-                if let Ok(mtime) = meta.modified() {
-                    let file_age = SystemTime::now()
-                        .duration_since(mtime)
-                        .unwrap_or(Duration::from_secs(3600));
-                    last_activity_ms = mtime
-                        .duration_since(UNIX_EPOCH)
-                        .ok()
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(last_activity_ms);
+    let (
+        status,
+        token_speed,
+        total_output_tokens,
+        reasoning_output_tokens,
+        last_message_preview,
+        model,
+        thinking_level,
+        effort,
+        context_percent,
+        rate_limit,
+        codex_cost,
+        total_input_tokens,
+    ) = if age_secs < 600.0 && rollout_path.exists() {
+        // Update last_activity_ms from file mtime for sub-second precision.
+        if let Ok(meta) = fs::metadata(&rollout_path) {
+            if let Ok(mtime) = meta.modified() {
+                let file_age = SystemTime::now()
+                    .duration_since(mtime)
+                    .unwrap_or(Duration::from_secs(3600));
+                last_activity_ms = mtime
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(last_activity_ms);
 
-                    if let Ok(content) = read_session_content(&rollout_path) {
-                        let all_parsed: Vec<Value> = content
-                            .lines()
-                            .filter_map(|l| serde_json::from_str(l).ok())
-                            .collect();
+                if let Ok(content) = read_session_content(&rollout_path) {
+                    let all_parsed: Vec<Value> = content
+                        .lines()
+                        .filter_map(|l| serde_json::from_str(l).ok())
+                        .collect();
 
-                        let last_n_start = all_parsed.len().saturating_sub(100);
-                        let last_n = &all_parsed[last_n_start..];
+                    let last_n_start = all_parsed.len().saturating_sub(100);
+                    let last_n = &all_parsed[last_n_start..];
 
-                        // Full parse, not `last_n`: the turn-boundary scan inside
-                        // must see a `task_started` that a long turn (>100 rollout
-                        // lines) has scrolled past the tail window, or an in-flight
-                        // session misreads as Idle once the file goes silent >30s.
-                        let st = determine_status(&all_parsed, file_age.as_secs_f64());
-                        // Rate-limit from this session's own rollout (Fleet-owned +
-                        // cut-off + reached window). Overrides status so auto-resume
-                        // can continue it after reset.
-                        let originator_in = extract_session_meta(&all_parsed)
-                            .and_then(|m| m.get("originator").and_then(|o| o.as_str()))
-                            .filter(|s| !s.is_empty());
-                        let rl = codex_rollout_rate_limit(
-                            &all_parsed,
-                            originator_in,
-                            chrono::Utc::now(),
-                        );
-                        let st = if rl.is_some() {
-                            crate::session::SessionStatus::RateLimited
-                        } else {
-                            st
-                        };
-                        let (spd, tok, reasoning) = compute_token_stats(&all_parsed);
-                        let preview = extract_last_text(last_n);
-                        let mdl = extract_model(&all_parsed).or_else(|| thread.model.clone());
-
-                        let has_reasoning = last_n.iter().any(|v| {
-                            v.get("type").and_then(|t| t.as_str()) == Some("response_item")
-                                && v.get("payload")
-                                    .and_then(|p| p.get("type"))
-                                    .and_then(|t| t.as_str())
-                                    == Some("reasoning")
-                        });
-                        let tl = if has_reasoning {
-                            Some("thinking".to_string())
-                        } else {
-                            None
-                        };
-                        // The rollout we just parsed carries the freshest dial;
-                        // codex's own thread row and Fleet's launch note cover
-                        // a rollout with no turn_context yet.
-                        let eff = extract_effort(&all_parsed)
-                            .or_else(|| thread.reasoning_effort.clone())
-                            .or_else(|| crate::launch_spec::effort_of(&thread.id));
-                        let tok = if tok > 0 { tok } else { thread.tokens_used as u64 };
-                        let ctx = extract_context_percent(&all_parsed, mdl.as_deref());
-                        let (cost, input) = codex_cost_and_input(&all_parsed, mdl.as_deref());
-                        (st, spd, tok, reasoning, preview, mdl, tl, eff, ctx, rl, cost, input)
+                    // Full parse, not `last_n`: the turn-boundary scan inside
+                    // must see a `task_started` that a long turn (>100 rollout
+                    // lines) has scrolled past the tail window, or an in-flight
+                    // session misreads as Idle once the file goes silent >30s.
+                    let st = determine_status(&all_parsed, file_age.as_secs_f64());
+                    // Rate-limit from this session's own rollout (Fleet-owned +
+                    // cut-off + reached window). Overrides status so auto-resume
+                    // can continue it after reset.
+                    let originator_in = extract_session_meta(&all_parsed)
+                        .and_then(|m| m.get("originator").and_then(|o| o.as_str()))
+                        .filter(|s| !s.is_empty());
+                    let rl =
+                        codex_rollout_rate_limit(&all_parsed, originator_in, chrono::Utc::now());
+                    let st = if rl.is_some() {
+                        crate::session::SessionStatus::RateLimited
                     } else {
-                        (
-                            determine_status_from_age(file_age.as_secs_f64()),
-                            0.0,
-                            thread.tokens_used as u64,
-                            0,
-                            None,
-                            thread.model.clone(),
-                            None,
-                            thread
-                                .reasoning_effort
-                                .clone()
-                                .or_else(|| crate::launch_spec::effort_of(&thread.id)),
-                            None,
-                            None,
-                            0.0,
-                            0,
-                        )
-                    }
+                        st
+                    };
+                    let (spd, tok, reasoning) = compute_token_stats(&all_parsed);
+                    let preview = extract_last_text(last_n);
+                    let mdl = extract_model(&all_parsed).or_else(|| thread.model.clone());
+
+                    let has_reasoning = last_n.iter().any(|v| {
+                        v.get("type").and_then(|t| t.as_str()) == Some("response_item")
+                            && v.get("payload")
+                                .and_then(|p| p.get("type"))
+                                .and_then(|t| t.as_str())
+                                == Some("reasoning")
+                    });
+                    let tl = if has_reasoning {
+                        Some("thinking".to_string())
+                    } else {
+                        None
+                    };
+                    // The rollout we just parsed carries the freshest dial;
+                    // codex's own thread row and Fleet's launch note cover
+                    // a rollout with no turn_context yet.
+                    let eff = extract_effort(&all_parsed)
+                        .or_else(|| thread.reasoning_effort.clone())
+                        .or_else(|| crate::launch_spec::effort_of(&thread.id));
+                    let tok = if tok > 0 {
+                        tok
+                    } else {
+                        thread.tokens_used as u64
+                    };
+                    let ctx = extract_context_percent(&all_parsed, mdl.as_deref());
+                    let (cost, input) = codex_cost_and_input(&all_parsed, mdl.as_deref());
+                    (
+                        st, spd, tok, reasoning, preview, mdl, tl, eff, ctx, rl, cost, input,
+                    )
                 } else {
                     (
-                        determine_status_from_age(age_secs),
+                        determine_status_from_age(file_age.as_secs_f64()),
                         0.0,
                         thread.tokens_used as u64,
                         0,
@@ -1707,20 +1687,12 @@ fn build_session_from_sqlite(
                 )
             }
         } else {
-            // Older session — use SQLite metadata only, skip rollout file.
-            // codex stores the raw first prompt as `first_user_message`/`title`,
-            // which for Fleet-launched sessions opens with the prepended
-            // `<system-reminder>` block — strip it so the card preview shows the
-            // real prompt (see `strip_leading_system_reminder`).
-            let preview = derive_codex_title(&thread.first_user_message)
-                .or_else(|| derive_codex_title(&thread.title))
-                .map(|title| title.chars().take(200).collect());
             (
                 determine_status_from_age(age_secs),
                 0.0,
                 thread.tokens_used as u64,
                 0,
-                preview,
+                None,
                 thread.model.clone(),
                 None,
                 thread
@@ -1732,7 +1704,34 @@ fn build_session_from_sqlite(
                 0.0,
                 0,
             )
-        };
+        }
+    } else {
+        // Older session — use SQLite metadata only, skip rollout file.
+        // codex stores the raw first prompt as `first_user_message`/`title`,
+        // which for Fleet-launched sessions opens with the prepended
+        // `<system-reminder>` block — strip it so the card preview shows the
+        // real prompt (see `strip_leading_system_reminder`).
+        let preview = derive_codex_title(&thread.first_user_message)
+            .or_else(|| derive_codex_title(&thread.title))
+            .map(|title| title.chars().take(200).collect());
+        (
+            determine_status_from_age(age_secs),
+            0.0,
+            thread.tokens_used as u64,
+            0,
+            preview,
+            thread.model.clone(),
+            None,
+            thread
+                .reasoning_effort
+                .clone()
+                .or_else(|| crate::launch_spec::effort_of(&thread.id)),
+            None,
+            None,
+            0.0,
+            0,
+        )
+    };
 
     // Reuse the shared helper so codex sessions collapse `.worktrees/<task-id>`
     // to the repo name (and get the chat-workspace rename) identically to the
@@ -1783,9 +1782,7 @@ fn build_session_from_sqlite(
             derive_codex_title(&thread.first_user_message)
         });
 
-    let agent_type = source_info
-        .agent_role
-        .or_else(|| thread.agent_role.clone());
+    let agent_type = source_info.agent_role.or_else(|| thread.agent_role.clone());
 
     // Fleet-ownership marker: the rollout `originator` (see
     // `read_rollout_originator`). Fleet-launched Codex sessions carry
@@ -1840,7 +1837,12 @@ fn build_session_from_sqlite(
         rate_limit,
         todos: None,
         background_tasks: Vec::new(),
-        task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,        compact_count: 0,
+        task_plan: None,
+        handoff: None,
+        user_mark: None,
+        title_override: None,
+        last_read_ms: None,
+        compact_count: 0,
         compact_pre_tokens: 0,
         compact_post_tokens: 0,
         compact_cost_usd: 0.0,
@@ -1882,18 +1884,16 @@ pub fn codex_stale_rollout_paths(sessions: &[crate::session::SessionInfo]) -> Ve
 mod tests {
     use super::{
         build_session_from_sqlite, clamp_dead_session_status, codex_account_email_from_auth_json,
-        codex_cost_and_input,
-        codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
+        codex_cost_and_input, codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
-        codex_token_breakdown_from_lines, codex_token_deltas_from_lines, codex_usage_from_foxy,
-        compute_token_stats,
-        determine_status, exec_note_from_script, parse_codex_session, plan_type_from_foxy_label,
-        USAGE_SOURCE_FOXY,
-        derive_codex_title,
-        extract_context_percent, extract_first_user_prompt, last_rollout_rate_limits,
-        latest_total_token_usage, normalize_messages, strip_leading_system_reminder,
-        resolve_pid, strip_trailing_context_files, read_rollout_originator, CodexProcess,
-        CodexRateLimitWindow, CodexUsageItem, SqliteThread,
+        codex_token_breakdown_from_lines, codex_token_deltas_from_lines,
+        codex_usage_from_app_server_result, codex_usage_from_foxy, compute_token_stats,
+        derive_codex_title, determine_status, exec_note_from_script, extract_context_percent,
+        extract_first_user_prompt, last_rollout_rate_limits, latest_total_token_usage,
+        normalize_messages, parse_codex_session, plan_type_from_foxy_label,
+        read_rollout_originator, resolve_pid, strip_leading_system_reminder,
+        strip_trailing_context_files, CodexProcess, CodexRateLimitWindow, CodexUsageItem,
+        SqliteThread, USAGE_SOURCE_FOXY,
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
@@ -2017,8 +2017,7 @@ mod tests {
         // TASKS.md `<system-reminder>` rides in front of the actual prompt.
         // The title fallback must skip all the boilerplate and return only the
         // real prompt with the reminder stripped.
-        let reminder_prefixed =
-            "<system-reminder>\nThe workspace `TASKS.md` holds active plans.\n\
+        let reminder_prefixed = "<system-reminder>\nThe workspace `TASKS.md` holds active plans.\n\
              ## Plan: foo\n- [ ] **P1** — bar\n</system-reminder>\n\n\
              当前fleet应用中，是不是审计和日报两个功能会使用到LLM？";
         let lines = vec![
@@ -2110,11 +2109,26 @@ mod tests {
         // the desktop composer offers *resume* (matching the drain gate), not the
         // misleading "会话运行中，排队" enqueue mode.
         assert_eq!(clamp_dead_session_status(S::Active, false), S::WaitingInput);
-        assert_eq!(clamp_dead_session_status(S::Streaming, false), S::WaitingInput);
-        assert_eq!(clamp_dead_session_status(S::Thinking, false), S::WaitingInput);
-        assert_eq!(clamp_dead_session_status(S::Executing, false), S::WaitingInput);
-        assert_eq!(clamp_dead_session_status(S::Delegating, false), S::WaitingInput);
-        assert_eq!(clamp_dead_session_status(S::Processing, false), S::WaitingInput);
+        assert_eq!(
+            clamp_dead_session_status(S::Streaming, false),
+            S::WaitingInput
+        );
+        assert_eq!(
+            clamp_dead_session_status(S::Thinking, false),
+            S::WaitingInput
+        );
+        assert_eq!(
+            clamp_dead_session_status(S::Executing, false),
+            S::WaitingInput
+        );
+        assert_eq!(
+            clamp_dead_session_status(S::Delegating, false),
+            S::WaitingInput
+        );
+        assert_eq!(
+            clamp_dead_session_status(S::Processing, false),
+            S::WaitingInput
+        );
     }
 
     #[test]
@@ -2149,7 +2163,11 @@ mod tests {
             json!({"type":"response_item","payload":{"type":"function_call"}}),
         ];
         let st = determine_status(&tool, 60.0);
-        assert_ne!(st, S::Idle, "a silent in-flight tool call must not read as Idle");
+        assert_ne!(
+            st,
+            S::Idle,
+            "a silent in-flight tool call must not read as Idle"
+        );
         assert!(
             matches!(st, S::Streaming | S::Executing | S::Thinking | S::Active),
             "expected a working status for a silent in-flight tool call, got {st:?}"
@@ -2346,8 +2364,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let dir = std::env::temp_dir()
-            .join(format!("codex_worktree_name_test_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("codex_worktree_name_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let rollout = dir.join("rollout-worktree.jsonl");
         std::fs::write(
@@ -2421,8 +2439,8 @@ mod tests {
             .as_secs() as i64;
 
         // A freshly written rollout file → its mtime is "now".
-        let dir = std::env::temp_dir()
-            .join(format!("codex_stale_mtime_test_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("codex_stale_mtime_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let rollout = dir.join("rollout-test.jsonl");
         std::fs::write(
@@ -2449,8 +2467,7 @@ mod tests {
         };
 
         let procs: Vec<CodexProcess> = Vec::new();
-        let info = build_session_from_sqlite(&thread, &procs)
-            .expect("should build a SessionInfo");
+        let info = build_session_from_sqlite(&thread, &procs).expect("should build a SessionInfo");
 
         // last_activity must track the fresh file mtime (~now), not the stale
         // SQLite updated_at (~20 min ago). Old behaviour: gated behind
@@ -2497,7 +2514,9 @@ mod tests {
                 let content = m.get("message")?.get("content")?.as_array()?;
                 content.iter().find_map(|b| {
                     if b.get("type").and_then(|t| t.as_str()) == Some("text") {
-                        b.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                        b.get("text")
+                            .and_then(|t| t.as_str())
+                            .map(|s| s.to_string())
                     } else {
                         None
                     }
@@ -2528,7 +2547,9 @@ mod tests {
             .filter_map(|m| {
                 let content = m.get("message")?.get("content")?.as_array()?;
                 content.iter().find_map(|b| {
-                    b.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    b.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
                 })
             })
             .collect();
@@ -2569,7 +2590,10 @@ mod tests {
             json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the reply"}]},"timestamp":"t-persisted"}),
         ]);
 
-        assert_eq!(live, persisted, "same reply must keep one stable uuid across the live→persisted swap");
+        assert_eq!(
+            live, persisted,
+            "same reply must keep one stable uuid across the live→persisted swap"
+        );
     }
 
     /// A turn that genuinely repeats the identical text must NOT collapse to one
@@ -2586,7 +2610,10 @@ mod tests {
             .filter_map(|m| m.get("uuid").and_then(|u| u.as_str()))
             .collect();
         assert_eq!(uuids.len(), 2, "two replies expected");
-        assert_ne!(uuids[0], uuids[1], "repeated identical text must get distinct uuids");
+        assert_ne!(
+            uuids[0], uuids[1],
+            "repeated identical text must get distinct uuids"
+        );
     }
 
     #[test]
@@ -2602,7 +2629,10 @@ mod tests {
         })];
         let out = normalize_messages(lines);
         assert_eq!(out[0]["message"]["content"][0]["type"], json!("thinking"));
-        assert_eq!(out[0]["message"]["content"][0]["thinking"], json!("First step\nSecond step"));
+        assert_eq!(
+            out[0]["message"]["content"][0]["thinking"],
+            json!("First step\nSecond step")
+        );
     }
 
     #[test]
@@ -2613,9 +2643,12 @@ mod tests {
             "timestamp": "t1"
         })];
         let out = normalize_messages(lines);
-        assert_eq!(out[0]["message"]["content"][0], json!({
-            "type": "redacted_thinking", "reason": "summary_unavailable"
-        }));
+        assert_eq!(
+            out[0]["message"]["content"][0],
+            json!({
+                "type": "redacted_thinking", "reason": "summary_unavailable"
+            })
+        );
     }
 
     #[test]
@@ -2683,7 +2716,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn normalize_messages_strips_leading_fleet_system_reminder() {
         // Fleet prepends the TASKS.md active-plans `<system-reminder>` block into
@@ -2710,9 +2742,7 @@ mod tests {
             .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("user"))
             .collect();
         assert_eq!(users.len(), 1);
-        let text = users[0]["message"]["content"][0]["text"]
-            .as_str()
-            .unwrap();
+        let text = users[0]["message"]["content"][0]["text"].as_str().unwrap();
         assert_eq!(
             text, prompt,
             "leading Fleet <system-reminder> block must be stripped from the bubble"
@@ -2849,7 +2879,11 @@ mod tests {
             }),
         ];
         let out = normalize_messages(lines);
-        assert_eq!(out.len(), 2, "the error must be emitted alongside the prompt");
+        assert_eq!(
+            out.len(),
+            2,
+            "the error must be emitted alongside the prompt"
+        );
 
         let err = &out[1];
         assert_eq!(err["type"], json!("assistant"), "renders in the agent lane");
@@ -2863,7 +2897,9 @@ mod tests {
             json!("end_turn"),
             "a closed turn — this is what stops the trailing spinner"
         );
-        let text = err["message"]["content"][0]["text"].as_str().unwrap_or_default();
+        let text = err["message"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default();
         assert!(
             text.contains("refresh token was already used"),
             "the operator needs the actual reason, got: {text}"
@@ -2913,7 +2949,11 @@ mod tests {
             }),
         ];
         let out = normalize_messages(lines);
-        assert_eq!(out.len(), 1, "the bare task_complete must not add a second row");
+        assert_eq!(
+            out.len(),
+            1,
+            "the bare task_complete must not add a second row"
+        );
         assert_eq!(out[0]["isTurnError"], json!(true));
         assert_eq!(
             out[0]["message"]["content"][0]["text"],
@@ -3330,12 +3370,15 @@ mod tests {
         assert_eq!(result["is_error"], json!(false));
         assert!(result["content"].as_str().unwrap().contains("Updated"));
 
-        assert!(out.iter().all(|m| {
-            m.get("message")
-                .and_then(|message| message.get("content"))
-                .and_then(|value| value.as_array())
-                .is_none_or(|blocks| blocks.iter().all(|block| block.get("text").is_none()))
-        }), "patch event must no longer emit assistant prose: {out:#?}");
+        assert!(
+            out.iter().all(|m| {
+                m.get("message")
+                    .and_then(|message| message.get("content"))
+                    .and_then(|value| value.as_array())
+                    .is_none_or(|blocks| blocks.iter().all(|block| block.get("text").is_none()))
+            }),
+            "patch event must no longer emit assistant prose: {out:#?}"
+        );
     }
 
     #[test]
@@ -3379,7 +3422,10 @@ mod tests {
         // (`!isSubagent && isFleetOwnedEntrypoint`) then excluded — so a
         // Fleet-spawned codex "新会话" never surfaced and the launcher hung
         // forever on "正在启动会话…".
-        assert!(!super::parse_source("exec").is_subagent, "plain exec is top-level");
+        assert!(
+            !super::parse_source("exec").is_subagent,
+            "plain exec is top-level"
+        );
         assert!(!super::parse_source("EXEC").is_subagent, "case-insensitive");
         // Interactive TUI ("cli") and IDE sources are top-level too.
         assert!(!super::parse_source("cli").is_subagent);
@@ -3426,18 +3472,39 @@ mod tests {
 
         let deltas = codex_token_deltas_from_lines(&lines);
 
-        assert_eq!(deltas.len(), 4, "duplicate and backwards events dropped: {deltas:?}");
+        assert_eq!(
+            deltas.len(),
+            4,
+            "duplicate and backwards events dropped: {deltas:?}"
+        );
         // Turn 1: raw 1000 (400 cached) → 600 full-price.
         assert_eq!(deltas[0].input_tokens, 600);
         assert_eq!(deltas[0].cached_input_tokens, 400);
         assert_eq!(deltas[0].output_tokens, 100);
         assert!(deltas[0].timestamp_ms.is_some());
         // Turn 2: raw +2000, cached +1000 → 1000 full-price, output +150.
-        assert_eq!((deltas[1].input_tokens, deltas[1].cached_input_tokens, deltas[1].output_tokens), (1_000, 1_000, 150));
+        assert_eq!(
+            (
+                deltas[1].input_tokens,
+                deltas[1].cached_input_tokens,
+                deltas[1].output_tokens
+            ),
+            (1_000, 1_000, 150)
+        );
         // Turn 3 is measured against the true running max (3000/1400/250), not
         // the backwards snapshot: raw +1000, cached +500, output +150.
-        assert_eq!((deltas[2].input_tokens, deltas[2].cached_input_tokens, deltas[2].output_tokens), (500, 500, 150));
-        assert_eq!(deltas[3].timestamp_ms, None, "undated turn keeps a None stamp");
+        assert_eq!(
+            (
+                deltas[2].input_tokens,
+                deltas[2].cached_input_tokens,
+                deltas[2].output_tokens
+            ),
+            (500, 500, 150)
+        );
+        assert_eq!(
+            deltas[3].timestamp_ms, None,
+            "undated turn keeps a None stamp"
+        );
 
         // Telescoping: Σ deltas == the final cumulative snapshot.
         let sum_full: u64 = deltas.iter().map(|d| d.input_tokens).sum();
@@ -3498,7 +3565,10 @@ mod tests {
         })];
         let (cost, input) = codex_cost_and_input(&lines, None);
         assert_eq!(input, 1_000_000);
-        assert!((cost - 5.0).abs() < 1e-9, "gpt sol input = $5/M, got {cost}");
+        assert!(
+            (cost - 5.0).abs() < 1e-9,
+            "gpt sol input = $5/M, got {cost}"
+        );
     }
 
     #[test]
@@ -3518,7 +3588,10 @@ mod tests {
                 "total_token_usage":{"input_tokens":136970,"cached_input_tokens":999999,"output_tokens":565}}}}),
         ];
         // cached (999999) is clamped down to input (136970).
-        assert_eq!(latest_total_token_usage(&lines), Some((136970, 136970, 565)));
+        assert_eq!(
+            latest_total_token_usage(&lines),
+            Some((136970, 136970, 565))
+        );
     }
 
     #[test]
@@ -3532,10 +3605,12 @@ mod tests {
         // raw input (incl. cached) = 136970, cached = 123392, output = 565.
         // Panel must show full-price input = 136970 - 123392 = 13578, and the
         // three rows (13578 + 123392 + 565) must sum to total_tokens 137535.
-        let lines = vec![json!({"type":"event_msg","payload":{"type":"token_count","info":{
+        let lines = vec![
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{
             "total_token_usage":{
                 "input_tokens":136970,"cached_input_tokens":123392,"output_tokens":565
-            }}}})];
+            }}}}),
+        ];
         let b = codex_token_breakdown_from_lines(&lines, Some("gpt-5.6-sol".to_string()));
         assert_eq!(b.input_tokens, 13578);
         assert_eq!(b.cached_input_tokens, 123392);
@@ -3574,7 +3649,11 @@ mod tests {
             r#"{{"type":"session_meta","payload":{{"id":"t1","originator":"fleet","source":"exec"}}}}"#
         )
         .unwrap();
-        writeln!(f, r#"{{"type":"turn_context","payload":{{"model":"gpt-5"}}}}"#).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"turn_context","payload":{{"model":"gpt-5"}}}}"#
+        )
+        .unwrap();
         assert_eq!(
             read_rollout_originator(f.path()).as_deref(),
             Some("fleet"),
@@ -3589,27 +3668,46 @@ mod tests {
         // positional after the `resume` subcommand, not a `--resume` flag. This
         // is the shape a live Fleet auto-resume / handoff-resume process has, so
         // proc_alive depends on parsing it.
-        let argv: Vec<String> = ["exec", "resume", "019f-thread-xyz", "--json", "--skip-git-repo-check", "--", "hi"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let argv: Vec<String> = [
+            "exec",
+            "resume",
+            "019f-thread-xyz",
+            "--json",
+            "--skip-git-repo-check",
+            "--",
+            "hi",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         assert_eq!(
             extract_thread_id_from_args(&argv).as_deref(),
             Some("019f-thread-xyz")
         );
         // The flag forms must keep working.
         let flagged: Vec<String> = ["--resume", "abc"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(extract_thread_id_from_args(&flagged).as_deref(), Some("abc"));
+        assert_eq!(
+            extract_thread_id_from_args(&flagged).as_deref(),
+            Some("abc")
+        );
     }
 
     #[test]
     fn codex_proc_alive_only_on_exact_thread_match() {
         use super::{codex_proc_alive, CodexProcess};
         let procs = vec![
-            CodexProcess { pid: 10, cwd: "/ws".into(), thread_id: Some("t-alive".into()) },
+            CodexProcess {
+                pid: 10,
+                cwd: "/ws".into(),
+                thread_id: Some("t-alive".into()),
+            },
             // Same cwd, different thread — must NOT make t-dead look alive (the
             // pid-per-session hazard a cwd match would fall into).
-            CodexProcess { pid: 11, cwd: "/ws".into(), thread_id: None },
+            CodexProcess {
+                pid: 11,
+                cwd: "/ws".into(),
+                thread_id: None,
+            },
         ];
         assert!(codex_proc_alive(&procs, "t-alive"));
         assert!(!codex_proc_alive(&procs, "t-dead"));
@@ -3640,8 +3738,14 @@ mod tests {
         // live codex (thread id present in proc set) — must be left running.
         // claude session — codex reconcile must ignore it entirely.
         let mut sessions = vec![
-            mk("t-dead-codex", crate::codex_launch::FLEET_AGENT_SOURCE_CODEX),
-            mk("t-live-codex", crate::codex_launch::FLEET_AGENT_SOURCE_CODEX),
+            mk(
+                "t-dead-codex",
+                crate::codex_launch::FLEET_AGENT_SOURCE_CODEX,
+            ),
+            mk(
+                "t-live-codex",
+                crate::codex_launch::FLEET_AGENT_SOURCE_CODEX,
+            ),
             mk("t-claude", "claude"),
         ];
         let procs = vec![CodexProcess {
@@ -3744,7 +3848,11 @@ mod tests {
 
         // The live Codex set has that pid but no thread id in argv — exactly what
         // a mid-first-turn `codex exec` looks like.
-        let running = vec![CodexProcess { pid: 4242, cwd: "/ws".into(), thread_id: None }];
+        let running = vec![CodexProcess {
+            pid: 4242,
+            cwd: "/ws".into(),
+            thread_id: None,
+        }];
         assert!(
             codex_proc_alive(&running, "t-new"),
             "a running new spawn must read as alive via its recorded pid"
@@ -3785,8 +3893,16 @@ mod tests {
 
         crate::codex_launch::record_spawn_pid("t-new", 4242);
         let running = vec![
-            CodexProcess { pid: 3131, cwd: "/ws".into(), thread_id: None },
-            CodexProcess { pid: 4242, cwd: "/ws".into(), thread_id: None },
+            CodexProcess {
+                pid: 3131,
+                cwd: "/ws".into(),
+                thread_id: None,
+            },
+            CodexProcess {
+                pid: 4242,
+                cwd: "/ws".into(),
+                thread_id: None,
+            },
         ];
 
         assert_eq!(
@@ -3807,7 +3923,11 @@ mod tests {
         use std::io::Write;
         // First line is not session_meta → None (we only trust line 1).
         let mut f = tempfile::NamedTempFile::new().unwrap();
-        writeln!(f, r#"{{"type":"turn_context","payload":{{"model":"gpt-5"}}}}"#).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"turn_context","payload":{{"model":"gpt-5"}}}}"#
+        )
+        .unwrap();
         assert_eq!(read_rollout_originator(f.path()), None);
 
         // session_meta without an originator field → None.
@@ -3836,7 +3956,11 @@ mod tests {
             .unwrap();
         }
         for _ in 0..20 {
-            writeln!(f, r#"{{"type":"event_msg","payload":{{"type":"token_count"}}}}"#).unwrap();
+            writeln!(
+                f,
+                r#"{{"type":"event_msg","payload":{{"type":"token_count"}}}}"#
+            )
+            .unwrap();
         }
         f.flush().unwrap();
 
@@ -3883,7 +4007,9 @@ mod tests {
         // and new_offset lands at the current file size.
         let (lines, off1) = src.tail_incremental(&uri, 0).unwrap();
         assert!(
-            lines.iter().all(|m| m.get("uuid").and_then(|u| u.as_str()).is_some()),
+            lines
+                .iter()
+                .all(|m| m.get("uuid").and_then(|u| u.as_str()).is_some()),
             "every normalized codex tail message must carry a uuid"
         );
         assert!(
@@ -3906,7 +4032,9 @@ mod tests {
         let (lines2, off3) = src.tail_incremental(&uri, off1).unwrap();
         assert!(off3 > off1, "offset advances past the appended reply");
         assert!(
-            lines2.iter().any(|m| m.to_string().contains("second reply")),
+            lines2
+                .iter()
+                .any(|m| m.to_string().contains("second reply")),
             "the freshly-appended reply must appear on the next poll"
         );
     }
@@ -3932,6 +4060,7 @@ mod tests {
                 resets_at: Some(1_787_622_736),
             }),
             secondary: None,
+            rate_limit_buckets: Vec::new(),
         }
     }
 
@@ -4014,6 +4143,37 @@ mod tests {
     }
 
     #[test]
+    fn app_server_snapshot_collects_top_level_and_additional_buckets() {
+        let item = codex_usage_from_app_server_result(&json!({
+            "rateLimits": {
+                "limitId": "codex", "planType": "plus",
+                "primary": {"usedPercent": 12, "windowDurationMins": 300}
+            },
+            "rateLimitsByLimitId": {
+                "base_model_inference": {
+                    "limitName": "Luna Reserve", "normalModelSlug": "gpt-reserve",
+                    "primary": {"usedPercent": 48, "windowDurationMins": 10080}
+                }
+            }
+        }))
+        .unwrap();
+        assert_eq!(item.primary.as_ref().unwrap().used_percent, 12);
+        assert_eq!(item.rate_limit_buckets.len(), 2);
+        assert_eq!(
+            item.rate_limit_buckets[0].limit_id.as_deref(),
+            Some("codex")
+        );
+        assert_eq!(
+            item.rate_limit_buckets[1].limit_id.as_deref(),
+            Some("base_model_inference")
+        );
+        assert_eq!(
+            item.rate_limit_buckets[1].limit_name.as_deref(),
+            Some("Luna Reserve")
+        );
+    }
+
+    #[test]
     fn foxy_plan_label_is_normalised_to_the_app_server_spelling() {
         // foxy stores "Codex Team"; codex itself reports "team". The plan badge
         // must not change depending on which source served the panel.
@@ -4035,9 +4195,10 @@ mod tests {
     }
 
     /// A foxy account with the given window percentages and nothing else.
-    fn foxy_codex_account_at(primary: Option<i32>, secondary: Option<i32>)
-        -> crate::foxy::FoxyCodexAccount
-    {
+    fn foxy_codex_account_at(
+        primary: Option<i32>,
+        secondary: Option<i32>,
+    ) -> crate::foxy::FoxyCodexAccount {
         let w = |used_percent: i32| CodexRateLimitWindow {
             used_percent,
             window_duration_mins: None,
@@ -4049,6 +4210,7 @@ mod tests {
             full_name: "Harry C".into(),
             primary: primary.map(w),
             secondary: secondary.map(w),
+            rate_limit_buckets: Vec::new(),
         }
     }
 
@@ -4107,8 +4269,8 @@ mod tests {
             rate_limit_reached_type: Some("primary".into()),
             ..Default::default()
         };
-        let st = codex_rate_limit_state_from_usage(&usage, chrono::Utc::now())
-            .expect("reached → Some");
+        let st =
+            codex_rate_limit_state_from_usage(&usage, chrono::Utc::now()).expect("reached → Some");
         assert_eq!(
             st.resets_at.timestamp(),
             resets_secs,
@@ -4120,7 +4282,10 @@ mod tests {
             chrono::Duration::minutes(10080)
         );
         // Unknown limit_type → skips the claude-metric recovery gate.
-        assert_eq!(st.limit_type, crate::rate_limit_parser::RateLimitType::Unknown);
+        assert_eq!(
+            st.limit_type,
+            crate::rate_limit_parser::RateLimitType::Unknown
+        );
     }
 
     #[test]
@@ -4187,7 +4352,10 @@ mod tests {
             (st.resets_at - st.error_timestamp),
             chrono::Duration::minutes(300)
         );
-        assert_eq!(st.limit_type, crate::rate_limit_parser::RateLimitType::Unknown);
+        assert_eq!(
+            st.limit_type,
+            crate::rate_limit_parser::RateLimitType::Unknown
+        );
     }
 
     // ── scan-integration gating: codex_rollout_rate_limit ───────────────────
@@ -4217,9 +4385,15 @@ mod tests {
     #[test]
     fn last_turn_incomplete_detects_cutoff_vs_clean() {
         // turn_started with no completion → cut off.
-        assert!(codex_last_turn_incomplete(&[ev("turn_started"), tc_reached(Some("secondary"))]));
+        assert!(codex_last_turn_incomplete(&[
+            ev("turn_started"),
+            tc_reached(Some("secondary"))
+        ]));
         // ...but a clean turn_complete after → not cut off.
-        assert!(!codex_last_turn_incomplete(&[ev("turn_started"), ev("turn_complete")]));
+        assert!(!codex_last_turn_incomplete(&[
+            ev("turn_started"),
+            ev("turn_complete")
+        ]));
         // turn_aborted → cut off.
         assert!(codex_last_turn_incomplete(&[ev("turn_aborted")]));
     }
@@ -4446,7 +4620,10 @@ pub fn codex_session_pid(thread_id: &str) -> Option<u32> {
         return Some(process.pid);
     }
     let recorded = crate::codex_launch::resolve_spawn_pid(thread_id)?;
-    processes.iter().any(|p| p.pid == recorded).then_some(recorded)
+    processes
+        .iter()
+        .any(|p| p.pid == recorded)
+        .then_some(recorded)
 }
 
 /// A fresh liveness check for one Codex thread: scans the live Codex process set
@@ -4723,10 +4900,7 @@ fn parse_codex_session(
 ) -> Option<SessionInfo> {
     let metadata = fs::metadata(rollout_path).ok()?;
     let last_modified = metadata.modified().ok()?;
-    let last_activity_ms = last_modified
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_millis() as u64;
+    let last_activity_ms = last_modified.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
     let created_at_ms = metadata
         .created()
         .ok()
@@ -4814,7 +4988,8 @@ fn parse_codex_session(
     // Full parse, not `last_n` — see the SQLite path: a >100-line turn scrolls
     // `task_started` past the tail window and misreads as Idle when silent.
     let status = determine_status(&all_parsed, age.as_secs_f64());
-    let (token_speed, total_output_tokens, reasoning_output_tokens) = compute_token_stats(&all_parsed);
+    let (token_speed, total_output_tokens, reasoning_output_tokens) =
+        compute_token_stats(&all_parsed);
     let last_message_preview = extract_last_text(last_n);
     let model = extract_model(&all_parsed);
     let context_percent = extract_context_percent(&all_parsed, model.as_deref());
@@ -4835,8 +5010,7 @@ fn parse_codex_session(
     };
     // The rollout's own turn_context is the freshest source; the launch note
     // Fleet wrote at spawn covers a rollout too short to carry one yet.
-    let effort =
-        extract_effort(&all_parsed).or_else(|| crate::launch_spec::effort_of(&session_id));
+    let effort = extract_effort(&all_parsed).or_else(|| crate::launch_spec::effort_of(&session_id));
 
     // PID resolution: prefer thread-id match, fall back to workspace path.
     let (pid, pid_precise) = resolve_pid(codex_processes, &session_id, &workspace_path);
@@ -4933,7 +5107,12 @@ fn parse_codex_session(
         rate_limit,
         todos: None,
         background_tasks: Vec::new(),
-        task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,        compact_count: 0,
+        task_plan: None,
+        handoff: None,
+        user_mark: None,
+        title_override: None,
+        last_read_ms: None,
+        compact_count: 0,
         compact_pre_tokens: 0,
         compact_post_tokens: 0,
         compact_cost_usd: 0.0,
@@ -4993,7 +5172,12 @@ fn codex_turn_error_text(payload: &Value) -> Option<String> {
             payload.get("type").and_then(|t| t.as_str()),
             Some("error") | Some("stream_error")
         )
-        .then(|| payload.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+        .then(|| {
+            payload
+                .get("message")
+                .and_then(|m| m.as_str())
+                .map(str::to_owned)
+        })
         .flatten()
     })?;
     let text = text.trim();
@@ -5094,10 +5278,7 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
     let mut messages: Vec<Value> = Vec::new();
 
     for line in lines {
-        let timestamp = line
-            .get("timestamp")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let timestamp = line.get("timestamp").cloned().unwrap_or(Value::Null);
         let line_type = line
             .get("type")
             .and_then(|t| t.as_str())
@@ -5169,9 +5350,7 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                         // Skip the event-mirror copy when the canonical
                         // response_item carries the same text (see the dedup
                         // note at the top of this fn).
-                        if !text.is_empty()
-                            && !response_item_assistant_texts.contains(&text)
-                        {
+                        if !text.is_empty() && !response_item_assistant_texts.contains(&text) {
                             messages.push(json!({
                                 "type": "assistant",
                                 "message": {
@@ -5184,7 +5363,8 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                         }
                     }
                     // Approval requests — show as system-level waiting messages.
-                    "exec_approval_request" | "apply_patch_approval_request"
+                    "exec_approval_request"
+                    | "apply_patch_approval_request"
                     | "mcp_approval_request" => {
                         let desc = match msg_type {
                             "exec_approval_request" => {
@@ -5336,7 +5516,10 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
 
                         if server == "fleet"
                             && tool == "fleet__ask"
-                            && arguments.get("questions").and_then(Value::as_array).is_some()
+                            && arguments
+                                .get("questions")
+                                .and_then(Value::as_array)
+                                .is_some()
                         {
                             let call_id = payload
                                 .get("call_id")
@@ -5374,9 +5557,11 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                                         .join("\n")
                                 })
                                 .or_else(|| {
-                                    result
-                                        .and_then(|v| v.get("Err"))
-                                        .map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))
+                                    result.and_then(|v| v.get("Err")).map(|v| {
+                                        v.as_str()
+                                            .map(str::to_owned)
+                                            .unwrap_or_else(|| v.to_string())
+                                    })
                                 })
                                 .unwrap_or_default();
                             let is_error = ok.is_none()
@@ -5922,7 +6107,12 @@ fn assign_stable_uuids(messages: &mut [Value]) {
 /// message *the same message* to a reader.
 fn message_identity(m: &Value) -> String {
     let mut parts: Vec<String> = Vec::new();
-    parts.push(m.get("type").and_then(Value::as_str).unwrap_or("").to_string());
+    parts.push(
+        m.get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    );
     // tool_result identity lives at the top level, not under `message`.
     if let Some(tid) = m.get("tool_use_id").and_then(Value::as_str) {
         parts.push(format!("tuid={tid}"));
@@ -5971,7 +6161,9 @@ impl AgentSource for CodexSource {
         // Reuse cached process list if fresh (< 10 s).
         let codex_processes = {
             let mut guard = self.process_cache.lock().unwrap();
-            let stale = guard.0.map_or(true, |t| t.elapsed() > Duration::from_secs(10));
+            let stale = guard
+                .0
+                .map_or(true, |t| t.elapsed() > Duration::from_secs(10));
             if stale {
                 guard.1 = scan_codex_processes();
                 guard.0 = Some(std::time::Instant::now());
@@ -6020,18 +6212,14 @@ impl AgentSource for CodexSource {
         let read_raw_tail = |k: usize| -> Result<Vec<Value>, String> {
             if is_zst {
                 let content = read_zst_file(&file_path)?;
-                let lines: Vec<&str> = content
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .collect();
+                let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
                 let start = lines.len().saturating_sub(k);
                 Ok(lines[start..]
                     .iter()
                     .filter_map(|l| serde_json::from_str(l).ok())
                     .collect())
             } else {
-                crate::jsonl_tail::read_tail_lines_as_json(&file_path, k)
-                    .map_err(|e| e.to_string())
+                crate::jsonl_tail::read_tail_lines_as_json(&file_path, k).map_err(|e| e.to_string())
             }
         };
 
@@ -6136,7 +6324,10 @@ impl AgentSource for CodexSource {
     }
 
     fn fetch_account(&self) -> Result<Value, String> {
-        Err("Codex does not have a separate account endpoint; plan info is included in usage".into())
+        Err(
+            "Codex does not have a separate account endpoint; plan info is included in usage"
+                .into(),
+        )
     }
 
     fn fetch_usage(&self) -> Result<Value, String> {
@@ -6198,6 +6389,24 @@ pub struct CodexRateLimitWindow {
     pub resets_at: Option<i64>,
 }
 
+/// One independently-metered Codex quota, carrying the provider's display
+/// metadata and both windows. The legacy top-level pair remains on
+/// [`CodexUsageItem`] as the canonical quota projection.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexRateLimitBucket {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub normal_model_slug: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary: Option<CodexRateLimitWindow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secondary: Option<CodexRateLimitWindow>,
+}
+
 /// Credits snapshot from Codex.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -6222,6 +6431,8 @@ pub struct CodexUsageItem {
     pub primary: Option<CodexRateLimitWindow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary: Option<CodexRateLimitWindow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rate_limit_buckets: Vec<CodexRateLimitBucket>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credits: Option<CodexCreditsSnapshot>,
     /// Which ChatGPT account these numbers belong to, so the usage panel can
@@ -6257,11 +6468,9 @@ pub const USAGE_SOURCE_APP_SERVER: &str = "codex-app-server";
 /// Project a foxy-sourced Codex account onto the app-server's snapshot shape, so
 /// every consumer downstream is source-agnostic.
 ///
-/// Two fields cannot be filled from foxy and are deliberately left at their
-/// defaults rather than guessed:
-/// - `window_duration_mins` (already `None` per
-///   [`crate::foxy::FoxyCodexAccount`]) — foxy stores no window length.
-/// - `credits` — foxy polls no credits balance.
+/// Credits cannot be filled from foxy and are deliberately left unknown.
+/// Current foxy versions preserve provider-reported window durations in their
+/// dynamic buckets; legacy versions continue to leave them absent.
 ///
 /// `plan_type` is normalised back to the app-server's spelling: foxy stores the
 /// display label (`"Codex Team"`, built as `"Codex " + titlecase(plan_type)` in
@@ -6274,6 +6483,7 @@ fn codex_usage_from_foxy(a: crate::foxy::FoxyCodexAccount) -> CodexUsageItem {
         rate_limit_reached_type: reached_window_from_percentages(&a.primary, &a.secondary),
         primary: a.primary,
         secondary: a.secondary,
+        rate_limit_buckets: a.rate_limit_buckets,
         usage_source: USAGE_SOURCE_FOXY.to_string(),
         ..Default::default()
     }
@@ -6316,6 +6526,51 @@ fn base64_url_decode(segment: &str) -> Option<Vec<u8>> {
         .ok()
 }
 
+fn app_server_rate_limit_buckets(result: &Value) -> Vec<CodexRateLimitBucket> {
+    let legacy = result.get("rateLimits").unwrap_or(result);
+    let legacy_bucket = serde_json::from_value::<CodexRateLimitBucket>(legacy.clone()).ok();
+    let mut entries: Vec<(String, CodexRateLimitBucket)> = result
+        .get("rateLimitsByLimitId")
+        .and_then(Value::as_object)
+        .map(|buckets| {
+            buckets
+                .iter()
+                .filter_map(|(id, value)| {
+                    let mut bucket =
+                        serde_json::from_value::<CodexRateLimitBucket>(value.clone()).ok()?;
+                    if bucket.limit_id.is_none() {
+                        bucket.limit_id = Some(id.clone());
+                    }
+                    Some((id.clone(), bucket))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    entries
+        .sort_by(|(left, _), (right, _)| (left != "codex", left).cmp(&(right != "codex", right)));
+    let mut buckets: Vec<CodexRateLimitBucket> =
+        entries.into_iter().map(|(_, bucket)| bucket).collect();
+    if let Some(bucket) = legacy_bucket {
+        let legacy_id = bucket.limit_id.as_deref().unwrap_or("codex");
+        if !buckets
+            .iter()
+            .any(|item| item.limit_id.as_deref() == Some(legacy_id))
+        {
+            buckets.insert(0, bucket);
+        }
+    }
+    buckets
+}
+
+fn codex_usage_from_app_server_result(result: &Value) -> Result<CodexUsageItem, String> {
+    let legacy = result.get("rateLimits").unwrap_or(result);
+    let mut snapshot: CodexUsageItem =
+        serde_json::from_value(legacy.clone()).map_err(|e| format!("parse rate-limit: {e}"))?;
+    snapshot.rate_limit_buckets = app_server_rate_limit_buckets(result);
+    snapshot.usage_source = USAGE_SOURCE_APP_SERVER.to_string();
+    Ok(snapshot)
+}
+
 /// Derive Codex's `rateLimitReachedType` from the window percentages.
 ///
 /// foxy re-serves usage numbers but not Codex's own "which window did I hit"
@@ -6333,9 +6588,8 @@ fn reached_window_from_percentages(
     primary: &Option<CodexRateLimitWindow>,
     secondary: &Option<CodexRateLimitWindow>,
 ) -> Option<String> {
-    let exhausted = |w: &Option<CodexRateLimitWindow>| {
-        w.as_ref().is_some_and(|w| w.used_percent >= 100)
-    };
+    let exhausted =
+        |w: &Option<CodexRateLimitWindow>| w.as_ref().is_some_and(|w| w.used_percent >= 100);
     if exhausted(primary) {
         Some("primary".to_string())
     } else if exhausted(secondary) {
@@ -6423,14 +6677,20 @@ pub fn codex_rate_limit_state_from_rollout(
 ) -> Option<crate::session::RateLimitState> {
     // Absent or null reached-type → not limited (or a legacy rollout without
     // the field). `.as_str()` on JSON null returns None, covering both.
-    let reached = rate_limits.get("rate_limit_reached_type")?.as_str()?.to_string();
+    let reached = rate_limits
+        .get("rate_limit_reached_type")?
+        .as_str()?
+        .to_string();
     let window_from = |key: &str| -> Option<CodexRateLimitWindow> {
         let w = rate_limits.get(key)?;
         if w.is_null() {
             return None;
         }
         Some(CodexRateLimitWindow {
-            used_percent: w.get("used_percent").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32,
+            used_percent: w
+                .get("used_percent")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as i32,
             // Rollout names it `window_minutes`; the app-server struct field is
             // `window_duration_mins` (camelCase `windowDurationMins`).
             window_duration_mins: w.get("window_minutes").and_then(|v| v.as_i64()),
@@ -6704,35 +6964,47 @@ fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageIt
     let stdout = child.stdout.take().ok_or("No stdout")?;
     let mut reader = BufReader::new(stdout);
 
-    let send = |stdin: &mut std::process::ChildStdin, msg: &serde_json::Value| -> Result<(), String> {
-        let mut data = serde_json::to_vec(msg).unwrap();
-        data.push(b'\n');
-        stdin.write_all(&data).map_err(|e| format!("write: {e}"))
-    };
+    let send =
+        |stdin: &mut std::process::ChildStdin, msg: &serde_json::Value| -> Result<(), String> {
+            let mut data = serde_json::to_vec(msg).unwrap();
+            data.push(b'\n');
+            stdin.write_all(&data).map_err(|e| format!("write: {e}"))
+        };
 
     // 1. initialize
-    send(&mut stdin, &serde_json::json!({
-        "jsonrpc": "2.0", "id": 1,
-        "method": "initialize",
-        "params": {
-            "clientInfo": { "name": "fleet", "version": "0.1" },
-            "capabilities": { "experimentalApi": true }
-        }
-    }))?;
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": { "name": "fleet", "version": "0.1" },
+                "capabilities": { "experimentalApi": true }
+            }
+        }),
+    )?;
 
     // Read init response (discard)
     let mut line = String::new();
-    reader.read_line(&mut line).map_err(|e| format!("read init: {e}"))?;
+    reader
+        .read_line(&mut line)
+        .map_err(|e| format!("read init: {e}"))?;
 
     // 2. initialized notification
-    send(&mut stdin, &serde_json::json!({"jsonrpc":"2.0","method":"initialized"}))?;
+    send(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized"}),
+    )?;
 
     // 3. account/rateLimits/read
-    send(&mut stdin, &serde_json::json!({
-        "jsonrpc": "2.0", "id": 2,
-        "method": "account/rateLimits/read",
-        "params": {}
-    }))?;
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 2,
+            "method": "account/rateLimits/read",
+            "params": {}
+        }),
+    )?;
 
     // Read lines until we get the response with id=2 (timeout via child kill after 10s).
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -6764,19 +7036,8 @@ fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageIt
                                     .unwrap_or("unknown")
                             ));
                         }
-                        let result = msg
-                            .get("result")
-                            .ok_or("Missing result in response")?;
-                        let mut snapshot: CodexUsageItem = serde_json::from_value(
-                            result
-                                .get("rateLimits")
-                                .cloned()
-                                .unwrap_or_else(|| result.clone()),
-                        )
-                        .map_err(|e| format!("parse rate-limit: {e}"))?;
-                        // Codex has no notion of Fleet's source labels, so the
-                        // field arrives at its serde default and is stamped here.
-                        snapshot.usage_source = USAGE_SOURCE_APP_SERVER.to_string();
+                        let result = msg.get("result").ok_or("Missing result in response")?;
+                        let mut snapshot = codex_usage_from_app_server_result(result)?;
                         // `account/rateLimits/read` returns limits only, so the
                         // account label comes from auth.json — the same store
                         // the CLI itself reads.

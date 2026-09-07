@@ -44,12 +44,21 @@ export interface CodexRateLimitWindow {
   resetsAt?: number | null;
 }
 
+export interface CodexRateLimitBucket {
+  limitId?: string | null;
+  limitName?: string | null;
+  normalModelSlug?: string | null;
+  primary?: CodexRateLimitWindow | null;
+  secondary?: CodexRateLimitWindow | null;
+}
+
 export interface CodexUsageItem {
   limitId?: string | null;
   limitName?: string | null;
   planType?: string | null;
   primary?: CodexRateLimitWindow | null;
   secondary?: CodexRateLimitWindow | null;
+  rateLimitBuckets?: CodexRateLimitBucket[];
   credits?: { hasCredits: boolean; unlimited: boolean; balance?: string | null } | null;
   /** Signed-in ChatGPT account, the Codex parallel of AccountInfoData.email.
    *  Absent on API-key auth (no id_token to read it from). */

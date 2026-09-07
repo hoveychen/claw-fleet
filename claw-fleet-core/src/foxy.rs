@@ -99,6 +99,7 @@ pub struct FoxyCodexAccount {
     pub full_name: String,
     pub primary: Option<crate::codex_source::CodexRateLimitWindow>,
     pub secondary: Option<crate::codex_source::CodexRateLimitWindow>,
+    pub rate_limit_buckets: Vec<crate::codex_source::CodexRateLimitBucket>,
 }
 
 /// Map one foxy account row onto Codex's window pair.
@@ -136,18 +137,80 @@ fn map_in_use_codex(accounts_body: &Value, codex_managed_id: i64) -> Option<Foxy
             .unwrap_or("")
             .to_string()
     };
+    let mut rate_limit_buckets: Vec<crate::codex_source::CodexRateLimitBucket> = acct
+        .get("codex_rate_limits")
+        .and_then(Value::as_array)
+        .map(|buckets| buckets.iter().filter_map(parse_codex_bucket).collect())
+        .unwrap_or_default();
+    let legacy_primary = acct.get("five_hour").and_then(parse_codex_window);
+    let legacy_secondary = acct.get("seven_day").and_then(parse_codex_window);
+    if rate_limit_buckets.is_empty() && (legacy_primary.is_some() || legacy_secondary.is_some()) {
+        rate_limit_buckets.push(crate::codex_source::CodexRateLimitBucket {
+            limit_id: Some("codex".to_string()),
+            primary: legacy_primary.clone(),
+            secondary: legacy_secondary.clone(),
+            ..Default::default()
+        });
+    }
+    let canonical = rate_limit_buckets
+        .iter()
+        .find(|bucket| bucket.limit_id.as_deref() == Some("codex"))
+        .or_else(|| rate_limit_buckets.first());
     Some(FoxyCodexAccount {
         email: text("email"),
         plan: text("plan"),
         full_name: text("full_name"),
-        primary: acct.get("five_hour").and_then(parse_codex_window),
-        secondary: acct.get("seven_day").and_then(parse_codex_window),
+        primary: canonical.and_then(|bucket| bucket.primary.clone()).or(legacy_primary),
+        secondary: canonical.and_then(|bucket| bucket.secondary.clone()).or(legacy_secondary),
+        rate_limit_buckets,
     })
 }
 
-/// Convert one of foxy's `{ utilization, resets_at }` rows into a Codex window.
+fn parse_codex_bucket(v: &Value) -> Option<crate::codex_source::CodexRateLimitBucket> {
+    let text = |key: &str| {
+        v.get(key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let limit_id = text("limit_id");
+    if limit_id.is_none() && v.get("primary").is_none() && v.get("secondary").is_none() {
+        return None;
+    }
+    Some(crate::codex_source::CodexRateLimitBucket {
+        limit_id,
+        limit_name: text("limit_name"),
+        normal_model_slug: text("normal_model_slug"),
+        primary: v.get("primary").and_then(parse_codex_bucket_window),
+        secondary: v.get("secondary").and_then(parse_codex_bucket_window),
+    })
+}
+
+fn parse_codex_bucket_window(v: &Value) -> Option<crate::codex_source::CodexRateLimitWindow> {
+    if v.is_null() {
+        return None;
+    }
+    Some(crate::codex_source::CodexRateLimitWindow {
+        used_percent: v.get("used_percent")?.as_f64()? as i32,
+        window_duration_mins: v
+            .get("window_seconds")
+            .and_then(Value::as_i64)
+            .filter(|seconds| *seconds > 0)
+            .map(|seconds| seconds / 60),
+        resets_at: v
+            .get("reset_at")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|dt| dt.timestamp()),
+    })
+}
+
+/// Convert one of foxy's legacy compatibility rows into a Codex window.
 /// `None` when the row is absent or null — foxy omits a window entirely when the
-/// plan has none (a Codex Team account reports no `secondary`).
+/// plan has none (a Codex Team account reports no `secondary`). Newer foxy
+/// versions also include `window_seconds`; legacy rows leave the duration
+/// unknown rather than inferring it from the misleading column name.
 fn parse_codex_window(v: &Value) -> Option<crate::codex_source::CodexRateLimitWindow> {
     if v.is_null() {
         return None;
@@ -161,9 +224,11 @@ fn parse_codex_window(v: &Value) -> Option<crate::codex_source::CodexRateLimitWi
         .map(|dt| dt.timestamp());
     Some(crate::codex_source::CodexRateLimitWindow {
         used_percent,
-        // foxy stores no window length for any provider, so this stays unknown
-        // rather than being inferred from the column it arrived in.
-        window_duration_mins: None,
+        window_duration_mins: v
+            .get("window_seconds")
+            .and_then(Value::as_i64)
+            .filter(|seconds| *seconds > 0)
+            .map(|seconds| seconds / 60),
         resets_at,
     })
 }
@@ -488,6 +553,28 @@ mod tests {
         let secondary = a.secondary.expect("secondary mapped from the seven_day column");
         assert_eq!(secondary.used_percent, 25);
         assert_eq!(secondary.resets_at, Some(1_787_738_400));
+    }
+
+    #[test]
+    fn codex_dynamic_buckets_preserve_names_models_and_durations() {
+        let body = json!({"accounts": [{
+            "id": 7, "provider": "codex", "plan": "Codex Plus",
+            "codex_rate_limits": [
+                {"limit_id": "codex", "primary": {
+                    "used_percent": 10, "reset_at": "2026-08-25T01:52:16Z", "window_seconds": 18000
+                }},
+                {"limit_id": "base_model_inference", "limit_name": "Luna Reserve",
+                 "normal_model_slug": "gpt-reserve", "primary": {
+                    "used_percent": 48, "reset_at": "2026-08-26T01:52:16Z", "window_seconds": 604800
+                 }}
+            ]
+        }]});
+        let account = map_in_use_codex(&body, 7).unwrap();
+        assert_eq!(account.rate_limit_buckets.len(), 2);
+        assert_eq!(account.rate_limit_buckets[1].limit_name.as_deref(), Some("Luna Reserve"));
+        assert_eq!(account.rate_limit_buckets[1].normal_model_slug.as_deref(), Some("gpt-reserve"));
+        assert_eq!(account.rate_limit_buckets[0].primary.as_ref().unwrap().window_duration_mins, Some(300));
+        assert_eq!(account.primary.as_ref().unwrap().used_percent, 10);
     }
 
     #[test]
