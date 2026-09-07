@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarClock, Repeat, Trash2, RefreshCw, Plus, Pencil, ArrowUpRight, Play } from "lucide-react";
+import { CalendarClock, ChevronRight, Repeat, Trash2, RefreshCw, Plus, Pencil, ArrowUpRight, Play } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { SessionOptionPills } from "./SessionOptionPills";
@@ -21,15 +21,22 @@ function toLocalInput(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** The seed prompt: tells the agent to confirm the task then schedule it. */
-function scheduleTemplate(fireLocal: string): string {
+/** The seed prompt: tells the agent to confirm the task then schedule it. The
+ *  title, when the user typed one, is passed through verbatim so the scheduled
+ *  task lands in the list under the name they chose rather than one the agent
+ *  invented. */
+function scheduleTemplate(fireLocal: string, title: string): string {
   const human = fireLocal.replace("T", " ");
+  const named = title.trim();
+  const titleFlag = named ? ` --title "${named.replace(/"/g, '\\"')}"` : ` --title "<几个字说清这是干什么的>"`;
   return [
-    `请协助我安排一个定时任务,预定在 ${human} 触发。`,
+    named
+      ? `请协助我安排一个定时任务「${named}」,预定在 ${human} 触发。`
+      : `请协助我安排一个定时任务,预定在 ${human} 触发。`,
     ``,
     `先跟我确认清楚要做的事,理解需求后用下面的命令把它排程(需要时可加 --model / --effort 指定模型和推理档位):`,
     ``,
-    `    fleet schedule create --at "${fireLocal}" --prompt "<把要做的事写清楚>"`,
+    `    fleet schedule create --at "${fireLocal}"${titleFlag} --prompt "<把要做的事写清楚>"`,
     ``,
     `事情是:`,
   ].join("\n");
@@ -48,6 +55,7 @@ interface LoopRecord {
   id: string;
   workspacePath: string;
   prompt: string;
+  title?: string;
   intervalSecs: number;
   nextFireAt: number;
   iterationsDone: number;
@@ -62,6 +70,7 @@ interface ScheduleRecord {
   id: string;
   workspacePath: string;
   prompt: string;
+  title?: string;
   fireAt: number;
   status: "pending" | "fired";
   firedAt?: number;
@@ -82,6 +91,8 @@ interface ScheduleUpdate {
   id: string;
   fireAt?: number;
   prompt?: string;
+  /** `""` clears the title back to showing the prompt. */
+  title?: string;
   model?: string;
   effort?: string;
   agentSource?: string;
@@ -243,17 +254,19 @@ export function ScheduleView() {
   // "新建" shortcut: pick a time → open a new session seeded with the template.
   const [creating, setCreating] = useState(false);
   const [fireLocal, setFireLocal] = useState("");
+  const [newTitle, setNewTitle] = useState("");
 
   const openCreate = useCallback(() => {
     setFireLocal(toLocalInput(new Date(Date.now() + 60 * 60 * 1000))); // default +1h
+    setNewTitle("");
     setCreating(true);
   }, []);
 
   const confirmCreate = useCallback(() => {
     if (!fireLocal) return;
-    requestNewSession({ prompt: scheduleTemplate(fireLocal) });
+    requestNewSession({ prompt: scheduleTemplate(fireLocal, newTitle) });
     setCreating(false);
-  }, [fireLocal, requestNewSession]);
+  }, [fireLocal, newTitle, requestNewSession]);
 
   // Edit an existing pending schedule (prompt / time / model / effort / source).
   const [editing, setEditing] = useState<ScheduleRecord | null>(null);
@@ -310,6 +323,8 @@ export function ScheduleView() {
         <CreateModal
           fireLocal={fireLocal}
           setFireLocal={setFireLocal}
+          title={newTitle}
+          setTitle={setNewTitle}
           onConfirm={confirmCreate}
           onCancel={() => setCreating(false)}
         />
@@ -369,11 +384,15 @@ export function ScheduleView() {
 function CreateModal({
   fireLocal,
   setFireLocal,
+  title,
+  setTitle,
   onConfirm,
   onCancel,
 }: {
   fireLocal: string;
   setFireLocal: (v: string) => void;
+  title: string;
+  setTitle: (v: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -412,6 +431,17 @@ function CreateModal({
             "选个触发时间,然后去新会话把事情讲给 agent —— 由它替你把计划创建好。",
           )}
         </div>
+        <label className={styles.field_label}>
+          {t("schedule.task_title", "标题")}
+          <span className={styles.field_optional}>{t("schedule.optional", "可选")}</span>
+        </label>
+        <input
+          className={styles.time_input}
+          type="text"
+          value={title}
+          placeholder={t("schedule.title_placeholder", "几个字说清这是干什么的,留空则由 agent 起名")}
+          onChange={(e) => setTitle(e.target.value)}
+        />
         <label className={styles.field_label}>{t("schedule.fire_at", "触发时间")}</label>
         <input
           className={styles.time_input}
@@ -456,6 +486,7 @@ function EditModal({
 }) {
   const { t } = useTranslation();
   const [prompt, setPrompt] = useState(rec.prompt);
+  const [title, setTitle] = useState(rec.title ?? "");
   const [fireLocal, setFireLocal] = useState(toLocalInput(new Date(rec.fireAt)));
   const [model, setModel] = useState(rec.model ?? "");
   const [effort, setEffort] = useState(rec.effort ?? "");
@@ -471,6 +502,7 @@ function EditModal({
       id: rec.id,
       fireAt: new Date(fireLocal).getTime(), // datetime-local parsed as local time
       prompt: prompt.trim(),
+      title: title.trim(), // "" clears back to showing the prompt
       model, // "" clears back to inherit-default
       effort,
       agentSource: tool,
@@ -488,6 +520,17 @@ function EditModal({
     <div className={styles.modal_overlay} onClick={onCancel}>
       <div className={`${styles.modal} ${styles.modal_wide}`} onClick={(e) => e.stopPropagation()}>
         <div className={styles.modal_title}>{t("schedule.edit_title", "编辑计划任务")}</div>
+        <label className={styles.field_label}>
+          {t("schedule.task_title", "标题")}
+          <span className={styles.field_optional}>{t("schedule.optional", "可选")}</span>
+        </label>
+        <input
+          className={styles.time_input}
+          type="text"
+          value={title}
+          placeholder={t("schedule.title_placeholder", "几个字说清这是干什么的,留空则由 agent 起名")}
+          onChange={(e) => setTitle(e.target.value)}
+        />
         <label className={styles.field_label}>{t("schedule.prompt", "任务内容")}</label>
         <textarea
           className={styles.edit_textarea}
@@ -579,17 +622,25 @@ function TaskRow({
     ? runsNewestFirst
     : runsNewestFirst.slice(0, RUNS_COLLAPSED);
 
-  // Prompt can be long; clamp to 2 lines and let the user click to expand.
+  // A titled task leads with its title and keeps the whole prompt behind the
+  // toggle — the prompt is often a multi-line script, useless as a row headline.
+  // Records written before titles existed keep the old behaviour: the prompt IS
+  // the headline, clamped to 2 lines and click-to-expand.
+  const title = rec.title?.trim() || null;
   const [expanded, setExpanded] = useState(false);
   const promptRef = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   useEffect(() => {
+    if (title) return; // no clamp measurement needed — the prompt is hidden
     const el = promptRef.current;
     if (!el) return;
     // When clamped, the box's real content is taller than its rendered height.
     setOverflowing(el.scrollHeight > el.clientHeight + 1);
-  }, [rec.prompt, expanded]);
+  }, [rec.prompt, expanded, title]);
   const expandable = overflowing || expanded;
+  const toggleTip = expanded
+    ? t("schedule.collapse", "点击收起")
+    : t("schedule.expand", "点击展开全文");
 
   // Timing summary line.
   let timing: string;
@@ -614,26 +665,56 @@ function TaskRow({
         {isLoop ? t("schedule.badge_loop", "循环") : t("schedule.badge_once", "单次")}
       </span>
       <div className={styles.body}>
-        <div
-          ref={promptRef}
-          className={`${styles.prompt} ${expanded ? styles.prompt_expanded : ""} ${expandable ? styles.prompt_clickable : ""}`}
-          onClick={expandable ? () => setExpanded((v) => !v) : undefined}
-          role={expandable ? "button" : undefined}
-          tabIndex={expandable ? 0 : undefined}
-          onKeyDown={
-            expandable
-              ? (e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setExpanded((v) => !v);
-                  }
+        {title ? (
+          <>
+            <div
+              className={styles.title}
+              onClick={() => setExpanded((v) => !v)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setExpanded((v) => !v);
                 }
-              : undefined
-          }
-          title={expandable ? (expanded ? t("schedule.collapse", "点击收起") : t("schedule.expand", "点击展开全文")) : undefined}
-        >
-          {rec.prompt}
-        </div>
+              }}
+              title={toggleTip}
+            >
+              <ChevronRight
+                size={12}
+                strokeWidth={2.4}
+                className={`${styles.title_chev} ${expanded ? styles.title_chev_open : ""}`}
+              />
+              <span className={styles.title_text}>{title}</span>
+            </div>
+            {expanded && (
+              <div className={`${styles.prompt} ${styles.prompt_expanded} ${styles.prompt_under_title}`}>
+                {rec.prompt}
+              </div>
+            )}
+          </>
+        ) : (
+          <div
+            ref={promptRef}
+            className={`${styles.prompt} ${expanded ? styles.prompt_expanded : ""} ${expandable ? styles.prompt_clickable : ""}`}
+            onClick={expandable ? () => setExpanded((v) => !v) : undefined}
+            role={expandable ? "button" : undefined}
+            tabIndex={expandable ? 0 : undefined}
+            onKeyDown={
+              expandable
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setExpanded((v) => !v);
+                    }
+                  }
+                : undefined
+            }
+            title={expandable ? toggleTip : undefined}
+          >
+            {rec.prompt}
+          </div>
+        )}
         <div className={styles.meta}>
           <span className={fired ? styles.status_fired : styles.status_pending}>
             {fired ? t("schedule.status_fired", "已触发") : t("schedule.status_pending", "待触发")}

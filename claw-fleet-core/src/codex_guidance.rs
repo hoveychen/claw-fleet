@@ -311,7 +311,10 @@ a fresh LOCAL session each interval so local creds are present — don't mistake
 it for the `/loop` that dies in a headless turn); **fire once at a future time \
 → `fleet schedule`** (`--at`/`--in`); **wait for an event then continue → \
 `fleet watch`** (above).\n\
-- Both `fleet loop` and `fleet schedule` take an optional `--until <shell cmd>` \
+- Both `fleet loop` and `fleet schedule` take a `--title <a few words>`: always \
+pass one on create, else the scheduled-task list can only show the first lines \
+of the prompt.\n\
+- Both also take an optional `--until <shell cmd>` \
 as a **cheap non-LLM gate** — a cheap probe run each tick (or once due) that \
 spawns the paid LLM session only when it exits 0. This is the money-saver: \
 poll often, pay for an LLM only when there is real work (e.g. a loop running a \

@@ -468,6 +468,11 @@ pub(crate) enum LoopCommands {
         /// The prompt each iteration runs.
         #[arg(long)]
         prompt: String,
+        /// Short human label shown in `fleet loop list` and the desktop Schedule
+        /// view instead of the first lines of the prompt. Strongly recommended —
+        /// a list of prompts is unreadable.
+        #[arg(long)]
+        title: Option<String>,
         /// Stop after this many iterations (default: run until stopped, capped
         /// at 500).
         #[arg(long)]
@@ -494,8 +499,8 @@ pub(crate) enum LoopCommands {
         #[arg(long)]
         json: bool,
     },
-    /// Adjust a loop in place. Pass any of --interval / --prompt / --max; a
-    /// changed interval reschedules the next fire one interval from now.
+    /// Adjust a loop in place. Pass any of --interval / --prompt / --title /
+    /// --max; a changed interval reschedules the next fire one interval from now.
     Update {
         /// The loop id.
         id: String,
@@ -505,6 +510,10 @@ pub(crate) enum LoopCommands {
         /// New prompt each iteration runs.
         #[arg(long)]
         prompt: Option<String>,
+        /// New short human label. Pass an empty string to clear it back to
+        /// showing the prompt.
+        #[arg(long)]
+        title: Option<String>,
         /// New iteration cap (capped at 500).
         #[arg(long)]
         max: Option<u32>,
@@ -597,6 +606,11 @@ pub(crate) enum ScheduleCommands {
         /// The prompt the fired session runs — the schedule's full context.
         #[arg(long)]
         prompt: String,
+        /// Short human label shown in `fleet schedule list` and the desktop
+        /// Schedule view instead of the first lines of the prompt. Strongly
+        /// recommended — a list of prompts is unreadable.
+        #[arg(long)]
+        title: Option<String>,
         /// Model the fired session runs on (e.g. `claude-opus-5`,
         /// `gpt-5.6-sol`). Overrides the value inherited from this session, and
         /// a model belonging to another harness also switches the session to
@@ -639,8 +653,9 @@ pub(crate) enum ScheduleCommands {
         json: bool,
     },
     /// Adjust a pending schedule. Pass any of --at / --in (not both), --prompt,
-    /// --model, --effort. Pass `--model ""` / `--effort ""` to clear back to the
-    /// inherited default. A fired schedule cannot be updated.
+    /// --title, --model, --effort. Pass `--model ""` / `--effort ""` to clear
+    /// back to the inherited default, or `--title ""` to clear the label back to
+    /// showing the prompt. A fired schedule cannot be updated.
     Update {
         /// The schedule id.
         id: String,
@@ -653,6 +668,9 @@ pub(crate) enum ScheduleCommands {
         /// New prompt the fired session runs.
         #[arg(long)]
         prompt: Option<String>,
+        /// New short human label (or `""` to clear it back to showing the prompt).
+        #[arg(long)]
+        title: Option<String>,
         /// New model (or `""` to inherit the default).
         #[arg(long)]
         model: Option<String>,

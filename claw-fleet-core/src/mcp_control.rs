@@ -182,12 +182,13 @@ fn watch_tool_def() -> Value {
 fn loop_tool_def() -> Value {
     json!({
         "name": "fleet__loop",
-        "description": "A recurring / cron-style scheduler (CLI alias: `fleet cron`): re-runs a prompt on an interval by spawning a fresh detached LOCAL session each time. Reach for this for any 'do X every N minutes / hourly / daily / periodically / on a schedule' need. Durable — survives the session, unlike Claude Code's own `/loop`, ScheduleWakeup, or CronCreate, which silently die in a headless `claude -p` turn. Because each tick is a local session, local creds (e.g. muveectl) are present. Tip: `until` is a cheap non-LLM gate — a shell probe run each tick that only spawns the (paid) LLM session when it exits 0, so you can poll often yet pay for an LLM only when there is real work. Use this instead of the `fleet loop` CLI. Actions: create (--prompt and --interval required; --max/--until optional), stop, list, update, get, run.",
+        "description": "A recurring / cron-style scheduler (CLI alias: `fleet cron`): re-runs a prompt on an interval by spawning a fresh detached LOCAL session each time. Reach for this for any 'do X every N minutes / hourly / daily / periodically / on a schedule' need. Durable — survives the session, unlike Claude Code's own `/loop`, ScheduleWakeup, or CronCreate, which silently die in a headless `claude -p` turn. Because each tick is a local session, local creds (e.g. muveectl) are present. Tip: `until` is a cheap non-LLM gate — a shell probe run each tick that only spawns the (paid) LLM session when it exits 0, so you can poll often yet pay for an LLM only when there is real work. Use this instead of the `fleet loop` CLI. Actions: create (--prompt and --interval required; --title strongly recommended, --max/--until optional), stop, list, update, get, run.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {"type": "string", "enum": ["create", "stop", "list", "update", "get", "run"], "default": "create"},
                 "prompt": {"type": "string", "description": "The prompt to re-run each interval. Required for create."},
+                "title": {"type": "string", "description": "Short human label (a handful of words) naming what this loop is for — shown in the desktop Schedule view and `fleet loop list` instead of the first lines of the prompt. Always pass one on create; a list of raw prompts is unreadable. On update, an empty string clears it back to showing the prompt."},
                 "interval": {"type": "string", "description": "Interval between runs, e.g. 5m / 1h. Required for create."},
                 "max": {"type": "integer", "description": "Optional cap on iterations."},
                 "until": {"type": "string", "description": "Optional non-LLM gate: a shell command checked at each interval tick. The iteration spawns only when it exits 0; otherwise the tick is skipped (no session, no iteration consumed) and re-checked next interval."},
@@ -202,12 +203,13 @@ fn loop_tool_def() -> Value {
 fn schedule_tool_def() -> Value {
     json!({
         "name": "fleet__schedule",
-        "description": "A one-shot scheduler: fires a prompt ONCE at an absolute future time by spawning a fresh detached session — for recurring / periodic runs use `fleet__loop` instead. Durable — survives the session, unlike Claude Code's ScheduleWakeup / CronCreate. Tip: `until` is a cheap non-LLM gate — once due, a shell probe is polled and the (paid) LLM session spawns only when it exits 0. Use this instead of the `fleet schedule` CLI. Actions: create (--prompt required, exactly one of --at/--in; --model/--effort/--until optional), cancel, list, update, get, run.",
+        "description": "A one-shot scheduler: fires a prompt ONCE at an absolute future time by spawning a fresh detached session — for recurring / periodic runs use `fleet__loop` instead. Durable — survives the session, unlike Claude Code's ScheduleWakeup / CronCreate. Tip: `until` is a cheap non-LLM gate — once due, a shell probe is polled and the (paid) LLM session spawns only when it exits 0. Use this instead of the `fleet schedule` CLI. Actions: create (--prompt required, exactly one of --at/--in; --title strongly recommended, --model/--effort/--until optional), cancel, list, update, get, run.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {"type": "string", "enum": ["create", "cancel", "list", "update", "get", "run"], "default": "create"},
                 "prompt": {"type": "string", "description": "The prompt to fire. Required for create."},
+                "title": {"type": "string", "description": "Short human label (a handful of words) naming what this schedule is for — shown in the desktop Schedule view and `fleet schedule list` instead of the first lines of the prompt. Always pass one on create; a list of raw prompts is unreadable. On update, an empty string clears it back to showing the prompt."},
                 "at": {"type": "string", "description": "Absolute time, e.g. \"2026-07-25 09:00\"."},
                 "in": {"type": "string", "description": "Relative delay, e.g. 5d."},
                 "model": {"type": "string", "description": "Override model (else inherits this session's). Naming another harness's model fires on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh. Effort then resets to that harness's default unless you pass one."},
@@ -746,6 +748,7 @@ fn handle_loop(args: &Value, sid: Option<&str>) -> Result<String, String> {
             let rec = agent_loop::create(
                 &ctx.workspace,
                 &prompt,
+                arg(args, "title").as_deref(),
                 interval_secs,
                 max,
                 ctx.model.as_deref(),
@@ -780,7 +783,13 @@ fn handle_loop(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 None => None,
             };
             let max = args.get("max").and_then(Value::as_u64).map(|v| v as u32);
-            let rec = agent_loop::update(&id, interval_secs, arg(args, "prompt").as_deref(), max)?;
+            let rec = agent_loop::update(
+                &id,
+                interval_secs,
+                arg(args, "prompt").as_deref(),
+                arg(args, "title").as_deref(),
+                max,
+            )?;
             let _ = agent_loop::arm_timer(&rec);
             Ok(format!("ok: loop {} updated。计时器已重挂。", rec.id))
         }
@@ -878,6 +887,7 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
             let rec = schedule::create(
                 &ctx.workspace,
                 &prompt,
+                arg(args, "title").as_deref(),
                 fire_at,
                 route.model.as_deref(),
                 route.effort.as_deref(),
@@ -910,15 +920,25 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
             let id = req(args, "id")?;
             let fire_at = resolve_fire_at(args, false)?;
             let prompt = arg(args, "prompt");
+            let title = arg(args, "title");
             let model = arg(args, "model");
             let effort = arg(args, "effort");
-            if fire_at.is_none() && prompt.is_none() && model.is_none() && effort.is_none() {
-                return Err("nothing to update — pass at/in, prompt, model and/or effort.".to_string());
+            if fire_at.is_none()
+                && prompt.is_none()
+                && title.is_none()
+                && model.is_none()
+                && effort.is_none()
+            {
+                return Err(
+                    "nothing to update — pass at/in, prompt, title, model and/or effort."
+                        .to_string(),
+                );
             }
             let rec = schedule::update(&schedule::ScheduleUpdate {
                 id: id.clone(),
                 fire_at,
                 prompt,
+                title,
                 model,
                 effort,
                 ..Default::default()

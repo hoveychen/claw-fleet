@@ -231,7 +231,7 @@ pub fn block_reason(payload: &StopPayload, is_headless: bool) -> Option<String> 
              `durable` 参数「Has no effect」，而且任务「only fire while the REPL is idle」——\
              headless 没有 REPL。工具骗你说排上了，实际上你一收尾它就随进程一起消失，不会有任何报错。\n\n\
              要真正的跨 turn 定时/循环，用 Fleet 的机制：\n\
-             - **循环**：`fleet loop create --interval <5m|1h> --prompt \"...\"`——\
+             - **循环**：`fleet loop create --interval <5m|1h> --prompt \"...\" --title \"<几个字说清这是干什么的>\"`——\
              Fleet 会在到点时拉起一个新会话执行该 prompt，进程退出也不影响。`fleet loop stop <id>` 停止。\n\
              - **条件观察**（如果你注册 wakeup 只是想「过一会回来看 X 好没好」）：\
              `fleet watch create --until '<完成时 exit 0 的命令>' --capture '<要汇报的文本>'`——\

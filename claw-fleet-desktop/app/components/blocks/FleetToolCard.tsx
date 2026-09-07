@@ -188,7 +188,7 @@ function LoopRecords({ records, t }: { records: Record<string, unknown>[]; t: TF
         const max = recNum(r, "maxIterations");
         const next = recNum(r, "nextFireAt");
         return (
-          <RecordCard key={i} title={prompt ?? recStr(r, "id") ?? "loop"}>
+          <RecordCard key={i} title={recStr(r, "title") ?? prompt ?? recStr(r, "id") ?? "loop"}>
             {interval !== undefined && <Field label={t("fleet.rec.interval")}>{fmtDur(interval, t)}</Field>}
             {done !== undefined && (
               <Field label={t("fleet.rec.iterations")}>{max !== undefined ? `${done}/${max}` : `${done}/∞`}</Field>
@@ -221,7 +221,7 @@ function ScheduleRecords({ records, t }: { records: Record<string, unknown>[]; t
           </span>
         ) : undefined;
         return (
-          <RecordCard key={i} title={prompt ?? recStr(r, "id") ?? "schedule"} badge={badge}>
+          <RecordCard key={i} title={recStr(r, "title") ?? prompt ?? recStr(r, "id") ?? "schedule"} badge={badge}>
             {fired && firedAt !== undefined ? (
               <Field label={t("fleet.rec.fired")}>
                 <Relative ms={firedAt} t={t} />

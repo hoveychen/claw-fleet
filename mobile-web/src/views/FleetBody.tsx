@@ -180,7 +180,7 @@ function LoopRecords({ records }: { records: Record<string, unknown>[] }) {
         const max = recNum(r, "maxIterations");
         const next = recNum(r, "nextFireAt");
         return (
-          <RecordCard key={i} title={prompt ?? recStr(r, "id") ?? "loop"}>
+          <RecordCard key={i} title={recStr(r, "title") ?? prompt ?? recStr(r, "id") ?? "loop"}>
             {interval !== undefined && <Field label={t("间隔")}>{fmtDur(interval)}</Field>}
             {done !== undefined && (
               <Field label={t("已运行")}>{max !== undefined ? `${done}/${max}` : `${done}/∞`}</Field>
@@ -208,7 +208,7 @@ function ScheduleRecords({ records }: { records: Record<string, unknown>[] }) {
           </span>
         ) : undefined;
         return (
-          <RecordCard key={i} title={prompt ?? recStr(r, "id") ?? "schedule"} badge={badge}>
+          <RecordCard key={i} title={recStr(r, "title") ?? prompt ?? recStr(r, "id") ?? "schedule"} badge={badge}>
             {fired && firedAt !== undefined ? (
               <Field label={t("触发于")}>{relWhen(firedAt)}</Field>
             ) : (
