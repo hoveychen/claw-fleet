@@ -31,13 +31,14 @@ import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
-import { isFleetOwnedEntrypoint, isFleetOwnedTask, isSessionUnread } from "../types";
+import { isFleetOwnedEntrypoint, isFleetOwnedTask } from "../types";
 import { useDraft } from "../draft";
 import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
 import { repoRootPath } from "../../../shared-ts/repoPath";
+import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import styles from "./TasksView.module.css";
 
 /** 文档级滚动条被所有 tab 共享，任务页又会随 tab 卸载重挂（见 App 里按 `tab` 的条件
@@ -100,13 +101,29 @@ const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimite
  *  `determine_status` derives status from transcript age alone and a session
  *  parked on one long tool call stops writing. Those rows must not read as
  *  ended — the detail composer offers to *queue* a follow-up for exactly this
- *  session, and the two surfaces must agree. */
-export function statusTone(s: SessionInfo): string | null {
-  if (WORKING.includes(s.status)) return "working";
+ *  session, and the two surfaces must agree.
+ *
+ *  The quiet tone is *latched* (`shared-ts/quietLatch.ts`, shared with the
+ *  desktop row): without hysteresis the same session alternated working ↔ quiet
+ *  several times a minute, because it writes one line every few minutes and
+ *  each write pushes the status back to a live one for core's hard window. */
+const quietLatch = createQuietLatch();
+
+export function statusTone(s: SessionInfo & { deviceId?: string }): string | null {
+  const quiet = stickyQuiet(quietLatch, `${s.deviceId ?? ""}/${s.id}`, {
+    alive: !!s.procAlive,
+    rawQuiet: !!s.procAlive && !LIVE.includes(s.status),
+    lastActivityMs: s.lastActivityMs ?? 0,
+    now: Date.now(),
+  });
   if (s.status === "waitingInput") return "waiting";
-  if (s.status === "active") return "active";
   if (s.status === "rateLimited" || s.status === "serverErrored" || s.status === "remoteDisconnected")
     return "error";
+  // A latched session stays dim even while its status momentarily reads live —
+  // that is the whole point of the hysteresis.
+  if (quiet) return "quiet";
+  if (WORKING.includes(s.status)) return "working";
+  if (s.status === "active") return "active";
   if (s.procAlive) return "quiet";
   return null;
 }
@@ -344,24 +361,6 @@ export function buildRenderItems<T extends SessionInfo & { deviceId?: string }>(
   });
 }
 
-/**
- * When a collapsed relay-group header is opened, which of its members to mark
- * read immediately. The header aggregates its unread dot over the whole chain
- * (`markMembers.some(isSessionUnread)`), but opening it only navigates to the
- * tip's detail — where the existing dwell clears just the tip. The *other* hops
- * of a collapsed group never get a detail dwell of their own, so without this
- * they'd keep the group's dot lit forever after the user has plainly opened it.
- * The tip is excluded so its own 2s detail dwell still governs it (a quick
- * glance that backs out shouldn't clear the tip). Already-read members are
- * skipped so we don't re-stamp them.
- */
-export function groupOpenReadTargets<T extends SessionInfo>(
-  tip: SessionInfo,
-  markMembers: T[],
-): T[] {
-  return markMembers.filter((m) => m.id !== tip.id && isSessionUnread(m));
-}
-
 interface Props {
   /** 合并列表:每条会话都带着它属于哪一台设备(deviceRuntime.ts 的 WithDevice)。
    *  id 只在单机内唯一,所以 React key 与「打开这一条」都必须带上 deviceId。 */
@@ -375,9 +374,6 @@ interface Props {
    *  Distinguishes "still waiting for the first push" from "pushed, but empty". */
   sessionsLoaded: boolean;
   onOpenSession: (session: WithDevice<SessionInfo>) => void;
-  onMarkRead: (sessions: Array<WithDevice<SessionInfo>>) => void;
-  /** 打开终端页。带着当前筛选的目录进去省一次选择；筛的是「全部目录」时传 null,
-   *  由终端页自己让用户挑。 */
   /** 这台设备的显示名。整个 prop 缺席 = 只配了一台,徽标与「设备 · 目录」的
    *  筛选项都不出现 —— 单设备用户不该为多设备付出任何一处视觉噪音。 */
   deviceLabelOf?: (deviceId: string) => string | null;
@@ -392,14 +388,12 @@ export function TasksView({
   agentOnline,
   sessionsLoaded,
   onOpenSession,
-  onMarkRead,
 }: Props) {
   const confirm = useConfirm();
   // 筛选状态落到 localStorage（复用 Composer 草稿那套 useDraft），这样切标签页
-  // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/仅活跃/分段都保持不变，
+  // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/分段都保持不变，
   // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
   const [search, setSearch] = useDraft<string>("tasks:search", "");
-  const [activeOnly, setActiveOnly] = useDraft<boolean>("tasks:activeOnly", false);
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
   // Group handoff-relay chains into one collapsible card. Default on; the setter
   // lives in the More tab. Tabs unmount on switch, so this re-reads the saved
@@ -451,15 +445,12 @@ export function TasksView({
   // 就折叠掉别的分区。「终端」按钮因此不带初始目录，由终端页自己的目录选择器接手。
   const multiDevice = deviceLabelOf !== undefined;
 
-  const activeCount = useMemo(() => all.filter((s) => LIVE.includes(s.status)).length, [all]);
-
   // Everything except the mark filter — the segment counts are taken over this
   // set so each count reflects how many rows its segment would reveal under the
-  // current workspace / query / active filters (mirrors the desktop `preMark`).
+  // current query (mirrors the desktop `preMark`).
   const preMark = useMemo(() => {
     const q = search.trim().toLowerCase();
     return all.filter((s) => {
-      if (activeOnly && !LIVE.includes(s.status)) return false;
       if (q) {
         const clientMatch =
           `${s.titleOverride ?? ""} ${s.aiTitle ?? ""} ${s.slug ?? ""} ${s.lastMessagePreview ?? ""} ${s.workspaceName}`
@@ -474,7 +465,7 @@ export function TasksView({
       }
       return true;
     });
-  }, [all, search, activeOnly, ftsMatchPaths]);
+  }, [all, search, ftsMatchPaths]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -490,8 +481,6 @@ export function TasksView({
     () => preMark.filter((s) => markFilter === "all" || markBucket(s) === markFilter),
     [preMark, markFilter],
   );
-
-  const unreadCount = useMemo(() => visible.filter(isSessionUnread).length, [visible]);
 
   const setMark = useCallback(
     (s: SessionInfo, mark: SessionMark | null) => {
@@ -733,13 +722,12 @@ export function TasksView({
       markMembers: Array<WithDevice<SessionInfo>>;
     },
   ) => {
-    // For a collapsed group the header card is the tip, but its dot and unread
-    // bold must reflect the whole chain (`group.markMembers` = full membership),
-    // not just the tip — otherwise a chain floated to the top by a live mid-hop
-    // shows no dot. Plain cards keep deriving from the session itself.
+    // For a collapsed group the header card is the tip, but its dot must
+    // reflect the whole chain (`group.markMembers` = full membership), not just
+    // the tip — otherwise a chain floated to the top by a live mid-hop shows no
+    // dot. Plain cards keep deriving from the session itself.
     const tone = group ? chainTone(group.markMembers) : statusTone(s);
     const mode = stopMode(s);
-    const unread = group ? group.markMembers.some(isSessionUnread) : isSessionUnread(s);
     const isDone = group
       ? group.markMembers.length > 0 && group.markMembers.every((m) => m.userMark === "done")
       : s.userMark === "done";
@@ -751,16 +739,7 @@ export function TasksView({
       <div
         key={itemKey(s.deviceId, s.id)}
         className={styles.card}
-        onClick={() => {
-          onOpenSession(s);
-          // A group header aggregates unread over the whole chain, but opening
-          // it only dwells the tip — clear the other unread hops here so the
-          // group's dot doesn't linger after the user opened it.
-          if (group) {
-            const rest = groupOpenReadTargets(s, group.markMembers);
-            if (rest.length > 0) onMarkRead(rest);
-          }
-        }}
+        onClick={() => onOpenSession(s)}
       >
         <div className={styles.cardHead}>
           {tone && <span className={styles.statusDot} data-tone={tone} />}
@@ -768,7 +747,6 @@ export function TasksView({
             <AgentSourceIcon source={s.agentSource} />
           </span>
           <span className={styles.title}>{title}</span>
-          {unread && <span className={styles.unreadDot} />}
           <span className={styles.time}>{timeAgo(s.lastActivityMs)}</span>
           {group && (
             <button
@@ -916,25 +894,6 @@ export function TasksView({
             onChange={(e) => setSearch(e.target.value)}
           />
           {searching && <span className={styles.searchSpinner} />}
-        </div>
-        <div className={styles.filterRow}>
-          <button
-            className={styles.filterToggle}
-            data-active={activeOnly}
-            onClick={() => setActiveOnly((v) => !v)}
-          >
-            <span className={styles.activeDot} />
-            {t("仅活跃")}
-            <span className={styles.activeCount}>{activeCount}</span>
-          </button>
-          {unreadCount > 0 && (
-            <button
-              className={styles.readAll}
-              onClick={() => onMarkRead(visible.filter(isSessionUnread))}
-            >
-              {t("全部已读 ({0})", unreadCount)}
-            </button>
-          )}
         </div>
         <div className={styles.segment}>
           {(["all", "pending", "done"] as MarkFilter[]).map((key) => (

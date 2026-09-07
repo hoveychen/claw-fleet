@@ -352,7 +352,10 @@
     "ai_skill_save_btn": "保存 skill 文件…",
     "ai_modal_close": "完成",
     "codex_limit": "速率限制",
-    "no_usage_data": "暂无用量数据"
+    "no_usage_data": "暂无用量数据",
+    "dsh_balance_tip": "这把 key 背后的 provider 报的剩余余额",
+    "dsh_key_limit": "该 key 已用 {{used}} / {{limit}}",
+    "dsh_no_keys": "dsh 里没有配置 provider key，没有可查的余额"
   },
   "skills": {
     "panel_title": "Skills",
@@ -460,7 +463,9 @@
       "heartbeat-lost": "桌面端掉线",
       "approved": "已批准",
       "approved-with-edits": "批准并改写",
-      "rejected": "已驳回"
+      "rejected": "已驳回",
+      "task-completed": "已结束任务",
+      "task-abandoned": "已放弃任务"
     },
     "other_label": "其他",
     "edited_plan": "改写后的计划：",
@@ -1762,7 +1767,9 @@
     "no_parameters": "无参数",
     "no_results": "没有结果。",
     "no_summary": "没有记录摘要。",
-    "tool_running": "运行中…"
+    "tool_running": "运行中…",
+    "decision_task_completed": "已结束任务",
+    "decision_task_abandoned": "已放弃任务"
   },
   "settings": {
     "title": "设置",
@@ -1862,6 +1869,8 @@
     "prd_mode_enabled": "启用 PRD 自律模式",
     "model_guidance_desc": "注入一份 Claude 与 Codex 两家模型的能力/成本/effort 速查表，让 Agent 给 subagent、workflow agent、新会话选模型时有据可依。同时对 Claude 与 Fleet 启动的 Codex 会话生效。",
     "model_guidance_enabled": "启用模型选择速查指引",
+    "session_title_guidance_desc": "让 Agent 在话题清楚后用 fleet__set_session_title 给自己的会话起名，任务卡上显示的是标题而不是第一条 prompt。你手动改过的名字永远优先。同时对 Claude 与 Fleet 启动的 Codex 会话生效。",
+    "session_title_guidance_enabled": "让 Agent 自己给会话起标题",
     "skill_autosync_enabled": "启用 Skill 自动互通",
     "wiki_guidance_desc": "让 Agent 把完成的 HTML 报告、demo、markdown 文档用 `fleet wiki publish` 归档进知识库，在「知识库」板块统一浏览，不再散落在工作目录里。同时对 Claude 与 Fleet 启动的 Codex 会话生效。",
     "wiki_guidance_enabled": "启用知识库归档指引",
@@ -2095,7 +2104,11 @@
     "mode_tooltip": "切换此题的单选 / 多选模式",
     "select_placeholder": "请选择…",
     "attach_failed": "附件上传失败",
-    "attach_error_dismiss": "关闭"
+    "attach_error_dismiss": "关闭",
+    "finish_task": "结束任务",
+    "abandon_task": "放弃任务",
+    "finish_task_tooltip": "Agent 认为任务已完成。结束后本会话标记为「已完成」。",
+    "abandon_task_tooltip": "Agent 认为任务尚未完成。结束后本会话标记为「未完成·已放弃」。"
   },
   "composer": {
     "attach": "添加附件",
@@ -2196,7 +2209,8 @@
     "dc_type_fleet_ask": "富交互卡",
     "dc_type_plan_approval": "计划审批",
     "dc_no_rec": "无推荐",
-    "total_cost": "总花费"
+    "total_cost": "总花费",
+    "dc_task_outcome": "完成/放弃"
   },
   "command": {
     "nested": {
@@ -2215,10 +2229,10 @@
     "empty": "还没有会话，点上方“新会话”发起一个",
     "no_match": "没有匹配的会话",
     "untitled": "（无标题）",
-    "unread": "未读 — 有新消息",
     "running": "运行中",
     "waiting": "等待输入",
     "quiet_alive": "运行中 · 已 {{mins}} 分钟没有新输出（多半卡在一条长工具调用上）",
+    "quiet_sparse": "运行中 · 输出稀疏（每隔几分钟才写一行，多半卡在一条长工具调用上）",
     "running_subagents": "{{count}} 个子代运行中",
     "activity_via_subagent": "最近活跃来自子代（主会话本身已静默）",
     "resume_placeholder": "输入追问提示词后恢复会话…",
@@ -2229,12 +2243,7 @@
     "all_workspaces": "全部目录",
     "workspaces": "工作区",
     "workspace_session_count": "{{count}} 组会话",
-    "only_active": "仅活跃",
-    "filter_active_tip": "只显示仍在运行或等待输入的会话",
-    "mark_all_read": "全部已读",
-    "mark_all_read_tip": "把所有未读会话标记为已读",
     "menu_open": "打开",
-    "menu_mark_read": "标为已读",
     "menu_mark_done": "标为已完成",
     "menu_mark_pending": "标为进行中",
     "menu_rename": "重命名",
@@ -2264,7 +2273,8 @@
     "group_collapse": "收起接力链",
     "group_expand": "展开接力链上更早的会话",
     "toggle_done": "已完成 — 点击改回进行中",
-    "toggle_pending": "进行中 — 点击标为已完成"
+    "toggle_pending": "进行中 — 点击标为已完成",
+    "outcome_abandoned": "任务已放弃（未完成）— 点击切换复核标记"
   },
   "view_files": "仓库",
   "files": {

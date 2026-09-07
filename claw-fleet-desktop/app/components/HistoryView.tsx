@@ -7,11 +7,9 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  CheckCheck,
   CheckCircle2,
   Circle,
   Copy,
-  Eye,
   Folder,
   FolderOpen,
   PanelRightOpen,
@@ -22,13 +20,12 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
-  useReadStore,
   useSessionsStore,
   useUIStore,
   type MarkFilter,
 } from "../store";
 import type { SessionInfo } from "../types";
-import { LIVE_STATUSES, isFleetOwnedTask, sessionUnread } from "../types";
+import { isFleetOwnedTask } from "../types";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { PageShell } from "./PageShell";
@@ -40,7 +37,7 @@ import { canControl, stopMode, performStop } from "./StopControl";
 import { SessionRail, WorkspaceRailSection } from "./SessionRail";
 import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./ContextMenu";
 import { RenameSessionDialog } from "./RenameSessionDialog";
-import { buildRenderItems, dwellReadTargets } from "./sessionGroups";
+import { buildRenderItems } from "./sessionGroups";
 import { groupSessionsByWorkspace } from "./workspaceSessionGroups";
 import styles from "./HistoryView.module.css";
 import { canRevealPath } from "../canReveal";
@@ -91,8 +88,7 @@ export function matchSpawnedSession(
 }
 
 /** Segments for the pending/done filter. "all" shows everything; the other two
- *  map to the binary mark buckets (unmarked collapses to "pending"). The
- *  read/unread axis is deliberately NOT filterable — only pending/done is.
+ *  map to the binary mark buckets (unmarked collapses to "pending").
  *
  *  The two bucket segments render the exact icons `MarkControl` puts on the row
  *  (hollow circle = pending, green check = done) so a segment reads as "show me
@@ -142,7 +138,7 @@ export function applyFrozenOrder(
 }
 
 // Relay-chain grouping logic (RenderItem / buildRenderItems / chainBarColor /
-// dwellReadTargets / GROUP_VISIBLE / GROUP_LOAD_STEP / chainTip) lives in
+// GROUP_VISIBLE / GROUP_LOAD_STEP / chainTip) lives in
 // ./sessionGroups so any rail can reuse it without importing this file.
 
 // GroupMarkControl (relay-chain mark-all) moved to ./MarkControl alongside the
@@ -168,11 +164,6 @@ export function HistoryView() {
   // launchpad on that churn even when the session list itself is unchanged.
   const sessions = useSessionsStore((s) => s.sessions);
   const scanReady = useSessionsStore((s) => s.scanReady);
-  // Read/unread axis — optimistic overrides hide the dot before the next scan
-  // re-stamps `lastReadMs`; see useReadStore.
-  const readOverrides = useReadStore((s) => s.overrides);
-  const markRead = useReadStore((s) => s.markRead);
-  const markManyRead = useReadStore((s) => s.markManyRead);
 
   // Rail filters live in the store, not here: this component is unmounted every
   // time `viewMode` leaves "history", which would otherwise reset them behind
@@ -188,10 +179,6 @@ export function HistoryView() {
     const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
   }, []);
-  // Narrow the rail to sessions whose agent is still live — same status set that
-  // colours the row dot green/amber.
-  const activeOnly = useUIStore((s) => s.historyActiveOnly);
-  const setActiveOnly = useUIStore((s) => s.setHistoryActiveOnly);
   // Segmented filter by manual review mark; "all" shows every bucket.
   const markFilter = useUIStore((s) => s.historyMarkFilter);
   const setMarkFilter = useUIStore((s) => s.setHistoryMarkFilter);
@@ -251,9 +238,8 @@ export function HistoryView() {
     const q = query.trim().toLowerCase();
     // Everything except the mark filter — the segment counts are taken over
     // this set so each count reflects how many rows its segment would reveal
-    // under the current workspace / query / active filters.
+    // under the current query.
     const preMark = adhocSessions
-      .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
       .filter((s) => {
         if (!q) return true;
         const clientMatch =
@@ -285,7 +271,7 @@ export function HistoryView() {
       // `lastActivityMs` would be stale, but the tree is very much alive.
       .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
     return { rows, markCounts: counts };
-  }, [adhocSessions, activeOnly, query, ftsMatchPaths, markFilter]);
+  }, [adhocSessions, query, ftsMatchPaths, markFilter]);
 
   // Whether the task page currently mixes agent sources (Claude + Codex + …).
   // Only then does the per-row source glyph earn its place; a uniform list gets
@@ -340,24 +326,6 @@ export function HistoryView() {
     return m;
   }, [adhocSessions]);
 
-  // Tip id → full chain membership, but only for chains currently rendered as a
-  // collapsed group header. Backs dwell-read (see `dwellReadTargets`): opening a
-  // group header must clear the whole chain's aggregate unread dot, not just the
-  // tip — which is all the header click actually opens. Singles and expanded
-  // children are absent from the map, so they fall back to marking only
-  // themselves.
-  const groupHeaderChains = useMemo(() => {
-    const m = new Map<string, SessionInfo[]>();
-    for (const workspace of workspaceGroups) {
-      for (const it of workspace.items) {
-        if (it.kind === "group") {
-          m.set(it.tip.id, chainMembersAll.get(it.chainId) ?? it.members);
-        }
-      }
-    }
-    return m;
-  }, [workspaceGroups, chainMembersAll]);
-
   // Chain expand / page-in state now lives inside <SessionRail>.
 
   const freezeSort = useCallback(() => {
@@ -371,19 +339,6 @@ export function HistoryView() {
     window.addEventListener("blur", thawSort);
     return () => window.removeEventListener("blur", thawSort);
   }, [frozenOrder, thawSort]);
-
-  const activeCount = useMemo(
-    () => adhocSessions.filter((s) => LIVE_STATUSES.has(s.status)).length,
-    [adhocSessions],
-  );
-
-  // Every launchpad session with newer activity than its last read — drives the
-  // "一键清除未读" button. Scoped to all adhoc sessions (not the filtered rows) so
-  // the button truly zeroes the unread count / sidebar badge.
-  const unreadSessions = useMemo(
-    () => adhocSessions.filter((s) => sessionUnread(s, readOverrides[s.id])),
-    [adhocSessions, readOverrides],
-  );
 
   // Open tabs, resolved against the live scan. An id whose session has vanished
   // from the scan resolves to nothing and simply drops out of the strip; we
@@ -467,7 +422,6 @@ export function HistoryView() {
 
   const rowMenuItems = useCallback(
     (s: SessionInfo): ContextMenuItem[] => {
-      const unread = sessionUnread(s, readOverrides[s.id]);
       const isDone = s.userMark === "done";
       const revealKey =
         document.documentElement.getAttribute("data-platform") === "windows"
@@ -481,14 +435,6 @@ export function HistoryView() {
           onSelect: () => handleRowClick(s),
         },
       ];
-      if (unread) {
-        items.push({
-          id: "mark-read",
-          label: t("history.menu_mark_read", "标为已读"),
-          icon: <Eye size={13} />,
-          onSelect: () => markRead(s),
-        });
-      }
       items.push({
         id: "toggle-mark",
         label: isDone
@@ -548,7 +494,7 @@ export function HistoryView() {
       }
       return items;
     },
-    [t, readOverrides, handleRowClick, markRead, copyText],
+    [t, handleRowClick, copyText],
   );
 
   // Back out of the composer, abandoning any in-flight spawn correlation so a
@@ -646,43 +592,18 @@ export function HistoryView() {
     return () => clearTimeout(id);
   }, [pending]);
 
-  // Dwell-to-read: staying on a session for 2s marks it read. Clicking away (or
-  // unmounting) before the timer fires cancels it, so a quick glance doesn't
-  // clear the unread dot. Re-keyed on the open session's id, not its activity,
-  // so a still-streaming session can flip back to unread and get re-read on a
-  // later visit — matching "new message after last read → unread".
   const activeSession = useMemo(
     () => (openId == null || openId === DRAFT_ID ? null : sessionById.get(openId) ?? null),
     [openId, sessionById],
   );
-  // Read at fire time so the timer isn't re-armed by every scan that refreshes
-  // the session object, which would keep pushing the 2s dwell out. Same reason
-  // `groupHeaderChains` is read through a ref: it's rebuilt on every scan, so a
-  // dep on it would reset the dwell timer each tick.
-  const activeSessionRef = useRef(activeSession);
-  activeSessionRef.current = activeSession;
-  const groupHeaderChainsRef = useRef(groupHeaderChains);
-  groupHeaderChainsRef.current = groupHeaderChains;
-  useEffect(() => {
-    // Only a session dwells — the composer has no unread dot to clear.
-    if (activeSessionRef.current == null) return;
-    const id = setTimeout(() => {
-      const target = activeSessionRef.current;
-      // A group header aggregates unread over the whole chain, so dwelling on it
-      // clears every member — not just the tip the click opened.
-      if (target) markManyRead(dwellReadTargets(target, groupHeaderChainsRef.current));
-    }, 2000);
-    return () => clearTimeout(id);
-  }, [openId, markManyRead]);
 
   // One session row — shared by standalone rows and the members inside an
   // expanded handoff group, so both stay pixel-identical and pick up the same
   // memoisation.
-  // Fold this page's query threshold, read overrides and open-tab set into the
-  // shape <SessionRail> takes, so the shared rail stays agnostic of the stores.
+  // Fold this page's query threshold and open-tab set into the shape
+  // <SessionRail> takes, so the shared rail stays agnostic of the stores.
   const railSnippetFor = (jsonlPath: string) =>
     query.trim().length >= 2 ? snippetByPath.get(jsonlPath) : undefined;
-  const railIsUnread = (s: SessionInfo) => sessionUnread(s, readOverrides[s.id]);
   // The rail highlights the one session the column is showing.
   const openTabIds = useMemo(
     () => new Set(activeSession ? [activeSession.id] : []),
@@ -716,47 +637,7 @@ export function HistoryView() {
           </button>
         </div>
         <div className={styles.controls}>
-          <div className={styles.workspace_toolbar}>
-            <span className={styles.workspace_label}>
-              {t("history.workspaces", "工作区")}
-            </span>
-            {/* "全部已读" used to live in the page banner, where only an icon
-                fit. Here in the rail it sits with the filters it belongs to and
-                can carry its unread count. */}
-            <button
-              type="button"
-              className={styles.read_btn}
-              disabled={unreadSessions.length === 0}
-              onClick={() => markManyRead(unreadSessions)}
-              title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
-              aria-label={t("history.mark_all_read", "全部已读")}
-            >
-              <CheckCheck size={13} strokeWidth={1.8} />
-              {unreadSessions.length > 0 && (
-                <span className={styles.read_btn_count}>
-                  {unreadSessions.length}
-                </span>
-              )}
-            </button>
-          </div>
-          {/* Row 2: the "only active" pill sits beside the mark segments rather
-              than inside the workspace-select row. On WebKit (Tauri's WKWebView)
-              a <select> refuses to shrink below its widest option even with
-              min-width:0, so pairing it with the pill wrapped the pill onto its
-              own orphaned line. Giving the pill its own row removes that
-              dependency and reads the same in both engines. */}
           <div className={styles.mark_row}>
-            <button
-              type="button"
-              className={`${styles.active_toggle} ${activeOnly ? styles.active_toggle_on : ""}`}
-              aria-pressed={activeOnly}
-              onClick={() => setActiveOnly(!activeOnly)}
-              title={t("history.filter_active_tip", "只显示仍在运行或等待输入的会话")}
-            >
-              <span className={styles.active_toggle_dot} />
-              {t("history.only_active", "仅活跃")}
-              <span>{activeCount}</span>
-            </button>
             <div
               className={styles.mark_filter}
               role="group"
@@ -821,7 +702,6 @@ export function HistoryView() {
                   activeId={railActiveId}
                   openIds={openTabIds}
                   snippetFor={railSnippetFor}
-                  isUnread={railIsUnread}
                   nowTick={nowTick}
                   showSource={multiSource}
                   showWorkspace={false}

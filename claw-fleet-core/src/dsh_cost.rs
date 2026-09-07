@@ -130,6 +130,10 @@ const GENERATION_ENDPOINT: &str = "https://openrouter.ai/api/v1/generation";
 /// one — dsh's own conventional choice, and the key `.credentials.yaml` uses.
 const DEFAULT_KEY_ENV: &str = "OPENROUTER_API_KEY";
 
+/// The same for dsh's built-in DeepSeek route — `DEFAULT_API_KEY_ENV` in
+/// `@deepseek-ai/dsh-llm-deepseek`.
+const DEEPSEEK_KEY_ENV: &str = "DEEPSEEK_API_KEY";
+
 /// Cache file under `~/.fleet`, holding both kinds of frozen price. No entry
 /// ever expires: a generation record is immutable, and a metered price is
 /// deliberately held still — see the module docs.
@@ -479,9 +483,8 @@ pub fn generation_refs(events: &[Value]) -> Vec<GenerationRef> {
 /// That name is the lookup key everywhere else:
 ///
 /// 1. the process environment, and
-/// 2. `$DSH_HOME/.credentials.yaml`, which per `@deepseek-ai/dsh-credentials-local`
-///    is "a YAML mapping of credential reference to value, and nothing else" —
-///    **keyed by env-var name, not by provider name**.
+/// 2. `$DSH_HOME/.credentials.yaml` — **keyed by env-var name, not by provider
+///    name** (see [`credential_from_store`] for the document's layout).
 ///
 /// Measured against a real `dsh web`: with `OPENROUTER_API_KEY: sk-…` in that
 /// file, `credentials/describe` answers
@@ -525,15 +528,78 @@ pub fn openrouter_api_key() -> Option<String> {
         return Some(key);
     }
 
-    // The managed credential store, keyed by that same env-var name. An empty
-    // `{}` (the shipped default) yields nothing.
+    credential_from_store(&dsh_home, var)
+}
+
+/// Resolve the key for dsh's built-in `deepseek-official` route.
+///
+/// Same three layers as [`openrouter_api_key`], one level up in the settings
+/// document: DeepSeek is a top-level plugin (`llm-deepseek`) rather than one
+/// provider inside `llm-pi-ai`'s catalog, so its `apiKeyEnv` lives there. Read
+/// off `@deepseek-ai/dsh-llm-deepseek` 0.1.2-rc.1: `DEFAULT_API_KEY_ENV =
+/// "DEEPSEEK_API_KEY"`, overridable per-install via `Config.apiKeyEnv`.
+pub fn deepseek_api_key() -> Option<String> {
+    let dsh_home = crate::session::get_dsh_dir()?;
+
+    let settings = read_yaml(&dsh_home.join("settings.yaml"));
+    let plugin = settings
+        .as_ref()
+        .and_then(|s| s.pointer("/llm-deepseek").cloned())
+        .unwrap_or(Value::Null);
+
+    let var = plugin
+        .get("apiKeyEnv")
+        .and_then(Value::as_str)
+        .unwrap_or(DEEPSEEK_KEY_ENV);
+
+    if let Some(key) = non_empty(std::env::var(var).ok()) {
+        return Some(key);
+    }
+    if let Some(key) = non_empty(plugin.get("apiKey").and_then(Value::as_str).map(str::to_string)) {
+        return Some(key);
+    }
+    credential_from_store(&dsh_home, var)
+}
+
+/// Read one credential out of `$DSH_HOME/.credentials.yaml` by its env-var name.
+///
+/// The document is **versioned**, and the shape matters because the key sits one
+/// level down from where a naive lookup would look:
+///
+/// ```yaml
+/// version: 1
+/// refs:
+///   OPENROUTER_API_KEY: sk-or-…
+///   DEEPSEEK_API_KEY: sk-…
+/// records:
+///   client-connection/browser-session: { kind: grant, … }
+/// ```
+///
+/// Read off `@deepseek-ai/dsh-credentials-local` 0.1.2-rc.1 (the build installed
+/// on this machine, 2026-09-06): its parser **rejects** a flat document outright
+/// — *"uses the pre-release flat layout. Add `version: 1` and nest the existing
+/// entries under `refs:`"* — and rewrites it in place on load. So every live
+/// install has the nested form, and the flat lookup this function replaced found
+/// nothing on any of them: `dsh_session_cost` reported OpenRouter calls as
+/// unpriced on a machine whose key was configured all along.
+///
+/// The flat form is still accepted here as a fallback. It costs one `get` and
+/// covers a document that predates the migration (or one hand-written from the
+/// old docs) — dsh will migrate it on its next load anyway, and reading it
+/// early is strictly better than refusing a key that is plainly there.
+///
+/// `records` is deliberately not consulted: those are per-plugin durable grants
+/// addressed `<owner>/<id>`, not credential refs.
+fn credential_from_store(dsh_home: &std::path::Path, var: &str) -> Option<String> {
     let creds = read_yaml(&dsh_home.join(".credentials.yaml"))?;
-    non_empty(
-        creds
-            .get(var)
-            .and_then(Value::as_str)
-            .map(str::to_string),
-    )
+    let from_refs = creds
+        .pointer("/refs")
+        .and_then(|refs| refs.get(var))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    non_empty(from_refs).or_else(|| {
+        non_empty(creds.get(var).and_then(Value::as_str).map(str::to_string))
+    })
 }
 
 fn non_empty(v: Option<String>) -> Option<String> {
@@ -1501,6 +1567,35 @@ mod tests {
             )
             .unwrap();
             assert_eq!(openrouter_api_key().as_deref(), Some("sk-from-file"));
+        });
+    }
+
+    /// The shipped credential document is **versioned**: `version: 1` with the
+    /// keys nested under `refs:` (and durable plugin records under `records:`).
+    /// Read off `@deepseek-ai/dsh-credentials-local` 0.1.2-rc.1 on 2026-09-06:
+    /// its parser *rejects* the old flat layout outright — "uses the pre-release
+    /// flat layout. Add `version: 1` and nest the existing entries under
+    /// `refs:`" — and migrates the file in place on load. So on any live install
+    /// the key is one level down, and a top-level lookup finds nothing.
+    #[test]
+    fn key_comes_from_the_versioned_refs_section() {
+        with_temp_dsh_home(|base| {
+            std::fs::write(
+                base.join("settings.yaml"),
+                "llm-pi-ai:\n  providers:\n    openrouter:\n      apiKeyEnv: FLEET_TEST_REFS_VAR\n",
+            )
+            .unwrap();
+            std::env::remove_var("FLEET_TEST_REFS_VAR");
+
+            // Exactly the shape dsh writes: version stamp, refs section, and a
+            // records section it also keeps in the same document.
+            std::fs::write(
+                base.join(".credentials.yaml"),
+                "version: 1\nrefs:\n  FLEET_TEST_REFS_VAR: sk-from-refs\n\
+                 records:\n  client-connection/browser-session:\n    kind: grant\n",
+            )
+            .unwrap();
+            assert_eq!(openrouter_api_key().as_deref(), Some("sk-from-refs"));
         });
     }
 

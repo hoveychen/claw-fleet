@@ -1,13 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ClaudeIcon, CodexIcon, FoxyIcon } from "./SessionCard";
+import { ClaudeIcon, CodexIcon, DshIcon, FoxyIcon } from "./SessionCard";
 import styles from "./UsagePanel.module.css";
 import {
   useUsageStore,
   type UsageStats,
   type CodexRateLimitWindow,
+  type DshProviderBalance,
 } from "../usageStore";
+import type { SourceInfo } from "../modelChoices";
 import { codexRateLimitBars, type TFunc } from "../codexUsage";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { UsageHistoryModal } from "./UsageHistoryModal";
@@ -122,6 +124,70 @@ function CodexWindowBar({ label, window }: { label: string; window: CodexRateLim
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── dsh money row ────────────────────────────────────────────────────────────
+
+/** Render an amount in the currency the provider reported it in.
+ *
+ *  The currency is carried per row rather than assumed, because the two
+ *  providers behind a dsh install do not agree: DeepSeek settles a top-up in
+ *  CNY, OpenRouter in USD. Printing one of them with the other's sign is the
+ *  kind of confident-wrong number this panel exists to avoid, so an unknown
+ *  code is prefixed verbatim instead of being guessed at. */
+function formatMoney(amount: number, currency: string | null | undefined): string {
+  const n = amount.toFixed(2);
+  if (currency === "CNY") return `¥${n}`;
+  if (currency === "USD") return `$${n}`;
+  return currency ? `${currency} ${n}` : n;
+}
+
+/** One provider's position: a bar only when the provider gave a denominator.
+ *
+ *  A balance is money left with nothing to divide by — a bar drawn from it
+ *  would have to invent a ceiling. OpenRouter's per-key `limit` is a real
+ *  denominator, so that row (and only that row) gets the same bar treatment as
+ *  the rate-limit sections above. */
+function DshBalanceRow({ balance }: { balance: DshProviderBalance }) {
+  const { t } = useTranslation();
+  const hasLimit =
+    balance.limit !== null &&
+    balance.limit !== undefined &&
+    balance.limit > 0 &&
+    balance.used !== null &&
+    balance.used !== undefined;
+  const pct = hasLimit ? Math.round((balance.used! / balance.limit!) * 100) : null;
+
+  return (
+    <div className={styles.usage_item}>
+      <div className={styles.usage_header}>
+        <span className={styles.usage_label}>{balance.label}</span>
+        {balance.balance !== null && balance.balance !== undefined && (
+          <span className={styles.usage_pct} title={t("account.dsh_balance_tip")}>
+            {formatMoney(balance.balance, balance.currency)}
+          </span>
+        )}
+      </div>
+      {pct !== null && (
+        <>
+          <div className={styles.bar_track}>
+            <div className={fillClass(pct)} style={{ width: `${Math.min(pct, 100)}%` }} />
+          </div>
+          <div className={styles.usage_footer}>
+            <span className={styles.usage_reset}>
+              {t("account.dsh_key_limit", {
+                used: formatMoney(balance.used!, balance.currency),
+                limit: formatMoney(balance.limit!, balance.currency),
+              })}
+            </span>
+          </div>
+        </>
+      )}
+      {balance.error && <div className={styles.usage_footer}>
+        <span className={styles.usage_reset}>{balance.error}</span>
+      </div>}
     </div>
   );
 }
@@ -344,6 +410,65 @@ function CodexUsageSection() {
   );
 }
 
+// ── dsh section ──────────────────────────────────────────────────────────────
+
+/** dsh's card reports **money**, not a rate-limit window.
+ *
+ *  dsh publishes no quota of its own — it is a bring-your-own-key harness, so
+ *  the only truthful number is what the provider behind the key says is left.
+ *  That is why this section has no plan badge, no reset countdown and no
+ *  occupancy-history button: none of those exist for a prepaid balance. */
+function DshUsageSection() {
+  const { t } = useTranslation();
+  const { data, error, loading, lastUpdated, autoRefresh } = useUsageStore((s) => s.dsh);
+  const load = useUsageStore((s) => s.load);
+  const setAutoRefresh = useUsageStore((s) => s.setAutoRefresh);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const refresh = () => { load("dsh"); };
+  const onAutoRefreshChange = (v: boolean) => setAutoRefresh("dsh", v);
+
+  const balances = data?.balances ?? [];
+
+  return (
+    <div className={styles.tool_section}>
+      <div className={styles.tool_header}>
+        <DshIcon />
+        <span className={styles.tool_name}>dsh</span>
+      </div>
+      {loading && !data && <p className={styles.dim}>{t("account.loading")}</p>}
+      {error && (
+        <div className={styles.error}>
+          <p>{error}</p>
+          <button className={styles.retry} onClick={refresh}>{t("account.retry")}</button>
+        </div>
+      )}
+      {balances.length > 0 && (
+        <div className={styles.bars}>
+          {balances.map((b) => (
+            <DshBalanceRow key={b.provider} balance={b} />
+          ))}
+        </div>
+      )}
+      {data && balances.length === 0 && (
+        <p className={styles.dim}>{t("account.dsh_no_keys")}</p>
+      )}
+      <SectionFooter
+        lastUpdated={lastUpdated}
+        loading={loading}
+        autoRefresh={autoRefresh}
+        onAutoRefreshChange={onAutoRefreshChange}
+        onRefresh={refresh}
+      />
+    </div>
+  );
+}
+
 // ── Main panel ───────────────────────────────────────────────────────────────
 
 interface DetectedTools {
@@ -364,6 +489,12 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
   const [expanded, setExpanded] = useState(true);
   const [hasClaude, setHasClaude] = useState(true);
   const [hasCodex, setHasCodex] = useState(false);
+  // dsh is not in `detected_tools` (that struct predates it and describes
+  // Claude's install surfaces plus codex). Its own registry entry already
+  // answers the question — `available` is gated on the binary existing and
+  // `enabled` on the settings toggle — so the section follows the same rule
+  // the launcher uses rather than growing a second detection path.
+  const [hasDsh, setHasDsh] = useState(false);
   const ring = useUsageRing();
   // Auto-load Claude usage when collapsed (so tile has data without expanding panel)
   const loadUsage = useUsageStore((s) => s.load);
@@ -371,7 +502,8 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
     if (!collapsed) return;
     if (hasClaude) loadUsage("claude");
     if (hasCodex) loadUsage("codex");
-  }, [collapsed, hasClaude, hasCodex, loadUsage]);
+    if (hasDsh) loadUsage("dsh");
+  }, [collapsed, hasClaude, hasCodex, hasDsh, loadUsage]);
 
   useEffect(() => {
     invoke<SetupStatus>("check_setup_status")
@@ -381,9 +513,14 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
         setHasCodex(tools.codex);
       })
       .catch(() => {});
+    invoke<SourceInfo[]>("get_sources_config")
+      .then((sources) => {
+        setHasDsh(sources.some((s) => s.name === "dsh" && s.enabled && s.available));
+      })
+      .catch(() => {});
   }, []);
 
-  if (!hasClaude && !hasCodex) return null;
+  if (!hasClaude && !hasCodex && !hasDsh) return null;
 
   if (collapsed) {
     if (!ring) {
@@ -416,6 +553,7 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
         <div className={styles.content}>
           {hasClaude && <ClaudeUsageSection />}
           {hasCodex && <CodexUsageSection />}
+          {hasDsh && <DshUsageSection />}
         </div>
       )}
     </div>

@@ -2,7 +2,7 @@ import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, ChevronRight, Clock, FolderGit2, Radar, Waypoints } from "lucide-react";
 import type { SessionInfo } from "../types";
-import { LIVE_STATUSES, isQuietAlive, rowBarColor } from "../types";
+import { LIVE_STATUSES, isQuietAlive, isQuietAliveSticky, rowBarColor } from "../types";
 import { MarkControl } from "./MarkControl";
 import { AgentSourceIcon } from "./SessionCard";
 import styles from "./SessionRow.module.css";
@@ -90,7 +90,6 @@ export type SessionRowProps = {
   /** Open in a tab, but not the tab currently on screen. Weaker half of the
    *  same axis as `isSelected` — never both at once. */
   isOpen: boolean;
-  unread: boolean;
   /** Bumped every 30s by the parent so relative times keep advancing. Without
    *  it the memo would freeze the elapsed "3 分钟" at whatever it said on mount. */
   nowTick: number;
@@ -126,7 +125,6 @@ export const SessionRow = memo(function SessionRow({
   snippet,
   isSelected,
   isOpen,
-  unread,
   showSource,
   showWorkspace = true,
   onClick,
@@ -140,7 +138,14 @@ export const SessionRow = memo(function SessionRow({
   // — faded, so it reads apart from a truly working session — and the runtime
   // chip stays up, since "how long has this been going" is exactly the question
   // a session stuck on one long tool call raises.
+  // Raw vs latched (see `isQuietAliveSticky`): the dot's colour follows the
+  // latched value so it stops flickering, so the tooltip has to as well — a
+  // faded dot reading "运行中" would contradict itself. The two differ only in
+  // the window right after a sparse write, which gets its own wording: the
+  // transcript just moved, but the cadence is still "one line every few
+  // minutes", which is what the faded dot is saying.
   const quiet = isQuietAlive(s);
+  const sparse = !quiet && isQuietAliveSticky(s);
   const quietMins = quiet
     ? Math.max(0, Math.round((Date.now() - s.lastActivityMs) / 60000))
     : 0;
@@ -167,10 +172,9 @@ export const SessionRow = memo(function SessionRow({
     >
       <button
         type="button"
-        className={`${styles.row} ${expandable ? styles.row_expandable : ""} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""} ${unread ? styles.row_unread : ""}`}
+        className={`${styles.row} ${expandable ? styles.row_expandable : ""} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""}`}
         onClick={() => onClick(s)}
         title={tooltip || undefined}
-        aria-label={unread ? t("history.unread", "未读 — 有新消息") : undefined}
       >
         {runColor && (
           <span
@@ -183,12 +187,14 @@ export const SessionRow = memo(function SessionRow({
                   })
                 : s.status === "waitingInput"
                   ? t("history.waiting", "等待输入")
-                  : t("history.running", "运行中")
+                  : sparse
+                    ? t("history.quiet_sparse", "运行中 · 输出稀疏（每隔几分钟才写一行，多半卡在一条长工具调用上）")
+                    : t("history.running", "运行中")
             }
           />
         )}
         <span className={styles.row_body}>
-          <span className={`${styles.row_title} ${unread ? styles.row_title_unread : ""}`}>
+          <span className={styles.row_title}>
             {showSource && (
               <span className={styles.row_source} title={s.agentSource}>
                 <AgentSourceIcon source={s.agentSource} />
@@ -306,7 +312,6 @@ export const SessionRow = memo(function SessionRow({
 (prev, next) =>
   prev.isSelected === next.isSelected &&
   prev.isOpen === next.isOpen &&
-  prev.unread === next.unread &&
   prev.snippet === next.snippet &&
   prev.nowTick === next.nowTick &&
   prev.showSource === next.showSource &&

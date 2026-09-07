@@ -811,8 +811,8 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         task_plan: None,
         handoff: None,
         user_mark: None,
+        task_outcome: None,
         title_override: None,
-        last_read_ms: None,
         compact_count: 0,
         compact_pre_tokens: 0,
         compact_post_tokens: 0,
@@ -833,8 +833,8 @@ pub fn enrich_all(sessions: &mut [SessionInfo]) {
     crate::handoff::enrich_sessions(sessions);
     crate::watch::enrich_sessions(sessions);
     crate::session_mark::enrich_sessions(sessions);
+    crate::task_outcome::enrich_sessions(sessions);
     crate::session_title::enrich_sessions(sessions);
-    crate::session_read::enrich_sessions(sessions);
     crate::pending_message::enrich_sessions(sessions);
     // Last: it overrides `status`, so it must run after everything that reads or
     // sets one. A disconnected session's transcript-derived status describes a

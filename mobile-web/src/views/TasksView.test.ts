@@ -3,7 +3,6 @@ import {
   applyFrozenOrder,
   buildRenderItems,
   workspaceFilterValue,
-  groupOpenReadTargets,
   groupTaskSections,
   statusTone,
 } from "./TasksView";
@@ -118,44 +117,6 @@ describe("buildRenderItems", () => {
   });
 });
 
-/**
- * A collapsed relay group's header aggregates its unread dot over the whole
- * chain, but opening the header only navigates to (and dwells) the tip. The
- * other hops never get a detail dwell of their own, so `groupOpenReadTargets`
- * clears them on open — otherwise a non-tip unread hop keeps the group's dot
- * lit after the user plainly opened it (the bug this covers). The tip itself is
- * excluded so its own detail dwell still governs it.
- */
-function readState(id: string, unread: boolean): SessionInfo {
-  // isSessionUnread(s) = s.lastActivityMs > (s.lastReadMs ?? 0)
-  return {
-    id,
-    workspacePath: "/w",
-    workspaceName: "w",
-    lastActivityMs: 100,
-    lastReadMs: unread ? 0 : 100,
-  } as unknown as SessionInfo;
-}
-
-describe("groupOpenReadTargets", () => {
-  it("returns the unread non-tip hops, excluding the tip and already-read hops", () => {
-    const tip = readState("tip", true);
-    const chain = [tip, readState("hop2", true), readState("hop1", false)];
-    expect(groupOpenReadTargets(tip, chain).map((m) => m.id)).toEqual(["hop2"]);
-  });
-
-  it("returns nothing when only the tip is unread", () => {
-    const tip = readState("tip", true);
-    const chain = [tip, readState("hop2", false), readState("hop1", false)];
-    expect(groupOpenReadTargets(tip, chain)).toEqual([]);
-  });
-
-  it("returns nothing when the whole chain is already read", () => {
-    const tip = readState("tip", false);
-    expect(groupOpenReadTargets(tip, [tip, readState("hop2", false)])).toEqual([]);
-  });
-});
-
 describe("statusTone quiet-alive", () => {
   const row = (over: Partial<SessionInfo>) =>
     ({ id: "s", workspacePath: "/w", workspaceName: "n", status: "idle", ...over }) as SessionInfo;
@@ -174,8 +135,35 @@ describe("statusTone quiet-alive", () => {
   });
 
   it("does not dim a genuinely working row down to quiet", () => {
-    expect(statusTone(row({ status: "executing", procAlive: true }))).toBe("working");
-    expect(statusTone(row({ status: "waitingInput", procAlive: true }))).toBe("waiting");
+    // Distinct ids: the tone mapping is what's under test, and the anti-flicker
+    // latch is per session — one id would carry the quiet state across.
+    expect(statusTone(row({ id: "w", status: "executing", procAlive: true }))).toBe("working");
+    expect(statusTone(row({ id: "i", status: "waitingInput", procAlive: true }))).toBe("waiting");
+  });
+
+  it("does not flick back to working on a single sparse write", () => {
+    // Same flicker the desktop row had: a session parked on one long tool call
+    // writes a line every few minutes, each write pushes the status back to a
+    // live one for its hard window, and the dot alternated quiet → working →
+    // quiet. One lone write must not win the bright tone back.
+    const now = Date.now();
+    const id = "flicker-1";
+    expect(
+      statusTone(row({ id, status: "idle", procAlive: true, lastActivityMs: now - 200_000 })),
+    ).toBe("quiet");
+    expect(
+      statusTone(row({ id, status: "executing", procAlive: true, lastActivityMs: now - 1_000 })),
+    ).toBe("quiet");
+  });
+
+  it("goes back to working once two writes land close together", () => {
+    const now = Date.now();
+    const id = "recover-1";
+    statusTone(row({ id, status: "idle", procAlive: true, lastActivityMs: now - 200_000 }));
+    statusTone(row({ id, status: "executing", procAlive: true, lastActivityMs: now - 20_000 }));
+    expect(
+      statusTone(row({ id, status: "executing", procAlive: true, lastActivityMs: now - 1_000 })),
+    ).toBe("working");
   });
 });
 

@@ -223,6 +223,13 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { locale: hostPrefs().locale },
   }),
 
+  apply_session_title_guidance: () => ({
+    method: "POST",
+    path: "/apply_session_title_guidance",
+    empty: true,
+    body: { user_title: hostPrefs().userTitle, locale: hostPrefs().locale },
+  }),
+
   apply_plan_approval_hook: () => ({
     method: "POST",
     path: "/apply_plan_approval_hook",
@@ -821,13 +828,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/procs",
   }),
 
-  mark_sessions_read: (a) => ({
-    method: "POST",
-    path: "/session_read",
-    empty: true,
-    body: { items: a.items },
-  }),
-
   // 直连(手机不经中转)。浏览器构建走同一套 HTTP 路由 —— 少了这几条,那几个
   // 命令在 webui 里会静默 no-op(见 webTransport.test.ts 的覆盖门禁)。
 
@@ -956,6 +956,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   remove_model_guidance: () => ({
     method: "POST",
     path: "/remove_model_guidance",
+    empty: true,
+  }),
+
+  remove_session_title_guidance: () => ({
+    method: "POST",
+    path: "/remove_session_title_guidance",
     empty: true,
   }),
 

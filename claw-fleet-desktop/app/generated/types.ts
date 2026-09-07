@@ -59,8 +59,8 @@ taskPlan?: TaskPlanSummary | null,
 backgroundTasks?: Array<BackgroundTask>, 
 handoff?: SessionHandoffInfo | null, 
 userMark?: SessionMark | null, 
+taskOutcome?: TaskOutcome | null, 
 titleOverride?: string | null, 
-lastReadMs?: number | null, 
 compactCount: number, 
 compactPreTokens: number, 
 compactPostTokens: number, 
@@ -71,6 +71,14 @@ remoteDisconnect?: RemoteDisconnect | null,
 mirrorWrite?: MirrorWrite | null, };
 
 export type SessionMark = "pending" | "done";
+
+export type TaskOutcome = "completed" | "abandoned";
+
+export type TaskOutcomeRecord = { outcome: TaskOutcome, 
+workspacePath: string, 
+cardId: string, 
+agentClaimedComplete: boolean, 
+updated: number, };
 
 export type RateLimitType = "sessionLimit" | "weeklyLimit" | "opusLimit" | "sonnetLimit" | "usageLimit" | "outOfExtraUsage" | "unknown";
 
@@ -312,7 +320,8 @@ parked?: boolean, };
 
 export type FleetAskRequest = { id: string, 
 sessionId: string, workspaceName: string, aiTitle?: string | null, timestamp: string, 
-parked?: boolean, questions: Array<FleetAskQuestion>, 
+parked?: boolean, 
+taskComplete?: boolean, questions: Array<FleetAskQuestion>, 
 reviewDocs?: Array<ReviewDoc>, };
 
 export type FleetAskQuestion = { question: string, header: string, multiSelect: boolean, options?: Array<FleetAskOption>, html?: string | null, formFields?: Array<FleetAskFormField>, 
@@ -363,7 +372,7 @@ export type ElicitationOutcome = "answered" | "declined" | "heartbeat-lost" | "t
 
 export type PlanApprovalOutcome = "approved" | "approved-with-edits" | "rejected" | "heartbeat-lost" | "timeout";
 
-export type FleetAskOutcome = "answered" | "cancelled" | "heartbeat-lost" | "timeout";
+export type FleetAskOutcome = "answered" | "cancelled" | "task-completed" | "task-abandoned" | "heartbeat-lost" | "timeout";
 
 export type SelectedOption = { 
 label: string, 
@@ -392,6 +401,8 @@ export type DecisionTypeStats = {
 triggered: number, 
 answered: number, 
 declined: number, 
+taskCompleted: number, 
+taskAbandoned: number, 
 heartbeatLost: number, 
 timeout: number, 
 withRecommendation: number, 
@@ -426,6 +437,17 @@ sessionId: string, };
 
 export type ManagedLesson = { 
 id: string, content: string, reason: string, workspaceName: string, sessionId: string, };
+
+export type TaskReview = { 
+rootSessionId: string, 
+sessionIds: Array<string>, workspaceName: string, workspacePath: string, 
+outcome: TaskOutcome, 
+agentClaimedComplete: boolean, 
+title: string, 
+summary: string, 
+lessons: Array<Lesson>, 
+terminatedAt: number, 
+generatedAt: number, };
 
 export type ProcStatus = "starting" | "running" | "exited";
 

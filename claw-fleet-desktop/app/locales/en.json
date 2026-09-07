@@ -352,7 +352,10 @@
     "ai_skill_save_btn": "Save skill file…",
     "ai_modal_close": "Done",
     "codex_limit": "Rate Limit",
-    "no_usage_data": "No usage data"
+    "no_usage_data": "No usage data",
+    "dsh_balance_tip": "Remaining balance reported by the provider behind this key",
+    "dsh_key_limit": "Key spend {{used}} of {{limit}}",
+    "dsh_no_keys": "No provider key configured in dsh — nothing to ask for a balance"
   },
   "skills": {
     "panel_title": "Skills",
@@ -463,7 +466,9 @@
       "heartbeat-lost": "heartbeat lost",
       "approved": "approved",
       "approved-with-edits": "approved with edits",
-      "rejected": "rejected"
+      "rejected": "rejected",
+      "task-completed": "task finished",
+      "task-abandoned": "task abandoned"
     },
     "other_label": "Other",
     "edited_plan": "Edited plan:",
@@ -1765,7 +1770,9 @@
     "no_parameters": "No parameters",
     "no_results": "No results.",
     "no_summary": "No summary recorded.",
-    "tool_running": "Running…"
+    "tool_running": "Running…",
+    "decision_task_completed": "Task finished",
+    "decision_task_abandoned": "Task abandoned"
   },
   "settings": {
     "title": "Settings",
@@ -1865,6 +1872,8 @@
     "prd_mode_enabled": "Enable PRD discipline mode",
     "model_guidance_desc": "Inject a Claude + Codex model capability/cost/effort cheat-sheet so agents pick a model deliberately for subagents, workflow agents, and new sessions. Applies to both Claude and Fleet-launched Codex sessions.",
     "model_guidance_enabled": "Enable model-selection guidance",
+    "session_title_guidance_desc": "Ask the agent to name its own session once the topic is clear, via the fleet__set_session_title tool, so task cards read as titles instead of the first prompt. A title you set by hand always wins. Applies to both Claude and Fleet-launched Codex sessions.",
+    "session_title_guidance_enabled": "Let agents title their own sessions",
     "skill_autosync_enabled": "Enable automatic skill interop",
     "wiki_guidance_desc": "Tell agents to archive finished HTML reports, demos and markdown docs into the Fleet wiki (`fleet wiki publish`) so they show up in the Wiki board instead of getting lost in workdirs. Applies to both Claude and Fleet-launched Codex sessions.",
     "wiki_guidance_enabled": "Enable wiki publish guidance",
@@ -2098,7 +2107,11 @@
     "mode_tooltip": "Switch this question between single and multi select",
     "select_placeholder": "Select…",
     "attach_failed": "Attachment upload failed",
-    "attach_error_dismiss": "Dismiss"
+    "attach_error_dismiss": "Dismiss",
+    "finish_task": "Finish task",
+    "abandon_task": "Abandon task",
+    "finish_task_tooltip": "The agent considers the task done. Ending here marks this session complete.",
+    "abandon_task_tooltip": "The agent does not consider the task done. Ending here marks this session unfinished."
   },
   "composer": {
     "attach": "Attach files",
@@ -2199,7 +2212,8 @@
     "dc_type_fleet_ask": "Rich card",
     "dc_type_plan_approval": "Plan approval",
     "dc_no_rec": "no rec.",
-    "total_cost": "Total Cost"
+    "total_cost": "Total Cost",
+    "dc_task_outcome": "done/given up"
   },
   "command": {
     "nested": {
@@ -2219,10 +2233,10 @@
     "empty": "No sessions yet — start one from the button above",
     "no_match": "No matching sessions",
     "untitled": "(untitled)",
-    "unread": "Unread — new activity",
     "running": "Running",
     "waiting": "Waiting for input",
     "quiet_alive": "Running · no new output for {{mins}} min (likely parked on one long tool call)",
+    "quiet_sparse": "Running · sparse output (one line every few minutes — likely parked on one long tool call)",
     "running_subagents": "{{count}} subagents running",
     "activity_via_subagent": "Latest activity is from a subagent (the main session itself is idle)",
     "resume_placeholder": "Type a follow-up prompt to resume…",
@@ -2233,12 +2247,7 @@
     "all_workspaces": "All workspaces",
     "workspaces": "Workspaces",
     "workspace_session_count": "{{count}} groups",
-    "only_active": "Active only",
-    "filter_active_tip": "Show only sessions still running or waiting for input",
-    "mark_all_read": "Mark all read",
-    "mark_all_read_tip": "Mark every unread session as read",
     "menu_open": "Open",
-    "menu_mark_read": "Mark as read",
     "menu_mark_done": "Mark as done",
     "menu_mark_pending": "Mark as in progress",
     "menu_rename": "Rename",
@@ -2267,7 +2276,8 @@
     "group_collapse": "Collapse relay chain",
     "group_expand": "Show earlier sessions in this relay chain",
     "toggle_done": "Done — click to mark in progress again",
-    "toggle_pending": "In progress — click to mark done"
+    "toggle_pending": "In progress — click to mark done",
+    "outcome_abandoned": "Task abandoned (unfinished) — click to toggle the review mark"
   },
   "view_files": "Repos",
   "files": {

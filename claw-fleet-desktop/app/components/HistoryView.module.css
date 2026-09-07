@@ -3,39 +3,6 @@
    rail's *content* (launcher + filters + session list), the banner action,
    and the detail column that fills the main container. */
 
-/* "全部已读" — clears every unread session's dot in one call. Lives in the
-   rail's workspace row, so it takes the same pill shape as .active_toggle
-   below; dimmed and inert when nothing is unread. */
-.read_btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  flex: 0 0 auto;
-  padding: 4px 7px;
-  border-radius: 7px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
-  color: var(--color-text-dim);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
-}
-
-.read_btn:hover:not(:disabled) {
-  background: var(--color-bg-card-hover);
-  color: var(--color-text);
-}
-
-.read_btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.read_btn_count {
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
 .new_btn {
   display: inline-flex;
   align-items: center;
@@ -88,64 +55,11 @@
   to { transform: rotate(360deg); }
 }
 
-.workspace_toolbar {
-  display: flex;
-  align-items: center;
-  min-height: 28px;
-  gap: 6px;
-}
-
-.workspace_label {
-  flex: 1;
-  font-size: 12px;
-  color: var(--color-text-dim);
-  font-weight: 500;
-}
-
-/* Row 2 keeps non-directory filters compact under the workspace title. */
+/* Non-directory filters (mark segments) sit in their own compact row. */
 .mark_row {
   display: flex;
   align-items: stretch;
   gap: 8px;
-}
-
-/* "Only active" pill — filters the list down to sessions the agent still owns. */
-.active_toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  padding: 5px 9px;
-  font-size: 12px;
-  color: var(--color-text-dim);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-
-.active_toggle:hover {
-  background: var(--color-bg-card-hover);
-}
-
-.active_toggle_on {
-  color: var(--color-text);
-  border-color: var(--color-success);
-  background: rgba(var(--color-success-rgb), 0.12);
-}
-
-.active_toggle_dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-text-dim);
-  flex: 0 0 auto;
-}
-
-.active_toggle_on .active_toggle_dot {
-  background: var(--color-success);
 }
 
 /* Segmented filter by manual review mark — one row can be active at a time;

@@ -85,6 +85,8 @@ const OUTCOME_LABEL: Record<string, string> = {
   answered: "已回答",
   declined: "已拒答",
   cancelled: "已取消",
+  "task-completed": "已结束任务",
+  "task-abandoned": "已放弃任务",
   timeout: "超时",
   "heartbeat-lost": "面板掉线",
   approved: "已批准",
@@ -93,9 +95,12 @@ const OUTCOME_LABEL: Record<string, string> = {
 };
 
 function outcomeTone(outcome: string): string {
-  if (["answered", "approved", "approved-with-edits"].includes(outcome)) return "good";
+  // v3 的两个终态是判词，不是拒答:结束任务归 good,放弃任务归 warn(一个结局,
+  // 不是一次拒绝参与)。
+  if (["answered", "approved", "approved-with-edits", "task-completed"].includes(outcome))
+    return "good";
   if (["declined", "rejected", "cancelled"].includes(outcome)) return "bad";
-  if (["timeout", "heartbeat-lost"].includes(outcome)) return "warn";
+  if (["timeout", "heartbeat-lost", "task-abandoned"].includes(outcome)) return "warn";
   return "dim";
 }
 

@@ -149,7 +149,7 @@ fn handoff_tool_def() -> Value {
                 "note": {"type": "string", "description": "Handoff briefing — what's done, what's next, key files, gotchas. Required for register."},
                 "plan": {"type": "string", "description": "Plan id to attribute the successor to."},
                 "next": {"type": "string", "description": "P-task the successor resumes at (requires plan)."},
-                "model": {"type": "string", "description": "Override the successor's model (else inherits this session's)."},
+                "model": {"type": "string", "description": "Override the successor's model (else inherits this session's). Naming another harness's model relays on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh. Effort then resets to that harness's default unless you pass one."},
                 "effort": {"type": "string", "description": "Override the successor's effort (low|medium|high|max)."}
             },
             "required": ["action"],
@@ -210,7 +210,7 @@ fn schedule_tool_def() -> Value {
                 "prompt": {"type": "string", "description": "The prompt to fire. Required for create."},
                 "at": {"type": "string", "description": "Absolute time, e.g. \"2026-07-25 09:00\"."},
                 "in": {"type": "string", "description": "Relative delay, e.g. 5d."},
-                "model": {"type": "string", "description": "Override model (else inherits this session's)."},
+                "model": {"type": "string", "description": "Override model (else inherits this session's). Naming another harness's model fires on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh. Effort then resets to that harness's default unless you pass one."},
                 "effort": {"type": "string", "description": "Override effort."},
                 "until": {"type": "string", "description": "Optional non-LLM gate: once due, this shell command is polled and the session spawns only when it exits 0. If it never passes within the timeout the schedule is abandoned (no session)."},
                 "poll": {"type": "string", "description": "Seconds between gate polls once due, e.g. 30s / 2m (min 5s, default 30s). Only with `until`."},
@@ -594,9 +594,14 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
                 }
             }
             let ctx = crate::session::inherit_launch_context(Some(sid));
-            let model = arg(args, "model").or(ctx.model);
-            let effort = arg(args, "effort").or(ctx.effort);
-            let agent_source = ctx.source.unwrap_or_else(|| "claude-code".to_string());
+            // Naming another harness's model re-points the relay at that harness
+            // (see `agent_source::route_launch`) — otherwise the successor would
+            // be launched by this session's tool with a model it cannot serve.
+            let route = crate::agent_source::route_launch(
+                &ctx,
+                arg(args, "model").as_deref(),
+                arg(args, "effort").as_deref(),
+            )?;
             let rec = handoff::register(
                 sid,
                 &ctx.workspace,
@@ -604,17 +609,18 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
                 &note,
                 plan.as_deref(),
                 next.as_deref(),
-                model.as_deref(),
-                effort.as_deref(),
-                &agent_source,
+                route.model.as_deref(),
+                route.effort.as_deref(),
+                &route.agent_source,
             )?;
             Ok(format!(
-                "ok: handoff registered (chain {}, 第 {} 棒, model={}, effort={}). \
+                "ok: handoff registered (chain {}, 第 {} 棒, model={}, effort={}){}. \
                  接力 session 将在本 session 结束 turn 后由 Stop hook 自动启动；请尽快结束当前 turn。",
                 rec.chain_id,
                 rec.hop,
                 rec.model.as_deref().unwrap_or("<CLI 默认>"),
                 rec.effort.as_deref().unwrap_or("<CLI 默认>"),
+                route.switch_note(),
             ))
         }
         "show" => {
@@ -861,16 +867,21 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
             let prompt = req(args, "prompt")?;
             let fire_at = resolve_fire_at(args, true)?.expect("create requires at/in");
             let ctx = crate::session::inherit_launch_context(sid);
-            let model = arg(args, "model").or(ctx.model);
-            let effort = arg(args, "effort").or(ctx.effort);
+            // A model naming another harness re-points the fired session at that
+            // harness (see `agent_source::route_launch`).
+            let route = crate::agent_source::route_launch(
+                &ctx,
+                arg(args, "model").as_deref(),
+                arg(args, "effort").as_deref(),
+            )?;
             let gate = build_schedule_gate(args)?;
             let rec = schedule::create(
                 &ctx.workspace,
                 &prompt,
                 fire_at,
-                model.as_deref(),
-                effort.as_deref(),
-                ctx.source.as_deref(),
+                route.model.as_deref(),
+                route.effort.as_deref(),
+                Some(route.agent_source.as_str()),
                 sid,
                 gate,
             )?;
@@ -879,10 +890,11 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 Err(e) => format!("但计时器启动失败: {e}(Stop hook reconcile 会补上)"),
             };
             Ok(format!(
-                "ok: schedule {} created — fires at epoch-ms {}, model={}. {armed}。取消用 action=cancel id={}。",
+                "ok: schedule {} created — fires at epoch-ms {}, model={}{}. {armed}。取消用 action=cancel id={}。",
                 rec.id,
                 rec.fire_at,
                 rec.model.as_deref().unwrap_or("<CLI 默认>"),
+                route.switch_note(),
                 rec.id
             ))
         }

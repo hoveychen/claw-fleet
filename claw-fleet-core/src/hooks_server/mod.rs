@@ -1313,7 +1313,6 @@ fn handle_request(
             crate::routes::SESSION_TITLE => route_session_title(ctx, request, &query, json_header, path),
 
             // ── Session read (batch mark-read; unread is derived) ─────────────
-            crate::routes::SESSION_READ => route_session_read(ctx, request, &query, json_header, path),
 
             // ── Workspace command runner (proc_runner) ───────────────────────
             crate::routes::PROCS => route_procs(ctx, request, &query, json_header, path),
@@ -1344,6 +1343,11 @@ fn handle_request(
             crate::routes::APPLY_MODEL_GUIDANCE => route_apply_model_guidance(ctx, request, &query, json_header, path),
 
             crate::routes::REMOVE_MODEL_GUIDANCE => route_remove_model_guidance(ctx, request, &query, json_header, path),
+
+            // ── Session-title guidance endpoints ─────────────────────────────
+            crate::routes::APPLY_SESSION_TITLE_GUIDANCE => route_apply_session_title_guidance(ctx, request, &query, json_header, path),
+
+            crate::routes::REMOVE_SESSION_TITLE_GUIDANCE => route_remove_session_title_guidance(ctx, request, &query, json_header, path),
 
             crate::routes::INTERACTION_DIAGNOSTICS => route_interaction_diagnostics(ctx, request, &query, json_header, path),
 

@@ -237,7 +237,6 @@ export class MockRelayClient extends RelayClient {
       // Write methods: acknowledge without doing anything. The UI's optimistic
       // update is what we're exercising, not the desktop's side of it.
       case "session_mark":
-      case "session_read":
       case "stop":
       case "stop_workspace":
       case "interrupt":

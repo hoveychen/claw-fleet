@@ -56,59 +56,6 @@
   }
 }
 
-.filterRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /* 窄屏上按钮换行，而不是互相挤成一条缝。 */
-  flex-wrap: wrap;
-}
-
-.filterToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-card);
-  color: var(--color-text-dim);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: var(--t-aux, 12px);
-  flex-shrink: 0;
-}
-
-.filterToggle[data-active="true"] {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: var(--color-accent-soft);
-}
-
-.activeDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-success);
-  flex-shrink: 0;
-}
-
-.activeCount {
-  color: var(--color-text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.filterToggle[data-active="true"] .activeCount {
-  color: var(--color-accent);
-}
-
-.readAll {
-  border: none;
-  background: none;
-  color: var(--color-accent);
-  font-size: var(--t-aux, 12px);
-  flex-shrink: 0;
-  padding: 6px 0;
-}
-
 .segment {
   display: flex;
   background: var(--color-bg-secondary);
@@ -149,14 +96,6 @@
 
 .segmentButton[data-active="true"] .segmentCount {
   color: var(--color-text);
-}
-
-.unreadDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  flex-shrink: 0;
 }
 
 .opsRow {

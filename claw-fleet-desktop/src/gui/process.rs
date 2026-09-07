@@ -267,17 +267,6 @@ pub(crate) fn set_session_title(
         .set_session_title(session_id, workspace_path, title)
 }
 
-/// Mark a batch of sessions read as of now (a single row-read is a batch of one,
-/// "一键清除未读" a batch of many). Unread is derived from `last_read_ms` vs
-/// `last_activity_ms`, so this only stamps the read time.
-#[tauri::command(async)]
-pub(crate) fn mark_sessions_read(
-    items: Vec<claw_fleet_core::session_read::SessionReadItem>,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    state.backend.mark_sessions_read(items)
-}
-
 // ── Keep-awake (caffeinate -i equivalent) ────────────────────────────────────
 // Desktop-local power state, a plain command rather than a `LocalBackend`
 // method: the assertion controls the desktop process itself (like app_nap /

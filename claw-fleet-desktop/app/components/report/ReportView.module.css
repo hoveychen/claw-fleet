@@ -743,3 +743,7 @@
 .dc_dim {
   color: var(--color-text-dim);
 }
+/* 完成/放弃 那一列的「完成」半边。和 .dc_warn 配对读:一绿一橙。 */
+.dc_ok {
+  color: var(--color-success);
+}

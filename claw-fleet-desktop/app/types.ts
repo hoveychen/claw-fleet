@@ -19,6 +19,11 @@ import type {
   PermissionPromptRequest,
   A2uiRenderRequest,
 } from "./generated/types";
+import {
+  createQuietLatch,
+  resetQuietLatch,
+  stickyQuiet,
+} from "../../shared-ts/quietLatch";
 
 // ── Session launch entrypoints / status helpers ──────────────────────────────
 
@@ -113,6 +118,31 @@ export function isQuietAlive(s: SessionInfo): boolean {
   return s.procAlive && !LIVE_STATUSES.has(s.status);
 }
 
+/** Anti-flicker latch behind [`rowBarColor`]'s two greens. `isQuietAlive` alone
+ *  alternated on the same row several times a minute: a session parked on one
+ *  long tool call writes a line every few minutes, each write pushes the status
+ *  back to a live one for its hard window, and the window then decays again. The
+ *  latch (shared with the mobile task page, see `shared-ts/quietLatch.ts`) makes
+ *  the faded green sticky — a lone sparse write no longer wins the solid green
+ *  back; two writes close together do. */
+const quietLatch = createQuietLatch();
+
+/** Whether the row should read as quiet-alive *after* the hysteresis. Callers
+ *  wanting the raw, un-latched predicate use [`isQuietAlive`]. */
+export function isQuietAliveSticky(s: SessionInfo, now: number = Date.now()): boolean {
+  return stickyQuiet(quietLatch, s.id, {
+    alive: s.procAlive,
+    rawQuiet: isQuietAlive(s),
+    lastActivityMs: s.lastActivityMs,
+    now,
+  });
+}
+
+/** Tests only: drop the latch so cases can't inherit one another's state. */
+export function resetQuietAliveLatch(): void {
+  resetQuietLatch(quietLatch);
+}
+
 /** Run-status colour: green = agent still live, amber = waiting for input,
  *  faded green = process alive but the transcript has gone quiet (see
  *  [`isQuietAlive`]). Genuinely ended sessions get nothing (null) — this is a
@@ -125,11 +155,15 @@ export function isQuietAlive(s: SessionInfo): boolean {
  *  the amber and green here were dark-theme hues that never re-darkened under
  *  the light theme. */
 export function rowBarColor(s: SessionInfo): string | null {
+  // The latch is consulted on every call (that is what keeps it fed), but only
+  // decides between the two greens: a session parked for input wears amber
+  // whatever its write cadence, and an ended one wears nothing.
+  const sticky = isQuietAliveSticky(s);
   if (!LIVE_STATUSES.has(s.status)) {
-    return isQuietAlive(s) ? QUIET_ALIVE_COLOR : null;
+    return sticky ? QUIET_ALIVE_COLOR : null;
   }
   if (s.status === "waitingInput") return "var(--color-warning)";
-  return "var(--color-success)";
+  return sticky ? QUIET_ALIVE_COLOR : "var(--color-success)";
 }
 
 /** Statuses that mean a turn is genuinely in flight. Note `waitingInput` is
@@ -186,21 +220,6 @@ export function canEnqueueSession(s: SessionInfo): boolean {
     isFleetOwnedEntrypoint(s.entrypoint) &&
     (s.procAlive || IN_FLIGHT_STATUSES.has(s.status))
   );
-}
-
-/**
- * Whether a session counts as *unread*: it has newer activity than the last
- * time it was read. `overrideReadMs` is the optimistic client-side read stamp
- * (from `useReadStore`) that covers the window between a dwell-read and the next
- * backend scan re-stamping `lastReadMs`. Never-read sessions (both stamps
- * absent → 0) are unread as long as they have any activity.
- */
-export function sessionUnread(
-  s: SessionInfo,
-  overrideReadMs?: number,
-): boolean {
-  const lastRead = Math.max(s.lastReadMs ?? 0, overrideReadMs ?? 0);
-  return s.lastActivityMs > lastRead;
 }
 
 // ── Frontend-only session types ──────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, WaitingAlert } from "./types";
 import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
@@ -223,12 +223,11 @@ interface UIState {
    *  involuntary hops a waiting-input alert or the mascot bubble make by calling
    *  setViewMode("list"). Component state would be thrown away each time and the
    *  segmented filter would snap back to 「全部」, so these live in the store.
-   *  markFilter / workspaceFilter / activeOnly are also written to disk;
+   *  markFilter / workspaceFilter are also written to disk;
    *  `historyQuery` is deliberately store-only — a search box restored on boot
    *  would fire an FTS query the user never asked for. */
   historyMarkFilter: MarkFilter;
   historyWorkspaceFilter: string;
-  historyActiveOnly: boolean;
   historyQuery: string;
   /** Group handoff-relay sessions (sharing a `handoff.chainId`) into one
    *  collapsible row in the task list. Default on; lives in the store (not
@@ -246,7 +245,6 @@ interface UIState {
   updatePlansView: (patch: Partial<MainViewState["plans"]>) => void;
   setHistoryMarkFilter: (f: MarkFilter) => void;
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
-  setHistoryActiveOnly: (on: boolean) => void;
   setHistoryQuery: (q: string) => void;
   setHistoryGroupHandoff: (on: boolean) => void;
   /** "+ New project" CTA → ProjectsView opens the
@@ -480,7 +478,6 @@ export const useUIStore = create<UIState>((set) => ({
   mascotVisible: getItem("mascot-visible") === "true",
   historyMarkFilter: readMarkFilter(),
   historyWorkspaceFilter: initialHistoryWorkspaceFilter,
-  historyActiveOnly: getItem("history-active-only") === "true",
   historyQuery: "",
   // Default on — the empty/absent case yields grouping; only an explicit
   // "false" opts out. Mirrors the `autoUpdateCheck` default-on idiom.
@@ -506,10 +503,6 @@ export const useUIStore = create<UIState>((set) => ({
   setHistoryWorkspaceFilter: (p) => {
     setItem("history-workspace-filter", p);
     set({ historyWorkspaceFilter: p });
-  },
-  setHistoryActiveOnly: (on) => {
-    setItem("history-active-only", on ? "true" : "false");
-    set({ historyActiveOnly: on });
   },
   setHistoryQuery: (q) => set({ historyQuery: q }),
   setHistoryGroupHandoff: (on) => {
@@ -1019,48 +1012,6 @@ export const useAuditStore = create<AuditState>((set, get) => ({
     }),
 }));
 
-// ── Session read/unread store ─────────────────────────────────────────────────
-//
-// Unread is derived from `SessionInfo.lastReadMs` (stamped by the backend scan)
-// vs `lastActivityMs`. The scan lags a few seconds behind a dwell-read, so this
-// store holds optimistic client-side read stamps that make the red dot clear (and
-// the sidebar badge decrement) immediately; they're harmless once the scan
-// catches up because `sessionUnread` takes the max of both.
-
-interface ReadState {
-  /** session id → optimistic read timestamp (epoch ms). */
-  overrides: Record<string, number>;
-  /** Mark one session read locally + persist to the backend (batch of one). */
-  markRead: (session: SessionInfo) => void;
-  /** Mark many sessions read locally + persist in a single backend call. */
-  markManyRead: (sessions: SessionInfo[]) => void;
-}
-
-export const useReadStore = create<ReadState>((set) => ({
-  overrides: {},
-  markRead: (session) => useReadStore.getState().markManyRead([session]),
-  markManyRead: (sessions) => {
-    if (sessions.length === 0) return;
-    const now = Date.now();
-    set((state) => {
-      const next = { ...state.overrides };
-      for (const s of sessions) {
-        next[s.id] = Math.max(next[s.id] ?? 0, now);
-      }
-      return { overrides: next };
-    });
-    invoke("mark_sessions_read", {
-      items: sessions.map((s) => ({
-        sessionId: s.id,
-        workspacePath: s.workspacePath,
-      })),
-    }).catch(() => {
-      // Best-effort: the optimistic override still hides the dot this session;
-      // a failed persist just means the dot returns after the next scan.
-    });
-  },
-}));
-
 // ── Report store ────────────────────────────────────────────────────────────
 
 interface ReportState {
@@ -1344,8 +1295,13 @@ interface DecisionState {
   declineElicitation: (id: string) => Promise<void>;
   /** Submit fleet__ask answers (options + form fields) back to the MCP server. */
   submitFleetAsk: (id: string) => Promise<void>;
-  /** Cancel a fleet__ask card (user explicitly dismissed). */
-  cancelFleetAsk: (id: string) => Promise<void>;
+  /**
+   * Resolve a fleet__ask card without answering it. `taskOutcome` is the v3
+   * terminal verdict from the card's always-present end-the-task button —
+   * `"completed"` (结束任务) or `"abandoned"` (放弃任务) — which Fleet stamps onto
+   * the session. Omit it for a plain dismissal, which records no terminal state.
+   */
+  cancelFleetAsk: (id: string, taskOutcome?: TaskOutcome | null) => Promise<void>;
   /** Toggle an option for a fleet__ask question. */
   toggleFleetAskOption: (id: string, question: string, option: string, multiSelect: boolean) => void;
   /** Set the "Other" free-text for a fleet__ask question. */
@@ -1958,11 +1914,16 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     );
   },
 
-  cancelFleetAsk: async (id) => {
+  cancelFleetAsk: async (id, taskOutcome) => {
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
     fireDecisionResponse("respond_to_fleet_ask (cancel)", () =>
-      invoke("respond_to_fleet_ask", { id, cancelled: true, answers: {} }),
+      invoke("respond_to_fleet_ask", {
+        id,
+        cancelled: true,
+        answers: {},
+        taskOutcome: taskOutcome ?? null,
+      }),
     );
   },
 

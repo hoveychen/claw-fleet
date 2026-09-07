@@ -91,20 +91,16 @@ pub(crate) fn cmd_handoff(
     // An explicit `--model` / `--effort` flag wins over the inherited value. The
     // model override matters because the auto-resolved value is unreliable when
     // the last turn ran on a rate-limit fallback — exactly why the flag exists.
-    let model = model
-        .map(str::trim)
-        .filter(|m| !m.is_empty())
-        .map(str::to_string)
-        .or(ctx.model);
-    let effort = effort
-        .map(str::trim)
-        .filter(|e| !e.is_empty())
-        .map(str::to_string)
-        .or(ctx.effort);
-    // Fleet stamps `FLEET_AGENT_SOURCE` on the sessions it launches (Codex sets
-    // it to "codex"; Claude sessions have no stamp). Absent → "claude-code", the
-    // historical default, so the successor is relayed on the same tool.
-    let agent_source = ctx.source.unwrap_or_else(|| "claude-code".to_string());
+    // `route_launch` additionally re-points the whole relay when the named model
+    // belongs to another harness (Fleet stamps `FLEET_AGENT_SOURCE` on the
+    // sessions it launches; absent → "claude-code", the historical default).
+    let route = match claw_fleet_core::agent_source::route_launch(&ctx, model, effort) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(2);
+        }
+    };
     match claw_fleet_core::handoff::register(
         &sid,
         &ctx.workspace,
@@ -112,17 +108,18 @@ pub(crate) fn cmd_handoff(
         note,
         plan,
         next,
-        model.as_deref(),
-        effort.as_deref(),
-        &agent_source,
+        route.model.as_deref(),
+        route.effort.as_deref(),
+        &route.agent_source,
     ) {
         Ok(rec) => println!(
-            "ok: handoff registered (chain {}, 第 {} 棒, model={}, effort={}). \
+            "ok: handoff registered (chain {}, 第 {} 棒, model={}, effort={}){}. \
              接力 session 将在本 session 结束 turn 后由 Stop hook 自动启动；请尽快结束当前 turn。",
             rec.chain_id,
             rec.hop,
             rec.model.as_deref().unwrap_or("<CLI 默认>"),
             rec.effort.as_deref().unwrap_or("<CLI 默认>"),
+            route.switch_note(),
         ),
         Err(e) => {
             eprintln!("Error: {e}");
