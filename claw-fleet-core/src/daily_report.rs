@@ -35,7 +35,9 @@ pub struct DailyReport {
 ///   0 — implicit for reports predating this field (last-turn input snapshot).
 ///   1 — cumulative input incl. cache (input + cache_creation + cache_read),
 ///       matching cost and the sidebar counter's口径.
-pub const CURRENT_METRICS_VERSION: u32 = 1;
+///   2 — usage attributed by finalized turn timestamp, including sessions that
+///       crossed midnight and live Claude/Codex sources.
+pub const CURRENT_METRICS_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -600,6 +602,69 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
     }
 }
 
+/// Extract the non-token activity that belongs to one local calendar day.
+/// Token and cost fields come from `today_usage::sessions_usage_for_date`; this
+/// companion fold keeps report-only tool/search counters on the same boundary.
+fn extract_session_activity_for_date(
+    jsonl_content: &str,
+    date: &str,
+) -> (HashMap<String, u32>, u64) {
+    let mut tool_calls = HashMap::new();
+    let mut web_search_requests = 0u64;
+    let mut seen_msg_ids = HashSet::new();
+
+    for line in jsonl_content.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(message) = v.get("message").and_then(Value::as_object) else {
+            continue;
+        };
+        if message.get("stop_reason").map_or(true, Value::is_null) {
+            continue;
+        }
+        let Some(turn_date) = v
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+        else {
+            continue;
+        };
+        if turn_date != date {
+            continue;
+        }
+        let msg_id = message.get("id").and_then(Value::as_str).unwrap_or_default();
+        if !msg_id.is_empty() && !seen_msg_ids.insert(msg_id.to_string()) {
+            continue;
+        }
+
+        web_search_requests = web_search_requests.saturating_add(
+            message
+                .get("usage")
+                .and_then(|u| u.get("server_tool_use"))
+                .and_then(|u| u.get("web_search_requests"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+        );
+        if let Some(content) = message.get("content").and_then(Value::as_array) {
+            for block in content {
+                if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                    continue;
+                }
+                if let Some(name) = block.get("name").and_then(Value::as_str) {
+                    *tool_calls.entry(name.to_string()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    (tool_calls, web_search_requests)
+}
+
 // ── Report generation ────────────────────────────────────────────────────────
 
 /// Generate a daily report from a list of SessionInfo and their JSONL paths.
@@ -616,14 +681,62 @@ pub fn generate_report_from_sessions(
     // Per-session extracted metrics, keyed by session index
     struct SessionData {
         metrics: SessionMetricsRaw,
+        model_lines: Vec<crate::today_usage::ModelReceiptLine>,
         info: usize, // index into sessions
     }
 
     let mut session_data: Vec<SessionData> = Vec::new();
-    for (i, si) in sessions.iter().enumerate() {
-        let jsonl_content = std::fs::read_to_string(&si.jsonl_path).unwrap_or_default();
-        let metrics = extract_session_metrics(&jsonl_content);
-        session_data.push(SessionData { metrics, info: i });
+    let daily_usage = crate::today_usage::sessions_usage_for_date(sessions, date);
+    for ((i, si), model_lines) in sessions.iter().enumerate().zip(daily_usage) {
+        let jsonl_content = if si.agent_source == "claude-code" {
+            std::fs::read_to_string(&si.jsonl_path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let (tool_calls, web_search_requests) =
+            extract_session_activity_for_date(&jsonl_content, date);
+
+        let mut metrics = SessionMetricsRaw {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_creation_1h_tokens: 0,
+            cache_read_tokens: 0,
+            web_search_requests,
+            cost_usd: 0.0,
+            tool_calls,
+            model: None,
+        };
+        for line in &model_lines {
+            let cache_creation = line
+                .cache_creation_tokens
+                .saturating_add(line.cache_creation_1h_tokens);
+            metrics.input_tokens = metrics
+                .input_tokens
+                .saturating_add(line.input_tokens)
+                .saturating_add(cache_creation)
+                .saturating_add(line.cache_read_tokens);
+            metrics.output_tokens = metrics.output_tokens.saturating_add(line.output_tokens);
+            metrics.cache_creation_tokens = metrics
+                .cache_creation_tokens
+                .saturating_add(cache_creation);
+            metrics.cache_creation_1h_tokens = metrics
+                .cache_creation_1h_tokens
+                .saturating_add(line.cache_creation_1h_tokens);
+            metrics.cache_read_tokens = metrics
+                .cache_read_tokens
+                .saturating_add(line.cache_read_tokens);
+            metrics.cost_usd += line.cost_usd;
+        }
+        metrics.model = model_lines
+            .iter()
+            .max_by(|a, b| a.cost_usd.total_cmp(&b.cost_usd))
+            .map(|line| line.model.clone());
+
+        if model_lines.is_empty() && metrics.tool_calls.is_empty() {
+            continue;
+        }
+        session_data.push(SessionData { metrics, model_lines, info: i });
     }
 
     // Group by workspace_path
@@ -724,22 +837,37 @@ pub fn generate_report_from_sessions(
                 *tool_call_breakdown.entry(tool.clone()).or_insert(0) += count;
             }
 
-            let entry = model_breakdown
-                .entry(effective_model)
-                .or_insert(ModelTokens {
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cache_creation_tokens: 0,
-                    cache_creation_1h_tokens: 0,
-                    cache_read_tokens: 0,
-                    cost_usd: 0.0,
-                });
-            entry.input_tokens += sd.metrics.input_tokens;
-            entry.output_tokens += sd.metrics.output_tokens;
-            entry.cache_creation_tokens += sd.metrics.cache_creation_tokens;
-            entry.cache_creation_1h_tokens += sd.metrics.cache_creation_1h_tokens;
-            entry.cache_read_tokens += sd.metrics.cache_read_tokens;
-            entry.cost_usd += sd.metrics.cost_usd;
+            for line in &sd.model_lines {
+                let cache_creation = line
+                    .cache_creation_tokens
+                    .saturating_add(line.cache_creation_1h_tokens);
+                let entry = model_breakdown
+                    .entry(line.model.clone())
+                    .or_insert(ModelTokens {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cache_creation_tokens: 0,
+                        cache_creation_1h_tokens: 0,
+                        cache_read_tokens: 0,
+                        cost_usd: 0.0,
+                    });
+                entry.input_tokens = entry
+                    .input_tokens
+                    .saturating_add(line.input_tokens)
+                    .saturating_add(cache_creation)
+                    .saturating_add(line.cache_read_tokens);
+                entry.output_tokens = entry.output_tokens.saturating_add(line.output_tokens);
+                entry.cache_creation_tokens = entry
+                    .cache_creation_tokens
+                    .saturating_add(cache_creation);
+                entry.cache_creation_1h_tokens = entry
+                    .cache_creation_1h_tokens
+                    .saturating_add(line.cache_creation_1h_tokens);
+                entry.cache_read_tokens = entry
+                    .cache_read_tokens
+                    .saturating_add(line.cache_read_tokens);
+                entry.cost_usd += line.cost_usd;
+            }
 
             *source_breakdown
                 .entry(si.agent_source.clone())
@@ -764,7 +892,10 @@ pub fn generate_report_from_sessions(
     // Sort projects by session count descending
     projects.sort_by(|a, b| b.session_count.cmp(&a.session_count));
 
-    let session_ids: Vec<String> = sessions.iter().map(|s| s.id.clone()).collect();
+    let session_ids: Vec<String> = session_data
+        .iter()
+        .map(|sd| sessions[sd.info].id.clone())
+        .collect();
 
     DailyReport {
         date: date.to_string(),
@@ -778,7 +909,7 @@ pub fn generate_report_from_sessions(
             total_cache_read_tokens,
             total_web_search_requests,
             total_cost_usd,
-            total_sessions: sessions.len() as u32,
+            total_sessions: session_data.len() as u32,
             total_subagents,
             total_tool_calls,
             tool_call_breakdown,
@@ -1467,9 +1598,9 @@ pub fn append_lesson_to_claude_md(lesson: &Lesson) -> Result<(), String> {
 
 // ── Session scanning for a specific date ────────────────────────────────────
 
-/// Scan `~/.claude/projects/` for JSONL files whose creation date matches `date`
-/// (YYYY-MM-DD) in the local timezone.  Unlike the normal session scanner, this
-/// has no age limit and is suitable for backfill.
+/// Scan `~/.claude/projects/` for JSONL files with finalized assistant activity
+/// on `date` (YYYY-MM-DD) in the local timezone. Unlike the normal session
+/// scanner, this has no age limit and is suitable for backfill.
 pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
     use crate::session::decode_workspace_path_with_parts;
 
@@ -1551,7 +1682,8 @@ pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
     sessions
 }
 
-/// Build a `SessionInfo` for a JSONL file only if its creation date matches `date`.
+/// Build a `SessionInfo` for a JSONL file only if one finalized assistant turn
+/// belongs to `date`. Metadata dates cheaply prune files that cannot overlap.
 fn make_session_info_for_date(
     file_path: &std::path::Path,
     date: &str,
@@ -1562,16 +1694,19 @@ fn make_session_info_for_date(
     use crate::session::SessionStatus;
 
     let meta = file_path.metadata().ok()?;
-    let sys_time = meta.created().or_else(|_| meta.modified()).ok()?;
-    let created_ms = sys_time
+    let created_time = meta.created().or_else(|_| meta.modified()).ok()?;
+    let modified_time = meta.modified().unwrap_or(created_time);
+    let created_ms = created_time
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
-
-    let secs = (created_ms / 1000) as i64;
-    let dt = chrono::DateTime::from_timestamp(secs, 0)?;
-    let local = dt.with_timezone(&chrono::Local);
-    if local.format("%Y-%m-%d").to_string() != date {
+    let modified_ms = modified_time
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let created_date = local_date_from_ms(created_ms)?;
+    let modified_date = local_date_from_ms(modified_ms)?;
+    if date < created_date.as_str() || date > modified_date.as_str() {
         return None;
     }
 
@@ -1583,12 +1718,30 @@ fn make_session_info_for_date(
 
     let jsonl_path = file_path.to_string_lossy().to_string();
 
-    // Extract title from JSONL content: look for ai-title line or slug
+    // Confirm activity and extract title from the same disk read.
     let content = std::fs::read_to_string(file_path).unwrap_or_default();
     let mut ai_title: Option<String> = None;
     let mut slug: Option<String> = None;
+    let mut active_on_date = false;
     for line in content.lines() {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+            if v.get("type").and_then(Value::as_str) == Some("assistant")
+                && v.get("message")
+                    .and_then(|m| m.get("stop_reason"))
+                    .is_some_and(|reason| !reason.is_null())
+                && v.get("timestamp")
+                    .and_then(Value::as_str)
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| {
+                        dt.with_timezone(&chrono::Local)
+                            .format("%Y-%m-%d")
+                            .to_string()
+                    })
+                    .as_deref()
+                    == Some(date)
+            {
+                active_on_date = true;
+            }
             if v.get("type").and_then(|t| t.as_str()) == Some("ai-title") {
                 if let Some(t) = v.get("aiTitle").and_then(|t| t.as_str()) {
                     ai_title = Some(t.to_string());
@@ -1598,6 +1751,9 @@ fn make_session_info_for_date(
                 slug = Some(s.to_string());
             }
         }
+    }
+    if !active_on_date {
+        return None;
     }
 
     Some(crate::session::SessionInfo {
@@ -1654,6 +1810,26 @@ fn make_session_info_for_date(
     })
 }
 
+fn local_date_from_ms(ms: u64) -> Option<String> {
+    chrono::DateTime::from_timestamp((ms / 1000) as i64, 0).map(|dt| {
+        dt.with_timezone(&chrono::Local)
+            .format("%Y-%m-%d")
+            .to_string()
+    })
+}
+
+/// Cheap overlap gate for the live multi-source session cache. Exact inclusion
+/// is decided later by the per-turn projection, so false positives are harmless.
+pub fn session_overlaps_date(si: &crate::session::SessionInfo, date: &str) -> bool {
+    let Some(created) = local_date_from_ms(si.created_at_ms) else {
+        return false;
+    };
+    let Some(last) = local_date_from_ms(si.last_activity_ms.max(si.created_at_ms)) else {
+        return false;
+    };
+    created.as_str() <= date && date <= last.as_str()
+}
+
 // ── Report scheduler ────────────────────────────────────────────────────────
 
 /// Called with a date (`YYYY-MM-DD`) when that day's report first becomes
@@ -1678,6 +1854,7 @@ pub fn start_report_scheduler(
     report_store: std::sync::Arc<std::sync::Mutex<ReportStore>>,
     locale: std::sync::Arc<std::sync::Mutex<String>>,
     llm_config: std::sync::Arc<std::sync::Mutex<crate::llm_provider::LlmConfig>>,
+    live_sessions: std::sync::Arc<std::sync::Mutex<Vec<crate::session::SessionInfo>>>,
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
     on_report_ready: Option<ReportReadyHook>,
 ) {
@@ -1713,9 +1890,10 @@ pub fn start_report_scheduler(
                 let lang = locale.lock().unwrap().clone();
                 let rs = report_store.clone();
                 let cfg = llm_config.lock().unwrap().clone();
+                let session_snapshot = live_sessions.lock().unwrap().clone();
                 let hook = on_report_ready.clone();
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run_backfill_check(&rs, &lang, &cfg, hook.as_ref());
+                    run_backfill_check(&rs, &lang, &cfg, &session_snapshot, hook.as_ref());
                 })) {
                     Ok(()) => {}
                     Err(e) => {
@@ -1776,6 +1954,7 @@ fn run_backfill_check(
     report_store: &std::sync::Arc<std::sync::Mutex<ReportStore>>,
     locale: &str,
     llm_config: &crate::llm_provider::LlmConfig,
+    live_sessions: &[crate::session::SessionInfo],
     on_report_ready: Option<&ReportReadyHook>,
 ) {
     let today = chrono::Local::now();
@@ -1802,7 +1981,17 @@ fn run_backfill_check(
             continue;
         }
 
-        let sessions = scan_sessions_for_date(&date);
+        let mut sessions = scan_sessions_for_date(&date);
+        let mut known: HashSet<(String, String)> = sessions
+            .iter()
+            .map(|s| (s.agent_source.clone(), s.id.clone()))
+            .collect();
+        for session in live_sessions {
+            let key = (session.agent_source.clone(), session.id.clone());
+            if session_overlaps_date(session, &date) && known.insert(key) {
+                sessions.push(session.clone());
+            }
+        }
         if sessions.is_empty() {
             continue;
         }
@@ -1984,10 +2173,11 @@ mod tests {
             "up-to-date report must NOT be regenerated"
         );
 
-        // Cached under an older口径 (e.g. version 0, the pre-field default) →
+        // Cached under the immediately previous口径 (version 1 used whole
+        // creation-day sessions) →
         // must be regenerated so its token totals move to the new basis.
         let mut stale = make_test_report("2026-07-09");
-        stale.metrics.metrics_version = 0;
+        stale.metrics.metrics_version = CURRENT_METRICS_VERSION - 1;
         assert!(
             past_report_needs_regen(Some(&stale)),
             "stale-口径 report must be regenerated"
@@ -2345,10 +2535,11 @@ mod tests {
         let jsonl1_path = dir.join("session1.jsonl");
         let jsonl2_path = dir.join("session2.jsonl");
 
-        let line1 = r#"{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","name":"Edit","id":"tu_1","input":{}}],"usage":{"input_tokens":100,"output_tokens":50},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
-        let line2 = r#"{"type":"assistant","message":{"id":"msg_2","content":[{"type":"tool_use","name":"Bash","id":"tu_2","input":{}}],"usage":{"input_tokens":200,"output_tokens":80},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
+        let line1 = r#"{"type":"assistant","timestamp":"2026-03-31T12:00:00Z","message":{"id":"msg_1","content":[{"type":"tool_use","name":"Edit","id":"tu_1","input":{}}],"usage":{"input_tokens":100,"output_tokens":50},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
+        let previous_day = r#"{"type":"assistant","timestamp":"2026-03-30T12:00:00Z","message":{"id":"msg_old","content":[{"type":"tool_use","name":"Read","id":"tu_old","input":{}}],"usage":{"input_tokens":900,"output_tokens":400},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
+        let line2 = r#"{"type":"assistant","timestamp":"2026-03-31T13:00:00Z","message":{"id":"msg_2","content":[{"type":"tool_use","name":"Bash","id":"tu_2","input":{}}],"usage":{"input_tokens":200,"output_tokens":80},"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}"#;
 
-        std::fs::write(&jsonl1_path, line1).unwrap();
+        std::fs::write(&jsonl1_path, format!("{previous_day}\n{line1}")).unwrap();
         std::fs::write(&jsonl2_path, line2).unwrap();
 
         let s1 = crate::session::SessionInfo {
@@ -2455,19 +2646,40 @@ mod tests {
             mirror_write: None,
         };
 
-        let sessions: Vec<&crate::session::SessionInfo> = vec![&s1, &s2];
+        let codex_path = dir.join("codex-rollout.jsonl");
+        let codex_lines = [
+            serde_json::json!({"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}).to_string(),
+            serde_json::json!({
+                "type":"event_msg",
+                "timestamp":"2026-03-31T14:00:00Z",
+                "payload":{"type":"token_count","info":{"total_token_usage":{
+                    "input_tokens":1000,"cached_input_tokens":600,"output_tokens":10
+                }}}
+            }).to_string(),
+        ];
+        std::fs::write(&codex_path, codex_lines.join("\n")).unwrap();
+        let mut s3 = s1.clone();
+        s3.id = "s3".to_string();
+        s3.workspace_path = "/project-a".to_string();
+        s3.workspace_name = "project-a".to_string();
+        s3.jsonl_path = format!("codex://{}", codex_path.to_string_lossy());
+        s3.agent_source = "codex".to_string();
+
+        let sessions: Vec<&crate::session::SessionInfo> = vec![&s1, &s2, &s3];
         let report = generate_report_from_sessions("2026-03-31", "UTC", &sessions);
 
         assert_eq!(report.date, "2026-03-31");
-        assert_eq!(report.metrics.total_sessions, 2);
+        assert_eq!(report.metrics.total_sessions, 3);
         assert_eq!(report.metrics.total_subagents, 1);
         assert_eq!(report.metrics.projects.len(), 2);
-        assert_eq!(report.metrics.total_output_tokens, 130); // 50 + 80
+        assert_eq!(report.metrics.total_input_tokens, 1300); // Claude 300 + Codex raw input 1000
+        assert_eq!(report.metrics.total_output_tokens, 140); // Claude 130 + Codex 10
         assert_eq!(report.metrics.total_tool_calls, 2); // 1 Edit + 1 Bash
-        assert_eq!(report.session_ids, vec!["s1", "s2"]);
+        assert_eq!(report.session_ids, vec!["s1", "s2", "s3"]);
 
         // Verify source breakdown
         assert_eq!(report.metrics.source_breakdown.get("claude-code"), Some(&2));
+        assert_eq!(report.metrics.source_breakdown.get("codex"), Some(&1));
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&dir);

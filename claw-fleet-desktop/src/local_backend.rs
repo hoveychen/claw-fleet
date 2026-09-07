@@ -1422,6 +1422,7 @@ impl LocalBackend {
             report_store.clone(),
             locale.clone(),
             llm_config.clone(),
+            sessions.clone(),
             running.clone(),
             Some(std::sync::Arc::new(move |date: &str| {
                 use tauri::Manager;
@@ -3443,20 +3444,7 @@ impl LocalBackend {
         let cached: Vec<SessionInfo> = {
             let all = self.sessions.lock().unwrap();
             all.iter()
-                .filter(|s| {
-                    if s.created_at_ms == 0 {
-                        return false;
-                    }
-                    let secs = (s.created_at_ms / 1000) as i64;
-                    chrono::DateTime::from_timestamp(secs, 0)
-                        .map(|dt| {
-                            dt.with_timezone(&chrono::Local)
-                                .format("%Y-%m-%d")
-                                .to_string()
-                                == date
-                        })
-                        .unwrap_or(false)
-                })
+                .filter(|s| crate::daily_report::session_overlaps_date(s, date))
                 .cloned()
                 .collect()
         };

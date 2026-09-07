@@ -468,6 +468,37 @@ fn build_lines(
     lines
 }
 
+/// Return each session's billed usage for exactly one local calendar day.
+///
+/// Daily reports use this instead of maintaining a second transcript parser,
+/// so Claude/Codex attribution, cache pricing, model changes and cross-midnight
+/// sessions stay identical to the receipt. The projection cache is locked and
+/// persisted once for the whole batch so a first report does not rewrite it
+/// after every newly discovered session.
+pub(crate) fn sessions_usage_for_date(
+    sessions: &[&SessionInfo],
+    date: &str,
+) -> Vec<Vec<ModelReceiptLine>> {
+    let mut cache = usage_cache().lock().unwrap();
+    let mut result = Vec::with_capacity(sessions.len());
+    for session in sessions {
+        let mut by_model = std::collections::HashMap::new();
+        let mut by_day = std::collections::BTreeMap::new();
+        let cells = cache.cells(session);
+        sum_cells_window(
+            cells,
+            &session.agent_source,
+            date,
+            date,
+            &mut by_model,
+            &mut by_day,
+        );
+        result.push(build_lines(by_model));
+    }
+    persist_cache(&mut cache);
+    result
+}
+
 // ── Arbitrary-range breakdown (receipt + per-day trend) ──────────────────────
 //
 // This is **the** fold: the arbitrary inclusive `[from_ms, to_ms]` window that
