@@ -50,7 +50,15 @@ const FLEET_TOOL_LABELS: Record<string, string> = {
   loop: "循环",
   schedule: "定时",
   wiki: "知识库",
+  artifact: "产出",
+  inspect: "巡检",
+  control: "信号",
+  notes: "笔记",
+  history: "历史",
   set_session_title: "设置标题",
+  image: "生成图片",
+  image_edit: "修改图片",
+  permission_prompt: "权限询问",
 };
 
 /**

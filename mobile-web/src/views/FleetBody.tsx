@@ -90,6 +90,41 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "list": return t("列出知识库");
       case "search": return t("搜索 {0}", str(input, "query"));
     }
+  } else if (tool === "artifact") {
+    switch (action) {
+      case "add": return t("存入产出 {0}", str(input, "title"));
+      case "list": return t("列出产出");
+      case "get": return t("查看产出 {0}", id);
+      case "delete": return t("删除产出 {0}", id);
+    }
+  } else if (tool === "inspect") {
+    switch (action) {
+      case "list": return t("列出在跑的 agent");
+      case "get": return t("查看 agent {0}", id);
+      case "speed": return t("查看 token 速度");
+      case "account": return t("查看账号用量");
+      case "search": return t("搜索会话记录 {0}", str(input, "query"));
+      case "audit": return t("审计风险命令");
+    }
+  } else if (tool === "control") {
+    switch (action) {
+      case "stop": return t("停止 agent {0}", id);
+      case "interrupt": return t("打断 agent {0}", id);
+    }
+  } else if (tool === "notes") {
+    const path = str(input, "path");
+    switch (action) {
+      case "write": return t("写入笔记 {0}", path);
+      case "append": return t("追加笔记 {0}", path);
+      case "read": return t("读取笔记 {0}", path);
+      case "list": return t("列出笔记");
+      case "search": return t("搜索笔记 {0}", str(input, "query"));
+    }
+  } else if (tool === "history") {
+    switch (action) {
+      case "search": return t("搜索历史记录 {0}", str(input, "query"));
+      case "read": return t("读取历史第 {0} 行", String(input.line_no ?? ""));
+    }
   }
   return action || tool;
 }
