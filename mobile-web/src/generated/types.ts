@@ -373,7 +373,7 @@ export type ElicitationOutcome = "answered" | "declined" | "heartbeat-lost" | "t
 
 export type PlanApprovalOutcome = "approved" | "approved-with-edits" | "rejected" | "heartbeat-lost" | "timeout";
 
-export type FleetAskOutcome = "answered" | "cancelled" | "heartbeat-lost" | "timeout";
+export type FleetAskOutcome = "answered" | "cancelled" | "task-completed" | "task-abandoned" | "heartbeat-lost" | "timeout";
 
 export type SelectedOption = { 
 label: string, 
@@ -402,6 +402,8 @@ export type DecisionTypeStats = {
 triggered: number, 
 answered: number, 
 declined: number, 
+taskCompleted: number, 
+taskAbandoned: number, 
 heartbeatLost: number, 
 timeout: number, 
 withRecommendation: number, 

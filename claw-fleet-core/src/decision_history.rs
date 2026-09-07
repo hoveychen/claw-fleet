@@ -56,12 +56,38 @@ pub enum PlanApprovalOutcome {
 pub enum FleetAskOutcome {
     /// User submitted answers via the Decision Panel. `answers` is populated.
     Answered,
-    /// User clicked Cancel.
+    /// User dismissed the card without answering and without a verdict on the
+    /// task. Pre-v3 this also covered the two terminal presses below; they are
+    /// split out because "the boss declared this done" and "the boss waved the
+    /// card away" are not the same event, and folding them lost the only
+    /// per-card record of which it was.
     Cancelled,
+    /// User pressed 结束任务 — the task was closed as complete.
+    TaskCompleted,
+    /// User pressed 放弃任务 — the task was closed as unfinished.
+    TaskAbandoned,
     /// Desktop consumer disappeared mid-flight.
     HeartbeatLost,
     /// Configured wait_seconds elapsed without any response.
     Timeout,
+}
+
+impl FleetAskOutcome {
+    /// The outcome a resolved card carries. `task_outcome` is `Some` only when
+    /// the user used the card's terminal button. Single source of truth for the
+    /// mapping, shared by the MCP handler and the orphan-recovery path so the
+    /// two cannot drift.
+    pub fn for_resolution(
+        cancelled: bool,
+        task_outcome: Option<crate::task_outcome::TaskOutcome>,
+    ) -> Self {
+        match (cancelled, task_outcome) {
+            (_, Some(crate::task_outcome::TaskOutcome::Completed)) => Self::TaskCompleted,
+            (_, Some(crate::task_outcome::TaskOutcome::Abandoned)) => Self::TaskAbandoned,
+            (true, None) => Self::Cancelled,
+            (false, None) => Self::Answered,
+        }
+    }
 }
 
 // ── Selected-option enrichment ───────────────────────────────────────────────
@@ -360,8 +386,16 @@ pub struct DecisionTypeStats {
     pub triggered: u32,
     /// Terminal outcome = answered (fleet-ask) / approved (plan-approval).
     pub answered: u32,
-    /// Declined / cancelled / rejected.
+    /// Declined / cancelled / rejected — the user refused to engage with the
+    /// card. Does NOT include the v3 terminal presses; see the two below.
     pub declined: u32,
+    /// fleet-ask cards resolved with 结束任务 (task closed as a success).
+    /// Absent (0) in reports generated before the terminal button existed.
+    #[serde(default)]
+    pub task_completed: u32,
+    /// fleet-ask cards resolved with 放弃任务 (task closed as unfinished).
+    #[serde(default)]
+    pub task_abandoned: u32,
     /// Desktop consumer disappeared mid-flight.
     pub heartbeat_lost: u32,
     /// Wait window elapsed with no response.
@@ -509,6 +543,12 @@ fn accumulate_record(stats: &mut DecisionCardStats, rec: &DecisionHistoryRecord,
                 accumulate_first_q_fleet_ask(s, r);
             }
             FleetAskOutcome::Cancelled => s.declined += 1,
+            // The two terminal presses stay OUT of `declined`: that bucket means
+            // "the user refused to engage with the card", and ending a task is
+            // the opposite — it is the user engaging decisively. They get their
+            // own counters so a day's completion rate is readable.
+            FleetAskOutcome::TaskCompleted => s.task_completed += 1,
+            FleetAskOutcome::TaskAbandoned => s.task_abandoned += 1,
             FleetAskOutcome::HeartbeatLost => s.heartbeat_lost += 1,
             FleetAskOutcome::Timeout => s.timeout += 1,
         },

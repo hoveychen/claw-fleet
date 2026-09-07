@@ -2947,16 +2947,19 @@ export const MOCK_DAILY_REPORT: DailyReport = {
       byType: {
         elicitation: {
           triggered: 42, answered: 40, declined: 1, heartbeatLost: 0, timeout: 1,
+          taskCompleted: 0, taskAbandoned: 0,
           withRecommendation: 31, recommendedHit: 19, otherPick: 9,
           latencySecsSum: 3520, latencyCount: 40,
         },
         "fleet-ask": {
-          triggered: 6, answered: 6, declined: 0, heartbeatLost: 0, timeout: 0,
+          triggered: 8, answered: 6, declined: 0, heartbeatLost: 0, timeout: 0,
+          taskCompleted: 2, taskAbandoned: 1,
           withRecommendation: 4, recommendedHit: 3, otherPick: 1,
           latencySecsSum: 210, latencyCount: 6,
         },
         "plan-approval": {
           triggered: 2, answered: 1, declined: 1, heartbeatLost: 0, timeout: 0,
+          taskCompleted: 0, taskAbandoned: 0,
           withRecommendation: 0, recommendedHit: 0, otherPick: 0,
           latencySecsSum: 48, latencyCount: 1,
         },

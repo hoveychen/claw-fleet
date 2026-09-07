@@ -522,11 +522,8 @@ where
         return Ok(false);
     };
 
-    let outcome = if resp.cancelled {
-        crate::decision_history::FleetAskOutcome::Cancelled
-    } else {
-        crate::decision_history::FleetAskOutcome::Answered
-    };
+    let outcome =
+        crate::decision_history::FleetAskOutcome::for_resolution(resp.cancelled, resp.task_outcome);
 
     if resp.cancelled {
         cleanup(id);

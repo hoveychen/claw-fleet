@@ -461,7 +461,9 @@
       "heartbeat-lost": "桌面端掉线",
       "approved": "已批准",
       "approved-with-edits": "批准并改写",
-      "rejected": "已驳回"
+      "rejected": "已驳回",
+      "task-completed": "已结束任务",
+      "task-abandoned": "已放弃任务"
     },
     "other_label": "其他",
     "edited_plan": "改写后的计划：",
@@ -1769,7 +1771,9 @@
     "no_parameters": "无参数",
     "no_results": "没有结果。",
     "no_summary": "没有记录摘要。",
-    "tool_running": "运行中…"
+    "tool_running": "运行中…",
+    "decision_task_completed": "已结束任务",
+    "decision_task_abandoned": "已放弃任务"
   },
   "settings": {
     "title": "设置",
@@ -2247,7 +2251,8 @@
     "dc_type_fleet_ask": "富交互卡",
     "dc_type_plan_approval": "计划审批",
     "dc_no_rec": "无推荐",
-    "total_cost": "总花费"
+    "total_cost": "总花费",
+    "dc_task_outcome": "完成/放弃"
   },
   "command": {
     "nested": {

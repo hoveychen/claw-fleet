@@ -720,7 +720,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     if resp.cancelled {
         persist_fleet_ask_history(
             &req,
-            crate::decision_history::FleetAskOutcome::Cancelled,
+            crate::decision_history::FleetAskOutcome::for_resolution(true, resp.task_outcome),
             std::collections::BTreeMap::new(),
         );
         return Ok(tool_error(terminal_notice(resp.task_outcome)));

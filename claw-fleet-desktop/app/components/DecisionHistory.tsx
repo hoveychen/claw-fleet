@@ -66,6 +66,13 @@ function outcomeClass(outcome: string): string {
     case "declined":
     case "cancelled":
       return styles.outcome_declined;
+    // The v3 terminal presses read as their own verdicts, not as a decline:
+    // finishing a task is the success case, abandoning it is an outcome rather
+    // than a refusal to engage.
+    case "task-completed":
+      return styles.outcome_approved;
+    case "task-abandoned":
+      return styles.outcome_timeout;
     case "timeout":
       return styles.outcome_timeout;
     case "heartbeat-lost":

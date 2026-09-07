@@ -464,7 +464,9 @@
       "heartbeat-lost": "heartbeat lost",
       "approved": "approved",
       "approved-with-edits": "approved with edits",
-      "rejected": "rejected"
+      "rejected": "rejected",
+      "task-completed": "task finished",
+      "task-abandoned": "task abandoned"
     },
     "other_label": "Other",
     "edited_plan": "Edited plan:",
@@ -1772,7 +1774,9 @@
     "no_parameters": "No parameters",
     "no_results": "No results.",
     "no_summary": "No summary recorded.",
-    "tool_running": "Running…"
+    "tool_running": "Running…",
+    "decision_task_completed": "Task finished",
+    "decision_task_abandoned": "Task abandoned"
   },
   "settings": {
     "title": "Settings",
@@ -2250,7 +2254,8 @@
     "dc_type_fleet_ask": "Rich card",
     "dc_type_plan_approval": "Plan approval",
     "dc_no_rec": "no rec.",
-    "total_cost": "Total Cost"
+    "total_cost": "Total Cost",
+    "dc_task_outcome": "done/given up"
   },
   "command": {
     "nested": {
