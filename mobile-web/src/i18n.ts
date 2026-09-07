@@ -724,7 +724,6 @@ const DICT: Record<string, string> = {
   组织: "Organization",
   套餐: "Plan",
   用量来源: "Usage source",
-  "foxy-switcher（本地守护进程）": "foxy-switcher (local daemon)",
   "Anthropic 接口": "Anthropic API",
   "Claude 账号读取失败：{0}": "Failed to read the Claude account: {0}",
   未知原因: "unknown reason",
