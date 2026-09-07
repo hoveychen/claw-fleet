@@ -547,6 +547,28 @@ pub struct LaunchRoute {
     pub switched_from: Option<String>,
 }
 
+impl LaunchRoute {
+    /// A clause naming the harness switch, for the "ok: …" line the CLI and the
+    /// MCP tools print back. Empty when nothing was re-pointed, so callers can
+    /// splice it in unconditionally.
+    ///
+    /// The agent asked for a model and got a different *tool* than the one it is
+    /// running on; saying so is what keeps that from looking like a silent
+    /// mis-launch when the successor shows up as a Codex session.
+    pub fn switch_note(&self) -> String {
+        match &self.switched_from {
+            None => String::new(),
+            Some(from) => format!(
+                "（模型 {} 属于 {}，已从 {} 改为用 {} 启动）",
+                self.model.as_deref().unwrap_or_default(),
+                self.agent_source,
+                from,
+                self.agent_source
+            ),
+        }
+    }
+}
+
 /// Resolve the launch route for a successor created from `ctx`.
 ///
 /// The override rule the CLI and the MCP tools both used to open-code was

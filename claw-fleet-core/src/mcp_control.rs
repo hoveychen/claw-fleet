@@ -594,9 +594,14 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
                 }
             }
             let ctx = crate::session::inherit_launch_context(Some(sid));
-            let model = arg(args, "model").or(ctx.model);
-            let effort = arg(args, "effort").or(ctx.effort);
-            let agent_source = ctx.source.unwrap_or_else(|| "claude-code".to_string());
+            // Naming another harness's model re-points the relay at that harness
+            // (see `agent_source::route_launch`) — otherwise the successor would
+            // be launched by this session's tool with a model it cannot serve.
+            let route = crate::agent_source::route_launch(
+                &ctx,
+                arg(args, "model").as_deref(),
+                arg(args, "effort").as_deref(),
+            )?;
             let rec = handoff::register(
                 sid,
                 &ctx.workspace,
@@ -604,17 +609,18 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
                 &note,
                 plan.as_deref(),
                 next.as_deref(),
-                model.as_deref(),
-                effort.as_deref(),
-                &agent_source,
+                route.model.as_deref(),
+                route.effort.as_deref(),
+                &route.agent_source,
             )?;
             Ok(format!(
-                "ok: handoff registered (chain {}, 第 {} 棒, model={}, effort={}). \
+                "ok: handoff registered (chain {}, 第 {} 棒, model={}, effort={}){}. \
                  接力 session 将在本 session 结束 turn 后由 Stop hook 自动启动；请尽快结束当前 turn。",
                 rec.chain_id,
                 rec.hop,
                 rec.model.as_deref().unwrap_or("<CLI 默认>"),
                 rec.effort.as_deref().unwrap_or("<CLI 默认>"),
+                route.switch_note(),
             ))
         }
         "show" => {
