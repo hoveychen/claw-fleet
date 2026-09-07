@@ -662,7 +662,7 @@ const DICT: Record<string, string> = {
   "新目录名": "New directory name",
   创建: "Create",
   新建目录失败: "Could not create that directory",
-  "要让 agent 做什么？": "What should the agent do?",
+  "要让 agent 做什么？": "Task for the agent?",
   创建会话失败: "Failed to create session",
   // ── 渲染兜底(ErrorBoundary)──
   这一块没能显示出来: "This part could not be displayed",
@@ -751,6 +751,8 @@ const DICT: Record<string, string> = {
   "落后 {0}": "{0} behind",
   "worktree（{0}）": "Worktrees ({0})",
   "没有 worktree。": "No worktrees.",
+  最近: "Recent",
+  "选目录…": "Pick folder…",
   最近提交: "Recent commits",
   "没有提交。": "No commits.",
   "确认 push 到远端？": "Push to remote?",
