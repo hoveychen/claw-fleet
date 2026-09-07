@@ -92,24 +92,3 @@ export function buildRenderItems(rows: SessionInfo[], group: boolean): RenderIte
     return { ...it, tip: chainTip(members), members };
   });
 }
-
-/**
- * Which sessions a dwell-read on the active session should clear. A collapsed
- * relay-group header shows an aggregate unread dot over its *whole* chain (see
- * the header's `unread` prop, which is `full.some(sessionUnread)`), yet clicking
- * the header only opens the tip. So dwelling on it must mark every chain member
- * read — otherwise a still-unread non-tip hop keeps the group's dot lit after
- * the user has plainly opened it. A standalone row, an expanded group's child,
- * or any ungrouped row marks only itself.
- *
- * `groupTips` maps a currently-rendered group header's tip id → that group's
- * full chain membership; ids absent from it (singles / children) fall back to
- * the lone session.
- */
-export function dwellReadTargets(
-  active: SessionInfo,
-  groupTips: Map<string, SessionInfo[]>,
-): SessionInfo[] {
-  const chain = groupTips.get(active.id);
-  return chain && chain.length > 0 ? chain : [active];
-}

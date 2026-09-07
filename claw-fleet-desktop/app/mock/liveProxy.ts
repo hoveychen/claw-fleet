@@ -821,13 +821,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/procs",
   }),
 
-  mark_sessions_read: (a) => ({
-    method: "POST",
-    path: "/session_read",
-    empty: true,
-    body: { items: a.items },
-  }),
-
   // 直连(手机不经中转)。浏览器构建走同一套 HTTP 路由 —— 少了这几条,那几个
   // 命令在 webui 里会静默 no-op(见 webTransport.test.ts 的覆盖门禁)。
 

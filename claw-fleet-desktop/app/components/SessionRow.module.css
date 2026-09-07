@@ -58,14 +58,10 @@
   background: color-mix(in srgb, var(--color-bg-card-hover) 45%, transparent);
 }
 
-/* The row carries three orthogonal axes and each gets its own visual channel,
+/* The row carries two orthogonal axes and each gets its own visual channel,
    so they can't be mistaken for one another:
      run status  -> colour   (.row_status_dot: green live / amber waiting)
-     unread      -> weight   (.row_unread: bold title + a faint row wash)
-     done/pending-> control  (MarkControl, right gutter)
-   An earlier design put unread on a red dot right next to the run-status bar;
-   two marks 10px apart in different shapes and clashing hues read as one
-   broken traffic light rather than two facts. */
+     done/pending-> control  (MarkControl, right gutter) */
 .row_status_dot {
   position: absolute;
   left: 7px;
@@ -74,16 +70,6 @@
   height: 7px;
   border-radius: 50%;
   pointer-events: none;
-}
-
-/* Unread wash — deliberately weaker than :hover so a hovered read row still
-   looks distinct from an unhovered unread one. */
-.row_unread {
-  background: rgba(255, 255, 255, 0.035);
-}
-
-:global([data-theme="light"]) .row_unread {
-  background: rgba(32, 28, 18, 0.04);
 }
 
 .row_body {
@@ -103,14 +89,6 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
-}
-
-/* Unread rows carry the title at full contrast and weight; read rows fall back
-   to the secondary text colour. The whole title line responds, which scans
-   faster down a long list than a 7px dot did. */
-.row_title_unread {
-  color: var(--color-text);
-  font-weight: 600;
 }
 
 /* Agent-source glyph (Claude / Codex …) riding ahead of the title, shown only
@@ -264,8 +242,8 @@
   transform: rotate(90deg);
 }
 
-/* Pending/done toggle — the manual "finished?" axis, orthogonal to the top-left
-   unread dot and the left run-status bar. Always visible: a hollow circle for
+/* Pending/done toggle — the manual "finished?" axis, orthogonal to the left
+   run-status bar. Always visible: a hollow circle for
    pending, a filled green check for done. The glyph itself is a lucide icon
    rendered by MarkControl / GroupMarkControl (which import this module); this
    styles the button box + colour. `data-done` drives the colour so both the

@@ -19,7 +19,7 @@ type SessionRailProps = {
   items: RenderItem[];
   /** Full membership of every relay chain keyed by chainId, taken over ALL
    *  launchpad sessions (not just the filtered rows) so a group header's
-   *  aggregate liveness / unread / mark-all covers the whole chain even when a
+   *  aggregate liveness / mark-all covers the whole chain even when a
    *  filter hides some hops. */
   chainMembersAll: Map<string, SessionInfo[]>;
   /** Session currently shown in the detail column (rendered as .row_active). */
@@ -30,8 +30,6 @@ type SessionRailProps = {
   /** FTS snippet for a row's transcript, or undefined when the query is too
    *  short / didn't match. Parent owns the query threshold. */
   snippetFor: (jsonlPath: string) => string | undefined;
-  /** Whether a session has unread activity (parent folds in its read overrides). */
-  isUnread: (s: SessionInfo) => boolean;
   /** Bumped every 30s by the parent so relative times keep advancing. */
   nowTick: number;
   /** Show the agent-source glyph ahead of each title (only when sources mix). */
@@ -97,7 +95,7 @@ export function WorkspaceRailSection({
  * page (HistoryView). Renders standalone rows and
  * collapsed handoff-relay chains (a tip header that expands to show earlier
  * hops), owning only the local expand / page-in state; everything data-shaped
- * (which sessions, their order, snippets, read/active state) is supplied by the
+ * (which sessions, their order, snippets, active state) is supplied by the
  * parent so both callers render the identical rail.
  */
 export function SessionRail({
@@ -106,7 +104,6 @@ export function SessionRail({
   activeId,
   openIds,
   snippetFor,
-  isUnread,
   nowTick,
   showSource,
   showWorkspace = true,
@@ -140,7 +137,6 @@ export function SessionRail({
       snippet={snippetFor(s.jsonlPath)}
       isSelected={activeId === s.id}
       isOpen={activeId !== s.id && openIds.has(s.id)}
-      unread={isUnread(s)}
       nowTick={nowTick}
       showSource={showSource}
       showWorkspace={showWorkspace}
@@ -174,12 +170,11 @@ export function SessionRail({
               snippet={snippetFor(tip.jsonlPath)}
               isSelected={activeId === tip.id}
               isOpen={activeId !== tip.id && openIds.has(tip.id)}
-              // Bold (unread) and the run-status dot represent the whole
-              // collapsed chain, not just the tip: the group is sorted to the
-              // top by its most-recently-active member, so its header must show
-              // that member's live/unread state or it reads as stale. `full` is
-              // the chain's complete membership.
-              unread={full.some(isUnread)}
+              // The run-status dot represents the whole collapsed chain, not
+              // just the tip: the group is sorted to the top by its
+              // most-recently-active member, so its header must show that
+              // member's live state or it reads as stale. `full` is the chain's
+              // complete membership.
               runColorOverride={chainBarColor(full)}
               nowTick={nowTick}
               showSource={showSource}
