@@ -11,7 +11,7 @@ pub mod fleet_binary;
 mod gui;
 pub mod keep_awake;
 pub mod local_backend;
-pub mod remote;
+pub mod rca_provision;
 pub mod traffic_lights;
 pub mod version_check;
 

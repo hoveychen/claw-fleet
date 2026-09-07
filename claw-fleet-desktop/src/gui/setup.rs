@@ -340,7 +340,7 @@ pub(crate) async fn remote_codex_login_start(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
-    let ssh_target = crate::remote::ssh_target_for_workspace(&path)?;
+    let ssh_target = crate::rca_provision::ssh_target_for_workspace(&path)?;
     let command =
         claw_fleet_core::harness_login::codex_device_auth_ssh_command(&ssh_target)?;
     let home = session::real_home_dir()
@@ -383,7 +383,7 @@ pub(crate) async fn remote_codex_login_poll(
     // remote auth.json, not the banner.
     let logged_in = if parse.success || !running {
         tokio::task::spawn_blocking(move || {
-            crate::remote::ssh_target_for_workspace(&path)
+            crate::rca_provision::ssh_target_for_workspace(&path)
                 .and_then(|t| claw_fleet_core::remote_host::remote_harness_statuses(&t))
                 .map(|s| {
                     s.iter()

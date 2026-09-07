@@ -334,7 +334,6 @@ fn parse_theme(s: Option<&str>) -> Option<tauri::Theme> {
 #[tauri::command]
 async fn open_settings_window(
     app: tauri::AppHandle,
-    connection: Option<String>,
     theme: Option<String>,
 ) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("settings") {
@@ -347,17 +346,10 @@ async fn open_settings_window(
         return Ok(());
     }
 
-    let mut path = String::from("settings.html");
-    if let Some(conn) = connection.filter(|s| !s.is_empty()) {
-        use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
-        path.push_str("?connection=");
-        path.push_str(&utf8_percent_encode(&conn, NON_ALPHANUMERIC).to_string());
-    }
-
     let mut builder = tauri::WebviewWindowBuilder::new(
         &app,
         "settings",
-        tauri::WebviewUrl::App(path.into()),
+        tauri::WebviewUrl::App("settings.html".into()),
     )
     .title("Settings")
     .inner_size(780.0, 640.0)
@@ -1028,7 +1020,6 @@ struct MenuLabels {
     quit: &'static str,
 
     file: &'static str,
-    switch_connection: &'static str,
     daily_report: &'static str,
     close_window: &'static str,
 
@@ -1072,7 +1063,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
             quit: "退出 Claw Fleet",
 
             file: "文件",
-            switch_connection: "切换连接",
             daily_report: "每日报告",
             close_window: "关闭窗口",
 
@@ -1114,7 +1104,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
             quit: "Quit Claw Fleet",
 
             file: "File",
-            switch_connection: "Switch Connection",
             daily_report: "Daily Report",
             close_window: "Close Window",
 
@@ -1185,13 +1174,6 @@ fn build_app_menu(
 
     // ── File ────────────────────────────────────────────────────────────
     let file_submenu = SubmenuBuilder::new(app, l.file)
-        .item(
-            &MenuItemBuilder::new(l.switch_connection)
-                .id("menu-switch-connection")
-                .accelerator("CmdOrCtrl+Shift+C")
-                .build(app)?,
-        )
-        .separator()
         .item(
             &MenuItemBuilder::new(l.daily_report)
                 .id("menu-daily-report")
@@ -1328,13 +1310,6 @@ fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
             }
             let _ = app.emit("menu-check-updates", ());
         }
-        "menu-switch-connection" => {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
-            let _ = app.emit("switch-connection", ());
-        }
         "menu-daily-report" => {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
@@ -1433,10 +1408,6 @@ fn build_tray_menu(
     }
 
     // ── Actions ──────────────────────────────────────────────────────────
-    builder = builder.item(
-        &MenuItemBuilder::new("Switch Connection").id("switch-connection").build(app)?
-    );
-    builder = builder.item(&PredefinedMenuItem::separator(app)?);
     builder = builder.item(
         &MenuItemBuilder::new("Quit").id("quit").build(app)?
     );
@@ -1917,8 +1888,6 @@ pub fn run() {
             let tray_menu = MenuBuilder::new(app)
                 .item(&MenuItemBuilder::new("No Active Agents").id("info-header").enabled(false).build(app)?)
                 .item(&PredefinedMenuItem::separator(app)?)
-                .item(&MenuItemBuilder::new("Switch Connection").id("switch-connection").build(app)?)
-                .item(&PredefinedMenuItem::separator(app)?)
                 .item(&MenuItemBuilder::new("Quit").id("quit").build(app)?)
                 .build()?;
 
@@ -1969,13 +1938,7 @@ pub fn run() {
                 .on_menu_event(|app, event| {
                     let id = event.id();
                     let id_str = id.as_ref();
-                    if id_str == "switch-connection" {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                        let _ = app.emit("switch-connection", ());
-                    } else if id_str == "quit" {
+                    if id_str == "quit" {
                         app.exit(0);
                     } else if let Some(idx_str) = id_str.strip_prefix("open-session-") {
                         if let Ok(idx) = idx_str.parse::<usize>() {
@@ -2127,18 +2090,14 @@ pub fn run() {
             detect_ai_tools,
             install_fleet_skill,
             save_skill_file,
-            remote::list_saved_connections,
-            remote::list_ssh_profiles,
-            remote::delete_connection,
-            remote::connect_remote,
-            remote::install_rca_remote,
-            remote::install_rca_on_host,
-            remote::update_rca_remote,
-            remote::remote_workspace_harness_statuses,
-            remote::install_harness_remote,
+            rca_provision::list_ssh_profiles,
+            rca_provision::install_rca_remote,
+            rca_provision::install_rca_on_host,
+            rca_provision::update_rca_remote,
+            rca_provision::remote_workspace_harness_statuses,
+            rca_provision::install_harness_remote,
             remote_codex_login_start,
             remote_codex_login_poll,
-            remote::disconnect_remote,
             pick_file,
             get_source_account,
             get_source_usage,
