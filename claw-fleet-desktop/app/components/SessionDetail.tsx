@@ -68,6 +68,7 @@ import { SubagentLiveCards } from "./SubagentLiveCards";
 import { SessionAuxDoc } from "./SessionAuxDoc";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
+import { followGrowthBehavior, liveThinkingLanded, retainLiveThinking } from "../streamContinuity";
 
 
 /** Max subagents listed in the scope dropdown (AgentScopeSwitcher). Active ones
@@ -448,6 +449,7 @@ export function SessionDetail({
   // Show tabs only when viewing a main agent that has active subagents,
   // or when viewing a subagent (show sibling tabs + parent).
   const scrollRef = useRef<HTMLDivElement>(null);
+  const autoScrollingRef = useRef(false);
   const [isFollowing, setIsFollowing] = useState(true);
   // The composer floats over the bottom of the transcript (chatbot-style), so
   // the scroller has to reserve exactly its height as bottom padding or the
@@ -507,11 +509,11 @@ export function SessionDetail({
     const poll = () => {
       invoke<LiveThinking | null>("read_live_thinking", { sessionId: liveSessionId })
         .then((lt) => {
-          if (!cancelled) setLiveThinking(lt);
+          if (!cancelled) setLiveThinking((previous) => retainLiveThinking(previous, lt));
         })
-        .catch(() => {
-          if (!cancelled) setLiveThinking(null);
-        });
+        // A failed sample carries no evidence that the stream disappeared.
+        // The inactive-status branch above clears it when the turn really ends.
+        .catch(() => {});
     };
     poll();
     const timer = window.setInterval(poll, 700);
@@ -520,6 +522,16 @@ export function SessionDetail({
       window.clearInterval(timer);
     };
   }, [liveSessionId, liveActive, paused]);
+
+  // The sidecar and transcript are separate transports. Keep the live block
+  // through an empty sidecar sample, then retire it in the same render that its
+  // durable assistant message arrives so the handoff neither flashes nor
+  // duplicates the reasoning.
+  useEffect(() => {
+    setLiveThinking((previous) =>
+      previous && liveThinkingLanded(messages, previous) ? null : previous,
+    );
+  }, [messages]);
 
   // Standalone-mode live tail: the initial fetch above is a one-shot, which
   // was fine when the only standalone consumer was DecisionPanel (a pending
@@ -816,6 +828,11 @@ export function SessionDetail({
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
+      if (autoScrollingRef.current) {
+        const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (dist <= 1) autoScrollingRef.current = false;
+        return;
+      }
       applyFollow({
         kind: "scroll",
         distFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight,
@@ -830,13 +847,19 @@ export function SessionDetail({
       // here too. Reading back through a subagent's result is not a request to
       // stop following the transcript, so let the card have its own gesture.
       if (nestedScrollerWillConsume(el, ev)) return;
+      autoScrollingRef.current = false;
       applyFollow({ kind: "gesture", intent: ev.deltaY });
+    };
+    const onPointerDown = () => {
+      autoScrollingRef.current = false;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("pointerdown", onPointerDown, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onPointerDown);
     };
   }, [applyFollow, session]);
 
@@ -863,9 +886,18 @@ export function SessionDetail({
     const el = scrollRef.current;
     if (!el) return;
 
+    let previousHeight: number | null = null;
     const pin = () => {
-      if (!followRef.current.following) return;
-      el.scrollTop = el.scrollHeight;
+      const nextHeight = el.scrollHeight;
+      const behavior = followGrowthBehavior(previousHeight, nextHeight);
+      previousHeight = nextHeight;
+      if (!followRef.current.following || behavior === null) return;
+      autoScrollingRef.current = behavior === "smooth";
+      if (behavior === "smooth") {
+        el.scrollTo({ top: nextHeight, behavior });
+      } else {
+        el.scrollTop = nextHeight;
+      }
     };
 
     // Observe the children, not the scroll box: the box's own border box never

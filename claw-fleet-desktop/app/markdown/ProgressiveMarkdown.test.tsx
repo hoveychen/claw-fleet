@@ -40,6 +40,7 @@ let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 /** Callbacks of every IntersectionObserver the component created. */
 let observers: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = [];
+const streamingComponents = {};
 
 beforeEach(() => {
   observers = [];
@@ -72,6 +73,14 @@ function render(body: string) {
   return container!;
 }
 
+function renderStreaming(body: string) {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => root!.render(<ProgressiveMarkdown body={body} components={streamingComponents} streaming />));
+  return container!;
+}
+
 /** Repeat `unit` until at least `bytes` long. */
 function bulk(unit: string, bytes: number): string {
   let out = "";
@@ -94,6 +103,27 @@ function scrollToBottom() {
 }
 
 describe("ProgressiveMarkdown", () => {
+  it("keeps completed stream blocks mounted while only the live tail changes", () => {
+    const el = renderStreaming("stable paragraph.\n\nlive tail");
+    const stable = el.querySelectorAll("[data-chunk]")[0];
+    expect(el.querySelectorAll("[data-chunk]")).toHaveLength(2);
+
+    const before = parses.mock.calls.length;
+    act(() =>
+      root!.render(
+        <ProgressiveMarkdown
+          body={"stable paragraph.\n\nlive tail keeps growing"}
+          components={streamingComponents}
+          streaming
+        />,
+      ),
+    );
+
+    expect(el.querySelectorAll("[data-chunk]")[0]).toBe(stable);
+    expect(parses.mock.calls.length).toBe(before + 1);
+    expect(el.textContent).toContain("live tail keeps growing");
+  });
+
   it("parses only the first chunks on open, not the whole document", () => {
     const el = render(longDoc);
     // The point of the feature: opening costs a couple of chunks, not ~10.

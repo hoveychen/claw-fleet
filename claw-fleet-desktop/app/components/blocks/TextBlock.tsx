@@ -79,10 +79,9 @@ export const TextBlock = memo(function TextBlock({
   // every block renderer was the worse option). Outside both, refs stay prose.
   const ambientWiki = useWikiLinks();
   const wiki = wikiProp ?? ambientWiki ?? undefined;
-  // When streaming, strip the last incomplete paragraph to avoid visual flicker.
-  // The blank-line normalisation that keeps an inline <svg> intact now happens
-  // inside ProgressiveMarkdown, which has to do it before splitting anyway.
-  const content = isPartial ? stripLastParagraph(text) : text;
+  // ProgressiveMarkdown isolates the unfinished tail from settled blocks, so
+  // the newest sentence can remain visible and grow token by token.
+  const content = text;
 
   // A message that arrived by streaming is never chunked, even after it
   // finishes: the reader watched it grow and is somewhere inside it, and
@@ -234,25 +233,3 @@ export const TextBlock = memo(function TextBlock({
     </div>
   );
 });
-
-function stripLastParagraph(text: string): string {
-  const lines = text.split("\n");
-  // Find the last non-empty line index
-  let lastNonEmpty = lines.length - 1;
-  while (lastNonEmpty >= 0 && lines[lastNonEmpty].trim() === "") {
-    lastNonEmpty--;
-  }
-  // If the last content ends mid-sentence (no period/punctuation), strip it
-  if (lastNonEmpty >= 0) {
-    const last = lines[lastNonEmpty];
-    if (!/[.!?`\])]$/.test(last)) {
-      // Find previous paragraph break
-      let paraStart = lastNonEmpty;
-      while (paraStart > 0 && lines[paraStart - 1].trim() !== "") {
-        paraStart--;
-      }
-      return lines.slice(0, paraStart).join("\n");
-    }
-  }
-  return text;
-}

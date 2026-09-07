@@ -81,9 +81,12 @@ export const ProgressiveMarkdown = memo(function ProgressiveMarkdown({
   // second chunk skips the split entirely.
   const chunks = useMemo(() => {
     const normalized = normalizeSvgBlankLines(body);
-    return streaming || normalized.length <= DEFAULT_CHUNK_BYTES
-      ? [normalized]
-      : chunkMarkdown(normalized);
+    if (streaming) {
+      // Cut at every safe completed block. Settled blocks retain their string
+      // and React key while only the unfinished tail is parsed again.
+      return chunkMarkdown(normalized, 1);
+    }
+    return normalized.length <= DEFAULT_CHUNK_BYTES ? [normalized] : chunkMarkdown(normalized);
   }, [body, streaming]);
   const [shown, setShown] = useState(INITIAL_CHUNKS);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -93,7 +96,8 @@ export const ProgressiveMarkdown = memo(function ProgressiveMarkdown({
     setShown(INITIAL_CHUNKS);
   }, [chunks]);
 
-  const remaining = chunks.length - shown;
+  const visibleChunks = streaming ? chunks : chunks.slice(0, shown);
+  const remaining = streaming ? 0 : chunks.length - shown;
 
   useEffect(() => {
     if (remaining <= 0) return;
@@ -122,7 +126,7 @@ export const ProgressiveMarkdown = memo(function ProgressiveMarkdown({
 
   return (
     <>
-      {chunks.slice(0, shown).map((chunk, i) => (
+      {visibleChunks.map((chunk, i) => (
         <MarkdownChunk
           key={i}
           body={chunk}
