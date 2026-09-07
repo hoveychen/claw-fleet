@@ -173,12 +173,13 @@ pub(crate) fn respond_to_fleet_ask(
     id: String,
     cancelled: bool,
     answers: std::collections::BTreeMap<String, String>,
+    task_outcome: Option<claw_fleet_core::task_outcome::TaskOutcome>,
 ) -> Result<(), String> {
     state
         .backend
         .write()
         .unwrap()
-        .respond_to_fleet_ask(&id, cancelled, answers)
+        .respond_to_fleet_ask(&id, cancelled, answers, task_outcome)
 }
 
 #[tauri::command(async)]

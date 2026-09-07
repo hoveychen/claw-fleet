@@ -467,7 +467,9 @@
       "heartbeat-lost": "heartbeat lost",
       "approved": "approved",
       "approved-with-edits": "approved with edits",
-      "rejected": "rejected"
+      "rejected": "rejected",
+      "task-completed": "task finished",
+      "task-abandoned": "task abandoned"
     },
     "other_label": "Other",
     "edited_plan": "Edited plan:",
@@ -1597,11 +1599,6 @@
       "desc": "This is the Tasks page — click \"New Session\" at the top of the task rail, pick a working directory, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is grouped here by directory."
     }
   },
-  "waiting_alerts": {
-    "title": "Needs Your Attention",
-    "dismiss_tip": "Click to dismiss",
-    "clear_all": "Clear all ({{n}})"
-  },
   "nav_group": {
     "aria": "Mode",
     "fleet": "Fleet",
@@ -1770,7 +1767,9 @@
     "no_parameters": "No parameters",
     "no_results": "No results.",
     "no_summary": "No summary recorded.",
-    "tool_running": "Running…"
+    "tool_running": "Running…",
+    "decision_task_completed": "Task finished",
+    "decision_task_abandoned": "Task abandoned"
   },
   "settings": {
     "title": "Settings",
@@ -2143,7 +2142,11 @@
     "mode_tooltip": "Switch this question between single and multi select",
     "select_placeholder": "Select…",
     "attach_failed": "Attachment upload failed",
-    "attach_error_dismiss": "Dismiss"
+    "attach_error_dismiss": "Dismiss",
+    "finish_task": "Finish task",
+    "abandon_task": "Abandon task",
+    "finish_task_tooltip": "The agent considers the task done. Ending here marks this session complete.",
+    "abandon_task_tooltip": "The agent does not consider the task done. Ending here marks this session unfinished."
   },
   "composer": {
     "attach": "Attach files",
@@ -2244,7 +2247,8 @@
     "dc_type_fleet_ask": "Rich card",
     "dc_type_plan_approval": "Plan approval",
     "dc_no_rec": "no rec.",
-    "total_cost": "Total Cost"
+    "total_cost": "Total Cost",
+    "dc_task_outcome": "done/given up"
   },
   "command": {
     "nested": {
@@ -2267,6 +2271,7 @@
     "running": "Running",
     "waiting": "Waiting for input",
     "quiet_alive": "Running · no new output for {{mins}} min (likely parked on one long tool call)",
+    "quiet_sparse": "Running · sparse output (one line every few minutes — likely parked on one long tool call)",
     "running_subagents": "{{count}} subagents running",
     "activity_via_subagent": "Latest activity is from a subagent (the main session itself is idle)",
     "resume_placeholder": "Type a follow-up prompt to resume…",
@@ -2277,8 +2282,6 @@
     "all_workspaces": "All workspaces",
     "workspaces": "Workspaces",
     "workspace_session_count": "{{count}} groups",
-    "only_active": "Active only",
-    "filter_active_tip": "Show only sessions still running or waiting for input",
     "menu_open": "Open",
     "menu_mark_done": "Mark as done",
     "menu_mark_pending": "Mark as in progress",
@@ -2308,7 +2311,8 @@
     "group_collapse": "Collapse relay chain",
     "group_expand": "Show earlier sessions in this relay chain",
     "toggle_done": "Done — click to mark in progress again",
-    "toggle_pending": "In progress — click to mark done"
+    "toggle_pending": "In progress — click to mark done",
+    "outcome_abandoned": "Task abandoned (unfinished) — click to toggle the review mark"
   },
   "view_files": "Repos",
   "files": {

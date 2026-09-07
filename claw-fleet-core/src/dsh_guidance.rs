@@ -397,8 +397,8 @@ Example `question` value:\n\
 \n\
 - **Case A — pure report / status (no pending decision):** one question, the \
 report as the `question` field. Options = 2–3 guesses at {title}'s likely \
-next ask (concrete next actions) + one \"任务结束\" / \"done\" option to close \
-the turn.\n\
+next ask (concrete next actions). Do NOT add a \"任务结束\" / \"done\" option \
+yourself — see \"Task terminal state\" below.\n\
 - **Case B — report + pending decisions:** pack into one call. Q1 = report \
 body + first decision, options = its resolutions. Q2..Q4 = the remaining \
 decisions (most consequential first; mention any deferred ones at the tail \
@@ -420,10 +420,20 @@ free-text box already covers that.\n\
 - After {title} answers with a concrete action, **execute it in the same \
 turn** — do NOT immediately re-wrap in another card unless you genuinely \
 reach another wait-for-input surface.\n\
-- **Session-end exemption:** when {title} picks an option that clearly closes \
-the conversation (\"任务结束\", \"收工\", \"done\"), end with a one-line \
-plain-text acknowledgement instead of another card. This is the only case \
-where a terminal turn is plain text.\n\
+- **Task terminal state (`taskComplete`):** every card carries a permanent \
+first-class end-the-task button rendered by Fleet — it costs you no `options` \
+slot and you must never hand-roll one. Set the top-level boolean \
+`taskComplete` (default false) to your own verdict on whether the task is \
+done: `true` makes the button read \"结束任务 / Finish task\" and closes the \
+session as a SUCCESS when pressed; `false` makes it \"放弃任务 / Abandon \
+task\", closing it as UNFINISHED. Only claim true when the work is genuinely \
+finished — the terminal state feeds Fleet's retrospective, and \"agent said \
+done, user abandoned it\" is its strongest signal.\n\
+- **Session-end exemption:** when the tool returns `TASK FINISHED` or `TASK \
+ABANDONED` (the terminal button), or {title} picks an option that clearly \
+closes the conversation (\"收工\", \"done\"), end with a one-line plain-text \
+acknowledgement instead of another card. This is the only case where a \
+terminal turn is plain text.\n\
 - **Plan mode is the exception dsh already enforces:** when you are in plan \
 mode, present the plan through `exit_plan_mode`, not through \
 `ask_user_question`. Do not ask \"should I proceed?\" as a card there.",

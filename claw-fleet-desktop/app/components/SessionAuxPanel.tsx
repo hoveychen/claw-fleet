@@ -81,8 +81,10 @@ export function SessionAuxPanel({
             aria-orientation="vertical"
           />
         )}
-        <div className={styles.aux_head}>
-          <div className={styles.aux_tabs} role="tablist">
+        {/* Owns the window's top-right corner whenever the panel is open, so it
+            needs its own drag region for the same reason the hero banner does. */}
+        <div className={styles.aux_head} data-tauri-drag-region>
+          <div className={styles.aux_tabs} role="tablist" data-tauri-drag-region>
             {tabs.map((tab) => (
               <span
                 key={tab.id}

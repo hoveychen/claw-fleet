@@ -1654,11 +1654,13 @@ impl crate::backend::Backend for RemoteBackend {
         id: &str,
         cancelled: bool,
         answers: std::collections::BTreeMap<String, String>,
+        task_outcome: Option<claw_fleet_core::task_outcome::TaskOutcome>,
     ) -> Result<(), String> {
         let resp = claw_fleet_core::mcp_ipc::FleetAskResponse {
             id: id.to_string(),
             answers,
             cancelled,
+            task_outcome,
         };
         self.probe.post_json_ok(claw_fleet_core::routes::FLEET_ASK_RESPOND, &resp)
     }

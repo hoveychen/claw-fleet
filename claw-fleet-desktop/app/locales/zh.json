@@ -464,7 +464,9 @@
       "heartbeat-lost": "桌面端掉线",
       "approved": "已批准",
       "approved-with-edits": "批准并改写",
-      "rejected": "已驳回"
+      "rejected": "已驳回",
+      "task-completed": "已结束任务",
+      "task-abandoned": "已放弃任务"
     },
     "other_label": "其他",
     "edited_plan": "改写后的计划：",
@@ -1594,11 +1596,6 @@
       "desc": "这里是「任务」页——点任务栏顶部的「新会话」，选好工作目录、模型和第一条指令，就能派一个 Claude 帮你干活。所有你发起的任务都会按目录汇总在这一页。"
     }
   },
-  "waiting_alerts": {
-    "title": "需要你的关注",
-    "dismiss_tip": "点击忽略",
-    "clear_all": "全部清空 ({{n}})"
-  },
   "nav_group": {
     "aria": "模式",
     "fleet": "舰队",
@@ -1767,7 +1764,9 @@
     "no_parameters": "无参数",
     "no_results": "没有结果。",
     "no_summary": "没有记录摘要。",
-    "tool_running": "运行中…"
+    "tool_running": "运行中…",
+    "decision_task_completed": "已结束任务",
+    "decision_task_abandoned": "已放弃任务"
   },
   "settings": {
     "title": "设置",
@@ -2140,7 +2139,11 @@
     "mode_tooltip": "切换此题的单选 / 多选模式",
     "select_placeholder": "请选择…",
     "attach_failed": "附件上传失败",
-    "attach_error_dismiss": "关闭"
+    "attach_error_dismiss": "关闭",
+    "finish_task": "结束任务",
+    "abandon_task": "放弃任务",
+    "finish_task_tooltip": "Agent 认为任务已完成。结束后本会话标记为「已完成」。",
+    "abandon_task_tooltip": "Agent 认为任务尚未完成。结束后本会话标记为「未完成·已放弃」。"
   },
   "composer": {
     "attach": "添加附件",
@@ -2241,7 +2244,8 @@
     "dc_type_fleet_ask": "富交互卡",
     "dc_type_plan_approval": "计划审批",
     "dc_no_rec": "无推荐",
-    "total_cost": "总花费"
+    "total_cost": "总花费",
+    "dc_task_outcome": "完成/放弃"
   },
   "command": {
     "nested": {
@@ -2263,6 +2267,7 @@
     "running": "运行中",
     "waiting": "等待输入",
     "quiet_alive": "运行中 · 已 {{mins}} 分钟没有新输出（多半卡在一条长工具调用上）",
+    "quiet_sparse": "运行中 · 输出稀疏（每隔几分钟才写一行，多半卡在一条长工具调用上）",
     "running_subagents": "{{count}} 个子代运行中",
     "activity_via_subagent": "最近活跃来自子代（主会话本身已静默）",
     "resume_placeholder": "输入追问提示词后恢复会话…",
@@ -2273,8 +2278,6 @@
     "all_workspaces": "全部目录",
     "workspaces": "工作区",
     "workspace_session_count": "{{count}} 组会话",
-    "only_active": "仅活跃",
-    "filter_active_tip": "只显示仍在运行或等待输入的会话",
     "menu_open": "打开",
     "menu_mark_done": "标为已完成",
     "menu_mark_pending": "标为进行中",
@@ -2305,7 +2308,8 @@
     "group_collapse": "收起接力链",
     "group_expand": "展开接力链上更早的会话",
     "toggle_done": "已完成 — 点击改回进行中",
-    "toggle_pending": "进行中 — 点击标为已完成"
+    "toggle_pending": "进行中 — 点击标为已完成",
+    "outcome_abandoned": "任务已放弃（未完成）— 点击切换复核标记"
   },
   "view_files": "仓库",
   "files": {

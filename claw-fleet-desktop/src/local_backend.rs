@@ -149,6 +149,7 @@ impl LocalBackend {
         let snapshot = {
             let mut list = self.sessions.lock().unwrap();
             claw_fleet_core::session_mark::enrich_sessions(&mut list);
+            claw_fleet_core::task_outcome::enrich_sessions(&mut list);
             claw_fleet_core::session_title::enrich_sessions(&mut list);
             claw_fleet_core::pending_message::enrich_sessions(&mut list);
             list.clone()
@@ -1871,6 +1872,7 @@ impl Backend for LocalBackend {
         // the done mark so it re-surfaces as needs-review, then re-emit so the
         // task page updates instantly rather than waiting for the rescan below.
         claw_fleet_core::session_mark::clear_done_on_resume(&session_id, &workspace_path);
+        claw_fleet_core::task_outcome::clear_on_resume(&session_id);
         // A resume is the user's answer to a dead remote transport: forget the
         // old verdict so the card stops being pinned to `remoteDisconnected`.
         // If the link is still down the new run's stderr monitor files a fresh
@@ -2918,13 +2920,15 @@ impl Backend for LocalBackend {
         id: &str,
         cancelled: bool,
         answers: std::collections::BTreeMap<String, String>,
+        task_outcome: Option<claw_fleet_core::task_outcome::TaskOutcome>,
     ) -> Result<(), String> {
         let resp = claw_fleet_core::mcp_ipc::FleetAskResponse {
             id: id.to_string(),
             answers,
             cancelled,
+            task_outcome,
         };
-        claw_fleet_core::parked::deliver(id, &resp, cancelled, claw_fleet_core::mcp_ipc::write_response)
+        claw_fleet_core::mcp_ipc::deliver_response(&resp)
     }
 
     fn respond_to_permission_prompt(
@@ -3961,6 +3965,7 @@ mod tests {
             task_plan: None,
             handoff: None,
             user_mark: None,
+            task_outcome: None,
             title_override: None,
             compact_count: 0,
             compact_pre_tokens: 0,

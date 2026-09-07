@@ -108,6 +108,7 @@ fn pipe_installer_plan(sh_url: &str, ps1_url: &str, envs: &[(&str, &str)]) -> In
     let envs = envs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     #[cfg(unix)]
     {
+        let _ = ps1_url;
         InstallPlan {
             program: "sh".into(),
             args: vec!["-c".into(), format!("curl -fsSL '{sh_url}' | sh")],
@@ -161,16 +162,7 @@ pub fn find_npm() -> Option<PathBuf> {
 }
 
 fn find_in_augmented_path(names: &[&str]) -> Option<PathBuf> {
-    let path = crate::session_launch::augmented_path_with_front(&[]);
-    for dir in std::env::split_paths(&path) {
-        for name in names {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
+    crate::session_launch::find_in_augmented_path(names)
 }
 
 /// Install `source` via its official channel, streaming every installer output

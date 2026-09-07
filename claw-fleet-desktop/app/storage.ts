@@ -70,7 +70,6 @@ const ALL_KEYS = [
   // it stays in-memory only.
   "history-mark-filter",
   "history-workspace-filter",
-  "history-active-only",
   "history-group-handoff",
   "onboarding-dismissed",
   "wizard-completed",

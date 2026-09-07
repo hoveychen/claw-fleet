@@ -139,6 +139,8 @@ const TERMINAL_OUTCOME_KEY: Record<DecisionTerminalOutcome, string> = {
   declined: "detail.decision_declined",
   timeout: "detail.decision_timeout",
   cancelled: "detail.decision_cancelled",
+  "task-completed": "detail.decision_task_completed",
+  "task-abandoned": "detail.decision_task_abandoned",
   "heartbeat-lost": "detail.decision_heartbeat_lost",
 };
 

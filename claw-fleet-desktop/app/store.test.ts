@@ -60,15 +60,13 @@ describe("启动台 rail filters", () => {
     expect(useUIStore.getState().historyMarkFilter).toBe("all");
   });
 
-  it("round-trips the workspace filter and the active-only toggle", async () => {
+  it("round-trips the workspace filter", async () => {
     const { useUIStore } = await import("./store");
     const { getItem } = await import("./storage");
 
     useUIStore.getState().setHistoryWorkspaceFilter("/Users/x/workspace/maliang");
-    useUIStore.getState().setHistoryActiveOnly(true);
 
     expect(getItem("history-workspace-filter")).toBe("/Users/x/workspace/maliang");
-    expect(getItem("history-active-only")).toBe("true");
   });
 
   it("keeps the search box out of the settings store", async () => {

@@ -12,11 +12,16 @@
 import type { AskQuestion } from "./toolResults";
 import type { DecisionHistoryRecord } from "./types";
 
-/** The four ways a decision card resolves without being answered. */
+/** The ways a decision card resolves without being answered. The last two are
+ *  v3's terminal button — a verdict on the *task*, not a refusal to engage with
+ *  the card, which is why they get their own chips rather than reading as
+ *  「已取消」. */
 export type DecisionTerminalOutcome =
   | "declined"
   | "timeout"
   | "cancelled"
+  | "task-completed"
+  | "task-abandoned"
   | "heartbeat-lost";
 
 /**
