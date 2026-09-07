@@ -51,7 +51,12 @@
    conversation, so the space it needs is padding inside the scroller, not a
    column of its own. */
 .rail_open .body_row {
-  --rail-space: calc(var(--rail-w) + var(--slab-gap));
+  /* The rail's width plus its own 10px offset from the pane edge and a gutter,
+     measured from the row's padding box — the drawer's `right` is relative to
+     that, the rail's to the slab inside it. Verified in the mock at 1512px:
+     with a bare `+ slab-gap` the drawer's right edge landed 3px *over* the
+     cards' left edge. */
+  --rail-space: calc(var(--rail-w) + 24px);
 }
 
 /* ── Hero banner ────────────────────────────────────────────────────────────
