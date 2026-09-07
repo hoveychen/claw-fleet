@@ -237,7 +237,6 @@ interface UIState {
    *  deliberately no `navGroup` field: the active tab is derived from `viewMode`
    *  via navGroupOf, so a cross-page hop can't desync the two. */
   lastViewByNavGroup: Record<NavGroup, ViewMode>;
-  liteMode: boolean;
   sidebarCollapsed: boolean;
   /** Per-view collapse state for each view's secondary sidebar (二级侧边栏),
    *  keyed by ViewMode. Re-clicking the already-active nav item toggles the
@@ -284,25 +283,18 @@ interface UIState {
   setHistoryGroupHandoff: (on: boolean) => void;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
-  // Lite-mode hop from the active DecisionPanel into a dedicated decision-
-  // history view. Holds the session id whose history is being viewed, or null
-  // when the view is closed. Takes precedence over DecisionPanel and the
-  // session list until the user closes it via the back button.
-  liteDecisionHistorySessionId: string | null;
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
   /** Switch sidebar tabs: hops to that tab's remembered page (or its home page
    *  on the first visit). A no-op when the current page already belongs to it. */
   setNavGroup: (g: NavGroup) => void;
   setLastSessionViewMode: (m: SessionViewMode) => void;
-  setLiteMode: (on: boolean) => void;
   setSidebarCollapsed: (on: boolean) => void;
   /** Toggle the collapsed state of `view`'s secondary sidebar. */
   toggleSecondarySidebar: (view: ViewMode) => void;
   /** Explicitly set `view`'s secondary sidebar collapsed state. */
   setSecondarySidebar: (view: ViewMode, collapsed: boolean) => void;
   setMascotVisible: (on: boolean) => void;
-  setLiteDecisionHistorySessionId: (id: string | null) => void;
   /** When true, the DecisionPanel renders as a minimized bar at the bottom
    *  of the screen instead of the full card. Guard decisions force-expand. */
   decisionPanelCollapsed: boolean;
@@ -520,7 +512,6 @@ export const useUIStore = create<UIState>((set) => ({
   lastSessionViewMode:
     (getItem("lastSessionViewMode") as SessionViewMode) ?? "gallery",
   lastViewByNavGroup: readLastViewByNavGroup(),
-  liteMode: getItem("liteMode") === "true",
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
   mascotVisible: getItem("mascot-visible") === "true",
@@ -567,7 +558,6 @@ export const useUIStore = create<UIState>((set) => ({
     setItem("history-group-handoff", on ? "true" : "false");
     set({ historyGroupHandoff: on });
   },
-  liteDecisionHistorySessionId: null,
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   floatingDecisionPanel: getItem("floating-decision-panel") === "true",
   setTheme: (t) => {
@@ -585,11 +575,6 @@ export const useUIStore = create<UIState>((set) => ({
   setLastSessionViewMode: (m) => {
     setItem("lastSessionViewMode", m);
     set({ lastSessionViewMode: m });
-  },
-  setLiteMode: (on) => {
-    setItem("liteMode", on ? "true" : "false");
-    invoke("set_lite_mode", { enabled: on }).catch(() => {});
-    set({ liteMode: on });
   },
   fileNav: null,
   requestFileNav: (req) =>
@@ -661,8 +646,6 @@ export const useUIStore = create<UIState>((set) => ({
     emit("overlay-mascot-visible-changed", on).catch(() => {});
     set({ mascotVisible: on });
   },
-  setLiteDecisionHistorySessionId: (id) =>
-    set({ liteDecisionHistorySessionId: id }),
   setDecisionPanelCollapsed: (on) => {
     setItem("decision-panel-collapsed", on ? "true" : "false");
     set({ decisionPanelCollapsed: on });

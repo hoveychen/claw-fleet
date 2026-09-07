@@ -745,7 +745,7 @@
   transform: rotate(45deg);
 }
 
-/* Segmented toggle toolbar above the profile card — keep-awake / Lite / theme.
+/* Segmented toggle toolbar above the profile card — keep-awake / theme.
    Same bordered-strip vocabulary as the banner's `.view_toggle` so it reads as
    a deliberate control bar rather than three loose icons. Cells split the width
    evenly (flex: 1) with hairline dividers between them. */
@@ -790,7 +790,7 @@
 }
 
 /* Theme cycle cell holds a text glyph (☀/☽/⊙) rather than an SVG — size it to
-   sit level with the 14px lite-mode icon beside it. */
+   sit level with the 14px icons beside it. */
 .footer_theme_btn {
   font-size: 15px;
   line-height: 1;
@@ -826,8 +826,7 @@
   padding: 2px 0 4px;
 }
 
-/* Subagent row: indent and draw an L-bracket connector in the left gutter,
-   mirroring the lite-mode timeline thread (see LiteSessionCard.module.css). */
+/* Subagent row: indent and draw an L-bracket connector in the left gutter. */
 .indented {
   position: relative;
   margin-left: 20px;

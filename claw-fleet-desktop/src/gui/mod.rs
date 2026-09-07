@@ -275,38 +275,6 @@ fn fit_main_window_to_work_area(w: &tauri::WebviewWindow) {
     let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
 }
 
-// Lite portrait mode — shrink main window to phone-like portrait strip.
-// We intentionally keep the native decorations (titleBarStyle: Overlay on
-// macOS, default chrome elsewhere) because toggling set_decorations at
-// runtime drops the Overlay style and the title bar can't be restored —
-// that manifested as a broken title bar after exiting lite. Trade-off:
-// traffic lights stay visible in lite mode, but we gain native rounded
-// corners + correct restore.
-#[tauri::command]
-fn set_lite_mode(app: tauri::AppHandle, enabled: bool) {
-    let Some(w) = app.get_webview_window("main") else { return };
-    if enabled {
-        let _ = w.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize::new(
-            300.0, 520.0,
-        ))));
-        let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(340.0, 720.0)));
-        if let Ok(Some(monitor)) = w.current_monitor() {
-            let size = monitor.size();
-            let scale = monitor.scale_factor();
-            let screen_w = size.width as f64 / scale;
-            let x = screen_w - 360.0;
-            let y = 40.0;
-            let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
-        }
-    } else {
-        let _ = w.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize::new(
-            900.0, 600.0,
-        ))));
-        let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(1280.0, 820.0)));
-        let _ = w.center();
-    }
-}
-
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -393,7 +361,7 @@ async fn open_settings_window(
     Ok(())
 }
 
-// ── Preview subwindow (lite-mode decision preview) ──────────────────────────
+// ── Preview subwindow (decision-card preview) ───────────────────────────────
 
 // async: see the deadlock note on `open_settings_window` — a synchronous
 // window-building command white-screens the new webview on Windows.
@@ -1041,7 +1009,6 @@ struct MenuLabels {
     select_all: &'static str,
 
     view: &'static str,
-    toggle_lite: &'static str,
     theme: &'static str,
     theme_system: &'static str,
     theme_light: &'static str,
@@ -1085,7 +1052,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
             select_all: "全选",
 
             view: "视图",
-            toggle_lite: "切换轻量模式",
             theme: "主题",
             theme_system: "跟随系统",
             theme_light: "亮色",
@@ -1127,7 +1093,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
             select_all: "Select All",
 
             view: "View",
-            toggle_lite: "Toggle Lite Mode",
             theme: "Theme",
             theme_system: "System",
             theme_light: "Light",
@@ -1233,12 +1198,6 @@ fn build_app_menu(
         .build()?;
 
     let view_submenu = SubmenuBuilder::new(app, l.view)
-        .item(
-            &MenuItemBuilder::new(l.toggle_lite)
-                .id("menu-toggle-lite")
-                .accelerator("CmdOrCtrl+Shift+L")
-                .build(app)?,
-        )
         .item(&theme_submenu)
         .separator()
         .item(
@@ -1341,9 +1300,6 @@ fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
                 let _ = w.set_focus();
             }
             let _ = app.emit("menu-daily-report", ());
-        }
-        "menu-toggle-lite" => {
-            let _ = app.emit("menu-toggle-lite", ());
         }
         "menu-theme-system" => {
             let _ = app.emit("menu-theme", "system");
@@ -2284,7 +2240,6 @@ pub fn run() {
             set_user_title,
             open_notification_settings,
             show_main_window,
-            set_lite_mode,
             crate::traffic_lights::nudge_traffic_lights,
             quit_app,
             open_settings_window,

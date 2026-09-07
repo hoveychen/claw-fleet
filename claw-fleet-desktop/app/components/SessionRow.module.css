@@ -1,6 +1,6 @@
-/* Task-list row — the Linear-style compact session row shared by the desktop
-   task page (HistoryView) and lite mode (LiteApp), extracted so both render the
-   identical rail without duplicating markup or styling. The relay-group
+/* Task-list row — the Linear-style compact session row used by the desktop
+   task page (HistoryView), extracted so every rail renders the identical row
+   without duplicating markup or styling. The relay-group
    wrappers (.group_wrap / .group_children / .group_more) and the mark toggle
    (.mark_toggle, shared with MarkControl) stay in HistoryView.module.css /
    SessionRail; this file owns only what SessionRow itself references. */

@@ -56,9 +56,6 @@ export interface PillMenuProps {
    *  first load can fail during `dsh web` startup, so reopening must retry or
    *  the menu lies ("no options") until the whole dialog is remounted. */
   onOpen?: () => void;
-  /** Tighter padding / smaller font for narrow hosts (e.g. lite mode's 340px
-   *  strip) where the full-size pill row would wrap to three lines. */
-  compact?: boolean;
 }
 
 export function PillMenu({
@@ -73,7 +70,6 @@ export function PillMenu({
   className,
   testId,
   onOpen,
-  compact,
 }: PillMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -126,7 +122,7 @@ export function PillMenu({
     <div className={`${styles.menu_wrap} ${className ?? ""}`} ref={wrapRef}>
       <button
         type="button"
-        className={`${styles.ghost_pill} ${compact ? styles.ghost_pill_compact : ""}`}
+        className={styles.ghost_pill}
         onClick={() => {
           if (disabled) return;
           if (!open) onOpen?.();

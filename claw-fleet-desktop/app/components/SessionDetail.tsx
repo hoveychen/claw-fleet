@@ -142,7 +142,6 @@ function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
 }
 
 export function SessionDetail({
-  lite = false,
   inline = false,
   sessionInfo = null,
   searchQuery: standaloneSearchQuery = null,
@@ -150,7 +149,6 @@ export function SessionDetail({
   tabOpener,
   secondView = false,
 }: {
-  lite?: boolean;
   inline?: boolean;
   /** When set, the component runs in standalone mode: its own local
    *  session/messages state, independent from the global useDetailStore.
@@ -173,8 +171,8 @@ export function SessionDetail({
   /** Present when this instance lives in a tab strip (the 任务 page's detail
    *  column): a path the agent named then opens as a tab *beside* the
    *  conversation instead of switching the whole window to the 仓库 page. Absent
-   *  in the global drawer and Lite mode, which have nowhere to put a tab and so
-   *  keep the page-switching behaviour. */
+   *  in the global drawer, which has nowhere to put a tab and so keeps the
+   *  page-switching behaviour. */
   tabOpener?: DetailTabOpener;
   /** This pane is the *second* view of a session already open in the column.
    *  Only drops the header's "open beside" item — it would offer to open the
@@ -635,7 +633,7 @@ export function SessionDetail({
       workspaceRoot: workspacePath,
       isLocal: connection?.type !== "remote",
       // In a tab strip the file opens beside the prose that named it — the
-      // whole point of an IDE's split. Elsewhere (drawer, Lite) there is no
+      // whole point of an IDE's split. Elsewhere (the drawer) there is no
       // strip, so it still goes to the 仓库 page.
       openInFiles: (absPath, line) =>
         tabOpener
@@ -936,7 +934,7 @@ export function SessionDetail({
     // tab strip, which is precisely "send it to the browser".
     <WikiLinksProvider value={wikiLinks}>
       <WebLinkProvider value={tabOpener?.openWeb ?? null}>
-      <div className={`${styles.root} ${liveSession ? styles.open : ""} ${lite ? styles.lite : ""} ${inline ? styles.inline : ""}`}>
+      <div className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""}`}>
         {liveSession && (
           <>
           {/* Header — two rows. The AI title leads (it is what identifies the
@@ -955,8 +953,8 @@ export function SessionDetail({
                 jsonlPath={liveSession.jsonlPath}
                 workspacePath={liveSession.workspacePath}
                 isLocal={connection?.type !== "remote"}
-                // Absent without a tab strip (the global drawer, Lite mode) —
-                // there is nowhere to put the second pane — and absent in the
+                // Absent without a tab strip (the global drawer) — there is
+                // nowhere to put the second pane — and absent in the
                 // second pane itself, where it would offer to open this one.
                 onOpenSecondView={
                   tabOpener && !secondView

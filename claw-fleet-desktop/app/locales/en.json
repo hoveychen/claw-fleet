@@ -1599,12 +1599,6 @@
     "dismiss_tip": "Click to dismiss",
     "clear_all": "Clear all ({{n}})"
   },
-  "lite": {
-    "enter": "Lite portrait mode",
-    "exit": "Exit lite mode",
-    "mute": "Mute alert sounds",
-    "unmute": "Unmute alert sounds"
-  },
   "nav_group": {
     "aria": "Mode",
     "fleet": "Fleet",
@@ -2181,7 +2175,6 @@
   "decision_panel": {
     "history_title": "Recent in this session",
     "history_more": "+{{count}} more in session detail",
-    "view_session_history": "View this session's history",
     "collapse": "Collapse panel",
     "expand": "Expand panel",
     "collapsed_label": "Decision panel · {{count}} pending",
@@ -2202,11 +2195,6 @@
     "submit_with_action": "Submit ({{action}})",
     "submitting": "Submitting…",
     "cancel": "Cancel"
-  },
-  "lite_decision_history": {
-    "back": "Back",
-    "loading": "Loading…",
-    "error": "Failed to load decisions."
   },
   "view_report": "Report",
   "report": {

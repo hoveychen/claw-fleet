@@ -20,8 +20,7 @@ function fmtTokens(n: number): string {
  */
 export function TodayUsageBadge({
   collapsed = false,
-  inline = false,
-}: { collapsed?: boolean; inline?: boolean } = {}) {
+}: { collapsed?: boolean } = {}) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<TodayUsage | null>(null);
   const [showReceipt, setShowReceipt] = useState(false);
@@ -66,25 +65,6 @@ export function TodayUsageBadge({
     <TokenReceiptModal onClose={() => setShowReceipt(false)} />
   ) : null;
   const openHint = t("today_usage.open_receipt", "查看今日花费明细");
-
-  // Compact one-line variant for narrow chrome (lite mode's drag bar):
-  // "$x · xK tok" on a single row, no section title.
-  if (inline) {
-    return (
-      <>
-        <button
-          type="button"
-          className={styles.badge_inline}
-          title={openHint}
-          onClick={() => setShowReceipt(true)}
-        >
-          <span className={styles.cost}>${cost.toFixed(2)}</span>
-          <span className={styles.tokens}>{fmtTokens(tokens)}</span>
-        </button>
-        {receipt}
-      </>
-    );
-  }
 
   if (collapsed) {
     return (

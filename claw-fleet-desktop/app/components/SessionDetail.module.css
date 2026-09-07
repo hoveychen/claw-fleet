@@ -46,8 +46,8 @@
 
 /* Windows frameless: leave room on the right for the three caption
    buttons drawn by <WindowsFrameOverlay> (3 × 46px). Skipped for the
-   inline (lite) form because the lite drag bar already accounts for
-   the buttons and SessionDetail then sits below it. */
+   inline form, which sits below a host chrome that already accounts for
+   the buttons. */
 .root:not(.inline) .header {
   padding-right: calc(16px + var(--win-caption-inset-x));
 }
@@ -556,16 +556,6 @@
 }
 .follow_pill:hover {
   background: var(--color-bg-card-hover);
-}
-
-/* ── Lite portrait mode: fill the LiteApp container instead of drawer ────── */
-.root.lite,
-.root.lite.open {
-  width: 100%;
-  min-width: 0;
-  height: 100%;
-  border-left: none;
-  transition: none;
 }
 
 /* ── Workflow DAG panel ───────────────────────────────────────────────────── */

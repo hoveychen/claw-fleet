@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import "./fonts";
 import "./App.css";
 import { ConnectionDialog } from "./components/ConnectionDialog";
-import { LiteApp } from "./components/LiteApp";
 import { Onboarding } from "./components/Onboarding";
 import { SessionDetail } from "./components/SessionDetail";
 import { SessionList } from "./components/SessionList";
@@ -37,12 +36,12 @@ function computeUnseenFeatures(): OnboardingFeatureId[] {
 }
 
 function App() {
-  const { theme, liteMode, setTheme, setLiteMode, setViewMode } = useUIStore();
+  const { theme, setTheme, setViewMode } = useUIStore();
   const { connection, setConnection, disconnect } = useConnectionStore();
 
   // Always-mounted listeners for backend decision events. Must live at the
   // App root so events aren't dropped while DecisionPanel is unmounted
-  // (e.g. lite mode with no pending decisions).
+  // (e.g. no pending decisions).
   useDecisionEvents();
   useDecisionPeerSync();
 
@@ -56,10 +55,8 @@ function App() {
   const find = useFindController();
 
   // Bridge: pop the floating decision window when the user can't see the in-app
-  // DecisionPanel — either because the main window is minimized, because the
-  // user toggled "always use the standalone window" in Settings, or because
-  // we're in lite mode (lite renders no in-window decision card by design —
-  // decisions always pop out as the standalone float instead).
+  // DecisionPanel — either because the main window is minimized, or because the
+  // user toggled "always use the standalone window" in Settings.
   const [mainMinimized, setMainMinimized] = useState(false);
   const decisions = useDecisionStore((s) => s.decisions);
   const floatingDecisionPanel = useUIStore((s) => s.floatingDecisionPanel);
@@ -97,7 +94,6 @@ function App() {
   const surfaces = decisionSurfaces({
     webBuild: isWebBuild(),
     floatingPreferred: floatingDecisionPanel,
-    liteMode,
     mainMinimized,
   });
   const { inline: inlineDecisionPanel, float: floatDecisionWindow } = surfaces;
@@ -193,12 +189,8 @@ function App() {
     ps.push(listen<"system" | "light" | "dark">("menu-theme", (e) => {
       setTheme(e.payload);
     }));
-    ps.push(listen("menu-toggle-lite", () => {
-      setLiteMode(!useUIStore.getState().liteMode);
-    }));
     ps.push(listen("menu-daily-report", () => {
       setViewMode("report");
-      if (useUIStore.getState().liteMode) setLiteMode(false);
     }));
     ps.push(listen("menu-welcome", () => {
       setOnboardingMode("full");
@@ -220,7 +212,7 @@ function App() {
     return () => {
       ps.forEach((p) => p.then((fn) => fn()).catch(() => {}));
     };
-  }, [setTheme, setLiteMode, setViewMode]);
+  }, [setTheme, setViewMode]);
 
   // Open a session detail when the user clicks an agent in the tray menu.
   // Fleet-spawned sessions route to the 任务 page's inline detail; others keep
@@ -300,34 +292,12 @@ function App() {
     setItem(WIZARD_COMPLETED_KEY, "1");
   }, []);
 
-  // Re-apply window decorations/size when the saved liteMode differs from the
-  // actual window state (e.g. first launch after a reload).
-  useEffect(() => {
-    invoke("set_lite_mode", { enabled: liteMode }).catch(() => {});
-  }, [liteMode]);
-
   // Show connection dialog until the user picks local or remote
   if (!connection) {
     return (
       <div className="app">
         <WindowsFrameOverlay />
         <ConnectionDialog onConnected={handleConnected} />
-      </div>
-    );
-  }
-
-  if (liteMode) {
-    return (
-      <div className="app">
-        <WindowsFrameOverlay />
-        <LiteApp />
-        {/* Lite draws no in-window card on the desktop — decisions pop out as
-            the standalone float, so this is false there. A tab has no float to
-            pop, so the panel has to ride along here or the card has nowhere to
-            render at all. */}
-        {inlineDecisionPanel && <DecisionPanel />}
-        <WaitingAlerts />
-        <FindBar controller={find} />
       </div>
     );
   }

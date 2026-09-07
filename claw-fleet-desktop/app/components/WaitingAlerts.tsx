@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import type { WaitingAlert } from "../types";
-import { navigateToSessionDetail, useDecisionStore, useDetailStore, useSessionsStore, useUIStore, useWaitingAlertsStore } from "../store";
+import { navigateToSessionDetail, useDecisionStore, useSessionsStore, useWaitingAlertsStore } from "../store";
 import { getItem } from "../storage";
 import { playAlertSound, type TtsMode } from "../audio";
 import styles from "./WaitingAlerts.module.css";
@@ -77,9 +77,6 @@ function AlertCard({
 export function WaitingAlerts() {
   const { t } = useTranslation();
   const { alerts, setAlerts, refresh, dismiss, dismissAll, dismissedIds } = useWaitingAlertsStore();
-  const liteMode = useUIStore((s) => s.liteMode);
-  const hasDecision = useDecisionStore((s) => s.decisions.length > 0);
-  const openedSession = useDetailStore((s) => s.session);
   const spokenIds = useRef(new Set<string>());
 
   useEffect(() => {
@@ -125,19 +122,12 @@ export function WaitingAlerts() {
   const visible = alerts.filter((a) => !dismissedIds.has(a.sessionId));
 
   if (visible.length === 0) return null;
-  // In lite mode the body is the mobile-style task page (LiteApp), which
-  // surfaces waiting sessions inline as row status dots — so suppress the
-  // bottom toast there to avoid overlaying it. Lite sub-views (DecisionPanel,
-  // SessionDetail) still fall back to the bottom toast so alerts stay visible.
-  const liteBodyView = liteMode && !hasDecision && !openedSession;
-  if (liteBodyView) return null;
-
   const MAX_STACK = 5;
   const shown = visible.slice(0, MAX_STACK);
   const overflowCount = visible.length - MAX_STACK;
 
   return (
-    <div className={`${styles.overlay} ${liteMode ? styles.overlay_lite : ""}`}>
+    <div className={styles.overlay}>
       {visible.length >= 2 && (
         <button
           className={styles.clear_all}

@@ -4,7 +4,6 @@ import { decisionSurfaces } from "./decisionSurface";
 const DESKTOP = {
   webBuild: false,
   floatingPreferred: false,
-  liteMode: false,
   mainMinimized: false,
 };
 
@@ -15,13 +14,6 @@ describe("decisionSurfaces — desktop", () => {
 
   it("hands the card to the standalone window when the user asked for it", () => {
     expect(decisionSurfaces({ ...DESKTOP, floatingPreferred: true })).toEqual({
-      inline: false,
-      float: true,
-    });
-  });
-
-  it("pops the float in Lite mode, which draws no in-window card", () => {
-    expect(decisionSurfaces({ ...DESKTOP, liteMode: true })).toEqual({
       inline: false,
       float: true,
     });
@@ -50,13 +42,6 @@ describe("decisionSurfaces — browser build", () => {
     });
   });
 
-  it("renders inline in Lite mode", () => {
-    expect(decisionSurfaces({ ...WEB, liteMode: true })).toEqual({
-      inline: true,
-      float: false,
-    });
-  });
-
   it("never asks for a float window, whatever the host reports", () => {
     expect(decisionSurfaces({ ...WEB, mainMinimized: true }).float).toBe(false);
   });
@@ -66,7 +51,6 @@ describe("decisionSurfaces — browser build", () => {
       decisionSurfaces({
         webBuild: true,
         floatingPreferred: true,
-        liteMode: true,
         mainMinimized: true,
       }),
     ).toEqual({ inline: true, float: false });

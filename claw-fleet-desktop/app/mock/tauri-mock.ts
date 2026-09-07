@@ -287,7 +287,6 @@ async function handleIPC(
     case "kill_workspace_sessions":
     case "delete_connection":
     case "connect_remote":
-    case "set_lite_mode":
     case "show_main_window":
     case "respond_to_guard":
     case "respond_to_elicitation":
@@ -1470,8 +1469,7 @@ export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
   installScreenplayDriver();
 
   // Decision-panel drivers — let developers trigger guard / elicitation
-  // decisions from the DevTools console to exercise the full-screen takeover
-  // (especially useful for the lite portrait mode).
+  // decisions from the DevTools console to exercise the full-screen takeover.
   (window as any).__mock_guard = (overrides: Record<string, unknown> = {}) => {
     const id = `mock-guard-${Date.now()}`;
     emit("guard-request", {

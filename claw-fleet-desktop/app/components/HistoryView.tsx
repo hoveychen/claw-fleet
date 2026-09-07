@@ -221,8 +221,8 @@ export function matchesWorkspaceFilter(
 }
 
 // timeAgo / formatRunning / renderSnippet / sessionEq and the SessionRow
-// component itself moved to ./SessionRow (the shared row atom), so LiteApp's
-// rail renders the identical row without duplicating it here.
+// component itself moved to ./SessionRow (the shared row atom) so every rail
+// renders the identical row without duplicating it here.
 
 /**
  * Reorder `rows` (the live filtered+sorted list) back into a frozen id order,
@@ -254,7 +254,7 @@ export function applyFrozenOrder(
 
 // Relay-chain grouping logic (RenderItem / buildRenderItems / chainBarColor /
 // dwellReadTargets / GROUP_VISIBLE / GROUP_LOAD_STEP / chainTip) lives in
-// ./sessionGroups so LiteApp's rail can reuse it without importing this file.
+// ./sessionGroups so any rail can reuse it without importing this file.
 
 // GroupMarkControl (relay-chain mark-all) moved to ./MarkControl alongside the
 // single-row MarkControl; SessionRail renders it inside group headers.

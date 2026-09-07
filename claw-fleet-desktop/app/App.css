@@ -67,7 +67,7 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
      — which is what made the pane feel like reading through a slot.
 
      `max-width` simply stops applying once the pane is narrower than this, so
-     the lite/portrait and minimum-width (360px) forms are untouched; the cap is
+     narrow (down to the 360px minimum-width) forms are untouched; the cap is
      what keeps a maximized 2560px window from rendering 2000px lines. */
   --transcript-column: 46.13rem;
 }

@@ -45,36 +45,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Inline mode (lite drag bar) ─────────────────────────────────────────── */
-
-.badge_inline {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  padding: 0 2px;
-  user-select: none;
-  cursor: pointer;
-  white-space: nowrap;
-  border: none;
-  background: none;
-  font: inherit;
-  color: inherit;
-  border-radius: var(--radius-xs);
-}
-
-.badge_inline:hover {
-  background: var(--color-bg-hover);
-}
-
-.badge_inline .cost {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.badge_inline .tokens {
-  font-size: 10px;
-}
-
 /* ── Collapsed rail mode ─────────────────────────────────────────────────── */
 
 .badge_collapsed {

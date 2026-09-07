@@ -53,7 +53,6 @@ export function SessionList() {
     setViewMode,
     setNavGroup,
     lastSessionViewMode,
-    setLiteMode,
     theme,
     setTheme,
     sidebarCollapsed,
@@ -505,7 +504,7 @@ export function SessionList() {
           )}
         </div>
 
-        {/* Footer: a segmented toggle toolbar (keep-awake / Lite / theme) over
+        {/* Footer: a segmented toggle toolbar (keep-awake / theme) over
             the profile card. The toggles used to live inside the card, but at
             narrow sidebar widths they crowded out the app name — so they get
             their own bar. Mirrors the banner's `view_toggle` segmented control
@@ -523,26 +522,6 @@ export function SessionList() {
                   aria-pressed={keepAwake}
                 >
                   <Coffee size={14} strokeWidth={1.5} />
-                </button>
-              )}
-              {/* Lite mode is a *window* mode: entering it undecorates the
-                  desktop window and resizes it to a portrait strip via
-                  `set_lite_mode`. A browser tab has no window of its own to
-                  reshape, so the button would only shrink the layout inside
-                  whatever viewport the tab already has. */}
-              {!isWebBuild() && (
-                <button
-                  type="button"
-                  className={styles.footer_toolbar_btn}
-                  onClick={() => setLiteMode(true)}
-                  title={t("lite.enter")}
-                  aria-label={t("lite.enter")}
-                >
-                  {/* Picture-in-picture / mini-window glyph for Lite mode */}
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
-                    <rect x="8.5" y="7.5" width="5" height="4.5" rx="0.8" fill="currentColor" fillOpacity="0.4" />
-                  </svg>
                 </button>
               )}
               <button
