@@ -468,6 +468,29 @@ fn build_lines(
     lines
 }
 
+/// Return one session's billed usage for exactly one local calendar day.
+///
+/// Daily reports use this instead of maintaining a second transcript parser,
+/// so Claude/Codex attribution, cache pricing, model changes and cross-midnight
+/// sessions stay identical to the receipt.
+pub(crate) fn session_usage_for_date(
+    session: &SessionInfo,
+    date: &str,
+) -> Vec<ModelReceiptLine> {
+    let cells = fold_session_cells(session);
+    let mut by_model = std::collections::HashMap::new();
+    let mut by_day = std::collections::BTreeMap::new();
+    sum_cells_window(
+        &cells,
+        &session.agent_source,
+        date,
+        date,
+        &mut by_model,
+        &mut by_day,
+    );
+    build_lines(by_model)
+}
+
 // ── Arbitrary-range breakdown (receipt + per-day trend) ──────────────────────
 //
 // This is **the** fold: the arbitrary inclusive `[from_ms, to_ms]` window that
