@@ -168,7 +168,12 @@ export async function getVoices(): Promise<TtsVoice[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   const locale = i18n.language === "zh" ? "zh" : "en";
   try {
-    return await invoke<TtsVoice[]>("get_tts_voices", { locale });
+    // Not just the throw: a host can *answer* with null (the browser build's
+    // fall-through for a command it has no route for). The caller renders
+    // `voices.length`, and since Settings became an in-window overlay that
+    // throw takes the whole app down rather than one subwindow.
+    const list = await invoke<TtsVoice[] | null>("get_tts_voices", { locale });
+    return Array.isArray(list) ? list : [];
   } catch {
     return [];
   }

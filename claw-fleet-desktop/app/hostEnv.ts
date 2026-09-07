@@ -24,7 +24,7 @@
 let webBuild = false;
 
 /**
- * Called once from a window entry point (`main.tsx`, `settings-main.tsx`) when
+ * Called once from the window entry point (`main.tsx`) when
  * that entry decided the page is *not* inside a Tauri webview — i.e. right
  * before it installs the HTTP transport. Nothing else may call this.
  */

@@ -147,7 +147,7 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
   ),
 };
 
-export function SettingsPanel({ onClose, standalone = false }: { onClose: () => void; standalone?: boolean }) {
+export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const { connection, disconnect } = useConnectionStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
@@ -155,23 +155,34 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   // initial tab; otherwise everyday users see just the 3 base tabs.
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Cross-window tab deep-link (e.g. a spawn error's "open the environment
-  // panel" button): consume SETTINGS_OPEN_TAB_KEY on mount, and via the
-  // `storage` event when this window is already open. Consumed = removed, so
-  // it never persists into an unrelated later open.
+  // Esc closes the overlay. The panel used to be its own window, where the OS
+  // gave the user a close affordance (⌘W / the title-bar button); as an overlay
+  // it has to supply one itself, and click-outside alone is not enough.
   useEffect(() => {
-    const consume = () => {
-      const tab = window.localStorage.getItem(SETTINGS_OPEN_TAB_KEY);
-      if (!tab) return;
-      window.localStorage.removeItem(SETTINGS_OPEN_TAB_KEY);
-      if (([...BASE_TABS, ...ADVANCED_TABS] as string[]).includes(tab)) {
-        setActiveTab(tab as SettingsTab);
-        if ((ADVANCED_TABS as string[]).includes(tab)) setShowAdvanced(true);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
       }
     };
-    consume();
-    window.addEventListener("storage", consume);
-    return () => window.removeEventListener("storage", consume);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Tab deep-link (e.g. a spawn error's "open the environment panel" button):
+  // the caller stashes the tab under SETTINGS_OPEN_TAB_KEY right before opening
+  // the overlay, and this panel consumes it on mount. Consumed = removed, so it
+  // never persists into an unrelated later open. No `storage` listener: the
+  // panel now mounts fresh on every open inside the one window, and a same-window
+  // write never fires that event anyway.
+  useEffect(() => {
+    const tab = window.localStorage.getItem(SETTINGS_OPEN_TAB_KEY);
+    if (!tab) return;
+    window.localStorage.removeItem(SETTINGS_OPEN_TAB_KEY);
+    if (([...BASE_TABS, ...ADVANCED_TABS] as string[]).includes(tab)) {
+      setActiveTab(tab as SettingsTab);
+      if ((ADVANCED_TABS as string[]).includes(tab)) setShowAdvanced(true);
+    }
   }, []);
 
   // ── Sources state ────────────────────────────────────────────────────────
@@ -1032,19 +1043,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     await emit("overlay-mascot-visible-changed", enabled).catch(() => {});
   }, []);
 
-  // ── Floating decision panel state ──────────────────────────────────────
-  const [floatingDecisionPanelState, setFloatingDecisionPanelState] = useState<FeatureState>(
-    () => getFeatureState("floating-decision-panel"),
-  );
-
-  const handleToggleFloatingDecisionPanel = useCallback(async (state: FeatureState) => {
-    setFloatingDecisionPanelState(state);
-    setFeatureState("floating-decision-panel", state);
-    const enabled = resolveFeatureState(state, "floating-decision-panel");
-    const { emit } = await import("@tauri-apps/api/event");
-    await emit("overlay-floating-decision-panel-changed", enabled).catch(() => {});
-  }, []);
-
   // ── Auto update check state ────────────────────────────────────────────
   const [autoUpdateCheckState, setAutoUpdateCheckState] = useState<FeatureState>(
     () => getFeatureState("auto-update-check"),
@@ -1141,17 +1139,10 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
 
   const handleSwitchConnection = useCallback(async () => {
-    if (standalone) {
-      // Defer to the main window; it owns the connection + detail stores.
-      const { emit } = await import("@tauri-apps/api/event");
-      await emit("switch-connection").catch(() => {});
-      onClose();
-      return;
-    }
     await useDetailStore.getState().close();
     await disconnect();
     onClose();
-  }, [disconnect, onClose, standalone]);
+  }, [disconnect, onClose]);
 
   const hooksInstalled = hooksPlan?.alreadyInstalled || hooksStatus === "success";
 
@@ -1176,14 +1167,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     </button>
   );
 
-  const wrapperProps = standalone
-    ? { className: styles.standalone_root }
-    : { className: styles.overlay, onClick: onClose };
-  const panelClass = standalone ? styles.standalone_panel : styles.panel;
-
   return (
-    <div {...wrapperProps}>
-      <div className={panelClass} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.overlay} onClick={onClose}>
+      <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className={styles.header}>
           <h2 className={styles.title}>{t("settings.title")}</h2>
@@ -1865,7 +1851,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
             {/* ── Interaction ── */}
             {activeTab === "interaction" && (
               <>
-              {/* ── Group: how decisions reach you (floating panel toggle moved to Alerts) ── */}
+              {/* ── Group: how decisions reach you ── */}
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.interaction_group_decision")}</div>
 
@@ -2394,10 +2380,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
               </>
             )}
 
-            {/* ── Alerts — unified: master mute → floating panel → system
-                 notifications → sound/speech. Replaces the old separate
-                 Notifications + Sound tabs and the floating-panel toggle that
-                 used to live under Interaction. ── */}
+            {/* ── Alerts — unified: master mute → system notifications →
+                 sound/speech. Replaces the old separate Notifications + Sound
+                 tabs. ── */}
             {activeTab === "alerts" && (
               <div className={styles.section}>
                 {/* Master mute — the single switch that silences EVERYTHING.
@@ -2417,31 +2402,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     onChange={handleTtsMutedChange}
                   />
                 </div>
-
-                {/* Visual — floating decision panel. The standalone window is a
-                    desktop-host feature: a tab cannot open one, and
-                    `show_decision_float` answers null in the browser build. The
-                    toggle used to still be here and still be persisted, so
-                    flipping it on in a tab silently sent every card to a window
-                    that does not exist (see decisionSurface.ts). */}
-                {!isWebBuild() && (
-                  <>
-                    <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.alerts_visual")}</div>
-                    <div className={styles.row}>
-                      <div>
-                        <span className={styles.row_label}>{t("settings.floating_decision_panel")}</span>
-                        <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                          {t("settings.floating_decision_panel_desc")}
-                        </span>
-                      </div>
-                      <TriStateToggle
-                        value={floatingDecisionPanelState}
-                        defaultOn={featureDefault("floating-decision-panel")}
-                        onChange={handleToggleFloatingDecisionPanel}
-                      />
-                    </div>
-                  </>
-                )}
 
                 {/* System notifications.
                     Every part of this is desktop-only, and the browser build

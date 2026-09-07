@@ -207,10 +207,6 @@ pub struct AppState {
     pub llm_config: Arc<Mutex<llm_provider::LlmConfig>>,
     /// Cached LLM provider info — pre-fetched at startup so Settings opens instantly.
     pub cached_llm_providers: Arc<Mutex<Vec<llm_provider::LlmProviderInfo>>>,
-    /// Serialized snapshot of the current decision queue, seeded by the main
-    /// window before it pops the decision-float. The float window reads this
-    /// on mount to hydrate its local store before live events arrive.
-    pub decision_float_snapshot: Arc<Mutex<Option<serde_json::Value>>>,
 }
 
 // ── App restart ─────────────────────────────────────────────────────────────
@@ -280,204 +276,6 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-// ── Settings window ──────────────────────────────────────────────────────────
-
-// Theme is applied on the builder so the native title bar starts in the
-// right mode. A freshly-built window otherwise inherits the system
-// NSAppearance, leaving a dark title bar on top of a light app body.
-fn parse_theme(s: Option<&str>) -> Option<tauri::Theme> {
-    match s? {
-        "light" => Some(tauri::Theme::Light),
-        "dark" => Some(tauri::Theme::Dark),
-        _ => None,
-    }
-}
-
-// NOTE: async command on purpose. On Windows, `WebviewWindowBuilder::build()`
-// deadlocks the main-thread event loop when called from a *synchronous* command
-// (the loop can't pump WebView2's initialization messages), which leaves the new
-// window a frozen white screen whose events — including the close button — never
-// fire. Running as an async command builds the webview off the main thread and
-// lets the loop pump, so the page actually loads. See tauri-apps/tauri#13963.
-#[tauri::command]
-async fn open_settings_window(
-    app: tauri::AppHandle,
-    connection: Option<String>,
-    theme: Option<String>,
-) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("settings") {
-        if let Some(t) = parse_theme(theme.as_deref()) {
-            let _ = w.set_theme(Some(t));
-        }
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-        return Ok(());
-    }
-
-    let mut path = String::from("settings.html");
-    if let Some(conn) = connection.filter(|s| !s.is_empty()) {
-        use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
-        path.push_str("?connection=");
-        path.push_str(&utf8_percent_encode(&conn, NON_ALPHANUMERIC).to_string());
-    }
-
-    let mut builder = tauri::WebviewWindowBuilder::new(
-        &app,
-        "settings",
-        tauri::WebviewUrl::App(path.into()),
-    )
-    .title("Settings")
-    .inner_size(780.0, 640.0)
-    .min_inner_size(560.0, 480.0)
-    .center();
-    if let Some(t) = parse_theme(theme.as_deref()) {
-        builder = builder.theme(Some(t));
-    }
-    let window = builder.build().map_err(|e| e.to_string())?;
-
-    // macOS only: hide on close instead of destroying the WKWebView. Tearing down
-    // a secondary webview races with delayed WebKit main-thread work items (observed
-    // crash in WebPageProxy::dispatchSetObscuredContentInsets on macOS 26.3.1).
-    //
-    // On Windows/Linux this MUST NOT run: hide-on-close leaves a zombie window whose
-    // WebView2/WebKitGTK process may have died (e.g. a white-screen load failure).
-    // The reuse branch above then only show()s that dead window and never rebuilds,
-    // so "settings won't open" becomes permanent. Letting the window destroy on close
-    // makes each reopen rebuild a fresh webview.
-    #[cfg(target_os = "macos")]
-    {
-        let hide_target = window.clone();
-        window.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = hide_target.hide();
-            }
-        });
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = window;
-
-    Ok(())
-}
-
-// ── Preview subwindow (decision-card preview) ───────────────────────────────
-
-// async: see the deadlock note on `open_settings_window` — a synchronous
-// window-building command white-screens the new webview on Windows.
-#[tauri::command]
-async fn open_preview_window(
-    app: tauri::AppHandle,
-    markdown: String,
-    title: Option<String>,
-    theme: Option<String>,
-) -> Result<(), String> {
-    // If already open, just push new content via event and bring to front.
-    if let Some(w) = app.get_webview_window("preview") {
-        if let Some(t) = parse_theme(theme.as_deref()) {
-            let _ = w.set_theme(Some(t));
-        }
-        let _ = w.show();
-        let _ = w.unminimize();
-        let payload = serde_json::json!({
-            "markdown": markdown,
-            "title": title,
-        });
-        let _ = w.emit("preview://update", payload);
-        return Ok(());
-    }
-
-    let mut path = String::from("preview.html");
-    {
-        use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
-        path.push_str("?markdown=");
-        path.push_str(&utf8_percent_encode(&markdown, NON_ALPHANUMERIC).to_string());
-        if let Some(t) = title.as_deref().filter(|s| !s.is_empty()) {
-            path.push_str("&title=");
-            path.push_str(&utf8_percent_encode(t, NON_ALPHANUMERIC).to_string());
-        }
-    }
-
-    let mut builder = tauri::WebviewWindowBuilder::new(
-        &app,
-        "preview",
-        tauri::WebviewUrl::App(path.into()),
-    )
-    .title(title.as_deref().unwrap_or("Preview"))
-    .inner_size(420.0, 520.0)
-    .min_inner_size(280.0, 240.0)
-    .resizable(true)
-    .decorations(true)
-    .always_on_top(true)
-    .skip_taskbar(true);
-    if let Some(t) = parse_theme(theme.as_deref()) {
-        builder = builder.theme(Some(t));
-    }
-
-    // Position beside the main window when we can; otherwise let Tauri pick.
-    // Tauri's builder.position() takes logical coords, so convert physical
-    // -> logical using the main window's scale factor (HiDPI correctness).
-    if let Some(main) = app.get_webview_window("main") {
-        let scale = main.scale_factor().unwrap_or(1.0);
-        if let (Ok(pos), Ok(size)) = (main.outer_position(), main.outer_size()) {
-            let x = (pos.x as f64 + size.width as f64) / scale + 8.0;
-            let y = pos.y as f64 / scale;
-            builder = builder.position(x, y);
-        }
-    }
-
-    let window = builder.build().map_err(|e| e.to_string())?;
-
-    // macOS only: same WKWebView teardown-race workaround as the settings window
-    // — hide instead of destroying so queued WebKit work items can't dereference
-    // a freed WebPageProxy.
-    //
-    // On Windows/Linux this MUST NOT run: hide-on-close leaves a zombie window
-    // whose WebView2/WebKitGTK process may have died (e.g. a white-screen load
-    // failure). The reuse branch above then only emit()s an update to that dead
-    // window and never rebuilds, so the preview "won't open" becomes permanent.
-    // Letting the window destroy on close makes each reopen rebuild a fresh webview.
-    #[cfg(target_os = "macos")]
-    {
-        let hide_target = window.clone();
-        window.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = hide_target.hide();
-            }
-        });
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = window;
-
-    Ok(())
-}
-
-#[tauri::command]
-fn update_preview_content(
-    app: tauri::AppHandle,
-    markdown: String,
-    title: Option<String>,
-) -> Result<(), String> {
-    let Some(w) = app.get_webview_window("preview") else {
-        return Ok(());
-    };
-    let payload = serde_json::json!({
-        "markdown": markdown,
-        "title": title,
-    });
-    w.emit("preview://update", payload)
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-fn close_preview_window(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("preview") {
-        let _ = w.close();
-    }
-    Ok(())
-}
 
 /// Page margin AppKit gets for the reader's print job, in points (72pt = 1in).
 /// 28pt ≈ 10mm. Only a floor: the print panel still lets the user change it.
@@ -589,226 +387,6 @@ fn print_webview(window: tauri::WebviewWindow) -> Result<(), String> {
         }
     }
     window.print().map_err(|e| e.to_string())
-}
-
-// ── Decision float window (shown when main is minimized) ─────────────────────
-
-const DECISION_FLOAT_LABEL: &str = "decision-float";
-const DECISION_FLOAT_W: f64 = 480.0;
-const DECISION_FLOAT_H: f64 = 380.0;
-const DECISION_FLOAT_BOTTOM_MARGIN: f64 = 64.0;
-const DECISION_FLOAT_MIN_W: f64 = 360.0;
-const DECISION_FLOAT_MIN_H: f64 = 200.0;
-const DECISION_FLOAT_MAX_H_RATIO: f64 = 0.7;
-const DECISION_FLOAT_MAX_W_RATIO: f64 = 0.9;
-
-/// macOS: visible work area (Dock + menu bar excluded) of the screen under the
-/// cursor, expressed in Tauri's top-left logical coordinate space as
-/// `(x_left, y_top, width, height)`. Returns `None` if AppKit yields no screens.
-///
-/// Tauri's `Monitor::size()` reports the full screen frame, which ignores the
-/// Dock — so a bottom-anchored window computed from it slides behind the Dock.
-/// `NSScreen.visibleFrame` is the only source that already subtracts the Dock
-/// and menu bar, regardless of Dock edge, size, or auto-hide state.
-#[cfg(target_os = "macos")]
-fn macos_cursor_screen_visible_frame() -> Option<(f64, f64, f64, f64)> {
-    use objc2::runtime::AnyObject;
-    use objc2::{class, msg_send};
-    use objc2_foundation::{NSPoint, NSRect};
-
-    unsafe {
-        // Cursor in Cocoa global coords (origin = bottom-left of the main screen, y up).
-        let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
-
-        let screens: *mut AnyObject = msg_send![class!(NSScreen), screens];
-        if screens.is_null() {
-            return None;
-        }
-        let count: usize = msg_send![screens, count];
-        if count == 0 {
-            return None;
-        }
-
-        // screens[0] owns the global origin; its full height flips Cocoa's
-        // y-up space into Tauri's y-down space.
-        let primary: *mut AnyObject = msg_send![screens, objectAtIndex: 0usize];
-        let primary_frame: NSRect = msg_send![primary, frame];
-        let primary_h = primary_frame.size.height;
-
-        // Pick the screen the cursor sits on; fall back to the primary screen.
-        let mut chosen = primary;
-        for i in 0..count {
-            let s: *mut AnyObject = msg_send![screens, objectAtIndex: i];
-            let f: NSRect = msg_send![s, frame];
-            if mouse.x >= f.origin.x
-                && mouse.x < f.origin.x + f.size.width
-                && mouse.y >= f.origin.y
-                && mouse.y < f.origin.y + f.size.height
-            {
-                chosen = s;
-                break;
-            }
-        }
-
-        let vf: NSRect = msg_send![chosen, visibleFrame];
-        let x_left = vf.origin.x;
-        // Cocoa top edge (y up) → Tauri top edge (y down from primary top).
-        let y_top = primary_h - (vf.origin.y + vf.size.height);
-        Some((x_left, y_top, vf.size.width, vf.size.height))
-    }
-}
-
-/// Logical top-left position that anchors a `w × h` window at the bottom-center
-/// of the monitor under the cursor, plus that monitor's logical width/height
-/// so callers can clamp size against the screen. On macOS the anchor and size
-/// bounds use the screen's *visible* work area (Dock + menu bar excluded);
-/// elsewhere it uses the full monitor frame. Falls back to the primary monitor,
-/// then to (120, 120) with screen size None.
-fn decision_float_target_position_for(
-    app: &tauri::AppHandle,
-    w: f64,
-    h: f64,
-) -> (f64, f64, Option<(f64, f64)>) {
-    // macOS: anchor against the visible work area so the window never slides
-    // behind the Dock or under the menu bar.
-    #[cfg(target_os = "macos")]
-    if let Some((vx, vy, vw, vh)) = macos_cursor_screen_visible_frame() {
-        let x = vx + (vw - w) / 2.0;
-        let y = vy + vh - h - DECISION_FLOAT_BOTTOM_MARGIN;
-        return (x, y, Some((vw, vh)));
-    }
-
-    let cursor = app.cursor_position().ok();
-    let monitors = app.available_monitors().unwrap_or_default();
-
-    let chosen = cursor.and_then(|c| {
-        monitors.iter().find(|m| {
-            let pos = m.position();
-            let size = m.size();
-            let x0 = pos.x as f64;
-            let y0 = pos.y as f64;
-            let x1 = x0 + size.width as f64;
-            let y1 = y0 + size.height as f64;
-            c.x >= x0 && c.x < x1 && c.y >= y0 && c.y < y1
-        })
-    }).or_else(|| app.primary_monitor().ok().flatten().and_then(|_| monitors.first()));
-
-    if let Some(mon) = chosen {
-        let scale = mon.scale_factor();
-        let mon_x = mon.position().x as f64 / scale;
-        let mon_y = mon.position().y as f64 / scale;
-        let mon_w = mon.size().width as f64 / scale;
-        let mon_h = mon.size().height as f64 / scale;
-        let x = mon_x + (mon_w - w) / 2.0;
-        let y = mon_y + mon_h - h - DECISION_FLOAT_BOTTOM_MARGIN;
-        (x, y, Some((mon_w, mon_h)))
-    } else {
-        (120.0, 120.0, None)
-    }
-}
-
-fn decision_float_target_position(app: &tauri::AppHandle) -> (f64, f64) {
-    let (x, y, _) = decision_float_target_position_for(app, DECISION_FLOAT_W, DECISION_FLOAT_H);
-    (x, y)
-}
-
-// async: see the deadlock note on `open_settings_window` — a synchronous
-// window-building command white-screens the new webview on Windows.
-#[tauri::command]
-async fn show_decision_float(
-    app: tauri::AppHandle,
-    snapshot: serde_json::Value,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    *state.decision_float_snapshot.lock().unwrap() = Some(snapshot);
-
-    let (x, y) = decision_float_target_position(&app);
-
-    if let Some(w) = app.get_webview_window(DECISION_FLOAT_LABEL) {
-        let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-        return Ok(());
-    }
-
-    tauri::WebviewWindowBuilder::new(
-        &app,
-        DECISION_FLOAT_LABEL,
-        tauri::WebviewUrl::App("decision-float.html".into()),
-    )
-    .title("Fleet Decision")
-    .inner_size(DECISION_FLOAT_W, DECISION_FLOAT_H)
-    .min_inner_size(360.0, 280.0)
-    .position(x, y)
-    .resizable(true)
-    .decorations(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .focused(true)
-    .build()
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-#[tauri::command]
-fn hide_decision_float(app: tauri::AppHandle, state: tauri::State<AppState>) {
-    *state.decision_float_snapshot.lock().unwrap() = None;
-    if let Some(w) = app.get_webview_window(DECISION_FLOAT_LABEL) {
-        let _ = w.hide();
-    }
-}
-
-/// Resize the decision-float window to fit content. Either dimension may be
-/// omitted (keeps current). Both are clamped against the min size and against
-/// `MAX_*_RATIO` of the current monitor's logical extent. Re-anchors the
-/// window to bottom-center so the float stays glued to the screen edge.
-#[tauri::command]
-fn resize_decision_float(
-    app: tauri::AppHandle,
-    width: Option<f64>,
-    height: Option<f64>,
-) -> Result<(), String> {
-    let Some(window) = app.get_webview_window(DECISION_FLOAT_LABEL) else {
-        return Ok(());
-    };
-
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let current = window.inner_size().map_err(|e| e.to_string())?;
-    let cur_w = current.width as f64 / scale;
-    let cur_h = current.height as f64 / scale;
-
-    let mut new_w = width.unwrap_or(cur_w);
-    let mut new_h = height.unwrap_or(cur_h);
-
-    // Probe the cursor monitor for clamp bounds (also gives us the anchor pos).
-    let (_, _, screen) = decision_float_target_position_for(&app, new_w, new_h);
-    if let Some((mon_w, mon_h)) = screen {
-        new_w = new_w.min((mon_w * DECISION_FLOAT_MAX_W_RATIO).round());
-        new_h = new_h.min((mon_h * DECISION_FLOAT_MAX_H_RATIO).round());
-    }
-    new_w = new_w.max(DECISION_FLOAT_MIN_W);
-    new_h = new_h.max(DECISION_FLOAT_MIN_H);
-
-    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(new_w, new_h)));
-
-    let (x, y, _) = decision_float_target_position_for(&app, new_w, new_h);
-    let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
-
-    Ok(())
-}
-
-#[tauri::command]
-fn get_decision_float_snapshot(state: tauri::State<AppState>) -> Option<serde_json::Value> {
-    state.decision_float_snapshot.lock().unwrap().clone()
-}
-
-#[tauri::command]
-fn is_main_window_minimized(app: tauri::AppHandle) -> bool {
-    app.get_webview_window("main")
-        .and_then(|w| w.is_minimized().ok())
-        .unwrap_or(false)
 }
 
 // ── Tray helpers ─────────────────────────────────────────────────────────────
@@ -1269,16 +847,14 @@ fn install_app_menu(app: &tauri::AppHandle) {
 fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
     match id {
         "menu-settings" => {
-            // App menu has no theme context; mirror the main window's current
-            // NSAppearance so the Settings titlebar matches.
-            let theme = app
-                .get_webview_window("main")
-                .and_then(|w| w.theme().ok())
-                .map(|t| match t {
-                    tauri::Theme::Dark => "dark".to_string(),
-                    _ => "light".to_string(),
-                });
-            let _ = open_settings_window(app.clone(), None, theme);
+            // Settings is an overlay inside the main window, so surface that
+            // window first and let the frontend open the panel.
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+            let _ = app.emit("menu-settings", ());
         }
         "menu-check-updates" | "menu-check-updates-help" => {
             if let Some(w) = app.get_webview_window("main") {
@@ -1642,7 +1218,6 @@ pub fn run() {
             tray_rebuild_pending: Arc::new(Mutex::new(false)),
             llm_config: Arc::new(Mutex::new(llm_provider::LlmConfig::load())),
             cached_llm_providers: Arc::new(Mutex::new(Vec::new())),
-            decision_float_snapshot: Arc::new(Mutex::new(None)),
         })
         .setup(move |app| {
             // Windows: strip native chrome so the frontend's drag bar +
@@ -1966,30 +1541,6 @@ pub fn run() {
                 });
             }
 
-            // ── Main window minimize watcher ─────────────────────────────────
-            // Emit a frontend event whenever the main window's minimized state
-            // may have changed, so the decision-float window can be shown /
-            // hidden accordingly. Tauri has no dedicated "minimized" event, so
-            // we re-check on Resized and Focused.
-            if let Some(main_win) = app.get_webview_window("main") {
-                let handle = app.handle().clone();
-                main_win.on_window_event(move |event| {
-                    use tauri::WindowEvent;
-                    match event {
-                        WindowEvent::Resized(_) | WindowEvent::Focused(_) => {
-                            if let Some(w) = handle.get_webview_window("main") {
-                                let minimized = w.is_minimized().unwrap_or(false);
-                                let _ = handle.emit(
-                                    "main-window-minimize-state-changed",
-                                    minimized,
-                                );
-                            }
-                        }
-                        _ => {}
-                    }
-                });
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2242,15 +1793,6 @@ pub fn run() {
             show_main_window,
             crate::traffic_lights::nudge_traffic_lights,
             quit_app,
-            open_settings_window,
-            open_preview_window,
-            update_preview_content,
-            close_preview_window,
-            show_decision_float,
-            hide_decision_float,
-            resize_decision_float,
-            get_decision_float_snapshot,
-            is_main_window_minimized,
             get_tts_voices,
             speak_text,
             speak_text_say,
