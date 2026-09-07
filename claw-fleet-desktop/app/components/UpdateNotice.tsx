@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getItem } from "../storage";
+import { versionCheckArgs } from "../versionCheck";
 import styles from "./UpdateNotice.module.css";
 
 interface VersionCheckResult {
@@ -19,10 +20,10 @@ export function UpdateNotice() {
 
   useEffect(() => {
     if (getItem("auto-update-check") === "false") return;
-    invoke<VersionCheckResult>("check_app_version", {
-      force: false,
-      locale: i18n.resolvedLanguage ?? i18n.language,
-    }).then(setResult).catch(() => {});
+    invoke<VersionCheckResult>(
+      "check_app_version",
+      versionCheckArgs(false, i18n.resolvedLanguage ?? i18n.language),
+    ).then(setResult).catch(() => {});
   }, [i18n.language, i18n.resolvedLanguage]);
 
   if (!result?.has_update || dismissed) return null;

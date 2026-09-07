@@ -13,6 +13,7 @@ import { DailyReportPopup } from "./components/report/DailyReportPopup";
 import { FindBar } from "./components/FindBar";
 import { useFindController } from "./find/useFindController";
 import { UpdateNotice } from "./components/UpdateNotice";
+import { versionCheckArgs } from "./versionCheck";
 import { Wizard } from "./components/Wizard";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
@@ -162,7 +163,7 @@ function App() {
       try {
         const result = await invoke<{ has_update: boolean; latest_version: string; release_url: string }>(
           "check_app_version",
-          { force: true, locale: i18n.resolvedLanguage ?? i18n.language },
+          versionCheckArgs(true, i18n.resolvedLanguage ?? i18n.language),
         );
         if (result.has_update && result.release_url) {
           const { openUrl } = await import("@tauri-apps/plugin-opener");
