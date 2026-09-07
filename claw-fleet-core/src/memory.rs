@@ -677,21 +677,31 @@ pub fn promote_memory(memory_path: &str, target: &str, workspace_path: &str) -> 
         _ => return Err(format!("invalid target: {}", target)),
     };
 
-    // Append to CLAUDE.md (create if it doesn't exist)
-    let existing = if claude_md_path.is_file() {
-        fs::read_to_string(&claude_md_path).map_err(|e| e.to_string())?
-    } else {
-        String::new()
-    };
+    // Append to CLAUDE.md (create if it doesn't exist).
+    //
+    // Under `claude_md_lock` like the six guidance carriers: this is the same
+    // read-modify-write shape, so without the lock a promote that started before
+    // an `apply_*` finishes writes back a body that predates it — erasing that
+    // carrier's `@import` block. Fleet then runs sessions with the guidance
+    // silently missing, and one such loss also uninstalls the dsh plugin. The
+    // whole read-modify-write is inside the lock; locking only the write would
+    // keep the stale read that causes the loss.
+    crate::claude_md_lock::with_lock(&claude_md_path, || {
+        let existing = if claude_md_path.is_file() {
+            fs::read_to_string(&claude_md_path).map_err(|e| e.to_string())?
+        } else {
+            String::new()
+        };
 
-    let separator = if existing.is_empty() || existing.ends_with('\n') {
-        "\n"
-    } else {
-        "\n\n"
-    };
+        let separator = if existing.is_empty() || existing.ends_with('\n') {
+            "\n"
+        } else {
+            "\n\n"
+        };
 
-    let new_content = format!("{}{}{}\n", existing, separator, content.trim());
-    fs::write(&claude_md_path, new_content).map_err(|e| e.to_string())?;
+        let new_content = format!("{}{}{}\n", existing, separator, content.trim());
+        fs::write(&claude_md_path, new_content).map_err(|e| e.to_string())
+    })?;
 
     // Delete the memory file
     let mem_name = mem_pb
