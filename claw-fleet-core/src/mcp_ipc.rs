@@ -444,6 +444,17 @@ fn terminal_context(id: &str) -> Option<(String, bool)> {
 /// `Done`: reaching a terminal state means the human is finished with this
 /// session either way, so leaving it in the "needs review" bucket would just be
 /// a stale chore. No-op for an ordinary answer or a plain dismissal.
+///
+/// **The whole handoff chain is stamped, not just the answering hop.** A relay
+/// chain is one task carried by N sessions (`fleet handoff`), so ending it on
+/// the last hop has to close the earlier ones too — otherwise every predecessor
+/// keeps a row in the desktop's 待办 bucket forever (`markBucket` in
+/// `HistoryView.tsx` calls anything without `userMark == done` pending), and a
+/// long chain leaves N-1 of them behind. Only the hop that actually raised the
+/// card carries the agent's `taskComplete` claim; predecessors record `false`,
+/// because they never made that claim and the retrospective reads that field as
+/// "the agent said it was done" evidence. The retrospective itself likewise runs
+/// once, for the answering hop.
 fn stamp_task_outcome(resp: &FleetAskResponse) {
     let Some(outcome) = resp.task_outcome else {
         return;
@@ -454,28 +465,63 @@ fn stamp_task_outcome(resp: &FleetAskResponse) {
     if session_id.trim().is_empty() {
         return;
     }
-    let workspace = crate::session::resolve_session_cwd(&session_id)
-        .or_else(|| crate::codex_source::codex_fleet_owned_cwd(&session_id))
+    let workspace = stamp_terminal_chain(&session_id, outcome, &resp.id, agent_claimed_complete);
+    // Per-task retrospective. Returns immediately; the LLM pass runs detached,
+    // because this path is unblocking an agent that is waiting on the card.
+    crate::task_review::on_task_terminated(&session_id, &workspace, outcome);
+}
+
+/// Stamp the terminal state across every session of `session_id`'s task — the
+/// whole handoff chain, or just this one session when it never relayed. Returns
+/// the answering session's workspace. Split out from [`stamp_task_outcome`] so
+/// it is testable without the detached retrospective thread that follows it.
+fn stamp_terminal_chain(
+    session_id: &str,
+    outcome: crate::task_outcome::TaskOutcome,
+    card_id: &str,
+    agent_claimed_complete: bool,
+) -> String {
+    let workspace = stamp_one_terminal(session_id, outcome, card_id, agent_claimed_complete);
+    // `task_sessions` is the existing definition of "the sessions that make up
+    // this task" (the retrospective already reads the chain this way); reuse it
+    // so the two cannot drift.
+    for hop in crate::task_review::task_sessions(session_id) {
+        if hop == session_id || hop.trim().is_empty() {
+            continue;
+        }
+        stamp_one_terminal(&hop, outcome, card_id, false);
+    }
+    workspace
+}
+
+/// Stamp one session's terminal state + review mark, returning the workspace it
+/// resolved to (the caller needs it for the retrospective).
+fn stamp_one_terminal(
+    session_id: &str,
+    outcome: crate::task_outcome::TaskOutcome,
+    card_id: &str,
+    agent_claimed_complete: bool,
+) -> String {
+    let workspace = crate::session::resolve_session_cwd(session_id)
+        .or_else(|| crate::codex_source::codex_fleet_owned_cwd(session_id))
         .unwrap_or_default();
     if let Err(e) = crate::task_outcome::set_outcome(
-        &session_id,
+        session_id,
         &workspace,
         Some(outcome),
-        &resp.id,
+        card_id,
         agent_claimed_complete,
     ) {
         crate::log_debug(&format!("task outcome stamp for {session_id}: {e}"));
     }
     if let Err(e) = crate::session_mark::set_mark(
-        &session_id,
+        session_id,
         &workspace,
         Some(crate::session_mark::SessionMark::Done),
     ) {
         crate::log_debug(&format!("session mark on terminal {session_id}: {e}"));
     }
-    // Per-task retrospective. Returns immediately; the LLM pass runs detached,
-    // because this path is unblocking an agent that is waiting on the card.
-    crate::task_review::on_task_terminated(&session_id, &workspace, outcome);
+    workspace
 }
 
 /// Recover an answered request whose MCP producer no longer exists.
@@ -1154,6 +1200,49 @@ mod tests {
             Some(crate::session_mark::SessionMark::Done),
             "reaching a terminal state also clears the needs-review chore"
         );
+    }
+
+    /// A handoff chain is one task carried by several sessions, so ending it on
+    /// the last hop has to close the earlier hops too — otherwise every
+    /// predecessor keeps a row in the desktop's 待办 bucket forever.
+    #[test]
+    fn terminal_outcome_stamps_the_whole_handoff_chain() {
+        let home = TmpHome::new("terminal-chain");
+        let chain_dir = home.dir.join(".fleet/handoffs/chain");
+        std::fs::create_dir_all(&chain_dir).unwrap();
+        std::fs::write(
+            chain_dir.join("chain-1.json"),
+            json!({
+                "chainId": "chain-1",
+                "workspacePath": "/tmp/ws",
+                "links": [
+                    {"fromSessionId": "hop-1", "toSessionId": "hop-2", "note": "n1", "handedAt": 1},
+                    {"fromSessionId": "hop-2", "toSessionId": "hop-3", "note": "n2", "handedAt": 2},
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        // The user presses 结束任务 on the last hop's card.
+        stamp_terminal_chain("hop-3", crate::task_outcome::TaskOutcome::Completed, "card-c", true);
+
+        for hop in ["hop-1", "hop-2", "hop-3"] {
+            let rec = crate::task_outcome::read(hop).unwrap_or_else(|| panic!("{hop} stamped"));
+            assert_eq!(rec.outcome, crate::task_outcome::TaskOutcome::Completed);
+            assert_eq!(rec.card_id, "card-c");
+            assert_eq!(
+                crate::session_mark::read(hop),
+                Some(crate::session_mark::SessionMark::Done),
+                "{hop} leaves the needs-review bucket too"
+            );
+        }
+        // Only the hop that raised the card made the `taskComplete` claim; the
+        // retrospective reads that field as the agent's own verdict, so the
+        // predecessors must not be credited with one they never made.
+        assert!(crate::task_outcome::read("hop-3").unwrap().agent_claimed_complete);
+        assert!(!crate::task_outcome::read("hop-1").unwrap().agent_claimed_complete);
+        assert!(!crate::task_outcome::read("hop-2").unwrap().agent_claimed_complete);
     }
 
     /// A plain dismissal (no terminal button) must record no terminal state —
