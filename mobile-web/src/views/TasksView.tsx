@@ -24,7 +24,6 @@ import {
   ServerOff,
   Share2,
   Square,
-  SquareTerminal,
   WifiOff,
 } from "lucide-react";
 import { AgentSourceIcon } from "./AgentSourceIcon";
@@ -34,12 +33,11 @@ import type { FleetTransport } from "../transport";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isFleetOwnedTask, isSessionUnread } from "../types";
 import { useDraft } from "../draft";
-import { useDeviceDraft } from "../deviceScope";
 import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
-import type { TerminalWorkspace } from "./TerminalView";
+import { repoRootPath } from "../../../shared-ts/repoPath";
 import styles from "./TasksView.module.css";
 
 /** 文档级滚动条被所有 tab 共享，任务页又会随 tab 卸载重挂（见 App 里按 `tab` 的条件
@@ -187,36 +185,58 @@ function markBucket(s: SessionInfo): SessionMark {
   return s.userMark === "done" ? "done" : "pending";
 }
 
-/** Values the workspace filter used to take back when the pure-chat workspace
- *  was still an option inside the `<select>` rather than its own toggle. "" is
- *  "all" and every real value is an absolute path, so these bare words could
- *  never collide with one. Read-only: migrated away on the first render that
- *  finds one persisted (see the effect in TasksView). */
-const LEGACY_CHAT_ONLY = "chat";
-const LEGACY_CHAT_HIDDEN = "no-chat";
+/** 任务列表的一个文件夹分区 —— 与桌面端启动台的仓库分组同构。 */
+export interface TaskSection {
+  /** 分区键,同时也是目录下拉的选项值(`workspaceFilterValue` 编码)。 */
+  key: string;
+  /** 表头文案:多设备时前缀设备名。 */
+  name: string;
+  /** 仓库根路径(worktree 已折回)。 */
+  path: string;
+  deviceId: string;
+  sessions: Array<WithDevice<SessionInfo>>;
+}
 
-/** Does `s` pass the workspace filter? Mirrors the desktop launchpad's
- *  `matchesWorkspaceFilter`: `chatOnly` is a chat-*only* toggle, not a
- *  chat-on/chat-off switch. On, it shows the pure-chat workspace and nothing
- *  else (the directory filter is ignored underneath it); off, nothing is
- *  filtered by mode, so chat sessions sit in "all" alongside the repos.
+/**
+ * 把已排好序的会话切成文件夹分区。**不重排**:分区按各自第一名成员出现的先后
+ * 排列,分区内保持传入顺序 —— 上面那套冻结顺序的用心在这里必须原样守住。
  *
- *  `chatPath` is the desktop host's `~/.fleet/chat`, `null` until the relay
- *  answers (or if it never does) — the toggle cannot be honoured without it, so
- *  it goes inert rather than showing an empty list. */
-export function matchesWorkspaceFilter(
-  s: SessionInfo & { deviceId?: string },
-  filter: string,
-  chatPath: string | null,
-  chatOnly: boolean,
-): boolean {
-  if (chatPath != null && chatOnly) return s.workspacePath === chatPath;
-  if (!filter) return true;
-  // 多设备时筛选值是 `<deviceId>::<workspacePath>`:两台机器上同路径的
-  // `/repos/foo` 是两个不同的仓库,合到一个选项里筛出来的列表是混的。
-  const sep = filter.indexOf("::");
-  if (sep < 0) return s.workspacePath === filter;
-  return s.deviceId === filter.slice(0, sep) && s.workspacePath === filter.slice(sep + 2);
+ * 纯聊天工作区恒定置顶(桌面端 `groupSessionsByWorkspace` 的 `pinnedPath` 同款):
+ * 它是最常回去的一个,不该因为某个项目更活跃就沉到列表深处。多设备时每台机器的
+ * 聊天目录各成一个分区,一并提到前面。
+ */
+export function groupTaskSections(
+  rows: Array<WithDevice<SessionInfo>>,
+  opts: {
+    chatPath: string | null;
+    multiDevice: boolean;
+    deviceLabelOf?: (deviceId: string) => string | null | undefined;
+  },
+): TaskSection[] {
+  const { chatPath, multiDevice, deviceLabelOf } = opts;
+  const byKey = new Map<string, TaskSection>();
+  for (const s of rows) {
+    const path = repoRootPath(s.workspacePath);
+    const key = workspaceFilterValue(s.deviceId, path, multiDevice);
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.sessions.push(s);
+      continue;
+    }
+    const device = deviceLabelOf?.(s.deviceId);
+    byKey.set(key, {
+      key,
+      name: device ? `${device} · ${s.workspaceName}` : s.workspaceName,
+      path,
+      deviceId: s.deviceId,
+      sessions: [s],
+    });
+  }
+  const sections = [...byKey.values()];
+  if (!chatPath) return sections;
+  const chat = sections.filter((sec) => sec.path === chatPath);
+  if (chat.length === 0) return sections;
+  return [...chat, ...sections.filter((sec) => sec.path !== chatPath)];
 }
 
 /** 目录筛选项的值。单设备时就是路径本身(与从前一致,老的草稿值继续有效)。 */
@@ -358,7 +378,6 @@ interface Props {
   onMarkRead: (sessions: Array<WithDevice<SessionInfo>>) => void;
   /** 打开终端页。带着当前筛选的目录进去省一次选择；筛的是「全部目录」时传 null,
    *  由终端页自己让用户挑。 */
-  onOpenTerminal: (workspace: TerminalWorkspace | null) => void;
   /** 这台设备的显示名。整个 prop 缺席 = 只配了一台,徽标与「设备 · 目录」的
    *  筛选项都不出现 —— 单设备用户不该为多设备付出任何一处视觉噪音。 */
   deviceLabelOf?: (deviceId: string) => string | null;
@@ -374,20 +393,12 @@ export function TasksView({
   sessionsLoaded,
   onOpenSession,
   onMarkRead,
-  onOpenTerminal,
 }: Props) {
   const confirm = useConfirm();
   // 筛选状态落到 localStorage（复用 Composer 草稿那套 useDraft），这样切标签页
   // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/仅活跃/分段都保持不变，
   // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
   const [search, setSearch] = useDraft<string>("tasks:search", "");
-  // 设备作用域:筛选值是一个 workspace 路径,它在另一台机器上根本不存在,不分家
-  // 切过去只会得到一个筛掉全部任务的空列表。搜索词与几个开关是纯 UI 偏好,属于
-  // 这台手机,仍然全局。
-  const [workspace, setWorkspace] = useDeviceDraft<string>("tasks:workspace", "");
-  // 仅聊天模式 —— 打开时盖过上面的目录筛选；关闭时不按模式过滤，聊天会话照常
-  // 混在列表里（见 matchesWorkspaceFilter）。
-  const [chatOnly, setChatOnly] = useDraft<boolean>("tasks:chatOnly", false);
   const [activeOnly, setActiveOnly] = useDraft<boolean>("tasks:activeOnly", false);
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
   // Group handoff-relay chains into one collapsible card. Default on; the setter
@@ -432,65 +443,13 @@ export function TasksView({
   }, [all]);
 
   // The desktop host's pure-chat workspace — the same path the new-session sheet
-  // pins. Null while it's in flight, which keeps the chat options hidden rather
-  // than offering a filter that can't be honoured.
+  // pins. Null while it's in flight; the chat section then simply sits where its
+  // activity puts it instead of being pinned on a guess.
   const chatPath = useChatWorkspace(client);
 
-  // Chat is filtered through its own pinned options, so it is kept out of the
-  // project list — otherwise it would sit there a second time as plain "Chat".
+  // 列表按文件夹分区展示（Chat 置顶），所以任务页不再有目录下拉：要看哪个目录
+  // 就折叠掉别的分区。「终端」按钮因此不带初始目录，由终端页自己的目录选择器接手。
   const multiDevice = deviceLabelOf !== undefined;
-  const workspaces = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const s of all) {
-      if (s.workspacePath === chatPath) continue;
-      const value = workspaceFilterValue(s.deviceId, s.workspacePath, multiDevice);
-      const device = deviceLabelOf?.(s.deviceId);
-      names.set(value, device ? `${device} · ${s.workspaceName}` : s.workspaceName);
-    }
-    return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [all, chatPath, multiDevice, deviceLabelOf]);
-
-  // 下拉的 value 是「设备::路径」的编码串，而开终端要的是拆开的三件套。这里按
-  // value 反查，省得在按钮那儿再解析一次编码（编码规则只该有一处知道）。
-  const terminalTargets = useMemo(() => {
-    const byValue = new Map<string, TerminalWorkspace>();
-    for (const s of all) {
-      if (s.workspacePath === chatPath) continue;
-      const value = workspaceFilterValue(s.deviceId, s.workspacePath, multiDevice);
-      if (!byValue.has(value)) {
-        byValue.set(value, {
-          deviceId: s.deviceId,
-          path: s.workspacePath,
-          name: s.workspaceName,
-        });
-      }
-    }
-    return byValue;
-  }, [all, chatPath, multiDevice]);
-
-  // 迁移：聊天还是下拉里一条选项时存下来的值。"chat" 交给 toggle，"no-chat"
-  // 已经没有对应项了（「全部目录」现在也含聊天），直接归零。要抢在下面那个孤
-  // 儿路径回退之前跑，否则「只看聊天」会被静默还原成「看全部」。
-  useEffect(() => {
-    if (workspace === LEGACY_CHAT_ONLY) {
-      setWorkspace("");
-      setChatOnly(true);
-    } else if (workspace === LEGACY_CHAT_HIDDEN) {
-      setWorkspace("");
-    }
-  }, [workspace, setWorkspace, setChatOnly]);
-
-  // A persisted workspace path can outlive its sessions (all done + pruned, or a
-  // repo we haven't touched this launch). Left as-is it would silently filter the
-  // list to empty while the <select> falls back to showing "全部目录" — looks like
-  // a bug. Once the first snapshot has landed, drop an orphaned real path back to
-  // "all". Chat mode is unaffected: it lives in its own toggle.
-  useEffect(() => {
-    if (!sessionsLoaded) return;
-    if (!workspace || workspace === LEGACY_CHAT_ONLY || workspace === LEGACY_CHAT_HIDDEN) return;
-    if (workspaces.some(([path]) => path === workspace)) return;
-    setWorkspace("");
-  }, [sessionsLoaded, workspace, workspaces, setWorkspace]);
 
   const activeCount = useMemo(() => all.filter((s) => LIVE.includes(s.status)).length, [all]);
 
@@ -500,7 +459,6 @@ export function TasksView({
   const preMark = useMemo(() => {
     const q = search.trim().toLowerCase();
     return all.filter((s) => {
-      if (!matchesWorkspaceFilter(s, workspace, chatPath, chatOnly)) return false;
       if (activeOnly && !LIVE.includes(s.status)) return false;
       if (q) {
         const clientMatch =
@@ -516,7 +474,7 @@ export function TasksView({
       }
       return true;
     });
-  }, [all, search, workspace, chatPath, chatOnly, activeOnly, ftsMatchPaths]);
+  }, [all, search, activeOnly, ftsMatchPaths]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -597,10 +555,27 @@ export function TasksView({
     [setMark],
   );
 
-  const renderItems = useMemo(
-    () => buildRenderItems(visible, groupHandoff),
-    [visible, groupHandoff],
+  // 文件夹分区是列表的一级层次；接力链分组退到分区之内（与桌面端启动台同构），
+  // 所以 buildRenderItems 逐分区跑，不会把两个目录的会话串成一条链。
+  const sections = useMemo(
+    () =>
+      groupTaskSections(visible, { chatPath, multiDevice, deviceLabelOf }).map((sec) => ({
+        ...sec,
+        items: buildRenderItems(sec.sessions, groupHandoff),
+      })),
+    [visible, chatPath, multiDevice, deviceLabelOf, groupHandoff],
   );
+
+  // 折叠起来的分区键。默认全展开——手机上一进来就该看到会话本身。
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
+  const toggleSection = useCallback((key: string) => {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const handleStop = useCallback(
     async (s: SessionInfo) => {
@@ -811,10 +786,7 @@ export function TasksView({
           )}
         </div>
         <div className={styles.metaRow}>
-          <span className={styles.project}>
-            <Folder size={11} />
-            {s.workspaceName}
-          </span>
+          {/* 目录名不再逐行重复——它就写在这张卡所属分区的表头上。 */}
           {/* 合并列表里必须一眼看出这条会话在哪台机器上 —— 同名项目在两台机器
               上很常见,而点进去拉的是那一台的 transcript。 */}
           {deviceLabelOf?.(s.deviceId) && (
@@ -946,39 +918,6 @@ export function TasksView({
           {searching && <span className={styles.searchSpinner} />}
         </div>
         <div className={styles.filterRow}>
-          {/* 目录下拉和聊天开关是同一个筛选的两半，互斥：聊天模式占满整个
-              列表，所以下拉在它底下置灰失效，而不是偷偷收窄一个它已经管不着
-              的列表。relay 没报出聊天目录时整个开关不显示——那时它没法生效。*/}
-          <select
-            className={styles.workspaceSelect}
-            value={workspace}
-            onChange={(e) => setWorkspace(e.target.value)}
-            disabled={chatOnly}
-          >
-            <option value="">{t("全部目录")}</option>
-            {workspaces.map(([path, name]) => (
-              <option key={path} value={path}>
-                {name}
-              </option>
-            ))}
-          </select>
-          {chatPath && (
-            <button
-              className={styles.filterToggle}
-              data-active={chatOnly}
-              onClick={() => setChatOnly((v) => !v)}
-            >
-              💬 {t("聊天")}
-            </button>
-          )}
-          <button
-            className={styles.filterToggle}
-            onClick={() => onOpenTerminal(terminalTargets.get(workspace) ?? null)}
-            title={t("在这台主机上开一个终端")}
-          >
-            <SquareTerminal size={13} />
-            {t("终端")}
-          </button>
           <button
             className={styles.filterToggle}
             data-active={activeOnly}
@@ -1028,38 +967,61 @@ export function TasksView({
       )}
 
       <div className={styles.list}>
-        {renderItems.map((item) => {
-          if (item.kind === "single") return renderCard(item.session);
-          const { chainId, tip, members, key } = item;
-          const full = chainMembersAll.get(chainId) ?? members;
-          const expanded = expandedChains.has(chainId);
-          const limit = chainLoadMore[chainId] ?? GROUP_VISIBLE;
-          // The header card *is* the tip (latest hop); the expanded list shows
-          // only the chain's *other* hops, never the tip again.
-          const rest = members.filter((m) => m.id !== tip.id);
-          const shown = expanded ? rest.slice(0, limit) : [];
-          const hidden = rest.length - shown.length;
+        {sections.map((section) => {
+          const collapsed = collapsedSections.has(section.key);
           return (
-            <div key={key} className={styles.group}>
-              {renderCard(tip, {
-                expanded,
-                onToggleExpand: () => toggleChain(chainId),
-                markMembers: full,
-              })}
-              {expanded && (
-                <div className={styles.groupChildren}>
-                  {shown.map((m) => renderCard(m))}
-                  {hidden > 0 && (
-                    <button
-                      className={styles.groupMore}
-                      onClick={() => loadMoreChain(chainId)}
-                    >
-                      {t("显示更早的 {0} 棒", hidden)}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
+            <section key={section.key} className={styles.workspaceSection}>
+              <button
+                className={styles.workspaceHeader}
+                aria-expanded={!collapsed}
+                title={section.path}
+                onClick={() => toggleSection(section.key)}
+              >
+                <Folder size={13} className={styles.workspaceFolder} />
+                <span className={styles.workspaceName}>{section.name}</span>
+                <span className={styles.workspaceCount}>{section.sessions.length}</span>
+                <ChevronRight
+                  size={14}
+                  className={styles.workspaceChevron}
+                  data-open={!collapsed}
+                />
+              </button>
+              {!collapsed &&
+                section.items.map((item) => {
+                  if (item.kind === "single") return renderCard(item.session);
+                  const { chainId, tip, members, key } = item;
+                  const full = chainMembersAll.get(chainId) ?? members;
+                  const expanded = expandedChains.has(chainId);
+                  const limit = chainLoadMore[chainId] ?? GROUP_VISIBLE;
+                  // The header card *is* the tip (latest hop); the expanded list
+                  // shows only the chain's *other* hops, never the tip again.
+                  const rest = members.filter((m) => m.id !== tip.id);
+                  const shown = expanded ? rest.slice(0, limit) : [];
+                  const hidden = rest.length - shown.length;
+                  return (
+                    <div key={key} className={styles.group}>
+                      {renderCard(tip, {
+                        expanded,
+                        onToggleExpand: () => toggleChain(chainId),
+                        markMembers: full,
+                      })}
+                      {expanded && (
+                        <div className={styles.groupChildren}>
+                          {shown.map((m) => renderCard(m))}
+                          {hidden > 0 && (
+                            <button
+                              className={styles.groupMore}
+                              onClick={() => loadMoreChain(chainId)}
+                            >
+                              {t("显示更早的 {0} 棒", hidden)}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </section>
           );
         })}
       </div>
