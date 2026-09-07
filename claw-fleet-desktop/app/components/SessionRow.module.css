@@ -98,8 +98,11 @@
   font-size: 12px;
   color: var(--color-text-secondary);
   line-height: 1.35;
+  /* One line, always: a mixed 1-/2-line rail makes rows read as different
+     heights and the eye loses the column. The overflow lives in the row's
+     tooltip (title + last message), so nothing is lost. */
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;

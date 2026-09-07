@@ -144,6 +144,15 @@ export const SessionRow = memo(function SessionRow({
   const quietMins = quiet
     ? Math.max(0, Math.round((Date.now() - s.lastActivityMs) / 60000))
     : 0;
+  // The title renders on a single clamped line, so the tooltip is the only
+  // place the full text survives — carry the title *and* the last message,
+  // not just the message (which is what a truncated row leaves you guessing).
+  const displayTitle =
+    s.titleOverride ?? s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）");
+  const tooltip = [displayTitle, s.lastMessagePreview]
+    .filter((v): v is string => !!v && v.trim().length > 0)
+    .filter((v, i, all) => all.indexOf(v) === i)
+    .join("\n\n");
   return (
     <div
       className={styles.row_wrap}
@@ -153,7 +162,7 @@ export const SessionRow = memo(function SessionRow({
         type="button"
         className={`${styles.row} ${expandable ? styles.row_expandable : ""} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""} ${unread ? styles.row_unread : ""}`}
         onClick={() => onClick(s)}
-        title={s.lastMessagePreview ?? undefined}
+        title={tooltip || undefined}
         aria-label={unread ? t("history.unread", "未读 — 有新消息") : undefined}
       >
         {runColor && (
@@ -178,7 +187,7 @@ export const SessionRow = memo(function SessionRow({
                 <AgentSourceIcon source={s.agentSource} />
               </span>
             )}
-            {s.titleOverride ?? s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
+            {displayTitle}
           </span>
           <span className={styles.row_meta}>
             {showWorkspace && (
