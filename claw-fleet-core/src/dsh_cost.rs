@@ -703,6 +703,35 @@ struct CostCache {
     /// collide. `serde(default)` so a cache written before this existed loads.
     #[serde(default)]
     metered: BTreeMap<String, MeteredPrice>,
+    /// session id → what that whole session has cost so far.
+    ///
+    /// A **derived** map: everything in it can be recomputed by re-walking the
+    /// session's history. It exists because the session roster is polled every
+    /// few seconds for every session, and a history walk per session per poll is
+    /// not a thing the session list can afford. Written whenever the ledger is
+    /// computed for any other reason; read by the roster with no RPC at all.
+    #[serde(default)]
+    sessions: BTreeMap<String, SessionSpend>,
+}
+
+/// What one dsh session has cost, cheap enough for the session roster to read.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSpend {
+    /// USD over every call that could be priced. `None` when none could be —
+    /// never `0.0`, which would read as "this session was free".
+    pub usd: Option<f64>,
+    pub priced_calls: u32,
+    pub unpriced_calls: u32,
+    /// The roster's `updatedAt` at the moment this was computed.
+    ///
+    /// This is the staleness marker, and it has to come from the roster rather
+    /// than from the ledger: the roster is the only clock the *scan* can read
+    /// without an RPC, so comparing like with like is what makes "has this
+    /// session moved since we priced it?" answerable for free. Comparing against
+    /// the last call's own timestamp would mark every session stale forever,
+    /// since a session is always persisted after its last call.
+    pub priced_at_updated_ms: i64,
 }
 
 fn load_cache() -> CostCache {
@@ -722,8 +751,12 @@ fn load_cache() -> CostCache {
 /// Receipts and metered prices are written together under one lock: a session
 /// that mixes routes produces both, and two separate locked writes would leave
 /// a window where only half of it had been recorded.
-fn store_cache(fresh: &BTreeMap<String, f64>, fresh_metered: &BTreeMap<String, MeteredPrice>) {
-    if fresh.is_empty() && fresh_metered.is_empty() {
+fn store_cache(
+    fresh: &BTreeMap<String, f64>,
+    fresh_metered: &BTreeMap<String, MeteredPrice>,
+    fresh_session: Option<(&str, SessionSpend)>,
+) {
+    if fresh.is_empty() && fresh_metered.is_empty() && fresh_session.is_none() {
         return;
     }
     let Some(path) = cache_path() else { return };
@@ -737,6 +770,12 @@ fn store_cache(fresh: &BTreeMap<String, f64>, fresh_metered: &BTreeMap<String, M
         cache
             .metered
             .extend(fresh_metered.iter().map(|(k, v)| (k.clone(), *v)));
+        if let Some((id, spend)) = fresh_session {
+            // Unlike the two maps above this is an overwrite, not a merge: a
+            // session's total is a fact about the whole session, and the newer
+            // reading supersedes the older one.
+            cache.sessions.insert(id.to_string(), spend);
+        }
         if let Ok(bytes) = serde_json::to_vec_pretty(&cache) {
             if let Err(e) = crate::atomic_json::write_atomic(&path, &bytes) {
                 crate::log_debug(&format!("dsh cost cache: write: {e}"));
@@ -822,7 +861,7 @@ fn price_ledger(session_id: &str, raw: &[RawCall]) -> Vec<PricedCall> {
     // Both kinds of fresh entry go down under one lock: a session that mixes
     // routes produces both, and two separate locked writes would leave a window
     // where only half of it had been recorded.
-    store_cache(&fresh_receipts, &fresh_metered);
+    store_cache(&fresh_receipts, &fresh_metered, None);
     calls
 }
 
@@ -924,6 +963,76 @@ fn price_ledger_with(
         });
     }
     (out, fresh_receipts, fresh_metered)
+}
+
+// ── Per-session spend, for the roster ────────────────────────────────────────
+//
+// The session list polls every few seconds and asks nothing of the network. So
+// the card's cost figure cannot be computed on demand — it is *looked up*, from
+// a total the ledger wrote down the last time anything else had reason to price
+// the session. The trade is explicit: the number on a card is what the session
+// had cost as of the last pricing, and a session that just ran a turn shows its
+// previous figure until one refresh catches up.
+
+/// Process-local memo of the `sessions` map, reloaded only when the cache file
+/// changes on disk.
+///
+/// Without this the roster reads (and parses) the whole cost cache — receipts,
+/// frozen metered prices and all — every few seconds, to use a few dozen bytes
+/// of it. The mtime gate makes a poll free when nothing has been priced since
+/// the last one, which is the overwhelmingly common case.
+static SPEND_MEMO: std::sync::Mutex<Option<(std::time::SystemTime, BTreeMap<String, SessionSpend>)>> =
+    std::sync::Mutex::new(None);
+
+/// Every session's recorded spend. No RPC, no network, usually no file read.
+pub fn all_session_spend() -> BTreeMap<String, SessionSpend> {
+    let Some(path) = cache_path() else {
+        return BTreeMap::new();
+    };
+    let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+    let mut memo = SPEND_MEMO
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let (Some(mtime), Some((seen, map))) = (mtime, memo.as_ref()) {
+        if *seen == mtime {
+            return map.clone();
+        }
+    }
+    let map = load_cache().sessions;
+    if let Some(mtime) = mtime {
+        *memo = Some((mtime, map.clone()));
+    }
+    map
+}
+
+/// Re-price one session and write its total down.
+///
+/// This is the expensive half — a full history walk, and possibly receipt
+/// lookups — so callers are expected to invoke it for **one** session at a time
+/// and only when [`SessionSpend::priced_at_updated_ms`] says the session has
+/// moved since it was last priced.
+pub fn refresh_session_spend(uri: &str, updated_ms: i64) -> Result<SessionSpend, String> {
+    let calls = dsh_session_calls(uri)?;
+    let cost = fold_session_cost(&calls);
+    let spend = SessionSpend {
+        usd: cost.total_usd,
+        priced_calls: cost.priced_calls,
+        // Both kinds of gap are "money we know is missing from this figure";
+        // the card has one line to say so, and the panel has the detail.
+        unpriced_calls: cost.unpriced_calls + cost.unpriceable_calls,
+        priced_at_updated_ms: updated_ms,
+    };
+    if let Some(id) = crate::dsh_source::DshSource::session_id_of(uri) {
+        store_cache(&BTreeMap::new(), &BTreeMap::new(), Some((id, spend)));
+    }
+    Ok(spend)
+}
+
+/// Is `spend` still current for a session the roster reports at `updated_ms`?
+///
+/// Absent means never priced, which is stale by definition.
+pub fn spend_is_current(spend: Option<&SessionSpend>, updated_ms: i64) -> bool {
+    spend.is_some_and(|s| s.priced_at_updated_ms >= updated_ms)
 }
 
 /// Real spend for a `dsh://` session URI — the ledger, folded.
