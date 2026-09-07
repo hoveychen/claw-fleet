@@ -1053,6 +1053,9 @@ export function SessionDetailView({
   // transcript, unfolded on an upward scroll, at the bottom, or whenever the
   // composer itself has something in it (the composer overrides this).
   const [composerHidden, setComposerHidden] = useState(false);
+  // 回复窗浮在转录之上、不占布局高度，所以滚动区要自己让出被遮住的那一截。
+  // 用实测值而不是写死一个数：胶囊会随输入内容、附件、排队消息一起长高。
+  const [composerHeight, setComposerHeight] = useState(0);
   const composerHiddenRef = useRef(false);
   const composerSettleUntil = useRef(0);
   const lastScrollTop = useRef(0);
@@ -1455,7 +1458,12 @@ export function SessionDetailView({
       )}
 
       {tab === "messages" && (
-      <div className={styles.scroll} ref={scrollRef} onScroll={onScroll}>
+      <div
+        className={styles.scroll}
+        ref={scrollRef}
+        onScroll={onScroll}
+        style={composerHeight ? { paddingBottom: composerHeight + 14 } : undefined}
+      >
         {syncingLatest && messages !== null && (
           <div className={styles.syncingLatest} role="status" aria-live="polite">
             <LoaderCircle size={14} aria-hidden="true" />
@@ -1551,6 +1559,7 @@ export function SessionDetailView({
           hidden={composerHidden}
           onOptimisticSend={handleOptimisticSend}
           onSubmitInFlight={handleSubmitInFlight}
+          onHeight={setComposerHeight}
         />
       )}
       {tab === "messages" && canEnqueueSession(session) && (
@@ -1560,6 +1569,7 @@ export function SessionDetailView({
           mode="enqueue"
           hidden={composerHidden}
           onSubmitInFlight={handleSubmitInFlight}
+          onHeight={setComposerHeight}
         />
       )}
     </div>

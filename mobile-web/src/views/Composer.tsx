@@ -1181,6 +1181,9 @@ interface ResumeProps {
    *  unsent draft, a focused field, a picked attachment or a queued follow-up
    *  all outrank it — nothing the user is mid-way through may vanish. */
   hidden?: boolean;
+  /** 本组件当前遮挡的高度（折叠时为 0）。它浮在转录之上、不占布局高度，父级
+   *  据此给滚动区补底部留白，最后一条消息才不会被压在胶囊底下。 */
+  onHeight?: (px: number) => void;
 }
 
 export function ResumeComposer({
@@ -1190,6 +1193,7 @@ export function ResumeComposer({
   onOptimisticSend,
   onSubmitInFlight,
   hidden,
+  onHeight,
 }: ResumeProps) {
   const enqueueing = mode === "enqueue";
   // 会话所属的源决定给哪套 model/effort 清单——认不出的源退回 Claude，那是
@@ -1265,18 +1269,20 @@ export function ResumeComposer({
     !prompt.trim() &&
     attachments.length === 0 &&
     pendingMessages.length === 0;
-  // The fold slides the box out and reclaims its space by cancelling its own
-  // height with a negative margin — measured rather than animated as a height,
-  // so an expanded box is never capped (a dragged-taller textarea or a long
-  // queue would be clipped by a max-height).
+  // 实测高度上报给父级：浮起后本组件不占布局高度，转录区要靠这个数字给自己补
+  // 底部留白，否则最后一条消息会永远压在胶囊底下。折叠时报 0 —— 那一刻它确实
+  // 不遮挡任何东西。
   const boxRef = useRef<HTMLDivElement>(null);
-  const [openHeight, setOpenHeight] = useState(0);
   useLayoutEffect(() => {
     const el = boxRef.current;
-    if (!el || collapsed) return;
-    const h = el.offsetHeight;
-    setOpenHeight((prev) => (prev === h ? prev : h));
+    if (!el) return;
+    // 报的是「从视口底到本组件顶」的距离，而不是自身高度：胶囊还会被决策折叠条
+    // （--peek-inset）往上顶，那段空隙同样是转录区不能用的地方。
+    onHeight?.(collapsed ? 0 : Math.round(window.innerHeight - el.getBoundingClientRect().top));
   });
+  // 卸载时把留白还回去：会话从「可续写」翻成「运行中」会换掉这个组件，留一个
+  // 陈旧的高度在父级手里，转录底下就永远空着一块没人遮的白。
+  useEffect(() => () => onHeight?.(0), [onHeight]);
 
   // Chips still worth rendering — gates the "已排队" label too, so cancelling
   // the last one doesn't leave a header standing over an empty list.
@@ -1378,7 +1384,6 @@ export function ResumeComposer({
       className={styles.resumeBox}
       ref={boxRef}
       data-hidden={collapsed || undefined}
-      style={collapsed && openHeight ? { marginBottom: -openHeight } : undefined}
       aria-hidden={collapsed || undefined}
     >
       {visiblePending.length > 0 && (
@@ -1447,13 +1452,10 @@ export function ResumeComposer({
           <textarea
             ref={voiceTailRef}
             className={styles.resumeInput}
-            placeholder={
-              enqueueing
-                ? t("会话运行中，发送后排队…")
-                : voice.available
-                  ? t("继续这个会话，也可点麦克风说…")
-                  : t("继续这个会话（留空 = continue）…")
-            }
+            /* 胶囊里一行只放得下十来个汉字，长 placeholder 会在静息态就把框撑成
+               两行 —— 那正是这次要消灭的东西。麦克风就在右边，不必再用文案介绍；
+               「留空 = continue」的行为没变，只是不再写在框里。 */
+            placeholder={enqueueing ? t("排队一条追问…") : t("继续这个会话…")}
             rows={1}
             value={voice.showingPreview ? voice.preview : prompt}
             readOnly={voice.showingPreview}

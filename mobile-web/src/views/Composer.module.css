@@ -529,26 +529,49 @@
   }
 }
 
+/* 浮起，不占布局高度。
+ *
+ * 原来它是 .page 里的一个 flex 兄弟，于是它有多高，转录区就少多高 —— 静息
+ * ≈400px 全都是从阅读区里扣掉的。改成绝对定位后转录内容从它底下滚过去；下方
+ * 需要留出的空白由 SessionDetailView 按实测高度给 .scroll 补 padding，那样
+ * 内容长高时留白跟着变，不用在这里写死一个数。 */
 .resumeBox {
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
-  padding: 10px 12px;
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  /* 决策折叠条（DecisionDrawer 的 .peek）也是全局 fixed 的，会正好压在这根胶囊
+     上。它把自己占住的下边界发布成 --peek-inset，这里往上让开；没有卡时该变量
+     不存在，退回贴底。 */
+  bottom: max(calc(6px + env(safe-area-inset-bottom)), var(--peek-inset, 0px));
+  z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  flex-shrink: 0;
+  gap: 6px;
   transition:
     transform 0.18s ease,
-    margin-bottom 0.18s ease,
     opacity 0.14s ease;
 }
 
+/* 胶囊底下那层渐隐。玻璃只挡住胶囊自己那一块，胶囊上方的配置 chip 仍然直接压在
+   转录文字上 —— 眼验时那两颗 chip 和底下的段落糊在一起。这层从背景色渐隐到透明，
+   让文字在撞到 chip 之前先化掉。它跟着 resumeBox 一起折叠。 */
+.resumeBox::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  right: -8px;
+  bottom: -44px;
+  height: calc(100% + 88px);
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--color-bg) 46%, transparent);
+}
+
 /* Folded while the reader scrolls back through the transcript: it slides down
-   out of view and gives its space back (the negative margin is set inline from
-   its measured height — see ResumeComposer). */
+   out of view. 浮起之后它本来就不占位，所以不再需要用负 margin 把自己的高度
+   抵消掉；多滑 24px 是为了越过 bottom 的那点偏移与安全区。 */
 .resumeBox[data-hidden] {
-  transform: translateY(100%);
+  transform: translateY(calc(100% + 24px));
   opacity: 0;
   pointer-events: none;
 }
@@ -624,12 +647,27 @@
   gap: 6px;
   padding: 4px 4px 4px 6px;
   border-radius: 24px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-input);
+  /* 玻璃材质：转录内容从它底下滚过去，所以它必须自己撑住可读性——半透明底 +
+     背景模糊 + 一道内高光边（顶栏 --color-bg-glass 是同一套语言）。 */
+  border: 1px solid var(--color-border-strong);
+  background: color-mix(in srgb, var(--color-bg-input) 74%, transparent);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow:
+    0 8px 26px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* 不支持 backdrop-filter 的 webview（部分低端安卓 / 旧鸿蒙壳）上，半透明底会让
+   转录文字直接透上来糊成一片。那里退回实心底：丢的是材质，守住的是可读性。 */
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  .pill {
+    background: var(--color-bg-input);
+  }
 }
 
 .pill:focus-within {
-  border-color: var(--color-border-strong);
+  border-color: var(--color-accent);
 }
 
 .pillBtn,
@@ -685,23 +723,21 @@
   z-index: 60;
 }
 
-.resumeActions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 /* Queued follow-ups waiting for the running turn to end. */
 .queuedList {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
-  margin-bottom: 6px;
 }
 
+/* 浮起之后这行字直接压在转录上，裸文字会和底下的内容糊在一起——给它自己的底。 */
 .queuedLabel {
   font-size: var(--t-meta, 11px);
   color: var(--color-text-secondary);
+  background: var(--color-bg-card);
+  border-radius: 6px;
+  padding: 2px 6px;
 }
 
 .queuedChip {

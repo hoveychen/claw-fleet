@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { HistoryLayer } from "../useNavStack";
 import { DecisionsView, KIND_LABEL } from "./DecisionsView";
@@ -58,6 +58,24 @@ export function DecisionDrawer(props: Props) {
     onOpenSession(deviceId, id);
   };
 
+  // 折叠条是全局 fixed 的，会正好压在会话详情页那根浮起的输入胶囊上。把它自己
+  // 占住的下边界发布成一个 CSS 变量，让别人往上让开 —— 量出来而不是写死一个数：
+  // 两台设备同时有卡时这条会换行变高。
+  const peekRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const el = peekRef.current;
+    if (!el) {
+      root.style.removeProperty("--peek-inset");
+      return;
+    }
+    const inset = window.innerHeight - el.getBoundingClientRect().top + 8;
+    root.style.setProperty("--peek-inset", `${Math.round(inset)}px`);
+    return () => {
+      root.style.removeProperty("--peek-inset");
+    };
+  });
+
   if (expanded) {
     return (
       <>
@@ -99,6 +117,7 @@ export function DecisionDrawer(props: Props) {
 
   return (
     <button
+      ref={peekRef}
       className={styles.peek}
       onClick={() => setExpanded(true)}
       aria-label={t("查看待处理决策")}
