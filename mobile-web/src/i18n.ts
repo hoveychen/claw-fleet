@@ -327,7 +327,6 @@ const DICT: Record<string, string> = {
   全部目录: "All workspaces",
   聊天: "Chat",
   仅活跃: "Live only",
-  "全部已读 ({0})": "Mark all read ({0})",
   全部: "All",
   进行中: "In progress",
   已完成: "Done",

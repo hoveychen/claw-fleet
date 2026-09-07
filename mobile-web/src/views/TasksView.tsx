@@ -32,7 +32,7 @@ import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
-import { isFleetOwnedEntrypoint, isFleetOwnedTask, isSessionUnread } from "../types";
+import { isFleetOwnedEntrypoint, isFleetOwnedTask } from "../types";
 import { useDraft } from "../draft";
 import { useDeviceDraft } from "../deviceScope";
 import { itemKey, type WithDevice } from "../deviceRuntime";
@@ -324,24 +324,6 @@ export function buildRenderItems<T extends SessionInfo & { deviceId?: string }>(
   });
 }
 
-/**
- * When a collapsed relay-group header is opened, which of its members to mark
- * read immediately. The header aggregates its unread dot over the whole chain
- * (`markMembers.some(isSessionUnread)`), but opening it only navigates to the
- * tip's detail — where the existing dwell clears just the tip. The *other* hops
- * of a collapsed group never get a detail dwell of their own, so without this
- * they'd keep the group's dot lit forever after the user has plainly opened it.
- * The tip is excluded so its own 2s detail dwell still governs it (a quick
- * glance that backs out shouldn't clear the tip). Already-read members are
- * skipped so we don't re-stamp them.
- */
-export function groupOpenReadTargets<T extends SessionInfo>(
-  tip: SessionInfo,
-  markMembers: T[],
-): T[] {
-  return markMembers.filter((m) => m.id !== tip.id && isSessionUnread(m));
-}
-
 interface Props {
   /** 合并列表:每条会话都带着它属于哪一台设备(deviceRuntime.ts 的 WithDevice)。
    *  id 只在单机内唯一,所以 React key 与「打开这一条」都必须带上 deviceId。 */
@@ -355,7 +337,6 @@ interface Props {
    *  Distinguishes "still waiting for the first push" from "pushed, but empty". */
   sessionsLoaded: boolean;
   onOpenSession: (session: WithDevice<SessionInfo>) => void;
-  onMarkRead: (sessions: Array<WithDevice<SessionInfo>>) => void;
   /** 打开终端页。带着当前筛选的目录进去省一次选择；筛的是「全部目录」时传 null,
    *  由终端页自己让用户挑。 */
   onOpenTerminal: (workspace: TerminalWorkspace | null) => void;
@@ -373,7 +354,6 @@ export function TasksView({
   agentOnline,
   sessionsLoaded,
   onOpenSession,
-  onMarkRead,
   onOpenTerminal,
 }: Props) {
   const confirm = useConfirm();
@@ -532,8 +512,6 @@ export function TasksView({
     () => preMark.filter((s) => markFilter === "all" || markBucket(s) === markFilter),
     [preMark, markFilter],
   );
-
-  const unreadCount = useMemo(() => visible.filter(isSessionUnread).length, [visible]);
 
   const setMark = useCallback(
     (s: SessionInfo, mark: SessionMark | null) => {
@@ -758,13 +736,12 @@ export function TasksView({
       markMembers: Array<WithDevice<SessionInfo>>;
     },
   ) => {
-    // For a collapsed group the header card is the tip, but its dot and unread
-    // bold must reflect the whole chain (`group.markMembers` = full membership),
-    // not just the tip — otherwise a chain floated to the top by a live mid-hop
-    // shows no dot. Plain cards keep deriving from the session itself.
+    // For a collapsed group the header card is the tip, but its dot must
+    // reflect the whole chain (`group.markMembers` = full membership), not just
+    // the tip — otherwise a chain floated to the top by a live mid-hop shows no
+    // dot. Plain cards keep deriving from the session itself.
     const tone = group ? chainTone(group.markMembers) : statusTone(s);
     const mode = stopMode(s);
-    const unread = group ? group.markMembers.some(isSessionUnread) : isSessionUnread(s);
     const isDone = group
       ? group.markMembers.length > 0 && group.markMembers.every((m) => m.userMark === "done")
       : s.userMark === "done";
@@ -776,16 +753,7 @@ export function TasksView({
       <div
         key={itemKey(s.deviceId, s.id)}
         className={styles.card}
-        onClick={() => {
-          onOpenSession(s);
-          // A group header aggregates unread over the whole chain, but opening
-          // it only dwells the tip — clear the other unread hops here so the
-          // group's dot doesn't linger after the user opened it.
-          if (group) {
-            const rest = groupOpenReadTargets(s, group.markMembers);
-            if (rest.length > 0) onMarkRead(rest);
-          }
-        }}
+        onClick={() => onOpenSession(s)}
       >
         <div className={styles.cardHead}>
           {tone && <span className={styles.statusDot} data-tone={tone} />}
@@ -793,7 +761,6 @@ export function TasksView({
             <AgentSourceIcon source={s.agentSource} />
           </span>
           <span className={styles.title}>{title}</span>
-          {unread && <span className={styles.unreadDot} />}
           <span className={styles.time}>{timeAgo(s.lastActivityMs)}</span>
           {group && (
             <button
@@ -988,14 +955,6 @@ export function TasksView({
             {t("仅活跃")}
             <span className={styles.activeCount}>{activeCount}</span>
           </button>
-          {unreadCount > 0 && (
-            <button
-              className={styles.readAll}
-              onClick={() => onMarkRead(visible.filter(isSessionUnread))}
-            >
-              {t("全部已读 ({0})", unreadCount)}
-            </button>
-          )}
         </div>
         <div className={styles.segment}>
           {(["all", "pending", "done"] as MarkFilter[]).map((key) => (

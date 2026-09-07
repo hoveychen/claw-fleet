@@ -78,7 +78,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     procAlive: true,
     contextPercent: 0.72,
     totalCostUsd: 4.33,
-    lastReadMs: null,
   },
   {
     // Subagent of sess-api-main. Kept in the snapshot purely as a drill-down
@@ -104,7 +103,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     procAlive: false,
     contextPercent: 0.18,
     totalCostUsd: 0.42,
-    lastReadMs: null,
   },
   {
     // Fleet-spawned Codex session, turn ended → shows the Codex mark and is
@@ -128,7 +126,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     procAlive: false,
     contextPercent: 0.41,
     totalCostUsd: 0,
-    lastReadMs: NOW - 40 * MIN,
   },
   {
     id: "sess-billing-3",
@@ -157,7 +154,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
       currentPlan: "Usage-based billing migration",
       currentTask: "P4 — cutover behind flag",
     },
-    lastReadMs: NOW - 30 * MIN,
   },
   {
     id: "sess-e2e-main",
@@ -178,7 +174,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     procAlive: true,
     contextPercent: 0.36,
     totalCostUsd: 4.02,
-    lastReadMs: NOW - 60 * MIN,
   },
   {
     id: "sess-infra-idle",
@@ -199,7 +194,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     contextPercent: 0.41,
     totalCostUsd: 2.05,
     userMark: "done",
-    lastReadMs: NOW - 3 * HOUR,
   },
   // Quiet-alive: the process runs on while the transcript has gone silent.
   // `determine_status` ages a session down to `idle` 60s after its last
@@ -226,7 +220,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     procAlive: true,
     contextPercent: 0.21,
     totalCostUsd: 14.11,
-    lastReadMs: NOW - 90 * MIN,
   },
   // The pure-chat session — not a project. Its workspacePath must equal
   // MOCK_CHAT_WORKSPACE for the chat filter to recognise it.
@@ -249,7 +242,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     procAlive: false,
     contextPercent: 0.08,
     totalCostUsd: 0.09,
-    lastReadMs: NOW - 45 * MIN,
   },
 ];
 
