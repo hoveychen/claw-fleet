@@ -438,14 +438,16 @@
   color: var(--color-text);
 }
 
-/* The reader itself — ExternalFilePreview / WikiTabPane / WebTabPane all
-   expect to fill their box. */
+/* The reader itself — ExternalFilePreview / WikiTabPane / WebTabPane all expect
+   to fill their box, and all three are bare content, so the gutter lives here
+   rather than being repeated in each. */
 .aux_doc_pane {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 8px 10px 10px;
 }
 
 /* ── Live subagent deck ─────────────────────────────────────────────────────

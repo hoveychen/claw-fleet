@@ -20,8 +20,6 @@ import {
   singleGroup,
   splitGroup,
   openSecondView,
-  openTabRouted,
-  tabAffinity,
   visibleTabIds,
   type GroupsState,
   type TabGroup,
