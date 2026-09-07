@@ -102,3 +102,51 @@ describe("reconcileMessages", () => {
     expect(reconcileMessages(prev, [])).toBe(prev);
   });
 });
+
+// Captured dsh ordering: the human and instructions share one millisecond,
+// followed by eight injections sharing the next millisecond.
+it("preserves the human, attachment and each injection across repeated polls", () => {
+  const row = (text: string, meta: boolean, ms: string): RawMessage => ({
+    type: "user", timestamp: `2026-09-07T22:17:03.${ms}Z`,
+    ...(meta ? { isMeta: true } : {}),
+    message: { role: "user", content: [{ type: "text", text }] },
+  });
+  const human = row("现在dsh没有计价？？？", false, "876");
+  human.message!.content = [
+    { type: "text", text: "现在dsh没有计价？？？" },
+    { type: "image", source: { type: "path", media_type: "image/webp", path: "/tmp/prompt-image.webp" } },
+  ];
+  const expected = [human, row("workspace instructions", true, "876"),
+    ...Array.from({ length: 8 }, (_, i) => row(`injection ${i}`, true, "877")),
+    msg("reply", "working")];
+  let displayed = reconcileMessages([], refetched(expected));
+  for (let poll = 0; poll < 3; poll++) {
+    displayed = reconcileMessages(displayed, refetched(expected));
+    expect(displayed).toEqual(expected);
+    expect(displayed.filter(m => m.type === "user" && !m.isMeta)).toHaveLength(1);
+  }
+});
+
+it("does not replace a sliding timestamp-only row with another row's body", () => {
+  const human: RawMessage = { type: "user", timestamp: "same-ms",
+    message: { role: "user", content: [{ type: "text", text: "human" }] } };
+  const injection: RawMessage = { ...human, isMeta: true,
+    message: { role: "user", content: [{ type: "text", text: "context" }] } };
+  expect(reconcileMessages([injection, msg("tail", "reply")], [human, msg("tail", "reply")]))
+    .toEqual([human, msg("tail", "reply")]);
+});
+
+it("does not substitute different content even when explicit ids collide", () => {
+  const expected = [msg("duplicate", "one"), msg("duplicate", "two"), msg("tail", "end")];
+  expect(reconcileMessages(expected, refetched(expected))).toEqual(expected);
+});
+
+it("recovers an already-corrupted rendered prompt on the next history read", () => {
+  const human: RawMessage = { type: "user", timestamp: "same-ms",
+    message: { role: "user", content: [{ type: "text", text: "recover me" }] } };
+  const injection: RawMessage = { ...human, isMeta: true,
+    message: { role: "user", content: [{ type: "text", text: "context" }] } };
+  const expected = [human, injection, msg("tail", "reply")];
+  const corrupted = [injection, injection, msg("tail", "reply")];
+  expect(reconcileMessages(corrupted, refetched(expected))).toEqual(expected);
+});

@@ -39,7 +39,19 @@ use serde_json::{json, Value};
 
 /// Convert a session's durable events into Claude-shaped transcript records.
 pub fn normalize(events: &[Value]) -> Vec<Value> {
-    events.iter().filter_map(normalize_event).collect()
+    events
+        .iter()
+        .filter_map(|event| {
+            let mut message = normalize_event(event)?;
+            // seq is durable and unique within a session, including injections,
+            // tool results and notices. Millisecond timestamps are NOT unique.
+            // Keep identity independent of pagination and normalized row offsets.
+            if let Some(seq) = event.get("seq").and_then(Value::as_i64) {
+                message["uuid"] = json!(format!("dsh-event:{seq}"));
+            }
+            Some(message)
+        })
+        .collect()
 }
 
 /// dsh stamps events with epoch milliseconds; the renderer wants what Claude
@@ -449,6 +461,39 @@ mod tests {
                 }
             }
         })
+    }
+
+    #[test]
+    fn same_millisecond_events_have_stable_distinct_transcript_ids() {
+        let mut events = vec![
+            user_message(),
+            agent_instructions(),
+            plugin_snapshot(),
+            assistant_with_tool_call(),
+            tool_result(),
+        ];
+        for event in &mut events {
+            event["time"] = json!(1788819423876i64);
+        }
+        let out = normalize(&events);
+        let ids: Vec<_> = out
+            .iter()
+            .map(|m| m["uuid"].as_str().expect("durable event identity"))
+            .collect();
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            events.len()
+        );
+        // The same event retains its identity regardless of page boundaries.
+        for (event, record) in events.iter().zip(&out) {
+            assert_eq!(
+                normalize(std::slice::from_ref(event))[0]["uuid"],
+                record["uuid"]
+            );
+        }
+        assert!(out[0].get("isMeta").is_none());
+        assert_eq!(out[1]["isMeta"], true);
+        assert_eq!(out[0]["message"]["content"], events[0]["data"]["content"]);
     }
 
     #[test]
