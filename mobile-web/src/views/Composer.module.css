@@ -437,9 +437,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  transition:
-    transform 0.18s ease,
-    opacity 0.14s ease;
 }
 
 /* 胶囊底下那层渐隐。玻璃只挡住胶囊自己那一块，胶囊上方的配置 chip 仍然直接压在
@@ -455,21 +452,6 @@
   z-index: -1;
   pointer-events: none;
   background: linear-gradient(to top, var(--color-bg) 46%, transparent);
-}
-
-/* Folded while the reader scrolls back through the transcript: it slides down
-   out of view. 浮起之后它本来就不占位，所以不再需要用负 margin 把自己的高度
-   抵消掉；多滑 24px 是为了越过 bottom 的那点偏移与安全区。 */
-.resumeBox[data-hidden] {
-  transform: translateY(calc(100% + 24px));
-  opacity: 0;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .resumeBox {
-    transition: none;
-  }
 }
 
 /* 两处 composer（新会话、会话内回复）共用的输入框。
