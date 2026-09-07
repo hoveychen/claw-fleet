@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   MapPin,
   Paperclip,
+  Plus,
   Send,
   SlidersHorizontal,
   X,
@@ -144,6 +145,35 @@ export function newSessionConfigSummary({
     title: `${toolLabel} · ${modelLabel || copy.defaultModel} · ${effortLabel || copy.defaultEffort}`,
     detail: permissionLabel || copy.defaultPermission,
   };
+}
+
+/** 回复窗的配置胶囊文案。
+ *
+ * 三个常驻下拉（模型 / 思考强度 / 权限）在回复窗里一年到头不动一次，却每次都占
+ * 掉 44px 的常驻高度。收成胶囊后它们只报告当前值，点开才展开选择器 —— 这是把
+ * 「随时可改」降级成「随时可见、点一下可改」，不是把功能藏起来。
+ *
+ * 模型与档位合成一颗（它们总是一起看），权限单独一颗且只对 Claude 出：codex 和
+ * dsh 没有 `--permission-mode` 这个概念。 */
+export function resumeConfigChips({
+  tool,
+  modelLabel,
+  effortLabel,
+  permissionLabel,
+  labels,
+}: {
+  tool: string;
+  modelLabel: string;
+  effortLabel: string;
+  permissionLabel: string;
+  labels?: { defaultModel: string; defaultPermission: string };
+}): string[] {
+  const copy = labels ?? { defaultModel: "默认模型", defaultPermission: "沿用权限" };
+  const chips = [
+    [modelLabel || copy.defaultModel, effortLabel].filter(Boolean).join(" · "),
+  ];
+  if (tool !== "codex" && tool !== "dsh") chips.push(permissionLabel || copy.defaultPermission);
+  return chips;
 }
 
 /** 10 MiB — mirrors MAX_UPLOAD_BYTES on the relay side. */
@@ -1193,6 +1223,25 @@ export function ResumeComposer({
     `resume:${session.id}:attachments`,
   );
   const [focused, setFocused] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  // 胶囊上报告的当前配置。dsh 的模型目录是主机运行时给的，这里认不出 id 就
+  // 原样显示 —— 显示一个真实但陌生的 id，好过显示一个错的友好名字。
+  const modelLabel = useMemo(() => {
+    const table = tool === "codex" ? CODEX_MODEL_CHOICES : tool === "dsh" ? [] : MODEL_CHOICES;
+    const hit = table.find(([v]) => v === model);
+    return hit ? t(hit[1]) : model;
+  }, [tool, model]);
+  const configChips = useMemo(
+    () =>
+      resumeConfigChips({
+        tool,
+        modelLabel,
+        effortLabel: effort,
+        permissionLabel: permissionMode ? t(PERMISSION_LABEL[permissionMode] ?? permissionMode) : "",
+      }),
+    [tool, modelLabel, effort, permissionMode],
+  );
   const voice = useVoiceRecorder({
     value: prompt,
     onChange: setPrompt,
@@ -1350,68 +1399,138 @@ export function ResumeComposer({
           ))}
         </div>
       )}
-      <textarea
-        ref={voiceTailRef}
-        className={styles.resumeInput}
-        placeholder={
-          enqueueing
-            ? t("会话运行中，发送后排队，本轮结束自动接上…")
-            : voice.available
-              ? t("继续这个会话，也可点麦克风说…")
-              : t("继续这个会话（留空 = continue）…")
-        }
-        rows={1}
-        value={voice.showingPreview ? voice.preview : prompt}
-        readOnly={voice.showingPreview}
-        onChange={(e) => setPrompt(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-      />
-      <AttachmentRow
-        attachments={attachments}
-        uploading={uploading}
-        onPick={(f) => void addFiles(f)}
-        onRemove={remove}
-        client={client}
-        previews={previews}
-        voice={voice}
-      />
-      <div className={styles.resumeActions}>
-        {!enqueueing && (
-          <OptionSelects
-            tool={tool}
+      {/* 缩略图单独一行，只在真有附件时才占高度 —— 原来它和 📎/🎤 挤在一条
+          常驻 44px 的 attachRow 里，空着也占位。 */}
+      {attachments.length > 0 && !voice.active && (
+        <div className={styles.resumeThumbs}>
+          <AttachmentThumbs
+            paths={attachments.map((a) => a.path)}
             client={client}
-            model={model}
-            effort={effort}
-            permissionMode={permissionMode}
-            permissionDefaultLabel="沿用权限"
-            onChange={(p) => {
-              if (p.model !== undefined) setModel(p.model);
-              if (p.effort !== undefined) setEffort(p.effort);
-              if (p.permissionMode !== undefined) setPermissionMode(p.permissionMode);
+            previews={previews}
+            onRemove={remove}
+            compact
+          />
+        </div>
+      )}
+      {/* 排队模式不给配置：这条消息会跟着当前这一轮的设置跑，显示一组改不动的
+          胶囊只会误导。 */}
+      {!enqueueing && !voice.active && (
+        <div className={styles.resumeChips}>
+          {configChips.map((label) => (
+            <button
+              key={label}
+              type="button"
+              className={styles.resumeChip}
+              onClick={() => setPickerOpen(true)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {voice.active ? (
+        <VoiceBar rec={voice} />
+      ) : (
+        <div className={styles.pill}>
+          <button
+            className={styles.pillBtn}
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+            aria-label={uploading ? t("上传中…") : t("附件")}
+          >
+            {uploading ? (
+              <LoaderCircle size={19} className={styles.spin} />
+            ) : (
+              <Plus size={20} />
+            )}
+          </button>
+          <textarea
+            ref={voiceTailRef}
+            className={styles.resumeInput}
+            placeholder={
+              enqueueing
+                ? t("会话运行中，发送后排队…")
+                : voice.available
+                  ? t("继续这个会话，也可点麦克风说…")
+                  : t("继续这个会话（留空 = continue）…")
+            }
+            rows={1}
+            value={voice.showingPreview ? voice.preview : prompt}
+            readOnly={voice.showingPreview}
+            onChange={(e) => setPrompt(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+          />
+          {/* 有字了就把麦克风让位给发送：两颗一直并排会让右侧挤成两个 40px 的
+              目标，而这一刻用户要的只有一个。 */}
+          {voice.available && !prompt.trim() && (
+            <span className={styles.pillMic}>
+              <VoiceMicButton rec={voice} />
+            </span>
+          )}
+          <button
+            className={styles.sendBtn}
+            data-success={sent || undefined}
+            disabled={busy || uploading || !client || (enqueueing && !prompt.trim())}
+            onClick={() => void submit()}
+            aria-label={
+              busy
+                ? enqueueing
+                  ? t("排队中…")
+                  : t("发送中…")
+                : enqueueing
+                  ? t("排队")
+                  : t("继续会话")
+            }
+          >
+            {busy ? (
+              <LoaderCircle size={17} className={styles.spin} />
+            ) : sent ? (
+              <Check size={17} />
+            ) : (
+              <Send size={16} />
+            )}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              void addFiles(e.target.files);
+              e.target.value = "";
             }}
           />
-        )}
-        <button
-          className={styles.submit}
-          disabled={busy || uploading || !client || (enqueueing && !prompt.trim())}
-          onClick={() => void submit()}
-        >
-          {busy ? (
-            enqueueing ? t("排队中…") : t("发送中…")
-          ) : sent ? (
-            <>
-              <Check size={15} />
-              {enqueueing ? t("已排队") : t("已发送")}
-            </>
-          ) : (
-            <>
-              <Send size={15} />
-              {enqueueing ? t("排队") : t("继续会话")}
-            </>
-          )}
-        </button>
-      </div>
+        </div>
+      )}
+      {pickerOpen && (
+        <div className={styles.resumePicker}>
+          <div className={styles.pickerBackdrop} onClick={() => setPickerOpen(false)} />
+          <div className={styles.pickerSheet} role="dialog" aria-label={t("运行配置")}>
+            <div className={styles.pickerGrabber} />
+            <div className={styles.pickerHead}>
+              <span />
+              <strong>{t("运行配置")}</strong>
+              <button onClick={() => setPickerOpen(false)}>{t("完成")}</button>
+            </div>
+            <div className={styles.pickerBody}>
+              <OptionSelects
+                tool={tool}
+                client={client}
+                model={model}
+                effort={effort}
+                permissionMode={permissionMode}
+                permissionDefaultLabel="沿用权限"
+                onChange={(p) => {
+                  if (p.model !== undefined) setModel(p.model);
+                  if (p.effort !== undefined) setEffort(p.effort);
+                  if (p.permissionMode !== undefined) setPermissionMode(p.permissionMode);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

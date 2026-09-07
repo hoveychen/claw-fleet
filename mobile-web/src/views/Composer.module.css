@@ -583,6 +583,108 @@
   outline: none;
 }
 
+/* 配置胶囊行。只报告当前值，点开才是选择器 —— 见 resumeConfigChips 的注释。 */
+.resumeChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.resumeChip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+  line-height: 1;
+}
+
+.resumeChip:active {
+  background: var(--color-bg-card-hover);
+}
+
+/* 附件缩略图行。只在真有附件时渲染，所以这里不设 min-height —— 空着就该是 0。 */
+.resumeThumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+/* 输入胶囊：＋ / 输入框 / 麦克风 / 发送 同排。align-items:flex-end 让自增高的
+   输入框往上长，两侧的圆按钮始终贴着底边，不会被拽到中间去。 */
+.pill {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 4px 4px 4px 6px;
+  border-radius: 24px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-input);
+}
+
+.pill:focus-within {
+  border-color: var(--color-border-strong);
+}
+
+.pillBtn,
+.sendBtn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+}
+
+.pillBtn {
+  background: none;
+  color: var(--color-text-secondary);
+}
+
+.pillBtn:active {
+  background: var(--color-bg-card-hover);
+}
+
+.sendBtn {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.sendBtn:disabled {
+  opacity: 0.4;
+}
+
+.sendBtn[data-success="true"] {
+  background: var(--color-success);
+  opacity: 1;
+}
+
+/* 麦克风按钮自带 44px + 一圈描边（它原本是行里唯一的圆按钮）。进了胶囊之后
+   它有了 ＋ 和发送两个同伴，尺寸得对齐，那圈描边在胶囊底色上也只是脏。
+   用后代选择器而不是 [class*=btn]：CSS Modules 会把类名哈希掉，子串匹配是
+   碰运气。 */
+.pillMic > button {
+  width: 38px;
+  height: 38px;
+  border-color: transparent;
+}
+
+/* 配置选择器的浮层根。picker 的背板/面板都是 absolute 定位，在新会话页里以
+   全屏 .sheet 为包含块；回复窗没有那个全屏容器，所以这里自己给一个 fixed 的。 */
+.resumePicker {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+
 .resumeActions {
   display: flex;
   flex-direction: column;

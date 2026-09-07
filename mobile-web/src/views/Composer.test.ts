@@ -7,6 +7,7 @@ import {
   newSessionConfigSummary,
   newSessionLocationSummary,
   recentWorkspaces,
+  resumeConfigChips,
 } from "./Composer";
 import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import type { SessionInfo } from "../types";
@@ -258,5 +259,47 @@ describe("carryPromptToDevice", () => {
     // 默认值必须在(不是只存了个 {prompt}),否则重挂载后 tool/permissionMode 会是 undefined。
     expect(d.tool).toBe("claude");
     expect(d.permissionMode).toBe("acceptEdits");
+  });
+});
+
+describe("resumeConfigChips", () => {
+  const labels = { defaultModel: "默认模型", defaultPermission: "沿用权限" };
+
+  it("模型与档位合成一颗，权限单独一颗", () => {
+    expect(
+      resumeConfigChips({
+        tool: "claude",
+        modelLabel: "Opus 5",
+        effortLabel: "xhigh",
+        permissionLabel: "接受编辑",
+        labels,
+      }),
+    ).toEqual(["Opus 5 · xhigh", "接受编辑"]);
+  });
+
+  it("没选就报告默认值，而不是空胶囊", () => {
+    expect(
+      resumeConfigChips({
+        tool: "claude",
+        modelLabel: "",
+        effortLabel: "",
+        permissionLabel: "",
+        labels,
+      }),
+    ).toEqual(["默认模型", "沿用权限"]);
+  });
+
+  it("codex / dsh 不出权限胶囊——它们没有 --permission-mode 这个概念", () => {
+    for (const tool of ["codex", "dsh"]) {
+      expect(
+        resumeConfigChips({
+          tool,
+          modelLabel: "gpt-5.6-sol",
+          effortLabel: "medium",
+          permissionLabel: "接受编辑",
+          labels,
+        }),
+      ).toEqual(["gpt-5.6-sol · medium"]);
+    }
   });
 });
