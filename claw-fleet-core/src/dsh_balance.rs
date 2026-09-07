@@ -364,6 +364,39 @@ mod tests {
         assert!(row.error.is_none());
     }
 
+    /// Opt-in live smoke against whatever keys this machine's dsh holds.
+    ///
+    /// `#[ignore]`d because it needs the network and a configured install, but
+    /// kept in the tree because the parsers above prove only that *a recorded
+    /// body* is read correctly — they cannot catch an endpoint that moved, an
+    /// auth scheme that changed, or a key resolver that reads the wrong file
+    /// (which is the exact defect this module shipped alongside a fix for).
+    /// Run with `cargo test -p claw-fleet-core dsh_balance -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "hits the network with the machine's real dsh keys"]
+    fn live_balances_smoke() {
+        let item = fetch_balances();
+        for row in &item.balances {
+            println!(
+                "{} [{}] balance={:?} limit={:?} used={:?} error={:?}",
+                row.label,
+                row.provider,
+                row.balance,
+                row.limit,
+                row.used,
+                row.error
+            );
+        }
+        assert!(
+            !item.balances.is_empty(),
+            "no provider key configured in dsh — nothing to smoke-test"
+        );
+        assert!(
+            item.balances.iter().all(|b| b.error.is_none()),
+            "a configured provider failed: {item:?}"
+        );
+    }
+
     /// The key endpoint failing must not take the account balance down with it.
     #[test]
     fn a_failed_key_lookup_still_reports_the_account_balance() {
