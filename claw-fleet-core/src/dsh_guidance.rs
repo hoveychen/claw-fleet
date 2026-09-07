@@ -908,8 +908,19 @@ pub fn reconcile_dsh_from_claude_state(user_title: &str, locale: &str) -> Result
     // delivers both halves of PRD injection now. Reported rather than swallowed:
     // there is no fallback channel any more, so a silent failure here would mean
     // dsh sessions quietly running without any Fleet context at all.
-    crate::dsh_plugin::reconcile_dsh_patch(set.prd, user_title, locale)
+    //
+    // `believe_installed` is why a single CLAUDE.md read cannot uninstall the
+    // plugin: without a recorded opt-out, a negative read leaves whatever is on
+    // disk in place. Uninstalling here is sticky — nothing re-installs the plugin
+    // on a later pass — so it takes the durable record of intent, not one stat.
+    let prd = crate::control_plane_prefs::believe_installed(
+        set.prd,
+        crate::control_plane_prefs::Feature::PrdDiscipline,
+        crate::dsh_plugin::is_dsh_plugin_installed(),
+    );
+    crate::dsh_plugin::reconcile_dsh_patch(prd, user_title, locale)
 }
+
 
 /// Whether the dsh PRD-discipline block is still present in
 /// `$DSH_HOME/AGENTS.md`.

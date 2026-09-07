@@ -878,11 +878,35 @@ pub fn reconcile_codex_from_claude_state(user_title: &str, locale: &str) -> Resu
     // conjure a ~/.codex/AGENTS.md for a Claude-only user who happened to add a
     // lesson. Codex has no @import, so an existing codex home is the signal.
     let codex_present = codex_home().map(|d| d.exists()).unwrap_or(false);
+    // Each concept's Claude-side read goes through `believe_installed`: an
+    // unrecorded negative read keeps the codex block that is already on disk
+    // instead of stripping it. Stripping is the sticky direction — a later pass
+    // restores CLAUDE.md's `@import` but never re-writes AGENTS.md — so it takes
+    // an explicit opt-out, not a single stat of a file six writers rewrite at
+    // every startup. `lessons` is not a toggle (it tracks the lesson list), so
+    // it is read as-is.
+    use crate::control_plane_prefs::{believe_installed, Feature};
     let set = CodexGuidanceSet {
-        prd: crate::prd_discipline::is_prd_discipline_installed(),
-        interaction: crate::interaction_mode::is_interaction_mode_installed(),
-        wiki: crate::wiki_guidance::is_wiki_guidance_installed(),
-        model: crate::model_guidance::is_model_guidance_installed(),
+        prd: believe_installed(
+            crate::prd_discipline::is_prd_discipline_installed(),
+            Feature::PrdDiscipline,
+            is_codex_prd_installed(),
+        ),
+        interaction: believe_installed(
+            crate::interaction_mode::is_interaction_mode_installed(),
+            Feature::InteractionMode,
+            is_codex_interaction_installed(),
+        ),
+        wiki: believe_installed(
+            crate::wiki_guidance::is_wiki_guidance_installed(),
+            Feature::WikiGuidance,
+            is_codex_wiki_installed(),
+        ),
+        model: believe_installed(
+            crate::model_guidance::is_model_guidance_installed(),
+            Feature::ModelGuidance,
+            is_codex_model_installed(),
+        ),
         lessons: codex_present && !crate::lessons_store::list_lessons().is_empty(),
     };
     reconcile_codex_agents_md(set, user_title, locale)

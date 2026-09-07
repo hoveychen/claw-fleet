@@ -1,0 +1,291 @@
+//! The two invariants that keep Fleet's `~/.claude/CLAUDE.md` `@import` blocks —
+//! and the harness guidance that rides on them — from silently disappearing.
+//!
+//! Background (2026-09-07): on 老板's machine `~/.dsh/cordis.patch.yml` came
+//! back as `[]`, so every dsh session ran with no Fleet context at all. The
+//! immediate cause of *that* incident — six guidance writers racing on
+//! CLAUDE.md until only one 120-byte block was left — is already fixed by
+//! `claude_md_lock::with_lock`. These tests cover what the incident exposed and
+//! the lock did not close:
+//!
+//! 1. **Every** read-modify-write of CLAUDE.md must hold that lock. A seventh
+//!    writer (`memory::promote_memory`) did not, so it can still overwrite the
+//!    guidance blocks of anything applying concurrently.
+//! 2. A single *negative* read of CLAUDE.md must never be enough to uninstall
+//!    the dsh plugin. Whatever the reason the block was momentarily missing, the
+//!    uninstall outlives it: the next self-heal restores the `@import`, but
+//!    nothing restores the plugin, which is why 老板's stayed gone for hours.
+
+use std::time::{Duration, Instant};
+
+/// How long the test holds the lock while the writer under test tries to run.
+const HELD: Duration = Duration::from_millis(700);
+/// A writer that respects the lock cannot finish before roughly this long.
+/// Slack below `HELD` keeps the assertion off the timer's own precision.
+const MIN_WAITED: Duration = Duration::from_millis(400);
+
+/// `promote_memory` copies a memory file's body into CLAUDE.md by reading the
+/// whole file, appending, and writing it back — the same read-modify-write shape
+/// as the six guidance carriers, and it must serialize against them.
+#[test]
+fn promoting_a_memory_waits_for_the_claude_md_lock() {
+    let _guard = claw_fleet_core::paths::fleet_home_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let claude_dir = temp.path().join(".claude");
+    std::fs::create_dir_all(&claude_dir).unwrap();
+    let claude_md = claude_dir.join("CLAUDE.md");
+    std::fs::write(&claude_md, "# user content\n").unwrap();
+
+    let mem_dir = claude_dir.join("projects").join("ws").join("memory");
+    std::fs::create_dir_all(&mem_dir).unwrap();
+    let mem = mem_dir.join("thing.md");
+    std::fs::write(
+        &mem,
+        "---\nname: thing\ndescription: d\n---\n\nthe fact worth keeping\n",
+    )
+    .unwrap();
+
+    let prev = std::env::var_os("CLAUDE_CONFIG_DIR");
+    unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &claude_dir) };
+
+    // Hold the lock for HELD, then release. A locked writer must wait it out.
+    let md = claude_md.clone();
+    let holder = std::thread::spawn(move || {
+        claw_fleet_core::claude_md_lock::with_lock(&md, || std::thread::sleep(HELD));
+    });
+    // Give the holder a moment to actually take the lock before racing it.
+    std::thread::sleep(Duration::from_millis(100));
+
+    let started = Instant::now();
+    let promoted = claw_fleet_core::memory::promote_memory(
+        mem.to_str().unwrap(),
+        "global",
+        temp.path().to_str().unwrap(),
+    );
+    let waited = started.elapsed();
+    holder.join().unwrap();
+
+    match prev {
+        Some(v) => unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", v) },
+        None => unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") },
+    }
+
+    assert!(promoted.is_ok(), "promote failed: {promoted:?}");
+    assert!(
+        waited >= MIN_WAITED,
+        "promote_memory rewrote CLAUDE.md after only {waited:?} — it is not \
+         holding claude_md_lock, so it can overwrite the @import blocks of any \
+         guidance applying at the same moment"
+    );
+    let after = std::fs::read_to_string(&claude_md).unwrap();
+    assert!(after.contains("the fact worth keeping"), "promote must land");
+    assert!(after.contains("# user content"), "must not drop user content");
+}
+
+/// Guard: a CLAUDE.md with no PRD block, but prefs that record no such choice
+/// by the user, must NOT uninstall Fleet's dsh plugin.
+///
+/// The asymmetry is the point. Installing again is idempotent and cheap;
+/// uninstalling is sticky — nothing re-installs the plugin on the next pass, so
+/// one bad read costs every later dsh session its whole Fleet context until
+/// somebody notices. `control_plane_prefs` is the durable record of what the
+/// user actually chose, so it decides, not a single stat of a file that six
+/// writers rewrite on every startup.
+#[test]
+fn a_missing_prd_block_alone_does_not_uninstall_the_dsh_plugin() {
+    let _guard = claw_fleet_core::paths::fleet_home_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let claude_dir = temp.path().join(".claude");
+    let dsh_home = temp.path().join(".dsh");
+    let fleet_home = temp.path().join(".fleet");
+    std::fs::create_dir_all(&claude_dir).unwrap();
+    std::fs::create_dir_all(&dsh_home).unwrap();
+    std::fs::create_dir_all(&fleet_home).unwrap();
+
+    // The state right after an incident: PRD's @import is gone from CLAUDE.md,
+    // but the user never turned PRD off (empty prefs = nothing disabled).
+    std::fs::write(claude_dir.join("CLAUDE.md"), "# just user content\n").unwrap();
+
+    let prev = (
+        std::env::var_os("CLAUDE_CONFIG_DIR"),
+        std::env::var_os("DSH_HOME"),
+        std::env::var_os("FLEET_HOME"),
+    );
+    unsafe {
+        std::env::set_var("CLAUDE_CONFIG_DIR", &claude_dir);
+        std::env::set_var("DSH_HOME", &dsh_home);
+        std::env::set_var("FLEET_HOME", &fleet_home);
+    }
+
+    // Plugin currently installed — this is what must survive.
+    claw_fleet_core::dsh_plugin::reconcile_dsh_patch(true, "Boss", "en").unwrap();
+    assert!(
+        claw_fleet_core::dsh_plugin::is_dsh_plugin_installed(),
+        "setup: plugin should start installed"
+    );
+
+    let reconciled = claw_fleet_core::dsh_guidance::reconcile_dsh_from_claude_state("Boss", "en");
+    let still_installed = claw_fleet_core::dsh_plugin::is_dsh_plugin_installed();
+
+    // Second half: when the user DID turn PRD off, the uninstall must still run.
+    claw_fleet_core::control_plane_prefs::mark_disabled(
+        claw_fleet_core::control_plane_prefs::Feature::PrdDiscipline,
+    )
+    .unwrap();
+    let after_optout = claw_fleet_core::dsh_guidance::reconcile_dsh_from_claude_state("Boss", "en")
+        .map(|()| claw_fleet_core::dsh_plugin::is_dsh_plugin_installed());
+
+    unsafe {
+        match prev.0 {
+            Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+            None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+        }
+        match prev.1 {
+            Some(v) => std::env::set_var("DSH_HOME", v),
+            None => std::env::remove_var("DSH_HOME"),
+        }
+        match prev.2 {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+    }
+
+    assert!(reconciled.is_ok(), "reconcile errored: {reconciled:?}");
+    assert!(
+        still_installed,
+        "one CLAUDE.md read with no PRD block uninstalled the dsh plugin — every \
+         later dsh session then runs with no Fleet context, and nothing puts the \
+         plugin back"
+    );
+    assert_eq!(
+        after_optout,
+        Ok(false),
+        "an explicit opt-out recorded in control_plane_prefs must still uninstall"
+    );
+}
+
+/// The codex half of the same asymmetry: an unrecorded negative read must not
+/// strip codex's `AGENTS.md` blocks, but an explicit opt-out must.
+#[test]
+fn a_missing_prd_block_alone_does_not_strip_codex_agents_md() {
+    let _guard = claw_fleet_core::paths::fleet_home_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let claude_dir = temp.path().join(".claude");
+    let codex_home = temp.path().join(".codex");
+    let fleet_home = temp.path().join(".fleet");
+    for d in [&claude_dir, &codex_home, &fleet_home] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    // PRD's @import is missing from CLAUDE.md and nothing is recorded as off.
+    std::fs::write(claude_dir.join("CLAUDE.md"), "# just user content\n").unwrap();
+
+    let prev = (
+        std::env::var_os("CLAUDE_CONFIG_DIR"),
+        std::env::var_os("CODEX_HOME"),
+        std::env::var_os("FLEET_HOME"),
+    );
+    unsafe {
+        std::env::set_var("CLAUDE_CONFIG_DIR", &claude_dir);
+        std::env::set_var("CODEX_HOME", &codex_home);
+        std::env::set_var("FLEET_HOME", &fleet_home);
+    }
+
+    // Start from a codex AGENTS.md that has the PRD block installed.
+    claw_fleet_core::codex_guidance::reconcile_codex_agents_md(
+        claw_fleet_core::codex_guidance::CodexGuidanceSet {
+            prd: true,
+            interaction: false,
+            wiki: false,
+            model: false,
+            lessons: false,
+        },
+        "Boss",
+        "en",
+    )
+    .unwrap();
+    let installed_at_start = claw_fleet_core::codex_guidance::is_codex_prd_installed();
+
+    let kept = claw_fleet_core::codex_guidance::reconcile_codex_from_claude_state("Boss", "en")
+        .map(|()| claw_fleet_core::codex_guidance::is_codex_prd_installed());
+
+    claw_fleet_core::control_plane_prefs::mark_disabled(
+        claw_fleet_core::control_plane_prefs::Feature::PrdDiscipline,
+    )
+    .unwrap();
+    let after_optout =
+        claw_fleet_core::codex_guidance::reconcile_codex_from_claude_state("Boss", "en")
+            .map(|()| claw_fleet_core::codex_guidance::is_codex_prd_installed());
+
+    unsafe {
+        match prev.0 {
+            Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+            None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+        }
+        match prev.1 {
+            Some(v) => std::env::set_var("CODEX_HOME", v),
+            None => std::env::remove_var("CODEX_HOME"),
+        }
+        match prev.2 {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+    }
+
+    assert!(installed_at_start, "setup: codex PRD block should start installed");
+    assert_eq!(
+        kept,
+        Ok(true),
+        "one CLAUDE.md read with no PRD block stripped codex's AGENTS.md block — \
+         and no later pass writes it back"
+    );
+    assert_eq!(
+        after_optout,
+        Ok(false),
+        "an explicit opt-out recorded in control_plane_prefs must still strip it"
+    );
+}
+
+/// Drift-guard: no `CLAUDE.md` write may go through plain `fs::write`.
+///
+/// `fs::write` truncates and then writes, so a reader that samples the file in
+/// between sees it empty or half-written — and every `is_*_installed()` reader
+/// is unlocked by design (they are cheap stats called from UI paths). A probe on
+/// 2026-09-07 measured 2418 of 8064 concurrent reads missing the sentinel during
+/// a tight rewrite loop. `atomic_json::write_atomic` renames a temp file over
+/// the target instead, so a reader sees either the old file or the new one.
+///
+/// The lock does not make this redundant: writers serialize against each other,
+/// readers do not take it at all.
+#[test]
+fn no_claude_md_write_uses_plain_fs_write() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut offenders = Vec::new();
+    let mut stack = vec![src];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let body = std::fs::read_to_string(&path).unwrap_or_default();
+            for (i, line) in body.lines().enumerate() {
+                let is_write = line.contains("fs::write(");
+                let names_claude_md = line.contains("claude_md");
+                if is_write && names_claude_md {
+                    offenders.push(format!("{}:{}  {}", path.display(), i + 1, line.trim()));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these writes truncate CLAUDE.md in place, so an unlocked reader can see \
+         it empty and conclude the guidance is uninstalled — use \
+         `atomic_json::write_atomic`:\n{}",
+        offenders.join("\n")
+    );
+}
