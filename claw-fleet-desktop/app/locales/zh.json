@@ -353,7 +353,10 @@
     "ai_skill_save_btn": "保存 skill 文件…",
     "ai_modal_close": "完成",
     "codex_limit": "速率限制",
-    "no_usage_data": "暂无用量数据"
+    "no_usage_data": "暂无用量数据",
+    "dsh_balance_tip": "这把 key 背后的 provider 报的剩余余额",
+    "dsh_key_limit": "该 key 已用 {{used}} / {{limit}}",
+    "dsh_no_keys": "dsh 里没有配置 provider key，没有可查的余额"
   },
   "skills": {
     "panel_title": "Skills",

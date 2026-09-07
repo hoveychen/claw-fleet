@@ -353,7 +353,10 @@
     "ai_skill_save_btn": "Save skill file…",
     "ai_modal_close": "Done",
     "codex_limit": "Rate Limit",
-    "no_usage_data": "No usage data"
+    "no_usage_data": "No usage data",
+    "dsh_balance_tip": "Remaining balance reported by the provider behind this key",
+    "dsh_key_limit": "Key spend {{used}} of {{limit}}",
+    "dsh_no_keys": "No provider key configured in dsh — nothing to ask for a balance"
   },
   "skills": {
     "panel_title": "Skills",
