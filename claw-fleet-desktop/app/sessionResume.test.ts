@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   canResumeSession,
+  isLiveMember,
   isQuietAlive,
   resetQuietAliveLatch,
   rowBarColor,
@@ -183,5 +184,32 @@ describe("shouldFollowSession", () => {
     expect(shouldFollowSession(session({ status: "idle", procAlive: true }))).toBe(
       true,
     );
+  });
+});
+
+describe("isLiveMember", () => {
+  it("keeps a main session parked at end_turn in the live set", () => {
+    // On a main session `waitingInput` really does mean "your turn" — the
+    // amber dot and the resume composer both depend on it staying live.
+    expect(isLiveMember(session({ status: "waitingInput" }))).toBe(true);
+  });
+
+  it("drops a subagent whose turn ended — its end_turn is the final report", () => {
+    // Regression (2026-09-06): a finished Explore agent sat in the panel
+    // titled 运行中的 Agent wearing 等待输入 for the full 300s window that
+    // `determine_status` holds WaitingInput. A subagent has no user to wait
+    // for, so end_turn means done, not parked.
+    expect(
+      isLiveMember(session({ isSubagent: true, status: "waitingInput" })),
+    ).toBe(false);
+  });
+
+  it("leaves every other subagent status alone", () => {
+    // A subagent blocked on a decision card reads Executing (stop_reason=
+    // tool_use), so the narrowing above must not touch the working statuses.
+    expect(isLiveMember(session({ isSubagent: true, status: "executing" }))).toBe(true);
+    expect(isLiveMember(session({ isSubagent: true, status: "thinking" }))).toBe(true);
+    expect(isLiveMember(session({ isSubagent: true, status: "delegating" }))).toBe(true);
+    expect(isLiveMember(session({ isSubagent: true, status: "idle" }))).toBe(false);
   });
 });

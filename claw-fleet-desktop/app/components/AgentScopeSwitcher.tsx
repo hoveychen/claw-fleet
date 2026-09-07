@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { ChevronDown } from "lucide-react";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
-import type { SessionInfo } from "../types";
+import { memberDisplayStatus, type SessionInfo } from "../types";
 import styles from "./SessionDetail.module.css";
 
 /** The header identity label for one session in the family: ◈ main, or ⎇ its
@@ -60,7 +60,7 @@ export function AgentScopeSwitcher({
     return {
       id: s.id,
       label: isCurrent ? `${agentLabel(s, t)} · ${t("detail.agent_current")}` : agentLabel(s, t),
-      icon: <span className={styles.tab_dot} data-status={s.status} />,
+      icon: <span className={styles.tab_dot} data-status={memberDisplayStatus(s)} />,
       sub: s.isSubagent ? agentIdTail(s.id) : undefined,
       onSelect: () => {
         if (!isCurrent) onOpen(s);

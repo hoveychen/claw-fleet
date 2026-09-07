@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore, useUIStore } from "../store";
 import { useSessionSearch } from "../hooks/useSessionSearch";
-import type { SessionInfo, SessionStatus } from "../types";
+import { memberDisplayStatus, type SessionInfo, type SessionStatus } from "../types";
 import { isWorkflowAgent } from "../workflowAgent";
 import { SessionCard, StatusIcon, SubagentTypeIcon, formatModel } from "./SessionCard";
 import { SessionsPage } from "./SessionsBanner";
@@ -26,7 +26,10 @@ const ACTIVE_STATUSES: SessionStatus[] = [
 ];
 
 function isActive(s: SessionInfo) {
-  return ACTIVE_STATUSES.includes(s.status);
+  // `memberDisplayStatus`, not the raw status: a subagent's `waitingInput` is
+  // its final report landing, not a request for input, and counting it here
+  // put finished agents in the group's 活跃 row and its "+N running" badge.
+  return ACTIVE_STATUSES.includes(memberDisplayStatus(s));
 }
 
 // ── SubagentRow ───────────────────────────────────────────────────────────
