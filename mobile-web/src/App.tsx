@@ -843,7 +843,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // it), so the drawer would only duplicate them there. Everywhere else (other
   // tabs, or any tab with a detail page open) the drawer is the surface.
   const showDecisionDrawer =
-    decisions.length > 0 && (tab !== "decisions" || overlayOpen);
+    decisions.length > 0 && !showNewSession && (tab !== "decisions" || overlayOpen);
 
   /** 当前打开的是哪个浮层。拿它当浮层那层渲染兜底的 resetKey —— 关掉再开、或
    *  换到另一个浮层时自动清错重试,一次渲染失败不该把这个入口永久钉死。 */
@@ -1214,7 +1214,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               key={newSessionTargetId}
               sessions={newSessionSessions}
               client={transportFor(newSessionTargetId)}
-              devices={runtimeDevices.length > 1 ? runtimeDevices : undefined}
+              devices={runtimeDevices}
               targetDeviceId={newSessionTargetId}
               onTargetDevice={setNewSessionDeviceId}
               initialFiles={sharedFiles}
