@@ -59,6 +59,7 @@ import {
   syncLiveAgents,
   toggleTab,
   type AuxDocKind,
+  type AuxFacetItem,
   type AuxState,
 } from "../detailAux";
 import { useResizableWidth } from "../hooks/useResizableWidth";
@@ -797,6 +798,13 @@ export function SessionDetail({
   const pickTab = useCallback((id: string) => {
     setAux((st) => toggleTab(st, id));
   }, []);
+  /* Picking a facet from the overflow menu only ever *opens* it. The tab strip's
+     click is a toggle because the strip is also the panel's on/off control; a
+     menu item that sometimes closed the panel you just asked for would read as
+     the click having missed. */
+  const openFacet = useCallback((id: string) => {
+    setAux((st) => showTab(st, id));
+  }, []);
   const closeAuxPanel = useCallback(() => {
     setAux((st) => closeAux(st));
   }, []);
@@ -1066,17 +1074,14 @@ export function SessionDetail({
     return mainSession ? [mainSession, ...ordered] : ordered;
   }, [liveSession, sessions]);
 
-  // The auxiliary column's tab strip: the running agents, the session's facets,
-  // then every doc opened from the transcript. Conditional facets appear on the
-  // same terms their old tabs did — only when the session has something to show.
-  const auxTabs = useMemo((): AuxTab[] => {
-    const list: AuxTab[] = [];
-    if (liveSubagents.length > 0) {
-      list.push({
-        id: AGENTS_TAB,
-        label: t("detail.live_agents", { count: liveSubagents.length }),
-      });
-    }
+  /* The session's facets — Skills, 决策, Token, 任务, 后台任务, 临时文件,
+     Workflow — are things you go *look up*, one at a time, so they live in the
+     header's overflow menu rather than as seven permanent tabs above the panel.
+     Conditional ones appear on the same terms their old tabs did: only when the
+     session has something to show. The tab strip then carries only what the
+     session itself put there (see `auxTabs`). */
+  const auxFacets = useMemo((): AuxFacetItem[] => {
+    const list: AuxFacetItem[] = [];
     list.push({ id: "skills", label: t("detail.tab_skills") });
     list.push({ id: "decisions", label: t("detail.tab_decisions") });
     list.push({ id: "tokens", label: t("detail.tab_tokens") });
@@ -1096,11 +1101,9 @@ export function SessionDetail({
         label: `${t("detail.tab_workflow")} (${workflowTrees.length})`,
       });
     }
-    for (const d of aux.docs) list.push({ id: d.id, label: d.label, closable: true });
     return list;
   }, [
     t,
-    liveSubagents.length,
     hasTaskPlans,
     hasBgTasks,
     bgTasks.length,
@@ -1108,8 +1111,28 @@ export function SessionDetail({
     scratchpadCount,
     hasWorkflows,
     workflowTrees.length,
-    aux.docs,
   ]);
+
+  // The auxiliary column's tab strip: the running agents, the facet currently
+  // being read (only that one — the rest are in the menu), then every doc opened
+  // from the transcript. So the strip is "what is open in here", not a catalogue
+  // of everything that could be.
+  const auxTabs = useMemo((): AuxTab[] => {
+    const list: AuxTab[] = [];
+    if (liveSubagents.length > 0) {
+      list.push({
+        id: AGENTS_TAB,
+        label: t("detail.live_agents", { count: liveSubagents.length }),
+      });
+    }
+    const openFacet =
+      aux.active != null && isAuxFacet(aux.active)
+        ? auxFacets.find((f) => f.id === aux.active)
+        : undefined;
+    if (openFacet) list.push({ id: openFacet.id, label: openFacet.label });
+    for (const d of aux.docs) list.push({ id: d.id, label: d.label, closable: true });
+    return list;
+  }, [t, liveSubagents.length, auxFacets, aux.active, aux.docs]);
 
   // A selection whose tab has since disappeared (the session took another turn
   // and emptied 后台任务, say) would otherwise hold the panel on nothing.
@@ -1313,6 +1336,9 @@ export function SessionDetail({
                       sessionId={liveSession.id}
                       jsonlPath={liveSession.jsonlPath}
                       workspacePath={liveSession.workspacePath}
+                      facets={auxFacets}
+                      activeFacet={activeFacet}
+                      onPickFacet={openFacet}
                     />
                     {!inline && (
                       <button

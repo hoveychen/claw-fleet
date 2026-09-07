@@ -33,6 +33,13 @@ const FACETS: readonly AuxFacet[] = [
   "workflow",
 ];
 
+/** A facet as offered in the header's overflow menu: the id to open plus the
+ *  label (with its count, when it has one) to show. */
+export interface AuxFacetItem {
+  id: AuxFacet;
+  label: string;
+}
+
 /** The live-subagent deck's tab id. Not a facet: it exists only while something
  *  is running, and it is the tab the panel opens itself on. */
 export const AGENTS_TAB = "agents";

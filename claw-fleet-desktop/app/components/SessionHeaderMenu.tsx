@@ -3,33 +3,68 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
+  Coins,
   Copy,
+  FileClock,
   FileJson2,
   Folder,
   FolderOpen,
+  ListChecks,
+  type LucideIcon,
+  MessageSquareQuote,
   MoreHorizontal,
+  Sparkles,
+  Terminal,
+  Workflow,
 } from "lucide-react";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionHeaderMenu.module.css";
 import { canRevealPath } from "../canReveal";
+import type { AuxFacet, AuxFacetItem } from "../detailAux";
+
+/** One icon per facet, so the menu reads as a list of destinations rather than
+ *  a wall of text. Keyed by facet id — adding a facet without an icon still
+ *  renders, just without one. */
+const FACET_ICONS: Record<AuxFacet, LucideIcon> = {
+  skills: Sparkles,
+  decisions: MessageSquareQuote,
+  tokens: Coins,
+  tasks: ListChecks,
+  bgtasks: Terminal,
+  scratchpad: FileClock,
+  workflow: Workflow,
+};
 
 /**
- * The detail header's overflow menu: everything about a session that is a
- * copy-when-you-need-it identifier rather than something to watch — the session
- * id, its transcript path, the workspace path.
+ * The detail header's overflow menu.
  *
- * They used to sit in the header as two permanent rows; here they cost nothing
- * until asked for, and the menu doubles as the affordance that tells you where
- * they went.
+ * Two families live here. First the session's facets — Skills, 决策, Token,
+ * 任务, 后台任务, 临时文件, Workflow — each one a button that pulls that panel up
+ * in the auxiliary column. They used to be a permanent tab strip above the
+ * panel, which spent the strip's whole width on destinations you visit once an
+ * hour; as menu items they cost nothing until asked for, and the strip is left
+ * to hold only what is actually open.
+ *
+ * Then the copy-when-you-need-it identifiers — the session id, its transcript
+ * path, the workspace path — which were themselves two permanent header rows
+ * before they moved in here for the same reason.
  */
 export function SessionHeaderMenu({
   sessionId,
   jsonlPath,
   workspacePath,
+  facets = [],
+  activeFacet = null,
+  onPickFacet,
 }: {
   sessionId: string;
   jsonlPath: string;
   workspacePath: string;
+  /** Facets this session can show, already labelled (counts included). */
+  facets?: AuxFacetItem[];
+  /** The one the auxiliary panel is showing, if any. */
+  activeFacet?: AuxFacet | null;
+  onPickFacet?: (id: AuxFacet) => void;
 }) {
   const { t } = useTranslation();
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -52,12 +87,25 @@ export function SessionHeaderMenu({
 
   const items: ContextMenuItem[] = [];
 
-  // Leads the menu: it is the one item that *does* something to the layout,
+  // Leads the menu: these are the items that *do* something to the layout,
   // where the rest hand you a string to paste elsewhere.
+  if (onPickFacet) {
+    for (const facet of facets) {
+      const Icon = FACET_ICONS[facet.id];
+      items.push({
+        id: `facet-${facet.id}`,
+        label: facet.label,
+        icon: Icon ? <Icon size={13} /> : undefined,
+        active: activeFacet === facet.id,
+        onSelect: () => onPickFacet(facet.id),
+      });
+    }
+  }
 
   items.push(
     {
       id: "copy-id",
+      dividerBefore: items.length > 0,
       label: t("detail.copy_session_id"),
       sub: sessionId,
       icon: <Copy size={13} />,
