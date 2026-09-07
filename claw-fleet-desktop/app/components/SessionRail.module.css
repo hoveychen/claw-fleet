@@ -23,7 +23,7 @@
 }
 
 .workspace_header:hover {
-  background: color-mix(in srgb, var(--color-bg-card-hover) 60%, transparent);
+  background: color-mix(in srgb, var(--color-bg-row-hover) 60%, transparent);
   color: var(--color-text);
 }
 
@@ -103,5 +103,5 @@
 }
 
 .group_more:hover {
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-row-hover);
 }

@@ -98,12 +98,15 @@
 }
 
 .mark_seg:hover {
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-row-hover);
 }
 
+/* These segments sit on the canvas, so they take the canvas-plane tokens — the
+   card-plane hover is within a luminance unit of the canvas in light, which
+   left both the hover and the ACTIVE filter invisible. */
 .mark_seg_on {
   color: var(--color-text);
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-row-selected);
   font-weight: 500;
 }
 
@@ -231,5 +234,5 @@
 }
 
 .starting_dismiss:hover {
-  background: var(--color-bg-card-hover);
+  background: var(--color-bg-row-hover);
 }
