@@ -585,6 +585,7 @@ impl Backend for NullBackend {
             prd_discipline_installed: false,
             wiki_guidance_installed: false,
             model_guidance_installed: false,
+            session_title_guidance_installed: false,
             idle_hooks_installed: false,
             wakeup_guard_installed: false,
         }
@@ -632,6 +633,7 @@ impl Backend for NullBackend {
         _: &str,
         _: bool,
         _: std::collections::BTreeMap<String, String>,
+        _: Option<claw_fleet_core::task_outcome::TaskOutcome>,
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }
@@ -695,6 +697,12 @@ impl Backend for NullBackend {
         Err("backend not ready".into())
     }
     fn remove_model_guidance(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn apply_session_title_guidance(&self, _: &str, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn remove_session_title_guidance(&self) -> Result<(), String> {
         Err("backend not ready".into())
     }
     fn apply_prd_mode(&self, _: &str, _: &str) -> Result<(), String> {

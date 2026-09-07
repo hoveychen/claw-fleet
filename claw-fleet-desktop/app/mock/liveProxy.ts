@@ -223,6 +223,13 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { locale: hostPrefs().locale },
   }),
 
+  apply_session_title_guidance: () => ({
+    method: "POST",
+    path: "/apply_session_title_guidance",
+    empty: true,
+    body: { user_title: hostPrefs().userTitle, locale: hostPrefs().locale },
+  }),
+
   apply_plan_approval_hook: () => ({
     method: "POST",
     path: "/apply_plan_approval_hook",
@@ -954,6 +961,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   remove_model_guidance: () => ({
     method: "POST",
     path: "/remove_model_guidance",
+    empty: true,
+  }),
+
+  remove_session_title_guidance: () => ({
+    method: "POST",
+    path: "/remove_session_title_guidance",
     empty: true,
   }),
 

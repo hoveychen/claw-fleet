@@ -70,7 +70,6 @@ const ALL_KEYS = [
   // it stays in-memory only.
   "history-mark-filter",
   "history-workspace-filter",
-  "history-active-only",
   "history-group-handoff",
   "onboarding-dismissed",
   "wizard-completed",
@@ -96,6 +95,7 @@ const ALL_KEYS = [
   "prd-mode-enabled",
   "wiki-guidance-enabled",
   "model-guidance-enabled",
+  "session-title-guidance-enabled",
   "plan-approval-enabled",
   "onboarding-seen-features",
   "usage-auto-refresh",
@@ -224,6 +224,7 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   "prd-mode-enabled": true,
   "wiki-guidance-enabled": true,
   "model-guidance-enabled": true,
+  "session-title-guidance-enabled": true,
   "auto-update-check": true,
   // Default OFF.
   "tts-muted": false,

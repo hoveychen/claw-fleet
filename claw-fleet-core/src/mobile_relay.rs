@@ -984,6 +984,10 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "pidPrecise",
     "entrypoint",
     "userMark",
+    // v3 任务终态(completed / abandoned)。手机上的任务行要和桌面一样能一眼看出
+    // 「这个任务是干完了还是放弃了」;没放行的话字段会被白名单静默裁掉。只有终结
+    // 过的会话才有,其余整个字段缺席。
+    "taskOutcome",
     "procAlive",
     // Relay-chain position (hop/chainLen) — the mobile task row shows the same
     // handoff chip the desktop launchpad row does. Small object; enrich sets it
@@ -1982,8 +1986,15 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
                 .map_err(|e| format!("bad answers: {e}"))?
                 .unwrap_or_default();
             let cancelled = payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false);
-            let resp = crate::mcp_ipc::FleetAskResponse { id: id.clone(), answers, cancelled };
-            crate::parked::deliver(&id, &resp, cancelled, crate::mcp_ipc::write_response)
+            // v3 terminal button: the phone sends `taskOutcome` alongside
+            // `cancelled: true` when the user pressed 结束任务 / 放弃任务, so the
+            // phone stamps the same session terminal state the desktop does.
+            let task_outcome = payload
+                .get("taskOutcome")
+                .cloned()
+                .and_then(|v| serde_json::from_value(v).ok());
+            let resp = crate::mcp_ipc::FleetAskResponse { id: id.clone(), answers, cancelled, task_outcome };
+            crate::mcp_ipc::deliver_response(&resp)
         }
         "plan-approval" => {
             let decision = str_field("decision").ok_or("missing decision")?;
@@ -2897,6 +2908,7 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
     // A "done" task resumed from mobile is active again — drop the done mark so
     // it re-surfaces as needs-review (next snapshot re-enriches user_mark).
     crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
+    crate::task_outcome::clear_on_resume(&req.session_id);
     // Same as the desktop resume: drop a stale remote-disconnect verdict so the
     // row isn't pinned red after the user has asked for a retry.
     crate::remote_disconnect::clear(&req.session_id);
@@ -4150,6 +4162,7 @@ mod tests {
             timestamp: "2026-07-14T00:00:00Z".into(),
             parked: false,
             review_docs: vec![],
+            task_complete: false,
             questions: vec![crate::mcp_ipc::FleetAskQuestion {
                 question: "保留兼容？".into(),
                 header: "兼容".into(),

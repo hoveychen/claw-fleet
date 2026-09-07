@@ -2,7 +2,7 @@ import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, ChevronRight, Clock, FolderGit2, Radar, Waypoints } from "lucide-react";
 import type { SessionInfo } from "../types";
-import { LIVE_STATUSES, isQuietAlive, rowBarColor } from "../types";
+import { LIVE_STATUSES, isQuietAlive, isQuietAliveSticky, rowBarColor } from "../types";
 import { MarkControl } from "./MarkControl";
 import { AgentSourceIcon } from "./SessionCard";
 import styles from "./SessionRow.module.css";
@@ -138,7 +138,14 @@ export const SessionRow = memo(function SessionRow({
   // — faded, so it reads apart from a truly working session — and the runtime
   // chip stays up, since "how long has this been going" is exactly the question
   // a session stuck on one long tool call raises.
+  // Raw vs latched (see `isQuietAliveSticky`): the dot's colour follows the
+  // latched value so it stops flickering, so the tooltip has to as well — a
+  // faded dot reading "运行中" would contradict itself. The two differ only in
+  // the window right after a sparse write, which gets its own wording: the
+  // transcript just moved, but the cadence is still "one line every few
+  // minutes", which is what the faded dot is saying.
   const quiet = isQuietAlive(s);
+  const sparse = !quiet && isQuietAliveSticky(s);
   const quietMins = quiet
     ? Math.max(0, Math.round((Date.now() - s.lastActivityMs) / 60000))
     : 0;
@@ -180,7 +187,9 @@ export const SessionRow = memo(function SessionRow({
                   })
                 : s.status === "waitingInput"
                   ? t("history.waiting", "等待输入")
-                  : t("history.running", "运行中")
+                  : sparse
+                    ? t("history.quiet_sparse", "运行中 · 输出稀疏（每隔几分钟才写一行，多半卡在一条长工具调用上）")
+                    : t("history.running", "运行中")
             }
           />
         )}

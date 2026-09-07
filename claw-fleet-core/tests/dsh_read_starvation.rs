@@ -3,12 +3,12 @@
 //! `DshSource::with_client` owns one process-global mutex guarding the shared
 //! `dsh web` handle. If that lock is held for the whole RPC — and not just for
 //! the start/restart it exists to protect — then every dsh call in the process
-//! is serialized: the `session.history` fired when the user opens a session's
-//! 对话 tab waits out however many `session.list` polls (`WatchStrategy::Poll(3s)`,
+//! is serialized: the `session/page` read fired when the user opens a session's
+//! 对话 tab waits out however many `session/list` polls (`WatchStrategy::Poll(3s)`,
 //! issued from several call sites at once) happen to hold or barge the lock.
 //!
 //! The dsh side here is a fixture server (`tests/fixtures/fake-dsh.js`) rather
-//! than a real `dsh web`: it answers `session.list` slowly and `session.history`
+//! than a real `dsh web`: it answers `session/list` slowly and `session/page`
 //! quickly, and — being an ordinary concurrent HTTP server — will answer both at
 //! once. So any wait the reader observes is Fleet-side by construction, which is
 //! what makes this an isolation test rather than a benchmark.
@@ -31,9 +31,9 @@ use claw_fleet_core::dsh_source::DshSource;
 /// `fleet serve` route that scans on request.
 const POLLERS: usize = 3;
 
-/// The fixture's `session.list` latency — the "slow background call".
+/// The fixture's `session/list` latency — the "slow background call".
 const LIST_DELAY_MS: u64 = 1500;
-/// The fixture's `session.history` latency — what an uncontended interactive
+/// The fixture's `session/page` latency — what an uncontended interactive
 /// read actually costs.
 const HISTORY_DELAY_MS: u64 = 50;
 
@@ -44,6 +44,38 @@ const HISTORY_DELAY_MS: u64 = 50;
 /// by queueing, not by the machine being slow.
 const READ_BUDGET: Duration = Duration::from_millis(800);
 
+/// The cap on the warm-up call that boots the fixture.
+///
+/// Generous against the fixture's own cost (a start plus one 1.5s call) and far
+/// under `dsh_server::STARTUP_TIMEOUT` (120s), which is what an *unusable*
+/// fixture costs — per call, retried. That is not hypothetical: when dsh 0.1.2
+/// moved the startup contract (`?token=` in the launch line) and this fixture
+/// did not follow, every RPC waited out two of those timeouts and the file took
+/// 46 minutes to fail on CI. A dead fixture must now say so in seconds.
+const BOOT_BUDGET: Duration = Duration::from_secs(30);
+
+/// Run one dsh call on a worker thread and give up on it after `budget`.
+///
+/// The worker is deliberately not joined on timeout: it is parked inside a
+/// startup timeout that cannot be cancelled from here, and the point of this
+/// helper is that the *test* stops waiting for it.
+fn within<T: Send + 'static>(budget: Duration, what: &str, body: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(body());
+    });
+    match rx.recv_timeout(budget) {
+        Ok(value) => value,
+        Err(_) => panic!(
+            "{what} did not answer within {budget:?}: the fake-dsh fixture never became usable. \
+             The likeliest cause is Fleet's dsh contract moving without \
+             tests/fixtures/fake-dsh.js following it — check the launch line \
+             (`dsh web: http://127.0.0.1:<port>/?token=<token>`), the `GET /?token=` \
+             cookie exchange, and the `/api/<service>/<method>` endpoints."
+        ),
+    }
+}
+
 /// Both tests drive the same process-global `dsh web` and the same environment,
 /// so they may never overlap.
 fn serial() -> MutexGuard<'static, ()> {
@@ -51,6 +83,17 @@ fn serial() -> MutexGuard<'static, ()> {
     LOCK.get_or_init(|| Mutex::new(()))
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// A request log private to this process.
+///
+/// The path used to be a fixed name in the shared temp dir, which is a shared
+/// counter the moment two checkouts run this file at once — Rule 3 gives every
+/// plan its own worktree, so that is the normal case here, not an exotic one.
+/// Appends from a neighbour's fixture would then be counted as this test's own
+/// `session/list` calls.
+fn request_log(what: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("fake-dsh-{what}-{}.log", std::process::id()))
 }
 
 fn fixture() -> PathBuf {
@@ -123,8 +166,11 @@ fn an_interactive_read_does_not_queue_behind_the_roster_poll() {
     };
 
     let source = DshSource::new();
-    // The first RPC boots the fixture server; keep that out of the numbers.
-    let _ = source.scan_sessions();
+    // The first RPC boots the fixture server; keep that out of the numbers — and
+    // out of the 120s-per-call hole a broken fixture would otherwise dig.
+    within(BOOT_BUDGET, "the warm-up scan", || {
+        let _ = DshSource::new().scan_sessions();
+    });
 
     let samples = under_poll_load(POLLERS, || {
         (0..5)
@@ -147,16 +193,16 @@ fn an_interactive_read_does_not_queue_behind_the_roster_poll() {
     );
 }
 
-/// How many `session.list` calls actually reached the fixture server.
+/// How many `session/list` calls actually reached the fixture server.
 fn list_calls(log: &std::path::Path) -> usize {
     std::fs::read_to_string(log)
         .unwrap_or_default()
         .lines()
-        .filter(|l| l.contains("enter session.list"))
+        .filter(|l| l.contains("enter session/list"))
         .count()
 }
 
-/// Concurrent roster scans must collapse into one `session.list`.
+/// Concurrent roster scans must collapse into one `session/list`.
 ///
 /// Several Fleet call sites scan the roster — the registry watch loop, the
 /// desktop rescan, and (in `fleet serve`) one per scan-bearing HTTP route. When
@@ -168,7 +214,7 @@ fn list_calls(log: &std::path::Path) -> usize {
 #[test]
 fn concurrent_roster_scans_collapse_into_one_dsh_call() {
     let _serial = serial();
-    let log = std::env::temp_dir().join("fake-dsh-singleflight.log");
+    let log = request_log("singleflight");
     let _ = std::fs::remove_file(&log);
     let Some(_fleet_home) = arrange(LIST_DELAY_MS, Some(&log)) else {
         eprintln!("skipped: node not on PATH, the dsh fixture cannot run");
@@ -178,7 +224,9 @@ fn concurrent_roster_scans_collapse_into_one_dsh_call() {
     // Boot the server on an interactive read, so the roster call count starts at
     // zero rather than counting a warm-up scan.
     let source = DshSource::new();
-    let _ = source.get_messages_tail("dsh://session-probe", 50);
+    within(BOOT_BUDGET, "the warm-up read", || {
+        let _ = DshSource::new().get_messages_tail("dsh://session-probe", 50);
+    });
     assert_eq!(list_calls(&log), 0, "warm-up must not have scanned");
 
     // Eight scanners released at the same instant.
@@ -201,7 +249,7 @@ fn concurrent_roster_scans_collapse_into_one_dsh_call() {
     assert_eq!(
         list_calls(&log),
         1,
-        "8 simultaneous roster scans must share one session.list"
+        "8 simultaneous roster scans must share one session/list"
     );
     assert!(
         rosters.iter().all(|r| r.len() == 1),
@@ -240,7 +288,7 @@ fn summarize(label: &str, samples: &[Duration]) {
 #[ignore = "timing measurement; run manually with --ignored --nocapture"]
 fn measure_interactive_read_latency_under_scan_load() {
     let _serial = serial();
-    let log = std::env::temp_dir().join("fake-dsh-requests.log");
+    let log = request_log("requests");
     let _ = std::fs::remove_file(&log);
     let Some(_fleet_home) = arrange(3000, Some(&log)) else {
         eprintln!("skipped: node not on PATH, the dsh fixture cannot run");
@@ -269,4 +317,35 @@ fn measure_interactive_read_latency_under_scan_load() {
 
     claw_fleet_core::dsh_source::shutdown();
     println!("request log: {}", log.display());
+}
+
+/// `session_events` must read history through the endpoint dsh 0.1.2 actually
+/// serves.
+///
+/// It is the raw-event read `dsh_cost` uses to recover provider generation ids.
+/// It used to POST `session.history` — 0.1.1's spelling for a standalone history
+/// call that 0.1.2 both renamed (endpoints are now `<service>/<method>`, and a
+/// dotted name is one path segment) and *replaced* with the paged `session/page`.
+/// Against a real server that is a 404 on every call, which is why the fixture
+/// answers unknown endpoints with 404 too: a stale endpoint name must fail here
+/// rather than sail through and only break in front of a user.
+#[test]
+fn session_events_reads_history_through_a_live_endpoint() {
+    let _serial = serial();
+    let Some(_fleet_home) = arrange(LIST_DELAY_MS, None) else {
+        eprintln!("skipped: node not on PATH, the dsh fixture cannot run");
+        return;
+    };
+
+    let events = within(BOOT_BUDGET, "session_events", || {
+        claw_fleet_core::dsh_source::session_events("dsh://session-probe")
+    });
+    claw_fleet_core::dsh_source::shutdown();
+
+    let events = events.expect("session_events must reach a served endpoint");
+    assert_eq!(
+        events.len(),
+        2,
+        "the fixture's two durable events must come back: {events:?}"
+    );
 }

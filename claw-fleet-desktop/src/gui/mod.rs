@@ -1737,6 +1737,8 @@ pub fn run() {
             remove_wiki_guidance,
             apply_model_guidance,
             remove_model_guidance,
+            apply_session_title_guidance,
+            remove_session_title_guidance,
             get_interaction_diagnostics,
             test_decision_frontend_only,
             test_decision_end_to_end,

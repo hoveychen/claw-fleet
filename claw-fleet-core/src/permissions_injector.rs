@@ -73,6 +73,7 @@ pub const INJECT_RULES: &[&str] = &[
     "Workflow(*)",
     "mcp__fleet__fleet__ask",
     "mcp__fleet__fleet__render_a2ui",
+    "mcp__fleet__fleet__set_session_title",
     "mcp__fleet__fleet__plan",
     "mcp__fleet__fleet__handoff",
     "mcp__fleet__fleet__watch",
@@ -585,6 +586,24 @@ mod tests {
                 "control tool {name} not pre-authorised (expected rule {rule} in INJECT_RULES)"
             );
         }
+    }
+
+    /// Same contract for the always-on tool the session-title guidance tells
+    /// agents to call: guidance that names a tool without an allow rule turns
+    /// every self-titling session into a permission card the user has to clear.
+    /// Driven off the rendered guidance rather than a literal so deleting the
+    /// rule fails here.
+    #[test]
+    fn inject_rules_preauthorise_the_tool_the_session_title_guidance_names() {
+        let guidance = crate::session_title_guidance::render_guidance("Boss", "en");
+        assert!(
+            guidance.contains("fleet__set_session_title"),
+            "guidance no longer names the tool — update this test with it"
+        );
+        assert!(
+            INJECT_RULES.contains(&"mcp__fleet__fleet__set_session_title"),
+            "session-title guidance asks agents to call a tool that is not pre-authorised"
+        );
     }
 
     /// Regression: the Windows `PowerShell` tool has its own permission-rule

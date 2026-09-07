@@ -1348,6 +1348,11 @@ fn handle_request(
 
             crate::routes::REMOVE_MODEL_GUIDANCE => route_remove_model_guidance(ctx, request, &query, json_header, path),
 
+            // ── Session-title guidance endpoints ─────────────────────────────
+            crate::routes::APPLY_SESSION_TITLE_GUIDANCE => route_apply_session_title_guidance(ctx, request, &query, json_header, path),
+
+            crate::routes::REMOVE_SESSION_TITLE_GUIDANCE => route_remove_session_title_guidance(ctx, request, &query, json_header, path),
+
             crate::routes::INTERACTION_DIAGNOSTICS => route_interaction_diagnostics(ctx, request, &query, json_header, path),
 
             crate::routes::TEST_DECISION_END_TO_END => route_test_decision_end_to_end(ctx, request, &query, json_header, path),

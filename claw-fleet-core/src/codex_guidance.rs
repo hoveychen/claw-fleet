@@ -369,25 +369,7 @@ Use `reviewDocs` (an array of `{{ \"kind\": \"wiki\"|\"file\", \"ref\": \
 / report / plan file you produced: Fleet renders each as a tab beside the \
 card so {title} reads it in place instead of hunting down the path.\n\
 \n\
-## Session title\n\
-\n\
-Once the conversation has a stable topic, call `fleet__set_session_title` to \
-give the current session a concise, descriptive title. Do this once per \
-session as soon as the topic is clear enough to name; do not merely copy the \
-user's first message. Keep the title specific (name the concrete task or \
-question), avoid generic labels such as \"Help\" or \"Coding task\", and do \
-not ask {title} to supply a title. If the conversation's topic materially \
-changes, call it again with the new title; otherwise do not rename on every \
-turn.\n\
-\n\
-Like other Fleet MCP tools, Codex may defer it from the upfront tool list; \
-invoke it inside the outer `exec` with the exact direct-call shape \
-`await tools.mcp__fleet__fleet__set_session_title({{ title: \"<concise title>\" }});`. \
-**Do not inspect `ALL_TOOLS`, search tool lists, gate the call on apparent \
-availability, or use dynamic lookup:** deferred MCP tools are absent from \
-those lists even when they are callable. This tool is non-blocking. If the \
-direct call returns a not-registered / unknown-tool error, continue the task \
-without retrying or interrupting {title}.\n\
+{session_title}\
 \n\
 ### Deferred-tool wait invariant\n\
 \n\
@@ -430,8 +412,8 @@ Example `question` value:\n\
 \n\
 - **Case A — pure report / status (no pending decision):** one question, the \
 report as the `question` field. Options = 2–3 guesses at {title}'s likely \
-next ask (concrete next actions) + one \"任务结束\" / \"done\" option to close \
-the turn.\n\
+next ask (concrete next actions). Do NOT add a \"任务结束\" / \"done\" option \
+yourself — see \"Task terminal state\" below.\n\
 - **Case B — report + pending decisions:** pack into one call. Q1 = report \
 body + first decision, options = its resolutions. Q2..Q4 = the remaining \
 decisions (most consequential first; mention any deferred ones at the tail \
@@ -453,14 +435,33 @@ auto-added \"Other\" already covers free input.\n\
 - After {title} answers with a concrete action, **execute it in the same \
 turn** — do NOT immediately re-wrap in another card unless you genuinely \
 reach another wait-for-input surface.\n\
-- **Session-end exemption:** when {title} picks an option that clearly closes \
-the conversation (\"任务结束\", \"收工\", \"done\"), end with a one-line \
-plain-text acknowledgement instead of another card. This is the only case \
-where a terminal turn is plain text.\n\
+- **Task terminal state (`taskComplete`):** every card carries a permanent \
+first-class end-the-task button rendered by Fleet — it costs you no `options` \
+slot and you must never hand-roll one. Set the top-level boolean \
+`taskComplete` (default false) to your own verdict on whether the task is \
+done: `true` makes the button read \"结束任务 / Finish task\" and closes the \
+session as a SUCCESS when pressed; `false` makes it \"放弃任务 / Abandon \
+task\", closing it as UNFINISHED. Only claim true when the work is genuinely \
+finished — the terminal state feeds Fleet's retrospective, and \"agent said \
+done, user abandoned it\" is its strongest signal.\n\
+- **Session-end exemption:** when the tool returns `TASK FINISHED` or `TASK \
+ABANDONED` (the terminal button), or {title} picks an option that clearly \
+closes the conversation (\"收工\", \"done\"), end with a one-line plain-text \
+acknowledgement instead of another card. This is the only case where a \
+terminal turn is plain text.\n\
 - **When this whole part does NOT apply:** if `fleet__ask` is not in your \
 toolset this turn (rare), respond with plain text as normal.",
         title = title,
         ix_lang = ix_lang,
+        // The codex interaction block is English-only today (locale only picks
+        // the `ix_lang` line), so the shared section is rendered in English too
+        // — otherwise a `zh` host would get one Chinese section wedged into an
+        // otherwise English block.
+        session_title = crate::session_title_guidance::render_session_title_section(
+            &title,
+            "en",
+            crate::session_title_guidance::Harness::Codex,
+        ),
     )
 }
 
@@ -1071,6 +1072,29 @@ mod tests {
             g.contains("tools.mcp__fleet__fleet__set_session_title")
                 && g.contains("Do not inspect `ALL_TOOLS`"),
             "must give the exact direct-call shape and forbid the deferred-tool list trap"
+        );
+    }
+
+    /// The naming semantics are shared with the Claude-side guidance file
+    /// (`session_title_guidance`). Asserting the block *embeds* that renderer —
+    /// rather than re-checking its wording here — is what keeps a future edit
+    /// from being applied to one harness and forgotten on the other.
+    #[test]
+    fn session_title_section_comes_from_the_shared_renderer() {
+        let shared = crate::session_title_guidance::render_session_title_section(
+            "Boss",
+            "en",
+            crate::session_title_guidance::Harness::Codex,
+        );
+        assert!(
+            render_codex_interaction_block("", "en").contains(&shared),
+            "codex block must embed the shared session-title section verbatim"
+        );
+        // …and the zh block too: the section stays English there on purpose, so
+        // a locale switch must not silently drop it.
+        assert!(
+            render_codex_interaction_block("", "zh").contains(&shared),
+            "zh codex block must carry the same English session-title section"
         );
     }
 

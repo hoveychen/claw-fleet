@@ -166,6 +166,19 @@
   border: 1px solid var(--color-border);
 }
 
+/* v3 决策卡的终结按钮:一个位置两种判词,由 agent 的 taskComplete 决定。用描边
+   而非实心 —— 它和「提交」并排,实心会抢走主操作的位置。放弃用琥珀不用红:放弃
+   是一个结局,不是一个危险动作。 */
+.finishButton {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.abandonButton {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
 .reasonInput {
   margin-top: 8px;
 }

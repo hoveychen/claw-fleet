@@ -46,6 +46,7 @@ export function DecisionCardsPanel({ stats }: { stats?: DecisionCardStats }) {
             <th>{t("report.dc_type")}</th>
             <th>{t("report.dc_triggered")}</th>
             <th>{t("report.dc_answered")}</th>
+            <th>{t("report.dc_task_outcome")}</th>
             <th>{t("report.dc_recommended_hit")}</th>
             <th>{t("report.dc_other")}</th>
             <th>{t("report.dc_avg_latency")}</th>
@@ -63,6 +64,21 @@ export function DecisionCardsPanel({ stats }: { stats?: DecisionCardStats }) {
                   {st.answered}
                   {st.triggered > 0 && (
                     <span className={styles.dc_rate}>{pct(st.answered, st.triggered)}</span>
+                  )}
+                </td>
+                {/* v3 任务终态。只有 fleet-ask 卡带得动终结按钮,别的类型这两个
+                    计数恒为 0 —— 那时候画一个 "0 / 0" 是噪音,留一个破折号。 */}
+                <td>
+                  {st.taskCompleted + st.taskAbandoned > 0 ? (
+                    <>
+                      <span className={styles.dc_ok}>{st.taskCompleted}</span>
+                      {" / "}
+                      <span className={st.taskAbandoned > 0 ? styles.dc_warn : undefined}>
+                        {st.taskAbandoned}
+                      </span>
+                    </>
+                  ) : (
+                    <span className={styles.dc_dim}>—</span>
                   )}
                 </td>
                 <td>

@@ -57,6 +57,9 @@ fn apply(feature: Feature, s: &Settings) -> Result<(), String> {
         Feature::PrdDiscipline => crate::prd_discipline::apply_prd_discipline(&s.title, &s.locale),
         Feature::WikiGuidance => crate::wiki_guidance::apply_wiki_guidance(&s.locale),
         Feature::ModelGuidance => crate::model_guidance::apply_model_guidance(&s.locale),
+        Feature::SessionTitleGuidance => {
+            crate::session_title_guidance::apply_session_title_guidance(&s.title, &s.locale)
+        }
     }
 }
 
@@ -76,6 +79,7 @@ pub fn is_installed(feature: Feature, plan: &HookSetupPlan) -> bool {
         Feature::PrdDiscipline => plan.prd_discipline_installed,
         Feature::WikiGuidance => plan.wiki_guidance_installed,
         Feature::ModelGuidance => plan.model_guidance_installed,
+        Feature::SessionTitleGuidance => plan.session_title_guidance_installed,
     }
 }
 
@@ -152,6 +156,7 @@ mod tests {
             prd_discipline_installed: true,
             wiki_guidance_installed: true,
             model_guidance_installed: true,
+            session_title_guidance_installed: true,
             idle_hooks_installed: true,
             wakeup_guard_installed: true,
         }

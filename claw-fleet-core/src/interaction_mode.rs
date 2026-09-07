@@ -96,9 +96,10 @@ Claude Code 里这个工具的规范名是 `mcp__fleet__ask`（有的环境显�
 ### Case A —— 纯报告 / 状态（没有待用户决策的事项）\n\
 \n\
 1 个问题。把完整报告（可用 markdown）作为 `question` 字段。\n\
-选项（总共争取 2–4 个）：\n\
-- 2–3 个对{title_zh}下一步可能诉求的猜测（具体的下一步动作）。\n\
-- 1 个「任务结束」选项，用于无后续动作地收尾本回合。\n\
+选项（总共争取 2–4 个）：对{title_zh}下一步可能诉求的猜测，每个都是\
+具体的下一步动作。\n\
+**不要**自己加「任务结束」「收工」「done」这类收尾选项——每张卡片\
+底部都常驻一颗一等的结束按钮，见下面「任务终态」。\n\
 \n\
 ### Case B —— 报告 + 待决策事项\n\
 \n\
@@ -113,6 +114,27 @@ Claude Code 里这个工具的规范名是 `mcp__fleet__ask`（有的环境显�
 ### Case C —— 单个澄清问题\n\
 \n\
 标准用法——一个问题，2–4 个候选答案。「Other」逃生口是隐含的。\n\
+\n\
+## 任务终态（`taskComplete`）\n\
+\n\
+每张卡片底部都常驻一颗**一等的结束按钮**，由 Fleet 渲染，不占用你的 \
+`options` 名额，你也永远不需要（也不允许）自己造一个「任务结束」选项。\n\
+\n\
+你唯一要做的是在每次调用里给出 `taskComplete`（顶层布尔，缺省 false）——\
+它是**你对「这个任务做完了没有」的判断**，决定那颗按钮长什么样：\n\
+\n\
+- `taskComplete: true` → 按钮显示「结束任务」。老板按下后，本会话被标记为\
+**已完成（成功）**。只有在活真的干完了、你正在交最终汇报、没有剩余待办时才\
+传 true。\n\
+- `taskComplete: false`（缺省）→ 按钮显示「放弃任务」。老板按下后，本会话被\
+标记为**未完成·已放弃**。这是常态：只要你还认为有活没干完，就是 false。\n\
+\n\
+按下哪一个由老板决定，你只负责如实报告自己的判断。别为了让卡片好看就谎报 \
+true——终态会进复盘统计，「你说完成了、老板却按了放弃」正是复盘最看重的信号。\n\
+\n\
+按钮被按下时，工具返回的不是答案而是 `TASK FINISHED` 或 `TASK ABANDONED`。\
+两者都意味着**立刻收摊**：不要再开工、不要再发卡、不要再总结一遍，用一行话\
+应一声就结束本回合。\n\
 \n\
 ## 语音摘要分隔符（TTS）\n\
 \n\
@@ -167,7 +189,8 @@ Fleet 的决策面板会为每张新卡片播一段简短的 TTS 播报。前端
 里执行那个动作。不要把那个执行回合再包进另一个 `fleet__ask`，除非你又抵达\
 了一个真正的「等待输入」界面。\n\
 \n\
-**会话结束豁免。**当用户选了明显结束对话的选项（如「任务结束」「下班」「收工」，\
+**会话结束豁免。**当用户按下卡片的结束按钮（工具返回 TASK FINISHED / \
+TASK ABANDONED），或选了明显结束对话的选项（如「下班」「收工」，\
 或任何等价于「我们完事了」的表达），本回合以一行纯文本致意结束，而不是再来一个\
 `fleet__ask`。这是本文件顶部「每回合都要问」规则的字面豁免之一；不要追加\
 取舍说明——上述规则已明确授权这里的纯文本收尾，所以没有需要点出的冲突。\n\
@@ -435,9 +458,11 @@ input — do NOT add a \"let me type freely\" option yourself.\n\
 ### Case A — Pure report / status (no pending user decision)\n\
 \n\
 1 question. Use the full report (markdown OK) as the `question` field.\n\
-Options (aim for 2–4 total):\n\
-- 2–3 guesses at {title_en}'s likely next ask (concrete next actions).\n\
-- 1 \"任务结束\" option to close out the turn with no further action.\n\
+Options (aim for 2–4 total): guesses at {title_en}'s likely next ask, each \
+a concrete next action.\n\
+Do **not** add a \"任务结束\" / \"done\" / \"wrap up\" option yourself — every \
+card carries a permanent first-class end-the-task button; see \"Task terminal \
+state\" below.\n\
 \n\
 ### Case B — Report + pending decisions\n\
 \n\
@@ -454,6 +479,33 @@ in this batch and mention the deferred ones at the tail of Q1's report so \
 \n\
 Standard usage — one question, 2–4 candidate answers. The \"Other\" escape \
 hatch is implicit.\n\
+\n\
+## Task Terminal State (`taskComplete`)\n\
+\n\
+Every card carries a permanent **first-class end-the-task button**, rendered \
+by Fleet. It does not consume one of your `options` slots, and you never need \
+(or are allowed) to hand-roll a \"任务结束\" / \"done\" option of your own.\n\
+\n\
+All you do is set `taskComplete` on each call (top-level boolean, default \
+false) — **your own verdict on whether the task is finished** — which decides \
+what that button says:\n\
+\n\
+- `taskComplete: true` → the button reads \"Finish task\". Pressing it closes \
+this session as **complete (a success)**. Set it true only when the work is \
+genuinely done, you are delivering the final report, and nothing is left.\n\
+- `taskComplete: false` (default) → the button reads \"Abandon task\". \
+Pressing it closes the session as **unfinished / given up on**. This is the \
+normal case: while you still believe work remains, it is false.\n\
+\n\
+Which one gets pressed is the user's call; your job is only to report your \
+verdict honestly. Never claim true to make the card look good — the terminal \
+state feeds the retrospective, and \"the agent said done, the user abandoned \
+it\" is exactly the signal that review cares about most.\n\
+\n\
+When the button is pressed the tool returns `TASK FINISHED` or `TASK \
+ABANDONED` instead of answers. Both mean **stop immediately**: start no \
+further work, raise no further card, do not summarise again — acknowledge in \
+one line and end the turn.\n\
 \n\
 ## Speech Summary Divider (TTS)\n\
 \n\
@@ -521,8 +573,9 @@ After the user answers, if the answer clearly dispatches you to execute \
 turn. Do NOT re-wrap that executing turn in another `fleet__ask` unless \
 you again reach a genuine wait-for-input surface.\n\
 \n\
-**Session-end exemption.** When the user picks an option that clearly closes \
-the conversation (e.g. \"任务结束\", \"下班\", \"收工\", or anything \
+**Session-end exemption.** When the user presses the card's terminal button \
+(the tool comes back with TASK FINISHED or TASK ABANDONED), or picks an option \
+that clearly closes the conversation (e.g. \"下班\", \"收工\", or anything \
 equivalently meaning \"we are done\"), this turn ends with a one-line \
 plain-text acknowledgement instead of another `fleet__ask`. This is one of \
 the literal exemptions to the every-turn-asks rule at the top of this file; \

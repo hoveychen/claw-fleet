@@ -1128,6 +1128,7 @@ pub trait Backend: Send + Sync {
         id: &str,
         cancelled: bool,
         answers: std::collections::BTreeMap<String, String>,
+        task_outcome: Option<crate::task_outcome::TaskOutcome>,
     ) -> Result<(), String>;
 
     // ── fleet__permission_prompt MCP tool (headless native-permission bridge) ──
@@ -1210,6 +1211,13 @@ pub trait Backend: Send + Sync {
     // ── Model guidance (global CLAUDE.md block) ─────────────────────────────
     fn apply_model_guidance(&self, locale: &str) -> Result<(), String>;
     fn remove_model_guidance(&self) -> Result<(), String>;
+
+    // ── Session-title guidance (global CLAUDE.md block) ─────────────────────
+    // Takes the user title as well as the locale (like interaction mode, unlike
+    // the two guidance blocks above) because the text addresses the user by
+    // name.
+    fn apply_session_title_guidance(&self, user_title: &str, locale: &str) -> Result<(), String>;
+    fn remove_session_title_guidance(&self) -> Result<(), String>;
     /// QA diagnostics: report on the four backend-observable checkpoints in
     /// the AskUserQuestion → Decision Card pipeline. The frontend appends a
     /// fifth row (Tauri listener self-test) it owns.
@@ -1480,7 +1488,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, title_override: None,            compact_count: 0,
+            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,

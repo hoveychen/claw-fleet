@@ -26,7 +26,7 @@ import {
   type MarkFilter,
 } from "../store";
 import type { SessionInfo } from "../types";
-import { LIVE_STATUSES, isFleetOwnedTask } from "../types";
+import { isFleetOwnedTask } from "../types";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { PageShell } from "./PageShell";
@@ -184,10 +184,6 @@ export function HistoryView() {
     const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
   }, []);
-  // Narrow the rail to sessions whose agent is still live — same status set that
-  // colours the row dot green/amber.
-  const activeOnly = useUIStore((s) => s.historyActiveOnly);
-  const setActiveOnly = useUIStore((s) => s.setHistoryActiveOnly);
   // Segmented filter by manual review mark; "all" shows every bucket.
   const markFilter = useUIStore((s) => s.historyMarkFilter);
   const setMarkFilter = useUIStore((s) => s.setHistoryMarkFilter);
@@ -247,9 +243,8 @@ export function HistoryView() {
     const q = query.trim().toLowerCase();
     // Everything except the mark filter — the segment counts are taken over
     // this set so each count reflects how many rows its segment would reveal
-    // under the current workspace / query / active filters.
+    // under the current query.
     const preMark = adhocSessions
-      .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
       .filter((s) => {
         if (!q) return true;
         const clientMatch =
@@ -281,7 +276,7 @@ export function HistoryView() {
       // `lastActivityMs` would be stale, but the tree is very much alive.
       .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
     return { rows, markCounts: counts };
-  }, [adhocSessions, activeOnly, query, ftsMatchPaths, markFilter]);
+  }, [adhocSessions, query, ftsMatchPaths, markFilter]);
 
   // Whether the task page currently mixes agent sources (Claude + Codex + …).
   // Only then does the per-row source glyph earn its place; a uniform list gets
@@ -349,11 +344,6 @@ export function HistoryView() {
     window.addEventListener("blur", thawSort);
     return () => window.removeEventListener("blur", thawSort);
   }, [frozenOrder, thawSort]);
-
-  const activeCount = useMemo(
-    () => adhocSessions.filter((s) => LIVE_STATUSES.has(s.status)).length,
-    [adhocSessions],
-  );
 
   // Open tabs, resolved against the live scan. An id whose session has vanished
   // from the scan resolves to nothing and simply drops out of the strip; we
@@ -652,29 +642,7 @@ export function HistoryView() {
           </button>
         </div>
         <div className={styles.controls}>
-          <div className={styles.workspace_toolbar}>
-            <span className={styles.workspace_label}>
-              {t("history.workspaces", "工作区")}
-            </span>
-          </div>
-          {/* Row 2: the "only active" pill sits beside the mark segments rather
-              than inside the workspace-select row. On WebKit (Tauri's WKWebView)
-              a <select> refuses to shrink below its widest option even with
-              min-width:0, so pairing it with the pill wrapped the pill onto its
-              own orphaned line. Giving the pill its own row removes that
-              dependency and reads the same in both engines. */}
           <div className={styles.mark_row}>
-            <button
-              type="button"
-              className={`${styles.active_toggle} ${activeOnly ? styles.active_toggle_on : ""}`}
-              aria-pressed={activeOnly}
-              onClick={() => setActiveOnly(!activeOnly)}
-              title={t("history.filter_active_tip", "只显示仍在运行或等待输入的会话")}
-            >
-              <span className={styles.active_toggle_dot} />
-              {t("history.only_active", "仅活跃")}
-              <span>{activeCount}</span>
-            </button>
             <div
               className={styles.mark_filter}
               role="group"

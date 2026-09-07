@@ -330,7 +330,6 @@ const DICT: Record<string, string> = {
   "搜索标题、计划、全文…": "Search title, plan, full text…",
   全部目录: "All workspaces",
   聊天: "Chat",
-  仅活跃: "Live only",
   全部: "All",
   进行中: "In progress",
   已完成: "Done",
