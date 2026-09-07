@@ -406,11 +406,22 @@
   animation: aux_drawer_in 160ms ease-out;
 }
 
+/* Click-outside-to-close, and a falloff instead of a wash. A flat
+   `rgb(0 0 0 / 24%)` read as an arbitrary dark rectangle: the scrim is
+   `absolute` inside *this* pane, so it could only ever darken the detail column
+   and stopped dead at the edge of the list beside it — in the 任务 split that
+   is a grey block hanging in the middle of the window with no explanation.
+   Anchoring the tint at the right instead makes it read as the drawer's own
+   shadow spilling onto the transcript: strongest where the drawer meets it,
+   gone by the pane's left border, so there is no hard edge anywhere. The stop
+   positions are deliberately proportional rather than pinned to the drawer's
+   left edge — at narrow widths the drawer covers 94% and the sliver left of it
+   simply fades to nothing, which is the right answer there too. */
 .aux_scrim {
   position: absolute;
   inset: 0 var(--rail-space, 0px) 0 0;
   z-index: 5;
-  background: rgb(0 0 0 / 24%);
+  background: linear-gradient(to left, rgb(0 0 0 / 26%), rgb(0 0 0 / 0%));
   animation: aux_scrim_in 120ms ease-out;
 }
 
