@@ -18,7 +18,7 @@
   height: auto;
   object-fit: contain;
   border-radius: var(--radius-sm);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
   cursor: default;
   user-select: none;
 }

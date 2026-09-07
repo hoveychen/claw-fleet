@@ -17,7 +17,7 @@
   padding: 20px 24px;
   max-width: 520px;
   width: 100%;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
 }

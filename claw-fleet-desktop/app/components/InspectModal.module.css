@@ -20,7 +20,7 @@
   max-width: 900px;
   height: 80vh;
   overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
 }
 
 /* Header */
