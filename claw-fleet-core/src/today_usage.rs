@@ -1435,14 +1435,26 @@ fn build_range_breakdown(
 /// Each in-window session is projected through `cache` (folded from disk only on
 /// a miss) and summed over the date window `[from, to]`.
 /// Infer the agent-source label for a report-sourced receipt line from its
-/// model id. The daily-report DB keys usage by model, not by source, so we map
-/// gpt/codex model ids to Codex and everything else to Claude Code. (Fleet's own
+/// model id. The daily-report DB keys usage by model, not by source. (Fleet's own
 /// guard/audit LLM overhead is never recorded in daily reports, so it simply
 /// does not appear on report-sourced days — a negligible $1–5/day omission.)
+///
+/// The dsh arm is load-bearing rather than cosmetic. dsh spend is priced by the
+/// provider, so its receipt line must be flagged `priced_by_provider` and drawn
+/// without the per-row `× $/M` column; falling through to `claude-code` would
+/// both mislabel the row and make the receipt itemise it against Fleet's
+/// reference rates, breaking `Σ rows == subtotal` on every backfilled day. Two
+/// signatures, neither of which any Claude Code or Codex model id can produce:
+///
+/// * `deepseek-…` — dsh's built-in route, the only place those ids appear.
+/// * a `provider/model` slash — how OpenRouter names every model it fronts
+///   (`anthropic/claude-haiku-4.5`). Claude Code and Codex both use bare ids.
 fn infer_report_source(model: &str) -> String {
     let m = model.to_ascii_lowercase();
     if m.contains("gpt") || m.contains("codex") {
         "codex".to_string()
+    } else if m.starts_with("deepseek") || m.contains('/') {
+        "dsh".to_string()
     } else {
         "claude-code".to_string()
     }
@@ -2232,6 +2244,46 @@ mod breakdown_tests {
         assert_eq!(lines.len(), 1, "the dsh session must produce a receipt line");
         assert_eq!(lines[0].source, "dsh");
         assert!((lines[0].cost_usd - 0.42).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod report_source_tests {
+    use super::*;
+
+    /// A dsh model read back out of the daily-report DB must be labelled `dsh`.
+    ///
+    /// The DB keys usage by model with no source, so this inference is the only
+    /// thing standing between a backfilled dsh day and a receipt that both calls
+    /// it Claude Code and itemises provider-priced tokens against Fleet's own
+    /// reference rates — which is `Σ rows ≠ subtotal`, the invariant the receipt
+    /// exists to hold.
+    #[test]
+    fn report_backfill_recognises_dsh_models() {
+        assert_eq!(infer_report_source("deepseek-v4-flash"), "dsh");
+        assert_eq!(infer_report_source("deepseek-v4-flash-vision-exp"), "dsh");
+        assert_eq!(infer_report_source("anthropic/claude-haiku-4.5"), "dsh");
+        // …without capturing anything the other two sources emit: their ids are
+        // bare, never `provider/model`.
+        assert_eq!(infer_report_source("claude-opus-5"), "claude-code");
+        assert_eq!(infer_report_source("claude-sonnet-4-6"), "claude-code");
+        assert_eq!(infer_report_source("gpt-5.6-sol"), "codex");
+        assert_eq!(infer_report_source("codex-mini"), "codex");
+    }
+
+    /// …and once labelled, the line is drawn as provider-priced, which is what
+    /// actually restores the invariant.
+    #[test]
+    fn a_backfilled_dsh_line_is_provider_priced() {
+        let mut by_model = std::collections::HashMap::new();
+        let mut acc = LineAcc::default();
+        acc.add(10, 0, 0, 20, 30, 0.42);
+        by_model.insert(
+            (infer_report_source("deepseek-v4-flash"), "deepseek-v4-flash".to_string()),
+            acc,
+        );
+        let lines = build_lines(by_model);
+        assert!(lines[0].priced_by_provider);
     }
 }
 
