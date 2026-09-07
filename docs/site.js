@@ -104,3 +104,12 @@
       /* GitHub remains available. */
     });
 })();
+
+// Keep the complete feature catalogue compact until a visitor wants the details.
+const catalogueToggle = document.querySelector('.catalogue-toggle');
+if (catalogueToggle) catalogueToggle.addEventListener('click', () => {
+  const expand = catalogueToggle.getAttribute('aria-expanded') !== 'true';
+  document.querySelectorAll('.capability-group').forEach(group => { group.open = expand; });
+  catalogueToggle.setAttribute('aria-expanded', String(expand));
+  catalogueToggle.textContent = expand ? catalogueToggle.dataset.collapse : catalogueToggle.dataset.expand;
+});

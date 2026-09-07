@@ -1,0 +1,486 @@
+{
+  "en": [
+    {
+      "title": "Start and continue",
+      "items": [
+        [
+          "Three agent tools",
+          "Use Claude Code, Codex and dsh in one workspace."
+        ],
+        [
+          "Model and reasoning controls",
+          "Choose an available model, reasoning effort and permission mode."
+        ],
+        [
+          "File and image context",
+          "Attach source material and reference images to a brief."
+        ],
+        [
+          "Follow-ups while work runs",
+          "Add another instruction without waiting for the task to finish."
+        ],
+        [
+          "Task tabs",
+          "Move between tasks while keeping each conversation in place."
+        ],
+        [
+          "Cross-session search",
+          "Find previous work by title, plan or conversation text."
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/NewSessionForm.tsx"
+    },
+    {
+      "title": "See the work as it happens",
+      "items": [
+        [
+          "List and gallery views",
+          "See multiple sessions and their current states together."
+        ],
+        [
+          "Live activity",
+          "Distinguish thinking, tool execution, output and waiting for input."
+        ],
+        [
+          "Full conversation timeline",
+          "Inspect thinking, tool calls and code changes."
+        ],
+        [
+          "Subagents and workflows",
+          "Follow parent sessions, subagent work and workflow relationships."
+        ],
+        [
+          "Interrupt and stop",
+          "Take control of a stuck or no-longer-needed session."
+        ],
+        [
+          "Session organization",
+          "Rename, mark and filter sessions to keep useful work easy to find."
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/SessionDetail.tsx"
+    },
+    {
+      "title": "Keep a person in the loop",
+      "items": [
+        [
+          "One decision queue",
+          "Handle questions, permissions and plan approvals together."
+        ],
+        [
+          "Materials beside the decision",
+          "Review documents, images and HTML previews alongside a decision."
+        ],
+        [
+          "Options and structured forms",
+          "Use single choice, multiple choice, free text and form fields."
+        ],
+        [
+          "Pre-execution guard",
+          "Review risk analysis before supported commands run."
+        ],
+        [
+          "Editable plan approval",
+          "Read and edit a proposed plan before approving it."
+        ],
+        [
+          "Decision history",
+          "Keep questions, choices and feedback for later review."
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/DecisionPanel.tsx"
+    },
+    {
+      "title": "Keep longer work moving",
+      "items": [
+        [
+          "Durable plans and task trees",
+          "Track phases and keep the plan with the work."
+        ],
+        [
+          "Context handoffs",
+          "Start a successor session with a handoff brief."
+        ],
+        [
+          "Visible handoff chains",
+          "Trace the sessions that carried a piece of work forward."
+        ],
+        [
+          "One-time schedules",
+          "Start a task at a specified time."
+        ],
+        [
+          "Recurring tasks",
+          "Repeat checks or routine work on a schedule."
+        ],
+        [
+          "Condition-based runs",
+          "Wait for an event and run the agent only when the condition is met."
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/PlansView.tsx"
+    },
+    {
+      "title": "Keep the output and the knowledge",
+      "items": [
+        [
+          "Multi-format previews",
+          "Preview PDFs, Office files, images, video and web documents."
+        ],
+        [
+          "Export deliverables",
+          "Download finished files or hand them to someone else."
+        ],
+        [
+          "Favorites, notes and project filters",
+          "Organize deliverables without relying on filenames alone."
+        ],
+        [
+          "Project wiki publishing",
+          "Keep reusable HTML reports and Markdown documents."
+        ],
+        [
+          "Wiki search and cross-links",
+          "Search full text and reference conclusions across documents and sessions."
+        ],
+        [
+          "Document version history",
+          "Update a document while keeping earlier versions available."
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/ArtifactsView.tsx"
+    },
+    {
+      "title": "Connect projects and devices",
+      "items": [
+        [
+          "File explorer",
+          "Browse project files, images and source code."
+        ],
+        [
+          "Git status and diffs",
+          "Inspect changes and pull or push from the interface."
+        ],
+        [
+          "Terminal and processes",
+          "Run commands and inspect terminal output and process state."
+        ],
+        [
+          "SSH workspaces",
+          "Connect projects and agent environments on another machine."
+        ],
+        [
+          "Browser access and self-hosting",
+          "Run Fleet Web UI on your own always-on machine."
+        ],
+        [
+          "QR pairing and multiple devices",
+          "Pair a phone with desktop Fleet and switch between devices."
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/FilesView.tsx"
+    },
+    {
+      "title": "Understand usage and execution",
+      "items": [
+        [
+          "Account quota windows",
+          "See supported account quotas and reset windows."
+        ],
+        [
+          "Tokens and estimated cost",
+          "Review per-session consumption and estimated totals."
+        ],
+        [
+          "Live speed and spend trends",
+          "Watch output speed and changes in spend."
+        ],
+        [
+          "Daily work reports",
+          "Summarize sessions, output and work that needs attention."
+        ],
+        [
+          "Command auditing",
+          "Review executed commands by risk category."
+        ],
+        [
+          "Environment setup and diagnostics",
+          "Check installation, versions, sign-in and tool availability."
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/UsagePanel.tsx"
+    },
+    {
+      "title": "Make it work your way",
+      "items": [
+        [
+          "Skill browsing and sync",
+          "Inspect skills and synchronize them across supported tools."
+        ],
+        [
+          "Plugins and marketplaces",
+          "Browse, install and manage plugin sources."
+        ],
+        [
+          "Memory rules and history",
+          "Inspect project memory, revision history and rule scope."
+        ],
+        [
+          "Start and review from a phone",
+          "Start tasks, add instructions and answer decisions from a phone."
+        ],
+        [
+          "Voice transcription and image input",
+          "Turn speech into editable text and add images to a brief."
+        ],
+        [
+          "Notifications, sounds and speech",
+          "Choose how Fleet gets your attention."
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/SkillsView.tsx"
+    }
+  ],
+  "zh": [
+    {
+      "title": "开始与继续工作",
+      "items": [
+        [
+          "三种 Agent 入口",
+          "在同一工作台使用 Claude Code、Codex 和 dsh。"
+        ],
+        [
+          "模型与推理强度",
+          "按任务选择可用模型、推理强度和权限模式。"
+        ],
+        [
+          "文件与图片上下文",
+          "把资料和参考图片附在任务里。"
+        ],
+        [
+          "运行中追加要求",
+          "不必等任务结束，再补充一条要求。"
+        ],
+        [
+          "多标签工作区",
+          "在多个任务间切换，保留各自的上下文。"
+        ],
+        [
+          "跨会话搜索",
+          "按标题、计划与会话全文找回以前的工作。"
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/NewSessionForm.tsx"
+    },
+    {
+      "title": "看清 Agent 在做什么",
+      "items": [
+        [
+          "列表与画廊视图",
+          "同时查看多个会话及其当前状态。"
+        ],
+        [
+          "实时执行状态",
+          "区分思考、执行、输出与等待输入。"
+        ],
+        [
+          "完整会话时间线",
+          "展开思考、工具调用和代码差异。"
+        ],
+        [
+          "子 Agent 与工作流",
+          "查看父子会话、分工与工作流关系。"
+        ],
+        [
+          "中断与停止",
+          "直接接管卡住或不再需要的会话。"
+        ],
+        [
+          "标记与会话整理",
+          "重命名、标记和筛选，留下值得回看的工作。"
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/SessionDetail.tsx"
+    },
+    {
+      "title": "人来做决定",
+      "items": [
+        [
+          "统一决策队列",
+          "问题、权限与计划审批集中处理。"
+        ],
+        [
+          "材料与决定并排",
+          "直接审阅文档、图片与 HTML 预览。"
+        ],
+        [
+          "选项与结构化表单",
+          "支持单选、多选、自由回答和表单字段。"
+        ],
+        [
+          "执行前风险拦截",
+          "在受支持的命令执行前查看风险分析。"
+        ],
+        [
+          "可编辑的计划审批",
+          "先看计划，必要时修改，再批准执行。"
+        ],
+        [
+          "完整决策记录",
+          "保留问题、选择和反馈，回看来龙去脉。"
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/DecisionPanel.tsx"
+    },
+    {
+      "title": "让长任务接着做",
+      "items": [
+        [
+          "持久计划与任务树",
+          "按阶段追踪进度，计划随任务保留。"
+        ],
+        [
+          "上下文交接",
+          "带着交接简报启动后继会话。"
+        ],
+        [
+          "可追溯的接力链",
+          "回看一项工作经过了哪些会话。"
+        ],
+        [
+          "一次性定时任务",
+          "让任务在指定时间启动。"
+        ],
+        [
+          "周期性任务",
+          "按计划重复执行检查或整理工作。"
+        ],
+        [
+          "条件触发与便宜探测",
+          "等待外部事件，满足条件后再唤起 Agent。"
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/PlansView.tsx"
+    },
+    {
+      "title": "留下成果与知识",
+      "items": [
+        [
+          "多格式文件预览",
+          "查看 PDF、Office、图片、视频及网页文档。"
+        ],
+        [
+          "导出与取走文件",
+          "把完成的文件下载或交给其他人。"
+        ],
+        [
+          "收藏、备注与项目筛选",
+          "按用途整理交付物，不用靠文件名猜。"
+        ],
+        [
+          "发布到项目知识库",
+          "保存可复用的 HTML 报告和 Markdown 文档。"
+        ],
+        [
+          "知识库搜索与互链",
+          "全文搜索，并在文档和会话里引用结论。"
+        ],
+        [
+          "文档版本历史",
+          "更新同一篇文档，保留旧版本可回看。"
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/ArtifactsView.tsx"
+    },
+    {
+      "title": "连接项目与设备",
+      "items": [
+        [
+          "文件树与内容预览",
+          "浏览项目文件、图片与代码内容。"
+        ],
+        [
+          "Git 状态与差异",
+          "查看改动，并在界面中执行拉取与推送。"
+        ],
+        [
+          "内置终端与进程",
+          "运行命令，查看终端输出和进程状态。"
+        ],
+        [
+          "SSH 远端工作区",
+          "连接其他机器上的项目与 Agent 环境。"
+        ],
+        [
+          "浏览器与自托管",
+          "在自己的常在线机器上运行 Fleet Web UI。"
+        ],
+        [
+          "扫码配对与多设备",
+          "手机连接桌面，在多台设备之间切换。"
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/FilesView.tsx"
+    },
+    {
+      "title": "观察用量与运行质量",
+      "items": [
+        [
+          "账号额度窗口",
+          "查看受支持账号的额度与重置时间。"
+        ],
+        [
+          "Token 与费用估算",
+          "查看会话消耗与汇总费用。"
+        ],
+        [
+          "实时速度与花费趋势",
+          "留意输出速度及费用增长。"
+        ],
+        [
+          "每日工作报告",
+          "汇总会话、产出和需要关注的工作。"
+        ],
+        [
+          "命令审计",
+          "按风险类别回看执行过的命令。"
+        ],
+        [
+          "环境安装与诊断",
+          "检查安装、版本、登录与工具可用性。"
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/UsagePanel.tsx"
+    },
+    {
+      "title": "按自己的习惯使用",
+      "items": [
+        [
+          "技能浏览与同步",
+          "查看技能内容，并同步到支持的工具。"
+        ],
+        [
+          "插件与市场管理",
+          "浏览、安装和管理插件来源。"
+        ],
+        [
+          "记忆规则与历史",
+          "查看项目记忆、历史版本与规则归属。"
+        ],
+        [
+          "手机发起与接手",
+          "在手机上发任务、补充要求和回答决定。"
+        ],
+        [
+          "语音转写与图片输入",
+          "把语音转成可编辑文字，配合图片交代任务。"
+        ],
+        [
+          "通知、提示音与播报",
+          "按自己的节奏选择提醒方式。"
+        ]
+      ],
+      "evidence": "claw-fleet-desktop/app/components/SkillsView.tsx"
+    }
+  ]
+}

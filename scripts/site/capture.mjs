@@ -14,16 +14,16 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const out = `${root}docs/screenshots/current`;
 mkdirSync(out, {recursive:true});
 const scenes = JSON.parse(readFileSync(new URL('./fixtures/scenes.json',import.meta.url),'utf8'));
+const assetManifest = JSON.parse(readFileSync(new URL('./fixtures/assets.json',import.meta.url),'utf8'));
 const assets = {};
-for (const lang of ['en','zh']) for (let i=0;i<8;i++) {
-  const ext = i===3||i===4?'md':'html';
-  assets[`website-${lang}-${i}`] = {contentType:ext==='md'?'text/markdown':'text/html', body:readFileSync(new URL(`./fixtures/${lang}/${i}.${ext}`,import.meta.url),'utf8')};
+for (const lang of ['en','zh']) for (const a of assetManifest[lang]) {
+  assets[a.id] = {contentType:a.mime,body:readFileSync(new URL(`./fixtures/${lang}/${a.name}`,import.meta.url))};
 }
 const browser = await chromium.launch({headless:true,channel:'chrome'});
 try {
   for (const lang of ['en','zh']) {
     const c = scenes[lang];
-    const ctx = await browser.newContext({viewport:{width:1280,height:820},deviceScaleFactor:2,locale:lang==='zh'?'zh-CN':'en-US',colorScheme:'light'});
+    const ctx = await browser.newContext({viewport:{width:1280,height:720},deviceScaleFactor:2,locale:lang==='zh'?'zh-CN':'en-US',colorScheme:'light'});
     await ctx.addInitScript(lang => {
       localStorage.setItem('mock-store:theme','light');
       localStorage.setItem('mock-store:viewMode','history');
@@ -33,25 +33,41 @@ try {
     await ctx.route('**/artifact_blob?*', route => {
       const id = new URL(route.request().url()).searchParams.get('id');
       if (!assets[id]) throw new Error('Missing fixture '+id);
-      return route.fulfill({status:200,...assets[id]});
+      const a = assets[id];
+      const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range || '');
+      if (range) {
+        const start=Number(range[1]), end=range[2]?Math.min(Number(range[2]),a.body.length-1):a.body.length-1;
+        return route.fulfill({status:206,contentType:a.contentType,body:a.body.subarray(start,end+1),headers:{'content-range':`bytes ${start}-${end}/${a.body.length}`,'accept-ranges':'bytes'}});
+      }
+      return route.fulfill({status:200,...a});
     });
     const p = await ctx.newPage();
     const failed = [];
     p.on('response', r => {if(r.status()>=400) failed.push(r.url()+': '+r.status());});
     async function capture(name, clip) {
-      await p.evaluate(() => document.fonts.ready);
+      await p.evaluate(async () => {await document.fonts.ready; await Promise.all([...document.images].map(i=>i.decode()));});
       const text = await p.locator('body').innerText();
       if (lang === 'en' && /[\u3400-\u9fff]/u.test(text)) throw new Error(`Mixed-language ${name}: ${text}`);
       await p.screenshot({animations:'disabled',path:`${out}/${name}-${lang}.png`,clip});
     }
     await p.goto(`http://localhost:5299/?mock&website=${lang}`);
-    await p.getByText(c.tasks[0][0],{exact:true}).first().click();
-    await p.getByRole('heading',{name:lang==='en'?'The launch package is ready':'发布资料已经备齐'}).waitFor();
-    await p.locator('h2').filter({hasText:lang==='en'?'The launch package is ready':'发布资料已经备齐'}).click();
-    await capture('work',{x:74,y:0,width:1206,height:820});
+    await p.waitForFunction(brief => [...document.querySelectorAll('textarea')].some(t=>t.value===brief),c.brief);
+    await p.mouse.move(0,0);
+    const formClip = await p.evaluate(() => {
+      document.activeElement?.blur();
+      const textarea = document.querySelector('textarea');
+      const heading = [...document.querySelectorAll('h3')].find(h => /^(New Session|新建会话)$/.test(h.textContent.trim()));
+      if (!heading || !textarea) throw new Error('Missing populated task form');
+      if (textarea.scrollHeight > textarea.clientHeight + 2) throw new Error('Brief is clipped');
+      const r = heading.parentElement.parentElement.getBoundingClientRect();
+      return {x:Math.max(0,r.x-12),y:Math.max(0,r.y-12),width:r.width+24,height:r.height+24};
+    });
+    await p.waitForFunction(() => [...document.querySelectorAll('img')].every(i => i.complete && i.naturalWidth > 0));
+    await capture('work',formClip);
     await p.addScriptTag({content:'window.__mock_fleet_ask()'});
     await p.getByText(c.options[0],{exact:true}).waitFor();
     await p.getByText(c.reviewTitle,{exact:true}).first().waitFor();
+    await p.waitForFunction(() => [...document.querySelectorAll('iframe')].some(f => f.getBoundingClientRect().height > 400));
     const panel = p.locator('[class*="panel_with_detail_"]').first();
     await panel.screenshot({animations:'disabled',path:`${out}/review-${lang}.png`});
     await p.setViewportSize({width:1000,height:820});
@@ -59,9 +75,8 @@ try {
     await p.getByText(c.tasks[0][0],{exact:true}).first().waitFor();
     await p.locator('nav button').filter({has:p.locator('svg.lucide-package')}).click();
     await p.getByText(c.artifacts[7],{exact:true}).waitFor();
-    await p.waitForFunction(() => document.querySelectorAll('iframe').length >= 6);
-    // Wait for all real preview bodies, not only iframe mount.
-    for (const frame of p.frames().slice(1)) await frame.locator('h1').waitFor();
+    await p.waitForFunction(() => document.querySelectorAll('[data-ready="1"]').length >= 7,{},{timeout:30000});
+    await p.waitForFunction(() => [...document.querySelectorAll('img')].filter(i=>i.src.includes('artifact_blob')).every(i=>i.complete&&i.naturalWidth>0));
     await capture('results',{x:74,y:0,width:926,height:690});
     await p.setViewportSize({width:430,height:740});
     await p.goto(`http://localhost:5288/?mock&website=${lang}`);
@@ -71,4 +86,7 @@ try {
     if(failed.length) throw new Error(JSON.stringify(failed));
     console.log({lang,screenshots:4,failedResources:0});
   }
+} catch(error) {
+ for(const context of browser.contexts()) for(const p of context.pages()) { console.error('CAPTURE PAGE',p.url(),await p.locator('body').innerText()); await p.screenshot({path:'/tmp/fleet-capture-failure.png'}); }
+ throw error;
 } finally {await browser.close();}

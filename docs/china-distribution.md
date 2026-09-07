@@ -68,14 +68,19 @@ python3 scripts/site/distribute.py \
 
 ### 更新官网双语截图
 
-示例数据在 `scripts/site/fixtures/scenes.json`，两种语言使用独立文案。`generate.py` 生成真实可预览的 HTML/Markdown 示例材料；`capture.mjs` 使用真实桌面和手机组件生成八张截图，取景在生成阶段完成，官网不再二次偏移裁剪。
+示例数据在 `scripts/site/fixtures/scenes.json`，两种语言使用独立文案。`generate.py` 生成真实 PDF、XLSX、PPTX、DOCX、HTML 与 Markdown 文件，`render-assets.mjs` 渲染包装 PNG 和 MP4，并记录实际文件大小；`capture.mjs` 使用真实桌面和手机组件生成八张截图，取景在生成阶段完成，官网不再二次偏移裁剪。
 
 分别启动 `claw-fleet-desktop` 的 Vite（端口 5299）与 `mobile-web` 的 Vite（端口 5288），从仓库根执行：
 
 ```sh
-python3 scripts/site/fixtures/generate.py
+python3 -m venv /tmp/fleet-site-fixtures
+/tmp/fleet-site-fixtures/bin/pip install -r scripts/site/fixtures/requirements.txt
+/tmp/fleet-site-fixtures/bin/python scripts/site/fixtures/generate.py
+node scripts/site/fixtures/render-assets.mjs
 node scripts/site/capture.mjs
 python3 scripts/site/build.py
 ```
+
+多媒体生成需要 `ffmpeg`；中文 PDF 默认嵌入 macOS 的黑体子集，其他系统通过 `CJK_FONT` 指向支持中文的 TrueType 字体。功能目录维护于 `scripts/site/content/capabilities.json`，保留各分组的源码依据。构建器为图片、样式和脚本添加内容摘要版本参数。
 
 截图使用已安装 `patchwright-cli` 自带的 Patchright 与 Chrome；也可用 `PATCHRIGHT_MODULE` 指向本地 Patchright 模块。官网在 5290 端口提供服务后，执行 `node scripts/site/verify.mjs` 检查双语引用、资源加载与桌面/手机显示，再逐张打开图片眼验。

@@ -1,0 +1,118 @@
+{
+  "en": [
+    {
+      "id": "website-en-0",
+      "name": "00-brief.pdf",
+      "mime": "application/pdf",
+      "kind": "pdf",
+      "sizeBytes": 2018
+    },
+    {
+      "id": "website-en-1",
+      "name": "01-budget.xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "kind": "sheet",
+      "sizeBytes": 7114
+    },
+    {
+      "id": "website-en-2",
+      "name": "02-launch.pptx",
+      "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "kind": "slides",
+      "sizeBytes": 30550
+    },
+    {
+      "id": "website-en-3",
+      "name": "03-guide.docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "kind": "doc",
+      "sizeBytes": 36900
+    },
+    {
+      "id": "website-en-4",
+      "name": "04-packaging.png",
+      "mime": "image/png",
+      "kind": "image",
+      "sizeBytes": 64143
+    },
+    {
+      "id": "website-en-5",
+      "name": "05-garden.html",
+      "mime": "text/html",
+      "kind": "text",
+      "sizeBytes": 868
+    },
+    {
+      "id": "website-en-6",
+      "name": "06-film.mp4",
+      "mime": "video/mp4",
+      "kind": "video",
+      "sizeBytes": 305647
+    },
+    {
+      "id": "website-en-7",
+      "name": "07-checklist.md",
+      "mime": "text/markdown",
+      "kind": "text",
+      "sizeBytes": 235
+    }
+  ],
+  "zh": [
+    {
+      "id": "website-zh-0",
+      "name": "00-brief.pdf",
+      "mime": "application/pdf",
+      "kind": "pdf",
+      "sizeBytes": 39031
+    },
+    {
+      "id": "website-zh-1",
+      "name": "01-budget.xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "kind": "sheet",
+      "sizeBytes": 7183
+    },
+    {
+      "id": "website-zh-2",
+      "name": "02-launch.pptx",
+      "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "kind": "slides",
+      "sizeBytes": 30632
+    },
+    {
+      "id": "website-zh-3",
+      "name": "03-guide.docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "kind": "doc",
+      "sizeBytes": 36978
+    },
+    {
+      "id": "website-zh-4",
+      "name": "04-packaging.png",
+      "mime": "image/png",
+      "kind": "image",
+      "sizeBytes": 55338
+    },
+    {
+      "id": "website-zh-5",
+      "name": "05-garden.html",
+      "mime": "text/html",
+      "kind": "text",
+      "sizeBytes": 849
+    },
+    {
+      "id": "website-zh-6",
+      "name": "06-film.mp4",
+      "mime": "video/mp4",
+      "kind": "video",
+      "sizeBytes": 281252
+    },
+    {
+      "id": "website-zh-7",
+      "name": "07-checklist.md",
+      "mime": "text/markdown",
+      "kind": "text",
+      "sizeBytes": 197
+    }
+  ]
+}
