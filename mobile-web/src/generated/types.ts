@@ -98,7 +98,8 @@ inputTokens: number,
 cacheCreationTokens: number, 
 cacheCreation1hTokens: number, cacheReadTokens: number, outputTokens: number, 
 inputPrice: number, outputPrice: number, cacheWritePrice: number, cacheWrite1hPrice: number, cacheReadPrice: number, 
-costUsd: number, pricedByProvider: boolean, };
+costUsd: number, 
+pricedByProvider: boolean, };
 
 export type TodayUsageBreakdown = { 
 date: string, 
