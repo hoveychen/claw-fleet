@@ -1,7 +1,7 @@
 //! Wiki knowledge base — agents publish durable HTML reports/demos and
 //! markdown docs into `~/.fleet/wiki/` via `fleet wiki publish`; the desktop
-//! 知识库 board lists and renders them through the `Backend` trait so both
-//! LocalBackend and RemoteBackend see the same content.
+//! 知识库 board and the `fleet serve` wiki routes list and render them from
+//! the same functions here, so every client sees the same content.
 //!
 //! On-disk layout (scan-dir, one `doc.json` per doc — no global index, so
 //! concurrent publishes from several agents never contend on a shared file):

@@ -4,19 +4,19 @@ use super::*;
 
 #[tauri::command(async)]
 pub(crate) fn list_sessions(state: tauri::State<'_, AppState>) -> Vec<SessionInfo> {
-    state.backend.read().unwrap().list_sessions()
+    state.backend.list_sessions()
 }
 
 #[tauri::command(async)]
 pub(crate) fn today_usage(state: tauri::State<'_, AppState>) -> claw_fleet_core::today_usage::TodayUsage {
-    state.backend.read().unwrap().today_usage()
+    state.backend.today_usage()
 }
 
 #[tauri::command(async)]
 pub(crate) fn today_usage_breakdown(
     state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::today_usage::TodayUsageBreakdown {
-    state.backend.read().unwrap().today_usage_breakdown()
+    state.backend.today_usage_breakdown()
 }
 
 #[tauri::command(async)]
@@ -27,8 +27,6 @@ pub(crate) fn usage_range_breakdown(
 ) -> claw_fleet_core::today_usage::UsageRangeBreakdown {
     state
         .backend
-        .read()
-        .unwrap()
         .usage_range_breakdown(from_ms, to_ms)
 }
 
@@ -42,7 +40,7 @@ pub(crate) fn search_sessions(
     if query.trim().is_empty() {
         return vec![];
     }
-    state.backend.read().unwrap().search_sessions(&query, limit)
+    state.backend.search_sessions(&query, limit)
 }
 
 #[tauri::command(async)]
@@ -50,7 +48,7 @@ pub(crate) fn get_messages(
     jsonl_path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Value>, String> {
-    state.backend.read().unwrap().get_messages(&jsonl_path)
+    state.backend.get_messages(&jsonl_path)
 }
 
 /// Read at most the last `tail` messages of a session. Used by SessionDetail
@@ -84,9 +82,8 @@ pub(crate) fn get_messages_tail(
             "get_messages_tail[dsh] enter tail={tail} [{jsonl_path}]"
         ));
     }
-    let mut probe = crate::cmd_probe::CmdProbe::start("get_messages_tail", &jsonl_path);
-    let backend = state.backend.read().unwrap();
-    probe.locked();
+    let probe = crate::cmd_probe::CmdProbe::start("get_messages_tail", &jsonl_path);
+    let backend = &state.backend;
     let out = backend.get_messages_tail(&jsonl_path, tail);
     probe.done(|| match &out {
         Ok(msgs) => format!("{} msgs", msgs.len()),
@@ -104,6 +101,41 @@ pub(crate) fn get_messages_tail(
     out
 }
 
+/// One step of a live follow: everything appended since byte `offset`, plus the
+/// cursor to pass next time. `offset: None` returns no messages, only where the
+/// transcript currently ends — how a follower gets its first cursor.
+///
+/// This is what a detail pane polls instead of re-requesting a whole window.
+/// The window path re-read a 4513-record transcript every 1.5s and took 1–3s
+/// doing it (see `liveTailWindow.ts`); a cursor makes the steady-state read
+/// proportional to what the agent just wrote.
+///
+/// `(async)` for the same reason as `get_messages_tail` — it touches the file.
+#[tauri::command(async)]
+pub(crate) fn get_messages_since(
+    jsonl_path: String,
+    offset: Option<u64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<TailDelta, String> {
+    let probe = crate::cmd_probe::CmdProbe::start("get_messages_since", &jsonl_path);
+    let backend = &state.backend;
+    let out = backend.get_messages_since(&jsonl_path, offset);
+    probe.done(|| match &out {
+        Ok((msgs, off)) => format!("{} msgs, offset {off}", msgs.len()),
+        Err(e) => format!("error: {e}"),
+    });
+    out.map(|(messages, offset)| TailDelta { messages, offset })
+}
+
+/// Result of [`get_messages_since`]. A struct rather than a tuple so the
+/// frontend reads `.messages` / `.offset` instead of `[0]` / `[1]`.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TailDelta {
+    messages: Vec<Value>,
+    offset: u64,
+}
+
 /// Full, untrimmed tool output for one `tool_use_id`. `get_messages_tail`
 /// truncates oversized tool output for transport; the frontend calls this when
 /// the reader expands a card flagged `_fleetTruncated`. `(async)` for the same
@@ -116,8 +148,6 @@ pub(crate) fn get_tool_result_full(
 ) -> Result<Value, String> {
     state
         .backend
-        .read()
-        .unwrap()
         .get_tool_result_full(&jsonl_path, &tool_use_id)
 }
 
@@ -126,7 +156,7 @@ pub(crate) fn get_skill_history(
     jsonl_path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
-    state.backend.read().unwrap().get_skill_history(&jsonl_path)
+    state.backend.get_skill_history(&jsonl_path)
 }
 
 #[tauri::command(async)]
@@ -136,8 +166,6 @@ pub(crate) fn get_workflow_trees(
 ) -> Result<Vec<claw_fleet_core::workflow::WorkflowTree>, String> {
     state
         .backend
-        .read()
-        .unwrap()
         .get_workflow_trees(&jsonl_path)
 }
 
@@ -149,8 +177,6 @@ pub(crate) fn get_task_token_breakdown(
 ) -> Result<claw_fleet_core::token_analysis::TaskTokenBreakdown, String> {
     state
         .backend
-        .read()
-        .unwrap()
         .get_task_token_breakdown(&jsonl_path, project_root.as_deref())
 }
 
@@ -161,8 +187,6 @@ pub(crate) fn get_codex_token_breakdown(
 ) -> Result<claw_fleet_core::codex_source::CodexTokenBreakdown, String> {
     state
         .backend
-        .read()
-        .unwrap()
         .get_codex_token_breakdown(&jsonl_path)
 }
 
@@ -174,8 +198,6 @@ pub(crate) fn get_dsh_token_breakdown(
 ) -> Result<claw_fleet_core::dsh_source::DshTokenBreakdown, String> {
     state
         .backend
-        .read()
-        .unwrap()
         .get_dsh_token_breakdown(&uri)
 }
 
@@ -186,7 +208,7 @@ pub(crate) fn get_dsh_session_cost(
     uri: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::dsh_cost::DshSessionCost, String> {
-    state.backend.read().unwrap().get_dsh_session_cost(&uri)
+    state.backend.get_dsh_session_cost(&uri)
 }
 
 /// dsh's model catalogue for the launcher's model / effort menus. `async`
@@ -195,7 +217,7 @@ pub(crate) fn get_dsh_session_cost(
 pub(crate) fn dsh_models(
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::dsh_source::DshModelCatalog, String> {
-    state.backend.read().unwrap().dsh_models()
+    state.backend.dsh_models()
 }
 
 #[tauri::command(async)]
@@ -203,7 +225,7 @@ pub(crate) fn get_session_todos(
     jsonl_path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::session_todos::TodoItem>, String> {
-    let messages = state.backend.read().unwrap().get_messages(&jsonl_path)?;
+    let messages = state.backend.get_messages(&jsonl_path)?;
     Ok(claw_fleet_core::session_todos::extract_latest_todos(&messages))
 }
 
@@ -219,5 +241,5 @@ pub(crate) fn list_session_images(
     session_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::codex_image::GeneratedImage> {
-    state.backend.read().unwrap().list_session_images(&session_id)
+    state.backend.list_session_images(&session_id)
 }

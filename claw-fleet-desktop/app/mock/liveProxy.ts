@@ -527,6 +527,11 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { path: q(a.jsonlPath), tail: q(a.tail) },
   }),
 
+  // Incremental follow. `offset: null` asks only where the transcript ends —
+  // that is `/file_size`, a different route from the delta itself, so this one
+  // command spans two endpoints and cannot be a plain route entry.
+  // See LIVE_COMPOSITES below.
+
   get_mobile_relay_config: () => ({
     method: "GET",
     path: "/mobile-relay/config",
@@ -1536,6 +1541,30 @@ export const LIVE_COMPOSITES: Record<
    * Per-bucket failures degrade to `[]`, mirroring the Rust's `unwrap_or_default`
    * on each call: one dead endpoint must not lose the other five.
    */
+  /**
+   * `gui::get_messages_since` — one step of a live follow, mirroring
+   * `RemoteBackend::get_messages_since`. Two endpoints, not one, which is why
+   * it cannot be a plain route: `offset: null` asks only where the transcript
+   * ends (`/file_size`), while an offset asks for the delta (`/tail`).
+   */
+  get_messages_since: async (a) => {
+    const path = String(a.jsonlPath ?? "");
+    if (a.offset === null || a.offset === undefined) {
+      const size = (await callProbe({
+        method: "GET",
+        path: "/file_size",
+        query: { path },
+      })) as { size?: number } | null;
+      return { messages: [], offset: size?.size ?? 0 };
+    }
+    const delta = (await callProbe({
+      method: "GET",
+      path: "/tail",
+      query: { path, offset: String(a.offset) },
+    })) as { lines?: unknown[]; newOffset?: number } | null;
+    return { messages: delta?.lines ?? [], offset: delta?.newOffset ?? Number(a.offset) };
+  },
+
   list_pending_decisions: async () => {
     const buckets: Array<[string, string]> = [
       ["guard", "/guard/pending"],

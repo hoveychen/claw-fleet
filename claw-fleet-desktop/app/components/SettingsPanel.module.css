@@ -197,39 +197,6 @@
   margin-top: 2px;
 }
 
-/* ── Connection row ──────────────────────────────────────────────────────── */
-
-.connection_info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.connection_badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: var(--radius-xs);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-dim);
-  border: 1px solid var(--color-border);
-}
-
-.switch_btn {
-  padding: 4px 10px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--color-text-dim);
-  font-size: 12px;
-  transition: background 0.1s, color 0.1s;
-}
-
-.switch_btn:hover {
-  background: var(--color-bg-card-hover);
-  color: var(--color-text);
-}
-
 /* ── Hooks section ───────────────────────────────────────────────────────── */
 
 .hooks_status {

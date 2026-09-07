@@ -198,7 +198,7 @@ pub struct MobileRelayStatus {
     /// Currently-connected mobile clients that announced themselves via
     /// `client_hello`. Best-effort: pruned on a heartbeat timeout (the relay
     /// only reports a client *count*, never which client left). `#[serde(default)]`
-    /// keeps a RemoteBackend probe against an older `fleet serve` deserializable.
+    /// keeps a client of an older `fleet serve` deserializable.
     #[serde(default)]
     pub devices: Vec<MobileClientInfo>,
 }
@@ -3049,7 +3049,7 @@ const ATTACHMENT_THUMB_MIN_DIM: u32 = 256;
 
 /// A `full: true` request ships the stored bytes untouched — that is the point
 /// of tapping a thumbnail. The desktop side of the store accepts up to
-/// [`crate::backend::MAX_ATTACHMENT_BYTES`] (50 MiB) though, while the relay's
+/// [`crate::ui_types::MAX_ATTACHMENT_BYTES`] (50 MiB) though, while the relay's
 /// WS frame budget is 32 MiB *before* base64 inflates it by a third. Anything
 /// past this ceiling is squeezed like a decision asset rather than failing the
 /// tap outright.
@@ -3310,7 +3310,7 @@ fn account_usage_payload() -> Value {
     // Claude is handled above (its AccountInfo carries the previous-period
     // marker that `usage_summary` drops); the rest come through the same
     // normalised summary the tray menu uses.
-    let sources: Vec<crate::backend::SourceUsageSummary> = crate::agent_source::build_sources()
+    let sources: Vec<crate::ui_types::SourceUsageSummary> = crate::agent_source::build_sources()
         .iter()
         .filter(|s| s.api_name() != "claude" && s.is_available())
         .filter_map(|s| s.usage_summary())
@@ -5945,7 +5945,7 @@ mod tests {
 
     #[test]
     fn status_devices_field_defaults_when_absent() {
-        // A RemoteBackend probing an older `fleet serve` gets JSON with no
+        // A client of an older `fleet serve` gets JSON with no
         // `devices` key — it must still deserialize (serde default = empty).
         let old: MobileRelayStatus = serde_json::from_str(
             r#"{"enabled":true,"connected":true,"clients":1,"relayUrl":"x","secretSet":true}"#,

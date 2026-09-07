@@ -6,7 +6,7 @@ pub mod artifacts;
 pub mod atomic_json;
 pub mod audit;
 pub mod auto_resume;
-pub mod backend;
+pub mod ui_types;
 pub mod bg_guard;
 pub mod bom;
 pub mod browse_paths;
@@ -216,7 +216,7 @@ mod log_debug_tests {
 // ── Shared functions (used by both GUI app and fleet-cli probe) ──────────────
 
 /// Detect which Claude-related tools are installed on the local machine.
-pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTools {
+pub fn detect_installed_tools(sessions: &[SessionInfo]) -> ui_types::DetectedTools {
     let home = session::real_home_dir();
 
     let (cli, _) = check_cli_installed();
@@ -278,7 +278,7 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTool
     let desktop = desktop && claude_enabled;
     let codex = codex && config.is_source_enabled("codex");
 
-    backend::DetectedTools { cli, vscode, jetbrains, desktop, codex }
+    ui_types::DetectedTools { cli, vscode, jetbrains, desktop, codex }
 }
 
 /// Resolve the Claude CLI binary fleet should use, honouring the user override.

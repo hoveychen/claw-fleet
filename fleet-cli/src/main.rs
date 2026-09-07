@@ -14,11 +14,6 @@ use clap::{Parser, Subcommand, ValueEnum};
     long_about = None
 )]
 struct Cli {
-    /// Run command on a remote host via SSH. Installs fleet on the remote if needed.
-    /// Accepts any SSH destination: user@host, hostname, or an SSH config profile name.
-    #[arg(long, global = true, value_name = "HOST")]
-    remote: Option<String>,
-
     #[command(subcommand)]
     command: Commands,
 }
@@ -1099,47 +1094,6 @@ fn main() {
     }
 
     let cli = Cli::parse();
-
-    if let Some(ref host) = cli.remote {
-        match &cli.command {
-            Commands::Serve { .. }
-            | Commands::WebUi { .. }
-            | Commands::Skill { .. }
-            | Commands::Guard { .. }
-            | Commands::Elicitation
-            | Commands::Mcp
-            | Commands::Acp { .. }
-            | Commands::PlanApproval
-            | Commands::PrdContext
-            | Commands::NotesHint
-            | Commands::DshContext { .. }
-            | Commands::WakeupGuard
-            | Commands::HookEvent => {
-                eprintln!("Error: --remote is not supported with the '{}' subcommand.",
-                    match &cli.command {
-                        Commands::Serve { .. } => "serve",
-                        Commands::WebUi { .. } => "webui",
-                        Commands::Skill { .. } => "skill",
-                        Commands::Guard { .. } => "guard",
-                        Commands::Elicitation => "elicitation",
-                        Commands::Mcp => "mcp",
-                        Commands::Acp { .. } => "acp",
-                        Commands::PlanApproval => "plan-approval",
-                        Commands::PrdContext => "prd-context",
-                        Commands::NotesHint => "notes-hint",
-                        Commands::DshContext { .. } => "dsh-context",
-                        Commands::WakeupGuard => "wakeup-guard",
-                        Commands::HookEvent => "hook-event",
-                        _ => unreachable!(),
-                    }
-                );
-                std::process::exit(1);
-            }
-            _ => {}
-        }
-        let remote_bin = commands::remote::ensure_remote_fleet(host);
-        commands::remote::delegate_to_remote(host, &remote_bin);
-    }
 
     match cli.command {
         Commands::Agents { all, json } => commands::agents::cmd_agents(all, json),

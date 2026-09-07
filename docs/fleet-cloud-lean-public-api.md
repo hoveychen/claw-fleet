@@ -58,7 +58,7 @@ curl -H "$H" "$B/cloud_usage"
 
 | Token | 来源 | 权限 |
 |---|---|---|
-| **admin** | `fleet serve --token <t>` | 全部路由。第一方用（desktop / RemoteBackend / mobile relay）。 |
+| **admin** | `fleet serve --token <t>` | 全部路由。第一方用（mobile relay / 自家脚本）。 |
 | **scoped（公开）** | 容器 env `FLEET_PUBLIC_TOKEN` | **仅** `routes::is_public()` 白名单。外部客户集成服务用。 |
 
 - 携带方式：`Authorization: Bearer <token>` 头，或 `?token=<token>` query（SSE `EventSource` 用后者，因为它设不了头）。

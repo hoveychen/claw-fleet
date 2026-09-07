@@ -7,7 +7,12 @@
       "watch": "Watch",
       "loop": "Loop",
       "schedule": "Schedule",
-      "wiki": "Wiki"
+      "wiki": "Wiki",
+      "artifact": "Artifact",
+      "inspect": "Inspect",
+      "control": "Signal",
+      "notes": "Notes",
+      "history": "History"
     },
     "param": {
       "plan_id": "Plan",
@@ -34,7 +39,21 @@
       "file": "File",
       "id": "ID",
       "model": "Model",
-      "effort": "Effort"
+      "effort": "Effort",
+      "all": "All",
+      "level": "Level",
+      "filter": "Filter",
+      "limit": "Limit",
+      "prefix": "Prefix",
+      "start_line": "From line",
+      "stop_line": "To line",
+      "max_files": "Max files",
+      "max_matches_per_file": "Max per file",
+      "session": "Session",
+      "line_no": "Line",
+      "offset_chars": "Char offset",
+      "limit_chars": "Char limit",
+      "force": "Force"
     },
     "summary": {
       "plan": {
@@ -78,6 +97,35 @@
         "cat": "View {{slug}}",
         "list": "List wiki",
         "search": "Search {{query}}"
+      },
+      "artifact": {
+        "add": "Stored artifact {{title}}",
+        "list": "Listed artifacts",
+        "get": "Artifact {{id}}",
+        "delete": "Deleted artifact {{id}}"
+      },
+      "inspect": {
+        "list": "Listed running agents",
+        "get": "Agent {{id}}",
+        "speed": "Token throughput",
+        "account": "Account usage",
+        "search": "Searched transcripts {{query}}",
+        "audit": "Audited risky commands"
+      },
+      "control": {
+        "stop": "Stopped agent {{id}}",
+        "interrupt": "Interrupted agent {{id}}"
+      },
+      "notes": {
+        "write": "Wrote note {{path}}",
+        "append": "Appended to note {{path}}",
+        "read": "Read note {{path}}",
+        "list": "Listed notes",
+        "search": "Searched notes {{query}}"
+      },
+      "history": {
+        "search": "Searched history {{query}}",
+        "read": "Read history line {{line}}"
       }
     },
     "rec": {
@@ -200,7 +248,6 @@
     "system": "System"
   },
   "language": "Language",
-  "switch_connection": "Switch Connection",
   "view_list": "List",
   "view_gallery": "Gallery",
   "view_sessions": "Sessions",
@@ -761,7 +808,6 @@
     "no_active_agents": "No Active Agents",
     "main_agents": "Main: {{n}}",
     "sub_agents": "+ {{n}} subagent(s)",
-    "switch_connection": "Switch Connection",
     "usage": "Usage"
   },
   "workflow": {
@@ -1599,11 +1645,6 @@
       "desc": "This is the Tasks page — click \"New Session\" at the top of the task rail, pick a working directory, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is grouped here by directory."
     }
   },
-  "waiting_alerts": {
-    "title": "Needs Your Attention",
-    "dismiss_tip": "Click to dismiss",
-    "clear_all": "Clear all ({{n}})"
-  },
   "nav_group": {
     "aria": "Mode",
     "fleet": "Fleet",
@@ -1726,7 +1767,15 @@
       "loop": "Loop",
       "schedule": "Schedule",
       "wiki": "Wiki",
-      "set_session_title": "Set title"
+      "set_session_title": "Set title",
+      "artifact": "Artifact",
+      "inspect": "Inspect",
+      "control": "Signal",
+      "notes": "Notes",
+      "history": "History",
+      "image": "Image",
+      "image_edit": "Image edit",
+      "permission_prompt": "Permission prompt"
     },
     "tool_patch_add": "Creating {{path}}",
     "tool_patch_update": "Editing {{path}}",
@@ -1774,7 +1823,18 @@
     "no_summary": "No summary recorded.",
     "tool_running": "Running…",
     "decision_task_completed": "Task finished",
-    "decision_task_abandoned": "Task abandoned"
+    "decision_task_abandoned": "Task abandoned",
+    "fleet_sum": {
+      "title": "Set session title",
+      "title_named": "Set session title: {{title}}",
+      "image": "Generated an image",
+      "image_named": "Generated an image: {{desc}}",
+      "image_edit": "Revised the image",
+      "image_edit_named": "Revised the image: {{desc}}",
+      "render_a2ui": "Rendered a rich card",
+      "ask": "Raised a decision card",
+      "permission_prompt": "Asked for command approval"
+    }
   },
   "settings": {
     "title": "Settings",
@@ -1789,7 +1849,6 @@
     "permissions_bypass_recommended": "Recommended: On",
     "tab_general": "General",
     "tab_alerts": "Alerts",
-    "tab_account": "Account",
     "tab_interaction": "Interaction",
     "tab_model": "Model",
     "tab_integration": "Integrations",
@@ -1803,12 +1862,8 @@
     "sound": "Sound",
     "theme": "Theme",
     "language": "Language",
-    "connection": "Connection",
     "interaction": "Interaction",
     "channel": "Channels",
-    "current_connection": "Current",
-    "local": "Local",
-    "remote": "Remote",
     "hooks": "Enhanced status detection",
     "hooks_desc": "Once installed, Fleet can tell more accurately whether each session is running, waiting for you, or finished.",
     "interaction_group_decision": "How decisions reach you",
@@ -1957,6 +2012,8 @@
     "notification_web_unavailable": "System notifications are sent by the Fleet desktop app, on the machine it runs on. A browser tab has no sender of its own, so these settings would not change anything here.",
     "auto_update_check": "Automatic update check",
     "auto_update_check_desc": "Check for new versions once a day and show a notification when an update is available",
+    "report_auto_popup": "Pop up the daily report",
+    "report_auto_popup_desc": "Show the report in the main window once its AI summary is written — once per day, never twice.",
     "group_handoff": "Group handoff sessions",
     "group_handoff_desc": "Collapse sessions from the same handoff relay chain into one group in the task list; click to expand, and mark the whole chain done at once",
     "auto_resume": "Auto-resume after rate limit",
@@ -2027,39 +2084,6 @@
     "scenario_daily_report_lessons": "Daily report lessons",
     "scenario_session_analyze": "Session outcome analysis",
     "scenario_mascot_quips": "Mascot quips"
-  },
-  "connect_dialog": {
-    "title": "Claw Fleet",
-    "subtitle": "Your AI coding fleet command center",
-    "local_title": "Local Mode",
-    "local_desc": "Monitor AI agent sessions running on this machine",
-    "connect_local": "Get Started",
-    "or_remote": "or connect to a remote server via SSH",
-    "remote_title": "Remote Connection",
-    "saved_connections": "Saved Connections",
-    "add_new_remote": "+ Add New Remote",
-    "new_connection": "New Connection",
-    "remote_connection": "Remote Connection",
-    "manual": "Manual",
-    "ssh_config_profile": "SSH Config Profile",
-    "label_optional": "Label (optional)",
-    "label_placeholder": "e.g. My Dev Server",
-    "profile_name": "Profile Name",
-    "host_ip": "Host / IP",
-    "ssh_port": "SSH Port",
-    "username": "Username",
-    "identity_file": "Identity File (optional)",
-    "jump_host": "Jump Host (optional)",
-    "browse": "Browse…",
-    "back_to_saved": "← Back to saved",
-    "back": "← Back",
-    "connecting": "Connecting…",
-    "connect": "Connect",
-    "retry": "Retry",
-    "error_profile_required": "SSH profile name is required.",
-    "error_host_user_required": "Host and Username are required.",
-    "select_identity_file": "Select SSH Identity File",
-    "remove_saved": "Remove saved connection"
   },
   "hooks": {
     "banner": "Install Fleet hooks for more accurate status detection",
@@ -2261,8 +2285,9 @@
     "task_review_overclaimed_hint": "The agent judged the task complete, but you pressed Abandon — closing that gap is what this review is for.",
     "task_review_underclaimed": "claimed unfinished",
     "task_review_underclaimed_hint": "The agent did not judge the task complete, yet you finished it — it may have under-reported its progress.",
-    "task_review_hops": "{{count}} hops"
-  },
+    "task_review_hops": "{{count}} hops",
+    "popup_title": "Your daily report is ready",
+    "popup_open_full": "Open full report"  },
   "command": {
     "nested": {
       "bash": "embedded bash -c",
@@ -2506,7 +2531,6 @@
     "refresh": "Re-check",
     "probing": "Checking…",
     "loading": "Loading…",
-    "remote_note": "You are connected to a remote host: the statuses below are the remote machine's; install/login actions currently run on this machine only (remote actions coming later).",
     "installed": "Installed",
     "not_installed": "Not installed",
     "logged_in": "Logged in",

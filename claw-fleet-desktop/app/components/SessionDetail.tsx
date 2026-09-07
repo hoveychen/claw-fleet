@@ -6,7 +6,6 @@ import { useTranslation } from "react-i18next";
 import {
   INITIAL_TAIL,
   LOAD_EARLIER_STEP,
-  useConnectionStore,
   useDecisionStore,
   useDetailStore,
   useSessionsStore,
@@ -14,9 +13,10 @@ import {
 } from "../store";
 import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
-import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
+import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow, messageToText } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
+import { appendTailDelta } from "../tailDelta";
 import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
 import {
@@ -207,6 +207,9 @@ export function SessionDetail({
   /** Last record of the previous poll's window — how the next poll measures
    *  what the agent appended. Cleared with the messages it describes. */
   const prevLastIdRef = useRef<string | null>(null);
+  /** Byte cursor for incremental follow, or null when this pane is on the
+   *  whole-window path (source without a file behind it, or a failed read). */
+  const tailOffsetRef = useRef<number | null>(null);
 
   // Optimistic follow-ups: submitting a resume/enqueue spawns a detached
   // `claude --resume` that only writes the message into the JSONL once the CLI
@@ -225,6 +228,7 @@ export function SessionDetail({
       setLocalSession(sessionInfo);
       setLocalMessages([]);
       prevLastIdRef.current = null;
+      tailOffsetRef.current = null;
       setLocalLoadingEarlier(false);
       setLocalTail(INITIAL_TAIL);
       setLocalFullyLoaded(false);
@@ -256,14 +260,34 @@ export function SessionDetail({
         }
       : null;
     probeDsh?.("fired");
+    // Take the live-follow cursor and *then* read the window — awaited, not
+    // raced. A record written between the two arrives in both and is deduped by
+    // `appendTailDelta`; the other order would place it before a cursor that
+    // never delivers it, and it would be lost. The cost is one metadata read
+    // (a `stat` locally, one round trip remotely) before the transcript paints.
+    //
+    // A failure — or an offset of 0, meaning no file stands behind this path
+    // (dsh://) — leaves the cursor null and the poll below stays on the
+    // whole-window path it used before incremental follow existed.
+    tailOffsetRef.current = null;
+    const withCursor = invoke<TailDelta>("get_messages_since", {
+      jsonlPath: localSession.jsonlPath,
+      offset: null,
+    })
+      .then((d) => {
+        if (!cancelled && d.offset > 0) tailOffsetRef.current = d.offset;
+      })
+      .catch(() => {});
     // Deadline, not abort: `get_messages_tail` can stay pending forever when the
     // backend stops answering (proven by freezing dsh's web server — the pane
     // sat on 「加载中…」 for 80s+ with no error). A late result still renders.
     withStallWatch(
-      invoke<RawMessage[]>("get_messages_tail", {
-        jsonlPath: localSession.jsonlPath,
-        tail,
-      }),
+      withCursor.then(() =>
+        invoke<RawMessage[]>("get_messages_tail", {
+          jsonlPath: localSession.jsonlPath,
+          tail,
+        }),
+      ),
       () => {
         probeDsh?.(cancelled ? "stalled(cancelled)" : "stalled");
         if (cancelled) return;
@@ -329,6 +353,7 @@ export function SessionDetail({
         setLocalSession(s);
         setLocalMessages([]);
         prevLastIdRef.current = null;
+        tailOffsetRef.current = null;
         setLocalTail(INITIAL_TAIL);
         setLocalFullyLoaded(false);
       } else {
@@ -397,7 +422,6 @@ export function SessionDetail({
   }, []);
 
   const sessions = useSessionsStore((s) => s.sessions);
-  const connection = useConnectionStore((s) => s.connection);
   const liveSession = useMemo(() => {
     if (!session) return null;
     return sessions.find((s) => s.id === session.id) ?? session;
@@ -535,6 +559,37 @@ export function SessionDetail({
       // window and would race a stale-tail overwrite from us.
       if (inFlight || localLoadingRef.current) return;
       inFlight = true;
+      // Incremental follow: read only what the agent appended since last tick.
+      // The window path below re-read the whole fetched window every 1.5s,
+      // which on a 4513-record transcript took 1–3s per poll — longer than the
+      // interval scheduling it. Falls back the moment the cursor is gone
+      // (unsupported source, or an error that invalidated it).
+      const offset = tailOffsetRef.current;
+      if (offset !== null) {
+        invoke<TailDelta>("get_messages_since", {
+          jsonlPath: standaloneJsonlPath,
+          offset,
+        })
+          .then((d) => {
+            if (cancelled) return;
+            tailOffsetRef.current = d.offset;
+            if (d.messages.length > 0) {
+              setLocalMessages((prev) => appendTailDelta(prev, d.messages));
+            }
+          })
+          .catch(() => {
+            // Drop back to the window path rather than going quiet: a follower
+            // that stops delivering messages looks exactly like an idle agent.
+            if (!cancelled) tailOffsetRef.current = null;
+          })
+          .finally(() => {
+            inFlight = false;
+          });
+        return;
+      }
+      // Fallback: no byte cursor for this source (dsh://) or the cursor read
+      // failed. Re-request a window and grow it only by what actually arrived —
+      // see `liveTailWindow` for what the old unconditional +1000 cost.
       const tail = localTailRef.current;
       invoke<RawMessage[]>("get_messages_tail", {
         jsonlPath: standaloneJsonlPath,
@@ -661,10 +716,9 @@ export function SessionDetail({
     if (!workspacePath) return undefined;
     return {
       workspaceRoot: workspacePath,
-      isLocal: connection?.type !== "remote",
       openInFiles: (absPath) => openAuxDoc("file", absPath),
     };
-  }, [workspacePath, connection?.type, openAuxDoc]);
+  }, [workspacePath, openAuxDoc]);
 
   // `[[slug]]` refs the agent wrote become links. Agents are told to publish
   // findings to the wiki and to cross-reference them that way, so the refs were
@@ -1093,7 +1147,12 @@ export function SessionDetail({
       >
         {liveSession && (
           <>
-          <div className={styles.body_row}>
+          {/* The gutter around the two slabs is now what reaches the window's
+              top edge, so it carries its own drag region — same reason the hero
+              and the aux tab strip do (Tauri's shim reads e.target, not an
+              ancestor). The resize handle inside it is a child without the
+              attribute, so col-resize dragging still wins there. */}
+          <div className={styles.body_row} data-tauri-drag-region>
             <div className={styles.main_col}>
               {/* Hero banner. The session's identity and the controls that act
                   on it, as one surface rather than a title row with a tab strip
@@ -1104,16 +1163,26 @@ export function SessionDetail({
                   ⋯ menu; the plan / handoff / watch rows ride along the bottom
                   edge, where they stay put instead of scrolling away with the
                   conversation. */}
-              <div className={styles.hero}>
-                <div className={styles.hero_top}>
-                  <div className={styles.hero_ident}>
+              {/* data-tauri-drag-region on every container of this banner: it
+                  now owns the window's top-right corner, and a frameless window
+                  can only be dragged by an element that carries the attribute
+                  itself (Tauri's shim reads e.target, not an ancestor). The
+                  fixed <WindowsFrameOverlay> strip above is pointer-events:none,
+                  so it does not cover this corner on macOS — every other surface
+                  reaching the window top (sidebar header, PageShell banner)
+                  carries its own region for the same reason. Buttons and chips
+                  are separate targets, so their clicks are unaffected. */}
+              <div className={styles.hero} data-tauri-drag-region>
+                <div className={styles.hero_top} data-tauri-drag-region>
+                  <div className={styles.hero_ident} data-tauri-drag-region>
                     <div
                       className={styles.header_title}
                       title={preferredTitle || liveSession.workspacePath}
+                      data-tauri-drag-region
                     >
                       {preferredTitle || liveSession.workspaceName}
                     </div>
-                  <div className={styles.meta_row}>
+                  <div className={styles.meta_row} data-tauri-drag-region>
                     {/* Only when the title line isn't already the workspace name. */}
                     {preferredTitle && preferredTitle !== liveSession.workspaceName && (
                       <span
@@ -1226,7 +1295,7 @@ export function SessionDetail({
                   {/* Toolbar. The auxiliary column's switch leads it: with the
                       facet buttons gone from this side, this is how you get the
                       panel back once it is closed. */}
-                  <div className={styles.hero_tools}>
+                  <div className={styles.hero_tools} data-tauri-drag-region>
                     <button
                       type="button"
                       className={`${styles.hero_tool} ${auxOpen ? styles.hero_tool_on : ""}`}
@@ -1244,7 +1313,6 @@ export function SessionDetail({
                       sessionId={liveSession.id}
                       jsonlPath={liveSession.jsonlPath}
                       workspacePath={liveSession.workspacePath}
-                      isLocal={connection?.type !== "remote"}
                     />
                     {!inline && (
                       <button

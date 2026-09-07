@@ -16,7 +16,12 @@
  * card leans on that; the return text is classified into `FleetResult` below.
  */
 
-/** The six MCP control tools, keyed by the tail segment of their tool name. */
+/**
+ * The MCP control tools, keyed by the tail segment of their tool name. Mirrors
+ * `CONTROL_TOOL_NAMES` in `claw-fleet-core/src/mcp_control.rs` (and the desktop
+ * copy of this file) — a tool missing here fails `isFleetTool`, so its row
+ * renders through the generic path and loses its label entirely.
+ */
 export const FLEET_CONTROL_TOOLS = [
   "plan",
   "handoff",
@@ -24,6 +29,11 @@ export const FLEET_CONTROL_TOOLS = [
   "loop",
   "schedule",
   "wiki",
+  "artifact",
+  "inspect",
+  "control",
+  "notes",
+  "history",
 ] as const;
 
 export type FleetTool = (typeof FLEET_CONTROL_TOOLS)[number];
@@ -178,6 +188,20 @@ function isJsonRecordAction(tool: FleetTool, action: string): boolean {
  * Classify a control tool's return text into a structured `FleetResult`. Falls
  * back to `raw` (never drops the text) when a parse doesn't apply or fails.
  */
+/**
+ * The five tools whose returns the Rust side already formats for the eye
+ * (`mcp_inspect.rs` agent tables, `render_note_files`, `render_history_hits`,
+ * the artifact listing). Their read actions go to `raw`, which keeps the line
+ * breaks; the actions listed per tool are mutates returning one `ok: …` line.
+ */
+const PROSE_TOOL_MUTATES: Partial<Record<FleetTool, readonly string[]>> = {
+  inspect: [],
+  history: [],
+  notes: ["write", "append"],
+  artifact: ["add", "delete"],
+  control: ["stop", "interrupt"],
+};
+
 export function classifyResult(
   tool: FleetTool,
   action: string,
@@ -210,6 +234,14 @@ export function classifyResult(
   if (isJsonRecordAction(tool, action)) {
     const records = tryParseRecords(text);
     return records ? { kind: "records", records } : { kind: "raw", text };
+  }
+  // `notes read` returns the note file verbatim — the same shape as `wiki cat`.
+  if (tool === "notes" && action === "read") {
+    return { kind: "wiki-cat", body: content };
+  }
+  const mutates = PROSE_TOOL_MUTATES[tool];
+  if (mutates) {
+    return mutates.includes(action) ? { kind: "confirm", text } : { kind: "raw", text };
   }
   // Mutate actions (create/check/uncheck/add/resume/stop/cancel/update/run) and
   // anything else: the `ok: …` confirmation line.

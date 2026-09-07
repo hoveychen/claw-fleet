@@ -9,14 +9,14 @@ pub(crate) fn list_llm_providers(state: tauri::State<AppState>) -> Vec<llm_provi
 
 #[tauri::command(async)]
 pub(crate) fn get_llm_config(state: tauri::State<'_, AppState>) -> llm_provider::LlmConfig {
-    state.backend.read().unwrap().get_llm_config()
+    state.backend.get_llm_config()
 }
 
 #[tauri::command(async)]
 pub(crate) fn set_llm_config(state: tauri::State<'_, AppState>, config: llm_provider::LlmConfig) -> Result<(), String> {
-    // Update both AppState (for background threads) and Backend.
+    // Update both AppState (for background threads) and LocalBackend.
     *state.llm_config.lock().unwrap() = config.clone();
-    state.backend.write().unwrap().set_llm_config(config)
+    state.backend.set_llm_config(config)
 }
 
 #[tauri::command(async)]
@@ -27,8 +27,6 @@ pub(crate) fn list_fleet_llm_usage_daily(
 ) -> Vec<llm_usage::FleetLlmUsageDailyBucket> {
     state
         .backend
-        .read()
-        .unwrap()
         .list_fleet_llm_usage_daily(from_ms, to_ms)
 }
 
@@ -38,7 +36,7 @@ pub(crate) fn get_usage_history(
     to_ms: i64,
     state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::account::UsageHistoryPoint> {
-    state.backend.read().unwrap().usage_history(from_ms, to_ms)
+    state.backend.usage_history(from_ms, to_ms)
 }
 
 #[tauri::command(async)]
@@ -49,8 +47,6 @@ pub(crate) fn get_codex_usage_history(
 ) -> Vec<claw_fleet_core::codex_usage_history::CodexUsageHistoryPoint> {
     state
         .backend
-        .read()
-        .unwrap()
         .codex_usage_history(from_ms, to_ms)
 }
 

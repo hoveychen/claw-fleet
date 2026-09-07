@@ -16,7 +16,6 @@ import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
 import { isWebBuild } from "../hostEnv";
 import { DirPickerDialog } from "./DirPickerDialog";
-import { useConnectionStore } from "../store";
 import type { SessionInfo } from "../types";
 import styles from "./ResumeComposer.module.css";
 
@@ -78,12 +77,10 @@ export function ResumeComposer({
   const [error, setError] = useState<string | null>(null);
   const [cancellingIndex, setCancellingIndex] = useState<number | null>(null);
   const composerRef = useRef<ChatComposerHandle | null>(null);
-  // The native directory dialog browses the machine the *desktop* runs on: the
-  // wrong one under a remote connection, and absent entirely in the browser
-  // build. `DirPickerDialog` browses whichever host the backend is bound to,
-  // which is the host that will read the attachment (mirrors NewSessionForm).
-  const isRemote = useConnectionStore((c) => c.connection?.type === "remote");
-  const needsBackendDirPicker = isRemote || isWebBuild();
+  // The native directory dialog is absent entirely in the browser build.
+  // `DirPickerDialog` browses the host the backend runs on, which is the host
+  // that will read the attachment (mirrors NewSessionForm).
+  const needsBackendDirPicker = isWebBuild();
   const [pickingDir, setPickingDir] = useState(false);
 
   // Drop one queued follow-up by its chip position. The backend re-emits the

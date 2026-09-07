@@ -4,24 +4,24 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useState } from "react";
 import "./fonts";
 import "./App.css";
-import { ConnectionDialog } from "./components/ConnectionDialog";
 import { Onboarding } from "./components/Onboarding";
 import { SessionDetail } from "./components/SessionDetail";
 import { SessionList } from "./components/SessionList";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { WaitingAlerts } from "./components/WaitingAlerts";
 import { DecisionPanel } from "./components/DecisionPanel";
+import { DailyReportPopup } from "./components/report/DailyReportPopup";
 import { FindBar } from "./components/FindBar";
 import { useFindController } from "./find/useFindController";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { Wizard } from "./components/Wizard";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
-import { type Connection, applyWindowTheme, navigateToSessionDetail, useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
+import { applyWindowTheme, navigateToSessionDetail, useReportStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
 import { useRemoteWorkspacesSync } from "./hooks/useRemoteWorkspaces";
+import { useWaitingAlertSound } from "./hooks/useWaitingAlertSound";
 
 const ONBOARDING_DISMISSED_KEY = "onboarding-dismissed";
 const WIZARD_COMPLETED_KEY = "wizard-completed";
@@ -34,7 +34,6 @@ function computeUnseenFeatures(): OnboardingFeatureId[] {
 
 function App() {
   const { theme, setTheme, setViewMode } = useUIStore();
-  const { connection, setConnection, disconnect } = useConnectionStore();
 
   // Always-mounted listeners for backend decision events. Must live at the
   // App root so events aren't dropped while DecisionPanel is unmounted
@@ -45,6 +44,11 @@ function App() {
   // and tab strip all badge remote workspaces from it, and a per-card fetch
   // would be one IPC round trip per card per board render.
   useRemoteWorkspacesSync();
+
+  // Chime/TTS when a session starts waiting for input. Headless — the
+  // bottom-right alert cards this used to live in were dropped; only the
+  // sound survives.
+  useWaitingAlertSound();
 
   // Settings overlay. Lives in the store rather than component state because
   // the tray/app menu (a Rust-side event) and the sidebar gear button are both
@@ -90,16 +94,6 @@ function App() {
     });
   }, []);
 
-  useEffect(() => {
-    const unlisten = listen("switch-connection", () => {
-      useDetailStore.getState().close();
-      disconnect();
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [disconnect]);
-
   // Sync theme/lang from the tray/overlay mascot process.
   useEffect(() => {
     const unThemePromise = listen<string>("overlay-theme-changed", (e) => {
@@ -125,6 +119,20 @@ function App() {
     };
   }, []);
 
+  // Catch-up popup. The `daily-report-ready` event only reaches a running app,
+  // and the summary for a given day is usually written while the app is closed
+  // (or during the 10s the scheduler waits before its first pass). So on boot
+  // we ask directly whether yesterday's report is finished; `maybePopupReport`
+  // is idempotent per date, so this never double-fires with the event.
+  useEffect(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const t = window.setTimeout(() => {
+      void useReportStore.getState().maybePopupReport(d.toISOString().slice(0, 10));
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, []);
+
   // ── App-menu event handlers ────────────────────────────────────────
   // Forwarded by Rust's `on_menu_event` for items with `menu-*` ids.
   useEffect(() => {
@@ -140,6 +148,11 @@ function App() {
     }));
     ps.push(listen("menu-daily-report", () => {
       setViewMode("report");
+    }));
+    // The report scheduler announces a date the moment its AI summary lands.
+    // Rust has already raised the main window by the time this arrives.
+    ps.push(listen<string>("daily-report-ready", (e) => {
+      void useReportStore.getState().maybePopupReport(e.payload);
     }));
     ps.push(listen("menu-welcome", () => {
       setOnboardingMode("full");
@@ -221,13 +234,6 @@ function App() {
     }
   }, [theme]);
 
-  const handleConnected = useCallback(
-    (conn: Connection) => {
-      setConnection(conn);
-    },
-    [setConnection]
-  );
-
   const finishOnboarding = useCallback(() => {
     setOnboardingMode(null);
     setItem(ONBOARDING_DISMISSED_KEY, "1");
@@ -241,16 +247,6 @@ function App() {
     setItem(WIZARD_COMPLETED_KEY, "1");
   }, []);
 
-  // Show connection dialog until the user picks local or remote
-  if (!connection) {
-    return (
-      <div className="app">
-        <WindowsFrameOverlay />
-        <ConnectionDialog onConnected={handleConnected} />
-      </div>
-    );
-  }
-
   return (
     <div className="app">
       <WindowsFrameOverlay />
@@ -259,14 +255,14 @@ function App() {
       {/* data-find-content scopes the Cmd+F find bar to the active page's
           content; the sidebar nav lives inside here too but is skipped by tag
           (<aside>/<nav>/<button>), and everything outside app_main (onboarding,
-          decision panel, alerts) is excluded by not being tagged. */}
+          decision panel) is excluded by not being tagged. */}
       <div className="app_main" data-find-content>
         <SessionList />
         {isSessionView && <SessionDetail />}
       </div>
       <DecisionPanel />
       {settingsOpen && <SettingsPanel onClose={closeSettings} />}
-      <WaitingAlerts />
+      <DailyReportPopup />
       <UpdateNotice />
       <FindBar controller={find} />
     </div>

@@ -61,7 +61,10 @@
    belongs to its tab strip (see .aux_head below). Skipped for the inline form,
    which sits below a host chrome that already accounts for the buttons. */
 .root:not(.inline):not(.aux_open) .hero {
-  padding-right: calc(16px + var(--win-caption-inset-x));
+  /* The slab already stands --slab-gap clear of the window edge, so that much
+     of the caption strip is cleared for free. max() keeps the term from going
+     negative and eating the base padding off-Windows, where the inset is 0. */
+  padding-right: calc(16px + max(0px, var(--win-caption-inset-x) - var(--slab-gap, 0px)));
 }
 
 /* Identity on the left, toolbar on the right. */
@@ -306,13 +309,25 @@
 /* ── Two-column body ────────────────────────────────────────────────────────
    The conversation keeps the left column for good; the auxiliary panel takes
    the right one (or floats over it when the pane is too narrow — see
-   SessionAuxPanel). Positioned so the overlay form has something to anchor to. */
+   SessionAuxPanel). Positioned so the overlay form has something to anchor to.
+
+   Both columns are rounded slabs floating on a recessed ground rather than two
+   halves of one flat surface split by a hairline. The ground is --color-bg-
+   sunken and the slabs keep --color-bg, so nothing *inside* either column
+   changes contrast — the transcript sits on exactly the fill it always did,
+   and every card/tool block inside it keeps the same relationship to it. */
 .body_row {
+  /* One knob for the gutter, so the resizer and the Windows caption inset can
+     both be expressed in terms of it instead of repeating a magic 8. */
+  --slab-gap: 8px;
   position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
   align-items: stretch;
+  gap: var(--slab-gap);
+  padding: var(--slab-gap);
+  background: var(--color-bg-sunken);
 }
 
 .main_col {
@@ -321,28 +336,78 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  /* The hero's tint and the transcript's bottom edge both have to be clipped
+     to the rounded corners; neither knows it is inside a slab. */
+  overflow: hidden;
+}
+
+/* Embedded hosts stay flat. `inline` is the DecisionPanel's detail column and
+   the 任务 page's 4-way split, both of which already draw their own framed
+   panel around this one — a rounded slab inset inside a rounded slab is two
+   frames saying the same thing, and in a ~300px quadrant the gutter is width
+   the transcript cannot spare. So the float is a property of the standalone
+   pane only; inline reverts to the shared-hairline layout. */
+.root.inline .body_row {
+  --slab-gap: 0px;
+  padding: 0;
+  background: var(--color-bg);
+}
+.root.inline .main_col {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+.root.inline .aux {
+  border: none;
+  border-left: 1px solid var(--color-border);
+  border-radius: 0;
+  box-shadow: none;
+}
+.root.inline .aux_head {
+  padding: 5px 6px 5px 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: linear-gradient(180deg, var(--color-bg-secondary) 0%, var(--color-bg) 100%);
+}
+/* No gutter to sit in: back to straddling the shared edge. */
+.root.inline .aux_resizer {
+  left: -3px;
+  width: 6px;
 }
 
 /* ── Auxiliary column ───────────────────────────────────────────────────────*/
+/* A slab of its own, matching .main_col — same fill, same radius, same border.
+   The two used to share one hairline; now they share a gutter. */
 .aux {
   position: relative;
   flex-shrink: 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--color-border);
   background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
 }
 
-/* Narrow pane: float over the conversation instead of halving it. */
+/* Narrow pane: float over the conversation instead of halving it. Absolute
+   offsets resolve against .body_row's *padding box*, which includes the
+   padding — so the gutter has to be spelled out here rather than inherited,
+   or the drawer runs edge-to-edge and its rounded corners sit half off the
+   window (verified in the mock at 1100px: rect was 0..820 tall, flush right). */
 .aux_overlay {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  top: var(--slab-gap, 0px);
+  right: var(--slab-gap, 0px);
+  bottom: var(--slab-gap, 0px);
   width: min(92%, 420px);
   z-index: 6;
-  box-shadow: -8px 0 24px rgb(0 0 0 / 18%);
+  box-shadow: -10px 0 28px rgb(0 0 0 / 28%);
 }
 
 .aux_scrim {
@@ -352,36 +417,50 @@
   background: rgb(0 0 0 / 24%);
 }
 
-/* Drag handle, straddling the shared edge. */
+/* Drag handle. With the columns separated it lives in the gutter between them
+   rather than straddling a shared edge — the whole gutter is the target. */
 .aux_resizer {
   position: absolute;
-  left: -3px;
+  left: calc(-1 * var(--slab-gap, 8px));
   top: 0;
   bottom: 0;
-  width: 6px;
+  width: var(--slab-gap, 8px);
   cursor: col-resize;
   z-index: 2;
 }
-.aux_resizer:hover {
-  background: var(--color-border);
+/* An inset pill rather than a full-bleed fill: a flooded gutter reads as a
+   third column for as long as the pointer is over it. */
+.aux_resizer:hover::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-strong);
 }
 .aux_dragging {
   user-select: none;
 }
 
+/* Inside a slab the strip no longer has to announce itself as chrome: the
+   card's own edge already separates it from the conversation, so the hard
+   divider and the tinted gradient are gone and the tabs read as a segmented
+   control sitting on the panel. */
 .aux_head {
   display: flex;
   align-items: stretch;
   gap: 4px;
-  padding: 5px 6px 5px 8px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 7px 7px 4px 8px;
   flex-shrink: 0;
-  background: linear-gradient(180deg, var(--color-bg-secondary) 0%, var(--color-bg) 100%);
+  background: transparent;
 }
 
 /* Windows frameless: with the panel open, IT owns the pane's right edge. */
 .root:not(.inline) .aux_head {
-  padding-right: calc(6px + var(--win-caption-inset-x));
+  padding-right: calc(7px + max(0px, var(--win-caption-inset-x) - var(--slab-gap, 0px)));
 }
 
 /* One flat strip: the agent deck, the session's facets, and every open doc. */

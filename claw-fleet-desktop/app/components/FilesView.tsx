@@ -30,7 +30,6 @@ import { CloneRepoDialog } from "./CloneRepoDialog";
 import { isTempWorkspacePath, repoRootPath } from "./NewSessionForm";
 import {
   runningProcCounts,
-  useConnectionStore,
   useProcStore,
   useSessionsStore,
   useUIStore,
@@ -136,14 +135,11 @@ export function FilesView() {
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const setSelected = (selectedWorkspace: string | null) =>
     updateMainViewState("files", { selectedWorkspace });
-  const { connection } = useConnectionStore();
-  const isRemote = connection?.type === "remote";
-  // The native directory dialog browses the machine the *desktop* runs on, which
-  // is the wrong one under a remote connection — and in the browser build there
-  // is no native dialog at all, only bytes. Both cases go through
-  // `DirPickerDialog`, which lists whatever host the backend is bound to
-  // (mirrors NewSessionForm).
-  const needsBackendDirPicker = isRemote || isWebBuild();
+  // The native directory dialog browses the machine the *desktop* runs on; in
+  // the browser build there is no native dialog at all, only bytes, so that
+  // case goes through `DirPickerDialog`, which lists the host the backend runs
+  // on (mirrors NewSessionForm).
+  const needsBackendDirPicker = isWebBuild();
   // Directories the user browsed to by hand this session. They have no sessions
   // of their own, so they'd never surface from the session-derived list — we
   // keep them here (most-recent first) and merge them in as zero-count cards.
@@ -156,13 +152,11 @@ export function FilesView() {
     anchor: ContextMenuAnchor;
   } | null>(null);
 
-  // Re-fetch whenever the backend changes underfoot: local↔remote swaps point
-  // at a different host, whose registered directories are its own.
   useEffect(() => {
     void invoke<string[]>("list_browse_paths")
       .then(setExtraPaths)
       .catch(() => setExtraPaths([]));
-  }, [isRemote]);
+  }, []);
 
   // Drop a hand-added path (zero-count card) back out of the session view.
   const removePath = async (path: string) => {
@@ -180,10 +174,10 @@ export function FilesView() {
     count: number;
   }): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
-    // Opening a file manager needs the host shell. A remote workspace lives on
-    // the probe, and in the browser build `reveal_path` is a no-op — a menu item
-    // that silently does nothing is worse than an absent one. (canReveal.ts)
-    if (canRevealPath(!isRemote)) {
+    // Opening a file manager needs the host shell; in the browser build
+    // `reveal_path` is a no-op — a menu item that silently does nothing is
+    // worse than an absent one. (canReveal.ts)
+    if (canRevealPath()) {
       const revealKey =
         document.documentElement.getAttribute("data-platform") === "windows"
           ? "paths.reveal_in_explorer"
@@ -860,10 +854,8 @@ export function ExternalFilePreview({
   label?: string;
 }) {
   const { t } = useTranslation();
-  const { connection } = useConnectionStore();
-  const isRemote = connection?.type === "remote";
   // Same reason as the workspace menu above: no host shell to reveal into.
-  const canReveal = canRevealPath(!isRemote);
+  const canReveal = canRevealPath();
 
   // FilePreview keys its read off `relativePath`; for an out-of-tree file the
   // absolute path IS the key, and the rest of the entry is only display data.

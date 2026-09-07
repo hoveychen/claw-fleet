@@ -1656,17 +1656,30 @@ fn make_session_info_for_date(
 
 // ── Report scheduler ────────────────────────────────────────────────────────
 
+/// Called with a date (`YYYY-MM-DD`) when that day's report first becomes
+/// readable (AI summary written). See [`start_report_scheduler`].
+pub type ReportReadyHook = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Start the background report scheduler thread.
 /// Checks every 10 minutes for missing reports and generates them.
 ///
 /// `running` is a shared cancellation flag. The caller flips it to false
 /// (typically from their `Drop` impl) to signal the thread to exit — otherwise
 /// successive backend swaps would stack up zombie scheduler threads.
+///
+/// `on_report_ready` fires once per date, at the moment that date's report
+/// stops being a bag of raw metrics and becomes a *readable* report — i.e.
+/// when pass 2 successfully writes its AI summary for the first time. It is
+/// deliberately NOT wired to pass 1: today's metrics are recomputed on every
+/// 10-minute tick, so a caller that popped a window on "report saved" would
+/// pop dozens of times a day. Fired from the scheduler thread; keep the
+/// closure cheap and non-blocking.
 pub fn start_report_scheduler(
     report_store: std::sync::Arc<std::sync::Mutex<ReportStore>>,
     locale: std::sync::Arc<std::sync::Mutex<String>>,
     llm_config: std::sync::Arc<std::sync::Mutex<crate::llm_provider::LlmConfig>>,
     running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_report_ready: Option<ReportReadyHook>,
 ) {
     use std::sync::atomic::Ordering;
 
@@ -1700,8 +1713,9 @@ pub fn start_report_scheduler(
                 let lang = locale.lock().unwrap().clone();
                 let rs = report_store.clone();
                 let cfg = llm_config.lock().unwrap().clone();
+                let hook = on_report_ready.clone();
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run_backfill_check(&rs, &lang, &cfg);
+                    run_backfill_check(&rs, &lang, &cfg, hook.as_ref());
                 })) {
                     Ok(()) => {}
                     Err(e) => {
@@ -1762,6 +1776,7 @@ fn run_backfill_check(
     report_store: &std::sync::Arc<std::sync::Mutex<ReportStore>>,
     locale: &str,
     llm_config: &crate::llm_provider::LlmConfig,
+    on_report_ready: Option<&ReportReadyHook>,
 ) {
     let today = chrono::Local::now();
     log_debug("[report-scheduler] backfill pass started");
@@ -1855,12 +1870,17 @@ fn run_backfill_check(
         }
 
         let mut any_failed = false;
+        // Whether *this* pass is what turned the date into a readable report.
+        // Only a first-time summary counts: on later passes the `is_some()`
+        // guard above skips the date entirely, so the hook can never re-fire.
+        let mut became_readable = false;
 
         if report.ai_summary.is_none() {
             log_debug(&format!("[report-scheduler] generating AI summary for {date}..."));
             if let Some(summary) = generate_ai_summary_routed(llm_config, &report, locale) {
                 let store = lock_store(report_store);
                 store.update_ai_summary(&date, &summary).ok();
+                became_readable = true;
                 log_debug(&format!("[report-scheduler] AI summary for {date} done"));
             } else {
                 log_debug(&format!("[report-scheduler] AI summary for {date} failed"));
@@ -1886,7 +1906,16 @@ fn run_backfill_check(
             AI_FAILURE_COOLDOWN
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .insert(date, std::time::Instant::now());
+                .insert(date.clone(), std::time::Instant::now());
+        }
+
+        // Announce after the lessons attempt, so whoever opens the report on
+        // this signal sees the finished thing rather than a summary with an
+        // empty lessons card still spinning underneath it.
+        if became_readable {
+            if let Some(hook) = on_report_ready {
+                hook(&date);
+            }
         }
     }
 

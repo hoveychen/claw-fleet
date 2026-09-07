@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { openSettings, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
+import { openSettings, runningProcTotal, useAuditStore, useDetailStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWebBuild, showsMobilePanel } from "../hostEnv";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -37,6 +37,7 @@ import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
 import { NAV_GROUPS, navGroupOf, type NavGroup } from "./navGroups";
+import { fmtBadgeCount } from "../railNumbers";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
@@ -74,7 +75,6 @@ export function SessionList() {
     },
     [viewMode, setViewMode, toggleSecondarySidebar],
   );
-  const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const hasNewReport = useReportStore((s) => s.hasNewReport);
   // Total running workspace commands across all repos — surfaced as a badge on
@@ -246,8 +246,6 @@ export function SessionList() {
     });
   }
 
-  const isRemote = connection?.type === "remote";
-
   const COLLAPSED_WIDTH = 64;
   const effectiveWidth = sidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
 
@@ -272,7 +270,9 @@ export function SessionList() {
         <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
         <span className={styles.nav_label}>{t("view_audit")}</span>
         {unreadCriticalCount > 0 && (
-          <span className={styles.nav_badge}>{unreadCriticalCount}</span>
+          <span className={styles.nav_badge} title={`${unreadCriticalCount}`}>
+            {fmtBadgeCount(unreadCriticalCount)}
+          </span>
         )}
       </button>
       <button
@@ -337,7 +337,9 @@ export function SessionList() {
         <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5V4Z"/></svg></span>
         <span className={styles.nav_label}>{t("view_files", "仓库")}</span>
         {runningProcCount > 0 && (
-          <span className={styles.nav_badge_running}>{runningProcCount}</span>
+          <span className={styles.nav_badge_running} title={`${runningProcCount}`}>
+            {fmtBadgeCount(runningProcCount)}
+          </span>
         )}
       </button>
       <button
@@ -432,10 +434,14 @@ export function SessionList() {
                   {/* Only while this tab's own nav is hidden — an active tab's
                       items carry their own badges. */}
                   {!selected && badge.alert > 0 && (
-                    <span className={styles.nav_tab_badge}>{badge.alert}</span>
+                    <span className={styles.nav_tab_badge} title={`${badge.alert}`}>
+                      {fmtBadgeCount(badge.alert)}
+                    </span>
                   )}
                   {!selected && badge.running > 0 && (
-                    <span className={styles.nav_tab_badge_running}>{badge.running}</span>
+                    <span className={styles.nav_tab_badge_running} title={`${badge.running}`}>
+                      {fmtBadgeCount(badge.running)}
+                    </span>
                   )}
                   {!selected && badge.alert === 0 && badge.dot && (
                     <span className={styles.nav_tab_dot} />
@@ -469,9 +475,15 @@ export function SessionList() {
         {/* Scrollable sidebar content — charts + usage hidden for the
             task-focused views (projects / tasks) to keep that rail clean. */}
         <div className={styles.sidebar_content}>
-          <TodayUsageBadge collapsed={sidebarCollapsed} />
-          <LiveStats collapsed={sidebarCollapsed} />
-          <UsagePanel collapsed={sidebarCollapsed} />
+          {/* Collapsed, the three panels degrade to bare number tiles. They
+              share one column here so the stack keeps a single gap and a
+              single edge inset — each panel used to bring its own margin and
+              the rail read as three misaligned boxes. */}
+          <div className={sidebarCollapsed ? styles.rail_tiles : undefined}>
+            <TodayUsageBadge collapsed={sidebarCollapsed} />
+            <LiveStats collapsed={sidebarCollapsed} />
+            <UsagePanel collapsed={sidebarCollapsed} />
+          </div>
 
           {!sidebarCollapsed && mascotVisible && (
             <div className={styles.mascot_section}>
@@ -491,37 +503,40 @@ export function SessionList() {
             the profile card. The toggles used to live inside the card, but at
             narrow sidebar widths they crowded out the app name — so they get
             their own bar. Mirrors the banner's `view_toggle` segmented control
-            for visual consistency. Hidden when the sidebar is collapsed. */}
+            for visual consistency. The whole footer — toolbar and profile card
+            alike — is dropped when the sidebar is collapsed: at 64px the card
+            degenerates into a bare app icon plus a gear, which reads as clutter
+            at the bottom of an icon rail. Settings stay reachable from the tray
+            menu (contextMenu.ts) and from the new-session form. */}
+        {!sidebarCollapsed && (
         <div className={styles.footer} data-wizard="settings-footer">
-          {!sidebarCollapsed && (
-            <div className={styles.footer_toolbar} role="group" aria-label={t("settings.title")}>
-              {keepAwakeSupported && (
-                <button
-                  type="button"
-                  className={`${styles.footer_toolbar_btn} ${keepAwake ? styles.footer_toolbar_btn_active : ""}`}
-                  onClick={() => setKeepAwake(!keepAwake)}
-                  title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-                  aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-                  aria-pressed={keepAwake}
-                >
-                  <Coffee size={14} strokeWidth={1.5} />
-                </button>
-              )}
+          <div className={styles.footer_toolbar} role="group" aria-label={t("settings.title")}>
+            {keepAwakeSupported && (
               <button
                 type="button"
-                className={`${styles.footer_toolbar_btn} ${styles.footer_theme_btn}`}
-                onClick={() =>
-                  // Cycle light → dark → system → light. setTheme is global and
-                  // already re-skins the app + overlays, so no extra wiring.
-                  setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")
-                }
-                title={t(`theme.${theme}`)}
-                aria-label={t(`theme.${theme}`)}
+                className={`${styles.footer_toolbar_btn} ${keepAwake ? styles.footer_toolbar_btn_active : ""}`}
+                onClick={() => setKeepAwake(!keepAwake)}
+                title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                aria-pressed={keepAwake}
               >
-                {theme === "light" ? "☀" : theme === "dark" ? "☽" : "⊙"}
+                <Coffee size={14} strokeWidth={1.5} />
               </button>
-            </div>
-          )}
+            )}
+            <button
+              type="button"
+              className={`${styles.footer_toolbar_btn} ${styles.footer_theme_btn}`}
+              onClick={() =>
+                // Cycle light → dark → system → light. setTheme is global and
+                // already re-skins the app + overlays, so no extra wiring.
+                setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")
+              }
+              title={t(`theme.${theme}`)}
+              aria-label={t(`theme.${theme}`)}
+            >
+              {theme === "light" ? "☀" : theme === "dark" ? "☽" : "⊙"}
+            </button>
+          </div>
           {/* role=button, not <button>: keyboard a11y restored via
               tabIndex + onKeyDown. */}
           <div
@@ -540,18 +555,13 @@ export function SessionList() {
             <div className={styles.footer_avatar}>
               <img src="/app-icon.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
-            {!sidebarCollapsed && (
-              <div className={styles.footer_info}>
-                <span className={styles.footer_name}>{t("title")}</span>
-                <span className={styles.footer_status}>
-                  <span className={`${styles.footer_dot} ${isRemote ? styles.footer_dot_remote : ""}`} />
-                  {isRemote ? t("settings.remote") : t("settings.local")}
-                </span>
-              </div>
-            )}
+            <div className={styles.footer_info}>
+              <span className={styles.footer_name}>{t("title")}</span>
+            </div>
             <span className={styles.footer_gear}>⚙</span>
           </div>
         </div>
+        )}
 
         {/* Resize handle — hidden when collapsed */}
         {!sidebarCollapsed && (

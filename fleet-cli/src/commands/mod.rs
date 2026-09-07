@@ -18,7 +18,6 @@ pub(crate) mod memory;
 pub(crate) mod notes;
 pub(crate) mod plan;
 pub(crate) mod prd;
-pub(crate) mod remote;
 pub(crate) mod report;
 pub(crate) mod schedule;
 pub(crate) mod search;

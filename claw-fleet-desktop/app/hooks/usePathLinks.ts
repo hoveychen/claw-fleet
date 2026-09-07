@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { Components } from "react-markdown";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import { pathAwareMarkdownComponents, safeMarkdownComponents } from "../markdown/safeLinks";
-import { useConnectionStore, useSessionsStore, useUIStore, type FileNavRequest } from "../store";
+import { useSessionsStore, useUIStore, type FileNavRequest } from "../store";
 
 export type OpenFilePayload = Omit<FileNavRequest, "nonce">;
 
@@ -26,7 +26,6 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
   const workspacePath = useSessionsStore(
     (s) => s.sessions.find((x) => x.id === sessionId)?.workspacePath,
   );
-  const connection = useConnectionStore((s) => s.connection);
   const requestFileNav = useUIStore((s) => s.requestFileNav);
   const unresolvedPaths = useUIStore((s) => s.unresolvedPaths);
 
@@ -35,13 +34,12 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
     if (!workspacePath) return undefined;
     return {
       workspaceRoot: workspacePath,
-      isLocal: connection?.type !== "remote",
       unresolved: unresolvedPaths,
       openInFiles: (absPath, line) => {
         requestFileNav({ workspacePath, absPath, line });
       },
     };
-  }, [sessionId, workspacePath, connection?.type, requestFileNav, unresolvedPaths]);
+  }, [sessionId, workspacePath, requestFileNav, unresolvedPaths]);
 }
 
 /**

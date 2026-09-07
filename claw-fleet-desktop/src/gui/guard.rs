@@ -4,12 +4,12 @@ use super::*;
 
 #[tauri::command(async)]
 pub(crate) fn apply_guard_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().apply_guard_hook()
+    state.backend.apply_guard_hook()
 }
 
 #[tauri::command(async)]
 pub(crate) fn remove_guard_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().remove_guard_hook()
+    state.backend.remove_guard_hook()
 }
 
 #[tauri::command(async)]
@@ -22,8 +22,6 @@ pub(crate) fn respond_to_guard(
 ) -> Result<(), String> {
     state
         .backend
-        .write()
-        .unwrap()
         .respond_to_guard(&id, allow, always_allow, reason)
 }
 
@@ -31,12 +29,12 @@ pub(crate) fn respond_to_guard(
 pub(crate) fn list_guard_allow_rules(
     state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::audit::GuardAllowRule> {
-    state.backend.read().unwrap().list_guard_allow_rules()
+    state.backend.list_guard_allow_rules()
 }
 
 #[tauri::command(async)]
 pub(crate) fn remove_guard_allow_rule(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
-    state.backend.write().unwrap().remove_guard_allow_rule(&id)
+    state.backend.remove_guard_allow_rule(&id)
 }
 
 #[tauri::command]
@@ -49,8 +47,6 @@ pub(crate) async fn analyze_guard_command(
     let backend = state.backend.clone();
     tokio::task::spawn_blocking(move || {
         backend
-            .read()
-            .unwrap()
             .analyze_guard_command(&command, &context, &lang)
     })
     .await

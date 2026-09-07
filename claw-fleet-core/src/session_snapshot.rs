@@ -47,8 +47,8 @@ pub const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 /// How long after the last read the ticker keeps scanning.
 ///
 /// A `fleet serve` with nobody attached should not poll every agent source
-/// forever — on a probe host that means an RPC to every tool every 2s for
-/// nothing. The next read restarts the ticker.
+/// forever — that would be an RPC to every tool every 2s for nothing. The
+/// next read restarts the ticker.
 pub const IDLE_AFTER: Duration = Duration::from_secs(60);
 
 struct Snap {

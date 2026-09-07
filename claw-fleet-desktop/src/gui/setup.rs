@@ -3,11 +3,11 @@ use super::*;
 // ── Setup status check ───────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn check_setup_status(state: tauri::State<'_, AppState>) -> Result<backend::SetupStatus, String> {
+pub(crate) async fn check_setup_status(state: tauri::State<'_, AppState>) -> Result<ui_types::SetupStatus, String> {
     // Only hold the backend lock briefly to get the cached session list,
     // then run the (potentially slow) subprocess checks outside the lock.
     let sessions = {
-        let b = state.backend.read().unwrap();
+        let b = &state.backend;
         b.list_sessions()
     };
     let (cli_installed, cli_path) = check_cli_installed();
@@ -17,7 +17,7 @@ pub(crate) async fn check_setup_status(state: tauri::State<'_, AppState>) -> Res
     let detected_tools = detect_installed_tools(&sessions);
     let logged_in = account::read_keychain_credentials().is_ok();
     let has_sessions = !sessions.is_empty();
-    Ok(backend::SetupStatus {
+    Ok(ui_types::SetupStatus {
         cli_installed,
         cli_path,
         claude_dir_exists,
@@ -28,16 +28,15 @@ pub(crate) async fn check_setup_status(state: tauri::State<'_, AppState>) -> Res
     })
 }
 
-/// Per-harness environment probe for the wizard/environment panel. Routed
-/// through the Backend trait so a remote workspace reports the remote host's
-/// harnesses, and moved off the async runtime because the probe shells out to
+/// Per-harness environment probe for the wizard/environment panel. Moved off
+/// the async runtime because the probe shells out to
 /// `<bin> --version` (bounded, but hundreds of ms with dsh's node startup).
 #[tauri::command]
 pub(crate) async fn harness_statuses(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::harness_status::HarnessStatus>, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.read().unwrap().harness_statuses())
+    tokio::task::spawn_blocking(move || backend.harness_statuses())
         .await
         .map_err(|e| format!("join: {e}"))
 }
@@ -60,9 +59,8 @@ impl HarnessInstallProgress {
 }
 
 /// Install a harness via its official installer (see
-/// `claw_fleet_core::harness_install`). Desktop-layer command like
-/// `install_rca_remote` — install *actions* are local-machine phase 1; the
-/// probe/status surface stays on the Backend trait for remote parity.
+/// `claw_fleet_core::harness_install`). Installs on this machine; an rca
+/// executor host's harnesses go through `install_harness_remote`.
 #[tauri::command]
 pub(crate) async fn install_harness(
     source: String,
@@ -174,7 +172,7 @@ pub(crate) async fn claude_login_start(
         .ok_or("cannot resolve home directory")?;
     let backend = state.backend.clone();
     let record = tokio::task::spawn_blocking(move || {
-        backend.read().unwrap().spawn_proc(home, "claude setup-token".into(), 100, 30)
+        backend.spawn_proc(home, "claude setup-token".into(), 100, 30)
     })
     .await
     .map_err(|e| format!("join: {e}"))??;
@@ -191,7 +189,7 @@ pub(crate) async fn claude_login_poll(
     let chunk = tokio::task::spawn_blocking(move || {
         // Offset 0: setup-token's whole transcript is a few KB, far under the
         // 256 KB chunk cap, so a cumulative re-read keeps the parser stateless.
-        backend.read().unwrap().proc_output(id, Some(0))
+        backend.proc_output(id, Some(0))
     })
     .await
     .map_err(|e| format!("join: {e}"))??;
@@ -227,7 +225,7 @@ pub(crate) async fn claude_login_submit_code(
     let payload = format!("{}\r", code.trim());
     let data_b64 = base64::engine::general_purpose::STANDARD.encode(payload.as_bytes());
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.read().unwrap().proc_input(id, data_b64))
+    tokio::task::spawn_blocking(move || backend.proc_input(id, data_b64))
         .await
         .map_err(|e| format!("join: {e}"))?
 }
@@ -238,7 +236,7 @@ pub(crate) async fn claude_login_cancel(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.read().unwrap().kill_proc(id, false))
+    tokio::task::spawn_blocking(move || backend.kill_proc(id, false))
         .await
         .map_err(|e| format!("join: {e}"))?
 }
@@ -270,7 +268,7 @@ pub(crate) async fn codex_login_start(
     let command = if device_auth { "codex login --device-auth" } else { "codex login" };
     let backend = state.backend.clone();
     let record = tokio::task::spawn_blocking(move || {
-        backend.read().unwrap().spawn_proc(home, command.into(), 100, 30)
+        backend.spawn_proc(home, command.into(), 100, 30)
     })
     .await
     .map_err(|e| format!("join: {e}"))??;
@@ -285,7 +283,7 @@ pub(crate) async fn codex_login_poll(
     use base64::Engine as _;
     let backend = state.backend.clone();
     let chunk = tokio::task::spawn_blocking(move || {
-        backend.read().unwrap().proc_output(id, Some(0))
+        backend.proc_output(id, Some(0))
     })
     .await
     .map_err(|e| format!("join: {e}"))??;
@@ -314,7 +312,7 @@ pub(crate) async fn codex_login_cancel(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.read().unwrap().kill_proc(id, false))
+    tokio::task::spawn_blocking(move || backend.kill_proc(id, false))
         .await
         .map_err(|e| format!("join: {e}"))?
 }
@@ -322,8 +320,8 @@ pub(crate) async fn codex_login_cancel(
 // ── Remote codex login (device-auth over ssh, wizard phase 2) ────────────────
 //
 // A remote workspace host has no browser/localhost callback, so remote codex
-// login is `codex login --device-auth` streamed over ssh through the Backend
-// proc surface. Copying a local auth.json is deliberately not offered (the
+// login is `codex login --device-auth` streamed over ssh through the
+// LocalBackend proc surface. Copying a local auth.json is deliberately not offered (the
 // single-use refresh token would rotate under two hosts and 401 both).
 
 #[derive(Clone, serde::Serialize)]
@@ -340,7 +338,7 @@ pub(crate) async fn remote_codex_login_start(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
-    let ssh_target = crate::remote::ssh_target_for_workspace(&path)?;
+    let ssh_target = crate::rca_provision::ssh_target_for_workspace(&path)?;
     let command =
         claw_fleet_core::harness_login::codex_device_auth_ssh_command(&ssh_target)?;
     let home = session::real_home_dir()
@@ -348,7 +346,7 @@ pub(crate) async fn remote_codex_login_start(
         .ok_or("cannot resolve home directory")?;
     let backend = state.backend.clone();
     let record = tokio::task::spawn_blocking(move || {
-        backend.read().unwrap().spawn_proc(home, command, 100, 30)
+        backend.spawn_proc(home, command, 100, 30)
     })
     .await
     .map_err(|e| format!("join: {e}"))??;
@@ -364,7 +362,7 @@ pub(crate) async fn remote_codex_login_poll(
     use base64::Engine as _;
     let backend = state.backend.clone();
     let chunk = tokio::task::spawn_blocking(move || {
-        backend.read().unwrap().proc_output(id, Some(0))
+        backend.proc_output(id, Some(0))
     })
     .await
     .map_err(|e| format!("join: {e}"))??;
@@ -383,7 +381,7 @@ pub(crate) async fn remote_codex_login_poll(
     // remote auth.json, not the banner.
     let logged_in = if parse.success || !running {
         tokio::task::spawn_blocking(move || {
-            crate::remote::ssh_target_for_workspace(&path)
+            crate::rca_provision::ssh_target_for_workspace(&path)
                 .and_then(|t| claw_fleet_core::remote_host::remote_harness_statuses(&t))
                 .map(|s| {
                     s.iter()
@@ -442,7 +440,7 @@ pub(crate) async fn get_account_info(
     app: tauri::AppHandle,
 ) -> Result<AccountInfo, String> {
     log_debug("get_account_info: start");
-    let fut = state.backend.read().unwrap().account_info();
+    let fut = state.backend.account_info();
     let info = fut.await.map_err(|e| {
         log_debug(&format!("get_account_info: error: {e}"));
         e
@@ -451,7 +449,7 @@ pub(crate) async fn get_account_info(
     {
         let app_state = app.state::<AppState>();
         let mut cached = app_state.cached_usage.lock().unwrap();
-        let summary = backend::SourceUsageSummary::from_claude(&info);
+        let summary = ui_types::SourceUsageSummary::from_claude(&info);
         if let Some(pos) = cached.iter().position(|s| s.source == "claude") {
             cached[pos] = summary;
         } else {
@@ -468,7 +466,7 @@ pub(crate) async fn get_source_account(
     source: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Value, String> {
-    let fut = state.backend.read().unwrap().source_account(&source);
+    let fut = state.backend.source_account(&source);
     fut.await
 }
 
@@ -478,13 +476,13 @@ pub(crate) async fn get_source_usage(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
-    let fut = state.backend.read().unwrap().source_usage(&source);
+    let fut = state.backend.source_usage(&source);
     let val = fut.await?;
     // Update the cached usage summary for the tray menu so that the
     // background refresh thread is no longer needed.
     {
         let summary = match source.as_str() {
-            "codex" => Some(backend::SourceUsageSummary::from_codex(&val)),
+            "codex" => Some(ui_types::SourceUsageSummary::from_codex(&val)),
             _ => None,
         };
         if let Some(summary) = summary {

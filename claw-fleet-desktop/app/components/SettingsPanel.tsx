@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useConnectionStore, useDetailStore, useUIStore } from "../store";
+import { REPORT_AUTO_POPUP_KEY, useUIStore } from "../store";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { isWebBuild } from "../hostEnv";
 import {
@@ -29,7 +29,7 @@ import { AgentSourceIcon } from "./SessionCard";
 import { UsageTrendPanel } from "./UsageTrendPanel";
 import styles from "./SettingsPanel.module.css";
 import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
-import { sshTargetOf, type HostHealth, type RemoteConnection } from "./ConnectionDialog";
+import { sshTargetOf, type HostHealth, type SshHost } from "../sshHosts";
 
 
 interface HookSetupPlan {
@@ -84,11 +84,11 @@ interface LlmConfig {
 type NotificationMode = "all" | "user_action" | "none";
 type TtsMode = "chime_and_speech" | "chime_only" | "off";
 
-// Redesigned IA: 3 everyday tabs (general / alerts / account) + 4 advanced
-// tabs (interaction / model / integration / usage) shown under a collapsible
-// "Advanced" group. See the settings-redesign plan.
-type SettingsTab = "general" | "alerts" | "account" | "environment" | "interaction" | "model" | "integration" | "usage";
-const BASE_TABS: SettingsTab[] = ["general", "alerts", "account"];
+// Redesigned IA: 2 everyday tabs (general / alerts) + the advanced tabs
+// (environment / interaction / model / integration / usage) shown under a
+// collapsible "Advanced" group. See the settings-redesign plan.
+type SettingsTab = "general" | "alerts" | "environment" | "interaction" | "model" | "integration" | "usage";
+const BASE_TABS: SettingsTab[] = ["general", "alerts"];
 const ADVANCED_TABS: SettingsTab[] = ["environment", "interaction", "model", "integration", "usage"];
 
 const tabIcons: Record<SettingsTab, React.ReactNode> = {
@@ -104,12 +104,6 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M6 13a2 2 0 0 0 4 0" />
       <path d="M12 7c0-2.76-1.79-5-4-5S4 4.24 4 7c0 3-1.5 4.5-2 5h12c-.5-.5-2-2-2-5z" />
-    </svg>
-  ),
-  account: (
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="8" cy="5" r="3" />
-      <path d="M2.5 14a5.5 5.5 0 0 1 11 0" />
     </svg>
   ),
   // Environment = wrench: install/upgrade/login health for the agent harnesses.
@@ -149,7 +143,6 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const { connection, disconnect } = useConnectionStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   // Advanced group starts expanded only when an advanced tab is somehow the
   // initial tab; otherwise everyday users see just the 3 base tabs.
@@ -240,13 +233,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // workspace paths plus two parallel registration forms — and, because both
   // forms bound the same `rwPath` / `rwLabel` state, typing into one silently
   // filled the other.
-  const [sshHosts, setSshHosts] = useState<RemoteConnection[]>([]);
+  const [sshHosts, setSshHosts] = useState<SshHost[]>([]);
   const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspace[]>([]);
   const [rwError, setRwError] = useState("");
   // stdio-over-ssh auto-installer wizard. The ssh-target picker merges three
-  // sources: ~/.ssh/config Host aliases, saved Fleet connections, and a manual
-  // `user@host` entry — all resolved to a RemoteConnection for install_rca_remote.
-  const [rwSavedConns, setRwSavedConns] = useState<RemoteConnection[]>([]);
+  // sources: ~/.ssh/config Host aliases, hosts already in the book, and a manual
+  // `user@host` entry — all resolved to an SshHost for install_rca_remote.
   const [rwSshProfiles, setRwSshProfiles] = useState<string[]>([]);
   const [rwConnId, setRwConnId] = useState(""); // "saved:<id>" | "profile:<alias>" | "__manual__"
   const [rwManualTarget, setRwManualTarget] = useState(""); // user@host when __manual__
@@ -268,27 +260,20 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
       .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
       .catch(() => {});
-    // The BACKEND host's book — that is the one a session resolves a
-    // workspace's `hostId` against. Under a local backend it is the same
-    // records `list_saved_connections` returns, which is what makes this one
-    // merged list rather than two.
-    invoke<RemoteConnection[]>("list_ssh_hosts")
+    // The host book a session resolves a workspace's `hostId` against; it also
+    // feeds the add-a-host picker below.
+    invoke<SshHost[]>("list_ssh_hosts")
       .then((hosts) => setSshHosts(hosts ?? []))
-      .catch(() => {});
-    // Deliberately still local: "which Fleet backends can THIS desktop dial".
-    // Only feeds the add-a-host picker below.
-    invoke<RemoteConnection[]>("list_saved_connections")
-      .then((conns) => setRwSavedConns(conns ?? []))
       .catch(() => {});
     invoke<string[]>("list_ssh_profiles")
       .then((profiles) => setRwSshProfiles(profiles ?? []))
       .catch(() => {});
   }, []);
 
-  // Resolve the picker selection to the RemoteConnection install_rca_remote needs.
-  const resolveInstallConn = useCallback((): RemoteConnection | null => {
+  // Resolve the picker selection to the SshHost install_rca_remote needs.
+  const resolveInstallConn = useCallback((): SshHost | null => {
     if (rwConnId.startsWith("saved:")) {
-      return rwSavedConns.find((c) => c.id === rwConnId.slice("saved:".length)) ?? null;
+      return sshHosts.find((c) => c.id === rwConnId.slice("saved:".length)) ?? null;
     }
     if (rwConnId.startsWith("profile:")) {
       const alias = rwConnId.slice("profile:".length);
@@ -307,7 +292,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       };
     }
     return null;
-  }, [rwConnId, rwManualTarget, rwSavedConns]);
+  }, [rwConnId, rwManualTarget, sshHosts]);
 
   // Provision the picked host as an rca executor. No workspace path: setting up
   // a host and choosing a directory on it are two decisions, and fusing them
@@ -320,7 +305,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setRwError("");
     setRwInstallSteps([]);
     try {
-      setSshHosts(await invoke<RemoteConnection[]>("install_rca_on_host", { conn }));
+      setSshHosts(await invoke<SshHost[]>("install_rca_on_host", { conn }));
       setRwConnId("");
       setRwManualTarget("");
     } catch (e) {
@@ -343,7 +328,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // Removing a host that still has workspaces would leave them resolving a
   // `hostId` that is gone — which fails loudly at spawn, but only then. Say so
   // up front instead.
-  const handleRemoveHost = useCallback(async (host: RemoteConnection) => {
+  const handleRemoveHost = useCallback(async (host: SshHost) => {
     setRwError("");
     const orphans = remoteWorkspaces.filter((w) => w.hostId === host.id);
     if (orphans.length > 0) {
@@ -356,7 +341,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       return;
     }
     try {
-      setSshHosts(await invoke<RemoteConnection[]>("remove_ssh_host", { id: host.id }));
+      setSshHosts(await invoke<SshHost[]>("remove_ssh_host", { id: host.id }));
     } catch (e) {
       setRwError(String(e));
     }
@@ -370,7 +355,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     try {
       const cfg = await invoke<RemoteWorkspacesConfig>("update_rca_remote", { path });
       setRemoteWorkspaces(cfg.workspaces ?? []);
-      setSshHosts(await invoke<RemoteConnection[]>("list_ssh_hosts"));
+      setSshHosts(await invoke<SshHost[]>("list_ssh_hosts"));
     } catch (e) {
       setRwError(String(e));
     } finally {
@@ -400,7 +385,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   const handleTestHost = useCallback(
-    (host: RemoteConnection) => probeHealth(host.id, sshTargetOf(host)),
+    (host: SshHost) => probeHealth(host.id, sshTargetOf(host)),
     [probeHealth],
   );
 
@@ -1079,6 +1064,16 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setFeatureState("auto-update-check", state);
   }, []);
 
+  // ── Daily-report auto-popup state ──────────────────────────────────────
+  const [reportAutoPopupState, setReportAutoPopupState] = useState<FeatureState>(
+    () => getFeatureState(REPORT_AUTO_POPUP_KEY),
+  );
+
+  const handleToggleReportAutoPopup = useCallback((state: FeatureState) => {
+    setReportAutoPopupState(state);
+    setFeatureState(REPORT_AUTO_POPUP_KEY, state);
+  }, []);
+
   // ── Group handoff-relay sessions ───────────────────────────────────────────
   // Lives in the UI store (which persists it) so the task list reacts live when
   // this is flipped, rather than only after a restart.
@@ -1164,18 +1159,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // ── Keep-awake (caffeinate -i equivalent) ───────────────────────────────
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
 
-  const handleSwitchConnection = useCallback(async () => {
-    await useDetailStore.getState().close();
-    await disconnect();
-    onClose();
-  }, [disconnect, onClose]);
-
   const hooksInstalled = hooksPlan?.alreadyInstalled || hooksStatus === "success";
 
   const tabLabels: Record<SettingsTab, string> = {
     general: t("settings.tab_general"),
     alerts: t("settings.tab_alerts"),
-    account: t("settings.tab_account"),
     environment: t("settings.tab_environment"),
     interaction: t("settings.tab_interaction"),
     model: t("settings.tab_model"),
@@ -1241,6 +1229,20 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     value={autoUpdateCheckState}
                     defaultOn={featureDefault("auto-update-check")}
                     onChange={handleToggleAutoUpdateCheck}
+                  />
+                </div>
+
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.report_auto_popup")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.report_auto_popup_desc")}
+                    </span>
+                  </div>
+                  <TriStateToggle
+                    value={reportAutoPopupState}
+                    defaultOn={featureDefault(REPORT_AUTO_POPUP_KEY)}
+                    onChange={handleToggleReportAutoPopup}
                   />
                 </div>
 
@@ -1484,24 +1486,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("account.panel_title")}</div>
                 <div className={styles.account_embed}>
                   <AccountInfo embedded />
-                </div>
-              </div>
-            )}
-
-            {/* ── Account & Connection ── */}
-            {activeTab === "account" && (
-              <div className={styles.section}>
-                <div className={styles.section_title}>{t("settings.connection")}</div>
-                <div className={styles.row}>
-                  <div className={styles.connection_info}>
-                    <span className={styles.row_label}>{t("settings.current_connection")}</span>
-                    <span className={styles.connection_badge}>
-                      {connection?.type === "remote" ? t("settings.remote") : t("settings.local")}
-                    </span>
-                  </div>
-                  <button className={styles.switch_btn} onClick={handleSwitchConnection}>
-                    {t("switch_connection")}
-                  </button>
                 </div>
               </div>
             )}
@@ -1817,9 +1801,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         ))}
                       </optgroup>
                     )}
-                    {rwSavedConns.length > 0 && (
+                    {sshHosts.length > 0 && (
                       <optgroup label={t("settings.remote_ws_src_saved")}>
-                        {rwSavedConns.map((c) => (
+                        {sshHosts.map((c) => (
                           <option key={`saved:${c.id}`} value={`saved:${c.id}`}>
                             {c.label || c.sshProfile || `${c.username}@${c.host}`}
                           </option>
@@ -1848,7 +1832,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       : t("settings.remote_host_install_btn")}
                   </button>
                 </div>
-                {rwSavedConns.length === 0 && rwSshProfiles.length === 0 && (
+                {sshHosts.length === 0 && rwSshProfiles.length === 0 && (
                   <div className={styles.row}>
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                       {t("settings.remote_ws_no_conns")}

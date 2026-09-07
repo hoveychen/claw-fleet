@@ -260,7 +260,9 @@ function DateCard({
 
 // ── Right-pane detail ───────────────────────────────────────────────────────
 
-function ReportDetail() {
+/** The selected day's report body. Exported so the auto-popup overlay shows
+ *  the exact same thing the page does instead of a second, drifting layout. */
+export function ReportDetail() {
   const { t, i18n } = useTranslation();
   const { currentReport, selectedDate, loading, generateReport } = useReportStore();
 

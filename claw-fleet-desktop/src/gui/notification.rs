@@ -57,7 +57,7 @@ pub(crate) fn reapply_interaction_mode_if_installed(
     title_override: &str,
     locale_override: Option<&str>,
 ) {
-    let backend = state.backend.read().unwrap();
+    let backend = &state.backend;
     let plan = backend.get_hooks_plan();
     if !plan.interaction_mode_installed {
         return;
@@ -76,7 +76,7 @@ pub(crate) fn reapply_prd_mode_if_installed(
     title_override: &str,
     locale_override: Option<&str>,
 ) {
-    let backend = state.backend.read().unwrap();
+    let backend = &state.backend;
     let plan = backend.get_hooks_plan();
     if !plan.prd_discipline_installed {
         return;
@@ -95,7 +95,7 @@ pub(crate) fn reapply_wiki_guidance_if_installed(
     state: &tauri::State<AppState>,
     locale_override: Option<&str>,
 ) {
-    let backend = state.backend.read().unwrap();
+    let backend = &state.backend;
     if !backend.get_hooks_plan().wiki_guidance_installed {
         return;
     }
@@ -113,7 +113,7 @@ pub(crate) fn reapply_model_guidance_if_installed(
     state: &tauri::State<AppState>,
     locale_override: Option<&str>,
 ) {
-    let backend = state.backend.read().unwrap();
+    let backend = &state.backend;
     if !backend.get_hooks_plan().model_guidance_installed {
         return;
     }
@@ -133,7 +133,7 @@ pub(crate) fn reapply_session_title_guidance_if_installed(
     title_override: &str,
     locale_override: Option<&str>,
 ) {
-    let backend = state.backend.read().unwrap();
+    let backend = &state.backend;
     if !backend.get_hooks_plan().session_title_guidance_installed {
         return;
     }
@@ -161,8 +161,6 @@ pub(crate) fn reapply_codex_guidance(
     };
     if let Err(e) = state
         .backend
-        .read()
-        .unwrap()
         .reconcile_codex_guidance(title_override, &locale)
     {
         eprintln!("re-apply codex guidance failed: {e}");

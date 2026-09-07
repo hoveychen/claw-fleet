@@ -5,27 +5,24 @@
 //! 「对话」Tab sat on 「加载中…」 forever against a dsh session, and every layer
 //! underneath measured healthy: `dsh session.history` answered a 150-message
 //! tail in 0.03s, and `fleet serve`'s `/messages?path=dsh://…&tail=150` — the
-//! same `Backend::get_messages_tail` the desktop calls — returned 122 messages
-//! in 0.47s. Driving the real frontend against that probe rendered the
-//! conversation in 918ms. So the failure lives in the desktop process, and the
-//! only thing there that the HTTP path does not have is [`AppState::backend`]'s
-//! `RwLock`: `get_messages_tail` / `read_live_thinking` take it for **read**
-//! (1.5s / 700ms polls while a session is active), `start_watching_session` /
-//! `stop_watching_session` take it for **write**.
+//! same `LocalBackend::get_messages_tail` the desktop calls — returned 122
+//! messages in 0.47s. Driving the real frontend against that probe rendered the
+//! conversation in 918ms. So the failure lived in the desktop process, and the
+//! probe is what separates "the call was slow" from "the call never returned"
+//! there — one log line per slow command, with the outcome attached.
 //!
-//! One log line therefore has to separate *waiting for the lock* from *running
-//! under it* — a multi-second total with a fast call means the queue, not dsh.
+//! (When it was written the desktop still held its backend behind an `RwLock`
+//! and the probe also split lock-wait from call time; the lock is gone, so the
+//! whole span is the call.)
 //!
 //! # Why some probes need a watchdog
 //!
 //! A command that never returns never reaches its completion log, so
 //! completion-based logging is blind to exactly the failure being chased.
 //! [`CmdProbe::start_watched`] arms a thread that reports while the call is
-//! still outstanding. It is reserved for the write-lock commands, which fire
-//! once per session open; the polled read commands log on completion only, so
-//! an active session does not spend a thread every 700ms.
-//!
-//! [`AppState::backend`]: crate::AppState::backend
+//! still outstanding. It is reserved for the commands that fire once per
+//! session open; the polled read commands log on completion only, so an
+//! active session does not spend a thread every 700ms.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -45,13 +42,11 @@ const WATCHDOG_MARKS: [Duration; 3] = [
     Duration::from_secs(15),
 ];
 
-/// Stopwatch for one Tauri command that goes through the backend lock.
+/// Stopwatch for one detail-pane Tauri command.
 pub(crate) struct CmdProbe {
     label: &'static str,
     detail: String,
     started: Instant,
-    /// When the backend lock came in hand; `None` until [`Self::locked`].
-    locked_at: Option<Instant>,
     /// Set on drop/completion so an armed watchdog stops reporting.
     finished: Arc<AtomicBool>,
 }
@@ -63,7 +58,6 @@ impl CmdProbe {
             label,
             detail: detail.into(),
             started: Instant::now(),
-            locked_at: None,
             finished: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -95,13 +89,7 @@ impl CmdProbe {
         probe
     }
 
-    /// Record that the backend lock is in hand. Everything before this point was
-    /// queueing; everything after is the call itself.
-    pub(crate) fn locked(&mut self) {
-        self.locked_at = Some(Instant::now());
-    }
-
-    /// Close the probe, logging the wait/call split when the total was slow.
+    /// Close the probe, logging the duration when the total was slow.
     ///
     /// `outcome` is whatever identifies the result at a glance (a row count, an
     /// error). It is only read on the slow path.
@@ -111,20 +99,10 @@ impl CmdProbe {
         if total.as_millis() < SLOW_MS {
             return;
         }
-        let (wait_ms, call_ms) = match self.locked_at {
-            Some(at) => (
-                (at - self.started).as_millis(),
-                at.elapsed().as_millis(),
-            ),
-            // Never acquired the lock — the whole time was the wait.
-            None => (total.as_millis(), 0),
-        };
         claw_fleet_core::log_debug(&format!(
-            "cmd probe: {} took {}ms (lock wait {}ms + call {}ms) — {} [{}]",
+            "cmd probe: {} took {}ms — {} [{}]",
             self.label,
             total.as_millis(),
-            wait_ms,
-            call_ms,
             outcome(),
             self.detail,
         ));
@@ -135,26 +113,12 @@ impl CmdProbe {
 mod tests {
     use super::*;
 
-    /// The split is what makes a log line diagnostic: the same 「slow」 total
-    /// means dsh when it is all `call`, and the lock queue when it is all
-    /// `wait`. A probe that never got the lock must report the whole span as
-    /// wait rather than silently attributing it to the call.
+    /// `done` only logs, so the observable contract is that closing a probe is
+    /// well-defined rather than a panic — on the fast path and the slow one.
     #[test]
-    fn a_probe_that_never_locked_reports_no_call_time() {
+    fn closing_a_probe_is_well_defined() {
         let probe = CmdProbe::start("get_messages_tail", "dsh://session-x");
-        assert!(probe.locked_at.is_none());
-        // `done` only logs, so the observable contract here is that closing an
-        // unlocked probe is well-defined rather than a panic.
-        probe.done(|| "abandoned".into());
-    }
-
-    #[test]
-    fn locking_splits_the_span() {
-        let mut probe = CmdProbe::start("get_messages_tail", "dsh://session-x");
-        std::thread::sleep(Duration::from_millis(5));
-        probe.locked();
-        let locked_at = probe.locked_at.expect("just set");
-        assert!(locked_at > probe.started);
+        assert!(probe.started.elapsed() < Duration::from_secs(1));
         probe.done(|| "1 msg".into());
     }
 

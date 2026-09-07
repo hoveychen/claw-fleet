@@ -168,7 +168,7 @@ pub(crate) fn route_elicitation_upload(
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "attachment.bin".to_string());
 
-                const MAX: u64 = crate::backend::MAX_ATTACHMENT_BYTES;
+                const MAX: u64 = crate::ui_types::MAX_ATTACHMENT_BYTES;
 
                 // Reject early via Content-Length if the client declared one.
                 if let Some(len) = request.body_length() {

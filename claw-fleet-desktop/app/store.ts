@@ -2,44 +2,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
-import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview, WaitingAlert } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
 import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
-import { getItem, setItem } from "./storage";
+import { getItem, resolveFeature, setItem } from "./storage";
+import { appendTailDelta } from "./tailDelta";
 import i18n from "./i18n";
 import { playChime } from "./audio";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 
-// ── Connection store ──────────────────────────────────────────────────────────
-
-export type Connection =
-  | { type: "local" }
-  | { type: "remote"; connection: RemoteConnection };
-
-interface ConnectionState {
-  /** `null` = not yet connected (dialog is shown) */
-  connection: Connection | null;
-  setConnection: (conn: Connection) => void;
-  disconnect: () => Promise<void>;
-}
-
-export const useConnectionStore = create<ConnectionState>((set) => ({
-  connection: null,
-  setConnection: (conn) => set({ connection: conn }),
-  disconnect: async () => {
-    await invoke("disconnect_remote").catch(() => {});
-    useSessionsStore.getState().setScanReady(false);
-    set({ connection: null });
-  },
-}));
-
 /** Open the in-app Settings overlay.
  *
  * Settings used to live in its own `settings.html` webview window, which meant
- * a second window with its own copy of every store, a `connection` query param
- * to seed it, and cross-window theme/lang events to keep the two in sync. It is
+ * a second window with its own copy of every store and cross-window theme/lang
+ * events to keep the two in sync. It is
  * now an overlay inside the main window, so all of that is just a boolean: the
  * panel reads the same stores the rest of the app already has. */
 export function openSettings(): void {
@@ -899,19 +876,8 @@ export const useDetailStore = create<DetailState>((set, get) => ({
 
   appendMessages: (msgs) => {
     set((state) => {
-      if (msgs.length === 0) return state;
-      // Dedup by uuid. Claude's `session-tail` is a byte-offset delta (never
-      // overlaps), so this is a no-op there. Codex's live follow re-normalizes a
-      // trailing window each poll (its rollout is folded — see
-      // `CodexSource::tail_incremental`), so consecutive pushes overlap and the
-      // event→response_item swap re-emits the same reply under its stable uuid;
-      // deduping here keeps each reply once. Records without a uuid are always
-      // kept (nothing to key on).
-      const seen = new Set(
-        state.messages.map((m) => m.uuid).filter((u): u is string => !!u),
-      );
-      const fresh = msgs.filter((m) => !m.uuid || !seen.has(m.uuid));
-      return fresh.length > 0 ? { messages: [...state.messages, ...fresh] } : state;
+      const merged = appendTailDelta(state.messages, msgs);
+      return merged === state.messages ? state : { messages: merged };
     });
   },
 }));
@@ -933,41 +899,6 @@ export function navigateToSessionDetail(session: SessionInfo) {
     useDetailStore.getState().open(session);
   }
 }
-
-// ── Waiting alerts store ────────────────────────────────────────────────────
-
-interface WaitingAlertsState {
-  alerts: WaitingAlert[];
-  /** Session IDs the user has acknowledged (dismissed) in this app session */
-  dismissedIds: Set<string>;
-  setAlerts: (alerts: WaitingAlert[]) => void;
-  dismiss: (sessionId: string) => void;
-  /** Acknowledge every currently-loaded alert at once (same semantics as dismiss) */
-  dismissAll: () => void;
-  refresh: () => Promise<void>;
-}
-
-export const useWaitingAlertsStore = create<WaitingAlertsState>((set) => ({
-  alerts: [],
-  dismissedIds: new Set(),
-  setAlerts: (alerts) => set({ alerts }),
-  dismiss: (sessionId) =>
-    set((state) => {
-      const next = new Set(state.dismissedIds);
-      next.add(sessionId);
-      return { dismissedIds: next };
-    }),
-  dismissAll: () =>
-    set((state) => {
-      const next = new Set(state.dismissedIds);
-      for (const a of state.alerts) next.add(a.sessionId);
-      return { dismissedIds: next };
-    }),
-  refresh: async () => {
-    const alerts = await invoke<WaitingAlert[]>("get_waiting_alerts");
-    set({ alerts });
-  },
-}));
 
 // ── Audit read-state store ──────────────────────────────────────────────────
 
@@ -1064,6 +995,13 @@ interface ReportState {
   lastSeenReportDate: string;
   hasNewReport: boolean;
 
+  // Auto-popup: the date whose report is being shown in the overlay, or null
+  // when no overlay is up. Distinct from `lastSeenReportDate` on purpose —
+  // "opened the report page" and "had the report pushed at me" are different
+  // events, and reusing the former would let a visit to today's page suppress
+  // tomorrow's popup of yesterday's finished report.
+  reportPopupDate: string | null;
+
   // Timeline (earlier-days feed below the selected-day detail)
   timelineReports: DailyReport[];
   timelineLoading: boolean;
@@ -1076,6 +1014,15 @@ interface ReportState {
   refreshNewReportFlag: () => Promise<void>;
   /** Mark the current latest report date as seen and clear the red dot. */
   markReportSeen: () => void;
+  /**
+   * Raise the auto-popup for `date`, unless the toggle is off or that date has
+   * already been popped once. Loads the report into `currentReport` so the
+   * overlay reuses the normal report body. No-op when the report has no AI
+   * summary yet — the popup exists to show a finished report, not a spinner.
+   */
+  maybePopupReport: (date: string) => Promise<void>;
+  /** Close the auto-popup overlay. */
+  closeReportPopup: () => void;
   generateReport: (date: string) => Promise<void>;
   generateSummary: (date: string) => Promise<void>;
   generateLessons: (date: string) => Promise<void>;
@@ -1107,6 +1054,14 @@ function latestDateWithData(stats: DailyReportStats[]): string {
 
 const TIMELINE_PAGE_SIZE = 7;
 
+/** Newest date already shown in the auto-popup (YYYY-MM-DD). */
+export const REPORT_LAST_POPPED_KEY = "daily-report-last-popped";
+/** Auto-popup toggle. A tristate feature key — default ON via FEATURE_DEFAULTS. */
+export const REPORT_AUTO_POPUP_KEY = "daily-report-auto-popup";
+
+/** Dates whose popup check is mid-flight. See `maybePopupReport`. */
+const popupInFlight = new Set<string>();
+
 export const useReportStore = create<ReportState>((set, get) => ({
   currentReport: null,
   heatmapData: [],
@@ -1123,6 +1078,8 @@ export const useReportStore = create<ReportState>((set, get) => ({
   latestReportDate: "",
   lastSeenReportDate: getItem("daily-report-last-seen") ?? "",
   hasNewReport: false,
+
+  reportPopupDate: null,
 
   timelineReports: [],
   timelineLoading: false,
@@ -1177,6 +1134,35 @@ export const useReportStore = create<ReportState>((set, get) => ({
       // Best-effort — leave the flag as-is on failure.
     }
   },
+
+  maybePopupReport: async (date: string) => {
+    if (!date) return;
+    if (!resolveFeature(REPORT_AUTO_POPUP_KEY)) return;
+    // One popup per date, ever.
+    if ((getItem(REPORT_LAST_POPPED_KEY) ?? "") >= date) return;
+    if (get().reportPopupDate) return;
+    // The in-flight set — not the persisted key — is what keeps two racing
+    // signals (boot check + scheduler event) from both opening. The key is
+    // written only once we've actually shown something: the boot check runs
+    // seconds after launch and routinely finds a report whose summary the
+    // scheduler hasn't written yet, and burning the date on that read would
+    // suppress the very event we're waiting for.
+    if (popupInFlight.has(date)) return;
+    popupInFlight.add(date);
+    try {
+      const report = await invoke<DailyReport | null>("get_daily_report", { date });
+      if (!report?.aiSummary) return;
+      if (get().reportPopupDate) return;
+      setItem(REPORT_LAST_POPPED_KEY, date);
+      set({ currentReport: report, selectedDate: date, reportPopupDate: date, loading: false });
+    } catch {
+      // Best-effort: a failed read just means no popup this time.
+    } finally {
+      popupInFlight.delete(date);
+    }
+  },
+
+  closeReportPopup: () => set({ reportPopupDate: null }),
 
   markReportSeen: () => {
     const latest = get().latestReportDate;

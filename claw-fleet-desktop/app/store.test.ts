@@ -566,3 +566,78 @@ describe("applyWindowTheme", () => {
     expect(winMock.setTheme).toHaveBeenCalledWith("light");
   });
 });
+
+/**
+ * 日报自动弹出的去重契约。
+ *
+ * 两个信号会调 maybePopupReport：启动后 1.5s 的补弹检查，和调度线程写完 AI
+ * 摘要时发的 daily-report-ready 事件。启动检查经常赶在摘要写完之前（调度器
+ * 首轮要等 10s），所以「已弹过」这个持久化标记必须等到真的弹出来才写——早写
+ * 一步就会把随后那个真事件挡掉，功能主路径直接失效。
+ */
+describe("日报自动弹出", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  async function setup(report: unknown) {
+    const core = await import("@tauri-apps/api/core");
+    (core.invoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => report,
+    );
+    return await import("./store");
+  }
+
+  it("摘要还没生成时不弹，也不写掉「已弹过」标记", async () => {
+    const { useReportStore, REPORT_LAST_POPPED_KEY } = await setup({
+      date: "2026-09-05",
+      aiSummary: null,
+    });
+    const { getItem } = await import("./storage");
+
+    await useReportStore.getState().maybePopupReport("2026-09-05");
+
+    expect(useReportStore.getState().reportPopupDate).toBeNull();
+    expect(getItem(REPORT_LAST_POPPED_KEY) ?? "").not.toBe("2026-09-05");
+  });
+
+  it("摘要已就绪时弹出，并记下日期", async () => {
+    const { useReportStore, REPORT_LAST_POPPED_KEY } = await setup({
+      date: "2026-09-05",
+      aiSummary: "今天干了很多活",
+    });
+    const { getItem } = await import("./storage");
+
+    await useReportStore.getState().maybePopupReport("2026-09-05");
+
+    expect(useReportStore.getState().reportPopupDate).toBe("2026-09-05");
+    expect(getItem(REPORT_LAST_POPPED_KEY)).toBe("2026-09-05");
+  });
+
+  it("同一天不会弹第二次", async () => {
+    const { useReportStore } = await setup({
+      date: "2026-09-05",
+      aiSummary: "今天干了很多活",
+    });
+
+    await useReportStore.getState().maybePopupReport("2026-09-05");
+    useReportStore.getState().closeReportPopup();
+    await useReportStore.getState().maybePopupReport("2026-09-05");
+
+    expect(useReportStore.getState().reportPopupDate).toBeNull();
+  });
+
+  it("开关关掉后不弹", async () => {
+    const { useReportStore, REPORT_AUTO_POPUP_KEY } = await setup({
+      date: "2026-09-05",
+      aiSummary: "今天干了很多活",
+    });
+    const { setFeatureState } = await import("./storage");
+    setFeatureState(REPORT_AUTO_POPUP_KEY, "off");
+
+    await useReportStore.getState().maybePopupReport("2026-09-05");
+
+    expect(useReportStore.getState().reportPopupDate).toBeNull();
+  });
+});

@@ -418,7 +418,7 @@ pub(crate) fn route_remove_prd_mode(
 /// host — codex's `~/.codex/AGENTS.md` and dsh's `$DSH_HOME/AGENTS.md`. Body
 /// carries `{user_title, locale}`; the enabled set is read from the host's own
 /// Claude carriers. The route keeps its codex-era path for wire compatibility
-/// with older desktops (see [`crate::backend::Backend::reconcile_codex_guidance`]).
+/// with older clients.
 pub(crate) fn route_reconcile_codex_guidance(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,
