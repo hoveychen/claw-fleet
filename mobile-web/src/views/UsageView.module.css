@@ -112,6 +112,18 @@
   overflow-wrap: anywhere;
 }
 
+/* 「用量来源」那一行 foxy 的狐狸头：11px 的 mark 在 14px 文字行里偏小，
+   放大到与文字同高，颜色跟着 rowValue 走（图标用 currentColor）。 */
+.sourceIcon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.sourceIcon svg {
+  width: 15px;
+  height: 15px;
+}
+
 .divider {
   height: 1px;
   background: var(--color-border);
