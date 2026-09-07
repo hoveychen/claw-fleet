@@ -1952,6 +1952,36 @@ mod tests {
         assert_eq!(info.last_activity_ms, 1786739335270);
     }
 
+    /// `session/list`'s `updatedAt` is *not* a last-activity clock: measured
+    /// against a live 0.1.2 server on 2026-09-07, a session whose `asOfSeq`
+    /// climbed 62587 → 62874 over 40s kept `updatedAt` frozen at the moment its
+    /// turn was submitted, 18 minutes earlier. So the mux's event clock has to
+    /// win whenever it is newer, or the card reads "18分钟前" mid-turn.
+    #[test]
+    fn a_live_event_clock_overrides_a_stale_updated_at() {
+        let mut info = session_info_from_list_item(&live_list_item()).expect("mapped");
+        overlay_activity(&mut info, Some(1786739999999));
+        assert_eq!(info.last_activity_ms, 1786739999999);
+        assert_eq!(info.agent_last_activity_ms, 1786739999999);
+        // `created_at_ms` is a different question and stays on the poll.
+        assert_eq!(info.created_at_ms, 1786739335270);
+    }
+
+    /// Between turns the sockets go quiet, so the last event can be older than
+    /// the poll's own timestamp (which the server bumps when it persists the
+    /// session). Taking the max rather than the overlay keeps the newer of the
+    /// two, and a session nobody has followed keeps the poll untouched.
+    #[test]
+    fn the_poll_wins_when_the_event_clock_is_older_or_absent() {
+        let mut info = session_info_from_list_item(&live_list_item()).expect("mapped");
+        overlay_activity(&mut info, Some(1));
+        assert_eq!(info.last_activity_ms, 1786739335270);
+
+        overlay_activity(&mut info, None);
+        assert_eq!(info.last_activity_ms, 1786739335270);
+        assert_eq!(info.agent_last_activity_ms, 1786739335270);
+    }
+
     #[test]
     fn sums_every_input_bucket_into_total_input() {
         let info = session_info_from_list_item(&live_list_item()).expect("mapped");

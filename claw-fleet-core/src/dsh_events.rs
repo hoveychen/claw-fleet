@@ -1503,6 +1503,36 @@ mod tests {
         assert_eq!(phase_of("agent/inbox/spliced", None), None);
     }
 
+    /// The card's "last activity" is a wall clock, and most of a turn's events
+    /// say nothing about the phase (`assistant/chunk` with no block type,
+    /// `session/title`, usage bookkeeping — see
+    /// `bookkeeping_events_leave_the_phase_alone`). So the activity clock has to
+    /// be bumped by *every* event, not just the phase-carrying ones, or a long
+    /// stretch of bookkeeping would read as an idle session.
+    #[test]
+    fn every_event_bumps_the_activity_clock() {
+        let live = LiveView::default();
+        live.apply(event("session-a", "session/title"), 5_000);
+        assert_eq!(live.last_event_at_ms("session-a"), Some(5_000));
+
+        // A later event moves it forward…
+        live.apply(event("session-a", "tool/call"), 9_000);
+        assert_eq!(live.last_event_at_ms("session-a"), Some(9_000));
+
+        // …and a frame replayed out of order after a reconnect must not pull it
+        // back, the same way `cursor` never regresses.
+        live.apply(event("session-a", "step/start"), 7_000);
+        assert_eq!(live.last_event_at_ms("session-a"), Some(9_000));
+    }
+
+    /// A session the sockets have never reported an event for has no activity
+    /// clock of its own, so the poll's `updatedAt` must stand alone.
+    #[test]
+    fn an_unseen_session_has_no_activity_clock() {
+        let live = LiveView::default();
+        assert_eq!(live.last_event_at_ms("session-a"), None);
+    }
+
     fn event(sid: &str, kind: &str) -> DshFrame {
         DshFrame::Event {
             session_id: sid.into(),
