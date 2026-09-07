@@ -1,0 +1,93 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import "../i18n";
+import { makeAuxDoc } from "../detailAux";
+import type { SessionInfo } from "../types";
+import { SessionAuxRail } from "./SessionAuxRail";
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let container: HTMLDivElement | null = null;
+let root: Root | null = null;
+
+afterEach(() => {
+  if (root) act(() => root!.unmount());
+  root = null;
+  container?.remove();
+  container = null;
+});
+
+function agent(id: string, title: string): SessionInfo {
+  return {
+    id,
+    aiTitle: title,
+    status: "Executing",
+    isSubagent: true,
+    lastActivityMs: Date.now(),
+    agentTokenSpeed: 0,
+  } as unknown as SessionInfo;
+}
+
+function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() =>
+    root!.render(
+      <SessionAuxRail
+        agents={[]}
+        docs={[]}
+        activeId={null}
+        onOpenAgent={() => {}}
+        onOpenDoc={() => {}}
+        onCloseDoc={() => {}}
+        {...props}
+      />,
+    ),
+  );
+  return container;
+}
+
+describe("SessionAuxRail", () => {
+  // The reason the rail can be permanent: with nothing in play it is not a
+  // narrow empty frame, it is not there at all.
+  it("costs no width when nothing is in play", () => {
+    expect(render().childElementCount).toBe(0);
+  });
+
+  it("shows a card per live subagent", () => {
+    const el = render({ agents: [agent("a", "Trace the watcher")] });
+
+    expect(el.querySelector("aside")).not.toBeNull();
+    expect(el.textContent).toContain("Trace the watcher");
+  });
+
+  // Cards only, one column, no tab strip and no section headings — the two
+  // kinds are siblings in the same stack.
+  it("stacks doc cards with the agent cards and offers no tabs", () => {
+    const el = render({
+      agents: [agent("a", "Trace the watcher")],
+      docs: [makeAuxDoc("file", "/repo/src/main.rs")],
+    });
+
+    expect(el.querySelector('[role="tablist"]')).toBeNull();
+    expect(el.textContent).toContain("main.rs");
+    expect(el.querySelectorAll("aside > *")).toHaveLength(2);
+  });
+
+  it("opens a doc card in the drawer, and dismisses it from its own ✕", () => {
+    const onOpenDoc = vi.fn();
+    const onCloseDoc = vi.fn();
+    const doc = makeAuxDoc("wiki", "arch/overview");
+    const el = render({ docs: [doc], onOpenDoc, onCloseDoc });
+    const [open, close] = Array.from(el.querySelectorAll("button")) as HTMLElement[];
+
+    act(() => open.click());
+    act(() => close.click());
+    expect(onOpenDoc).toHaveBeenCalledWith(doc.id);
+    expect(onCloseDoc).toHaveBeenCalledWith(doc.id);
+  });
+});

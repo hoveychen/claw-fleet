@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  activeAuxTab,
-  AGENTS_TAB,
   auxDocLabel,
   closeAux,
   closeDoc,
@@ -10,43 +8,37 @@ import {
   MAX_AUX_DOCS,
   openDoc,
   pruneTab,
+  reopenAuxId,
   showTab,
-  syncLiveAgents,
   toggleTab,
   type AuxState,
 } from "./detailAux";
 
 describe("toggleTab", () => {
-  it("opens a facet", () => {
+  it("opens a facet in the drawer", () => {
     expect(toggleTab(initialAux, "tokens").active).toBe("tokens");
   });
 
-  it("clicking the showing facet closes the panel", () => {
+  it("clicking the showing facet closes the drawer", () => {
     const open = toggleTab(initialAux, "tokens");
     expect(toggleTab(open, "tokens").active).toBe(null);
   });
 
-  it("switching facets keeps the panel open", () => {
+  it("switching facets keeps the drawer open", () => {
     const open = toggleTab(initialAux, "tokens");
     expect(toggleTab(open, "skills").active).toBe("skills");
-  });
-
-  it("clears a previous dismissal so the panel actually reopens", () => {
-    const dismissed = closeAux(initialAux);
-    expect(dismissed.agentsDismissed).toBe(true);
-    expect(toggleTab(dismissed, "skills").agentsDismissed).toBe(false);
   });
 });
 
 describe("openDoc", () => {
-  it("opens and focuses a file", () => {
+  it("adds the rail card and opens the doc in the drawer", () => {
     const st = openDoc(initialAux, "file", "/repo/src/main.rs");
     expect(st.docs).toHaveLength(1);
     expect(st.active).toBe(docId("file", "/repo/src/main.rs"));
     expect(st.docs[0].label).toBe("main.rs");
   });
 
-  it("reveals rather than duplicates an already-open doc", () => {
+  it("reveals rather than duplicates an already-carded doc", () => {
     let st = openDoc(initialAux, "wiki", "arch/overview");
     st = toggleTab(st, "tokens");
     st = openDoc(st, "wiki", "arch/overview");
@@ -54,7 +46,7 @@ describe("openDoc", () => {
     expect(st.active).toBe(docId("wiki", "arch/overview"));
   });
 
-  it("trims the oldest doc past the cap and keeps the newest focused", () => {
+  it("trims the oldest card past the cap and keeps the newest open", () => {
     let st: AuxState = initialAux;
     for (let i = 0; i < MAX_AUX_DOCS + 2; i += 1) {
       st = openDoc(st, "file", `/repo/f${i}.rs`);
@@ -70,22 +62,31 @@ describe("openDoc", () => {
   });
 });
 
+describe("closeAux", () => {
+  it("closes the drawer but keeps the rail's cards", () => {
+    const st = closeAux(openDoc(initialAux, "file", "/a.rs"));
+    expect(st.active).toBe(null);
+    expect(st.docs).toHaveLength(1);
+  });
+});
+
 describe("closeDoc", () => {
-  it("falls back to the neighbour when closing the focused doc", () => {
+  it("dismissing the open doc's card closes the drawer rather than sliding to a neighbour", () => {
     let st = openDoc(initialAux, "file", "/a.rs");
     st = openDoc(st, "file", "/b.rs");
     st = closeDoc(st, docId("file", "/b.rs"));
-    expect(st.active).toBe(docId("file", "/a.rs"));
+    expect(st.docs).toHaveLength(1);
+    expect(st.active).toBe(null);
   });
 
-  it("closing the last doc closes the panel", () => {
+  it("dismissing the last card closes the drawer", () => {
     let st = openDoc(initialAux, "file", "/a.rs");
     st = closeDoc(st, docId("file", "/a.rs"));
     expect(st.docs).toHaveLength(0);
     expect(st.active).toBe(null);
   });
 
-  it("closing a background doc leaves the focus alone", () => {
+  it("dismissing some other card leaves the drawer alone", () => {
     let st = openDoc(initialAux, "file", "/a.rs");
     st = openDoc(st, "file", "/b.rs");
     st = closeDoc(st, docId("file", "/a.rs"));
@@ -93,47 +94,34 @@ describe("closeDoc", () => {
   });
 });
 
-describe("activeAuxTab", () => {
-  it("is closed with nothing picked and no live agents", () => {
-    expect(activeAuxTab(initialAux, 0)).toBe(null);
+describe("reopenAuxId", () => {
+  it("has no memory before anything has been opened", () => {
+    expect(reopenAuxId(initialAux)).toBe(null);
   });
 
-  it("auto-opens on the agent deck for a live subagent", () => {
-    expect(activeAuxTab(initialAux, 1)).toBe(AGENTS_TAB);
+  it("remembers the last thing the drawer showed after it is closed", () => {
+    expect(reopenAuxId(closeAux(toggleTab(initialAux, "tokens")))).toBe("tokens");
   });
 
-  it("stays closed after the reader dismisses the deck", () => {
-    expect(activeAuxTab(closeAux(initialAux), 1)).toBe(null);
-  });
-
-  it("a picked facet wins over the auto-open", () => {
-    expect(activeAuxTab(toggleTab(initialAux, "skills"), 3)).toBe("skills");
-  });
-
-  it("a dismissal is spent once the last subagent finishes", () => {
-    const dismissed = closeAux(initialAux);
-    const after = syncLiveAgents(dismissed, 0);
-    expect(activeAuxTab(after, 2)).toBe(AGENTS_TAB);
-  });
-
-  it("showTab reopens a panel the reader had closed", () => {
-    const dismissed = closeAux(initialAux);
-    expect(activeAuxTab(showTab(dismissed, "tokens"), 0)).toBe("tokens");
+  it("forgets a doc whose card the reader dismissed", () => {
+    let st = openDoc(initialAux, "file", "/a.rs");
+    st = closeDoc(st, docId("file", "/a.rs"));
+    expect(reopenAuxId(st)).toBe(null);
   });
 });
 
 describe("pruneTab", () => {
-  it("drops a facet whose tab is gone", () => {
+  it("drops a facet the session no longer offers", () => {
     const st = toggleTab(initialAux, "bgtasks");
     expect(pruneTab(st, () => false).active).toBe(null);
   });
 
-  it("drops the agent deck once the last subagent finishes", () => {
-    const st = toggleTab(initialAux, AGENTS_TAB);
-    expect(pruneTab(st, (id) => id !== AGENTS_TAB).active).toBe(null);
+  it("forgets a remembered facet the session no longer offers", () => {
+    const st = closeAux(toggleTab(initialAux, "bgtasks"));
+    expect(reopenAuxId(pruneTab(st, () => false))).toBe(null);
   });
 
-  it("keeps a tab that still exists", () => {
+  it("keeps content that still exists", () => {
     const st = openDoc(initialAux, "web", "https://example.com/x");
     expect(pruneTab(st, () => true).active).toBe(st.active);
   });

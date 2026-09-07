@@ -47,24 +47,22 @@ import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
 import {
-  activeAuxTab,
-  AGENTS_TAB,
   closeAux,
   closeDoc,
   initialAux,
   isAuxFacet,
   openDoc,
   pruneTab,
+  reopenAuxId,
   showTab,
-  syncLiveAgents,
   toggleTab,
   type AuxDocKind,
   type AuxFacetItem,
   type AuxState,
 } from "../detailAux";
-import { SessionAuxPanel, type AuxTab } from "./SessionAuxPanel";
+import { SessionAuxPanel } from "./SessionAuxPanel";
+import { SessionAuxRail } from "./SessionAuxRail";
 import { SessionFacetPanel } from "./SessionFacetPanel";
-import { SubagentLiveCards } from "./SubagentLiveCards";
 import { SessionAuxDoc } from "./SessionAuxDoc";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
@@ -458,10 +456,12 @@ export function SessionDetail({
   const dockRef = useRef<HTMLDivElement>(null);
   const [dockHeight, setDockHeight] = useState(0);
   /* The conversation is no longer one tab among many — it owns this column for
-     good. Everything that used to sit beside it in that row (Skills, 决策,
-     Token, 任务, 后台任务, 临时文件, Workflow) is now a *button* that pulls the
-     panel up in the auxiliary column, so reading a token receipt no longer
-     costs you sight of the transcript. See detailAux.ts for the state. */
+     good. Beside it are two surfaces, at two different levels: a permanent rail
+     of cards for what is in play right now (running subagents, docs the agent
+     named), and a drawer that floats over the transcript to show one looked-up
+     thing at a time (Skills, 决策, Token, 任务, 后台任务, 临时文件, Workflow, or
+     one doc at full width). See detailAux.ts for the state and why the two are
+     no longer one tab strip. */
   const [aux, setAux] = useState<AuxState>(initialAux);
   /* The header's numeric chips — spend, tokens, reasoning share, compactions —
      are reference figures you look up, not identity you read at a glance. Seven
@@ -994,8 +994,8 @@ export function SessionDetail({
     if (el) el.scrollTop = el.scrollHeight;
   }, [dockHeight]);
 
-  /** Subagents of this session family that are running *right now* — the deck
-   *  of cards pinned to the top of the auxiliary column. Workflow fan-out
+  /** Subagents of this session family that are running *right now* — the cards
+   *  at the top of the auxiliary rail. Workflow fan-out
    *  agents are included (unlike the scope dropdown, which excludes them to
    *  stay a menu): "看完整个任务的所有 agent 状态" means all of them, and the
    *  deck caps its render rather than its input. Sorted most-recently-active
@@ -1016,12 +1016,6 @@ export function SessionDetail({
       )
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
   }, [liveSession, sessions]);
-
-  // A dismissal of the agent deck is spent once the last one finishes, so the
-  // next fan-out earns a fresh auto-open.
-  useEffect(() => {
-    setAux((st) => syncLiveAgents(st, liveSubagents.length));
-  }, [liveSubagents.length]);
 
   const tabs = useMemo((): SessionInfo[] => {
     if (!liveSession) return [];
@@ -1115,46 +1109,35 @@ export function SessionDetail({
     workflowTrees.length,
   ]);
 
-  // The auxiliary column's tab strip: the running agents, the facet currently
-  // being read (only that one — the rest are in the menu), then every doc opened
-  // from the transcript. So the strip is "what is open in here", not a catalogue
-  // of everything that could be.
-  const auxTabs = useMemo((): AuxTab[] => {
-    const list: AuxTab[] = [];
-    if (liveSubagents.length > 0) {
-      list.push({
-        id: AGENTS_TAB,
-        label: t("detail.live_agents", { count: liveSubagents.length }),
-      });
-    }
-    const openFacet =
-      aux.active != null && isAuxFacet(aux.active)
-        ? auxFacets.find((f) => f.id === aux.active)
-        : undefined;
-    if (openFacet) list.push({ id: openFacet.id, label: openFacet.label });
-    for (const d of aux.docs) list.push({ id: d.id, label: d.label, closable: true });
-    return list;
-  }, [t, liveSubagents.length, auxFacets, aux.active, aux.docs]);
-
-  // A selection whose tab has since disappeared (the session took another turn
-  // and emptied 后台任务, say) would otherwise hold the panel on nothing.
+  // Everything the drawer could legitimately be showing: a facet this session
+  // actually offers, or a doc that still has a card in the rail. A selection
+  // whose subject has since disappeared (the session took another turn and
+  // emptied 后台任务, say) would otherwise hold the drawer open on nothing.
+  const auxIds = useMemo(() => {
+    const ids = new Set<string>(auxFacets.map((f) => f.id));
+    for (const d of aux.docs) ids.add(d.id);
+    return ids;
+  }, [auxFacets, aux.docs]);
   useEffect(() => {
-    const ids = new Set(auxTabs.map((tb) => tb.id));
-    setAux((st) => pruneTab(st, (id) => ids.has(id)));
-  }, [auxTabs]);
+    setAux((st) => pruneTab(st, (id) => auxIds.has(id)));
+  }, [auxIds]);
 
-  const activeTab = activeAuxTab(aux, liveSubagents.length);
+  const activeTab = aux.active;
   const auxOpen = activeTab != null;
   const activeFacet = activeTab != null && isAuxFacet(activeTab) ? activeTab : null;
   const activeDoc = activeTab == null ? null : aux.docs.find((d) => d.id === activeTab) ?? null;
-  // The toolbar switch: hide it when it is showing, and bring back the tab the
-  // reader was last on (the agent deck, if agents are running) when it is not.
-  const reopenTabId = auxTabs[0]?.id ?? "skills";
+  // The drawer names the one thing it holds, in place of the tab strip.
+  const drawerTitle = activeFacet
+    ? auxFacets.find((f) => f.id === activeFacet)?.label ?? activeFacet
+    : activeDoc?.label ?? "";
+  // The rail is not something you open — it is there exactly when it has cards.
+  const railCards = liveSubagents.length + aux.docs.length;
+  // The toolbar switch drives the drawer only: hide it when it is showing, and
+  // put back whatever it showed last when it is not.
+  const reopenTabId = reopenAuxId(aux) ?? "skills";
   const toggleAuxPanel = useCallback(() => {
-    setAux((st) =>
-      activeAuxTab(st, liveSubagents.length) == null ? showTab(st, reopenTabId) : closeAux(st),
-    );
-  }, [liveSubagents.length, reopenTabId]);
+    setAux((st) => (st.active == null ? showTab(st, reopenTabId) : closeAux(st)));
+  }, [reopenTabId]);
 
   return (
     // Both link capabilities cover the whole component, so the reader modal and
@@ -1163,7 +1146,7 @@ export function SessionDetail({
     <WikiLinksProvider value={wikiLinks}>
       <WebLinkProvider value={openWebInAux}>
       <div
-        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""}`}
+        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railCards > 0 ? styles.rail_open : ""}`}
       >
         {liveSession && (
           <>
@@ -1312,22 +1295,22 @@ export function SessionDetail({
                     </button>
                   </div>
                   </div>
-                  {/* Toolbar. The auxiliary column's switch leads it: with the
-                      facet buttons gone from this side, this is how you get the
-                      panel back once it is closed. */}
+                  {/* Toolbar. The drawer's switch leads it: with the facet
+                      buttons gone from this side, this is how you get the last
+                      thing you looked up back once it is closed. It carries no
+                      running-agent badge any more — the rail beside the
+                      conversation is where live agents live, and it is visible
+                      whether the drawer is open or not. */}
                   <div className={styles.hero_tools} data-tauri-drag-region>
                     <button
                       type="button"
                       className={`${styles.hero_tool} ${auxOpen ? styles.hero_tool_on : ""}`}
                       onClick={toggleAuxPanel}
                       aria-pressed={auxOpen}
-                      title={auxOpen ? t("detail.aux_hide", "收起辅助栏") : t("detail.aux_show", "展开辅助栏")}
-                      aria-label={auxOpen ? t("detail.aux_hide", "收起辅助栏") : t("detail.aux_show", "展开辅助栏")}
+                      title={auxOpen ? t("detail.drawer_hide", "收起详情抽屉") : t("detail.drawer_show", "展开详情抽屉")}
+                      aria-label={auxOpen ? t("detail.drawer_hide", "收起详情抽屉") : t("detail.drawer_show", "展开详情抽屉")}
                     >
                       <PanelRight size={14} strokeWidth={1.8} />
-                      {liveSubagents.length > 0 && (
-                        <span className={styles.hero_tool_badge}>{liveSubagents.length}</span>
-                      )}
                     </button>
                     <SessionHeaderMenu
                       sessionId={liveSession.id}
@@ -1449,17 +1432,20 @@ export function SessionDetail({
               </div>
             </div>
 
+            {/* The ambient layer. A real column — it narrows the conversation —
+                which it earns by not rendering at all when there is nothing in
+                play. */}
+            <SessionAuxRail
+              agents={liveSubagents}
+              docs={aux.docs}
+              activeId={activeTab}
+              onOpenAgent={open}
+              onOpenDoc={pickTab}
+              onCloseDoc={dropDoc}
+            />
+
             {auxOpen && (
-              <SessionAuxPanel
-                tabs={auxTabs}
-                activeId={activeTab}
-                onPick={pickTab}
-                onCloseTab={dropDoc}
-                onClose={closeAuxPanel}
-              >
-                {activeTab === AGENTS_TAB && (
-                  <SubagentLiveCards agents={liveSubagents} onOpen={open} />
-                )}
+              <SessionAuxPanel title={drawerTitle} onClose={closeAuxPanel}>
                 {activeDoc && (
                   <SessionAuxDoc
                     doc={activeDoc}

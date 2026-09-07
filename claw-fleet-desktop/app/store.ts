@@ -1232,7 +1232,10 @@ export const useReportStore = create<ReportState>((set, get) => ({
       // Stamp the date alongside the rows so the card can tell "this day has no
       // finished tasks" from "the fetch for this day hasn't landed yet" — the
       // two look identical if you only look at an empty array.
-      set({ taskReviews: reviews, taskReviewsDate: date });
+      // `?? []`: a command that resolves to null (the browser/mock build has no
+      // handler for this one) would otherwise put null where the card reads
+      // `.length` and take the whole app down with it.
+      set({ taskReviews: reviews ?? [], taskReviewsDate: date });
     } catch {
       set({ taskReviews: [], taskReviewsDate: date });
     }
