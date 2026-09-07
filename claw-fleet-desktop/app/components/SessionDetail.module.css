@@ -236,19 +236,153 @@
   box-sizing: border-box;
 }
 
-/* Tab bar (agent segmented control + view tabs combined) */
-.tab_bar {
+/* ── Two-column body ────────────────────────────────────────────────────────
+   The conversation keeps the left column for good; the auxiliary panel takes
+   the right one (or floats over it when the pane is too narrow — see
+   SessionAuxPanel). Positioned so the overlay form has something to anchor to. */
+.body_row {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.main_col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Facet buttons — Skills / 决策 / Token / 任务 / … Each opens its panel in the
+   auxiliary column rather than replacing the conversation, so these read as
+   toggles (pill, lit when open), not as tabs. */
+.facet_bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px 0;
+  gap: 6px;
+  padding: 7px 16px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg);
   flex-shrink: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
-.tab_bar::-webkit-scrollbar { display: none; }
+.facet_bar::-webkit-scrollbar { display: none; }
+
+.facet_btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--color-text-dim);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.facet_btn:hover {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+}
+.facet_btn_active {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
+}
+
+/* ── Auxiliary column ───────────────────────────────────────────────────────*/
+.aux {
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+/* Narrow pane: float over the conversation instead of halving it. */
+.aux_overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(92%, 420px);
+  z-index: 6;
+  box-shadow: -8px 0 24px rgb(0 0 0 / 18%);
+}
+
+.aux_scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: rgb(0 0 0 / 24%);
+}
+
+/* Drag handle, straddling the shared edge. */
+.aux_resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 2;
+}
+.aux_resizer:hover {
+  background: var(--color-border);
+}
+.aux_dragging {
+  user-select: none;
+}
+
+.aux_head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.aux_title {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aux_close {
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: var(--radius-xs);
+}
+.aux_close:hover {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+}
+
+.aux_body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 
 /* Status dot — leads each row in the agent scope dropdown (AgentScopeSwitcher),
    colour-coded by the subagent's live status. */
@@ -266,28 +400,6 @@
 .tab_dot[data-status="waitingInput"]{ background: var(--badge-waiting-fg); }
 .tab_dot[data-status="active"]      { background: var(--badge-active-fg); }
 .tab_dot[data-status="delegating"]  { background: var(--badge-delegating-fg); }
-
-/* View tabs (Decisions / Skills / Messages) — now the only occupants of the
-   .tab_bar row; the agent scope selector moved to the header dropdown. */
-.view_tab {
-  padding: 6px 12px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-dim);
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s;
-}
-.view_tab:hover {
-  color: var(--color-text);
-}
-.view_tab_active {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent, #60a5fa);
-}
 
 .skills_panel {
   flex: 1;

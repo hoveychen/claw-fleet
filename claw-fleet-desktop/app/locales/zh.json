@@ -1638,6 +1638,7 @@
     "load_earlier": "加载更早的消息",
     "loading_earlier": "正在加载更早的消息…",
     "syncing_latest": "正在同步最新消息…",
+    "aux_title": "辅助信息",
     "tab_decisions": "决策",
     "task_notification": "后台任务",
     "task_done": "已完成",

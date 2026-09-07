@@ -27,7 +27,6 @@ import {
 import { nestedScrollerWillConsume } from "../nestedScroll";
 import { currentViewMetrics, formatSnapshot, takeScrollSnapshot } from "../scrollSnapshot";
 import { AgentNavProvider } from "./AgentNavContext";
-import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
 import { PlanProgressRow } from "./PlanProgressRow";
 import { WatchStatusRow } from "./WatchStatusRow";
@@ -39,22 +38,26 @@ import { WikiLinksProvider } from "../markdown/wikiLinksContext";
 import { WebLinkProvider } from "../markdown/webLinks";
 import { revealSlugInWikiPage, useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
-import { ScratchpadView } from "./ScratchpadView";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { effortChipLabel, effortTitle, formatModel } from "./SessionCard";
-import { SkillHistory } from "./SkillHistory";
-import { TokenSpendPanel } from "./TokenSpendPanel";
-import { CodexTokenPanel } from "./CodexTokenPanel";
-import { DshTokenPanel } from "./DshTokenPanel";
-import { tokenPanelForAgentSource } from "../modelChoices";
 import { inlineCodexFleetAsk, withCodexDecisionHistory } from "./codexDecision";
-import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
-import { bgTaskIcon, bgTaskDataType } from "../bgTaskKinds";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
+import {
+  auxVisible,
+  initialAux,
+  isAuxFacet,
+  pruneFacet,
+  toggleFacet,
+  type AuxFacet,
+  type AuxState,
+} from "../detailAux";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { SessionAuxPanel } from "./SessionAuxPanel";
+import { SessionFacetPanel } from "./SessionFacetPanel";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
 
@@ -63,6 +66,12 @@ import { showLatestSync } from "../conversationPlaceholder";
  *  win the slots first, then the most-recently-active finished ones. A parent
  *  that fanned out hundreds of subagents would otherwise flood the menu. */
 const SUBAGENT_TAB_CAP = 12;
+
+/** Narrower than this and the pane can't hold two readable columns, so the
+ *  auxiliary panel floats over the conversation instead of splitting it. A
+ *  4-way split of the 任务 page bottoms out at MIN_GROUP_PX (280), and
+ *  DecisionPanel's inline column is narrower still. */
+const AUX_OVERLAY_PX = 640;
 
 /** Standalone-mode live tail: re-pull the transcript tail at this cadence
  *  while the session is in an active status. */
@@ -429,16 +438,24 @@ export function SessionDetail({
   // the draft, the option pills and the queued-follow-up chips.
   const dockRef = useRef<HTMLDivElement>(null);
   const [dockHeight, setDockHeight] = useState(0);
-  type ViewTab =
-    | "decisions"
-    | "skills"
-    | "messages"
-    | "tokens"
-    | "workflow"
-    | "tasks"
-    | "bgtasks"
-    | "scratchpad";
-  const [viewTab, setViewTab] = useState<ViewTab>("messages");
+  /* The conversation is no longer one tab among many — it owns this column for
+     good. Everything that used to sit beside it in that row (Skills, 决策,
+     Token, 任务, 后台任务, 临时文件, Workflow) is now a *button* that pulls the
+     panel up in the auxiliary column, so reading a token receipt no longer
+     costs you sight of the transcript. See detailAux.ts for the state. */
+  const [aux, setAux] = useState<AuxState>(initialAux);
+  /** Panel width, only meaningful in the side-by-side (non-overlay) form. */
+  const {
+    width: auxWidth,
+    isDragging: auxDragging,
+    onMouseDown: onAuxResize,
+  } = useResizableWidth("detail-aux-width", { min: 260, max: 720, initial: 380, side: "right" });
+  /** Pane width, measured — the aux column collapses to an overlay drawer below
+   *  AUX_OVERLAY_PX. Measured rather than a media query because the constraint
+   *  is this pane's width (one of four split groups, or DecisionPanel's inline
+   *  column), not the window's. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [paneWidth, setPaneWidth] = useState(0);
   /* The header's numeric chips — spend, tokens, reasoning share, compactions —
      are reference figures you look up, not identity you read at a glance. Seven
      of them in a row turned the title area into a status bar, so they collapse
@@ -609,13 +626,14 @@ export function SessionDetail({
     };
   }, [liveSession?.id, liveSession?.jsonlPath]);
 
-  // Honor an explicit initial tab (e.g. the user clicked the card's plan row →
-  // open straight to "tasks"). Default tab is "messages" (对话).
+  // Honor an explicit initial facet (e.g. the user clicked the card's plan row
+  // → open straight to 任务). Opens it in the aux column; the conversation is
+  // always on screen either way.
   useEffect(() => {
     if (isStandalone) return;
-    const tab = global.initialTab;
-    if (!tab) return;
-    setViewTab(tab as ViewTab);
+    const facet = global.initialTab;
+    if (!facet || !isAuxFacet(facet)) return;
+    setAux((st) => (st.active === facet ? st : { ...st, active: facet, agentsDismissed: false }));
   }, [isStandalone, global.session?.id, global.initialTab]);
 
   // TASKS.md plan for THIS session — scoped to the plan the session is focused
@@ -717,17 +735,40 @@ export function SessionDetail({
   const bgTasks = liveSession?.backgroundTasks ?? [];
   const hasBgTasks = bgTasks.length > 0;
 
-  // Switching to a session without a scratchpad would otherwise strand the view
-  // on a tab whose button no longer renders. Same for the background-tasks tab,
-  // whose array empties as soon as the session takes another turn.
+  // Switching to a session without a scratchpad would otherwise strand the
+  // panel on a facet whose button no longer renders. Same for 后台任务, whose
+  // array empties as soon as the session takes another turn.
+  const facetAvailable = useCallback(
+    (facet: AuxFacet) => {
+      if (facet === "scratchpad") return hasScratchpad;
+      if (facet === "bgtasks") return hasBgTasks;
+      if (facet === "tasks") return hasTaskPlans;
+      if (facet === "workflow") return hasWorkflows;
+      return true;
+    },
+    [hasScratchpad, hasBgTasks, hasTaskPlans, hasWorkflows],
+  );
   useEffect(() => {
-    if (viewTab === "scratchpad" && !hasScratchpad) setViewTab("messages");
-    if (viewTab === "bgtasks" && !hasBgTasks) setViewTab("messages");
-  }, [viewTab, hasScratchpad, hasBgTasks]);
+    setAux((st) => pruneFacet(st, facetAvailable));
+  }, [facetAvailable]);
 
-  const pickTab = useCallback((tab: ViewTab) => {
-    setViewTab(tab);
+  const pickFacet = useCallback((facet: AuxFacet) => {
+    setAux((st) => toggleFacet(st, facet));
   }, []);
+  const closeAuxPanel = useCallback(() => {
+    setAux((st) => ({ ...st, active: null, agentsDismissed: true }));
+  }, []);
+
+  // Pane width drives the overlay/side-by-side choice.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const measure = () => setPaneWidth(el.clientWidth);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, [liveSession?.id]);
 
   // `isFollowing` drives the footer, but the pin below runs from a
   // ResizeObserver callback that must not re-subscribe on every state change —
@@ -768,13 +809,13 @@ export function SessionDetail({
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("wheel", onWheel);
     };
-  }, [applyFollow, session, viewTab]);
+  }, [applyFollow, session]);
 
-  // A different session, or a fresh visit to the tab, starts pinned again.
+  // A different session starts pinned again.
   useEffect(() => {
     followRef.current = initialFollowState;
     setIsFollowing(true);
-  }, [liveSession?.id, viewTab]);
+  }, [liveSession?.id]);
 
   // Pin the viewport to the newest message for as long as the reader has not
   // scrolled away to read history.
@@ -790,7 +831,6 @@ export function SessionDetail({
   const hasMessages = messages.length > 0;
   const hasLiveThinking = !!(liveThinking?.streaming && liveThinking.thinking);
   useEffect(() => {
-    if (viewTab !== "messages") return;
     const el = scrollRef.current;
     if (!el) return;
 
@@ -807,7 +847,7 @@ export function SessionDetail({
     for (const child of Array.from(el.children)) ro.observe(child);
     pin();
     return () => ro.disconnect();
-  }, [viewTab, liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
+  }, [liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -849,10 +889,6 @@ export function SessionDetail({
   // through the observer.
   const showsComposer = (canResume || canEnqueue) && !!liveSession;
   useEffect(() => {
-    if (viewTab !== "messages") {
-      setDockHeight(0);
-      return;
-    }
     const el = dockRef.current;
     if (!el) {
       setDockHeight(0);
@@ -863,7 +899,7 @@ export function SessionDetail({
     ro.observe(el);
     measure();
     return () => ro.disconnect();
-  }, [viewTab, showsComposer, isFollowing, liveSession?.id]);
+  }, [showsComposer, isFollowing, liveSession?.id]);
 
   // Padding is applied by React on the next paint, which grows scrollHeight
   // under a reader who is pinned to the newest message. Re-pin in the same
@@ -928,13 +964,62 @@ export function SessionDetail({
     return mainSession ? [mainSession, ...ordered] : ordered;
   }, [liveSession, sessions]);
 
+  // The facet buttons above the conversation. Conditional ones appear on the
+  // same terms their tabs did: only when the session has something to show.
+  const facetButtons = useMemo(() => {
+    const list: { facet: AuxFacet; label: string }[] = [
+      { facet: "skills", label: t("detail.tab_skills") },
+      { facet: "decisions", label: t("detail.tab_decisions") },
+      { facet: "tokens", label: t("detail.tab_tokens") },
+    ];
+    if (hasTaskPlans) list.push({ facet: "tasks", label: t("detail.tab_tasks") });
+    if (hasBgTasks) {
+      list.push({ facet: "bgtasks", label: `${t("detail.tab_bgtasks")} (${bgTasks.length})` });
+    }
+    if (hasScratchpad) {
+      list.push({
+        facet: "scratchpad",
+        label: `${t("detail.tab_scratchpad")} (${scratchpadCount})`,
+      });
+    }
+    if (hasWorkflows) {
+      list.push({
+        facet: "workflow",
+        label: `${t("detail.tab_workflow")} (${workflowTrees.length})`,
+      });
+    }
+    return list;
+  }, [
+    t,
+    hasTaskPlans,
+    hasBgTasks,
+    bgTasks.length,
+    hasScratchpad,
+    scratchpadCount,
+    hasWorkflows,
+    workflowTrees.length,
+  ]);
+
+  const activeFacet = aux.active != null && isAuxFacet(aux.active) ? aux.active : null;
+  const auxOpen = auxVisible(aux, 0);
+  // Overlay until the pane is wide enough for two columns. `paneWidth === 0` is
+  // the pre-measure frame; treat it as wide so the panel doesn't flash as an
+  // overlay on mount.
+  const auxOverlay = paneWidth > 0 && paneWidth < AUX_OVERLAY_PX;
+  const auxTitle = activeFacet
+    ? facetButtons.find((b) => b.facet === activeFacet)?.label ?? ""
+    : t("detail.aux_title", "辅助信息");
+
   return (
     // Both link capabilities cover the whole component, so the reader modal and
     // every tool-block renderer inherit them too. `openWeb` is null outside a
     // tab strip, which is precisely "send it to the browser".
     <WikiLinksProvider value={wikiLinks}>
       <WebLinkProvider value={tabOpener?.openWeb ?? null}>
-      <div className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""}`}>
+      <div
+        ref={rootRef}
+        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""}`}
+      >
         {liveSession && (
           <>
           {/* Header — two rows. The AI title leads (it is what identifies the
@@ -1089,7 +1174,7 @@ export function SessionDetail({
               <PlanProgressRow
                 plan={liveSession.taskPlan}
                 variant="header"
-                onOpen={() => pickTab("tasks")}
+                onOpen={() => pickFacet("tasks")}
               />
             )}
             {/* Handoff relay chain — chip toggles the chain detail panel */}
@@ -1100,320 +1185,129 @@ export function SessionDetail({
             )}
           </div>
 
-          {/* View-tab row. The agent scope selector no longer lives here — it
-              moved to the header as a dropdown (AgentScopeSwitcher) so a growing
-              subagent list can't push these fixed tabs off the right edge. */}
-          <div className={styles.tab_bar}>
-            <button
-              className={`${styles.view_tab} ${viewTab === "messages" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("messages")}
-            >
-              {t("detail.tab_messages")}
-            </button>
-            <button
-              className={`${styles.view_tab} ${viewTab === "skills" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("skills")}
-            >
-              {t("detail.tab_skills")}
-            </button>
-            <button
-              className={`${styles.view_tab} ${viewTab === "decisions" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("decisions")}
-            >
-              {t("detail.tab_decisions")}
-            </button>
-            <button
-              className={`${styles.view_tab} ${viewTab === "tokens" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("tokens")}
-            >
-              {t("detail.tab_tokens")}
-            </button>
-            {hasTaskPlans && (
-              <button
-                className={`${styles.view_tab} ${viewTab === "tasks" ? styles.view_tab_active : ""}`}
-                onClick={() => pickTab("tasks")}
-              >
-                {t("detail.tab_tasks")}
-              </button>
-            )}
-            {hasBgTasks && (
-              <button
-                className={`${styles.view_tab} ${viewTab === "bgtasks" ? styles.view_tab_active : ""}`}
-                onClick={() => pickTab("bgtasks")}
-              >
-                {t("detail.tab_bgtasks")} ({bgTasks.length})
-              </button>
-            )}
-            {hasScratchpad && (
-              <button
-                className={`${styles.view_tab} ${viewTab === "scratchpad" ? styles.view_tab_active : ""}`}
-                onClick={() => pickTab("scratchpad")}
-              >
-                {t("detail.tab_scratchpad")} ({scratchpadCount})
-              </button>
-            )}
-            {hasWorkflows && (
-              <button
-                className={`${styles.view_tab} ${viewTab === "workflow" ? styles.view_tab_active : ""}`}
-                onClick={() => pickTab("workflow")}
-              >
-                {t("detail.tab_workflow")} ({workflowTrees.length})
-              </button>
-            )}
-          </div>
-
-          {viewTab === "scratchpad" && workspacePath && sessionId && (
-            <ScratchpadView workspace={workspacePath} sessionId={sessionId} />
-          )}
-
-          {viewTab === "decisions" && (
-            <DecisionHistory records={decisionRecords} mode="tab" />
-          )}
-
-          {viewTab === "skills" && (
-            <div className={styles.skills_panel}>
-              <SkillHistory jsonlPath={liveSession.jsonlPath} mode="tab" />
-            </div>
-          )}
-
-          {viewTab === "tokens" && liveSession && (
-            {
-              // `jsonlPath` carries each source's own handle: a file path for
-              // Claude, a `codex://` rollout URI, a `dsh://` session id.
-              codex: <CodexTokenPanel jsonlPath={liveSession.jsonlPath} />,
-              dsh: <DshTokenPanel uri={liveSession.jsonlPath} />,
-              claude: (
-                <TokenSpendPanel
-                  jsonlPath={liveSession.jsonlPath}
-                  workspacePath={liveSession.workspacePath}
-                />
-              ),
-            }[tokenPanelForAgentSource(liveSession.agentSource)]
-          )}
-
-          {viewTab === "tasks" && (
-            <div className={styles.tasks_panel}>
-              {taskPlans.map((plan, pi) => {
-                const done = plan.items.filter((it) => it.done).length;
-                const total = plan.items.length;
-                const allDone = total > 0 && done === total;
-                // Prefer the human-readable `**Plan:**` title; fall back to the
-                // sentinel id, then to the anonymous label.
-                const title = plan.title ?? plan.id ?? t("detail.tasks_anonymous");
-                // Keep the id as a secondary tag only when a title is present —
-                // otherwise the title already *is* the id, no need to repeat it.
-                const showId = Boolean(plan.title && plan.id);
-                // The first still-pending item is "current" for this plan —
-                // the visible answer to "做到第几个 P 了".
-                const currentIdx = plan.items.findIndex((it) => !it.done);
-                return (
-                  <div key={plan.id ?? `plan-${pi}`} className={styles.tasks_plan}>
-                    <div className={styles.tasks_plan_head}>
-                      <span className={styles.tasks_plan_title}>{title}</span>
-                      <span
-                        className={`${styles.tasks_plan_status} ${allDone ? styles.tasks_plan_status_done : styles.tasks_plan_status_active}`}
-                      >
-                        {allDone
-                          ? t("detail.tasks_status_done")
-                          : t("detail.tasks_status_active")}
-                      </span>
-                      <span className={styles.tasks_plan_count}>
-                        {done}/{total}
-                      </span>
-                    </div>
-                    {(showId || plan.source) && (
-                      <div className={styles.tasks_plan_sub}>
-                        {showId && <span className={styles.tasks_plan_id}>{plan.id}</span>}
-                        {plan.source && (
-                          <span className={styles.tasks_plan_source} title={plan.source}>
-                            {plan.source}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    <ul className={styles.tasks_items}>
-                      {plan.items.map((it, ii) => {
-                        const isCurrent = ii === currentIdx;
-                        return (
-                          <li
-                            key={ii}
-                            className={`${styles.tasks_item} ${it.done ? styles.tasks_item_done : ""} ${isCurrent ? styles.tasks_item_current : ""}`}
-                          >
-                            <span className={styles.tasks_check} aria-hidden>
-                              {it.done ? "☑" : isCurrent ? "▶" : "☐"}
-                            </span>
-                            <span className={styles.tasks_text}>{it.text}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {viewTab === "bgtasks" && (
-            <div className={styles.bgtasks_panel}>
-              {bgTasks.map((bt) => {
-                const icon = bgTaskIcon(bt.type);
-                const dataType = bgTaskDataType(bt.type);
-                const label = bt.description || bt.command || bt.id;
-                // A subagent task correlates to its own scanned session
-                // (`agent-<id>`, see session.rs / openAgentSession). When that
-                // session is present we read its *live* status and let the row
-                // open it — far more accurate than the last-Stop snapshot,
-                // which for a subagent can be minutes stale.
-                const linked =
-                  bt.type === "subagent"
-                    ? sessions.find((s) => s.id === `agent-${bt.id}`)
-                    : undefined;
-                if (linked) {
-                  return (
-                    <button
-                      key={bt.id}
-                      className={styles.bgtask_item_link}
-                      onClick={() => openAgentSession(bt.id)}
-                      title={t("detail.bgtask_open_hint")}
-                    >
-                      <span className={styles.bgtask_icon} aria-hidden>{icon}</span>
-                      <span className={styles.tab_dot} data-status={linked.status} />
-                      <span className={styles.bgtask_type} data-bgtype={dataType}>
-                        {linked.agentType ?? bt.type}
-                      </span>
-                      <span className={styles.bgtask_desc}>
-                        {linked.aiTitle || label}
-                      </span>
-                    </button>
-                  );
-                }
-                // Shell / monitor, or a subagent whose session hasn't surfaced
-                // (or already aged out): no live source, so this row reflects
-                // the *last Stop* only — flag it as such rather than imply it's
-                // current.
-                return (
-                  <div key={bt.id} className={styles.bgtask_item}>
-                    <span className={styles.bgtask_icon} aria-hidden>{icon}</span>
-                    <span className={styles.bgtask_type} data-bgtype={dataType}>
-                      {bt.type}
-                    </span>
-                    <span className={styles.bgtask_desc}>{label}</span>
-                    <span
-                      className={styles.bgtask_stale}
-                      title={
-                        liveSession.lastActivityMs
-                          ? new Date(liveSession.lastActivityMs).toLocaleString()
-                          : undefined
-                      }
-                    >
-                      {t("detail.bgtask_as_of_stop")}
-                    </span>
-                  </div>
-                );
-              })}
-              <div className={styles.bgtasks_note}>{t("detail.bgtasks_note")}</div>
-            </div>
-          )}
-
-          {viewTab === "workflow" && (
-            <div className={styles.workflow_panel}>
-              {workflowTrees.map((tree) => {
-                const done = tree.agents.filter((a) => a.status === "done").length;
-                return (
-                  <div key={tree.runId} className={styles.workflow_run}>
-                    <div className={styles.workflow_run_head}>
-                      <span className={styles.workflow_run_name}>
-                        {tree.name ?? tree.runId}
-                      </span>
-                      <span className={styles.workflow_run_meta}>
-                        {tree.runId} · {done}/{tree.agents.length} agents
-                      </span>
-                    </div>
-                    <WorkflowDag tree={tree} onOpenAgent={openAgentSession} />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {viewTab === "messages" && (
-            <div className={styles.messages_pane}>
-              {syncingLatest && (
-                <div className={styles.syncing_latest} role="status" aria-live="polite">
-                  <LoaderCircle size={14} aria-hidden="true" />
-                  {t("detail.syncing_latest", "正在同步最新消息…")}
-                </div>
-              )}
-              <div
-                ref={scrollRef}
-                className={styles.scroll_area}
-                style={{ paddingBottom: dockHeight }}
-              >
-                {/* The "load earlier" control lives inside MessageList, which
-                    owns the render window this button used to duplicate. */}
-                <AgentNavProvider nav={agentNav}>
-                  <MessageList
-                    messages={displayedMessages}
-                    isLoading={isLoading}
-                    stalled={loadStalled}
-                    onRetry={retryLoad}
-                    searchQuery={searchQuery}
-                    status={liveSession?.status ?? null}
-                    liveThinking={liveThinking}
-                    decisionRecords={decisionRecords}
-                    onLoadEarlier={loadEarlier}
-                    fullyLoaded={fullyLoaded}
-                    isLoadingEarlier={isLoadingEarlier}
-                    paths={pathLinks}
-                    // Use the live-refreshed session (same source every other
-                    // jsonlPath consumer here uses); `session` is the possibly-
-                    // stale object the drawer was opened with, whose jsonlPath
-                    // can be absent for sessions opened from a partial shape.
-                    jsonlPath={liveSession?.jsonlPath ?? session?.jsonlPath}
-                  />
-                  {inlineFleetAsk && (
-                    <div className={styles.inline_fleet_ask} data-testid="inline-codex-fleet-ask">
-                      <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
-                        <InlineFleetAskCard decision={inlineFleetAsk} compact />
-                      </Suspense>
-                    </div>
-                  )}
-                </AgentNavProvider>
+          {/* Facet buttons — what used to be a row of mutually-exclusive view
+              tabs. The conversation is not a tab any more: it owns this column,
+              and each button pulls its panel up in the auxiliary column beside
+              it (click the lit one again to close). The agent scope selector
+              lives in the header as a dropdown (AgentScopeSwitcher). */}
+          <div className={styles.body_row}>
+            <div className={styles.main_col}>
+              <div className={styles.facet_bar}>
+                {facetButtons.map((b) => (
+                  <button
+                    key={b.facet}
+                    type="button"
+                    className={`${styles.facet_btn} ${activeFacet === b.facet ? styles.facet_btn_active : ""}`}
+                    aria-pressed={activeFacet === b.facet}
+                    onClick={() => pickFacet(b.facet)}
+                  >
+                    {b.label}
+                  </button>
+                ))}
               </div>
 
-              {/* Composer + follow control, floating over the bottom of the
-                  transcript instead of sitting in a separate docked bar below
-                  it: same reading column as the messages, and the conversation
-                  scrolls under it behind a fade. The scroller reserves this
-                  element's measured height as bottom padding.
-
-                  Resume/enqueue: when the turn has ended submit resumes; while
-                  the turn is still running it queues a follow-up (delivered
-                  when the turn ends). One of canResume / canEnqueue holds. */}
-              {(showsComposer || !isFollowing) && (
-                <div ref={dockRef} className={styles.dock_layer}>
-                  {!isFollowing && (
-                    <button className={styles.follow_pill} onClick={scrollToBottom}>
-                      ↓ {t("detail.scroll_to_latest")}
-                    </button>
-                  )}
-                  {showsComposer && liveSession && (
-                    <div className={styles.resume_dock}>
-                      <ResumeComposer
-                        sessionId={liveSession.id}
-                        workspacePath={liveSession.workspacePath}
-                        agentSource={liveSession.agentSource}
-                        session={liveSession}
-                        onResumed={handleResumed}
-                        mode={canEnqueue ? "enqueue" : "resume"}
-                        pendingMessages={liveSession.pendingMessages ?? []}
-                      />
-                    </div>
-                  )}
+              <div className={styles.messages_pane}>
+                {syncingLatest && (
+                  <div className={styles.syncing_latest} role="status" aria-live="polite">
+                    <LoaderCircle size={14} aria-hidden="true" />
+                    {t("detail.syncing_latest", "正在同步最新消息…")}
+                  </div>
+                )}
+                <div
+                  ref={scrollRef}
+                  className={styles.scroll_area}
+                  style={{ paddingBottom: dockHeight }}
+                >
+                  {/* The "load earlier" control lives inside MessageList, which
+                      owns the render window this button used to duplicate. */}
+                  <AgentNavProvider nav={agentNav}>
+                    <MessageList
+                      messages={displayedMessages}
+                      isLoading={isLoading}
+                      stalled={loadStalled}
+                      onRetry={retryLoad}
+                      searchQuery={searchQuery}
+                      status={liveSession?.status ?? null}
+                      liveThinking={liveThinking}
+                      decisionRecords={decisionRecords}
+                      onLoadEarlier={loadEarlier}
+                      fullyLoaded={fullyLoaded}
+                      isLoadingEarlier={isLoadingEarlier}
+                      paths={pathLinks}
+                      // Use the live-refreshed session (same source every other
+                      // jsonlPath consumer here uses); `session` is the possibly-
+                      // stale object the drawer was opened with, whose jsonlPath
+                      // can be absent for sessions opened from a partial shape.
+                      jsonlPath={liveSession?.jsonlPath ?? session?.jsonlPath}
+                    />
+                    {inlineFleetAsk && (
+                      <div className={styles.inline_fleet_ask} data-testid="inline-codex-fleet-ask">
+                        <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
+                          <InlineFleetAskCard decision={inlineFleetAsk} compact />
+                        </Suspense>
+                      </div>
+                    )}
+                  </AgentNavProvider>
                 </div>
-              )}
+
+                {/* Composer + follow control, floating over the bottom of the
+                    transcript instead of sitting in a separate docked bar below
+                    it: same reading column as the messages, and the conversation
+                    scrolls under it behind a fade. The scroller reserves this
+                    element's measured height as bottom padding.
+
+                    Resume/enqueue: when the turn has ended submit resumes; while
+                    the turn is still running it queues a follow-up (delivered
+                    when the turn ends). One of canResume / canEnqueue holds. */}
+                {(showsComposer || !isFollowing) && (
+                  <div ref={dockRef} className={styles.dock_layer}>
+                    {!isFollowing && (
+                      <button className={styles.follow_pill} onClick={scrollToBottom}>
+                        ↓ {t("detail.scroll_to_latest")}
+                      </button>
+                    )}
+                    {showsComposer && liveSession && (
+                      <div className={styles.resume_dock}>
+                        <ResumeComposer
+                          sessionId={liveSession.id}
+                          workspacePath={liveSession.workspacePath}
+                          agentSource={liveSession.agentSource}
+                          session={liveSession}
+                          onResumed={handleResumed}
+                          mode={canEnqueue ? "enqueue" : "resume"}
+                          pendingMessages={liveSession.pendingMessages ?? []}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+
+            {auxOpen && (
+              <SessionAuxPanel
+                overlay={auxOverlay}
+                width={auxWidth}
+                isDragging={auxDragging}
+                onResizeStart={onAuxResize}
+                title={auxTitle}
+                onClose={closeAuxPanel}
+              >
+                {activeFacet && (
+                  <SessionFacetPanel
+                    facet={activeFacet}
+                    session={liveSession}
+                    decisionRecords={decisionRecords}
+                    taskPlans={taskPlans}
+                    bgTasks={bgTasks}
+                    workflowTrees={workflowTrees}
+                    sessions={sessions}
+                    onOpenAgent={openAgentSession}
+                  />
+                )}
+              </SessionAuxPanel>
+            )}
+          </div>
         </>
       )}
       {/* Portalled to <body> on purpose: a fixed overlay inside the pane would
