@@ -2012,6 +2012,8 @@
     "notification_web_unavailable": "System notifications are sent by the Fleet desktop app, on the machine it runs on. A browser tab has no sender of its own, so these settings would not change anything here.",
     "auto_update_check": "Automatic update check",
     "auto_update_check_desc": "Check for new versions once a day and show a notification when an update is available",
+    "report_auto_popup": "Pop up the daily report",
+    "report_auto_popup_desc": "Show the report in the main window once its AI summary is written — once per day, never twice.",
     "group_handoff": "Group handoff sessions",
     "group_handoff_desc": "Collapse sessions from the same handoff relay chain into one group in the task list; click to expand, and mark the whole chain done at once",
     "auto_resume": "Auto-resume after rate limit",
@@ -2275,7 +2277,9 @@
     "dc_type_plan_approval": "Plan approval",
     "dc_no_rec": "no rec.",
     "total_cost": "Total Cost",
-    "dc_task_outcome": "done/given up"
+    "dc_task_outcome": "done/given up",
+    "popup_title": "Your daily report is ready",
+    "popup_open_full": "Open full report"
   },
   "command": {
     "nested": {

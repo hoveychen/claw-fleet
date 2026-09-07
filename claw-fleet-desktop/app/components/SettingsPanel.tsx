@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useUIStore } from "../store";
+import { REPORT_AUTO_POPUP_KEY, useUIStore } from "../store";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { isWebBuild } from "../hostEnv";
 import {
@@ -1064,6 +1064,16 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setFeatureState("auto-update-check", state);
   }, []);
 
+  // ── Daily-report auto-popup state ──────────────────────────────────────
+  const [reportAutoPopupState, setReportAutoPopupState] = useState<FeatureState>(
+    () => getFeatureState(REPORT_AUTO_POPUP_KEY),
+  );
+
+  const handleToggleReportAutoPopup = useCallback((state: FeatureState) => {
+    setReportAutoPopupState(state);
+    setFeatureState(REPORT_AUTO_POPUP_KEY, state);
+  }, []);
+
   // ── Group handoff-relay sessions ───────────────────────────────────────────
   // Lives in the UI store (which persists it) so the task list reacts live when
   // this is flipped, rather than only after a restart.
@@ -1219,6 +1229,20 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     value={autoUpdateCheckState}
                     defaultOn={featureDefault("auto-update-check")}
                     onChange={handleToggleAutoUpdateCheck}
+                  />
+                </div>
+
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.report_auto_popup")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.report_auto_popup_desc")}
+                    </span>
+                  </div>
+                  <TriStateToggle
+                    value={reportAutoPopupState}
+                    defaultOn={featureDefault(REPORT_AUTO_POPUP_KEY)}
+                    onChange={handleToggleReportAutoPopup}
                   />
                 </div>
 

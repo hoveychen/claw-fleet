@@ -1413,11 +1413,24 @@ impl LocalBackend {
         }
 
         // Start the daily report scheduler (backfills missing reports in background).
+        // The hook fires once per date, when that day's AI summary lands — the
+        // frontend turns it into the auto-popup overlay. Raise the main window
+        // first, same as the tray's 每日报告 item: an overlay painted inside a
+        // hidden window is a popup nobody sees.
+        let app_report = app.clone();
         crate::daily_report::start_report_scheduler(
             report_store.clone(),
             locale.clone(),
             llm_config.clone(),
             running.clone(),
+            Some(std::sync::Arc::new(move |date: &str| {
+                use tauri::Manager;
+                if let Some(w) = app_report.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+                let _ = app_report.emit("daily-report-ready", date.to_string());
+            })),
         );
 
         step!("threads spawned, constructing result");
