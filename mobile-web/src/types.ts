@@ -127,8 +127,6 @@ export interface SessionInfo {
   pidPrecise?: boolean;
   entrypoint?: string | null;
   userMark?: SessionMark | null;
-  /** Unread = lastActivityMs > (lastReadMs ?? 0). */
-  lastReadMs?: number | null;
   /** True when the session's agent process is still alive. */
   procAlive?: boolean;
   /** Follow-ups queued while the session was mid-turn, delivered via
@@ -181,10 +179,6 @@ export function isFleetOwnedTask(s: SessionInfo): boolean {
     isFleetOwnedEntrypoint(s.entrypoint) &&
     s.fleetSpawned !== false
   );
-}
-
-export function isSessionUnread(s: SessionInfo): boolean {
-  return s.lastActivityMs > (s.lastReadMs ?? 0);
 }
 
 const IN_FLIGHT: SessionStatus[] = [

@@ -100,15 +100,6 @@
   color: var(--color-accent);
 }
 
-.readAll {
-  border: none;
-  background: none;
-  color: var(--color-accent);
-  font-size: var(--t-aux, 12px);
-  flex-shrink: 0;
-  padding: 6px 0;
-}
-
 .segment {
   display: flex;
   background: var(--color-bg-secondary);
@@ -149,14 +140,6 @@
 
 .segmentButton[data-active="true"] .segmentCount {
   color: var(--color-text);
-}
-
-.unreadDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  flex-shrink: 0;
 }
 
 .opsRow {

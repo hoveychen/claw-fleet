@@ -7,8 +7,7 @@ import styles from "./SessionRow.module.css";
 
 /**
  * The pending/done toggle on a launchpad row — the manual "have I finished with
- * this?" axis, orthogonal to the read/unread dot (top-left) and the run status
- * (left accent bar). Two states only: unmarked reads as *pending* (hollow
+ * this?" axis, orthogonal to the run status (left accent bar). Two states only: unmarked reads as *pending* (hollow
  * circle), `done` is explicit (filled check). Clicking flips between them, in
  * either direction — done can go back to pending. Persisted via `set_session_mark`
  * (`null` clears back to the pending default).

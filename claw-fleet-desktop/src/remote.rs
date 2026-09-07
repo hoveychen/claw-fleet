@@ -806,14 +806,6 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::SESSION_TITLE, &req)
     }
 
-    fn mark_sessions_read(
-        &self,
-        items: Vec<claw_fleet_core::session_read::SessionReadItem>,
-    ) -> Result<(), String> {
-        let req = claw_fleet_core::session_read::MarkSessionsReadRequest { items };
-        self.probe.post_json_ok(claw_fleet_core::routes::SESSION_READ, &req)
-    }
-
 
     fn spawn_proc(
         &self,

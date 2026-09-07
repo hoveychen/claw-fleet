@@ -487,13 +487,6 @@ pub trait Backend: Send + Sync {
         workspace_path: String,
         title: Option<String>,
     ) -> Result<(), String>;
-    /// Mark a batch of sessions read as of now. "Unread" is derived
-    /// (`last_activity_ms > last_read_ms`), so this only stamps the read time;
-    /// a single mark is a batch of one, "mark all read" a batch of many.
-    fn mark_sessions_read(
-        &self,
-        items: Vec<crate::session_read::SessionReadItem>,
-    ) -> Result<(), String>;
 
     // ── Workspace command runner (文件 page) ────────────────────────────────
     // Commands launched at a workspace's cwd, each hosted by a detached
@@ -1410,7 +1403,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,            compact_count: 0,
+            task_plan: None, handoff: None, user_mark: None, title_override: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,

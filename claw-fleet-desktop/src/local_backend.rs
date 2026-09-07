@@ -150,7 +150,6 @@ impl LocalBackend {
             let mut list = self.sessions.lock().unwrap();
             claw_fleet_core::session_mark::enrich_sessions(&mut list);
             claw_fleet_core::session_title::enrich_sessions(&mut list);
-            claw_fleet_core::session_read::enrich_sessions(&mut list);
             claw_fleet_core::pending_message::enrich_sessions(&mut list);
             list.clone()
         };
@@ -1564,7 +1563,7 @@ fn build_incremental_sessions(
     }
 
     // Re-stamp the out-of-jsonl state for retained AND freshly-scanned sessions.
-    // Freshly-scanned ones arrive with `user_mark` / `last_read_ms` / `handoff`
+    // Freshly-scanned ones arrive with `user_mark` / `title_override` / `handoff`
     // unset, and a handoff link can appear while a predecessor's source stays
     // clean — so this runs over the whole merged list, not just the new rows.
     crate::session::enrich_all(&mut s);
@@ -2067,15 +2066,6 @@ impl Backend for LocalBackend {
         title: Option<String>,
     ) -> Result<(), String> {
         claw_fleet_core::session_title::set_title(&session_id, &workspace_path, title)?;
-        self.restamp_marks_and_emit();
-        Ok(())
-    }
-
-    fn mark_sessions_read(
-        &self,
-        items: Vec<claw_fleet_core::session_read::SessionReadItem>,
-    ) -> Result<(), String> {
-        claw_fleet_core::session_read::mark_read(&items)?;
         self.restamp_marks_and_emit();
         Ok(())
     }
@@ -3964,7 +3954,6 @@ mod tests {
             handoff: None,
             user_mark: None,
             title_override: None,
-            last_read_ms: None,
             compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
@@ -3973,32 +3962,25 @@ mod tests {
     }
 
     /// The launchpad's mark filter reads `user_mark` off the sessions the
-    /// scanner emits, and the read/unread dot reads `last_read_ms`. Both are
-    /// stamped by scan-time enrichers, and the *incremental* rescan (the hot
-    /// path behind every file event) used to run only the handoff enricher —
-    /// so a freshly-scanned session came back with both fields cleared and the
-    /// segment counts never moved off "all pending".
+    /// scanner emits. It is stamped by a scan-time enricher, and the
+    /// *incremental* rescan (the hot path behind every file event) used to run
+    /// only the handoff enricher — so a freshly-scanned session came back with
+    /// the field cleared and the segment counts never moved off "all pending".
     #[test]
-    fn incremental_rescan_stamps_mark_and_read_state() {
+    fn incremental_rescan_stamps_mark_state() {
         use claw_fleet_core::session_mark::SessionMark;
-        use claw_fleet_core::session_read::SessionReadItem;
 
         let _lock = claw_fleet_core::paths::fleet_home_lock();
         let tmp = tempfile::tempdir().unwrap();
         let prev = std::env::var_os("FLEET_HOME");
         std::env::set_var("FLEET_HOME", tmp.path());
 
-        // The human marked this session done and read it — both live on disk.
+        // The human marked this session done — that lives on disk.
         claw_fleet_core::session_mark::set_mark("sess-1", "/tmp/test", Some(SessionMark::Done))
             .unwrap();
-        claw_fleet_core::session_read::mark_read(&[SessionReadItem {
-            session_id: "sess-1".into(),
-            workspace_path: "/tmp/test".into(),
-        }])
-        .unwrap();
 
         // A file event marks the source dirty, so its sessions get re-scanned
-        // fresh off the jsonl — i.e. with `user_mark`/`last_read_ms` unset.
+        // fresh off the jsonl — i.e. with `user_mark` unset.
         let sources: Vec<Box<dyn AgentSource>> = vec![Box::new(MockSource {
             sessions: vec![mk_session("sess-1", "claude-code")],
             ..MockSource::new("claude-code", "claude", "")
@@ -4015,10 +3997,6 @@ mod tests {
             out[0].user_mark,
             Some(SessionMark::Done),
             "incremental rescan dropped the on-disk done mark",
-        );
-        assert!(
-            out[0].last_read_ms.is_some(),
-            "incremental rescan dropped the on-disk read state",
         );
     }
 

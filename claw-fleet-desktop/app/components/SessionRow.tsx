@@ -90,7 +90,6 @@ export type SessionRowProps = {
   /** Open in a tab, but not the tab currently on screen. Weaker half of the
    *  same axis as `isSelected` — never both at once. */
   isOpen: boolean;
-  unread: boolean;
   /** Bumped every 30s by the parent so relative times keep advancing. Without
    *  it the memo would freeze the elapsed "3 分钟" at whatever it said on mount. */
   nowTick: number;
@@ -126,7 +125,6 @@ export const SessionRow = memo(function SessionRow({
   snippet,
   isSelected,
   isOpen,
-  unread,
   showSource,
   showWorkspace = true,
   onClick,
@@ -167,10 +165,9 @@ export const SessionRow = memo(function SessionRow({
     >
       <button
         type="button"
-        className={`${styles.row} ${expandable ? styles.row_expandable : ""} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""} ${unread ? styles.row_unread : ""}`}
+        className={`${styles.row} ${expandable ? styles.row_expandable : ""} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""}`}
         onClick={() => onClick(s)}
         title={tooltip || undefined}
-        aria-label={unread ? t("history.unread", "未读 — 有新消息") : undefined}
       >
         {runColor && (
           <span
@@ -188,7 +185,7 @@ export const SessionRow = memo(function SessionRow({
           />
         )}
         <span className={styles.row_body}>
-          <span className={`${styles.row_title} ${unread ? styles.row_title_unread : ""}`}>
+          <span className={styles.row_title}>
             {showSource && (
               <span className={styles.row_source} title={s.agentSource}>
                 <AgentSourceIcon source={s.agentSource} />
@@ -306,7 +303,6 @@ export const SessionRow = memo(function SessionRow({
 (prev, next) =>
   prev.isSelected === next.isSelected &&
   prev.isOpen === next.isOpen &&
-  prev.unread === next.unread &&
   prev.snippet === next.snippet &&
   prev.nowTick === next.nowTick &&
   prev.showSource === next.showSource &&

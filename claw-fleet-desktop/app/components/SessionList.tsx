@@ -1,15 +1,14 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { openSettings, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
+import { openSettings, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWebBuild, showsMobilePanel } from "../hostEnv";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
-import { isFleetOwnedEntrypoint, sessionUnread } from "../types";
 import { GalleryView } from "./GalleryView";
 import { SessionEmptyState } from "./EmptyState";
 import { MascotEyes } from "./MascotEyes";
@@ -78,19 +77,6 @@ export function SessionList() {
   const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const hasNewReport = useReportStore((s) => s.hasNewReport);
-  // Unread launchpad sessions — same scope the 启动台 (HistoryView) lists
-  // (Fleet-owned, non-subagent) — surfaced as a count badge on its nav item.
-  const readOverrides = useReadStore((s) => s.overrides);
-  const unreadLaunchpadCount = useMemo(
-    () =>
-      sessions.filter(
-        (s) =>
-          !s.isSubagent &&
-          isFleetOwnedEntrypoint(s.entrypoint) &&
-          sessionUnread(s, readOverrides[s.id]),
-      ).length,
-    [sessions, readOverrides],
-  );
   // Total running workspace commands across all repos — surfaced as a badge on
   // the 仓库 (files) nav item, mirroring the green per-repo badge in FilesView.
   const runningProcCount = useProcStore((s) => runningProcTotal(s.procs));
@@ -110,7 +96,7 @@ export function SessionList() {
     // folds into the same quiet dot the new daily report already uses; the exact
     // count still sits on the 审计 nav item inside the tab.
     fleet: { alert: 0, running: 0, dot: hasNewReport || unreadCriticalCount > 0 },
-    work: { alert: unreadLaunchpadCount, running: runningProcCount, dot: false },
+    work: { alert: 0, running: runningProcCount, dot: false },
   };
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -343,9 +329,6 @@ export function SessionList() {
       >
         <span className={styles.nav_icon}><ListChecks size={14} strokeWidth={1.5} /></span>
         <span className={styles.nav_label}>{t("view_history", "任务")}</span>
-        {unreadLaunchpadCount > 0 && (
-          <span className={styles.nav_badge}>{unreadLaunchpadCount}</span>
-        )}
       </button>
       <button
         className={`${styles.nav_item} ${viewMode === "files" ? styles.nav_active : ""}`}

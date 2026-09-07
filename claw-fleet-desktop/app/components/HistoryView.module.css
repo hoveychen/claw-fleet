@@ -3,39 +3,6 @@
    rail's *content* (launcher + filters + session list), the banner action,
    and the detail column that fills the main container. */
 
-/* "全部已读" — clears every unread session's dot in one call. Lives in the
-   rail's workspace row, so it takes the same pill shape as .active_toggle
-   below; dimmed and inert when nothing is unread. */
-.read_btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  flex: 0 0 auto;
-  padding: 4px 7px;
-  border-radius: 7px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
-  color: var(--color-text-dim);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
-}
-
-.read_btn:hover:not(:disabled) {
-  background: var(--color-bg-card-hover);
-  color: var(--color-text);
-}
-
-.read_btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.read_btn_count {
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
 .new_btn {
   display: inline-flex;
   align-items: center;

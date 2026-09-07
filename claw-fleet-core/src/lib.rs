@@ -135,7 +135,6 @@ pub mod session_launch;
 pub mod session_history;
 pub mod session_mark;
 pub mod session_notes;
-pub mod session_read;
 pub mod session_snapshot;
 pub mod session_title;
 pub mod session_todos;
