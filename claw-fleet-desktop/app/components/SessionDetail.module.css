@@ -406,12 +406,17 @@
   animation: aux_drawer_in 160ms ease-out;
 }
 
+/* Click-outside-to-close only — deliberately untinted. A flat 24% black wash
+   read as an arbitrary dark rectangle: the scrim is confined to this pane, so
+   in the 任务 split it darkened the detail column and stopped dead at the list
+   beside it, and even standalone it only covered the strip left of the drawer.
+   The drawer is not modal; its own shadow already lifts it off the transcript,
+   so the separation is carried there instead of by dimming a column. */
 .aux_scrim {
   position: absolute;
   inset: 0 var(--rail-space, 0px) 0 0;
   z-index: 5;
-  background: rgb(0 0 0 / 24%);
-  animation: aux_scrim_in 120ms ease-out;
+  background: transparent;
 }
 
 @keyframes aux_drawer_in {
@@ -419,14 +424,8 @@
   to { transform: translateX(0); opacity: 1; }
 }
 
-@keyframes aux_scrim_in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .aux_overlay,
-  .aux_scrim { animation: none; }
+  .aux_overlay { animation: none; }
 }
 
 /* Inside a slab the strip no longer has to announce itself as chrome: the
