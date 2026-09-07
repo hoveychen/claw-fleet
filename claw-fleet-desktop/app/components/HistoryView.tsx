@@ -17,7 +17,6 @@ import {
   Folder,
   FolderOpen,
   History,
-  MessageCircle,
   PanelRightOpen,
   Pencil,
   Plus,
@@ -37,11 +36,7 @@ import { LIVE_STATUSES, isFleetOwnedTask, sessionUnread } from "../types";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { PageShell } from "./PageShell";
-import {
-  NewSessionForm,
-  repoRootPath,
-  type NewSessionCreated,
-} from "./NewSessionForm";
+import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { useComposerDraftStore, type ComposerDraft } from "../composerDraft";
 import { SessionDetail } from "./SessionDetail";
 import { SessionTabs, type TabItem } from "./SessionTabs";
@@ -193,33 +188,6 @@ function markBucket(s: SessionInfo): "pending" | "done" {
   return s.userMark === "done" ? "done" : "pending";
 }
 
-/** Does `s` pass the rail's workspace filter?
- *
- *  `chatOnly` is a chat-*only* toggle, not a chat-on/chat-off switch: while it
- *  is on the rail shows the pure-chat workspace and nothing else, and `filter`
- *  (the directory `<select>`) is ignored — a directory left selected underneath
- *  must not narrow the chat list. While it is off nothing is filtered by mode,
- *  so "all" means all: chat sessions sit in the rail alongside the repos. (A
- *  concrete directory filter still leaves them out, since the chat workspace is
- *  not that directory.)
- *
- *  `chatPath` is the pure-chat workspace, `null` while the backend call is in
- *  flight or if it failed. The toggle cannot be honoured without it, so it goes
- *  inert and this degrades to a plain directory filter rather than emptying the
- *  rail on a guess. */
-export function matchesWorkspaceFilter(
-  s: SessionInfo,
-  filter: string,
-  chatPath: string | null,
-  chatOnly: boolean,
-): boolean {
-  if (chatPath != null && chatOnly) return s.workspacePath === chatPath;
-  if (filter === "all") return true;
-  // Options are collapsed to repo roots (see the dropdown's distinctWorkspaces),
-  // so a session inside `<repo>/.worktrees/<task>` matches its root's option.
-  return repoRootPath(s.workspacePath) === filter;
-}
-
 // timeAgo / formatRunning / renderSnippet / sessionEq and the SessionRow
 // component itself moved to ./SessionRow (the shared row atom) so every rail
 // renders the identical row without duplicating it here.
@@ -294,8 +262,6 @@ export function HistoryView() {
   // the user's back (a waiting-input alert forcing setViewMode("list") is enough).
   const query = useUIStore((s) => s.historyQuery);
   const setQuery = useUIStore((s) => s.setHistoryQuery);
-  const chatOnly = useUIStore((s) => s.historyChatOnly);
-  const setChatOnly = useUIStore((s) => s.setHistoryChatOnly);
   // Re-render on a slow tick so the relative "last updated" and the live
   // Elapsed-runtime durations keep counting even when no scan lands (a waiting-input
   // session can sit idle for minutes). 30s granularity matches the minute-level
@@ -408,9 +374,9 @@ export function HistoryView() {
     [sessions],
   );
 
-  // The pure-chat workspace is its own mode, reached through the toggle beside
-  // the <select>, so it is kept out of the project list below — otherwise it
-  // would sit in there a second time, alphabetised among the repos as "Chat".
+  // The pure-chat workspace. It is no longer a mode of its own — chat sessions
+  // sit in the rail like any other section — but the section is pinned to the
+  // top (see `pinnedPath` below) so it never sinks among busier repos.
   const chatPath = useChatWorkspace();
 
   const { rows, markCounts } = useMemo(() => {
@@ -419,7 +385,6 @@ export function HistoryView() {
     // this set so each count reflects how many rows its segment would reveal
     // under the current workspace / query / active filters.
     const preMark = adhocSessions
-      .filter((s) => matchesWorkspaceFilter(s, "all", chatPath, chatOnly))
       .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
       .filter((s) => {
         if (!q) return true;
@@ -452,7 +417,7 @@ export function HistoryView() {
       // `lastActivityMs` would be stale, but the tree is very much alive.
       .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
     return { rows, markCounts: counts };
-  }, [adhocSessions, chatPath, chatOnly, activeOnly, query, ftsMatchPaths, markFilter]);
+  }, [adhocSessions, activeOnly, query, ftsMatchPaths, markFilter]);
 
   // Whether the task page currently mixes agent sources (Claude + Codex + …).
   // Only then does the per-row source glyph earn its place; a uniform list gets
@@ -483,11 +448,12 @@ export function HistoryView() {
     () =>
       groupSessionsByWorkspace(displayRows, {
         preserveOrder: frozenOrder != null,
+        pinnedPath: chatPath,
       }).map((group) => ({
         ...group,
         items: buildRenderItems(group.sessions, groupHandoff),
       })),
-    [displayRows, groupHandoff, frozenOrder],
+    [displayRows, groupHandoff, frozenOrder, chatPath],
   );
 
   // Full membership of every relay chain, keyed by chainId — taken over ALL
@@ -1252,19 +1218,6 @@ export function HistoryView() {
             <span className={styles.workspace_label}>
               {t("history.workspaces", "工作区")}
             </span>
-            {chatPath && (
-              <button
-                type="button"
-                className={`${styles.chat_toggle} ${chatOnly ? styles.chat_toggle_on : ""}`}
-                aria-pressed={chatOnly}
-                onClick={() => setChatOnly(!chatOnly)}
-                title={t("history.filter_chat_tip", "只显示纯聊天会话，不按目录筛选；关闭时全部目录也含聊天")}
-                aria-label={t("history.chat_mode", "仅聊天")}
-              >
-                <MessageCircle size={12} strokeWidth={1.8} />
-                <span>{t("history.chat_mode", "仅聊天")}</span>
-              </button>
-            )}
             {/* "全部已读" used to live in the page banner, where only an icon
                 fit. Here in the rail it sits with the filters it belongs to and
                 can carry its unread count. */}

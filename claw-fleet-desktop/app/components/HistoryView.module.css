@@ -4,8 +4,8 @@
    and the detail column that fills the main container. */
 
 /* "全部已读" — clears every unread session's dot in one call. Lives in the
-   rail's workspace row, so it takes the same pill shape as .chat_toggle beside
-   it; dimmed and inert when nothing is unread. */
+   rail's workspace row, so it takes the same pill shape as .active_toggle
+   below; dimmed and inert when nothing is unread. */
 .read_btn {
   display: inline-flex;
   align-items: center;
@@ -100,35 +100,6 @@
   font-size: 12px;
   color: var(--color-text-dim);
   font-weight: 500;
-}
-
-/* Chat mode — the pure-chat workspace pulled out of the <select> beside it into
-   a mode of its own. Same pill shape as .active_toggle (row 2), tinted with the
-   accent instead of the success colour so the two read as different filters. */
-.chat_toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  padding: 4px 7px;
-  font-size: 11px;
-  color: var(--color-text-dim);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-
-.chat_toggle:hover {
-  background: var(--color-bg-card-hover);
-}
-
-.chat_toggle_on {
-  color: var(--color-text);
-  border-color: var(--color-accent);
-  background: rgba(var(--color-accent-rgb), 0.12);
 }
 
 /* Row 2 keeps non-directory filters compact under the workspace title. */
