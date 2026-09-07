@@ -12,12 +12,11 @@ export interface AuxTab {
 }
 
 /**
- * The session detail's auxiliary column.
+ * The session detail's auxiliary drawer.
  *
- * It owns the column — its width and drag handle, its tab strip, and the one
- * behaviour that isn't layout: collapsing to an overlay drawer when the pane it
- * lives in is too narrow to hold two readable columns. What goes *in* it is
- * decided by `SessionDetail`, which owns that data.
+ * It floats over the conversation from the right edge, so opening a lookup
+ * surface never narrows or reflows the transcript underneath it. What goes
+ * *in* it is decided by `SessionDetail`, which owns that data.
  *
  * Everything the panel can show is one flat strip of tabs — the running agents,
  * the session's facets, and each doc opened from the transcript — rather than
@@ -25,17 +24,11 @@ export interface AuxTab {
  * than it needed to be; a tab is the honest shape when only one of them is
  * being read at a time.
  *
- * The narrow case is not hypothetical: the same `SessionDetail` renders inside
- * `DecisionPanel`'s inline detail column and inside a 4-way split of the 任务
- * page, where a half can be ~300px. Splitting that in two would leave neither
- * side readable, so below the threshold the panel floats over the conversation
- * instead of taking a share of it.
+ * The same overlay shape is used at every pane width. Apart from preserving the
+ * transcript, this keeps the interaction identical in the standalone detail,
+ * `DecisionPanel`, and a 4-way split of the 任务 page.
  */
 export function SessionAuxPanel({
-  overlay,
-  width,
-  isDragging,
-  onResizeStart,
   tabs,
   activeId,
   onPick,
@@ -43,12 +36,6 @@ export function SessionAuxPanel({
   onClose,
   children,
 }: {
-  /** Float over the conversation instead of sitting beside it. */
-  overlay: boolean;
-  /** Column width in px. Ignored in overlay mode, which sizes itself. */
-  width: number;
-  isDragging: boolean;
-  onResizeStart: (e: React.MouseEvent) => void;
   tabs: AuxTab[];
   activeId: string | null;
   onPick: (id: string) => void;
@@ -66,21 +53,8 @@ export function SessionAuxPanel({
   }, [activeId]);
   return (
     <>
-      {/* Only in overlay mode: the conversation underneath is still visible, so
-          a click outside is the natural way back to it. */}
-      {overlay && <div className={styles.aux_scrim} onClick={onClose} />}
-      <aside
-        className={`${styles.aux} ${overlay ? styles.aux_overlay : ""} ${isDragging ? styles.aux_dragging : ""}`}
-        style={overlay ? undefined : { width }}
-      >
-        {!overlay && (
-          <div
-            className={styles.aux_resizer}
-            onMouseDown={onResizeStart}
-            role="separator"
-            aria-orientation="vertical"
-          />
-        )}
+      <div className={styles.aux_scrim} onClick={onClose} />
+      <aside className={`${styles.aux} ${styles.aux_overlay}`}>
         {/* Owns the window's top-right corner whenever the panel is open, so it
             needs its own drag region for the same reason the hero banner does. */}
         <div className={styles.aux_head} data-tauri-drag-region>

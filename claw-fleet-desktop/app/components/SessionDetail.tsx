@@ -62,7 +62,6 @@ import {
   type AuxFacetItem,
   type AuxState,
 } from "../detailAux";
-import { useResizableWidth } from "../hooks/useResizableWidth";
 import { SessionAuxPanel, type AuxTab } from "./SessionAuxPanel";
 import { SessionFacetPanel } from "./SessionFacetPanel";
 import { SubagentLiveCards } from "./SubagentLiveCards";
@@ -75,12 +74,6 @@ import { showLatestSync } from "../conversationPlaceholder";
  *  win the slots first, then the most-recently-active finished ones. A parent
  *  that fanned out hundreds of subagents would otherwise flood the menu. */
 const SUBAGENT_TAB_CAP = 12;
-
-/** Narrower than this and the pane can't hold two readable columns, so the
- *  auxiliary panel floats over the conversation instead of splitting it. A
- *  4-way split of the 任务 page bottoms out at MIN_GROUP_PX (280), and
- *  DecisionPanel's inline column is narrower still. */
-const AUX_OVERLAY_PX = 640;
 
 /** Standalone-mode live tail: re-pull the transcript tail at this cadence
  *  while the session is in an active status. */
@@ -468,18 +461,6 @@ export function SessionDetail({
      panel up in the auxiliary column, so reading a token receipt no longer
      costs you sight of the transcript. See detailAux.ts for the state. */
   const [aux, setAux] = useState<AuxState>(initialAux);
-  /** Panel width, only meaningful in the side-by-side (non-overlay) form. */
-  const {
-    width: auxWidth,
-    isDragging: auxDragging,
-    onMouseDown: onAuxResize,
-  } = useResizableWidth("detail-aux-width", { min: 260, max: 720, initial: 380, side: "right" });
-  /** Pane width, measured — the aux column collapses to an overlay drawer below
-   *  AUX_OVERLAY_PX. Measured rather than a media query because the constraint
-   *  is this pane's width (one of four split groups, or DecisionPanel's inline
-   *  column), not the window's. */
-  const rootRef = useRef<HTMLDivElement>(null);
-  const [paneWidth, setPaneWidth] = useState(0);
   /* The header's numeric chips — spend, tokens, reasoning share, compactions —
      are reference figures you look up, not identity you read at a glance. Seven
      of them in a row turned the title area into a status bar, so they collapse
@@ -818,17 +799,6 @@ export function SessionDetail({
     setAux((st) => closeDoc(st, id));
   }, []);
 
-  // Pane width drives the overlay/side-by-side choice.
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    const measure = () => setPaneWidth(el.clientWidth);
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    measure();
-    return () => ro.disconnect();
-  }, [liveSession?.id]);
-
   // `isFollowing` drives the footer, but the pin below runs from a
   // ResizeObserver callback that must not re-subscribe on every state change —
   // so mirror the state into a ref and write both through one reducer.
@@ -1145,10 +1115,6 @@ export function SessionDetail({
   const auxOpen = activeTab != null;
   const activeFacet = activeTab != null && isAuxFacet(activeTab) ? activeTab : null;
   const activeDoc = activeTab == null ? null : aux.docs.find((d) => d.id === activeTab) ?? null;
-  // Overlay until the pane is wide enough for two columns. `paneWidth === 0` is
-  // the pre-measure frame; treat it as wide so the panel doesn't flash as an
-  // overlay on mount.
-  const auxOverlay = paneWidth > 0 && paneWidth < AUX_OVERLAY_PX;
   // The toolbar switch: hide it when it is showing, and bring back the tab the
   // reader was last on (the agent deck, if agents are running) when it is not.
   const reopenTabId = auxTabs[0]?.id ?? "skills";
@@ -1165,7 +1131,6 @@ export function SessionDetail({
     <WikiLinksProvider value={wikiLinks}>
       <WebLinkProvider value={openWebInAux}>
       <div
-        ref={rootRef}
         className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""}`}
       >
         {liveSession && (
@@ -1454,10 +1419,6 @@ export function SessionDetail({
 
             {auxOpen && (
               <SessionAuxPanel
-                overlay={auxOverlay}
-                width={auxWidth}
-                isDragging={auxDragging}
-                onResizeStart={onAuxResize}
                 tabs={auxTabs}
                 activeId={activeTab}
                 onPick={pickTab}
