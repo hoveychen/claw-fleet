@@ -17,6 +17,7 @@ import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollo
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
+import { nextLiveTail } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
 import {
   initialFollowState,
@@ -528,10 +529,11 @@ export function SessionDetail({
           if (cancelled) return;
           setLocalMessages((prev) => reconcileMessages(prev, msgs));
           setLocalFullyLoaded(msgs.length < tail);
-          // Window saturated: the next transcript write would slide already-
-          // rendered messages out of the top. Grow the window so the visible
-          // history stays anchored while the tail keeps extending.
-          if (msgs.length >= tail) setLocalTail(tail + LOAD_EARLIER_STEP);
+          // Keep the window's start pinned as the transcript grows, so nothing
+          // the reader has scrolled back to slides out of the top. See
+          // `liveTailWindow` for the rule and what it costs to get wrong.
+          const grown = nextLiveTail({ tail, returned: msgs.length });
+          if (grown !== tail) setLocalTail(grown);
         })
         .catch(() => {})
         .finally(() => {
