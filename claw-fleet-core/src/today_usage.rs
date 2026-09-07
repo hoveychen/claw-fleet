@@ -283,6 +283,13 @@ pub struct ModelReceiptLine {
     /// `Σ rows == cost_usd`. Never true for `claude-code` / `codex` / report
     /// backfill, which are always priced by the rate table.
     pub priced_by_provider: bool,
+    /// How many of this line's calls carry tokens but **no** price — a fresh
+    /// OpenRouter generation the API will not answer for yet, or a route with no
+    /// published rate. Their tokens are in the counts above; their money is in
+    /// nobody's total. The UI must show this rather than let `cost_usd` read as
+    /// the whole story, because "$0.01 spent" and "$0.01 spent plus 3 calls we
+    /// could not price" are different claims. Always 0 for rate-table sources.
+    pub unpriced_calls: u32,
 }
 
 /// Today's per-model receipt — the itemised breakdown behind the sidebar badge.
@@ -307,6 +314,7 @@ pub struct TodayUsageBreakdown {
 
 /// Mutable accumulator for one receipt line while folding turns.
 #[derive(Default)]
+#[derive(Debug)]
 struct LineAcc {
     input: u64,
     cache_creation: u64,
@@ -317,6 +325,11 @@ struct LineAcc {
     cache_read: u64,
     output: u64,
     cost: f64,
+    /// Calls whose price could not be established. Counted separately from
+    /// `cost` because folding them in as `0.0` makes "we could not price this"
+    /// indistinguishable from "this was free" — only dsh routes can produce
+    /// them, and only they ever set this.
+    unpriced: u32,
 }
 
 impl LineAcc {
@@ -337,6 +350,11 @@ impl LineAcc {
         self.cache_read += cache_read;
         self.output += output;
         self.cost += cost;
+    }
+
+    /// Record `n` calls that contributed tokens but no priceable amount.
+    fn add_unpriced(&mut self, n: u32) {
+        self.unpriced += n;
     }
 }
 
@@ -472,6 +490,7 @@ fn build_lines(
                 cache_read_price: c.cache_read,
                 cost_usd: acc.cost,
                 priced_by_provider,
+                unpriced_calls: acc.unpriced,
             }
         })
         .collect();
@@ -496,19 +515,26 @@ pub(crate) fn sessions_usage_for_date(
     date: &str,
 ) -> Vec<Vec<ModelReceiptLine>> {
     let mut cache = usage_cache().lock().unwrap();
+    let result = sessions_usage_for_date_with(&mut cache, sessions, date);
+    persist_cache(&mut cache);
+    result
+}
+
+/// Pure-ish core of [`sessions_usage_for_date`], with the projection cache
+/// passed in.
+///
+/// Split out so the "no source is skipped here" property is testable without a
+/// live dsh server: seed `cache` with a session's cells and this must turn them
+/// into lines whatever `agent_source` says. dsh used to be dropped on the floor
+/// by an explicit `continue` right here, so its spend reached today's receipt but
+/// never a daily report.
+fn sessions_usage_for_date_with(
+    cache: &mut UsageBreakdownCache,
+    sessions: &[&SessionInfo],
+    date: &str,
+) -> Vec<Vec<ModelReceiptLine>> {
     let mut result = Vec::with_capacity(sessions.len());
     for session in sessions {
-        // dsh is deliberately skipped here: its spend is the provider's own
-        // charge for an open model space, which this surface would have to store
-        // per-model and then re-attribute on read-back with
-        // `infer_report_source` — mis-labelling every dsh model as Claude Code
-        // and breaking the receipt's `Σ rows == subtotal` invariant on the
-        // backfilled historical days. The daily-report/receipt口径 unification
-        // that handles dsh attribution properly is a separate plan; this receipt
-        // fix scopes itself to the live per-turn fold (today / near windows).
-        if session.agent_source == "dsh" {
-            continue;
-        }
         let mut by_model = std::collections::HashMap::new();
         let mut by_day = std::collections::BTreeMap::new();
         let cells = cache.cells(session);
@@ -522,7 +548,6 @@ pub(crate) fn sessions_usage_for_date(
         );
         result.push(build_lines(by_model));
     }
-    persist_cache(&mut cache);
     result
 }
 
@@ -958,64 +983,64 @@ fn codex_cells_are_approximate(cells: &SessionCells) -> bool {
     cells.keys().any(|(d, _)| d.is_empty())
 }
 
-/// Project one dsh session into a single `(last-activity-day, model)` cell.
+/// Project one dsh session into `(local day, model)` cells — one per distinct
+/// day/model pair its calls touched.
 ///
 /// dsh routes through an open model space where the same model costs different
 /// amounts per provider (OpenRouter alone fronts dozens of sellers), so — unlike
-/// Claude/Codex — this is NOT priced with Fleet's rate table. The spend is the
-/// provider's own figure from [`crate::dsh_cost::dsh_session_cost`], and the
-/// token buckets come off the session's own projections
-/// ([`crate::dsh_source::dsh_token_breakdown`]). Both are cumulative over the
-/// whole session, so the entire session lands on its last-activity day — the
-/// same whole-session attribution the codex fold uses for a rollout with no
-/// per-turn timestamps. The line is flagged `priced_by_provider` so the UI stops
-/// expecting `Σ rows == cost`. Returns empty cells on error / zero usage, so an
-/// unreachable dsh server degrades to "no dsh spend" rather than erroring the
-/// whole receipt.
+/// Claude/Codex — this is NOT priced with Fleet's rate table. Each call carries
+/// the price [`crate::dsh_cost`] established for it, from the provider's own
+/// receipt or from a published rate list, and the line is flagged
+/// `priced_by_provider` so the UI stops expecting `Σ rows == cost`.
+///
+/// Returns empty cells on error, so an unreachable dsh server degrades to "no
+/// dsh spend" rather than erroring the whole receipt.
 fn fold_dsh_session_cells(s: &SessionInfo) -> SessionCells {
-    let Ok(tokens) = crate::dsh_source::dsh_token_breakdown(&s.jsonl_path) else {
-        return SessionCells::new();
-    };
-    if tokens.total_tokens == 0 {
-        return SessionCells::new();
+    match crate::dsh_cost::dsh_session_calls(&s.jsonl_path) {
+        Ok(calls) => dsh_cells(&calls),
+        Err(_) => SessionCells::new(),
     }
-    // Provider-priced: `cost_usd` is the real charge; the per-row prices the UI
-    // draws are Fleet's reference rates and will not add up to it.
-    let cost = crate::dsh_cost::dsh_session_cost(&s.jsonl_path)
-        .ok()
-        .and_then(|c| c.total_usd);
-    dsh_cells(s.model.as_deref(), s.last_activity_ms, &tokens, cost)
 }
 
-/// Pure core of [`fold_dsh_session_cells`]: one session's `(model, last-activity,
-/// token buckets, provider cost)` → the single cell. Split out so it is testable
-/// without a live dsh server or a network round trip. `cost` is `None` when the
-/// provider did not price the session — the cell still carries the tokens but
-/// zero spend, so an unpriceable dsh session never fabricates a number.
-fn dsh_cells(
-    model: Option<&str>,
-    last_activity_ms: u64,
-    tokens: &crate::dsh_source::DshTokenBreakdown,
-    cost: Option<f64>,
-) -> SessionCells {
+/// Pure core of [`fold_dsh_session_cells`]: a priced ledger → its cells. Split
+/// out so it is testable without a live dsh server or a network round trip.
+///
+/// **Per call, not per session.** The earlier version folded a session into one
+/// cell dated by its last activity and labelled with its latest route, carrying
+/// the cumulative total. That put a two-day session's whole spend on day two —
+/// and because the projection cache re-folds whenever a session logs new usage,
+/// day one's cell was deleted and its money re-booked to day two every time the
+/// session ran again. Claude and Codex have always folded per turn; this is dsh
+/// catching up.
+fn dsh_cells(calls: &[crate::dsh_cost::PricedCall]) -> SessionCells {
     let mut cells = SessionCells::new();
-    let model = model.map(str::to_string).unwrap_or_else(|| "unknown".to_string());
-    // `last_activity_ms` is u64; a 0 (unknown) dates to the epoch and is excluded
-    // from every day-bounded window, which under-counts rather than over-counts.
-    let date = local_date_str(last_activity_ms as i64);
-    cells
-        .entry((date, model))
-        .or_default()
-        .add(
-            tokens.uncached_input_tokens,
+    for call in calls {
+        // A call with no usable timestamp dates to the epoch and is excluded from
+        // every day-bounded window, which under-counts rather than over-counts.
+        let date = local_date_str(call.at_ms);
+        let model = if call.model.is_empty() {
+            "unknown".to_string()
+        } else {
+            call.model.clone()
+        };
+        let acc = cells.entry((date, model)).or_default();
+        acc.add(
+            call.input_tokens,
             // dsh reports a single cache-write bucket with no 1h TTL split, so
             // the 1h subset stays 0 and all writes price at the route's rate.
-            tokens.cache_write_tokens,
+            call.cache_write_tokens,
             0,
-            tokens.cache_read_tokens,
-            tokens.output_tokens,
-            cost.unwrap_or(0.0),
+            call.cache_read_tokens,
+            call.output_tokens,
+            // An unpriced call adds tokens and nothing else: `0.0` here is "this
+            // call contributed no known money", and the count below is what keeps
+            // that from being read as "this call was free".
+            call.usd.unwrap_or(0.0),
         );
+        if call.usd.is_none() {
+            acc.add_unpriced(1);
+        }
+    }
     cells
 }
 
@@ -1034,18 +1059,10 @@ fn sum_cells_window(
         if date.is_empty() || date.as_str() < from_date || date.as_str() > to_date {
             continue;
         }
-        by_model
+        let line = by_model
             .entry((source.to_string(), model.clone()))
-            .or_default()
-            .add(
-                acc.input,
-                acc.cache_creation,
-                acc.cache_creation_1h,
-                acc.cache_read,
-                acc.output,
-                acc.cost,
-            );
-        by_day.entry(date.clone()).or_default().add(
+            .or_default();
+        line.add(
             acc.input,
             acc.cache_creation,
             acc.cache_creation_1h,
@@ -1053,6 +1070,17 @@ fn sum_cells_window(
             acc.output,
             acc.cost,
         );
+        line.add_unpriced(acc.unpriced);
+        let day = by_day.entry(date.clone()).or_default();
+        day.add(
+            acc.input,
+            acc.cache_creation,
+            acc.cache_creation_1h,
+            acc.cache_read,
+            acc.output,
+            acc.cost,
+        );
+        day.add_unpriced(acc.unpriced);
     }
 }
 
@@ -1117,6 +1145,19 @@ impl UsageBreakdownCache {
             self.dirty = true;
         }
         &self.entries.get(&s.id).unwrap().cells
+    }
+
+    /// Install pre-computed cells for `s`, bypassing the fold. Test-only: the
+    /// fold is what needs a live server, and the properties above it do not.
+    #[cfg(test)]
+    fn seed(&mut self, s: &SessionInfo, cells: SessionCells) {
+        self.entries.insert(
+            s.id.clone(),
+            CacheEntry {
+                fingerprint: Self::fingerprint(s),
+                cells,
+            },
+        );
     }
 
     /// Drop cached entries for sessions no longer live, bounding the map to the
@@ -2166,23 +2207,139 @@ mod breakdown_tests {
         assert!((b.agent_cost_usd - expected).abs() < 1e-9);
     }
 
-    /// P1 red: the daily report must include dsh sessions.
+    /// The daily report must not drop a source on the floor.
     ///
-    /// `sessions_usage_for_date` early-returns on `agent_source == "dsh"`, so a
-    /// dsh session's spend never reaches a daily report — even though it shows on
-    /// today's receipt. A dsh session whose whole spend lives on one day must
-    /// open a receipt line for that day, like any Claude/Codex session. P3 drops
-    /// the skip; this test turns green there.
+    /// `sessions_usage_for_date` used to `continue` on `agent_source == "dsh"`,
+    /// so a dsh session's spend reached today's receipt but never a daily report.
+    /// Seeding the projection cache lets this assert the property itself rather
+    /// than needing a live dsh server: whatever cells a session has, they must
+    /// become lines.
     #[test]
-    fn dsh_daily_report_includes_dsh() {
+    fn the_daily_report_skips_no_source() {
         let now_ms = chrono::Local::now().timestamp_millis() as u64;
-        let s = today_session_with_jsonl("p1-dsh-daily", "dsh", "{}", false);
         let date = local_date_str(now_ms as i64);
-        let rows = sessions_usage_for_date(&[&s], &date);
-        assert!(
-            rows.iter().any(|lines| !lines.is_empty()),
-            "daily report must include dsh sessions; got {rows:?}"
+        let session = today_session_with_jsonl("dsh-daily", "dsh", "{}", false);
+
+        let mut cells = SessionCells::new();
+        let mut acc = LineAcc::default();
+        acc.add(10, 0, 0, 20, 30, 0.42);
+        cells.insert((date.clone(), "deepseek-v4-flash".to_string()), acc);
+        let mut cache = UsageBreakdownCache::default();
+        cache.seed(&session, cells);
+
+        let rows = sessions_usage_for_date_with(&mut cache, &[&session], &date);
+        let lines = rows.into_iter().next().expect("one session, one row");
+        assert_eq!(lines.len(), 1, "the dsh session must produce a receipt line");
+        assert_eq!(lines[0].source, "dsh");
+        assert!((lines[0].cost_usd - 0.42).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod dsh_ledger_tests {
+    use super::*;
+    use crate::dsh_cost::{PriceBasis, PricedCall};
+
+    /// A call on `day`, at noon local so no timezone shift can move it.
+    fn call(day: &str, model: &str, usd: Option<f64>, out_tokens: u64) -> PricedCall {
+        let at = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+            .and_local_timezone(chrono::Local)
+            .unwrap()
+            .timestamp_millis();
+        PricedCall {
+            at_ms: at,
+            provider: "deepseek-official".into(),
+            model: model.into(),
+            input_tokens: 10,
+            cache_read_tokens: 20,
+            cache_write_tokens: 0,
+            output_tokens: out_tokens,
+            usd,
+            basis: usd.map(|_| PriceBasis::Table),
+            peak: usd.map(|_| false),
+        }
+    }
+
+    /// A session that ran on two days must appear on **both**, each day carrying
+    /// what was actually spent on it.
+    ///
+    /// The session-scalar version put the whole cumulative figure on the session's
+    /// last-activity day, so a session used two days running had yesterday's cell
+    /// deleted and its money re-booked to today — today over-counted, yesterday
+    /// under-counted, and the two errors did not even cancel on the trend line.
+    #[test]
+    fn a_session_spanning_two_days_lands_on_both() {
+        let cells = dsh_cells(&[
+            call("2026-09-06", "deepseek-v4-flash", Some(0.10), 100),
+            call("2026-09-07", "deepseek-v4-flash", Some(0.25), 200),
+        ]);
+        assert_eq!(cells.len(), 2, "one cell per day, got {cells:?}");
+        let day = |d: &str| {
+            cells
+                .iter()
+                .find(|((date, _), _)| date == d)
+                .unwrap_or_else(|| panic!("no cell for {d}"))
+                .1
+        };
+        assert!((day("2026-09-06").cost - 0.10).abs() < 1e-9);
+        assert_eq!(day("2026-09-06").output, 100);
+        assert!((day("2026-09-07").cost - 0.25).abs() < 1e-9);
+        assert_eq!(day("2026-09-07").output, 200);
+    }
+
+    /// Each call is attributed to the model **it** used, not to whatever the
+    /// session's route happened to be when the panel last read it.
+    #[test]
+    fn calls_are_attributed_to_the_model_each_one_used() {
+        let cells = dsh_cells(&[
+            call("2026-09-07", "deepseek-v4-flash", Some(0.10), 100),
+            call("2026-09-07", "deepseek-v4-pro", Some(0.90), 200),
+        ]);
+        assert_eq!(cells.len(), 2, "one cell per model, got {cells:?}");
+        let model = |m: &str| {
+            cells
+                .iter()
+                .find(|((_, name), _)| name == m)
+                .unwrap_or_else(|| panic!("no cell for {m}"))
+                .1
+        };
+        assert!((model("deepseek-v4-flash").cost - 0.10).abs() < 1e-9);
+        assert!((model("deepseek-v4-pro").cost - 0.90).abs() < 1e-9);
+    }
+
+    /// An unpriced call contributes its tokens and **no** dollars, and says so.
+    ///
+    /// Folding it to `$0` is the same pixel as "this was free", which is exactly
+    /// the claim this module refuses to make anywhere else.
+    #[test]
+    fn an_unpriced_call_contributes_tokens_but_never_a_zero_dollar_claim() {
+        let cells = dsh_cells(&[
+            call("2026-09-07", "deepseek-v4-flash", Some(0.10), 100),
+            call("2026-09-07", "deepseek-v4-flash", None, 50),
+        ]);
+        let acc = cells.values().next().expect("one cell");
+        assert_eq!(acc.output, 150, "both calls' tokens are counted");
+        assert!((acc.cost - 0.10).abs() < 1e-9, "only the priced call adds money");
+        assert_eq!(acc.unpriced, 1, "the gap must be reportable, not invisible");
+    }
+
+    /// …and it has to survive all the way onto the receipt line, or the UI has
+    /// no way to distinguish a cheap day from an unpriced one.
+    #[test]
+    fn the_receipt_line_reports_how_many_calls_went_unpriced() {
+        let mut by_model = std::collections::HashMap::new();
+        let mut acc = LineAcc::default();
+        acc.add(10, 0, 0, 20, 150, 0.10);
+        acc.add_unpriced(1);
+        by_model.insert(
+            ("dsh".to_string(), "deepseek-v4-flash".to_string()),
+            acc,
         );
+        let lines = build_lines(by_model);
+        assert_eq!(lines[0].unpriced_calls, 1);
     }
 }
 
@@ -3035,24 +3192,28 @@ mod range_breakdown_tests {
             .collect()
     }
 
-    /// dsh spend is provider-priced: the pure mapping must carry the real cost,
-    /// the four token buckets (dsh's single cache-write bucket with no 1h TTL
-    /// split), the harvested route model, and the session's last-activity date.
+    /// dsh spend is provider-priced: the mapping must carry each call's real
+    /// cost and its four token buckets (dsh reports a single cache-write bucket
+    /// with no 1h TTL split), on the call's own day and model.
     #[test]
     fn dsh_cell_maps_tokens_model_cost_and_date() {
-        use crate::dsh_source::DshTokenBreakdown;
-        let tokens = DshTokenBreakdown {
-            uncached_input_tokens: 100,
-            cache_write_tokens: 20,
-            cache_read_tokens: 300,
-            output_tokens: 40,
-            ..Default::default()
-        };
+        use crate::dsh_cost::{PriceBasis, PricedCall};
         let at = 1_752_000_000_000i64;
-        let cells = dsh_cells(Some("openrouter/anthropic/claude-opus-5"), at as u64, &tokens, Some(0.1234));
+        let cells = dsh_cells(&[PricedCall {
+            at_ms: at,
+            provider: "openrouter".into(),
+            model: "anthropic/claude-opus-5".into(),
+            input_tokens: 100,
+            cache_read_tokens: 300,
+            cache_write_tokens: 20,
+            output_tokens: 40,
+            usd: Some(0.1234),
+            basis: Some(PriceBasis::Receipt),
+            peak: None,
+        }]);
         assert_eq!(cells.len(), 1);
         let ((date, model), acc) = cells.iter().next().unwrap();
-        assert_eq!(model, "openrouter/anthropic/claude-opus-5");
+        assert_eq!(model, "anthropic/claude-opus-5");
         assert_eq!(*date, local_date_str(at));
         assert_eq!(acc.input, 100);
         assert_eq!(acc.cache_creation, 20, "dsh cache write → 5m bucket");
@@ -3060,23 +3221,31 @@ mod range_breakdown_tests {
         assert_eq!(acc.cache_read, 300);
         assert_eq!(acc.output, 40);
         assert!((acc.cost - 0.1234).abs() < 1e-9, "provider cost carried verbatim");
+        assert_eq!(acc.unpriced, 0);
     }
 
-    /// An unpriced dsh session still counts its tokens but contributes $0 — it
-    /// never fabricates a number, and an unknown route falls back to `unknown`.
+    /// A call whose route the log never named still counts its tokens, under a
+    /// label that does not pretend to know which model ran.
     #[test]
-    fn dsh_cell_defaults_model_and_zero_when_unpriced() {
-        use crate::dsh_source::DshTokenBreakdown;
-        let tokens = DshTokenBreakdown {
-            uncached_input_tokens: 5,
+    fn dsh_cell_labels_an_unnamed_route_unknown() {
+        use crate::dsh_cost::PricedCall;
+        let cells = dsh_cells(&[PricedCall {
+            at_ms: 1_752_000_000_000,
+            provider: "openrouter".into(),
+            model: String::new(),
+            input_tokens: 5,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
             output_tokens: 2,
-            ..Default::default()
-        };
-        let cells = dsh_cells(None, 1_752_000_000_000u64, &tokens, None);
+            usd: None,
+            basis: None,
+            peak: None,
+        }]);
         let ((_, model), acc) = cells.iter().next().unwrap();
         assert_eq!(model, "unknown");
         assert_eq!(acc.cost, 0.0);
         assert_eq!(acc.input, 5);
+        assert_eq!(acc.unpriced, 1, "counted as unpriced, not as free");
     }
 
     /// `build_lines` tags every `dsh` source line as provider-priced (so the UI
