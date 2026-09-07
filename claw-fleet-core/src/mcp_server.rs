@@ -152,7 +152,7 @@ fn tools_list_result(fleet_owned: bool) -> Value {
 fn fleet_ask_tool_def() -> Value {
     json!({
         "name": "fleet__ask",
-        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus three optional fields: `html` (HTML preview, rendered in a sandboxed iframe), `formFields` (structured input fields), and `images` (local image files shown WITHOUT base64-inlining — pass file paths, reference them from `html` by name). Every question must have an answer surface: at least 2 `options`, OR `html`, OR `formFields` — a question with none of the three is rejected. To display an image, ALWAYS use `images` + a relative `<img src=\"name\">`; never base64-inline it into `html` (that wastes output tokens).",
+        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus three optional fields: `html` (HTML preview, rendered in a sandboxed iframe), `formFields` (structured input fields), and `images` (local image files shown WITHOUT base64-inlining — pass file paths, reference them from `html` by name). Every question must have an answer surface: at least 2 `options`, OR `html`, OR `formFields` — a question with none of the three is rejected. To display an image, ALWAYS use `images` + a relative `<img src=\"name\">`; never base64-inline it into `html` (that wastes output tokens). Every card already carries a permanent terminal button, so NEVER write your own \"任务结束\" / \"收工\" / \"done\" / \"wrap up\" option — set the top-level `taskComplete` boolean instead (true → the button reads 「结束任务」, false → 「放弃任务」). Such an option is rejected.",
         "inputSchema": crate::mcp_ipc::fleet_ask_input_schema(),
     })
 }
@@ -541,6 +541,81 @@ impl Drop for InflightGuard {
     }
 }
 
+/// Labels that mean nothing but "we are done here" — the pre-v3 convention the
+/// card's permanent terminal button replaced. Matched against the *whole*
+/// normalised label, never as a substring: an option like
+/// 「跑完测试再结束任务前的合并」 or "Finish the migration script" is a real next
+/// action that happens to mention finishing, and must stay allowed.
+const END_OPTION_LABELS: &[&str] = &[
+    // zh
+    "收工",
+    "收工了",
+    "收工吧",
+    "下班",
+    "下班了",
+    "任务结束",
+    "结束任务",
+    "结束",
+    "结束会话",
+    "放弃任务",
+    "到此为止",
+    "就这样",
+    "完事",
+    "完事了",
+    "干完了",
+    "没别的了",
+    "没有了",
+    // en
+    "done",
+    "all done",
+    "im done",
+    "i'm done",
+    "we're done",
+    "were done",
+    "we are done",
+    "finish",
+    "finished",
+    "finish task",
+    "finish the task",
+    "end task",
+    "end the task",
+    "end session",
+    "task complete",
+    "task completed",
+    "complete",
+    "completed",
+    "wrap up",
+    "wrap it up",
+    "wrapping up",
+    "call it a day",
+    "that's all",
+    "thats all",
+    "that is all",
+    "nothing else",
+    "nothing more",
+    "no further action",
+    "stop here",
+    "sign off",
+];
+
+/// True when `label` is a hand-rolled terminal option (see [`END_OPTION_LABELS`]).
+fn is_hand_rolled_end_option(label: &str) -> bool {
+    let mut norm = label.trim().to_lowercase();
+    // Agents append " (Recommended)" per the guidance; strip it before matching.
+    for suffix in [" (recommended)", "（recommended）", " (推荐)", "（推荐）"] {
+        if let Some(stripped) = norm.strip_suffix(suffix) {
+            norm = stripped.to_string();
+        }
+    }
+    // Drop decorative padding (emoji, ✅, quotes, trailing 。！~) from both ends
+    // so "✅ Done!" normalises to "done". `is_alphanumeric` is true for Han and
+    // Kana, so CJK labels survive this untouched.
+    let norm = norm
+        .trim_matches(|c: char| !c.is_alphanumeric() && c != '\'')
+        .trim();
+    END_OPTION_LABELS.contains(&norm)
+}
+
 fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     let questions: Vec<crate::mcp_ipc::FleetAskQuestion> =
@@ -581,6 +656,31 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
                 idx + 1
             ),
         });
+    }
+
+    // Terminal-option guard: every card already renders a permanent
+    // end-the-task button whose wording comes from `taskComplete`, so a
+    // hand-rolled 「收工」/「任务结束」/"Done" option is both a wasted option slot
+    // and a terminal press Fleet cannot record (it comes back as an ordinary
+    // answer, leaving the session's outcome unset). The ban was stated in prose
+    // in four places — this tool's description, the `options` and `taskComplete`
+    // schema fields, and the injected interaction-mode guidance — and agents
+    // kept shipping the option anyway because nothing rejected it. Reject it.
+    for (qi, q) in questions.iter().enumerate() {
+        if let Some(opt) = q.options.iter().find(|o| is_hand_rolled_end_option(&o.label)) {
+            return Err(JsonRpcError {
+                code: -32602,
+                message: format!(
+                    "Question {} has a hand-rolled terminal option (\"{}\"). Every card already \
+                     carries a permanent end-the-task button — drop this option and set the \
+                     top-level `taskComplete` boolean instead (true → the button reads \
+                     「结束任务」 and closes the session as a success, false → 「放弃任务」). \
+                     Every option must be a concrete next action or answer.",
+                    qi + 1,
+                    opt.label
+                ),
+            });
+        }
     }
 
     // Heartbeat check — if no Fleet consumer is alive, refuse the call so
@@ -1530,6 +1630,141 @@ mod tests {
             msg.contains("options") && msg.contains("html") && msg.contains("formFields"),
             "error should name the three answer surfaces, got: {msg}"
         );
+    }
+
+    #[test]
+    fn end_option_matcher_is_whole_label_only() {
+        for label in [
+            "收工",
+            "收工吧",
+            "任务结束",
+            "结束任务 (Recommended)",
+            "Done",
+            "✅ Done!",
+            "wrap up",
+            "Call it a day",
+        ] {
+            assert!(is_hand_rolled_end_option(label), "should flag: {label}");
+        }
+        for label in [
+            "跑完测试再结束任务前的合并",
+            "Finish the migration script",
+            "收工前先把 worktree 清掉",
+            "合并回 main",
+            "起真 app 验提示音",
+            "不用了,先放着",
+        ] {
+            assert!(
+                !is_hand_rolled_end_option(label),
+                "must not flag ordinary action: {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn tools_call_with_hand_rolled_end_option_errors() {
+        // Every card already carries a permanent terminal button driven by
+        // `taskComplete`; an option labelled 「收工」/「任务结束」/"Done" is the
+        // pre-v3 convention and records no terminal state. Prose said so in
+        // four places and agents kept doing it anyway, so reject it here.
+        // FLEET_HOME is forced empty for the same reason as the sibling
+        // answer-surface test: absent the guard the call would fall through to
+        // the (not-alive) consumer check and come back as an `isError`
+        // envelope, so a JSON-RPC -32602 proves *this* guard rejected it.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir()
+            .join(format!("fleet-ask-end-option-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by `fleet_home_lock`.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__ask",
+                "arguments": {
+                    "questions": [{
+                        "question": "已合并回 main。还要我做点什么吗?",
+                        "header": "已合并",
+                        "multiSelect": false,
+                        "options": [
+                            {"label": "收工", "description": "活干完了,不用再动。"},
+                            {"label": "起真 app 验提示音", "description": "跑 dev 构建。"}
+                        ]
+                    }]
+                }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+
+        // SAFETY: restore under the same lock.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert_eq!(resp["error"]["code"], -32602, "got {resp}");
+        let msg = resp["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            msg.contains("taskComplete") && msg.contains("收工"),
+            "error should name the offending label and point at taskComplete, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn tools_call_with_ordinary_options_is_not_flagged_as_end_option() {
+        // Guard must not fire on ordinary action labels that merely mention
+        // finishing something. Reaching the consumer check (isError, not a
+        // -32602 envelope) is the pass condition.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir()
+            .join(format!("fleet-ask-end-option-neg-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by `fleet_home_lock`.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__ask",
+                "arguments": {
+                    "questions": [{
+                        "question": "P5 怎么收?",
+                        "header": "P5",
+                        "multiSelect": false,
+                        "options": [
+                            {"label": "跑完测试再结束任务前的合并", "description": "先验证。"},
+                            {"label": "Finish the migration script", "description": "补完脚本。"}
+                        ]
+                    }]
+                }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+
+        // SAFETY: restore under the same lock.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert!(
+            resp.get("error").is_none(),
+            "ordinary labels must not trip the end-option guard, got {resp}"
+        );
+        assert_eq!(resp["result"]["isError"], true);
     }
 
     #[test]

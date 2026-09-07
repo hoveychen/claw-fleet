@@ -949,7 +949,7 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                             "type": "array",
                             "minItems": 2,
                             "maxItems": 4,
-                            "description": "Clickable answer choices (2–4). Optional ONLY when the question carries `html` or `formFields` instead; a question with no options, no html and no formFields has no answer surface and is rejected. Do not add an 'Other' option — the UI appends a free-text escape hatch automatically.",
+                            "description": "Clickable answer choices (2–4). Optional ONLY when the question carries `html` or `formFields` instead; a question with no options, no html and no formFields has no answer surface and is rejected. Do not add an 'Other' option — the UI appends a free-text escape hatch automatically. Do not add a terminal option either (\"任务结束\" / \"收工\" / \"下班\" / \"done\" / \"wrap up\" / \"call it a day\"): every card already has a permanent end-the-task button, so such a label is REJECTED — set the top-level `taskComplete` boolean instead. Every option must be a concrete next action or answer.",
                             "items": {
                                 "type": "object",
                                 "properties": {

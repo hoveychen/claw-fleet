@@ -190,7 +190,7 @@ Fleet 的决策面板会为每张新卡片播一段简短的 TTS 播报。前端
 了一个真正的「等待输入」界面。\n\
 \n\
 **会话结束豁免。**当用户按下卡片的结束按钮（工具返回 TASK FINISHED / \
-TASK ABANDONED），或选了明显结束对话的选项（如「下班」「收工」，\
+TASK ABANDONED），或在自由文本里表示收工（如「下班」「收工」，\
 或任何等价于「我们完事了」的表达），本回合以一行纯文本致意结束，而不是再来一个\
 `fleet__ask`。这是本文件顶部「每回合都要问」规则的字面豁免之一；不要追加\
 取舍说明——上述规则已明确授权这里的纯文本收尾，所以没有需要点出的冲突。\n\
@@ -574,8 +574,8 @@ turn. Do NOT re-wrap that executing turn in another `fleet__ask` unless \
 you again reach a genuine wait-for-input surface.\n\
 \n\
 **Session-end exemption.** When the user presses the card's terminal button \
-(the tool comes back with TASK FINISHED or TASK ABANDONED), or picks an option \
-that clearly closes the conversation (e.g. \"下班\", \"收工\", or anything \
+(the tool comes back with TASK FINISHED or TASK ABANDONED), or says in free \
+text that we are done (e.g. \"下班\", \"收工\", or anything \
 equivalently meaning \"we are done\"), this turn ends with a one-line \
 plain-text acknowledgement instead of another `fleet__ask`. This is one of \
 the literal exemptions to the every-turn-asks rule at the top of this file; \
