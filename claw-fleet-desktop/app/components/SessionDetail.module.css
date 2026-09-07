@@ -306,10 +306,10 @@
   box-sizing: border-box;
 }
 
-/* ── Two-column body ────────────────────────────────────────────────────────
-   The conversation keeps the left column for good; the auxiliary panel takes
-   the right one (or floats over it when the pane is too narrow — see
-   SessionAuxPanel). Positioned so the overlay form has something to anchor to.
+/* ── Conversation + overlay drawer ─────────────────────────────────────────
+   The conversation keeps the full row for good; the auxiliary panel floats
+   over it from the right (see SessionAuxPanel). Positioned so the drawer has
+   something to anchor to.
 
    Both columns are rounded slabs floating on a recessed ground rather than two
    halves of one flat surface split by a hairline. The ground is --color-bg-
@@ -373,13 +373,7 @@
   border-bottom: 1px solid var(--color-border);
   background: linear-gradient(180deg, var(--color-bg-secondary) 0%, var(--color-bg) 100%);
 }
-/* No gutter to sit in: back to straddling the shared edge. */
-.root.inline .aux_resizer {
-  left: -3px;
-  width: 6px;
-}
-
-/* ── Auxiliary column ───────────────────────────────────────────────────────*/
+/* ── Auxiliary drawer ───────────────────────────────────────────────────────*/
 /* A slab of its own, matching .main_col — same fill, same radius, same border.
    The two used to share one hairline; now they share a gutter. */
 .aux {
@@ -395,7 +389,7 @@
   overflow: hidden;
 }
 
-/* Narrow pane: float over the conversation instead of halving it. Absolute
+/* Float over the conversation instead of halving it. Absolute
    offsets resolve against .body_row's *padding box*, which includes the
    padding — so the gutter has to be spelled out here rather than inherited,
    or the drawer runs edge-to-edge and its rounded corners sit half off the
@@ -408,6 +402,7 @@
   width: min(92%, 420px);
   z-index: 6;
   box-shadow: -10px 0 28px rgb(0 0 0 / 28%);
+  animation: aux_drawer_in 160ms ease-out;
 }
 
 .aux_scrim {
@@ -415,34 +410,22 @@
   inset: 0;
   z-index: 5;
   background: rgb(0 0 0 / 24%);
+  animation: aux_scrim_in 120ms ease-out;
 }
 
-/* Drag handle. With the columns separated it lives in the gutter between them
-   rather than straddling a shared edge — the whole gutter is the target. */
-.aux_resizer {
-  position: absolute;
-  left: calc(-1 * var(--slab-gap, 8px));
-  top: 0;
-  bottom: 0;
-  width: var(--slab-gap, 8px);
-  cursor: col-resize;
-  z-index: 2;
+@keyframes aux_drawer_in {
+  from { transform: translateX(18px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
-/* An inset pill rather than a full-bleed fill: a flooded gutter reads as a
-   third column for as long as the pointer is over it. */
-.aux_resizer:hover::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: 12px;
-  bottom: 12px;
-  width: 3px;
-  border-radius: var(--radius-pill);
-  background: var(--color-border-strong);
+
+@keyframes aux_scrim_in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-.aux_dragging {
-  user-select: none;
+
+@media (prefers-reduced-motion: reduce) {
+  .aux_overlay,
+  .aux_scrim { animation: none; }
 }
 
 /* Inside a slab the strip no longer has to announce itself as chrome: the
