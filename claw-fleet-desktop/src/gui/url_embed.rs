@@ -12,8 +12,8 @@ use super::*;
 // The headers are perfectly readable from the host, though, so this answers the
 // question the webview cannot ask. Local-only by nature, like `reveal_path`: the
 // subject is whether *this* desktop's webview can frame the URL, so it has to be
-// probed from this machine's network. Asking a remote probe host would answer a
-// different question, which is why this is deliberately not on the Backend trait.
+// probed from this machine's network, which is why it is a plain command rather
+// than a `LocalBackend` method.
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]

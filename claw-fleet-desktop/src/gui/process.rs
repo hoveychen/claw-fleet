@@ -7,7 +7,7 @@ use super::*;
 /// sibling would abort someone else's turn.
 #[tauri::command(async)]
 pub(crate) fn interrupt_session(pid: u32, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().interrupt_pid(pid)
+    state.backend.interrupt_pid(pid)
 }
 
 /// Graceful stop for a source with no per-session process: route the stop to the
@@ -20,17 +20,17 @@ pub(crate) fn interrupt_agent_session(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.backend.write().unwrap().interrupt_agent_session(path)
+    state.backend.interrupt_agent_session(path)
 }
 
 #[tauri::command(async)]
 pub(crate) fn kill_session(pid: u32, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().kill_pid(pid)
+    state.backend.kill_pid(pid)
 }
 
 #[tauri::command(async)]
 pub(crate) fn kill_workspace_sessions(workspace_path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().kill_workspace(workspace_path)
+    state.backend.kill_workspace(workspace_path)
 }
 
 #[tauri::command(async)]
@@ -44,7 +44,7 @@ pub(crate) fn resume_rate_limited_session(
     agent_source: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.backend.write().unwrap().resume_session(
+    state.backend.resume_session(
         session_id,
         workspace_path,
         prompt,
@@ -67,8 +67,6 @@ pub(crate) fn enqueue_session_message(
 ) -> Result<(), String> {
     state
         .backend
-        .write()
-        .unwrap()
         .enqueue_message(session_id, workspace_path, text)
 }
 
@@ -82,8 +80,6 @@ pub(crate) fn cancel_session_pending_message(
 ) -> Result<(), String> {
     state
         .backend
-        .write()
-        .unwrap()
         .cancel_pending_message(session_id, index)
 }
 
@@ -107,8 +103,6 @@ pub(crate) async fn spawn_new_claude_session(
     let backend = state.backend.clone();
     tokio::task::spawn_blocking(move || {
         backend
-            .read()
-            .unwrap()
             .spawn_new_session(workspace_path, prompt, model, effort, permission_mode, tool)
     })
     .await
@@ -116,50 +110,46 @@ pub(crate) async fn spawn_new_claude_session(
 }
 
 /// Absolute path of the pure-chat workspace. The launcher
-/// pins it as a fixed entry — it has no prior sessions to be discovered from,
-/// and under a remote connection it resolves against the probe host's home.
+/// pins it as a fixed entry — it has no prior sessions to be discovered from.
 #[tauri::command(async)]
 pub(crate) fn chat_workspace(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state.backend.read().unwrap().chat_workspace()
+    state.backend.chat_workspace()
 }
 
-/// One level of directories under `path` on the *backend host* (`None` = its
-/// home), for the launcher's workspace picker.
+/// One level of directories under `path` (`None` = home), for the launcher's
+/// workspace picker.
 ///
-/// Goes through the backend rather than Tauri's native dialog plugin because the
-/// dialog can only ever browse the machine the desktop runs on — under a remote
-/// connection that is the wrong host, which is why the launcher used to just hide
-/// its Browse button in that mode.
+/// Exists alongside Tauri's native dialog plugin because the browser build has
+/// no native dialog at all — a tab can only be served a listing.
 #[tauri::command(async)]
 pub(crate) fn browse_dir(
     state: tauri::State<'_, AppState>,
     path: Option<String>,
 ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
-    state.backend.read().unwrap().browse_dir(path)
+    state.backend.browse_dir(path)
 }
 
-/// Make one directory under `path` on the *backend host* and answer with the new
-/// directory's listing. Through the backend for `browse_dir`'s reason: it must
-/// be created on the host the session will spawn on.
+/// Make one directory under `path` and answer with the new directory's listing
+/// — the picker's "new folder", for `browse_dir`'s reason.
 #[tauri::command(async)]
 pub(crate) fn create_dir(
     state: tauri::State<'_, AppState>,
     path: Option<String>,
     name: String,
 ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
-    state.backend.read().unwrap().create_dir(path, name)
+    state.backend.create_dir(path, name)
 }
 
 /// List directories on an rca executor host — the picker one ssh hop past
-/// [`browse_dir`]. Through the backend because the ssh has to originate where
-/// the session will spawn (that host owns the keys and the ssh-config aliases).
+/// [`browse_dir`]. The ssh originates from this machine, which owns the keys
+/// and the ssh-config aliases.
 #[tauri::command(async)]
 pub(crate) fn remote_browse_dir(
     state: tauri::State<'_, AppState>,
     ssh_target: String,
     path: Option<String>,
 ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
-    state.backend.read().unwrap().remote_browse_dir(ssh_target, path)
+    state.backend.remote_browse_dir(ssh_target, path)
 }
 
 /// Probe one rca executor host (reachable / rca installed / speaks `--stdio`).
@@ -170,12 +160,10 @@ pub(crate) fn remote_host_health(
     state: tauri::State<'_, AppState>,
     ssh_target: String,
 ) -> claw_fleet_core::remote_host::HostHealth {
-    state.backend.read().unwrap().remote_host_health(ssh_target)
+    state.backend.remote_host_health(ssh_target)
 }
 
 /// Make one directory on an rca executor host and answer with its listing.
-/// Through the backend for `remote_browse_dir`'s reason: it must be created on
-/// the machine that will actually execute the workspace.
 #[tauri::command(async)]
 pub(crate) fn remote_create_dir(
     state: tauri::State<'_, AppState>,
@@ -183,23 +171,17 @@ pub(crate) fn remote_create_dir(
     path: Option<String>,
     name: String,
 ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
-    state.backend.read().unwrap().remote_create_dir(ssh_target, path, name)
+    state.backend.remote_create_dir(ssh_target, path, name)
 }
 
-/// The ssh host book — list / upsert / remove, through the backend.
-///
-/// Distinct from `list_saved_connections`, which stays deliberately local: that
-/// one answers "which Fleet backends can THIS desktop dial", and you cannot ask
-/// a backend to remember the connection you use to reach it. This one answers
-/// "which machines can the backend host ssh into", which is what a workspace's
-/// `hostId` is resolved against when a session spawns there. Under a local
-/// backend the two are the same records — which is exactly the merged host list
-/// the settings page renders.
+/// The ssh host book — list / upsert / remove. These are the machines this
+/// desktop can ssh into as rca executors, which is what a workspace's `hostId`
+/// is resolved against when a session spawns.
 #[tauri::command(async)]
 pub(crate) fn list_ssh_hosts(
     state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::remote_host::SshHost> {
-    state.backend.read().unwrap().list_ssh_hosts()
+    state.backend.list_ssh_hosts()
 }
 
 #[tauri::command(async)]
@@ -207,7 +189,7 @@ pub(crate) fn upsert_ssh_host(
     state: tauri::State<'_, AppState>,
     host: claw_fleet_core::remote_host::SshHost,
 ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
-    state.backend.read().unwrap().upsert_ssh_host(host)
+    state.backend.upsert_ssh_host(host)
 }
 
 #[tauri::command(async)]
@@ -215,17 +197,15 @@ pub(crate) fn remove_ssh_host(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
-    state.backend.read().unwrap().remove_ssh_host(id)
+    state.backend.remove_ssh_host(id)
 }
 
 /// Remote-workspace registry (rca-routed workspaces) — list / upsert / remove.
-/// All three delegate through the backend: the registry lives on the host
-/// where sessions spawn (the probe host under a remote connection).
 #[tauri::command(async)]
 pub(crate) fn list_remote_workspaces(
     state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
-    state.backend.read().unwrap().list_remote_workspaces()
+    state.backend.list_remote_workspaces()
 }
 
 #[tauri::command(async)]
@@ -233,7 +213,7 @@ pub(crate) fn upsert_remote_workspace(
     state: tauri::State<'_, AppState>,
     entry: claw_fleet_core::remote_workspace::RemoteWorkspace,
 ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
-    state.backend.read().unwrap().upsert_remote_workspace(entry)
+    state.backend.upsert_remote_workspace(entry)
 }
 
 #[tauri::command(async)]
@@ -241,14 +221,14 @@ pub(crate) fn remove_remote_workspace(
     state: tauri::State<'_, AppState>,
     path: String,
 ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
-    state.backend.read().unwrap().remove_remote_workspace(path)
+    state.backend.remove_remote_workspace(path)
 }
 
 #[tauri::command(async)]
 pub(crate) fn get_auto_resume_config(
     state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::auto_resume::AutoResumeConfig {
-    state.backend.read().unwrap().get_auto_resume_config()
+    state.backend.get_auto_resume_config()
 }
 
 #[tauri::command(async)]
@@ -256,12 +236,11 @@ pub(crate) fn set_auto_resume_config(
     config: claw_fleet_core::auto_resume::AutoResumeConfig,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.backend.write().unwrap().set_auto_resume_config(config)
+    state.backend.set_auto_resume_config(config)
 }
 
 /// Set (or clear, when `mark` is null) the human's manual review mark for a
-/// session. Delegates via the backend so LocalBackend writes the local
-/// side-channel file and RemoteBackend POSTs it to the probe.
+/// session. Written to the local side-channel file.
 #[tauri::command(async)]
 pub(crate) fn set_session_mark(
     session_id: String,
@@ -271,14 +250,11 @@ pub(crate) fn set_session_mark(
 ) -> Result<(), String> {
     state
         .backend
-        .write()
-        .unwrap()
         .set_session_mark(session_id, workspace_path, mark)
 }
 
 /// Set (or clear, when `title` is null/empty) the human's manual title override
-/// for a session. Delegates via the backend so LocalBackend writes the local
-/// side-channel file and RemoteBackend POSTs it to the probe.
+/// for a session. Written to the local side-channel file.
 #[tauri::command]
 pub(crate) fn set_session_title(
     session_id: String,
@@ -288,8 +264,6 @@ pub(crate) fn set_session_title(
 ) -> Result<(), String> {
     state
         .backend
-        .read()
-        .unwrap()
         .set_session_title(session_id, workspace_path, title)
 }
 
@@ -301,13 +275,13 @@ pub(crate) fn mark_sessions_read(
     items: Vec<claw_fleet_core::session_read::SessionReadItem>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.backend.write().unwrap().mark_sessions_read(items)
+    state.backend.mark_sessions_read(items)
 }
 
 // ── Keep-awake (caffeinate -i equivalent) ────────────────────────────────────
-// Desktop-local power state, deliberately NOT routed through the Backend
-// trait: the assertion controls the machine the desktop app runs on (like
-// app_nap / tray), not the session host. See keep_awake.rs.
+// Desktop-local power state, a plain command rather than a `LocalBackend`
+// method: the assertion controls the desktop process itself (like app_nap /
+// tray). See keep_awake.rs.
 
 #[tauri::command]
 pub(crate) fn keep_awake_supported() -> bool {

@@ -84,8 +84,8 @@ fn build_bundle() -> String {
         claw_fleet_core::today_usage::DailyUsagePoint,
         claw_fleet_core::today_usage::UsageRangeBreakdown,
         claw_fleet_core::search_index::SearchHit,
-        claw_fleet_core::backend::WaitingAlert,
-        claw_fleet_core::backend::PendingDecisions,
+        claw_fleet_core::ui_types::WaitingAlert,
+        claw_fleet_core::ui_types::PendingDecisions,
         claw_fleet_core::skill_history::SkillInvocation,
     );
 

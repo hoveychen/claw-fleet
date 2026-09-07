@@ -13,7 +13,7 @@ pub(crate) fn git_status(
     root: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitStatus, String> {
-    state.backend.read().unwrap().git_status(&workspace, &root)
+    state.backend.git_status(&workspace, &root)
 }
 
 #[tauri::command(async)]
@@ -22,7 +22,7 @@ pub(crate) fn git_push(
     root: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
-    state.backend.read().unwrap().git_push(&workspace, &root)
+    state.backend.git_push(&workspace, &root)
 }
 
 #[tauri::command(async)]
@@ -31,7 +31,7 @@ pub(crate) fn git_pull(
     root: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
-    state.backend.read().unwrap().git_pull(&workspace, &root)
+    state.backend.git_pull(&workspace, &root)
 }
 
 /// Clone a repository into `dest`. Blocks for the whole clone (hence `async`, so
@@ -44,7 +44,7 @@ pub(crate) fn git_clone(
     dest: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
-    state.backend.read().unwrap().git_clone(&url, &dest)
+    state.backend.git_clone(&url, &dest)
 }
 
 /// Start the clone as a streaming proc and hand back its record. Returns as
@@ -56,6 +56,6 @@ pub(crate) fn start_git_clone(
     dest: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
-    state.backend.read().unwrap().start_git_clone(&url, &dest)
+    state.backend.start_git_clone(&url, &dest)
 }
 

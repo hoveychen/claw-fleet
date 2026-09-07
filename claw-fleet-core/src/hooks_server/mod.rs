@@ -446,7 +446,7 @@ pub fn serve(opts: ServeOptions) {
                     .collect();
                 for sess in &sessions {
                     if waiting_ids.contains(&sess.id) && !prev_alert_ids.contains(&sess.id) {
-                        let alert = crate::backend::WaitingAlert {
+                        let alert = crate::ui_types::WaitingAlert {
                             session_id: sess.id.clone(),
                             workspace_name: sess.workspace_name.clone(),
                             summary: sess.last_message_preview.clone().unwrap_or_default(),

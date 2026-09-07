@@ -33,7 +33,7 @@
 //! * `QUOTA_EXCEEDED` / `RATE_LIMIT` exist only as *error classifications* an
 //!   adapter assigns to a request that already failed (HTTP 429 and friends in
 //!   `dsh-llm-deepseek` / `dsh-llm-pi-ai`). They are not a pollable window with
-//!   a utilization and a reset time, which is what [`crate::backend::UsageBar`]
+//!   a utilization and a reset time, which is what [`crate::ui_types::UsageBar`]
 //!   needs.
 //!
 //! This follows from what dsh *is*: a bring-your-own-key harness. The quota

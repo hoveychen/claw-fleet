@@ -4,53 +4,53 @@ use super::*;
 
 #[tauri::command(async)]
 pub(crate) fn apply_elicitation_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().apply_elicitation_hook()
+    state.backend.apply_elicitation_hook()
 }
 
 #[tauri::command(async)]
 pub(crate) fn remove_elicitation_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().remove_elicitation_hook()
+    state.backend.remove_elicitation_hook()
 }
 
 #[tauri::command(async)]
 pub(crate) fn apply_interaction_mode(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
-    state.backend.write().unwrap().apply_interaction_mode(&title, &locale)
+    state.backend.apply_interaction_mode(&title, &locale)
 }
 
 #[tauri::command(async)]
 pub(crate) fn remove_interaction_mode(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().remove_interaction_mode()
+    state.backend.remove_interaction_mode()
 }
 
 #[tauri::command(async)]
 pub(crate) fn apply_wiki_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let locale = state.locale.lock().unwrap().clone();
-    state.backend.write().unwrap().apply_wiki_guidance(&locale)
+    state.backend.apply_wiki_guidance(&locale)
 }
 
 #[tauri::command(async)]
 pub(crate) fn remove_wiki_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().remove_wiki_guidance()
+    state.backend.remove_wiki_guidance()
 }
 
 #[tauri::command(async)]
 pub(crate) fn apply_model_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let locale = state.locale.lock().unwrap().clone();
-    state.backend.write().unwrap().apply_model_guidance(&locale)
+    state.backend.apply_model_guidance(&locale)
 }
 
 #[tauri::command(async)]
 pub(crate) fn remove_model_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().remove_model_guidance()
+    state.backend.remove_model_guidance()
 }
 
 #[tauri::command(async)]
 pub(crate) fn get_interaction_diagnostics(
     state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::interaction_mode_diagnostics::DiagnosticCheck> {
-    state.backend.read().unwrap().interaction_diagnostics()
+    state.backend.interaction_diagnostics()
 }
 
 #[tauri::command]
@@ -74,7 +74,7 @@ pub(crate) async fn test_decision_end_to_end(
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.read().unwrap().test_decision_end_to_end())
+    tokio::task::spawn_blocking(move || backend.test_decision_end_to_end())
         .await
         .map_err(|e| format!("task join error: {e}"))?
 }
@@ -84,7 +84,7 @@ pub(crate) async fn test_decision_via_claude_cli(
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.read().unwrap().test_decision_via_claude_cli())
+    tokio::task::spawn_blocking(move || backend.test_decision_via_claude_cli())
         .await
         .map_err(|e| format!("task join error: {e}"))?
 }
@@ -94,7 +94,7 @@ pub(crate) async fn test_fleet_ask_end_to_end(
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.read().unwrap().test_fleet_ask_end_to_end())
+    tokio::task::spawn_blocking(move || backend.test_fleet_ask_end_to_end())
         .await
         .map_err(|e| format!("task join error: {e}"))?
 }
@@ -104,7 +104,7 @@ pub(crate) async fn test_fleet_ask_via_claude_cli(
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
     let backend = state.backend.clone();
-    tokio::task::spawn_blocking(move || backend.read().unwrap().test_fleet_ask_via_claude_cli())
+    tokio::task::spawn_blocking(move || backend.test_fleet_ask_via_claude_cli())
         .await
         .map_err(|e| format!("task join error: {e}"))?
 }
@@ -113,12 +113,12 @@ pub(crate) async fn test_fleet_ask_via_claude_cli(
 pub(crate) fn apply_prd_mode(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
-    state.backend.write().unwrap().apply_prd_mode(&title, &locale)
+    state.backend.apply_prd_mode(&title, &locale)
 }
 
 #[tauri::command(async)]
 pub(crate) fn remove_prd_mode(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.write().unwrap().remove_prd_mode()
+    state.backend.remove_prd_mode()
 }
 
 /// Mirror the Claude concept toggles onto codex's AGENTS.md. Called by the
@@ -130,8 +130,6 @@ pub(crate) fn reconcile_codex_guidance(state: tauri::State<'_, AppState>) -> Res
     let locale = state.locale.lock().unwrap().clone();
     state
         .backend
-        .write()
-        .unwrap()
         .reconcile_codex_guidance(&title, &locale)
 }
 
@@ -144,8 +142,6 @@ pub(crate) fn respond_to_elicitation(
 ) -> Result<(), String> {
     state
         .backend
-        .write()
-        .unwrap()
         .respond_to_elicitation(&id, declined, answers)
 }
 
@@ -158,8 +154,6 @@ pub(crate) fn respond_to_fleet_ask(
 ) -> Result<(), String> {
     state
         .backend
-        .write()
-        .unwrap()
         .respond_to_fleet_ask(&id, cancelled, answers)
 }
 
@@ -172,8 +166,6 @@ pub(crate) fn respond_to_permission_prompt(
 ) -> Result<(), String> {
     state
         .backend
-        .write()
-        .unwrap()
         .respond_to_permission_prompt(&id, allow, reason)
 }
 
@@ -187,8 +179,6 @@ pub(crate) fn respond_to_a2ui_render(
 ) -> Result<(), String> {
     state
         .backend
-        .write()
-        .unwrap()
         .respond_to_a2ui_render(&id, cancelled, action_name, action_context)
 }
 
@@ -203,7 +193,7 @@ pub(crate) fn apply_mcp_injector(state: tauri::State<'_, AppState>) -> Result<()
                  build fleet-cli or install the production sidecar so the MCP \
                  injector can point at a real `command` path")?;
     let fleet_path = p.to_string_lossy().to_string();
-    state.backend.write().unwrap().apply_mcp_injector(&fleet_path)
+    state.backend.apply_mcp_injector(&fleet_path)
 }
 
 #[tauri::command(async)]
@@ -214,8 +204,6 @@ pub(crate) fn upload_elicitation_attachment(
 ) -> Result<String, String> {
     state
         .backend
-        .write()
-        .unwrap()
         .upload_attachment(std::path::Path::new(&source_path), from_clipboard)
 }
 
@@ -224,11 +212,11 @@ pub(crate) fn upload_elicitation_attachment(
 #[tauri::command]
 pub(crate) fn stage_pasted_attachment(bytes: Vec<u8>, extension: String) -> Result<String, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
-    if (bytes.len() as u64) > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
+    if (bytes.len() as u64) > claw_fleet_core::ui_types::MAX_ATTACHMENT_BYTES {
         return Err(format!(
             "attachment too large: {} bytes (max {})",
             bytes.len(),
-            claw_fleet_core::backend::MAX_ATTACHMENT_BYTES
+            claw_fleet_core::ui_types::MAX_ATTACHMENT_BYTES
         ));
     }
     let dir = std::env::temp_dir().join("fleet-pasted");
@@ -255,11 +243,11 @@ pub(crate) fn stage_pasted_attachment(bytes: Vec<u8>, extension: String) -> Resu
 #[tauri::command]
 pub(crate) fn read_local_file_bytes(path: String) -> Result<Vec<u8>, String> {
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-    if (bytes.len() as u64) > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
+    if (bytes.len() as u64) > claw_fleet_core::ui_types::MAX_ATTACHMENT_BYTES {
         return Err(format!(
             "file too large: {} bytes (max {})",
             bytes.len(),
-            claw_fleet_core::backend::MAX_ATTACHMENT_BYTES
+            claw_fleet_core::ui_types::MAX_ATTACHMENT_BYTES
         ));
     }
     Ok(bytes)

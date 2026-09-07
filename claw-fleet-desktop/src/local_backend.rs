@@ -6,6 +6,8 @@
 //! sources that require it.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::pin::Pin;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -17,7 +19,13 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 
 use crate::agent_source::{AgentSource, WatchStrategy};
-use crate::backend::{Backend, WaitingAlert};
+use crate::ui_types::WaitingAlert;
+
+/// A boxed, Send future returning `Result<T, String>`.
+pub type AccountInfoFuture =
+    Pin<Box<dyn Future<Output = Result<crate::account::AccountInfo, String>> + Send>>;
+/// Generic future for per-source account/usage data (returns untyped JSON).
+pub type SourceDataFuture = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
 use crate::log_debug;
 use crate::search_index::SearchIndex;
 use crate::session::{SessionInfo, SessionStatus};
@@ -372,7 +380,7 @@ impl LocalBackend {
         // cross-runtime skills (opt-in; see `skill_sync::auto_reconcile`). Only
         // the process that *owns* the skill files — the desktop LocalBackend —
         // runs this; remote auto-reconcile is deliberately out of scope for the
-        // MVP (manual adopt/sync/unlink already work over the Backend trait).
+        // MVP (manual adopt/sync/unlink already work through LocalBackend).
         let mut skills_watch_dirs: Vec<std::path::PathBuf> = Vec::new();
         if let Some(claude) = crate::session::get_claude_dir() {
             skills_watch_dirs.push(claude.join("skills"));
@@ -1780,21 +1788,84 @@ fn refresh_dead_codex_liveness_and_emit(
     }
 }
 
-// ── Backend impl ──────────────────────────────────────────────────────────────
+// ── Public API — what the Tauri commands call ─────────────────────────────────
 
-impl Backend for LocalBackend {
-    fn list_sessions(&self) -> Vec<SessionInfo> {
+impl LocalBackend {
+    pub fn list_sessions(&self) -> Vec<SessionInfo> {
         self.sessions.lock().unwrap().clone()
     }
 
-    fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
+    pub fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
         match find_source_for_path(&self.sources, path) {
             Some(source) => source.get_messages(path),
             None => Err(format!("No agent source can handle path: {path}")),
         }
     }
 
-    fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
+    /// Full, untrimmed tool output for one `tool_use_id` in `path`. The tail
+    /// payload from `get_messages_tail` truncates oversized tool output for
+    /// transport (see [`crate::message_trim`]); the frontend calls this when the
+    /// reader expands a card flagged `_fleetTruncated`.
+    pub fn get_tool_result_full(&self, path: &str, tool_use_id: &str) -> Result<Value, String> {
+        crate::message_trim::extract_full_tool_result(std::path::Path::new(path), tool_use_id)
+    }
+
+    /// Registered agent loops (`fleet loop`) — recurring future tasks.
+    pub fn list_loops(&self) -> Vec<crate::agent_loop::LoopRecord> {
+        crate::agent_loop::list()
+    }
+
+    /// Registered one-shot schedules (`fleet schedule`), pending + fired history.
+    pub fn list_schedules(&self) -> Vec<crate::schedule::ScheduleRecord> {
+        crate::schedule::list()
+    }
+
+    /// Cancel a loop by id.
+    pub fn cancel_loop(&self, id: String) -> Result<(), String> {
+        if crate::agent_loop::stop(&id) {
+            Ok(())
+        } else {
+            Err(format!("no loop with id {id}"))
+        }
+    }
+
+    /// Cancel (or forget-history-of) a schedule by id.
+    pub fn cancel_schedule(&self, id: String) -> Result<(), String> {
+        if crate::schedule::cancel(&id) {
+            Ok(())
+        } else {
+            Err(format!("no schedule with id {id}"))
+        }
+    }
+
+    /// Edit a still-`Pending` schedule (prompt / fire time / model / effort /
+    /// agent source) and re-arm its timer so the new time+generation takes
+    /// effect. It must both persist *and* re-arm, because the detached timer
+    /// lives in this process.
+    pub fn update_schedule(
+        &self,
+        update: crate::schedule::ScheduleUpdate,
+    ) -> Result<crate::schedule::ScheduleRecord, String> {
+        let rec = crate::schedule::update(&update)?;
+        let _ = crate::schedule::arm_timer(&rec);
+        Ok(rec)
+    }
+
+    /// fleet__ask depth-2 test: write a fake `FleetAskRequest` so the
+    /// MCP-side watcher emits `fleet-ask-request` and the frontend renders
+    /// a composite (html + form + options) test card. Cleanup auto-runs.
+    pub fn test_fleet_ask_end_to_end(&self) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_fleet_ask_end_to_end_test(std::time::Duration::from_secs(10))
+    }
+
+    /// fleet__ask depth-3 test: spawn `claude -p "<prompt>"` with
+    /// `--allowed-tools "mcp__fleet__ask"` so the Agent actually invokes
+    /// the MCP tool. Mirrors `test_decision_via_claude_cli`.
+    pub fn test_fleet_ask_via_claude_cli(&self) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_fleet_ask_claude_cli_test(std::time::Duration::from_secs(60))
+    }
+
+    pub fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
         match find_source_for_path(&self.sources, path) {
             Some(source) => {
                 let mut msgs = source.get_messages_tail(path, n)?;
@@ -1808,14 +1879,14 @@ impl Backend for LocalBackend {
         }
     }
 
-    fn interrupt_agent_session(&self, path: String) -> Result<(), String> {
+    pub fn interrupt_agent_session(&self, path: String) -> Result<(), String> {
         // No rescan kick here, unlike the pid paths: the source that owns the
         // session pushes its own status (dsh's `turn/end` arrives on the mux
         // within the same second), so a forced re-poll would only race it.
         claw_fleet_core::agent_source::interrupt_session_at(&path)
     }
 
-    fn interrupt_pid(&self, pid: u32) -> Result<(), String> {
+    pub fn interrupt_pid(&self, pid: u32) -> Result<(), String> {
         claw_fleet_core::session::interrupt_pid_impl(pid)?;
         // The CLI needs a moment to write its interrupt marker and exit, so the
         // rescan lags further behind than the kill path's.
@@ -1830,7 +1901,7 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn kill_pid(&self, pid: u32) -> Result<(), String> {
+    pub fn kill_pid(&self, pid: u32) -> Result<(), String> {
         claw_fleet_core::session::kill_pid_impl(pid)?;
         // Trigger a rescan after a delay.
         let app = self.app.clone();
@@ -1844,7 +1915,7 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn kill_workspace(&self, workspace_path: String) -> Result<(), String> {
+    pub fn kill_workspace(&self, workspace_path: String) -> Result<(), String> {
         claw_fleet_core::session::kill_workspace_impl(&workspace_path)?;
         // Trigger a rescan after a delay.
         let app = self.app.clone();
@@ -1858,7 +1929,7 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn resume_session(
+    pub fn resume_session(
         &self,
         session_id: String,
         workspace_path: String,
@@ -1901,7 +1972,7 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn enqueue_message(
+    pub fn enqueue_message(
         &self,
         session_id: String,
         workspace_path: String,
@@ -1914,7 +1985,7 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn cancel_pending_message(&self, session_id: String, index: usize) -> Result<(), String> {
+    pub fn cancel_pending_message(&self, session_id: String, index: usize) -> Result<(), String> {
         claw_fleet_core::pending_message::remove_at(&session_id, index)?;
         // Re-enrich + emit so the cancelled chip disappears immediately, matching
         // the enqueue path's instant feedback.
@@ -1922,18 +1993,18 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn chat_workspace(&self) -> Result<String, String> {
+    pub fn chat_workspace(&self) -> Result<String, String> {
         claw_fleet_core::chat_workspace::chat_workspace_for_ui()
     }
 
-    fn browse_dir(
+    pub fn browse_dir(
         &self,
         path: Option<String>,
     ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
         claw_fleet_core::workspace_browse::browse_dir(path.as_deref(), &self.known_workspaces())
     }
 
-    fn remote_browse_dir(
+    pub fn remote_browse_dir(
         &self,
         ssh_target: String,
         path: Option<String>,
@@ -1941,11 +2012,11 @@ impl Backend for LocalBackend {
         claw_fleet_core::remote_host::browse_remote_dir(&ssh_target, path.as_deref())
     }
 
-    fn remote_host_health(&self, ssh_target: String) -> claw_fleet_core::remote_host::HostHealth {
+    pub fn remote_host_health(&self, ssh_target: String) -> claw_fleet_core::remote_host::HostHealth {
         claw_fleet_core::remote_host::host_health(&ssh_target)
     }
 
-    fn remote_create_dir(
+    pub fn remote_create_dir(
         &self,
         ssh_target: String,
         path: Option<String>,
@@ -1954,25 +2025,25 @@ impl Backend for LocalBackend {
         claw_fleet_core::remote_host::create_remote_dir(&ssh_target, path.as_deref(), &name)
     }
 
-    fn list_ssh_hosts(&self) -> Vec<claw_fleet_core::remote_host::SshHost> {
+    pub fn list_ssh_hosts(&self) -> Vec<claw_fleet_core::remote_host::SshHost> {
         claw_fleet_core::remote_host::load_hosts()
     }
 
-    fn upsert_ssh_host(
+    pub fn upsert_ssh_host(
         &self,
         host: claw_fleet_core::remote_host::SshHost,
     ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
         claw_fleet_core::remote_host::upsert_host(host)
     }
 
-    fn remove_ssh_host(
+    pub fn remove_ssh_host(
         &self,
         id: String,
     ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
         claw_fleet_core::remote_host::remove_host(&id)
     }
 
-    fn create_dir(
+    pub fn create_dir(
         &self,
         path: Option<String>,
         name: String,
@@ -1984,25 +2055,25 @@ impl Backend for LocalBackend {
         )
     }
 
-    fn list_remote_workspaces(&self) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
+    pub fn list_remote_workspaces(&self) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
         claw_fleet_core::remote_workspace::load()
     }
 
-    fn upsert_remote_workspace(
+    pub fn upsert_remote_workspace(
         &self,
         entry: claw_fleet_core::remote_workspace::RemoteWorkspace,
     ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
         claw_fleet_core::remote_workspace::upsert(entry)
     }
 
-    fn remove_remote_workspace(
+    pub fn remove_remote_workspace(
         &self,
         path: String,
     ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
         claw_fleet_core::remote_workspace::remove(&path)
     }
 
-    fn spawn_new_session(
+    pub fn spawn_new_session(
         &self,
         workspace_path: String,
         prompt: String,
@@ -2038,18 +2109,18 @@ impl Backend for LocalBackend {
         Ok(resp)
     }
 
-    fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
+    pub fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
         claw_fleet_core::auto_resume::AutoResumeConfig::load()
     }
 
-    fn set_auto_resume_config(
+    pub fn set_auto_resume_config(
         &self,
         config: claw_fleet_core::auto_resume::AutoResumeConfig,
     ) -> Result<(), String> {
         config.save()
     }
 
-    fn set_session_mark(
+    pub fn set_session_mark(
         &self,
         session_id: String,
         workspace_path: String,
@@ -2060,7 +2131,7 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn set_session_title(
+    pub fn set_session_title(
         &self,
         session_id: String,
         workspace_path: String,
@@ -2071,7 +2142,7 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn mark_sessions_read(
+    pub fn mark_sessions_read(
         &self,
         items: Vec<claw_fleet_core::session_read::SessionReadItem>,
     ) -> Result<(), String> {
@@ -2080,11 +2151,11 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
+    pub fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
         claw_fleet_core::proc_runner::list_procs()
     }
 
-    fn spawn_proc(
+    pub fn spawn_proc(
         &self,
         workspace_path: String,
         command: String,
@@ -2097,11 +2168,11 @@ impl Backend for LocalBackend {
         claw_fleet_core::proc_runner::spawn_proc(&exe, &workspace_path, &command, cols, rows)
     }
 
-    fn kill_proc(&self, id: String, force: bool) -> Result<(), String> {
+    pub fn kill_proc(&self, id: String, force: bool) -> Result<(), String> {
         claw_fleet_core::proc_runner::kill_proc(&id, force)
     }
 
-    fn proc_output(
+    pub fn proc_output(
         &self,
         id: String,
         offset: Option<u64>,
@@ -2109,26 +2180,26 @@ impl Backend for LocalBackend {
         claw_fleet_core::proc_runner::proc_output(&id, offset)
     }
 
-    fn proc_input(&self, id: String, data_b64: String) -> Result<(), String> {
+    pub fn proc_input(&self, id: String, data_b64: String) -> Result<(), String> {
         claw_fleet_core::proc_runner::proc_input(&id, &data_b64)
     }
 
-    fn proc_resize(&self, id: String, cols: u16, rows: u16) -> Result<(), String> {
+    pub fn proc_resize(&self, id: String, cols: u16, rows: u16) -> Result<(), String> {
         claw_fleet_core::proc_runner::proc_resize(&id, cols, rows)
     }
 
-    fn clear_procs(&self, id: Option<String>, workspace_path: Option<String>) -> Result<u32, String> {
+    pub fn clear_procs(&self, id: Option<String>, workspace_path: Option<String>) -> Result<u32, String> {
         match id {
             Some(id) => claw_fleet_core::proc_runner::clear_proc(&id).map(|()| 1),
             None => claw_fleet_core::proc_runner::clear_finished_procs(workspace_path.as_deref()),
         }
     }
 
-    fn account_info(&self) -> crate::backend::AccountInfoFuture {
+    pub fn account_info(&self) -> AccountInfoFuture {
         Box::pin(crate::account::fetch_account_info())
     }
 
-    fn source_account(&self, source: &str) -> crate::backend::SourceDataFuture {
+    pub fn source_account(&self, source: &str) -> SourceDataFuture {
         let config = crate::agent_source::SourcesConfig::load();
         if !config.is_source_enabled(source) {
             let msg = format!("Source '{}' is disabled", source);
@@ -2147,7 +2218,7 @@ impl Backend for LocalBackend {
         })
     }
 
-    fn source_usage(&self, source: &str) -> crate::backend::SourceDataFuture {
+    pub fn source_usage(&self, source: &str) -> SourceDataFuture {
         let config = crate::agent_source::SourcesConfig::load();
         if !config.is_source_enabled(source) {
             let msg = format!("Source '{}' is disabled", source);
@@ -2166,7 +2237,7 @@ impl Backend for LocalBackend {
         })
     }
 
-    fn usage_summaries(&self) -> Vec<crate::backend::SourceUsageSummary> {
+    pub fn usage_summaries(&self) -> Vec<crate::ui_types::SourceUsageSummary> {
         self.sources
             .iter()
             .filter(|s| s.is_available())
@@ -2174,17 +2245,17 @@ impl Backend for LocalBackend {
             .collect()
     }
 
-    fn today_usage(&self) -> crate::today_usage::TodayUsage {
+    pub fn today_usage(&self) -> crate::today_usage::TodayUsage {
         let sessions = self.sessions.lock().unwrap().clone();
         crate::today_usage::today_usage(&sessions)
     }
 
-    fn today_usage_breakdown(&self) -> crate::today_usage::TodayUsageBreakdown {
+    pub fn today_usage_breakdown(&self) -> crate::today_usage::TodayUsageBreakdown {
         let sessions = self.sessions.lock().unwrap().clone();
         crate::today_usage::today_usage_breakdown(&sessions)
     }
 
-    fn usage_range_breakdown(
+    pub fn usage_range_breakdown(
         &self,
         from_ms: i64,
         to_ms: i64,
@@ -2193,7 +2264,7 @@ impl Backend for LocalBackend {
         crate::today_usage::usage_range_breakdown(&sessions, from_ms, to_ms)
     }
 
-    fn check_setup(&self) -> crate::backend::SetupStatus {
+    pub fn check_setup(&self) -> crate::ui_types::SetupStatus {
         let (cli_installed, cli_path) = crate::check_cli_installed();
         let claude_dir_exists = crate::session::get_claude_dir()
             .map(|d| d.is_dir())
@@ -2203,7 +2274,7 @@ impl Backend for LocalBackend {
         let logged_in = crate::account::read_keychain_credentials().is_ok();
         let has_sessions = !sessions.is_empty();
 
-        crate::backend::SetupStatus {
+        crate::ui_types::SetupStatus {
             cli_installed,
             cli_path,
             claude_dir_exists,
@@ -2214,11 +2285,11 @@ impl Backend for LocalBackend {
         }
     }
 
-    fn harness_statuses(&self) -> Vec<crate::harness_status::HarnessStatus> {
+    pub fn harness_statuses(&self) -> Vec<crate::harness_status::HarnessStatus> {
         crate::harness_status::probe_all()
     }
 
-    fn start_watch(&self, path: String) -> Result<u64, String> {
+    pub fn start_watch(&self, path: String) -> Result<u64, String> {
         match watch_start_target(&self.sources, &path)? {
             // Non-filesystem (polling) source — nothing to tail on disk.
             None => {
@@ -2232,11 +2303,11 @@ impl Backend for LocalBackend {
         }
     }
 
-    fn stop_watch(&self) {
+    pub fn stop_watch(&self) {
         self.watch.clear();
     }
 
-    fn list_memories(&self) -> Vec<crate::memory::WorkspaceMemory> {
+    pub fn list_memories(&self) -> Vec<crate::memory::WorkspaceMemory> {
         let mut all = Vec::new();
         for source in self.sources.iter() {
             all.extend(source.list_memories());
@@ -2244,14 +2315,14 @@ impl Backend for LocalBackend {
         all
     }
 
-    fn read_live_thinking(
+    pub fn read_live_thinking(
         &self,
         session_id: &str,
     ) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
         claw_fleet_core::live_thinking::read_live_thinking(session_id)
     }
 
-    fn get_memory_content(&self, path: &str) -> Result<String, String> {
+    pub fn get_memory_content(&self, path: &str) -> Result<String, String> {
         for source in self.sources.iter() {
             if let Ok(content) = source.get_memory_content(path) {
                 return Ok(content);
@@ -2260,7 +2331,7 @@ impl Backend for LocalBackend {
         Err("Memory file not found in any source".to_string())
     }
 
-    fn get_memory_history(&self, path: &str) -> Vec<crate::memory::MemoryHistoryEntry> {
+    pub fn get_memory_history(&self, path: &str) -> Vec<crate::memory::MemoryHistoryEntry> {
         for source in self.sources.iter() {
             let history = source.get_memory_history(path);
             if !history.is_empty() {
@@ -2270,22 +2341,22 @@ impl Backend for LocalBackend {
         vec![]
     }
 
-    fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc> {
+    pub fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc> {
         crate::wiki::list_docs()
     }
 
-    fn get_handoff_chain(
+    pub fn get_handoff_chain(
         &self,
         session_id: &str,
     ) -> Result<Option<crate::handoff::HandoffChain>, String> {
         Ok(crate::handoff::chain_containing(session_id))
     }
 
-    fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String> {
+    pub fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String> {
         crate::wiki::get_doc(slug)
     }
 
-    fn get_wiki_file(
+    pub fn get_wiki_file(
         &self,
         slug: &str,
         version: &str,
@@ -2294,7 +2365,7 @@ impl Backend for LocalBackend {
         crate::wiki::get_file(slug, version, relpath)
     }
 
-    fn get_decision_asset(
+    pub fn get_decision_asset(
         &self,
         id: &str,
         qidx: &str,
@@ -2303,18 +2374,18 @@ impl Backend for LocalBackend {
         crate::mcp_ipc::read_decision_asset(id, qidx, relpath)
     }
 
-    fn read_review_doc(
+    pub fn read_review_doc(
         &self,
         doc: &crate::mcp_ipc::ReviewDoc,
     ) -> Result<crate::mcp_ipc::ReviewDocContent, String> {
         crate::mcp_ipc::read_review_doc(doc)
     }
 
-    fn list_session_images(&self, session_id: &str) -> Vec<crate::codex_image::GeneratedImage> {
+    pub fn list_session_images(&self, session_id: &str) -> Vec<crate::codex_image::GeneratedImage> {
         crate::codex_image::list_thread_images(session_id)
     }
 
-    fn get_session_image(
+    pub fn get_session_image(
         &self,
         session_id: &str,
         name: &str,
@@ -2322,15 +2393,15 @@ impl Backend for LocalBackend {
         crate::codex_image::read_thread_image(session_id, name)
     }
 
-    fn list_artifacts(&self) -> Vec<crate::artifacts::Artifact> {
+    pub fn list_artifacts(&self) -> Vec<crate::artifacts::Artifact> {
         crate::artifacts::list()
     }
 
-    fn get_artifact(&self, id: &str) -> Result<crate::artifacts::Artifact, String> {
+    pub fn get_artifact(&self, id: &str) -> Result<crate::artifacts::Artifact, String> {
         crate::artifacts::get(id)
     }
 
-    fn add_artifact(
+    pub fn add_artifact(
         &self,
         source_path: &str,
         title: &str,
@@ -2350,7 +2421,7 @@ impl Backend for LocalBackend {
         )
     }
 
-    fn update_artifact(
+    pub fn update_artifact(
         &self,
         id: &str,
         title: Option<&str>,
@@ -2360,11 +2431,11 @@ impl Backend for LocalBackend {
         crate::artifacts::update(id, title, note, starred)
     }
 
-    fn delete_artifact(&self, id: &str) -> Result<(), String> {
+    pub fn delete_artifact(&self, id: &str) -> Result<(), String> {
         crate::artifacts::delete(id)
     }
 
-    fn read_artifact_bytes(
+    pub fn read_artifact_bytes(
         &self,
         id: &str,
         range: Option<(u64, u64)>,
@@ -2372,39 +2443,39 @@ impl Backend for LocalBackend {
         crate::artifacts::read_bytes(id, range)
     }
 
-    fn artifact_usage(&self) -> crate::artifacts::StoreUsage {
+    pub fn artifact_usage(&self) -> crate::artifacts::StoreUsage {
         crate::artifacts::usage()
     }
 
-    fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
+    pub fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
         crate::wiki::delete_doc(slug)
     }
 
-    fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String> {
+    pub fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String> {
         crate::wiki::delete_version(slug, version)
     }
 
-    fn move_wiki_doc(&self, from: &str, to: &str) -> Result<crate::wiki::WikiDoc, String> {
+    pub fn move_wiki_doc(&self, from: &str, to: &str) -> Result<crate::wiki::WikiDoc, String> {
         crate::wiki::move_doc(from, to)
     }
 
-    fn move_wiki_folder(&self, from: &str, to: &str) -> Result<Vec<crate::wiki::WikiDoc>, String> {
+    pub fn move_wiki_folder(&self, from: &str, to: &str) -> Result<Vec<crate::wiki::WikiDoc>, String> {
         crate::wiki::move_folder(from, to)
     }
 
-    fn delete_wiki_folder(&self, prefix: &str) -> Result<usize, String> {
+    pub fn delete_wiki_folder(&self, prefix: &str) -> Result<usize, String> {
         crate::wiki::delete_folder(prefix)
     }
 
-    fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
+    pub fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
         crate::wiki::search_docs(query)
     }
 
-    fn export_wiki_doc(&self, slug: &str, version: &str) -> Result<crate::wiki::WikiExport, String> {
+    pub fn export_wiki_doc(&self, slug: &str, version: &str) -> Result<crate::wiki::WikiExport, String> {
         crate::wiki::export_doc(slug, version)
     }
 
-    fn publish_wiki_text(
+    pub fn publish_wiki_text(
         &self,
         slug: &str,
         title: &str,
@@ -2416,7 +2487,7 @@ impl Backend for LocalBackend {
         crate::wiki::publish_text(slug, title, text, std::path::Path::new(workspace_path), mode)
     }
 
-    fn get_task_plans(
+    pub fn get_task_plans(
         &self,
         workspace_path: &str,
         session_id: Option<&str>,
@@ -2424,7 +2495,7 @@ impl Backend for LocalBackend {
         crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace_path), session_id)
     }
 
-    fn get_plan_forest(&self, workspace_path: &str) -> claw_fleet_core::plan_forest::PlanForest {
+    pub fn get_plan_forest(&self, workspace_path: &str) -> claw_fleet_core::plan_forest::PlanForest {
         // Chains are stored per-machine, not per-workspace, so scope them here
         // before the join — otherwise another repo's relays would show up on a
         // same-named plan id.
@@ -2435,26 +2506,26 @@ impl Backend for LocalBackend {
         claw_fleet_core::plan_forest::build(std::path::Path::new(workspace_path), chains)
     }
 
-    fn list_browse_paths(&self) -> Vec<String> {
+    pub fn list_browse_paths(&self) -> Vec<String> {
         claw_fleet_core::browse_paths::list()
     }
 
-    fn add_browse_path(&self, path: &str) -> Result<Vec<String>, String> {
+    pub fn add_browse_path(&self, path: &str) -> Result<Vec<String>, String> {
         claw_fleet_core::browse_paths::add(path)
     }
 
-    fn remove_browse_path(&self, path: &str) -> Result<Vec<String>, String> {
+    pub fn remove_browse_path(&self, path: &str) -> Result<Vec<String>, String> {
         claw_fleet_core::browse_paths::remove(path)
     }
 
-    fn list_explorer_roots(
+    pub fn list_explorer_roots(
         &self,
         workspace: &str,
     ) -> Result<Vec<crate::file_explorer::ExplorerRoot>, String> {
         crate::file_explorer::list_roots(workspace, &self.known_workspaces())
     }
 
-    fn list_explorer_dir(
+    pub fn list_explorer_dir(
         &self,
         workspace: &str,
         root: &str,
@@ -2470,7 +2541,7 @@ impl Backend for LocalBackend {
         )
     }
 
-    fn read_explorer_file(
+    pub fn read_explorer_file(
         &self,
         workspace: &str,
         root: &str,
@@ -2479,7 +2550,7 @@ impl Backend for LocalBackend {
         crate::file_explorer::read_file(workspace, root, rel_path, &self.known_workspaces())
     }
 
-    fn find_explorer_path(
+    pub fn find_explorer_path(
         &self,
         workspace: &str,
         root: &str,
@@ -2488,14 +2559,14 @@ impl Backend for LocalBackend {
         crate::file_explorer::find_by_suffix(workspace, root, rel_suffix, &self.known_workspaces())
     }
 
-    fn read_external_file(
+    pub fn read_external_file(
         &self,
         path: &str,
     ) -> Result<crate::file_explorer::ExplorerFileContent, String> {
         crate::file_explorer::read_external_file(path)
     }
 
-    fn list_scratchpad_dir(
+    pub fn list_scratchpad_dir(
         &self,
         workspace: &str,
         session_id: &str,
@@ -2509,7 +2580,7 @@ impl Backend for LocalBackend {
         )
     }
 
-    fn read_scratchpad_file(
+    pub fn read_scratchpad_file(
         &self,
         workspace: &str,
         session_id: &str,
@@ -2523,7 +2594,7 @@ impl Backend for LocalBackend {
         )
     }
 
-    fn git_status(
+    pub fn git_status(
         &self,
         workspace: &str,
         root: &str,
@@ -2531,7 +2602,7 @@ impl Backend for LocalBackend {
         crate::git_ops::git_status(workspace, root, &self.known_workspaces())
     }
 
-    fn git_push(
+    pub fn git_push(
         &self,
         workspace: &str,
         root: &str,
@@ -2539,7 +2610,7 @@ impl Backend for LocalBackend {
         crate::git_ops::git_push(workspace, root, &self.known_workspaces())
     }
 
-    fn git_pull(
+    pub fn git_pull(
         &self,
         workspace: &str,
         root: &str,
@@ -2547,7 +2618,7 @@ impl Backend for LocalBackend {
         crate::git_ops::git_pull(workspace, root, &self.known_workspaces())
     }
 
-    fn start_git_clone(
+    pub fn start_git_clone(
         &self,
         url: &str,
         dest: &str,
@@ -2563,7 +2634,7 @@ impl Backend for LocalBackend {
         )
     }
 
-    fn git_clone(&self, url: &str, dest: &str) -> Result<crate::git_ops::GitOpResult, String> {
+    pub fn git_clone(&self, url: &str, dest: &str) -> Result<crate::git_ops::GitOpResult, String> {
         let result = crate::git_ops::git_clone(url, dest)?;
         // A fresh clone has no sessions, so without registering it the 仓库 page
         // would list the card and then refuse to open its file tree.
@@ -2575,23 +2646,23 @@ impl Backend for LocalBackend {
         Ok(result)
     }
 
-    fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
+    pub fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
         crate::skills::scan_all_skills_for_workspaces(&self.known_workspaces())
     }
 
-    fn skill_sync_inventory(&self) -> Result<Vec<crate::skill_sync::SkillSyncEntry>, String> {
+    pub fn skill_sync_inventory(&self) -> Result<Vec<crate::skill_sync::SkillSyncEntry>, String> {
         crate::skill_sync::inventory()
     }
 
-    fn skill_sync_apply(&self) -> Result<crate::skill_sync::SkillSyncReport, String> {
+    pub fn skill_sync_apply(&self) -> Result<crate::skill_sync::SkillSyncReport, String> {
         crate::skill_sync::sync(true)
     }
 
-    fn skill_sync_adopt(&self, path: &str) -> Result<crate::skill_sync::SkillSyncReport, String> {
+    pub fn skill_sync_adopt(&self, path: &str) -> Result<crate::skill_sync::SkillSyncReport, String> {
         crate::skill_sync::adopt(std::path::Path::new(path))
     }
 
-    fn skill_sync_unlink(
+    pub fn skill_sync_unlink(
         &self,
         slug: &str,
         target: crate::skill_sync::SkillTarget,
@@ -2599,58 +2670,58 @@ impl Backend for LocalBackend {
         crate::skill_sync::unlink(slug, target)
     }
 
-    fn get_skill_autosync(&self) -> Result<bool, String> {
+    pub fn get_skill_autosync(&self) -> Result<bool, String> {
         Ok(crate::skill_sync::auto_sync_enabled())
     }
 
-    fn set_skill_autosync(&self, enabled: bool) -> Result<(), String> {
+    pub fn set_skill_autosync(&self, enabled: bool) -> Result<(), String> {
         crate::skill_sync::set_auto_sync_enabled(enabled)
     }
 
-    fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {
+    pub fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {
         crate::plugins::scan_with_catalog()
     }
 
-    fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<(), String> {
+    pub fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<(), String> {
         crate::claude_cli::set_plugin_enabled(plugin_id, enabled).map_err(|e| e.to_string())
     }
 
-    fn install_plugin(&self, plugin_id: &str) -> Result<(), String> {
+    pub fn install_plugin(&self, plugin_id: &str) -> Result<(), String> {
         crate::claude_cli::install_plugin(plugin_id).map_err(|e| e.to_string())
     }
 
-    fn uninstall_plugin(&self, plugin_id: &str) -> Result<(), String> {
+    pub fn uninstall_plugin(&self, plugin_id: &str) -> Result<(), String> {
         crate::claude_cli::uninstall_plugin(plugin_id).map_err(|e| e.to_string())
     }
 
-    fn list_marketplaces(&self) -> Vec<crate::claude_cli::CliMarketplace> {
+    pub fn list_marketplaces(&self) -> Vec<crate::claude_cli::CliMarketplace> {
         crate::claude_cli::list_marketplaces().unwrap_or_default()
     }
 
-    fn add_marketplace(&self, source: &str) -> Result<(), String> {
+    pub fn add_marketplace(&self, source: &str) -> Result<(), String> {
         crate::claude_cli::add_marketplace(source).map_err(|e| e.to_string())
     }
 
-    fn remove_marketplace(&self, name: &str) -> Result<(), String> {
+    pub fn remove_marketplace(&self, name: &str) -> Result<(), String> {
         crate::claude_cli::remove_marketplace(name).map_err(|e| e.to_string())
     }
 
-    fn get_skill_content(&self, path: &str) -> Result<String, String> {
+    pub fn get_skill_content(&self, path: &str) -> Result<String, String> {
         crate::skills::read_skill_file(path)
     }
 
-    fn list_skill_files(
+    pub fn list_skill_files(
         &self,
         skill_path: &str,
     ) -> Result<Vec<crate::skills::SkillFileEntry>, String> {
         crate::skills::list_skill_files(skill_path)
     }
 
-    fn delete_skill(&self, skill_path: &str) -> Result<(), String> {
+    pub fn delete_skill(&self, skill_path: &str) -> Result<(), String> {
         crate::skills::delete_skill(skill_path)
     }
 
-    fn get_skill_history(
+    pub fn get_skill_history(
         &self,
         jsonl_path: &str,
     ) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
@@ -2670,7 +2741,7 @@ impl Backend for LocalBackend {
         Ok(out)
     }
 
-    fn get_workflow_trees(
+    pub fn get_workflow_trees(
         &self,
         jsonl_path: &str,
     ) -> Result<Vec<claw_fleet_core::workflow::WorkflowTree>, String> {
@@ -2679,7 +2750,7 @@ impl Backend for LocalBackend {
         ))
     }
 
-    fn get_task_token_breakdown(
+    pub fn get_task_token_breakdown(
         &self,
         main_jsonl_path: &str,
         project_root: Option<&str>,
@@ -2689,56 +2760,56 @@ impl Backend for LocalBackend {
         claw_fleet_core::token_analysis::aggregate_task(main_path, project_path)
     }
 
-    fn get_codex_token_breakdown(
+    pub fn get_codex_token_breakdown(
         &self,
         jsonl_path: &str,
     ) -> Result<claw_fleet_core::codex_source::CodexTokenBreakdown, String> {
         claw_fleet_core::codex_source::codex_token_breakdown(jsonl_path)
     }
 
-    fn get_dsh_token_breakdown(
+    pub fn get_dsh_token_breakdown(
         &self,
         uri: &str,
     ) -> Result<claw_fleet_core::dsh_source::DshTokenBreakdown, String> {
         claw_fleet_core::dsh_source::dsh_token_breakdown(uri)
     }
 
-    fn get_dsh_session_cost(
+    pub fn get_dsh_session_cost(
         &self,
         uri: &str,
     ) -> Result<claw_fleet_core::dsh_cost::DshSessionCost, String> {
         claw_fleet_core::dsh_cost::dsh_session_cost(uri)
     }
 
-    fn dsh_models(&self) -> Result<claw_fleet_core::dsh_source::DshModelCatalog, String> {
+    pub fn dsh_models(&self) -> Result<claw_fleet_core::dsh_source::DshModelCatalog, String> {
         claw_fleet_core::dsh_source::dsh_models()
     }
 
-    fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
+    pub fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }
 
-    fn get_hooks_plan(&self) -> crate::hooks::HookSetupPlan {
+    pub fn get_hooks_plan(&self) -> crate::hooks::HookSetupPlan {
         crate::hooks::plan_hook_setup()
     }
 
-    fn apply_hooks(&self) -> Result<(), String> {
+    pub fn apply_hooks(&self) -> Result<(), String> {
         crate::hooks::apply_hook_setup()
     }
 
-    fn remove_hooks(&self) -> Result<(), String> {
+    pub fn remove_hooks(&self) -> Result<(), String> {
         crate::hooks::remove_fleet_hooks()
     }
 
-    fn apply_guard_hook(&self) -> Result<(), String> {
+    pub fn apply_guard_hook(&self) -> Result<(), String> {
         crate::hooks::apply_guard_hook()
     }
 
-    fn remove_guard_hook(&self) -> Result<(), String> {
+    pub fn remove_guard_hook(&self) -> Result<(), String> {
         crate::hooks::remove_guard_hook()
     }
 
-    fn respond_to_guard(
+    pub fn respond_to_guard(
         &self,
         id: &str,
         allow: bool,
@@ -2776,7 +2847,7 @@ impl Backend for LocalBackend {
         result
     }
 
-    fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String> {
+    pub fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String> {
         use crate::audit;
         use crate::guard;
         use crate::llm_provider;
@@ -2803,65 +2874,65 @@ impl Backend for LocalBackend {
         .ok_or_else(|| "LLM analysis timed out or failed".to_string())
     }
 
-    fn list_guard_allow_rules(&self) -> Vec<crate::audit::GuardAllowRule> {
+    pub fn list_guard_allow_rules(&self) -> Vec<crate::audit::GuardAllowRule> {
         crate::audit::list_guard_allow_rules()
     }
 
-    fn remove_guard_allow_rule(&self, id: &str) -> Result<(), String> {
+    pub fn remove_guard_allow_rule(&self, id: &str) -> Result<(), String> {
         crate::audit::remove_guard_allow_rule(id)
     }
 
-    fn apply_elicitation_hook(&self) -> Result<(), String> {
+    pub fn apply_elicitation_hook(&self) -> Result<(), String> {
         crate::hooks::apply_elicitation_hook()
     }
 
-    fn remove_elicitation_hook(&self) -> Result<(), String> {
+    pub fn remove_elicitation_hook(&self) -> Result<(), String> {
         crate::hooks::remove_elicitation_hook()
     }
 
-    fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
+    pub fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
         crate::interaction_mode::apply_interaction_mode(user_title, locale)
     }
 
-    fn remove_interaction_mode(&self) -> Result<(), String> {
+    pub fn remove_interaction_mode(&self) -> Result<(), String> {
         crate::interaction_mode::remove_interaction_mode()
     }
 
-    fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String> {
+    pub fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String> {
         crate::wiki_guidance::apply_wiki_guidance(locale)
     }
 
-    fn remove_wiki_guidance(&self) -> Result<(), String> {
+    pub fn remove_wiki_guidance(&self) -> Result<(), String> {
         crate::wiki_guidance::remove_wiki_guidance()
     }
 
-    fn apply_model_guidance(&self, locale: &str) -> Result<(), String> {
+    pub fn apply_model_guidance(&self, locale: &str) -> Result<(), String> {
         crate::model_guidance::apply_model_guidance(locale)
     }
 
-    fn remove_model_guidance(&self) -> Result<(), String> {
+    pub fn remove_model_guidance(&self) -> Result<(), String> {
         crate::model_guidance::remove_model_guidance()
     }
 
-    fn interaction_diagnostics(
+    pub fn interaction_diagnostics(
         &self,
     ) -> Vec<crate::interaction_mode_diagnostics::DiagnosticCheck> {
         crate::interaction_mode_diagnostics::run_checks()
     }
 
-    fn test_decision_end_to_end(
+    pub fn test_decision_end_to_end(
         &self,
     ) -> Result<crate::interaction_mode_test::TestRunResult, String> {
         crate::interaction_mode_test::run_end_to_end_test(std::time::Duration::from_secs(10))
     }
 
-    fn test_decision_via_claude_cli(
+    pub fn test_decision_via_claude_cli(
         &self,
     ) -> Result<crate::interaction_mode_test::TestRunResult, String> {
         crate::interaction_mode_test::run_claude_cli_test(std::time::Duration::from_secs(60))
     }
 
-    fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
+    pub fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
         crate::prd_discipline::apply_prd_discipline(user_title, locale)?;
         crate::hooks::apply_prd_context_hook()?;
         // Rule 5's enforcement layer — denies the built-in schedulers that
@@ -2872,7 +2943,7 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn remove_prd_mode(&self) -> Result<(), String> {
+    pub fn remove_prd_mode(&self) -> Result<(), String> {
         // Remove all three halves regardless of which fails — best effort, then
         // surface the first error if any so the UI can re-try.
         let r1 = crate::prd_discipline::remove_prd_discipline();
@@ -2881,7 +2952,7 @@ impl Backend for LocalBackend {
         r1.and(r2).and(r3)
     }
 
-    fn reconcile_codex_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
+    pub fn reconcile_codex_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
         // Both non-Claude carriers, not just codex — see the trait doc for why
         // the method keeps its codex-era name. Each is attempted regardless of
         // the other's outcome so one broken harness home cannot strand the
@@ -2891,7 +2962,7 @@ impl Backend for LocalBackend {
         codex.and(dsh)
     }
 
-    fn respond_to_elicitation(
+    pub fn respond_to_elicitation(
         &self,
         id: &str,
         declined: bool,
@@ -2915,7 +2986,7 @@ impl Backend for LocalBackend {
         result
     }
 
-    fn respond_to_fleet_ask(
+    pub fn respond_to_fleet_ask(
         &self,
         id: &str,
         cancelled: bool,
@@ -2929,7 +3000,7 @@ impl Backend for LocalBackend {
         claw_fleet_core::parked::deliver(id, &resp, cancelled, claw_fleet_core::mcp_ipc::write_response)
     }
 
-    fn respond_to_permission_prompt(
+    pub fn respond_to_permission_prompt(
         &self,
         id: &str,
         allow: bool,
@@ -2947,7 +3018,7 @@ impl Backend for LocalBackend {
         claw_fleet_core::permission_prompt_ipc::write_response(&resp)
     }
 
-    fn respond_to_a2ui_render(
+    pub fn respond_to_a2ui_render(
         &self,
         id: &str,
         cancelled: bool,
@@ -2968,20 +3039,20 @@ impl Backend for LocalBackend {
         )
     }
 
-    fn apply_mcp_injector(&self, fleet_path: &str) -> Result<(), String> {
+    pub fn apply_mcp_injector(&self, fleet_path: &str) -> Result<(), String> {
         claw_fleet_core::mcp_injector::acquire(std::process::id(), fleet_path)
             .map_err(|e| e.to_string())
     }
 
-    fn apply_plan_approval_hook(&self) -> Result<(), String> {
+    pub fn apply_plan_approval_hook(&self) -> Result<(), String> {
         crate::hooks::apply_plan_approval_hook()
     }
 
-    fn remove_plan_approval_hook(&self) -> Result<(), String> {
+    pub fn remove_plan_approval_hook(&self) -> Result<(), String> {
         crate::hooks::remove_plan_approval_hook()
     }
 
-    fn list_pending_plan_approvals(&self) -> Vec<crate::plan_approval::PlanApprovalRequest> {
+    pub fn list_pending_plan_approvals(&self) -> Vec<crate::plan_approval::PlanApprovalRequest> {
         let ids = crate::plan_approval::list_pending_requests();
         let sessions = self.sessions.lock().unwrap().clone();
         ids.iter()
@@ -3000,9 +3071,9 @@ impl Backend for LocalBackend {
             .collect()
     }
 
-    fn list_pending_decisions(&self) -> claw_fleet_core::backend::PendingDecisions {
+    pub fn list_pending_decisions(&self) -> claw_fleet_core::ui_types::PendingDecisions {
         use claw_fleet_core::parked::{self, ParkedKind};
-        let mut pending = claw_fleet_core::backend::PendingDecisions {
+        let mut pending = claw_fleet_core::ui_types::PendingDecisions {
             guard: crate::guard::list_pending_requests()
                 .iter()
                 .filter_map(|id| crate::guard::read_request(id))
@@ -3037,11 +3108,11 @@ impl Backend for LocalBackend {
                 .collect(),
         };
         let sessions = self.sessions.lock().unwrap().clone();
-        claw_fleet_core::backend::resolve_pending_display(&mut pending, &sessions);
+        claw_fleet_core::ui_types::resolve_pending_display(&mut pending, &sessions);
         pending
     }
 
-    fn respond_to_plan_approval(
+    pub fn respond_to_plan_approval(
         &self,
         id: &str,
         decision: &str,
@@ -3065,7 +3136,7 @@ impl Backend for LocalBackend {
         result
     }
 
-    fn list_session_decisions(
+    pub fn list_session_decisions(
         &self,
         session_id: &str,
         jsonl_path: Option<&str>,
@@ -3084,27 +3155,27 @@ impl Backend for LocalBackend {
         crate::decision_history::list_session_records_with_jsonl(session_id, path)
     }
 
-    fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {
+    pub fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {
         crate::agent_source::get_sources_config_local()
     }
 
-    fn list_codex_profiles(&self) -> Vec<claw_fleet_core::codex_launch::CodexProfile> {
+    pub fn list_codex_profiles(&self) -> Vec<claw_fleet_core::codex_launch::CodexProfile> {
         claw_fleet_core::codex_launch::list_codex_profiles()
     }
 
-    fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
+    pub fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
         crate::agent_source::set_source_enabled_local(name, enabled)
     }
 
-    fn list_claude_binaries(&self) -> Vec<crate::claude_binary::ClaudeBinary> {
+    pub fn list_claude_binaries(&self) -> Vec<crate::claude_binary::ClaudeBinary> {
         crate::claude_binary::discover()
     }
 
-    fn get_claude_binary_override(&self) -> Option<String> {
+    pub fn get_claude_binary_override(&self) -> Option<String> {
         crate::claude_binary::ClaudeBinaryConfig::load().override_path
     }
 
-    fn set_claude_binary_override(&self, path: Option<String>) -> Result<(), String> {
+    pub fn set_claude_binary_override(&self, path: Option<String>) -> Result<(), String> {
         let cleaned = path.and_then(|p| {
             let trimmed = p.trim().to_string();
             if trimmed.is_empty() { None } else { Some(trimmed) }
@@ -3113,7 +3184,7 @@ impl Backend for LocalBackend {
         config.save()
     }
 
-    fn get_audit_events(&self) -> crate::audit::AuditSummary {
+    pub fn get_audit_events(&self) -> crate::audit::AuditSummary {
         let all_sessions = self.sessions.lock().unwrap().clone();
         let active_ids: HashSet<String> = all_sessions
             .iter()
@@ -3218,23 +3289,23 @@ impl Backend for LocalBackend {
         }
     }
 
-    fn get_audit_rules(&self) -> Vec<crate::audit::AuditRuleInfo> {
+    pub fn get_audit_rules(&self) -> Vec<crate::audit::AuditRuleInfo> {
         crate::audit::get_all_rules()
     }
 
-    fn set_audit_rule_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
+    pub fn set_audit_rule_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
         crate::audit::set_rule_enabled(id, enabled)
     }
 
-    fn save_custom_audit_rule(&self, rule: crate::audit::AuditRuleInfo) -> Result<(), String> {
+    pub fn save_custom_audit_rule(&self, rule: crate::audit::AuditRuleInfo) -> Result<(), String> {
         crate::audit::save_custom_rule(rule)
     }
 
-    fn delete_custom_audit_rule(&self, id: &str) -> Result<(), String> {
+    pub fn delete_custom_audit_rule(&self, id: &str) -> Result<(), String> {
         crate::audit::delete_custom_rule(id)
     }
 
-    fn suggest_audit_rules(&self, concern: &str, lang: &str) -> Result<Vec<crate::audit::SuggestedRule>, String> {
+    pub fn suggest_audit_rules(&self, concern: &str, lang: &str) -> Result<Vec<crate::audit::SuggestedRule>, String> {
         let existing_tags: Vec<String> = crate::audit::get_all_rules()
             .iter()
             .map(|r| r.tag.clone())
@@ -3263,18 +3334,18 @@ impl Backend for LocalBackend {
             .map_err(|e| format!("Failed to parse LLM response: {e}"))
     }
 
-    fn search_sessions(&self, query: &str, limit: usize) -> Vec<crate::search_index::SearchHit> {
+    pub fn search_sessions(&self, query: &str, limit: usize) -> Vec<crate::search_index::SearchHit> {
         match self.search_index.lock() {
             Ok(idx) => idx.search(query, limit).unwrap_or_default(),
             Err(_) => vec![],
         }
     }
 
-    fn get_daily_report(&self, date: &str) -> Result<Option<crate::daily_report::DailyReport>, String> {
+    pub fn get_daily_report(&self, date: &str) -> Result<Option<crate::daily_report::DailyReport>, String> {
         self.report_store.lock().unwrap().get_report(date)
     }
 
-    fn list_daily_report_stats(&self, from: &str, to: &str) -> Vec<crate::daily_report::DailyReportStats> {
+    pub fn list_daily_report_stats(&self, from: &str, to: &str) -> Vec<crate::daily_report::DailyReportStats> {
         self.report_store
             .lock()
             .unwrap()
@@ -3282,7 +3353,7 @@ impl Backend for LocalBackend {
             .unwrap_or_default()
     }
 
-    fn generate_daily_report(&self, date: &str) -> Result<crate::daily_report::DailyReport, String> {
+    pub fn generate_daily_report(&self, date: &str) -> Result<crate::daily_report::DailyReport, String> {
         // Try in-memory session cache first (covers last 7 days)
         let cached: Vec<SessionInfo> = {
             let all = self.sessions.lock().unwrap();
@@ -3330,7 +3401,7 @@ impl Backend for LocalBackend {
         Ok(report)
     }
 
-    fn generate_daily_report_ai_summary(&self, date: &str) -> Result<String, String> {
+    pub fn generate_daily_report_ai_summary(&self, date: &str) -> Result<String, String> {
         let report = self
             .report_store
             .lock()
@@ -3353,7 +3424,7 @@ impl Backend for LocalBackend {
         Ok(summary)
     }
 
-    fn generate_daily_report_lessons(&self, date: &str) -> Result<Vec<crate::daily_report::Lesson>, String> {
+    pub fn generate_daily_report_lessons(&self, date: &str) -> Result<Vec<crate::daily_report::Lesson>, String> {
         let report = self
             .report_store
             .lock()
@@ -3376,29 +3447,29 @@ impl Backend for LocalBackend {
         Ok(lessons)
     }
 
-    fn append_lesson_to_claude_md(&self, lesson: &crate::daily_report::Lesson) -> Result<(), String> {
+    pub fn append_lesson_to_claude_md(&self, lesson: &crate::daily_report::Lesson) -> Result<(), String> {
         crate::daily_report::append_lesson_to_claude_md(lesson)
     }
 
-    fn list_managed_lessons(
+    pub fn list_managed_lessons(
         &self,
     ) -> Result<Vec<crate::lessons_store::ManagedLesson>, String> {
         Ok(crate::lessons_store::list_lessons())
     }
 
-    fn remove_managed_lesson(&self, id: &str) -> Result<(), String> {
+    pub fn remove_managed_lesson(&self, id: &str) -> Result<(), String> {
         crate::lessons_store::remove_lesson(id)
     }
 
-    fn list_llm_providers(&self) -> Vec<crate::llm_provider::LlmProviderInfo> {
+    pub fn list_llm_providers(&self) -> Vec<crate::llm_provider::LlmProviderInfo> {
         crate::llm_provider::all_provider_infos()
     }
 
-    fn get_llm_config(&self) -> crate::llm_provider::LlmConfig {
+    pub fn get_llm_config(&self) -> crate::llm_provider::LlmConfig {
         self.llm_config.lock().unwrap().clone()
     }
 
-    fn set_llm_config(&self, config: crate::llm_provider::LlmConfig) -> Result<(), String> {
+    pub fn set_llm_config(&self, config: crate::llm_provider::LlmConfig) -> Result<(), String> {
         // Mirror into the process-wide slot so the mobile relay's
         // `guard_analyze` follows the same provider choice.
         config.save()?;
@@ -3407,7 +3478,7 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn list_fleet_llm_usage_daily(
+    pub fn list_fleet_llm_usage_daily(
         &self,
         from_ms: u64,
         to_ms: u64,
@@ -3415,7 +3486,7 @@ impl Backend for LocalBackend {
         crate::llm_usage::list_usage_daily_buckets(from_ms, to_ms)
     }
 
-    fn usage_history(
+    pub fn usage_history(
         &self,
         from_ms: i64,
         to_ms: i64,
@@ -3423,7 +3494,7 @@ impl Backend for LocalBackend {
         crate::account::load_usage_history(from_ms, to_ms)
     }
 
-    fn codex_usage_history(
+    pub fn codex_usage_history(
         &self,
         from_ms: i64,
         to_ms: i64,
@@ -3431,18 +3502,18 @@ impl Backend for LocalBackend {
         crate::codex_usage_history::load_codex_usage_history(from_ms, to_ms)
     }
 
-    fn upload_attachment(
+    pub fn upload_attachment(
         &self,
         source_path: &std::path::Path,
         from_clipboard: bool,
     ) -> Result<String, String> {
         let abs = source_path.canonicalize().map_err(|e| e.to_string())?;
         let meta = std::fs::metadata(&abs).map_err(|e| e.to_string())?;
-        if meta.len() > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
+        if meta.len() > claw_fleet_core::ui_types::MAX_ATTACHMENT_BYTES {
             return Err(format!(
                 "attachment too large: {} bytes (max {})",
                 meta.len(),
-                claw_fleet_core::backend::MAX_ATTACHMENT_BYTES
+                claw_fleet_core::ui_types::MAX_ATTACHMENT_BYTES
             ));
         }
         if !from_clipboard {
@@ -3460,7 +3531,7 @@ impl Backend for LocalBackend {
         Ok(stored.to_string_lossy().into_owned())
     }
 
-    fn get_user_attachment(
+    pub fn get_user_attachment(
         &self,
         key: &str,
         name: &str,
@@ -3468,36 +3539,36 @@ impl Backend for LocalBackend {
         claw_fleet_core::user_attachments::read_user_attachment(key, name)
     }
 
-    fn get_mobile_relay_config(
+    pub fn get_mobile_relay_config(
         &self,
     ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
         Ok(claw_fleet_core::mobile_relay::load_config())
     }
 
-    fn set_mobile_relay_config(
+    pub fn set_mobile_relay_config(
         &self,
         cfg: claw_fleet_core::mobile_relay::MobileRelayConfig,
     ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
         claw_fleet_core::mobile_relay::set_config_normalized(cfg)
     }
 
-    fn rotate_mobile_relay_secret(
+    pub fn rotate_mobile_relay_secret(
         &self,
     ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
         claw_fleet_core::mobile_relay::rotate_secret()
     }
 
-    fn mobile_relay_status(
+    pub fn mobile_relay_status(
         &self,
     ) -> Result<claw_fleet_core::mobile_relay::MobileRelayStatus, String> {
         Ok(claw_fleet_core::mobile_relay::status())
     }
 
-    fn mobile_relay_qr_svg(&self, lang: Option<&str>) -> Result<String, String> {
+    pub fn mobile_relay_qr_svg(&self, lang: Option<&str>) -> Result<String, String> {
         claw_fleet_core::mobile_relay::qr_svg(lang)
     }
 
-    fn mobile_relay_pairing_url(&self, lang: Option<&str>) -> Result<String, String> {
+    pub fn mobile_relay_pairing_url(&self, lang: Option<&str>) -> Result<String, String> {
         claw_fleet_core::mobile_relay::pairing_url_text(lang)
     }
 
@@ -3505,7 +3576,7 @@ impl Backend for LocalBackend {
 
 /// Fetch usage summaries from all available sources via trait dispatch.
 /// All network I/O happens here, outside any Mutex guard.
-pub fn fetch_usage_summaries_from_sources(sources: &[Box<dyn AgentSource>]) -> Vec<crate::backend::SourceUsageSummary> {
+pub fn fetch_usage_summaries_from_sources(sources: &[Box<dyn AgentSource>]) -> Vec<crate::ui_types::SourceUsageSummary> {
     sources
         .iter()
         .filter(|s| s.is_available())
@@ -3776,7 +3847,7 @@ pub(crate) fn send_os_notification(app: &AppHandle, title: &str, body: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{SourceUsageSummary, UsageBar};
+    use crate::ui_types::{SourceUsageSummary, UsageBar};
     use serde_json::json;
     use std::path::PathBuf;
 

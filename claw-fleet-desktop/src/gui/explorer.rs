@@ -11,7 +11,7 @@ use super::*;
 
 #[tauri::command(async)]
 pub(crate) fn list_browse_paths(state: tauri::State<'_, AppState>) -> Vec<String> {
-    state.backend.read().unwrap().list_browse_paths()
+    state.backend.list_browse_paths()
 }
 
 #[tauri::command(async)]
@@ -19,7 +19,7 @@ pub(crate) fn add_browse_path(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    state.backend.read().unwrap().add_browse_path(&path)
+    state.backend.add_browse_path(&path)
 }
 
 #[tauri::command(async)]
@@ -27,7 +27,7 @@ pub(crate) fn remove_browse_path(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    state.backend.read().unwrap().remove_browse_path(&path)
+    state.backend.remove_browse_path(&path)
 }
 
 #[tauri::command(async)]
@@ -35,7 +35,7 @@ pub(crate) fn list_explorer_roots(
     workspace: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerRoot>, String> {
-    state.backend.read().unwrap().list_explorer_roots(&workspace)
+    state.backend.list_explorer_roots(&workspace)
 }
 
 #[tauri::command(async)]
@@ -48,8 +48,6 @@ pub(crate) fn list_explorer_dir(
 ) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
     state
         .backend
-        .read()
-        .unwrap()
         .list_explorer_dir(&workspace, &root, &rel_path, show_ignored)
 }
 
@@ -62,8 +60,6 @@ pub(crate) fn read_explorer_file(
 ) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
     state
         .backend
-        .read()
-        .unwrap()
         .read_explorer_file(&workspace, &root, &rel_path)
 }
 
@@ -78,8 +74,6 @@ pub(crate) fn find_explorer_path(
 ) -> Result<Vec<String>, String> {
     state
         .backend
-        .read()
-        .unwrap()
         .find_explorer_path(&workspace, &root, &rel_suffix)
 }
 
@@ -90,6 +84,6 @@ pub(crate) fn read_external_file(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
-    state.backend.read().unwrap().read_external_file(&path)
+    state.backend.read_external_file(&path)
 }
 

@@ -302,7 +302,7 @@ pub(crate) fn route_setup_status(
                 let logged_in = crate::account::read_keychain_credentials().is_ok();
                 let has_sessions = !sessions.is_empty();
 
-                let status = crate::backend::SetupStatus {
+                let status = crate::ui_types::SetupStatus {
                     cli_installed,
                     cli_path,
                     claude_dir_exists,
