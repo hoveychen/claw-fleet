@@ -47,9 +47,8 @@ pub(crate) fn artifact_response(
 
 // ── Artifact store (产出) ─────────────────────────────────────────────────────
 //
-// Every command routes through `state.backend`, so a remote workspace's
-// artifacts list, preview and export the same as a local one. The bytes
-// themselves reach the webview through the `fleet-artifact://` protocol
+// Every command routes through `state.backend`. The bytes themselves reach
+// the webview through the `fleet-artifact://` protocol
 // registered in `gui/mod.rs`, which is the only surface here that speaks
 // `Range`.
 
@@ -57,7 +56,7 @@ pub(crate) fn artifact_response(
 pub(crate) fn list_artifacts(
     state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::artifacts::Artifact> {
-    state.backend.read().unwrap().list_artifacts()
+    state.backend.list_artifacts()
 }
 
 #[tauri::command(async)]
@@ -65,15 +64,14 @@ pub(crate) fn get_artifact(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::artifacts::Artifact, String> {
-    state.backend.read().unwrap().get_artifact(&id)
+    state.backend.get_artifact(&id)
 }
 
 /// Ingest a file into the store.
 ///
-/// `source_path` names a file on whichever host serves this session — the
-/// probe's filesystem for a remote workspace, this machine's for a local one.
-/// That is deliberate: the agent that produced the deliverable ran there, so
-/// that is where the bytes already are and no upload is involved.
+/// `source_path` names a file on this machine: the agent that produced the
+/// deliverable ran here, so that is where the bytes already are and no upload
+/// is involved.
 #[tauri::command(async)]
 pub(crate) fn add_artifact(
     source_path: String,
@@ -83,7 +81,7 @@ pub(crate) fn add_artifact(
     session_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::artifacts::Artifact, String> {
-    state.backend.read().unwrap().add_artifact(
+    state.backend.add_artifact(
         &source_path,
         &title,
         &note,
@@ -102,7 +100,7 @@ pub(crate) fn update_artifact(
     starred: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::artifacts::Artifact, String> {
-    state.backend.read().unwrap().update_artifact(
+    state.backend.update_artifact(
         &id,
         title.as_deref(),
         note.as_deref(),
@@ -115,26 +113,24 @@ pub(crate) fn delete_artifact(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.backend.write().unwrap().delete_artifact(&id)
+    state.backend.delete_artifact(&id)
 }
 
 #[tauri::command(async)]
 pub(crate) fn artifact_usage(
     state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::artifacts::StoreUsage {
-    state.backend.read().unwrap().artifact_usage()
+    state.backend.artifact_usage()
 }
 
 /// Copy an artifact to `dest` on **this** machine — the 导出 / 另存为 action.
 ///
-/// Bytes come through the backend, so a remote artifact downloads
-/// transparently; the save dialog runs on the frontend (plugin-dialog) and
-/// hands us the chosen path. Mirrors `export_wiki_doc`.
+/// The save dialog runs on the frontend (plugin-dialog) and hands us the
+/// chosen path. Mirrors `export_wiki_doc`.
 ///
 /// Streamed in [`claw_fleet_core::artifacts::MAX_RANGE_CHUNK`] slices rather
 /// than one `read_artifact_bytes(id, None)`: exporting a multi-gigabyte render
-/// must not need a copy of it in memory first, and over a remote probe the
-/// whole-file form would be one enormous HTTP response.
+/// must not need a copy of it in memory first.
 #[tauri::command(async)]
 pub(crate) fn export_artifact(
     id: String,
@@ -148,13 +144,13 @@ pub(crate) fn export_artifact(
     // empty answer: `start >= total` is how "you seeked past the end" is
     // reported, and for a 0-byte artifact even `start = 0` satisfies that.
     // Exporting an empty deliverable must still produce an empty file.
-    let size = state.backend.read().unwrap().get_artifact(&id)?.size_bytes;
+    let size = state.backend.get_artifact(&id)?.size_bytes;
     let mut file =
         std::fs::File::create(&dest).map_err(|e| format!("create '{dest}': {e}"))?;
     let mut offset: u64 = 0;
     while offset < size {
         let slice = {
-            let backend = state.backend.read().unwrap();
+            let backend = &state.backend;
             backend.read_artifact_bytes(&id, Some((offset, offset + CHUNK - 1)))?
         };
         let read = slice.bytes.len() as u64;
@@ -170,22 +166,18 @@ pub(crate) fn export_artifact(
     Ok(())
 }
 
-/// Absolute path of an artifact's blob on the host that serves it.
+/// Absolute path of an artifact's blob on this machine, for "reveal in Finder"
+/// and "open with the system app".
 ///
-/// `None` for a remote workspace: the path would name a file on the probe's
-/// machine, and handing that to "reveal in Finder" or "open with the system
-/// app" would silently fail or, worse, open some unrelated local file at the
-/// same path. The frontend hides both actions when this is `None` and offers
-/// 导出 instead.
+/// Still an `Option` on the wire: the frontend hides both actions when this is
+/// `None` and offers 导出 instead, and the browser build answers `None` because
+/// a tab has no file manager to hand the path to.
 #[tauri::command(async)]
 pub(crate) fn artifact_local_path(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    if state.backend.read().unwrap().is_remote() {
-        return Ok(None);
-    }
-    let artifact = state.backend.read().unwrap().get_artifact(&id)?;
+    let artifact = state.backend.get_artifact(&id)?;
     let root = claw_fleet_core::artifacts::artifacts_dir()
         .ok_or_else(|| "cannot determine home dir".to_string())?;
     let path = claw_fleet_core::artifacts::blob_path(&root, &artifact);
@@ -206,9 +198,8 @@ pub(crate) fn artifact_local_path(
 /// hands over an artifact id rather than an arbitrary path.
 ///
 /// Like `artifact_local_path` this is a shell action, not a data-fetching
-/// capability, so it stays off the Backend trait (same reasoning as
-/// `reveal_path`) — and it is local-only, because a remote workspace's blob
-/// lives on the probe's machine.
+/// capability, so it is a plain command rather than a `LocalBackend` method
+/// (same reasoning as `reveal_path`).
 #[tauri::command(async)]
 pub(crate) fn open_artifact_external(
     app: tauri::AppHandle,
@@ -216,10 +207,7 @@ pub(crate) fn open_artifact_external(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    if state.backend.read().unwrap().is_remote() {
-        return Err("artifact lives on the remote host".to_string());
-    }
-    let artifact = state.backend.read().unwrap().get_artifact(&id)?;
+    let artifact = state.backend.get_artifact(&id)?;
     let root = claw_fleet_core::artifacts::artifacts_dir()
         .ok_or_else(|| "cannot determine home dir".to_string())?;
     let path = claw_fleet_core::artifacts::blob_path(&root, &artifact);

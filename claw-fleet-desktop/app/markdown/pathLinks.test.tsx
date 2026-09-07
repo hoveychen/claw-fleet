@@ -16,7 +16,6 @@ import { PathChip, type PathLinkContext } from "./pathLinks";
 const ROOT = "/Users/x/repo";
 const ctx = (over: Partial<PathLinkContext> = {}): PathLinkContext => ({
   workspaceRoot: ROOT,
-  isLocal: true,
   openInFiles: () => {},
   ...over,
 });

@@ -62,7 +62,7 @@ const UPLOADS_DIR: &str = ".fleet-uploads";
 
 /// Cap for a single upload. Same ceiling as a desktop attachment — one number
 /// for "how big a blob may a caller hand the agent".
-const MAX_UPLOAD_BYTES: u64 = crate::backend::MAX_ATTACHMENT_BYTES;
+const MAX_UPLOAD_BYTES: u64 = crate::ui_types::MAX_ATTACHMENT_BYTES;
 
 /// Reduce a caller-supplied filename to a bare, safe basename. Traversal
 /// (`../`, absolute paths) and empty/`.`/`..` names collapse to a default, so

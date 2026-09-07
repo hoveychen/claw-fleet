@@ -16,8 +16,8 @@
 //!   • `rel_path` is rejected on absolute paths and `..` components, then
 //!     canonicalized and required to stay under the root — so symlinks
 //!     pointing outside the root are refused too.
-//! This matters for RemoteBackend: `fleet serve` is token-authed, but the
-//! token grants session monitoring, not arbitrary filesystem reads.
+//! This matters over HTTP: `fleet serve` is token-authed, but the token grants
+//! session monitoring, not arbitrary filesystem reads.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -357,9 +357,9 @@ pub fn read_scratchpad_file(
 /// Requires an absolute path that canonicalizes to a regular file. Same size
 /// caps and text/image/binary classification as [`read_file`].
 ///
-/// A leading `~/` is expanded first, against *this* machine's home — so a
-/// remote workspace resolves it on the probe host, which is the home the file
-/// actually lives under. The front end hands paths through as the agent wrote
+/// A leading `~/` is expanded first, against *this* machine's home — the
+/// machine the agent ran on, which is the home the file actually lives under.
+/// The front end hands paths through as the agent wrote
 /// them (`pathLinks.tsx`), and agents write `~/Downloads/…` constantly, so
 /// this expansion mirrors what `reveal_path` already does for the same string.
 pub fn read_external_file(path: &str) -> Result<ExplorerFileContent, String> {

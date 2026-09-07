@@ -27,7 +27,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 use crate::agent_source::{AgentSource, WatchStrategy};
-use crate::backend::SourceUsageSummary;
+use crate::ui_types::SourceUsageSummary;
 use crate::session::{compute_context_percent, SessionInfo, SessionStatus};
 
 /// URI prefix for Codex session identifiers.

@@ -722,26 +722,6 @@
   text-overflow: ellipsis;
 }
 
-.footer_status {
-  font-size: 11px;
-  color: var(--color-text-dim);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.footer_dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-success);
-  flex-shrink: 0;
-}
-
-.footer_dot_remote {
-  background: #60a5fa;
-}
-
 .footer_gear {
   font-size: 14px;
   color: var(--color-text-dim);

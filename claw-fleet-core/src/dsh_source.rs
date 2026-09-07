@@ -35,7 +35,7 @@
 //! * `QUOTA_EXCEEDED` / `RATE_LIMIT` exist only as *error classifications* an
 //!   adapter assigns to a request that already failed (HTTP 429 and friends in
 //!   `dsh-llm-deepseek` / `dsh-llm-pi-ai`). They are not a pollable window with
-//!   a utilization and a reset time, which is what [`crate::backend::UsageBar`]
+//!   a utilization and a reset time, which is what [`crate::ui_types::UsageBar`]
 //!   needs.
 //!
 //! This follows from what dsh *is*: a bring-your-own-key harness. The quota
@@ -700,14 +700,14 @@ impl AgentSource for DshSource {
         serde_json::to_value(crate::dsh_balance::fetch_balances()).map_err(|e| e.to_string())
     }
 
-    fn usage_summary(&self) -> Option<crate::backend::SourceUsageSummary> {
+    fn usage_summary(&self) -> Option<crate::ui_types::SourceUsageSummary> {
         let item = crate::dsh_balance::fetch_balances();
         if item.balances.is_empty() {
             // No provider key configured: nothing to report, and an empty card
             // is worse than no card.
             return None;
         }
-        Some(crate::backend::SourceUsageSummary::from_dsh(&item))
+        Some(crate::ui_types::SourceUsageSummary::from_dsh(&item))
     }
 
     fn scan_sessions(&self) -> Vec<SessionInfo> {

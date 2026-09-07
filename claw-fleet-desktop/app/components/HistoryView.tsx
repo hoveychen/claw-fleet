@@ -20,7 +20,6 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
-  useConnectionStore,
   useSessionsStore,
   useUIStore,
   type MarkFilter,
@@ -165,10 +164,6 @@ export function HistoryView() {
   // launchpad on that churn even when the session list itself is unchanged.
   const sessions = useSessionsStore((s) => s.sessions);
   const scanReady = useSessionsStore((s) => s.scanReady);
-  // Remote workspaces live on the probe host — their files can't be revealed in
-  // the local file manager, so the row menu hides that item for them.
-  const connection = useConnectionStore((s) => s.connection);
-  const isLocal = connection?.type !== "remote";
 
   // Rail filters live in the store, not here: this component is unmounted every
   // time `viewMode` leaves "history", which would otherwise reset them behind
@@ -476,7 +471,7 @@ export function HistoryView() {
         icon: <Folder size={13} />,
         onSelect: () => copyText(s.workspacePath),
       });
-      if (canRevealPath(isLocal)) {
+      if (canRevealPath()) {
         items.push({
           id: "reveal",
           label: t(revealKey),
@@ -499,7 +494,7 @@ export function HistoryView() {
       }
       return items;
     },
-    [t, isLocal, handleRowClick, copyText],
+    [t, handleRowClick, copyText],
   );
 
   // Back out of the composer, abandoning any in-flight spawn correlation so a

@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::backend::SourceUsageSummary;
+use crate::ui_types::SourceUsageSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::SessionInfo;
 

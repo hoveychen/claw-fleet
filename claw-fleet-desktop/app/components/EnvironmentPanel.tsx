@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useConnectionStore } from "../store";
 import { isWebBuild } from "../hostEnv";
 import type { RemoteWorkspacesConfig } from "../types";
 import { AgentSourceIcon } from "./SessionCard";
@@ -101,11 +100,9 @@ interface CodexFlow {
 
 export function EnvironmentPanel() {
   const { t } = useTranslation();
-  const connection = useConnectionStore((s) => s.connection);
-  const isRemote = connection?.type === "remote";
   // A browser tab can neither run installers nor drive a login pty on the
   // machine the user sits at; statuses still show (routed to the serving host).
-  const actionsDisabled = isRemote || isWebBuild();
+  const actionsDisabled = isWebBuild();
 
   const [statuses, setStatuses] = useState<HarnessStatus[] | null>(null);
   const [custody, setCustody] = useState<FoxyCustody | null>(null);
@@ -414,9 +411,6 @@ export function EnvironmentPanel() {
   // ── rca remote-workspace hosts (phase 2) ────────────────────────────────────
 
   useEffect(() => {
-    // The rca registry is this machine's; on a RemoteBackend connection the
-    // panel already shows that host's own environment instead.
-    if (isRemote) return;
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
       .then((cfg) =>
         setRemoteHosts(
@@ -428,7 +422,7 @@ export function EnvironmentPanel() {
         ),
       )
       .catch(() => {});
-  }, [isRemote]);
+  }, []);
 
   const probeHost = useCallback(async (path: string) => {
     setHostState((p) => ({ ...p, [path]: { statuses: null, probing: true, error: null } }));
@@ -862,7 +856,6 @@ export function EnvironmentPanel() {
           {probing ? t("env.probing") : t("env.refresh")}
         </button>
       </div>
-      {isRemote && <div className={styles.remote_note}>{t("env.remote_note")}</div>}
       {statuses === null ? (
         <div className={styles.muted}>{t("env.loading")}</div>
       ) : (
@@ -871,7 +864,7 @@ export function EnvironmentPanel() {
           return s ? renderCard(s) : null;
         })
       )}
-      {!isRemote && remoteHosts.length > 0 && (
+      {remoteHosts.length > 0 && (
         <>
           <div className={styles.head_row}>
             <p className={styles.subtitle}>{t("env.remote_hosts")}</p>

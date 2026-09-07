@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use crate::agent_source::{AgentSource, ResumeSpec, WatchStrategy};
-use crate::backend::SourceUsageSummary;
+use crate::ui_types::SourceUsageSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::{get_claude_dir, CliProcess, SessionInfo, SessionStatus};
 

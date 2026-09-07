@@ -24,6 +24,6 @@ pub(crate) fn read_review_doc(
     doc: claw_fleet_core::mcp_ipc::ReviewDoc,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::mcp_ipc::ReviewDocContent, String> {
-    state.backend.read().unwrap().read_review_doc(&doc)
+    state.backend.read_review_doc(&doc)
 }
 

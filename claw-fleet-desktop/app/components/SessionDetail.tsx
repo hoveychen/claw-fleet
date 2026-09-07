@@ -6,7 +6,6 @@ import { useTranslation } from "react-i18next";
 import {
   INITIAL_TAIL,
   LOAD_EARLIER_STEP,
-  useConnectionStore,
   useDecisionStore,
   useDetailStore,
   useSessionsStore,
@@ -397,7 +396,6 @@ export function SessionDetail({
   }, []);
 
   const sessions = useSessionsStore((s) => s.sessions);
-  const connection = useConnectionStore((s) => s.connection);
   const liveSession = useMemo(() => {
     if (!session) return null;
     return sessions.find((s) => s.id === session.id) ?? session;
@@ -661,10 +659,9 @@ export function SessionDetail({
     if (!workspacePath) return undefined;
     return {
       workspaceRoot: workspacePath,
-      isLocal: connection?.type !== "remote",
       openInFiles: (absPath) => openAuxDoc("file", absPath),
     };
-  }, [workspacePath, connection?.type, openAuxDoc]);
+  }, [workspacePath, openAuxDoc]);
 
   // `[[slug]]` refs the agent wrote become links. Agents are told to publish
   // findings to the wiki and to cross-reference them that way, so the refs were
@@ -1259,7 +1256,6 @@ export function SessionDetail({
                       sessionId={liveSession.id}
                       jsonlPath={liveSession.jsonlPath}
                       workspacePath={liveSession.workspacePath}
-                      isLocal={connection?.type !== "remote"}
                     />
                     {!inline && (
                       <button

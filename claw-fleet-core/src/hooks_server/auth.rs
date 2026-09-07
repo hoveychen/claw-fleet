@@ -3,8 +3,7 @@
 //! Two token tiers back the Fleet Cloud lean deployment:
 //!
 //! - **admin token** — the existing single `fleet serve --token`. Full access
-//!   to every route. Used by the desktop app, RemoteBackend, mobile relay and
-//!   any first-party caller.
+//!   to every route. Used by the mobile relay and any first-party caller.
 //! - **scoped (public) token** — optional, supplied via `FLEET_PUBLIC_TOKEN`.
 //!   This is what an *external* customer's integrating service presents. It may
 //!   reach ONLY the curated public surface ([`crate::routes::is_public`]);

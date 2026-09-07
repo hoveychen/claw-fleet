@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { openSettings, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
+import { openSettings, runningProcTotal, useAuditStore, useDetailStore, useProcStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWebBuild, showsMobilePanel } from "../hostEnv";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -75,7 +75,6 @@ export function SessionList() {
     },
     [viewMode, setViewMode, toggleSecondarySidebar],
   );
-  const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const hasNewReport = useReportStore((s) => s.hasNewReport);
   // Total running workspace commands across all repos — surfaced as a badge on
@@ -246,8 +245,6 @@ export function SessionList() {
       );
     });
   }
-
-  const isRemote = connection?.type === "remote";
 
   const COLLAPSED_WIDTH = 64;
   const effectiveWidth = sidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
@@ -560,10 +557,6 @@ export function SessionList() {
             </div>
             <div className={styles.footer_info}>
               <span className={styles.footer_name}>{t("title")}</span>
-              <span className={styles.footer_status}>
-                <span className={`${styles.footer_dot} ${isRemote ? styles.footer_dot_remote : ""}`} />
-                {isRemote ? t("settings.remote") : t("settings.local")}
-              </span>
             </div>
             <span className={styles.footer_gear}>⚙</span>
           </div>

@@ -3,7 +3,8 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Blocks, Copy, Download, ExternalLink, FolderOpen, Power, Trash2 } from "lucide-react";
-import { useConnectionStore, useUIStore } from "../store";
+import { useUIStore } from "../store";
+import { canRevealPath } from "../canReveal";
 import { EmptyState } from "./EmptyState";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { PageShell } from "./PageShell";
@@ -229,7 +230,6 @@ export function PluginsView() {
     });
   }, [expanded, updateMainViewState]);
 
-  const isLocal = useConnectionStore((s) => s.connection?.type === "local");
 
   // Row context menu — anchor + subject held together, mirroring WikiView.
   const [ctxMenu, setCtxMenu] = useState<{ plugin: PluginItem; anchor: ContextMenuAnchor } | null>(
@@ -286,7 +286,7 @@ export function PluginsView() {
       sub: plugin.rootPath,
       onSelect: () => void writeText(plugin.rootPath).catch(() => {}),
     });
-    if (isLocal && plugin.isDownloaded) {
+    if (canRevealPath() && plugin.isDownloaded) {
       items.push({
         id: "reveal",
         label: t("plugins.reveal_manifest"),
@@ -450,7 +450,6 @@ function PluginDetail({
   onChanged: () => void;
 }) {
   const { t } = useTranslation();
-  const isLocal = useConnectionStore((s) => s.connection?.type === "local");
   const [pending, setPending] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
 
@@ -609,7 +608,7 @@ function PluginDetail({
               {pending ? t("plugins.toggle_pending") : t("plugins.uninstall_btn")}
             </button>
           )}
-          {isLocal && plugin.isDownloaded && (
+          {canRevealPath() && plugin.isDownloaded && (
             <button
               className={styles.promote_btn}
               onClick={reveal}

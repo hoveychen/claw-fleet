@@ -302,7 +302,7 @@ pub(crate) fn route_setup_status(
                 let logged_in = crate::account::read_keychain_credentials().is_ok();
                 let has_sessions = !sessions.is_empty();
 
-                let status = crate::backend::SetupStatus {
+                let status = crate::ui_types::SetupStatus {
                     cli_installed,
                     cli_path,
                     claude_dir_exists,
@@ -549,9 +549,9 @@ pub(crate) fn route_tail(
                     return;
                 };
 
-                // Source-aware incremental follow (the RemoteBackend live-tail
-                // surface, mirroring the mobile relay `serve_tail_delta` and the
-                // desktop `emit_tail_lines`): Claude gets the byte-offset raw
+                // Source-aware incremental follow (the HTTP live-tail surface,
+                // mirroring the mobile relay `serve_tail_delta` and the desktop
+                // `emit_tail_lines`): Claude gets the byte-offset raw
                 // tail; Codex re-normalizes its folded rollout so the emitted
                 // `session-tail` rows are renderable messages the desktop dedups
                 // by their stable `uuid`. A raw byte slice of a Codex rollout is

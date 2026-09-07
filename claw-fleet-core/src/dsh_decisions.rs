@@ -10,8 +10,8 @@
 //! ## No new card channel
 //!
 //! Fleet already carries two card shapes whose semantics match these exactly,
-//! each with its whole pipeline built (Backend trait → `fleet serve` HTTP →
-//! `RemoteBackend` → desktop watcher → mobile relay → decision history):
+//! each with its whole pipeline built (desktop watcher → `fleet serve` HTTP →
+//! mobile relay → decision history):
 //!
 //! * approval → [`crate::permission_prompt_ipc`] — one tool, allow or deny.
 //! * question → [`crate::elicitation`] — several questions, options, free text.

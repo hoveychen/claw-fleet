@@ -1,13 +1,12 @@
-//! Single source of truth for the HTTP route paths shared between the
-//! `fleet serve` router (`hooks_server::serve`) and the RemoteBackend HTTP
-//! client (`claw-fleet-desktop/src/remote.rs`).
+//! Single source of truth for the HTTP route paths of the `fleet serve`
+//! router (`hooks_server::serve`).
 //!
-//! Both sides reference the SAME constant, so renaming a path is a single
-//! edit that either updates both ends or fails to compile — turning the
-//! former runtime-404 drift (see tests/backend_drift_guard.rs Check B) into
-//! a compile error. Paths carrying query params (`?path=…`) or path
-//! segments (`/sources/<name>/account`) store only the constant prefix;
-//! callers append the query/segment as before.
+//! The router, the auth tiering (`hooks_server::auth`) and the HTTP-level
+//! tests all reference the SAME constant, so renaming a path is a single
+//! edit that either updates every reference or fails to compile. Paths
+//! carrying query params (`?path=…`) or path segments
+//! (`/sources/<name>/account`) store only the constant prefix; callers append
+//! the query/segment as before.
 
 pub const A2UI_RENDER_PENDING: &str = "/a2ui-render/pending";
 pub const A2UI_RENDER_RESPOND: &str = "/a2ui-render/respond";
@@ -39,11 +38,9 @@ pub const AUDIT: &str = "/audit";
 ///
 /// They exist for the **browser build**, which has no host of its own — a tab
 /// served by `fleet webui` has to reach these settings over HTTP or show a
-/// toggle that saves nowhere. `RemoteBackend` deliberately does NOT call them:
-/// over SSH these three govern the *desktop* machine (its injector lock, its
-/// decision-panel hooks, its resume scheduler), so it keeps reading the local
-/// files. `/auto_resume_config` is the same path Phase 4 P3 retired for exactly
-/// that reason; it is back for the web transport, not for the SSH client.
+/// toggle that saves nowhere. The desktop reads the local files directly:
+/// these three govern the machine the desktop runs on (its injector lock, its
+/// decision-panel hooks, its resume scheduler).
 pub const AUTO_RESUME_CONFIG: &str = "/auto_resume_config";
 pub const PERMISSIONS_CONFIG: &str = "/permissions_config";
 pub const DECISION_PANEL_CONFIG: &str = "/decision_panel_config";

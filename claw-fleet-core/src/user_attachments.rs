@@ -8,8 +8,8 @@
 //! resolve when the conversation is read back weeks later.
 //!
 //! Staging to `$TMPDIR` fails that on two counts: the OS reclaims the directory
-//! on its own schedule, and under `RemoteBackend` a desktop-side temp path names
-//! a file on the wrong machine entirely — the agent never could read it.
+//! on its own schedule, and for a browser tab a client-side temp path names a
+//! file on the wrong machine entirely — the agent never could read it.
 //!
 //! Layout: `~/.fleet/user-attachments/<sha256[..16]>/<name>`. Content-addressed,
 //! so the same screenshot pasted into five sessions costs one copy on disk.
@@ -110,11 +110,11 @@ pub fn ingest(source: &Path, name: &str) -> Result<PathBuf, String> {
 /// [`ingest`] for callers that already hold the bytes (a clipboard paste never
 /// touches disk before this point).
 pub fn ingest_bytes(bytes: &[u8], name: &str) -> Result<PathBuf, String> {
-    if bytes.len() as u64 > crate::backend::MAX_ATTACHMENT_BYTES {
+    if bytes.len() as u64 > crate::ui_types::MAX_ATTACHMENT_BYTES {
         return Err(format!(
             "attachment too large: {} bytes (max {})",
             bytes.len(),
-            crate::backend::MAX_ATTACHMENT_BYTES
+            crate::ui_types::MAX_ATTACHMENT_BYTES
         ));
     }
     let base = user_attachments_dir().ok_or("cannot determine home dir")?;
@@ -267,7 +267,7 @@ mod tests {
         assert!(read_user_attachment(&key, "missing.png").is_err());
 
         // Oversize is refused rather than silently truncated.
-        let huge = vec![0u8; (crate::backend::MAX_ATTACHMENT_BYTES + 1) as usize];
+        let huge = vec![0u8; (crate::ui_types::MAX_ATTACHMENT_BYTES + 1) as usize];
         assert!(ingest_bytes(&huge, "big.bin").is_err());
 
         unsafe {

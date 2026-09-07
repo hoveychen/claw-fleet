@@ -535,7 +535,7 @@ fn allowed_skill_root(path: &Path) -> Option<(PathBuf, bool)> {
     }
 
     // Repo-scoped roots, recognized structurally so a repository outside the
-    // user's home stays inspectable over local and remote backends alike.
+    // user's home stays inspectable from the desktop and over HTTP alike.
     for ancestor in path.ancestors() {
         if ancestor.file_name().and_then(|n| n.to_str()) != Some("skills") {
             continue;

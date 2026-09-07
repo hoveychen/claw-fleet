@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
-import type { RemoteConnection } from "./components/ConnectionDialog";
 import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome } from "./types";
 import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
@@ -12,34 +11,11 @@ import i18n from "./i18n";
 import { playChime } from "./audio";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 
-// ── Connection store ──────────────────────────────────────────────────────────
-
-export type Connection =
-  | { type: "local" }
-  | { type: "remote"; connection: RemoteConnection };
-
-interface ConnectionState {
-  /** `null` = not yet connected (dialog is shown) */
-  connection: Connection | null;
-  setConnection: (conn: Connection) => void;
-  disconnect: () => Promise<void>;
-}
-
-export const useConnectionStore = create<ConnectionState>((set) => ({
-  connection: null,
-  setConnection: (conn) => set({ connection: conn }),
-  disconnect: async () => {
-    await invoke("disconnect_remote").catch(() => {});
-    useSessionsStore.getState().setScanReady(false);
-    set({ connection: null });
-  },
-}));
-
 /** Open the in-app Settings overlay.
  *
  * Settings used to live in its own `settings.html` webview window, which meant
- * a second window with its own copy of every store, a `connection` query param
- * to seed it, and cross-window theme/lang events to keep the two in sync. It is
+ * a second window with its own copy of every store and cross-window theme/lang
+ * events to keep the two in sync. It is
  * now an overlay inside the main window, so all of that is just a boolean: the
  * panel reads the same stores the rest of the app already has. */
 export function openSettings(): void {

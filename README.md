@@ -88,13 +88,12 @@ When a task outgrows one context window, the agent registers a handoff and **Fle
 - **Wiki** — versioned, full-text-searchable archive of everything your agents publish (HTML reports, demos, docs), cross-linked with `[[slug]]`.
 - **Repos** — file trees, git status and diffs, built-in terminal.
 - **Audit** — every Bash command your agents ran, classified by risk.
-- **Remote machines** — point Fleet at a box over SSH and its agents show up next to your local ones.
 
 ---
 
 ## 3. From the terminal
 
-Everything the app does has a CLI behind it. Most commands take `--json`, and all take `--remote <host>`.
+Everything the app does has a CLI behind it. Most commands take `--json`.
 
 ```bash
 fleet agents                  # who's running, what they're doing
@@ -144,7 +143,7 @@ FLEET_WEBUI_DIR=$PWD/webui cargo build --release -p fleet-cli --features embed-w
 ./target/release/fleet-cli webui        # no --web-root needed
 ```
 
-The feature is off by default: the same crate produces the `fleet` probe that macOS/Windows bundles embed for remote SSH deployment, and that probe talks to an app which already has a UI. Embedding costs ~7 MB.
+The feature is off by default: the same crate produces the `fleet` sidecar that the macOS/Windows bundles embed for hooks and the CLI, and that sidecar sits next to an app which already has a UI. Embedding costs ~7 MB.
 
 ---
 
@@ -154,7 +153,7 @@ The feature is off by default: the same crate produces the `fleet` probe that ma
 
 **Decisions** ride on Claude Code's extension points — hooks (guard, questions, plan approval) and MCP tools (`fleet__ask`, `fleet__render_a2ui`, `fleet__permission_prompt`) — routed into a local hooks server. Desktop, floating card, and mobile are surfaces over the same queue.
 
-**Remote & mobile:** an SSH-bootstrapped `fleet serve` probe exposes the same data plane for remote machines; for mobile, the desktop dials *out* to a content-agnostic relay over WebSocket and your phone joins the channel with the key from the QR code.
+**Mobile:** the desktop dials *out* to a content-agnostic relay over WebSocket and your phone joins the channel with the key from the QR code. `fleet serve` exposes the same data plane over HTTP for the browser build and the cloud container.
 
 ```
 agents (Claude Code / Codex)

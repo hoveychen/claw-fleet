@@ -5,7 +5,7 @@ use crate::memory;
 
 #[tauri::command(async)]
 pub(crate) fn list_memories(state: tauri::State<'_, AppState>) -> Vec<memory::WorkspaceMemory> {
-    state.backend.read().unwrap().list_memories()
+    state.backend.list_memories()
 }
 
 /// `(async)` → threadpool: polled every 700ms while a session streams. Even
@@ -16,17 +16,17 @@ pub(crate) fn read_live_thinking(
     session_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
-    state.backend.read().unwrap().read_live_thinking(&session_id)
+    state.backend.read_live_thinking(&session_id)
 }
 
 #[tauri::command(async)]
 pub(crate) fn get_memory_content(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state.backend.read().unwrap().get_memory_content(&path)
+    state.backend.get_memory_content(&path)
 }
 
 #[tauri::command(async)]
 pub(crate) fn get_memory_history(path: String, state: tauri::State<'_, AppState>) -> Vec<memory::MemoryHistoryEntry> {
-    state.backend.read().unwrap().get_memory_history(&path)
+    state.backend.get_memory_history(&path)
 }
 
 #[tauri::command(async)]
@@ -37,8 +37,6 @@ pub(crate) fn get_task_plans(
 ) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
     state
         .backend
-        .read()
-        .unwrap()
         .get_task_plans(&workspace_path, session_id.as_deref())
 }
 
@@ -49,7 +47,7 @@ pub(crate) fn get_plan_forest(
     workspace_path: String,
     state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::plan_forest::PlanForest {
-    state.backend.read().unwrap().get_plan_forest(&workspace_path)
+    state.backend.get_plan_forest(&workspace_path)
 }
 
 #[tauri::command]

@@ -5,7 +5,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 
 use std::sync::OnceLock;
 
@@ -15,7 +15,7 @@ use tauri::menu::{AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, Predefined
 use tauri::tray::TrayIconBuilder;
 
 use super::account::AccountInfo;
-use super::backend::Backend;
+
 use super::session::SessionInfo;
 use super::*;
 
@@ -116,9 +116,8 @@ fn get_platform() -> String {
 /// the host-side events that explain them.
 ///
 /// Like `reveal_path`, this is a host action rather than a data-fetching
-/// capability, so it does not belong on the Backend trait: it records the state
-/// of *this* webview, which exists only on the machine drawing the UI. A remote
-/// workspace has no scroll container to diagnose.
+/// capability, so it is a plain command rather than a `LocalBackend` method: it
+/// records the state of *this* webview.
 #[tauri::command]
 fn log_frontend_debug(msg: String) {
     // Bound the line so a runaway caller can't grow the log without limit.
@@ -132,9 +131,9 @@ fn log_frontend_debug(msg: String) {
 /// does not accept `~`, and handing the home dir to the frontend just to rebuild
 /// the path there would be a data round-trip for something the host already knows.
 ///
-/// Local-only by nature — a remote workspace's files do not exist on this disk.
-/// This is a shell action rather than a data-fetching capability, so it does not
-/// belong on the Backend trait; the UI hides it when the connection is remote.
+/// A shell action rather than a data-fetching capability, so it is a plain
+/// command rather than a `LocalBackend` method; the browser build hides it
+/// (`canReveal.ts`).
 #[tauri::command]
 fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
@@ -166,7 +165,7 @@ fn get_app_version() -> String {
 /// `stamp_git_commit`). The 移动端 view compares it against each connected
 /// phone's `appCommit` to flag a stale mobile bundle. Like `get_app_version`,
 /// this is a compile-time constant of the running app — not backend data — so
-/// it stays a plain command and is identical under Local/Remote backends.
+/// it stays a plain command.
 /// `"unknown"` when no commit source was available at build time.
 #[tauri::command]
 fn desktop_build_commit() -> String {
@@ -176,11 +175,10 @@ fn desktop_build_commit() -> String {
 // ── App state ────────────────────────────────────────────────────────────────
 
 pub struct AppState {
-    /// The active backend (local or remote).  Swapped on connect/disconnect.
-    /// Uses RwLock so read-only operations don't block each other (all Backend
-    /// trait methods take &self).  Only the connect/disconnect swap needs a
-    /// write lock.
-    pub backend: Arc<RwLock<Box<dyn Backend>>>,
+    /// The data-plane facade every Tauri command delegates to. Built in
+    /// `setup()` (it needs the `AppHandle`) and never replaced afterwards;
+    /// all of its methods take `&self`, so no lock sits in front of it.
+    pub backend: Arc<local_backend::LocalBackend>,
     /// User's current UI locale (e.g. "en", "zh"), shared with backend threads.
     pub locale: Arc<Mutex<String>>,
     /// Notification mode: "all" | "user_action" | "none".
@@ -190,7 +188,7 @@ pub struct AppState {
     /// Cached sessions for tray menu rebuilds.
     pub cached_sessions: Arc<Mutex<Vec<SessionInfo>>>,
     /// Cached per-source usage summaries for tray menu display.
-    pub cached_usage: Arc<Mutex<Vec<backend::SourceUsageSummary>>>,
+    pub cached_usage: Arc<Mutex<Vec<ui_types::SourceUsageSummary>>>,
     /// Fingerprint of the last tray menu content — skip rebuilds when unchanged
     /// to prevent the menu from closing while the user is interacting with it.
     pub tray_fingerprint: Arc<Mutex<u64>>,
@@ -431,7 +429,7 @@ pub fn update_tray(app: &tauri::AppHandle, sessions: &[SessionInfo]) {
     let _ = app.run_on_main_thread(move || rebuild_tray(&handle));
 }
 
-pub fn update_tray_usage(app: &tauri::AppHandle, summaries: Vec<backend::SourceUsageSummary>) {
+pub fn update_tray_usage(app: &tauri::AppHandle, summaries: Vec<ui_types::SourceUsageSummary>) {
     let state = app.state::<AppState>();
     *state.cached_usage.lock().unwrap() = summaries;
     let handle = app.clone();
@@ -574,7 +572,6 @@ struct MenuLabels {
     quit: &'static str,
 
     file: &'static str,
-    switch_connection: &'static str,
     daily_report: &'static str,
     close_window: &'static str,
 
@@ -617,7 +614,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
             quit: "退出 Claw Fleet",
 
             file: "文件",
-            switch_connection: "切换连接",
             daily_report: "每日报告",
             close_window: "关闭窗口",
 
@@ -658,7 +654,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
             quit: "Quit Claw Fleet",
 
             file: "File",
-            switch_connection: "Switch Connection",
             daily_report: "Daily Report",
             close_window: "Close Window",
 
@@ -728,13 +723,6 @@ fn build_app_menu(
 
     // ── File ────────────────────────────────────────────────────────────
     let file_submenu = SubmenuBuilder::new(app, l.file)
-        .item(
-            &MenuItemBuilder::new(l.switch_connection)
-                .id("menu-switch-connection")
-                .accelerator("CmdOrCtrl+Shift+C")
-                .build(app)?,
-        )
-        .separator()
         .item(
             &MenuItemBuilder::new(l.daily_report)
                 .id("menu-daily-report")
@@ -863,13 +851,6 @@ fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
             }
             let _ = app.emit("menu-check-updates", ());
         }
-        "menu-switch-connection" => {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
-            let _ = app.emit("switch-connection", ());
-        }
         "menu-daily-report" => {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
@@ -914,7 +895,7 @@ fn build_tray_menu(
     active_main: &[&SessionInfo],
     _sub_count: usize,
     total: usize,
-    summaries: &[backend::SourceUsageSummary],
+    summaries: &[ui_types::SourceUsageSummary],
 ) -> Result<tauri::menu::Menu<tauri::Wry>, tauri::Error> {
     let mut builder = MenuBuilder::new(app);
 
@@ -966,10 +947,6 @@ fn build_tray_menu(
 
     // ── Actions ──────────────────────────────────────────────────────────
     builder = builder.item(
-        &MenuItemBuilder::new("Switch Connection").id("switch-connection").build(app)?
-    );
-    builder = builder.item(&PredefinedMenuItem::separator(app)?);
-    builder = builder.item(
         &MenuItemBuilder::new("Quit").id("quit").build(app)?
     );
 
@@ -1010,9 +987,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         // Serves wiki content into the webview: fleet-wiki://localhost/
         // <slug>/<version>/<relpath…> (http://fleet-wiki.localhost/… on
-        // Windows). Routed through the Backend trait so a remote connection
-        // transparently proxies bytes over the probe API. Asynchronous +
-        // worker thread because RemoteBackend does blocking HTTP.
+        // Windows). Answered from LocalBackend on a worker thread so a large
+        // asset read never blocks the webview's IPC thread.
         .register_asynchronous_uri_scheme_protocol("fleet-wiki", move |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             std::thread::spawn(move || {
@@ -1029,7 +1005,7 @@ pub fn run() {
                 // Scope the backend read lock so it's released before respond.
                 let result = {
                     let state = app.state::<AppState>();
-                    let backend = state.backend.read().unwrap();
+                    let backend = &state.backend;
                     backend.get_wiki_file(&slug, &version, &rel)
                 };
                 let response = match result {
@@ -1080,7 +1056,7 @@ pub fn run() {
 
                 let result = {
                     let state = app.state::<AppState>();
-                    let backend = state.backend.read().unwrap();
+                    let backend = &state.backend;
                     backend.read_artifact_bytes(&id, range)
                 };
                 let response = artifact_response(result, range.is_some());
@@ -1089,9 +1065,8 @@ pub fn run() {
         })
         // Serves fleet__ask decision-card assets into the webview:
         // fleet-decision://localhost/<id>/q<idx>/<relpath…>
-        // (http://fleet-decision.localhost/… on Windows). Same Backend-routed,
-        // worker-thread shape as fleet-wiki:// so remote sessions proxy the
-        // bytes over the probe API. Lets image-bearing cards load their
+        // (http://fleet-decision.localhost/… on Windows). Same worker-thread
+        // shape as fleet-wiki://. Lets image-bearing cards load their
         // index.html + images without base64-inlining into the tool call.
         .register_asynchronous_uri_scheme_protocol("fleet-decision", move |ctx, request, responder| {
             let app = ctx.app_handle().clone();
@@ -1108,7 +1083,7 @@ pub fn run() {
                 let rel = dec(segs.next().unwrap_or(""));
                 let result = {
                     let state = app.state::<AppState>();
-                    let backend = state.backend.read().unwrap();
+                    let backend = &state.backend;
                     backend.get_decision_asset(&id, &qidx, &rel)
                 };
                 let response = match result {
@@ -1129,9 +1104,8 @@ pub fn run() {
         })
         // Serves images a Codex session generated into the webview:
         // fleet-genimage://localhost/<session id>/<name>
-        // Same Backend-routed shape as fleet-decision:// above. The files sit in
-        // $CODEX_HOME, outside every workspace, so a remote session proxies them
-        // off the probe host — which is the machine that actually ran Codex.
+        // Same shape as fleet-decision:// above. The files sit in $CODEX_HOME,
+        // outside every workspace.
         .register_asynchronous_uri_scheme_protocol("fleet-genimage", move |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             std::thread::spawn(move || {
@@ -1146,7 +1120,7 @@ pub fn run() {
                 let name = dec(segs.next().unwrap_or(""));
                 let result = {
                     let state = app.state::<AppState>();
-                    let backend = state.backend.read().unwrap();
+                    let backend = &state.backend;
                     backend.get_session_image(&session, &name)
                 };
                 let response = match result {
@@ -1168,9 +1142,7 @@ pub fn run() {
         // Serves user-direction attachments (composer pastes, decision-panel
         // picks) into the webview so history can render them as thumbnails:
         // fleet-attachment://localhost/<key>/<name>
-        // Same Backend-routed shape as fleet-decision:// above, so a remote
-        // session proxies the bytes off the probe host — which is where the
-        // agent, and therefore the stored attachment, actually lives.
+        // Same shape as fleet-decision:// above.
         .register_asynchronous_uri_scheme_protocol("fleet-attachment", move |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             std::thread::spawn(move || {
@@ -1185,7 +1157,7 @@ pub fn run() {
                 let name = dec(segs.next().unwrap_or(""));
                 let result = {
                     let state = app.state::<AppState>();
-                    let backend = state.backend.read().unwrap();
+                    let backend = &state.backend;
                     backend.get_user_attachment(&key, &name)
                 };
                 let response = match result {
@@ -1205,20 +1177,7 @@ pub fn run() {
             });
         });
 
-    builder.manage(AppState {
-            // NullBackend is a placeholder; replaced with LocalBackend in setup().
-            backend: Arc::new(RwLock::new(Box::new(NullBackend) as Box<dyn Backend>)),
-            locale: Arc::new(Mutex::new("en".to_string())),
-            notification_mode: Arc::new(Mutex::new("user_action".to_string())),
-            user_title: Arc::new(Mutex::new(String::new())),
-            cached_sessions: Arc::new(Mutex::new(Vec::new())),
-            cached_usage: Arc::new(Mutex::new(Vec::new())),
-            tray_fingerprint: Arc::new(Mutex::new(0)),
-            tray_last_click: Arc::new(Mutex::new(None)),
-            tray_rebuild_pending: Arc::new(Mutex::new(false)),
-            llm_config: Arc::new(Mutex::new(llm_provider::LlmConfig::load())),
-            cached_llm_providers: Arc::new(Mutex::new(Vec::new())),
-        })
+    builder
         .setup(move |app| {
             // Windows: strip native chrome so the frontend's drag bar +
             // caption-button overlay can replace the OS title bar / system
@@ -1244,12 +1203,13 @@ pub fn run() {
             // without racing any still-streaming session.
             claw_fleet_core::live_thinking::prune_old(6 * 60 * 60);
 
-            // Replace NullBackend with the real LocalBackend now that AppHandle
-            // is available.
+            // Build the LocalBackend now that the AppHandle exists, and register
+            // AppState around it. Tauri runs `setup` before the event loop
+            // starts, so no command can be dispatched before this point — there
+            // is no window in which a placeholder backend would be observed.
             {
-                let state = app.state::<AppState>();
-                let locale = state.locale.clone();
-                let llm_cfg = state.llm_config.clone();
+                let locale = Arc::new(Mutex::new("en".to_string()));
+                let llm_cfg = Arc::new(Mutex::new(llm_provider::LlmConfig::load()));
                 llm_provider::set_shared_config(llm_cfg.lock().unwrap().clone());
 
                 // Build the agent source registry from config (~/.fleet/fleet-sources.json).
@@ -1257,17 +1217,29 @@ pub fn run() {
 
                 let local = local_backend::LocalBackend::new(
                     app.handle().clone(),
-                    locale,
-                    llm_cfg,
+                    locale.clone(),
+                    llm_cfg.clone(),
                     sources,
                 );
-                *state.backend.write().unwrap() = Box::new(local);
+                let cached_llm_providers = Arc::new(Mutex::new(Vec::new()));
+                app.manage(AppState {
+                    backend: Arc::new(local),
+                    locale,
+                    notification_mode: Arc::new(Mutex::new("user_action".to_string())),
+                    user_title: Arc::new(Mutex::new(String::new())),
+                    cached_sessions: Arc::new(Mutex::new(Vec::new())),
+                    cached_usage: Arc::new(Mutex::new(Vec::new())),
+                    tray_fingerprint: Arc::new(Mutex::new(0)),
+                    tray_last_click: Arc::new(Mutex::new(None)),
+                    tray_rebuild_pending: Arc::new(Mutex::new(false)),
+                    llm_config: llm_cfg,
+                    cached_llm_providers: cached_llm_providers.clone(),
+                });
 
                 // Pre-fetch LLM provider info in background so Settings opens instantly.
-                let cached = state.cached_llm_providers.clone();
                 std::thread::spawn(move || {
                     let infos = llm_provider::all_provider_infos();
-                    *cached.lock().unwrap() = infos;
+                    *cached_llm_providers.lock().unwrap() = infos;
                 });
             }
 
@@ -1448,8 +1420,6 @@ pub fn run() {
             let tray_menu = MenuBuilder::new(app)
                 .item(&MenuItemBuilder::new("No Active Agents").id("info-header").enabled(false).build(app)?)
                 .item(&PredefinedMenuItem::separator(app)?)
-                .item(&MenuItemBuilder::new("Switch Connection").id("switch-connection").build(app)?)
-                .item(&PredefinedMenuItem::separator(app)?)
                 .item(&MenuItemBuilder::new("Quit").id("quit").build(app)?)
                 .build()?;
 
@@ -1500,13 +1470,7 @@ pub fn run() {
                 .on_menu_event(|app, event| {
                     let id = event.id();
                     let id_str = id.as_ref();
-                    if id_str == "switch-connection" {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                        let _ = app.emit("switch-connection", ());
-                    } else if id_str == "quit" {
+                    if id_str == "quit" {
                         app.exit(0);
                     } else if let Some(idx_str) = id_str.strip_prefix("open-session-") {
                         if let Ok(idx) = idx_str.parse::<usize>() {
@@ -1633,18 +1597,14 @@ pub fn run() {
             detect_ai_tools,
             install_fleet_skill,
             save_skill_file,
-            remote::list_saved_connections,
-            remote::list_ssh_profiles,
-            remote::delete_connection,
-            remote::connect_remote,
-            remote::install_rca_remote,
-            remote::install_rca_on_host,
-            remote::update_rca_remote,
-            remote::remote_workspace_harness_statuses,
-            remote::install_harness_remote,
+            rca_provision::list_ssh_profiles,
+            rca_provision::install_rca_remote,
+            rca_provision::install_rca_on_host,
+            rca_provision::update_rca_remote,
+            rca_provision::remote_workspace_harness_statuses,
+            rca_provision::install_harness_remote,
             remote_codex_login_start,
             remote_codex_login_poll,
-            remote::disconnect_remote,
             pick_file,
             get_source_account,
             get_source_usage,

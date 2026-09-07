@@ -131,12 +131,11 @@ describe("host facts", () => {
  * empty root — with `boot()` still reporting success, which is exactly how this
  * first showed up.
  *
- * `ConnectionDialog` does `conns.length === 0` on the value of
- * `list_saved_connections`, so these two are load-bearing.
+ * The settings panel's host picker does `.length === 0` on the value of
+ * `list_ssh_profiles`, so this one is load-bearing.
  */
 describe("list-shaped commands never answer null", () => {
   it.each([
-    "list_saved_connections",
     "list_ssh_profiles",
     // `store.ts` assigns this straight into the `alerts` array slot.
     "get_waiting_alerts",
@@ -219,18 +218,14 @@ const KNOWN_WEB_GAPS = [
   // local no-op would be worse than a gap — the call site reports success on a
   // resolved promise, and nothing would have opened.
   "open_artifact_external",
-  // Emit onto the desktop's app-event bus, or have no RemoteBackend override.
+  // Emit onto the desktop's app-event bus.
   "test_decision_frontend_only",
   "test_fleet_ask_end_to_end",
   "test_fleet_ask_via_claude_cli",
-  // SSH connection management — a tab only ever talks to the server that
-  // served it, so there is nothing to connect, disconnect or install.
-  "connect_remote",
-  "disconnect_remote",
-  "delete_connection",
+  // Open an ssh connection FROM the caller's machine to install rca there. A
+  // tab has no ssh client and no keys; it only ever talks to the server that
+  // served it.
   "install_rca_remote",
-  // Same shape: opens an ssh connection FROM the caller's machine to install
-  // rca there. A tab has no ssh client and no keys.
   "install_rca_on_host",
   "update_rca_remote",
   // Environment wizard *actions*: run installers / drive a login pty on the

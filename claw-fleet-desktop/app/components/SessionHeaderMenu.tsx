@@ -26,12 +26,10 @@ export function SessionHeaderMenu({
   sessionId,
   jsonlPath,
   workspacePath,
-  isLocal,
 }: {
   sessionId: string;
   jsonlPath: string;
   workspacePath: string;
-  isLocal: boolean;
 }) {
   const { t } = useTranslation();
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -81,9 +79,8 @@ export function SessionHeaderMenu({
     },
   );
 
-  // A remote workspace's files are not on this machine — nothing to reveal.
-  // Nor can a browser tab open a file manager; see canReveal.ts.
-  if (canRevealPath(isLocal)) {
+  // A browser tab cannot open a file manager; see canReveal.ts.
+  if (canRevealPath()) {
     items.push({
       id: "reveal",
       label: t(revealKey),
