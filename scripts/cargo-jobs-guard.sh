@@ -168,7 +168,9 @@ mkdir -p "$SLOT_ROOT" 2>/dev/null || true
 HELD_SLOT=""
 
 release_slot() {
-  [[ -n "$HELD_SLOT" ]] && rm -rf "$HELD_SLOT" 2>/dev/null || true
+  if [[ -n "$HELD_SLOT" ]]; then
+    rm -rf "$HELD_SLOT" 2>/dev/null || true
+  fi
   HELD_SLOT=""
 }
 
