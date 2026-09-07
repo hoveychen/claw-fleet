@@ -65,3 +65,17 @@ python3 scripts/site/distribute.py \
 ## 官网维护
 
 双语文案：`scripts/site/content/zh.json` / `en.json`；模板：`scripts/site/build.py`；当前产品截图：`docs/screenshots/current/`（实际组件、示例数据）；样式与交互：`docs/site.css` / `docs/site.js`。执行 `python3 scripts/site/build.py` 后提交两个 HTML 产物。无需 Node 构建依赖。不要直接改生成的 HTML。
+
+### 更新官网双语截图
+
+示例数据在 `scripts/site/fixtures/scenes.json`，两种语言使用独立文案。`generate.py` 生成真实可预览的 HTML/Markdown 示例材料；`capture.mjs` 使用真实桌面和手机组件生成八张截图，取景在生成阶段完成，官网不再二次偏移裁剪。
+
+分别启动 `claw-fleet-desktop` 的 Vite（端口 5299）与 `mobile-web` 的 Vite（端口 5288），从仓库根执行：
+
+```sh
+python3 scripts/site/fixtures/generate.py
+node scripts/site/capture.mjs
+python3 scripts/site/build.py
+```
+
+截图使用已安装 `patchwright-cli` 自带的 Patchright 与 Chrome；也可用 `PATCHRIGHT_MODULE` 指向本地 Patchright 模块。官网在 5290 端口提供服务后，执行 `node scripts/site/verify.mjs` 检查双语引用、资源加载与桌面/手机显示，再逐张打开图片眼验。

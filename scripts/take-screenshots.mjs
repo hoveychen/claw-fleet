@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Regenerate the landing-page screenshots from Claw Fleet running in mock mode.
+ * Legacy gallery/mobile captures for older promo material.
+ * Current bilingual website: use scripts/site/capture.mjs and scripts/site/build.py.
  *
- * The GitHub Pages site (docs/index.html) inlines three real app screenshots —
+ * The previous landing page used these three screenshots —
  *   docs/screenshots/01_gallery.png          — desktop: live multi-agent gallery board.
  *   docs/screenshots/02_mobile_decisions.png  — mobile web: a fleet__ask decision card.
  *   docs/screenshots/03_mobile_tasks.png      — mobile web: the live task list.
