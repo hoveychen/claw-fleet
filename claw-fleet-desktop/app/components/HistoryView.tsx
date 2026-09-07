@@ -476,13 +476,18 @@ export function HistoryView() {
   // Repository sections are the rail's primary hierarchy. Relay chains stay a
   // secondary grouping inside each repository instead of joining sessions from
   // separate directories into one flat stream.
+  // While the sort freeze holds, the grouping must take `displayRows` as-is —
+  // it re-sorts by activity otherwise, which would put the row back under the
+  // cursor's feet even though `displayRows` itself was frozen.
   const workspaceGroups = useMemo(
     () =>
-      groupSessionsByWorkspace(displayRows).map((group) => ({
+      groupSessionsByWorkspace(displayRows, {
+        preserveOrder: frozenOrder != null,
+      }).map((group) => ({
         ...group,
         items: buildRenderItems(group.sessions, groupHandoff),
       })),
-    [displayRows, groupHandoff],
+    [displayRows, groupHandoff, frozenOrder],
   );
 
   // Full membership of every relay chain, keyed by chainId — taken over ALL

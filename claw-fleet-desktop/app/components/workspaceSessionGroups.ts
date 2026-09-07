@@ -12,6 +12,15 @@ function activityMs(session: SessionInfo): number {
   return session.agentLastActivityMs ?? session.lastActivityMs;
 }
 
+export interface GroupSessionsOptions {
+  /** Keep `sessions` in the order given instead of re-sorting by activity —
+   *  both within a section and across sections (a section takes the position of
+   *  its first member). The rail passes this while its sort freeze is engaged;
+   *  without it the freeze would be undone right here, since the frozen list is
+   *  re-sorted the moment it is grouped. */
+  preserveOrder?: boolean;
+}
+
 /**
  * Turn the task rail's flat session result into repository-sized sections.
  * Fleet worktrees belong to their durable repository root, matching the new
@@ -20,6 +29,7 @@ function activityMs(session: SessionInfo): number {
  */
 export function groupSessionsByWorkspace(
   sessions: SessionInfo[],
+  { preserveOrder = false }: GroupSessionsOptions = {},
 ): WorkspaceSessionGroup[] {
   const groups = new Map<string, WorkspaceSessionGroup>();
 
@@ -40,6 +50,10 @@ export function groupSessionsByWorkspace(
       sessions: [session],
     });
   }
+
+  // Insertion order already mirrors the caller's order, so preserving it is
+  // simply skipping both sorts.
+  if (preserveOrder) return [...groups.values()];
 
   for (const group of groups.values()) {
     group.sessions.sort((a, b) => activityMs(b) - activityMs(a));

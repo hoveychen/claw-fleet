@@ -45,6 +45,26 @@ describe("groupSessionsByWorkspace", () => {
     expect(groups[0].sessions.map((item) => item.id)).toEqual(["newer-a", "older-a"]);
   });
 
+  it("keeps the caller's order when told to preserve it", () => {
+    // The rail freezes row order while the pointer is parked over it, then
+    // hands the frozen list here. Re-sorting by activity would undo the freeze
+    // both inside a repository section and across sections.
+    const groups = groupSessionsByWorkspace(
+      [
+        session("older-a", "/work/a", "a", 10),
+        session("only-b", "/work/b", "b", 30),
+        session("newer-a", "/work/a", "a", 40),
+      ],
+      { preserveOrder: true },
+    );
+
+    expect(groups.map((group) => group.path)).toEqual(["/work/a", "/work/b"]);
+    expect(groups[0].sessions.map((item) => item.id)).toEqual([
+      "older-a",
+      "newer-a",
+    ]);
+  });
+
   it("uses the directory name as a deterministic tie-breaker", () => {
     const groups = groupSessionsByWorkspace([
       session("z", "/work/zebra", "zebra", 50),
