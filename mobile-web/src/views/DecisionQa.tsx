@@ -12,7 +12,7 @@
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
-import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
+import { mdComponents } from "../markdown/components";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import { splitAnswerAttachments } from "../userAttachments";
@@ -20,13 +20,10 @@ import { AttachmentThumbs } from "./AttachmentThumb";
 import { stripTtsDivider } from "./decisionCall";
 import styles from "./DecisionQa.module.css";
 
-/** Links stay inert on a transcript surface — a tap must not navigate the
- *  webview away from the session. */
-const mdLink: Components["a"] = ({ children }) => (
-  <span className={styles.mdLink}>{children}</span>
-);
-
-export const MD_BLOCK: Components = { ...mermaidMarkdownComponents, a: mdLink };
+// 链接走共享的组件表：http(s)/mailto 交给系统浏览器（壳里由 Capacitor 的
+// launchIntent / 鸿蒙的 onLoadIntercept 接管），其余 scheme 仍然不可点 —— 后者
+// 才是「一次误触把 webview 从会话上导走」的真实风险，而不是外链本身。
+export const MD_BLOCK: Components = mdComponents;
 export const MD_INLINE: Components = { ...MD_BLOCK, p: ({ children }) => <>{children}</> };
 
 export function Md({ text, inline }: { text: string; inline?: boolean }) {

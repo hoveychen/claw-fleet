@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
-import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
+import { mdComponents } from "../markdown/components";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import { useLightbox } from "./Lightbox";
@@ -121,7 +121,7 @@ function AgentBody({ result, fallback }: { result: Record<string, unknown> | nul
           <ReactMarkdown
             remarkPlugins={mdRemarkPlugins}
             rehypePlugins={mdRehypePlugins}
-            components={mermaidMarkdownComponents}
+            components={mdComponents}
           >
             {text}
           </ReactMarkdown>
@@ -280,7 +280,7 @@ function WebFetchBody({
           <ReactMarkdown
             remarkPlugins={mdRemarkPlugins}
             rehypePlugins={mdRehypePlugins}
-            components={mermaidMarkdownComponents}
+            components={mdComponents}
           >
             {summary}
           </ReactMarkdown>

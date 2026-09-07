@@ -16,7 +16,7 @@ import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 import { VoiceTextarea } from "./VoiceTextarea";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
-import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
+import { mdComponents } from "../markdown/components";
 import { fetchDecisionAsset } from "../decisionAsset";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
@@ -492,7 +492,7 @@ function GuardAnalysis({
           <ReactMarkdown
             remarkPlugins={mdRemarkPlugins}
             rehypePlugins={mdRehypePlugins}
-            components={mermaidMarkdownComponents}
+            components={mdComponents}
           >
             {state}
           </ReactMarkdown>
@@ -706,7 +706,7 @@ function PlanCard({
           <ReactMarkdown
             remarkPlugins={mdRemarkPlugins}
             rehypePlugins={mdRehypePlugins}
-            components={mermaidMarkdownComponents}
+            components={mdComponents}
           >
             {content}
           </ReactMarkdown>
@@ -959,7 +959,7 @@ function PrecedingNarration({
               <ReactMarkdown
                 remarkPlugins={mdRemarkPlugins}
             rehypePlugins={mdRehypePlugins}
-                components={mermaidMarkdownComponents}
+                components={mdComponents}
               >
                 {c.text}
               </ReactMarkdown>
@@ -1193,7 +1193,7 @@ function QuestionsCard({
             <ReactMarkdown
               remarkPlugins={mdRemarkPlugins}
             rehypePlugins={mdRehypePlugins}
-              components={mermaidMarkdownComponents}
+              components={mdComponents}
             >
               {stripTtsDivider(q.question)}
             </ReactMarkdown>
@@ -1265,7 +1265,7 @@ function QuestionsCard({
                     <ReactMarkdown
                       remarkPlugins={mdRemarkPlugins}
             rehypePlugins={mdRehypePlugins}
-                      components={mermaidMarkdownComponents}
+                      components={mdComponents}
                     >
                       {o.preview}
                     </ReactMarkdown>

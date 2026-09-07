@@ -140,11 +140,6 @@
   font-style: italic;
 }
 
-.mdLink {
-  color: var(--color-accent);
-  text-decoration: underline;
-}
-
 /* Markdown typography for the plan / feedback bodies. Selectors are :global
    because ReactMarkdown emits real tags, not CSS-module classes. The decision
    Q/A equivalents live in DecisionQa.module.css. */

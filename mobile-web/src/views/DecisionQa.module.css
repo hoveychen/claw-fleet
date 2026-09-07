@@ -78,11 +78,6 @@
   line-height: 1.5;
 }
 
-.mdLink {
-  color: var(--color-accent);
-  text-decoration: underline;
-}
-
 /* Markdown typography for the question body and option text. Selectors are
    :global because ReactMarkdown emits real tags, not CSS-module classes. */
 .qaQuestion :global(p) {

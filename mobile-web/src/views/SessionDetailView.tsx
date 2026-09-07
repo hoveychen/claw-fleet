@@ -40,7 +40,7 @@ import { isFleetTool } from "./fleetTools";
 import { fleetSummary } from "./FleetBody";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
-import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
+import { mdComponents } from "../markdown/components";
 import { dateLocale, t } from "../i18n";
 import { CopyButton } from "./CopyButton";
 import { useLightbox } from "./Lightbox";
@@ -387,10 +387,7 @@ function LazyMarkdown({ text, bare }: { text: string; bare?: boolean }) {
         <ReactMarkdown
           remarkPlugins={mdRemarkPlugins}
           rehypePlugins={mdRehypePlugins}
-          components={{
-            ...mermaidMarkdownComponents,
-            a: ({ children }) => <span className={styles.mdLink}>{children}</span>,
-          }}
+          components={mdComponents}
         >
           {text}
         </ReactMarkdown>
@@ -681,7 +678,9 @@ function AssistantBlocks({
 /** Inline markdown for the work-run band headline: `p` unwraps to a fragment
  *  so a one-sentence title renders inline (no block paragraph) inside the
  *  nowrap/ellipsis span, while `**bold**`/`code` still resolve. Links stay
- *  inert (same as LazyMarkdown) since a title never navigates. */
+ *  inert here — unlike message bodies, this headline sits inside the band's
+ *  `<button>`, so a real anchor would be interactive content nested in a
+ *  control (and a title never needs to navigate). */
 const bandTitleMdComponents = {
   p: ({ children }: { children?: ReactNode }) => <>{children}</>,
   a: ({ children }: { children?: ReactNode }) => (

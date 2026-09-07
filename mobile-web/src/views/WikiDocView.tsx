@@ -8,7 +8,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Loader2, Share2 } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
-import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
+import { mdComponents as sharedMdComponents } from "../markdown/components";
+import { MdLink } from "../markdown/linkComponents";
 import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { WikiDoc } from "../types";
@@ -145,7 +146,7 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
 
   const mdComponents = useMemo(
     () => ({
-      ...mermaidMarkdownComponents,
+      ...sharedMdComponents,
       a: ({ href = "", children, ...rest }: ComponentPropsWithoutRef<"a">) => {
         if (href.startsWith("wiki:")) {
           return (
@@ -161,19 +162,12 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
             </a>
           );
         }
-        if (/^https?:/i.test(href)) {
-          return (
-            <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
-              {children}
-            </a>
-          );
-        }
-        // Relative / unknown scheme: render as text-only so a stray click can't
-        // navigate the whole PWA away from the pairing.
+        // http(s)/mailto/tel → 真链接（壳里交给系统打开，浏览器里开新标签）；
+        // 相对路径 / 未知 scheme → 不可点，免得一次误触把整个 PWA 导走。
         return (
-          <a href={href} onClick={(e) => e.preventDefault()} {...rest}>
+          <MdLink href={href} {...rest}>
             {children}
-          </a>
+          </MdLink>
         );
       },
       img: ({ src = "", alt, ...rest }: ComponentPropsWithoutRef<"img">) => (

@@ -1,0 +1,16 @@
+/* 共享的 markdown 链接外观。三处渲染面（消息、决策卡、wiki）以前各自写一份，
+ * 颜色/下划线都一样，唯独「点不点得开」不一样 —— 现在样式和行为一起收在
+ * linkComponents.tsx 里。 */
+.link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  /* 手机上链接常夹在正文里，加大命中区不改行高。 */
+  padding: 0 1px;
+}
+
+/* 认不出的 scheme（相对路径、file:、自造 scheme）：还是画成链接的样子，但不给
+ * href —— 在壳里点它会把整个 SPA 导走。 */
+.inert {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
