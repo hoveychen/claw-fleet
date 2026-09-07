@@ -17,19 +17,15 @@ export const LIVE_CARD_CAP = 6;
  * scope dropdown in the header (which navigates *away* from the parent) or the
  * 后台任务 tab (a last-Stop snapshot, minutes stale for a subagent). Neither
  * answered "what is everything working on right now" without clicking. These
- * cards do, and they disappear the moment an agent finishes — the panel is a
- * picture of what is live, not a log.
+ * cards do, and the tab disappears the moment the last one finishes — the panel
+ * is a picture of what is live, not a log.
  */
 export function SubagentLiveCards({
   agents,
-  heading,
   onOpen,
 }: {
   /** Live subagents, most-recently-active first. */
   agents: SessionInfo[];
-  /** Label the deck. Suppressed when the panel header already names it — i.e.
-   *  when the cards are the only thing the panel holds. */
-  heading: boolean;
   onOpen: (session: SessionInfo) => void;
 }) {
   const { t } = useTranslation();
@@ -39,11 +35,6 @@ export function SubagentLiveCards({
 
   return (
     <div className={styles.agents_deck}>
-      {heading && (
-        <div className={styles.agents_deck_head}>
-          {t("detail.live_agents", { count: agents.length })}
-        </div>
-      )}
       {shown.map((a) => (
         <button
           key={a.id}

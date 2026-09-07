@@ -6,60 +6,16 @@ import { WikiTabPane } from "./WikiTabPane";
 import styles from "./SessionDetail.module.css";
 
 /**
- * The strip of docs opened from agent prose, and the reader for the focused
- * one.
+ * The reader for a doc opened from agent prose.
  *
  * A path, a `[[slug]]` or a url the agent named used to open as a tab in the
- * window's strip — which meant leaving the conversation to read the thing the
- * conversation was about. They open here instead, beside the sentence that
- * named them. The strip exists because a session names many: it keeps the last
- * few reachable without going back through the transcript to find the link.
+ * *window's* strip — which meant leaving the conversation to read the thing the
+ * conversation was about. It opens as a tab in the auxiliary column instead,
+ * beside the sentence that named it.
  *
  * The three readers are the *same components* the 仓库 and 知识库 pages use, so
  * a file or doc looks identical wherever it is open.
  */
-export function SessionAuxDocStrip({
-  docs,
-  activeId,
-  onPick,
-  onClose,
-}: {
-  docs: AuxDoc[];
-  activeId: string | null;
-  onPick: (id: string) => void;
-  onClose: (id: string) => void;
-}) {
-  const { t } = useTranslation();
-  if (docs.length === 0) return null;
-  return (
-    <div className={styles.aux_docs}>
-      {docs.map((d) => (
-        <span
-          key={d.id}
-          className={`${styles.aux_doc_chip} ${activeId === d.id ? styles.aux_doc_chip_active : ""}`}
-        >
-          <button
-            type="button"
-            className={styles.aux_doc_chip_label}
-            onClick={() => onPick(d.id)}
-            title={d.ref}
-          >
-            {d.label}
-          </button>
-          <button
-            type="button"
-            className={styles.aux_doc_chip_close}
-            onClick={() => onClose(d.id)}
-            aria-label={t("common.close", "关闭")}
-          >
-            ✕
-          </button>
-        </span>
-      ))}
-    </div>
-  );
-}
-
 export function SessionAuxDoc({
   doc,
   onOpenWiki,

@@ -1,38 +1,40 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeAuxTab,
+  AGENTS_TAB,
   auxDocLabel,
-  auxVisible,
   closeAux,
   closeDoc,
   docId,
   initialAux,
   MAX_AUX_DOCS,
   openDoc,
-  pruneFacet,
+  pruneTab,
+  showTab,
   syncLiveAgents,
-  toggleFacet,
+  toggleTab,
   type AuxState,
 } from "./detailAux";
 
-describe("toggleFacet", () => {
+describe("toggleTab", () => {
   it("opens a facet", () => {
-    expect(toggleFacet(initialAux, "tokens").active).toBe("tokens");
+    expect(toggleTab(initialAux, "tokens").active).toBe("tokens");
   });
 
   it("clicking the showing facet closes the panel", () => {
-    const open = toggleFacet(initialAux, "tokens");
-    expect(toggleFacet(open, "tokens").active).toBe(null);
+    const open = toggleTab(initialAux, "tokens");
+    expect(toggleTab(open, "tokens").active).toBe(null);
   });
 
   it("switching facets keeps the panel open", () => {
-    const open = toggleFacet(initialAux, "tokens");
-    expect(toggleFacet(open, "skills").active).toBe("skills");
+    const open = toggleTab(initialAux, "tokens");
+    expect(toggleTab(open, "skills").active).toBe("skills");
   });
 
   it("clears a previous dismissal so the panel actually reopens", () => {
     const dismissed = closeAux(initialAux);
     expect(dismissed.agentsDismissed).toBe(true);
-    expect(toggleFacet(dismissed, "skills").agentsDismissed).toBe(false);
+    expect(toggleTab(dismissed, "skills").agentsDismissed).toBe(false);
   });
 });
 
@@ -46,7 +48,7 @@ describe("openDoc", () => {
 
   it("reveals rather than duplicates an already-open doc", () => {
     let st = openDoc(initialAux, "wiki", "arch/overview");
-    st = toggleFacet(st, "tokens");
+    st = toggleTab(st, "tokens");
     st = openDoc(st, "wiki", "arch/overview");
     expect(st.docs).toHaveLength(1);
     expect(st.active).toBe(docId("wiki", "arch/overview"));
@@ -91,39 +93,49 @@ describe("closeDoc", () => {
   });
 });
 
-describe("auxVisible", () => {
-  it("stays hidden with nothing picked and no live agents", () => {
-    expect(auxVisible(initialAux, 0)).toBe(false);
+describe("activeAuxTab", () => {
+  it("is closed with nothing picked and no live agents", () => {
+    expect(activeAuxTab(initialAux, 0)).toBe(null);
   });
 
-  it("auto-opens for a live subagent", () => {
-    expect(auxVisible(initialAux, 1)).toBe(true);
+  it("auto-opens on the agent deck for a live subagent", () => {
+    expect(activeAuxTab(initialAux, 1)).toBe(AGENTS_TAB);
   });
 
-  it("stays closed after the reader dismisses the agent cards", () => {
-    expect(auxVisible(closeAux(initialAux), 1)).toBe(false);
+  it("stays closed after the reader dismisses the deck", () => {
+    expect(activeAuxTab(closeAux(initialAux), 1)).toBe(null);
   });
 
-  it("a picked facet shows regardless of agents", () => {
-    expect(auxVisible(toggleFacet(initialAux, "skills"), 0)).toBe(true);
+  it("a picked facet wins over the auto-open", () => {
+    expect(activeAuxTab(toggleTab(initialAux, "skills"), 3)).toBe("skills");
   });
 
   it("a dismissal is spent once the last subagent finishes", () => {
     const dismissed = closeAux(initialAux);
     const after = syncLiveAgents(dismissed, 0);
-    expect(auxVisible(after, 2)).toBe(true);
+    expect(activeAuxTab(after, 2)).toBe(AGENTS_TAB);
+  });
+
+  it("showTab reopens a panel the reader had closed", () => {
+    const dismissed = closeAux(initialAux);
+    expect(activeAuxTab(showTab(dismissed, "tokens"), 0)).toBe("tokens");
   });
 });
 
-describe("pruneFacet", () => {
-  it("drops a facet that no longer has a button", () => {
-    const st = toggleFacet(initialAux, "bgtasks");
-    expect(pruneFacet(st, () => false).active).toBe(null);
+describe("pruneTab", () => {
+  it("drops a facet whose tab is gone", () => {
+    const st = toggleTab(initialAux, "bgtasks");
+    expect(pruneTab(st, () => false).active).toBe(null);
   });
 
-  it("leaves a doc alone", () => {
+  it("drops the agent deck once the last subagent finishes", () => {
+    const st = toggleTab(initialAux, AGENTS_TAB);
+    expect(pruneTab(st, (id) => id !== AGENTS_TAB).active).toBe(null);
+  });
+
+  it("keeps a tab that still exists", () => {
     const st = openDoc(initialAux, "web", "https://example.com/x");
-    expect(pruneFacet(st, () => false).active).toBe(st.active);
+    expect(pruneTab(st, () => true).active).toBe(st.active);
   });
 });
 

@@ -1,19 +1,19 @@
 /**
- * State for the session detail's auxiliary column — the right-hand panel that
- * replaced the old row of mutually-exclusive view tabs.
+ * State for the session detail's auxiliary column — the tabbed right-hand panel
+ * that replaced the old row of view tabs above the conversation.
  *
- * The conversation is no longer *one of* the facets you switch between: it owns
- * the left column permanently, and everything else (Skills, 决策, Token, 任务,
- * 后台任务, 临时文件, Workflow) is something you pull up *beside* it. Same for a
- * path, a `[[slug]]` or a url clicked in agent prose: it opens here rather than
- * as a tab in the window's strip, so the thing the agent named sits next to the
- * sentence that named it.
+ * The conversation is no longer *one of* the things you switch between: it owns
+ * the left column permanently. Everything else — the live subagents, Skills,
+ * 决策, Token, 任务, 后台任务, 临时文件, Workflow, and any file / wiki doc / page
+ * the agent named — is a tab in the panel *beside* it. One `active` id spans all
+ * three families, which is what makes them one tab strip rather than three
+ * stacked sections competing for the same height.
  *
  * Pure module, no React: the reducer is the part worth testing, and the panel
- * component should not have to be mounted to test it.
+ * should not have to be mounted to test it.
  */
 
-/** A session facet — one of the buttons above the conversation. */
+/** A session facet — a panel scoped to this session. */
 export type AuxFacet =
   | "skills"
   | "decisions"
@@ -33,6 +33,10 @@ const FACETS: readonly AuxFacet[] = [
   "workflow",
 ];
 
+/** The live-subagent deck's tab id. Not a facet: it exists only while something
+ *  is running, and it is the tab the panel opens itself on. */
+export const AGENTS_TAB = "agents";
+
 export function isAuxFacet(value: unknown): value is AuxFacet {
   return FACETS.includes(value as AuxFacet);
 }
@@ -43,25 +47,25 @@ export type AuxDocKind = "file" | "wiki" | "web";
 
 export interface AuxDoc {
   /** Identity *and* the value stored in `active`. Prefixed by kind, so it can
-   *  never collide with a facet name. */
+   *  never collide with a facet name or with `AGENTS_TAB`. */
   id: string;
   kind: AuxDocKind;
   /** Absolute path / wiki slug / url, by kind. */
   ref: string;
-  /** What the doc strip shows. */
+  /** What the tab shows. */
   label: string;
 }
 
 export interface AuxState {
   /** Docs opened in this pane, most recently opened last. */
   docs: AuxDoc[];
-  /** A facet name or a doc id; `null` means nothing was picked (the panel is
-   *  then only worth showing when live subagents are running — see
-   *  `auxVisible`). */
+  /** The selected tab: `AGENTS_TAB`, a facet name, or a doc id. `null` means
+   *  the reader has picked nothing — the panel then shows only when subagents
+   *  are running (see `activeAuxTab`). */
   active: string | null;
-  /** The reader closed the panel while it held nothing but the agent cards.
-   *  Kept so it stays closed as those cards churn, and reset once the last
-   *  live subagent finishes (`syncLiveAgents`). */
+  /** The reader closed the panel while it held nothing but the agent deck.
+   *  Kept so it stays closed as those cards churn, and reset once the last live
+   *  subagent finishes (`syncLiveAgents`). */
   agentsDismissed: boolean;
 }
 
@@ -99,16 +103,24 @@ export function makeAuxDoc(kind: AuxDocKind, ref: string): AuxDoc {
   return { id: docId(kind, ref), kind, ref, label: auxDocLabel(kind, ref) };
 }
 
-/** Click a facet button: show it, or — clicking the one already showing —
- *  close the panel again. A toggle, because the button row is the only control
- *  the facet has. */
-export function toggleFacet(state: AuxState, facet: AuxFacet): AuxState {
-  if (state.active === facet) return closeAux(state);
-  return { ...state, active: facet, agentsDismissed: false };
+/**
+ * Click a tab: show it, or — clicking the one already showing — close the
+ * panel. A toggle, because the strip is also the panel's only on/off control.
+ */
+export function toggleTab(state: AuxState, id: string): AuxState {
+  if (state.active === id) return closeAux(state);
+  return { ...state, active: id, agentsDismissed: false };
 }
 
-/** Open a doc: reveal it if already open (no second copy — same rule the tab
- *  strip used), otherwise append and focus it. */
+/** Open a tab without the toggle-off half — for the toolbar's "show the panel"
+ *  button and for jumps from elsewhere (a clicked plan row). */
+export function showTab(state: AuxState, id: string): AuxState {
+  if (state.active === id && !state.agentsDismissed) return state;
+  return { ...state, active: id, agentsDismissed: false };
+}
+
+/** Open a doc: reveal it if already open (no second copy), otherwise append and
+ *  focus it. */
 export function openDoc(state: AuxState, kind: AuxDocKind, ref: string): AuxState {
   const doc = makeAuxDoc(kind, ref);
   const known = state.docs.some((d) => d.id === doc.id);
@@ -120,7 +132,8 @@ export function openDoc(state: AuxState, kind: AuxDocKind, ref: string): AuxStat
 }
 
 /** Close one doc. If it was the one on screen, fall back to its neighbour so
- *  the panel doesn't blink shut mid-read; with no docs left it closes. */
+ *  the panel doesn't blink shut mid-read; with no docs left it falls back to
+ *  no selection, which the tab strip resolves. */
 export function closeDoc(state: AuxState, id: string): AuxState {
   const idx = state.docs.findIndex((d) => d.id === id);
   if (idx < 0) return state;
@@ -130,22 +143,22 @@ export function closeDoc(state: AuxState, id: string): AuxState {
   return { ...state, docs, active: fallback ? fallback.id : null };
 }
 
-/** The panel's own close button. Also marks the agent cards dismissed, so
- *  closing an empty-but-for-cards panel actually closes it. */
+/** The panel's own close button. Also marks the agent deck dismissed, so
+ *  closing a panel that holds nothing else actually closes it. */
 export function closeAux(state: AuxState): AuxState {
   return { ...state, active: null, agentsDismissed: true };
 }
 
 /**
- * Is the panel on screen?
+ * Which tab is on screen, or `null` when the panel is closed.
  *
- * Two ways in: the reader picked something, or a subagent is running and the
- * cards have not been dismissed. The second is what makes "一个页看完整个任务的
- * 所有 agent 状态" true without asking for a click.
+ * Two ways to be open: the reader picked a tab, or subagents are running and
+ * the deck has not been dismissed — the second is what makes "一个页看完整个任
+ * 务的所有 agent 状态" true without asking for a click.
  */
-export function auxVisible(state: AuxState, liveAgentCount: number): boolean {
-  if (state.active != null) return true;
-  return liveAgentCount > 0 && !state.agentsDismissed;
+export function activeAuxTab(state: AuxState, liveAgentCount: number): string | null {
+  if (state.active != null) return state.active;
+  return liveAgentCount > 0 && !state.agentsDismissed ? AGENTS_TAB : null;
 }
 
 /** Called as the live-subagent count changes. Once the last one finishes the
@@ -158,13 +171,13 @@ export function syncLiveAgents(state: AuxState, liveAgentCount: number): AuxStat
 }
 
 /**
- * Drop an active facet that no longer has a button.
+ * Drop a selection whose tab no longer exists.
  *
- * 后台任务 empties as soon as the session takes another turn, and switching
- * sessions can strand the panel on a facet the new one doesn't offer — the old
- * tab row had the same guard.
+ * 后台任务 empties as soon as the session takes another turn, the agent deck
+ * disappears when the last subagent finishes, and switching sessions can strand
+ * the panel on a facet the new one doesn't offer.
  */
-export function pruneFacet(state: AuxState, available: (facet: AuxFacet) => boolean): AuxState {
-  if (state.active == null || !isAuxFacet(state.active)) return state;
-  return available(state.active) ? state : { ...state, active: null };
+export function pruneTab(state: AuxState, exists: (id: string) => boolean): AuxState {
+  if (state.active == null) return state;
+  return exists(state.active) ? state : { ...state, active: null };
 }
