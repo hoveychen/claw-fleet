@@ -58,11 +58,15 @@ pub fn render_session_title_section(user_title: &str, locale: &str, harness: Har
         format!(
             "## 会话标题\n\
 \n\
-一旦对话有了稳定的主题，调用 `fleet__set_session_title` 给当前会话起一个\
-简洁、有描述性的标题。每个会话做一次，主题清楚到能命名时就做；不要照抄\
-{title}的第一条消息。标题要具体（点名那件具体的任务或问题），避免\
-「帮忙」「写代码」这类放到几十个会话上都成立的泛标签，也不要反过来让\
-{title}给标题。如果对话主题发生了实质变化，再调用一次换成新标题；\
+**在你结束第一个回合之前，必须调用一次 `fleet__set_session_title`** 给当前\
+会话起一个简洁、有描述性的标题。不要等「主题稳定下来」再说——{title}的第一条\
+消息已经足够你命名这件活了，而等下去的实际结果是永远不调：任务列表里那些\
+「（无标题）」的会话，都是打算晚点再说的。\n\
+\n\
+标题要具体（点名那件具体的任务或问题），但不要照抄{title}的第一条消息，也\
+不要用「帮忙」「写代码」这类放到几十个会话上都成立的泛标签，更不要反过来让\
+{title}给标题。哪怕是一句话就能答完的小问题，也照样起一个——短会话在列表里\
+一样要认得出来。如果对话主题后来发生了实质变化，再调用一次换成新标题；\
 否则不要每轮都改名。\n\
 \n\
 {tail}\n",
@@ -73,14 +77,18 @@ pub fn render_session_title_section(user_title: &str, locale: &str, harness: Har
         format!(
             "## Session title\n\
 \n\
-Once the conversation has a stable topic, call `fleet__set_session_title` to \
-give the current session a concise, descriptive title. Do this once per \
-session as soon as the topic is clear enough to name; do not merely copy the \
-user's first message. Keep the title specific (name the concrete task or \
-question), avoid generic labels such as \"Help\" or \"Coding task\", and do \
-not ask {title} to supply a title. If the conversation's topic materially \
-changes, call it again with the new title; otherwise do not rename on every \
-turn.\n\
+**Call `fleet__set_session_title` once before you end your first turn**, giving \
+the current session a concise, descriptive title. Do not wait for the topic to \
+\"settle\": {title}'s first message is already enough to name the work, and \
+waiting reliably turns into never calling it at all — every \"(untitled)\" row \
+in the task list is a session that meant to get around to it.\n\
+\n\
+Keep the title specific (name the concrete task or question), but do not merely \
+copy {title}'s first message, avoid generic labels such as \"Help\" or \"Coding \
+task\", and never ask {title} to supply a title. Title even the one-answer \
+questions — a short session still has to be recognisable in the list. If the \
+topic later changes materially, call it again with the new title; otherwise do \
+not rename on every turn.\n\
 \n\
 {tail}\n",
             title = user_title,
@@ -281,6 +289,37 @@ mod tests {
                     "{locale}/{harness:?} leaked a raw {{title}} placeholder"
                 );
             }
+        }
+    }
+
+    /// The deadline is the whole instruction. Measured on 2026-09-07, the
+    /// original "once the conversation has a stable topic" wording got 3 of 5
+    /// real Fleet sessions titled: the long ones complied, and the short ones —
+    /// where "stable topic" never felt reached — stayed 「（无标题）」 forever.
+    /// Both locales must name a point in time by which the call has to have
+    /// happened, and must not walk it back to waiting for a settled topic.
+    #[test]
+    fn both_locales_demand_the_call_within_the_first_turn() {
+        for harness in [Harness::Claude, Harness::Codex] {
+            let zh = render_session_title_section("老板", "zh", harness);
+            assert!(
+                zh.contains("第一个回合之前"),
+                "zh/{harness:?} lost the first-turn deadline"
+            );
+            assert!(
+                !zh.contains("一旦对话有了稳定的主题"),
+                "zh/{harness:?} reverted to waiting for a stable topic"
+            );
+
+            let en = render_session_title_section("Boss", "en", harness);
+            assert!(
+                en.contains("before you end your first turn"),
+                "en/{harness:?} lost the first-turn deadline"
+            );
+            assert!(
+                !en.contains("Once the conversation has a stable topic"),
+                "en/{harness:?} reverted to waiting for a stable topic"
+            );
         }
     }
 

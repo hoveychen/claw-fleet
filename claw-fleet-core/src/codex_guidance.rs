@@ -1067,8 +1067,12 @@ mod tests {
                 && g.contains("mcp__fleet__fleet__set_session_title"),
             "must require Codex to name the current session through Fleet MCP"
         );
+        // The initial title has a deadline (first turn) rather than a
+        // condition ("once the topic is stable") — see
+        // `session_title_guidance::tests::both_locales_demand_the_call_within_the_first_turn`
+        // for why that wording changed on 2026-09-07.
         assert!(
-            g.contains("stable topic") && g.contains("materially changes"),
+            g.contains("before you end your first turn") && g.contains("changes materially"),
             "must define when the initial title is set and when it may be updated"
         );
         assert!(
