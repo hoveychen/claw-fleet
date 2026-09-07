@@ -13,14 +13,17 @@ interface VersionCheckResult {
 }
 
 export function UpdateNotice() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [result, setResult] = useState<VersionCheckResult | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
     if (getItem("auto-update-check") === "false") return;
-    invoke<VersionCheckResult>("check_app_version").then(setResult).catch(() => {});
-  }, []);
+    invoke<VersionCheckResult>("check_app_version", {
+      force: false,
+      locale: i18n.resolvedLanguage ?? i18n.language,
+    }).then(setResult).catch(() => {});
+  }, [i18n.language, i18n.resolvedLanguage]);
 
   if (!result?.has_update || dismissed) return null;
 

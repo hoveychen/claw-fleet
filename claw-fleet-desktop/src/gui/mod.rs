@@ -10,9 +10,11 @@ use std::sync::{Arc, Mutex};
 use std::sync::OnceLock;
 
 use serde_json::Value;
-use tauri::{Emitter, Manager};
-use tauri::menu::{AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{
+    AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+};
 use tauri::tray::TrayIconBuilder;
+use tauri::{Emitter, Manager};
 
 use super::account::AccountInfo;
 
@@ -20,72 +22,71 @@ use super::session::SessionInfo;
 use super::*;
 
 // ── Submodules (extracted command groups) ───────────────────────────────────
-mod tts;
 mod decision;
-mod permissions;
 mod notification;
+mod permissions;
 mod setup;
+mod tts;
 // Remote harness install (remote.rs) emits the same progress event shape.
 pub(crate) use setup::HarnessInstallProgress;
-mod process;
-mod proc_runner;
-mod sessions;
+mod alerts;
 mod artifacts;
 mod audit;
-mod hooks;
-mod guard;
-mod elicitation;
-mod plan_approval;
-mod cli_installer;
-mod memory;
-mod wiki;
-mod explorer;
-mod scratchpad;
-mod source_control;
-mod skills;
-mod plugins;
-mod sources;
 mod claude_bin;
-mod locale;
-mod alerts;
-mod mascot;
+mod cli_installer;
+mod elicitation;
+mod explorer;
+mod guard;
+mod hooks;
 mod llm;
+mod locale;
+mod mascot;
+mod memory;
+mod plan_approval;
+mod plugins;
+mod proc_runner;
+mod process;
 mod schedule;
+mod scratchpad;
+mod sessions;
+mod skills;
+mod source_control;
+mod sources;
 mod url_embed;
+mod wiki;
 
-use self::tts::*;
-use self::decision::*;
-use self::permissions::*;
-use self::notification::*;
-use self::setup::*;
-use self::process::*;
-use self::proc_runner::*;
-use self::sessions::*;
-use self::audit::*;
-use self::hooks::*;
-use self::guard::*;
-use self::elicitation::*;
-use self::plan_approval::*;
-use self::cli_installer::*;
-use self::memory::*;
-use self::schedule::*;
-use self::artifacts::*;
-use self::wiki::*;
-use self::explorer::*;
-use self::scratchpad::*;
-use self::source_control::*;
-use self::skills::*;
-use self::plugins::*;
-use self::sources::*;
-use self::claude_bin::*;
-use self::locale::*;
 use self::alerts::*;
-use self::mascot::*;
+use self::artifacts::*;
+use self::audit::*;
+use self::claude_bin::*;
+use self::cli_installer::*;
+use self::decision::*;
+use self::elicitation::*;
+use self::explorer::*;
+use self::guard::*;
+use self::hooks::*;
 use self::llm::*;
+use self::locale::*;
+use self::mascot::*;
+use self::memory::*;
+use self::notification::*;
+use self::permissions::*;
+use self::plan_approval::*;
+use self::plugins::*;
+use self::proc_runner::*;
+use self::process::*;
+use self::schedule::*;
+use self::scratchpad::*;
+use self::sessions::*;
+use self::setup::*;
+use self::skills::*;
+use self::source_control::*;
+use self::sources::*;
+use self::tts::*;
 use self::url_embed::*;
+use self::wiki::*;
 
 pub(crate) use self::tts::play_tts_for_notification;
-
 
 fn load_png_as_tray_icon(bytes: &[u8]) -> tauri::image::Image<'static> {
     let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
@@ -98,7 +99,12 @@ fn load_png_as_tray_icon(bytes: &[u8]) -> tauri::image::Image<'static> {
 #[tauri::command]
 fn get_log_path() -> String {
     session::real_home_dir()
-        .map(|h| h.join(".fleet").join("claw-fleet-debug.log").to_string_lossy().to_string())
+        .map(|h| {
+            h.join(".fleet")
+                .join("claw-fleet-debug.log")
+                .to_string_lossy()
+                .to_string()
+        })
         .unwrap_or_else(|| "unknown".to_string())
 }
 
@@ -152,8 +158,11 @@ fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn check_app_version() -> version_check::VersionCheckResult {
-    version_check::check_app_version()
+fn check_app_version(
+    force: Option<bool>,
+    locale: Option<String>,
+) -> version_check::VersionCheckResult {
+    version_check::check_app_version(force.unwrap_or(false), locale.as_deref().unwrap_or("en"))
 }
 
 #[tauri::command]
@@ -169,7 +178,9 @@ fn get_app_version() -> String {
 /// `"unknown"` when no commit source was available at build time.
 #[tauri::command]
 fn desktop_build_commit() -> String {
-    option_env!("FLEET_GIT_COMMIT").unwrap_or("unknown").to_string()
+    option_env!("FLEET_GIT_COMMIT")
+        .unwrap_or("unknown")
+        .to_string()
 }
 
 // ── App state ────────────────────────────────────────────────────────────────
@@ -274,7 +285,6 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-
 /// Page margin AppKit gets for the reader's print job, in points (72pt = 1in).
 /// 28pt ≈ 10mm. Only a floor: the print panel still lets the user change it.
 #[cfg(target_os = "macos")]
@@ -307,7 +317,8 @@ unsafe fn print_with_margins(
 
     // printOperationWithPrintInfo: is macOS 11+; without it there is nothing to
     // fall back to on this path, so let the caller use the plain wry route.
-    let can_print: bool = msg_send![webview, respondsToSelector: sel!(printOperationWithPrintInfo:)];
+    let can_print: bool =
+        msg_send![webview, respondsToSelector: sel!(printOperationWithPrintInfo:)];
     if !can_print {
         return Err("this WKWebView cannot print".into());
     }
@@ -411,10 +422,13 @@ fn is_session_active(s: &SessionInfo) -> bool {
     use session::SessionStatus;
     matches!(
         s.status,
-        SessionStatus::Thinking | SessionStatus::Executing |
-        SessionStatus::Streaming | SessionStatus::Processing |
-        SessionStatus::WaitingInput | SessionStatus::Active |
-        SessionStatus::Delegating
+        SessionStatus::Thinking
+            | SessionStatus::Executing
+            | SessionStatus::Streaming
+            | SessionStatus::Processing
+            | SessionStatus::WaitingInput
+            | SessionStatus::Active
+            | SessionStatus::Delegating
     )
 }
 
@@ -446,9 +460,8 @@ fn rebuild_tray(app: &tauri::AppHandle) {
     let summaries = state.cached_usage.lock().unwrap().clone();
 
     // Show all active sessions (main + subagents), sorted: main first, then subs.
-    let mut active_all: Vec<&SessionInfo> = sessions.iter()
-        .filter(|s| is_session_active(s))
-        .collect();
+    let mut active_all: Vec<&SessionInfo> =
+        sessions.iter().filter(|s| is_session_active(s)).collect();
     active_all.sort_by_key(|s| s.is_subagent);
     let active_main = &active_all; // alias for build_tray_menu signature
     let sub_count = active_all.iter().filter(|s| s.is_subagent).count();
@@ -488,15 +501,23 @@ fn rebuild_tray(app: &tauri::AppHandle) {
     } else {
         format!(
             "Claw Fleet — {} active  (Main: {}  Sub: {})",
-            total, active_main.len(), sub_count
+            total,
+            active_main.len(),
+            sub_count
         )
     };
 
-    let Some(tray) = app.tray_by_id("main") else { return };
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
     let _ = tray.set_tooltip(Some(&tooltip));
     #[cfg(target_os = "macos")]
     {
-        let title = if total > 0 { format!("{}", total) } else { String::new() };
+        let title = if total > 0 {
+            format!("{}", total)
+        } else {
+            String::new()
+        };
         let _ = tray.set_title(Some(&title));
     }
 
@@ -504,11 +525,9 @@ fn rebuild_tray(app: &tauri::AppHandle) {
     if fingerprint != prev {
         // If the menu is presumed open (recent tray click), defer the rebuild
         // so we don't close it under the user's cursor.
-        let within_grace = state
-            .tray_last_click
-            .lock()
-            .unwrap()
-            .map_or(false, |t| t.elapsed() < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS));
+        let within_grace = state.tray_last_click.lock().unwrap().map_or(false, |t| {
+            t.elapsed() < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS)
+        });
         if within_grace {
             *state.tray_rebuild_pending.lock().unwrap() = true;
             return;
@@ -526,13 +545,13 @@ fn rebuild_tray(app: &tauri::AppHandle) {
 fn flush_pending_tray_rebuild(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     let pending = *state.tray_rebuild_pending.lock().unwrap();
-    if !pending { return; }
+    if !pending {
+        return;
+    }
 
-    let within_grace = state
-        .tray_last_click
-        .lock()
-        .unwrap()
-        .map_or(false, |t| t.elapsed() < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS));
+    let within_grace = state.tray_last_click.lock().unwrap().map_or(false, |t| {
+        t.elapsed() < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS)
+    });
     if within_grace {
         return; // still within grace period
     }
@@ -881,9 +900,10 @@ fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
         }
         "menu-report-issue" => {
             use tauri_plugin_opener::OpenerExt;
-            let _ = app
-                .opener()
-                .open_url("https://github.com/hoveychen/claw-fleet/issues", None::<&str>);
+            let _ = app.opener().open_url(
+                "https://github.com/hoveychen/claw-fleet/issues",
+                None::<&str>,
+            );
         }
         _ => return false,
     }
@@ -901,20 +921,34 @@ fn build_tray_menu(
 
     // ── Active agents section ────────────────────────────────────────────
     let header_text = if total > 0 {
-        format!("{} Active Agent{}", total, if total == 1 { "" } else { "s" })
+        format!(
+            "{} Active Agent{}",
+            total,
+            if total == 1 { "" } else { "s" }
+        )
     } else {
         "No Active Agents".to_string()
     };
     builder = builder.item(
-        &MenuItemBuilder::new(header_text).id("info-header").enabled(false).build(app)?
+        &MenuItemBuilder::new(header_text)
+            .id("info-header")
+            .enabled(false)
+            .build(app)?,
     );
 
     // List all active sessions (main + subagents), clickable to open detail.
     for (i, s) in active_main.iter().enumerate() {
         let prefix = if s.is_subagent { "  ↳ " } else { "" };
-        let label = format!("{}{} — {}", prefix, s.workspace_name, status_label(&s.status));
+        let label = format!(
+            "{}{} — {}",
+            prefix,
+            s.workspace_name,
+            status_label(&s.status)
+        );
         builder = builder.item(
-            &MenuItemBuilder::new(label).id(format!("open-session-{}", i)).build(app)?
+            &MenuItemBuilder::new(label)
+                .id(format!("open-session-{}", i))
+                .build(app)?,
         );
     }
 
@@ -926,7 +960,9 @@ fn build_tray_menu(
             if summary.bars.is_empty() {
                 continue;
             }
-            let parts: Vec<String> = summary.bars.iter()
+            let parts: Vec<String> = summary
+                .bars
+                .iter()
                 .map(|b| format!("{}\t{}", b.label, usage_pct_str(b.utilization)))
                 .collect();
             let source_label = match summary.source.as_str() {
@@ -939,16 +975,14 @@ fn build_tray_menu(
                 &MenuItemBuilder::new(line)
                     .id(format!("info-usage-{}", idx))
                     .enabled(true)
-                    .build(app)?
+                    .build(app)?,
             );
         }
         builder = builder.item(&PredefinedMenuItem::separator(app)?);
     }
 
     // ── Actions ──────────────────────────────────────────────────────────
-    builder = builder.item(
-        &MenuItemBuilder::new("Quit").id("quit").build(app)?
-    );
+    builder = builder.item(&MenuItemBuilder::new("Quit").id("quit").build(app)?);
 
     builder.build()
 }
@@ -1038,144 +1072,156 @@ pub fn run() {
         //
         // Verified in P0 that WKWebView asks for ranges here even for embedded
         // PDFs (`Range: bytes=0-16383`), so this is not a video-only path.
-        .register_asynchronous_uri_scheme_protocol("fleet-artifact", move |ctx, request, responder| {
-            let app = ctx.app_handle().clone();
-            std::thread::spawn(move || {
-                let dec = |s: &str| {
-                    percent_encoding::percent_decode_str(s)
-                        .decode_utf8_lossy()
-                        .to_string()
-                };
-                let path = request.uri().path().trim_start_matches('/').to_string();
-                let id = dec(path.split('/').next().unwrap_or(""));
-                let range = request
-                    .headers()
-                    .get("Range")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(claw_fleet_core::artifacts::parse_range_header);
+        .register_asynchronous_uri_scheme_protocol(
+            "fleet-artifact",
+            move |ctx, request, responder| {
+                let app = ctx.app_handle().clone();
+                std::thread::spawn(move || {
+                    let dec = |s: &str| {
+                        percent_encoding::percent_decode_str(s)
+                            .decode_utf8_lossy()
+                            .to_string()
+                    };
+                    let path = request.uri().path().trim_start_matches('/').to_string();
+                    let id = dec(path.split('/').next().unwrap_or(""));
+                    let range = request
+                        .headers()
+                        .get("Range")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(claw_fleet_core::artifacts::parse_range_header);
 
-                let result = {
-                    let state = app.state::<AppState>();
-                    let backend = &state.backend;
-                    backend.read_artifact_bytes(&id, range)
-                };
-                let response = artifact_response(result, range.is_some());
-                responder.respond(response);
-            });
-        })
+                    let result = {
+                        let state = app.state::<AppState>();
+                        let backend = &state.backend;
+                        backend.read_artifact_bytes(&id, range)
+                    };
+                    let response = artifact_response(result, range.is_some());
+                    responder.respond(response);
+                });
+            },
+        )
         // Serves fleet__ask decision-card assets into the webview:
         // fleet-decision://localhost/<id>/q<idx>/<relpath…>
         // (http://fleet-decision.localhost/… on Windows). Same worker-thread
         // shape as fleet-wiki://. Lets image-bearing cards load their
         // index.html + images without base64-inlining into the tool call.
-        .register_asynchronous_uri_scheme_protocol("fleet-decision", move |ctx, request, responder| {
-            let app = ctx.app_handle().clone();
-            std::thread::spawn(move || {
-                let dec = |s: &str| {
-                    percent_encoding::percent_decode_str(s)
-                        .decode_utf8_lossy()
-                        .to_string()
-                };
-                let path = request.uri().path().trim_start_matches('/').to_string();
-                let mut segs = path.splitn(3, '/');
-                let id = dec(segs.next().unwrap_or(""));
-                let qidx = dec(segs.next().unwrap_or(""));
-                let rel = dec(segs.next().unwrap_or(""));
-                let result = {
-                    let state = app.state::<AppState>();
-                    let backend = &state.backend;
-                    backend.get_decision_asset(&id, &qidx, &rel)
-                };
-                let response = match result {
-                    Ok(f) => tauri::http::Response::builder()
-                        .status(200)
-                        .header("Content-Type", f.mime)
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(f.bytes)
-                        .unwrap(),
-                    Err(e) => tauri::http::Response::builder()
-                        .status(404)
-                        .header("Content-Type", "text/plain")
-                        .body(e.into_bytes())
-                        .unwrap(),
-                };
-                responder.respond(response);
-            });
-        })
+        .register_asynchronous_uri_scheme_protocol(
+            "fleet-decision",
+            move |ctx, request, responder| {
+                let app = ctx.app_handle().clone();
+                std::thread::spawn(move || {
+                    let dec = |s: &str| {
+                        percent_encoding::percent_decode_str(s)
+                            .decode_utf8_lossy()
+                            .to_string()
+                    };
+                    let path = request.uri().path().trim_start_matches('/').to_string();
+                    let mut segs = path.splitn(3, '/');
+                    let id = dec(segs.next().unwrap_or(""));
+                    let qidx = dec(segs.next().unwrap_or(""));
+                    let rel = dec(segs.next().unwrap_or(""));
+                    let result = {
+                        let state = app.state::<AppState>();
+                        let backend = &state.backend;
+                        backend.get_decision_asset(&id, &qidx, &rel)
+                    };
+                    let response = match result {
+                        Ok(f) => tauri::http::Response::builder()
+                            .status(200)
+                            .header("Content-Type", f.mime)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(f.bytes)
+                            .unwrap(),
+                        Err(e) => tauri::http::Response::builder()
+                            .status(404)
+                            .header("Content-Type", "text/plain")
+                            .body(e.into_bytes())
+                            .unwrap(),
+                    };
+                    responder.respond(response);
+                });
+            },
+        )
         // Serves images a Codex session generated into the webview:
         // fleet-genimage://localhost/<session id>/<name>
         // Same shape as fleet-decision:// above. The files sit in $CODEX_HOME,
         // outside every workspace.
-        .register_asynchronous_uri_scheme_protocol("fleet-genimage", move |ctx, request, responder| {
-            let app = ctx.app_handle().clone();
-            std::thread::spawn(move || {
-                let dec = |s: &str| {
-                    percent_encoding::percent_decode_str(s)
-                        .decode_utf8_lossy()
-                        .to_string()
-                };
-                let path = request.uri().path().trim_start_matches('/').to_string();
-                let mut segs = path.splitn(2, '/');
-                let session = dec(segs.next().unwrap_or(""));
-                let name = dec(segs.next().unwrap_or(""));
-                let result = {
-                    let state = app.state::<AppState>();
-                    let backend = &state.backend;
-                    backend.get_session_image(&session, &name)
-                };
-                let response = match result {
-                    Ok(f) => tauri::http::Response::builder()
-                        .status(200)
-                        .header("Content-Type", f.mime)
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(f.bytes)
-                        .unwrap(),
-                    Err(e) => tauri::http::Response::builder()
-                        .status(404)
-                        .header("Content-Type", "text/plain")
-                        .body(e.into_bytes())
-                        .unwrap(),
-                };
-                responder.respond(response);
-            });
-        })
+        .register_asynchronous_uri_scheme_protocol(
+            "fleet-genimage",
+            move |ctx, request, responder| {
+                let app = ctx.app_handle().clone();
+                std::thread::spawn(move || {
+                    let dec = |s: &str| {
+                        percent_encoding::percent_decode_str(s)
+                            .decode_utf8_lossy()
+                            .to_string()
+                    };
+                    let path = request.uri().path().trim_start_matches('/').to_string();
+                    let mut segs = path.splitn(2, '/');
+                    let session = dec(segs.next().unwrap_or(""));
+                    let name = dec(segs.next().unwrap_or(""));
+                    let result = {
+                        let state = app.state::<AppState>();
+                        let backend = &state.backend;
+                        backend.get_session_image(&session, &name)
+                    };
+                    let response = match result {
+                        Ok(f) => tauri::http::Response::builder()
+                            .status(200)
+                            .header("Content-Type", f.mime)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(f.bytes)
+                            .unwrap(),
+                        Err(e) => tauri::http::Response::builder()
+                            .status(404)
+                            .header("Content-Type", "text/plain")
+                            .body(e.into_bytes())
+                            .unwrap(),
+                    };
+                    responder.respond(response);
+                });
+            },
+        )
         // Serves user-direction attachments (composer pastes, decision-panel
         // picks) into the webview so history can render them as thumbnails:
         // fleet-attachment://localhost/<key>/<name>
         // Same shape as fleet-decision:// above.
-        .register_asynchronous_uri_scheme_protocol("fleet-attachment", move |ctx, request, responder| {
-            let app = ctx.app_handle().clone();
-            std::thread::spawn(move || {
-                let dec = |s: &str| {
-                    percent_encoding::percent_decode_str(s)
-                        .decode_utf8_lossy()
-                        .to_string()
-                };
-                let path = request.uri().path().trim_start_matches('/').to_string();
-                let mut segs = path.splitn(2, '/');
-                let key = dec(segs.next().unwrap_or(""));
-                let name = dec(segs.next().unwrap_or(""));
-                let result = {
-                    let state = app.state::<AppState>();
-                    let backend = &state.backend;
-                    backend.get_user_attachment(&key, &name)
-                };
-                let response = match result {
-                    Ok(f) => tauri::http::Response::builder()
-                        .status(200)
-                        .header("Content-Type", f.mime)
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(f.bytes)
-                        .unwrap(),
-                    Err(e) => tauri::http::Response::builder()
-                        .status(404)
-                        .header("Content-Type", "text/plain")
-                        .body(e.into_bytes())
-                        .unwrap(),
-                };
-                responder.respond(response);
-            });
-        });
+        .register_asynchronous_uri_scheme_protocol(
+            "fleet-attachment",
+            move |ctx, request, responder| {
+                let app = ctx.app_handle().clone();
+                std::thread::spawn(move || {
+                    let dec = |s: &str| {
+                        percent_encoding::percent_decode_str(s)
+                            .decode_utf8_lossy()
+                            .to_string()
+                    };
+                    let path = request.uri().path().trim_start_matches('/').to_string();
+                    let mut segs = path.splitn(2, '/');
+                    let key = dec(segs.next().unwrap_or(""));
+                    let name = dec(segs.next().unwrap_or(""));
+                    let result = {
+                        let state = app.state::<AppState>();
+                        let backend = &state.backend;
+                        backend.get_user_attachment(&key, &name)
+                    };
+                    let response = match result {
+                        Ok(f) => tauri::http::Response::builder()
+                            .status(200)
+                            .header("Content-Type", f.mime)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(f.bytes)
+                            .unwrap(),
+                        Err(e) => tauri::http::Response::builder()
+                            .status(404)
+                            .header("Content-Type", "text/plain")
+                            .body(e.into_bytes())
+                            .unwrap(),
+                    };
+                    responder.respond(response);
+                });
+            },
+        );
 
     builder
         .setup(move |app| {
@@ -1283,9 +1329,7 @@ pub fn run() {
             // processes (duplicate prompts / decision cards). Current code
             // installs no LaunchAgent — remove the legacy plist. Best-effort.
             if let Err(e) = claw_fleet_core::launchd::remove_legacy_serve_launchagent() {
-                claw_fleet_core::log_debug(&format!(
-                    "remove_legacy_serve_launchagent failed: {e}"
-                ));
+                claw_fleet_core::log_debug(&format!("remove_legacy_serve_launchagent failed: {e}"));
             }
 
             // Reclaim legacy token-less `dsh web` instances. Current 0.1.2
@@ -1303,9 +1347,7 @@ pub fn run() {
             // inside acquire self-heals when a prior Fleet process died
             // without releasing.
             if claw_fleet_core::permissions_injector::load_config().enabled {
-                if let Err(e) =
-                    claw_fleet_core::permissions_injector::acquire(std::process::id())
-                {
+                if let Err(e) = claw_fleet_core::permissions_injector::acquire(std::process::id()) {
                     claw_fleet_core::log_debug(&format!(
                         "permissions_injector::acquire failed: {e}"
                     ));
@@ -1331,10 +1373,9 @@ pub fn run() {
                 match crate::fleet_binary::resolve_fleet_binary() {
                     Some(p) => {
                         let path_str = p.to_string_lossy().to_string();
-                        if let Err(e) = claw_fleet_core::mcp_injector::acquire(
-                            std::process::id(),
-                            &path_str,
-                        ) {
+                        if let Err(e) =
+                            claw_fleet_core::mcp_injector::acquire(std::process::id(), &path_str)
+                        {
                             claw_fleet_core::log_debug(&format!(
                                 "mcp_injector::acquire failed: {e}"
                             ));
@@ -1373,16 +1414,13 @@ pub fn run() {
             // host for local-only users who never run `fleet serve`, giving the
             // 24h occupancy chart continuous coverage. Idempotent per process;
             // errors are swallowed and retried on the next tick.
-            claw_fleet_core::account::start_background_sampler(
-                std::time::Duration::from_secs(600),
-            );
+            claw_fleet_core::account::start_background_sampler(std::time::Duration::from_secs(600));
             // Codex parallel: same 10-minute cadence, but each tick self-gates
             // on codex being installed (no wasted `codex app-server` spawns for
             // Claude-only users). Feeds the codex 占用率历史 chart.
             claw_fleet_core::codex_source::start_codex_background_sampler(
                 std::time::Duration::from_secs(600),
             );
-
 
             // Truncate the hook events file if it has grown too large.
             crate::hooks::maybe_truncate_events_file();
@@ -1416,7 +1454,12 @@ pub fn run() {
             // ── Tray icon ────────────────────────────────────────────────────
             // Build an initial menu; it will be rebuilt dynamically by rebuild_tray().
             let tray_menu = MenuBuilder::new(app)
-                .item(&MenuItemBuilder::new("No Active Agents").id("info-header").enabled(false).build(app)?)
+                .item(
+                    &MenuItemBuilder::new("No Active Agents")
+                        .id("info-header")
+                        .enabled(false)
+                        .build(app)?,
+                )
                 .item(&PredefinedMenuItem::separator(app)?)
                 .item(&MenuItemBuilder::new("Quit").id("quit").build(app)?)
                 .build()?;
@@ -1432,15 +1475,13 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             let tray_builder = {
                 let icon = load_png_as_tray_icon(include_bytes!("../../icons/tray-windows.png"));
-                TrayIconBuilder::with_id("main")
-                    .icon(icon)
+                TrayIconBuilder::with_id("main").icon(icon)
             };
 
             #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             let tray_builder = {
                 let icon = app.default_window_icon().cloned().unwrap();
-                TrayIconBuilder::with_id("main")
-                    .icon(icon)
+                TrayIconBuilder::with_id("main").icon(icon)
             };
 
             tray_builder
@@ -1449,11 +1490,17 @@ pub fn run() {
                 .on_tray_icon_event(|tray, event| {
                     // Record click timestamp so we can defer tray menu rebuilds
                     // while the menu is open.
-                    if let tauri::tray::TrayIconEvent::Click { button, button_state, .. } = &event {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button,
+                        button_state,
+                        ..
+                    } = &event
+                    {
                         if matches!(button_state, tauri::tray::MouseButtonState::Up) {
                             let app = tray.app_handle();
                             let state = app.state::<AppState>();
-                            *state.tray_last_click.lock().unwrap() = Some(std::time::Instant::now());
+                            *state.tray_last_click.lock().unwrap() =
+                                Some(std::time::Instant::now());
 
                             // Left-click: show main window
                             if matches!(button, tauri::tray::MouseButton::Left) {
@@ -1474,9 +1521,8 @@ pub fn run() {
                         if let Ok(idx) = idx_str.parse::<usize>() {
                             let state = app.state::<AppState>();
                             let sessions = state.cached_sessions.lock().unwrap().clone();
-                            let mut active: Vec<&SessionInfo> = sessions.iter()
-                                .filter(|s| is_session_active(s))
-                                .collect();
+                            let mut active: Vec<&SessionInfo> =
+                                sessions.iter().filter(|s| is_session_active(s)).collect();
                             active.sort_by_key(|s| s.is_subagent);
                             if let Some(s) = active.get(idx) {
                                 // Show the main window and emit the session to open.
@@ -1495,11 +1541,9 @@ pub fn run() {
             // grace period after a tray click has elapsed.
             {
                 let app_handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS));
-                        flush_pending_tray_rebuild(&app_handle);
-                    }
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS));
+                    flush_pending_tray_rebuild(&app_handle);
                 });
             }
 
@@ -1780,12 +1824,8 @@ pub fn run() {
             // prompts nothing is left to answer. Only the settings-panel toggle
             // un-injects, via permissions_injector::deactivate().
             if matches!(event, tauri::RunEvent::Exit) {
-                let _ = claw_fleet_core::permissions_injector::release(
-                    std::process::id(),
-                );
-                let _ = claw_fleet_core::mcp_injector::release(
-                    std::process::id(),
-                );
+                let _ = claw_fleet_core::permissions_injector::release(std::process::id());
+                let _ = claw_fleet_core::mcp_injector::release(std::process::id());
                 // dsh 0.1.2 is an authenticated machine service. It deliberately
                 // survives this GUI process so an app update/relaunch cannot
                 // interrupt every active dsh turn; the next Fleet adopts it from

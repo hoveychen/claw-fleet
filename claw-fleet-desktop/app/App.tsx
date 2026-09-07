@@ -162,6 +162,7 @@ function App() {
       try {
         const result = await invoke<{ has_update: boolean; latest_version: string; release_url: string }>(
           "check_app_version",
+          { force: true, locale: i18n.resolvedLanguage ?? i18n.language },
         );
         if (result.has_update && result.release_url) {
           const { openUrl } = await import("@tauri-apps/plugin-opener");
