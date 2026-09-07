@@ -505,7 +505,8 @@ export function SessionDetail({
     const poll = () => {
       invoke<LiveThinking | null>("read_live_thinking", { sessionId: liveSessionId })
         .then((lt) => {
-          if (!cancelled) setLiveThinking((previous) => retainLiveThinking(previous, lt));
+          if (!cancelled)
+            setLiveThinking((previous) => retainLiveThinking(previous, lt, liveSessionId));
         })
         // A failed sample carries no evidence that the stream disappeared.
         // The inactive-status branch above clears it when the turn really ends.
@@ -528,6 +529,15 @@ export function SessionDetail({
       previous && liveThinkingLanded(messages, previous) ? null : previous,
     );
   }, [messages]);
+
+  // This component is not remounted when the open session changes — the props
+  // are re-derived and every piece of state has to be re-scoped by hand. The
+  // retained reasoning is state, so gate it on ownership at the render instead
+  // of waiting for the next 700ms sample to reject it: otherwise switching from
+  // a streaming session leaves its reasoning pinned above the new session's
+  // composer for a beat (and, for a session with no sidecar at all, forever).
+  const shownLiveThinking =
+    liveThinking && liveThinking.sessionId === liveSessionId ? liveThinking : null;
 
   // Standalone-mode live tail: the initial fetch above is a one-shot, which
   // was fine when the only standalone consumer was DecisionPanel (a pending
@@ -877,7 +887,7 @@ export function SessionDetail({
   // That parked the reader at the top of several thousand px of messages.
   // Re-pin on every height change instead.
   const hasMessages = messages.length > 0;
-  const hasLiveThinking = !!(liveThinking?.streaming && liveThinking.thinking);
+  const hasLiveThinking = !!(shownLiveThinking?.streaming && shownLiveThinking.thinking);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1372,7 +1382,7 @@ export function SessionDetail({
                       onRetry={retryLoad}
                       searchQuery={searchQuery}
                       status={liveSession?.status ?? null}
-                      liveThinking={liveThinking}
+                      liveThinking={shownLiveThinking}
                       decisionRecords={decisionRecords}
                       onLoadEarlier={loadEarlier}
                       fullyLoaded={fullyLoaded}
