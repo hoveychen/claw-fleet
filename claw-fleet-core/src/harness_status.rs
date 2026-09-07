@@ -277,7 +277,11 @@ fn dsh_channel_for_path(path: &Path) -> &'static str {
 /// strand dsh's `#!/usr/bin/env node` shebang), bounded by
 /// [`VERSION_PROBE_TIMEOUT`], and normalize the output to a bare version
 /// token.
-fn probe_version(bin: &str) -> Option<String> {
+///
+/// `pub(crate)` because [`crate::dsh_server::start`] runs the same probe once
+/// before launching a server — the version gate there and the version this
+/// panel reports must come from the same command, or they can disagree.
+pub(crate) fn probe_version(bin: &str) -> Option<String> {
     let mut cmd = crate::process_util::command(bin);
     cmd.arg("--version")
         .stdin(Stdio::null())

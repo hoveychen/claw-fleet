@@ -85,6 +85,23 @@ pub fn meets_min_version(version: Option<&str>) -> bool {
     found >= numeric_core(MIN_VERSION).unwrap_or_default()
 }
 
+/// The npm command that upgrades dsh, quoted in every too-old message.
+///
+/// Same package and channel [`crate::harness_install::update_plan`] runs for
+/// the desktop's one-click upgrade, so the text a CLI user is told to type and
+/// the button the wizard offers do the same thing.
+pub const UPGRADE_COMMAND: &str = "npm i -g @deepseek-ai/dsh@latest";
+
+/// The refusal a too-old dsh gets, carrying all three things needed to act on
+/// it: the version found, the version required, and the fix.
+pub fn too_old_message(found: Option<&str>) -> String {
+    let found = found.unwrap_or("unknown");
+    format!(
+        "this dsh is {found}, but Fleet needs dsh {MIN_VERSION} or newer \
+         (older builds speak a different wire protocol). Upgrade with: {UPGRADE_COMMAND}"
+    )
+}
+
 /// `"0.1.2-rc.1"` → `[0, 1, 2]`: leading numeric segments only, stopping at
 /// the first one carrying a non-numeric tail. Shorter is smaller, which is
 /// what `Vec<u32>`'s lexicographic `Ord` already gives us (`[0,1] < [0,1,2]`).
@@ -480,6 +497,15 @@ impl DshServer {
     pub fn start(binary: &Path, workspace: &Path) -> Result<Self, String> {
         if !workspace.is_dir() {
             return Err(format!("workspace does not exist: {}", workspace.display()));
+        }
+
+        // One `--version` before the spawn, so an unsupported build says so
+        // instead of failing three different ways downstream. See
+        // [`MIN_VERSION`]; the cost is one Node startup per server start (not
+        // per session), and an unreadable version is allowed through.
+        let version = crate::harness_status::probe_version(&binary.to_string_lossy());
+        if !meets_min_version(version.as_deref()) {
+            return Err(too_old_message(version.as_deref()));
         }
 
         let mut cmd = crate::process_util::command(binary);
@@ -1237,5 +1263,85 @@ mod tests {
             Ok(_) => panic!("a missing workspace must not start a server"),
         };
         assert!(err.contains("workspace does not exist"), "{err}");
+    }
+
+    /// A too-old dsh must be refused *before* the spawn, with a message that
+    /// names the problem.
+    ///
+    /// Without the gate an old binary is launched anyway and fails somewhere
+    /// downstream — an unknown `--no-open`, a launch line with no token, a 401
+    /// on the first call — and every one of those reaches the user as the same
+    /// unhelpful "dsh web exited before reporting a port". The message has to
+    /// carry all three things needed to act: the version found, the version
+    /// required, and the command that fixes it.
+    #[cfg(unix)]
+    #[test]
+    fn start_refuses_a_dsh_older_than_the_minimum() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("dsh");
+        {
+            let mut f = std::fs::File::create(&fake).unwrap();
+            // Answers --version like a 0.1.1 build; exits immediately for
+            // anything else, so a missing gate fails fast rather than sitting
+            // out the 120s startup timeout.
+            writeln!(
+                f,
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 0.1.1; exit 0; fi\nexit 1"
+            )
+            .unwrap();
+        }
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let err = match DshServer::start(&fake, dir.path()) {
+            Err(e) => e,
+            Ok(_) => panic!("a dsh older than {MIN_VERSION} must not start"),
+        };
+        assert!(err.contains("0.1.1"), "must name the version found: {err}");
+        assert!(
+            err.contains(MIN_VERSION),
+            "must name the version required: {err}"
+        );
+        assert!(
+            err.contains("@deepseek-ai/dsh"),
+            "must name the upgrade command: {err}"
+        );
+    }
+
+    /// The gate must not fire on the version that actually ships. `0.1.2-rc.1`
+    /// is below `0.1.2` under strict semver, so a semver-shaped check here
+    /// would refuse to launch on the boss's own machine.
+    ///
+    /// Stops at the launch line rather than a real server: the fake exits
+    /// after `--version`, so reaching "exited before reporting a port" proves
+    /// the gate passed and the spawn was attempted.
+    #[cfg(unix)]
+    #[test]
+    fn start_accepts_the_shipping_prerelease_and_proceeds_to_spawn() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("dsh");
+        {
+            let mut f = std::fs::File::create(&fake).unwrap();
+            writeln!(
+                f,
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 0.1.2-rc.1; exit 0; fi\nexit 1"
+            )
+            .unwrap();
+        }
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let err = match DshServer::start(&fake, dir.path()) {
+            Err(e) => e,
+            Ok(_) => panic!("the fake dsh cannot actually serve"),
+        };
+        assert!(
+            !err.contains(&format!("needs dsh {MIN_VERSION}")),
+            "0.1.2-rc.1 must pass the version gate, got: {err}"
+        );
     }
 }
