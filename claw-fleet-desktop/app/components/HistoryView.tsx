@@ -1228,18 +1228,6 @@ export function HistoryView() {
         placeholder: t("history.search_placeholder", "搜索标题、计划、全文…"),
         busy: searching,
       }}
-      actions={
-        <button
-          type="button"
-          className={styles.read_btn}
-          disabled={unreadSessions.length === 0}
-          onClick={() => markManyRead(unreadSessions)}
-          title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
-          aria-label={t("history.mark_all_read", "全部已读")}
-        >
-          <CheckCheck size={14} strokeWidth={1.8} />
-        </button>
-      }
       secondary={
         <>
         <div className={styles.rail_launch}>
@@ -1272,6 +1260,24 @@ export function HistoryView() {
                 <span>{t("history.chat_mode", "仅聊天")}</span>
               </button>
             )}
+            {/* "全部已读" used to live in the page banner, where only an icon
+                fit. Here in the rail it sits with the filters it belongs to and
+                can carry its unread count. */}
+            <button
+              type="button"
+              className={styles.read_btn}
+              disabled={unreadSessions.length === 0}
+              onClick={() => markManyRead(unreadSessions)}
+              title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
+              aria-label={t("history.mark_all_read", "全部已读")}
+            >
+              <CheckCheck size={13} strokeWidth={1.8} />
+              {unreadSessions.length > 0 && (
+                <span className={styles.read_btn_count}>
+                  {unreadSessions.length}
+                </span>
+              )}
+            </button>
           </div>
           {/* Row 2: the "only active" pill sits beside the mark segments rather
               than inside the workspace-select row. On WebKit (Tauri's WKWebView)
