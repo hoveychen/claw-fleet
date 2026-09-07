@@ -24,7 +24,6 @@ import {
   ServerOff,
   Share2,
   Square,
-  SquareTerminal,
   WifiOff,
 } from "lucide-react";
 import { AgentSourceIcon } from "./AgentSourceIcon";
@@ -38,7 +37,6 @@ import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
-import type { TerminalWorkspace } from "./TerminalView";
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import styles from "./TasksView.module.css";
 
@@ -380,7 +378,6 @@ interface Props {
   onMarkRead: (sessions: Array<WithDevice<SessionInfo>>) => void;
   /** 打开终端页。带着当前筛选的目录进去省一次选择；筛的是「全部目录」时传 null,
    *  由终端页自己让用户挑。 */
-  onOpenTerminal: (workspace: TerminalWorkspace | null) => void;
   /** 这台设备的显示名。整个 prop 缺席 = 只配了一台,徽标与「设备 · 目录」的
    *  筛选项都不出现 —— 单设备用户不该为多设备付出任何一处视觉噪音。 */
   deviceLabelOf?: (deviceId: string) => string | null;
@@ -396,7 +393,6 @@ export function TasksView({
   sessionsLoaded,
   onOpenSession,
   onMarkRead,
-  onOpenTerminal,
 }: Props) {
   const confirm = useConfirm();
   // 筛选状态落到 localStorage（复用 Composer 草稿那套 useDraft），这样切标签页
@@ -922,14 +918,6 @@ export function TasksView({
           {searching && <span className={styles.searchSpinner} />}
         </div>
         <div className={styles.filterRow}>
-          <button
-            className={styles.filterToggle}
-            onClick={() => onOpenTerminal(null)}
-            title={t("在这台主机上开一个终端")}
-          >
-            <SquareTerminal size={13} />
-            {t("终端")}
-          </button>
           <button
             className={styles.filterToggle}
             data-active={activeOnly}
