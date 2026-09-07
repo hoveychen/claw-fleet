@@ -47,10 +47,20 @@ function sameContent(a: RawMessage, b: RawMessage): boolean {
  * Returns `prev` itself when the fetch brought nothing new, so every consumer
  * memoised on the array short-circuits. Otherwise returns a new array whose
  * unchanged entries are the previous objects, so memoised rows still hit.
+ *
+ * An **empty** `next` onto a populated `prev` keeps `prev`. Transcripts are
+ * append-only: a source that had records and now answers with none is reporting
+ * a transient read (a dropped `dsh://` history cache mid-rebuild, a truncated
+ * window), never a conversation that un-happened. Blanking on it is what turns
+ * one bad poll into a pane with the user's own message gone — and it is the same
+ * call these sites already make for a *rejected* fetch, which keeps the old list.
+ * Deliberately clearing the pane (a session switch) sets `[]` directly instead of
+ * coming through here.
  */
 export function reconcileMessages(prev: RawMessage[], next: RawMessage[]): RawMessage[] {
   if (prev === next) return prev;
-  if (prev.length === 0 || next.length === 0) return next;
+  if (next.length === 0) return prev;
+  if (prev.length === 0) return next;
 
   const byId = new Map<string, RawMessage>();
   for (const m of prev) {

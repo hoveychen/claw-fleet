@@ -14,8 +14,9 @@ import {
 import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
-import { isRenderableRow, messageToText } from "../messageRows";
+import { isRenderableRow } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
+import { landedUserTexts, stillPending } from "../optimisticEcho";
 import { appendTailDelta } from "../tailDelta";
 import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
@@ -367,19 +368,14 @@ export function SessionDetail({
     messageCount: messages.length,
   });
 
-  // Text of every real user row already in the transcript, so we can tell which
-  // optimistic sends have landed and drop them (dedup by trimmed text).
-  const realUserTexts = useMemo(() => {
-    const set = new Set<string>();
-    for (const m of messages) {
-      if (m.type === "user") set.add(messageToText(m).trim());
-    }
-    return set;
-  }, [messages]);
+  // Text of every real user *bubble* already in the transcript, so we can tell
+  // which optimistic sends have landed and drop them (dedup by trimmed text).
+  // See `optimisticEcho.ts` for why folded meta rows do not count.
+  const realUserTexts = useMemo(() => landedUserTexts(messages), [messages]);
 
   // Optimistic sends that haven't yet appeared in the real transcript.
   const pendingOptimistic = useMemo(
-    () => optimisticSends.filter((o) => !realUserTexts.has(o.text.trim())),
+    () => optimisticSends.filter((o) => stillPending(o.text, realUserTexts)),
     [optimisticSends, realUserTexts],
   );
 
@@ -388,7 +384,7 @@ export function SessionDetail({
   // set state when something actually changed, to avoid a render loop.
   useEffect(() => {
     setOptimisticSends((prev) => {
-      const next = prev.filter((o) => !realUserTexts.has(o.text.trim()));
+      const next = prev.filter((o) => stillPending(o.text, realUserTexts));
       return next.length === prev.length ? prev : next;
     });
   }, [realUserTexts]);
