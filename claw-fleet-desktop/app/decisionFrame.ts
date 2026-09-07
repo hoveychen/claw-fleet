@@ -38,3 +38,46 @@ export function parseFrameHeight(data: unknown): number | null {
 export function shouldApplyFrameHeight(current: number | null, next: number): boolean {
   return current === null || Math.abs(next - current) > FRAME_DEAD_BAND;
 }
+
+/**
+ * Foreground the prelude hands an *unstyled* preview, per theme.
+ *
+ * Hard-coded rather than read from `var(--color-text)` because the iframe is on
+ * an opaque origin: the app's custom properties do not cross into it, so the
+ * value has to travel inside the document. Keep these two in sync with
+ * `--color-text` in App.css (dark root / `[data-theme="light"]`).
+ */
+const FRAME_TEXT: Record<"dark" | "light", string> = {
+  dark: "#f7f8f8",
+  light: "#1f2023",
+};
+
+/**
+ * Wrap an agent-authored `html` preview into the document the card's iframe
+ * actually loads.
+ *
+ * Agents write these fragments against the card they see — the observed failure
+ * was a table styled `color:#e6e6e6; background:transparent`, i.e. light text
+ * expecting the dark card to show through. The frame used to paint itself
+ * `#fff`, so that table rendered light-grey-on-white and was unreadable in the
+ * dark theme.
+ *
+ * The prelude fixes both halves of that:
+ * - `color-scheme` states the host theme, so a document that styles *nothing*
+ *   gets UA defaults (form controls, scrollbars) matching the app instead of
+ *   whatever the OS happens to prefer.
+ * - an explicit `color` plus a transparent canvas means the card's own themed
+ *   surface shows through and unstyled text stays legible either way.
+ *
+ * It is a *prelude*: it comes before the agent's own markup, so any rule the
+ * agent writes at equal specificity still wins. Nothing here is opaque, so an
+ * agent that wants its own background just sets one.
+ */
+export function framePreviewSrcDoc(html: string, theme: "dark" | "light"): string {
+  const prelude =
+    `<style>:root{color-scheme:${theme}}` +
+    `html,body{background:transparent}` +
+    `body{margin:0;color:${FRAME_TEXT[theme]};` +
+    `font:13px -apple-system,system-ui,sans-serif}</style>`;
+  return `${prelude}${html}`;
+}

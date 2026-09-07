@@ -10,6 +10,8 @@ import {
 import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
 import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
+import { useDocumentTheme } from "../hooks/useDocumentTheme";
+import { framePreviewSrcDoc } from "../decisionFrame";
 import { usePrecedingAgentMessages } from "../hooks/usePrecedingAgentMessages";
 import type {
   DecisionHistoryRecord,
@@ -1174,12 +1176,25 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
 
 // Shared by both preview paths (served index.html vs inline srcDoc) so a card
 // looks the same whether or not it carries images.
-const FLEET_ASK_FRAME_STYLE = {
-  width: "100%",
-  border: "1px solid var(--decision-card-border, #ccc)",
-  borderRadius: "0.4rem",
-  background: "#fff",
-} as const;
+//
+// The frame is deliberately NOT opaque. Agents author these previews against
+// the card they can see and routinely style a `background: transparent` body
+// with a light foreground; the frame used to paint itself `#fff`, which turned
+// exactly that into light-grey-on-white — unreadable in the dark theme. Leaving
+// it transparent lets the card's own themed surface show through, and
+// `framePreviewSrcDoc` carries a matching `color-scheme` + default foreground
+// into the document for previews that style nothing at all.
+function fleetAskFrameStyle(theme: "dark" | "light") {
+  return {
+    width: "100%",
+    border: "1px solid var(--decision-card-border, #ccc)",
+    borderRadius: "0.4rem",
+    background: "transparent",
+    // Also propagates to the embedded document's UA defaults (form controls,
+    // scrollbars) on the served-index.html path, which cannot take a prelude.
+    colorScheme: theme,
+  } as const;
+}
 
 
 function FleetAskFormFieldRow({
@@ -1397,6 +1412,9 @@ export function FleetAskCard({
   const parked = decision.request.parked === true;
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
+  // The preview iframe is cross-origin, so the theme has to travel into it as a
+  // value rather than through CSS custom properties.
+  const theme = useDocumentTheme();
   const {
     submitFleetAsk,
     cancelFleetAsk,
@@ -1603,15 +1621,15 @@ export function FleetAskCard({
             title={`fleet-ask-html-${decision.id}-${step}`}
             src={decisionAssetUrl(decision.id, `q${step}`)}
             minHeight={200}
-            style={FLEET_ASK_FRAME_STYLE}
+            style={fleetAskFrameStyle(theme)}
           />
         ) : (
           q.html && (
             <AutoHeightFrame
               title={`fleet-ask-html-${decision.id}-${step}`}
-              srcDoc={q.html}
+              srcDoc={framePreviewSrcDoc(q.html, theme)}
               minHeight={200}
-              style={FLEET_ASK_FRAME_STYLE}
+              style={fleetAskFrameStyle(theme)}
             />
           )
         )}
