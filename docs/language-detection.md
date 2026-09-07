@@ -18,3 +18,6 @@
 隔离浏览器 28 项断言通过：两个部署前缀 × zh-CN、zh-HK、en-US、fr-FR 首选语言，以及手动英文、保存偏好、直接中文 URL、禁用存储、显式 query、参数/锚点和无脚本页面可用性。浏览器脚本保存在 `/Users/hoveychen/.codex/artifacts/consumer-site-bilingual-v2/qa-language.js`。
 
 深圳语言检测已使用更新器同一把锁发布到独立部署目录，完整验证后才原子替换 current。现有下载清单不改，旧部署与安装包保留。GitHub Pages 的语言检测需本次源码合并、推送后，由 Pages workflow 发布；原有新版官网已在线，二者状态分开记录。
+
+
+深圳正式域名的 14 项浏览器断言全部通过。服务器实际重建 v2.6.0 并再次校验 7 个官方文件后，`locale.js` 仍可读，定时器保持 active；新的 current 指向 `/srv/claw-fleet-site/deployments/auto-v2.6.0-717ae0c4cc3b`。这验证了自动更新保留语言检测的真实路径。源码分发相关 12 项测试通过，包含升级后保留 locale.js。
