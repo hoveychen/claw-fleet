@@ -3,7 +3,14 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, test } from 'node:test'
 
-import { apply, fetchSections, latestInjectedText, name } from './index.js'
+import {
+  apply,
+  ensureSandboxMode,
+  fetchContext,
+  fetchSections,
+  latestInjectedText,
+  name,
+} from './index.js'
 
 // Scratch dir for the stub `fleet` executables. `/tmp` rather than os.tmpdir()
 // so the path stays inside this session's writable roots.
@@ -279,5 +286,125 @@ describe('apply', () => {
       messages: [],
     })
     assert.deepEqual(decision.messages, [])
+  })
+})
+
+describe('ensureSandboxMode', () => {
+  /** An agent double whose session records what was appended to its log. */
+  function appendingAgent(events = []) {
+    const appended = []
+    return {
+      appended,
+      agent: {
+        session: {
+          header: { cwd: '/ws' },
+          id: 'session-1',
+          events,
+          append(type, data) {
+            appended.push({ type, data })
+            events.push({ type, data })
+          },
+        },
+      },
+    }
+  }
+
+  test('appends the switch as one sandbox/mode event', () => {
+    const { agent, appended } = appendingAgent()
+    assert.equal(ensureSandboxMode(agent, 'danger-full-access'), true)
+    assert.deepEqual(appended, [
+      { type: 'sandbox/mode', data: { mode: 'danger-full-access' } },
+    ])
+  })
+
+  test('never appends twice in one session', () => {
+    // Re-appending on every step would bloat the log, and — worse — would
+    // reinstate our mode after the user switched away from it.
+    const { agent, appended } = appendingAgent()
+    ensureSandboxMode(agent, 'danger-full-access')
+    assert.equal(ensureSandboxMode(agent, 'danger-full-access'), false)
+    assert.equal(appended.length, 1)
+  })
+
+  test("leaves the user's own later switch alone", () => {
+    const { agent, appended } = appendingAgent([
+      { type: 'sandbox/mode', data: { mode: 'read-only' } },
+    ])
+    assert.equal(ensureSandboxMode(agent, 'danger-full-access'), false)
+    assert.equal(appended.length, 0)
+  })
+
+  test('a session with no append method costs the escalation, not the turn', () => {
+    // The `sessionEvents` precedent: a shape we do not recognise must degrade,
+    // because a throw inside agent/pre-step ends the turn.
+    assert.equal(ensureSandboxMode({ session: { events: [] } }, 'danger-full-access'), false)
+    assert.equal(ensureSandboxMode({}, 'danger-full-access'), false)
+  })
+
+  test('an append that throws is swallowed', () => {
+    const agent = {
+      session: {
+        events: [],
+        append() {
+          throw new TypeError('unknown event type')
+        },
+      },
+    }
+    assert.equal(ensureSandboxMode(agent, 'danger-full-access'), false)
+  })
+})
+
+describe('fetchContext sandbox mode', () => {
+  test('carries the mode the CLI named', async () => {
+    const fleetBin = stubFleet(
+      'mode',
+      `echo '{"sections":[],"sandboxMode":"danger-full-access"}'`,
+    )
+    const ctx = await fetchContext({ fleetBin, timeoutMs: 5000 }, '/ws', 's')
+    assert.equal(ctx.sandboxMode, 'danger-full-access')
+  })
+
+  test('an absent, null or non-string mode leaves the session on dsh defaults', async () => {
+    // The CLI omits the field for a session Fleet did not spawn. Escalation has
+    // to be an explicit decision, so anything that is not a real mode string
+    // must read as "no decision".
+    for (const [label, body] of [
+      ['absent', `echo '{"sections":[]}'`],
+      ['null', `echo '{"sections":[],"sandboxMode":null}'`],
+      ['number', `echo '{"sections":[],"sandboxMode":7}'`],
+      ['empty', `echo '{"sections":[],"sandboxMode":""}'`],
+    ]) {
+      const fleetBin = stubFleet(`mode-${label}`, body)
+      const ctx = await fetchContext({ fleetBin, timeoutMs: 5000 }, '/ws', 's')
+      assert.equal(ctx.sandboxMode, undefined, `${label} must not escalate`)
+    }
+  })
+
+  test('the pre-step listener switches the mode even when no section changed', async () => {
+    // The steady state: every section is already in the log, so the listener
+    // returns without injecting. The switch must still have happened, or a
+    // resumed session never gets it.
+    const fleetBin = stubFleet(
+      'steady',
+      `echo '{"sections":[{"name":"fleet-prd","text":"SAME"}],"sandboxMode":"danger-full-access"}'`,
+    )
+    const events = [injected('fleet-prd', 'SAME')]
+    const appended = []
+    const agent = {
+      session: {
+        header: { cwd: '/ws' },
+        id: 'session-1',
+        events,
+        append(type, data) {
+          appended.push({ type, data })
+          events.push({ type, data })
+        },
+      },
+    }
+    const decision = await runPreStep({ fleetBin, timeoutMs: 5000 }, agent)
+    assert.equal(decision.messages.length, 0, 'nothing new to inject')
+    assert.deepEqual(appended, [
+      { type: 'sandbox/mode', data: { mode: 'danger-full-access' } },
+    ])
   })
 })
