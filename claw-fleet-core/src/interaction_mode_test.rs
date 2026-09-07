@@ -11,8 +11,8 @@
 //!      itself exercises the `AskUserQuestion` injection from CLAUDE.md.
 //!      `run_claude_cli_test` below.
 //!
-//! Test (2) and (3) live in core so RemoteBackend can drive them on the
-//! probe server (where the real `~/.fleet/elicitation/` dir and the
+//! Test (2) and (3) live in core so `fleet serve` can drive them on the
+//! serving host (where the real `~/.fleet/elicitation/` dir and the
 //! configured Claude binary live).
 
 use serde::{Deserialize, Serialize};

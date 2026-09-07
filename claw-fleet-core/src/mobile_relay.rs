@@ -198,7 +198,7 @@ pub struct MobileRelayStatus {
     /// Currently-connected mobile clients that announced themselves via
     /// `client_hello`. Best-effort: pruned on a heartbeat timeout (the relay
     /// only reports a client *count*, never which client left). `#[serde(default)]`
-    /// keeps a RemoteBackend probe against an older `fleet serve` deserializable.
+    /// keeps a client of an older `fleet serve` deserializable.
     #[serde(default)]
     pub devices: Vec<MobileClientInfo>,
 }
@@ -5962,7 +5962,7 @@ mod tests {
 
     #[test]
     fn status_devices_field_defaults_when_absent() {
-        // A RemoteBackend probing an older `fleet serve` gets JSON with no
+        // A client of an older `fleet serve` gets JSON with no
         // `devices` key — it must still deserialize (serde default = empty).
         let old: MobileRelayStatus = serde_json::from_str(
             r#"{"enabled":true,"connected":true,"clients":1,"relayUrl":"x","secretSet":true}"#,

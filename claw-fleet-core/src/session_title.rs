@@ -62,7 +62,7 @@ pub enum AgentTitleOutcome {
 }
 
 /// HTTP request body for setting a title over the `fleet serve` boundary
-/// (`RemoteBackend` → `/session_title`). An absent/empty `title` clears.
+/// (`/session_title`). An absent/empty `title` clears.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSessionTitleRequest {

@@ -25,25 +25,21 @@
 //! `attachmentId: "sha256:dae52f01…"`, byte-identical to `shasum -a 256` of the
 //! file on disk.
 //!
-//! # Both backends, without a new endpoint
+//! # Desktop and `fleet serve` alike, without a new endpoint
 //!
-//! Fleet's rule is that a feature works under `RemoteBackend` too. This one does
-//! by construction, because every step already runs on whichever host the agent
-//! is on:
+//! Every step already runs on whichever host the agent is on, so the browser
+//! build and the cloud container get this by construction:
 //!
-//! * **Outbound.** The paths in the block were minted by
-//!   `Backend::upload_attachment`, which under `RemoteBackend` uploads the bytes
-//!   to the probe and returns a *probe* path. [`prompt_content`] then runs inside
-//!   that probe's `fleet serve`, next to the dsh it is talking to, so the file is
+//! * **Outbound.** The paths in the block were minted by the attachment
+//!   uploader on the serving host. [`prompt_content`] then runs inside that
+//!   host's `fleet serve`, next to the dsh it is talking to, so the file is
 //!   local to the reader.
 //! * **Inbound.** `get_messages` is a `fleet serve` route (`routes::MESSAGES`),
-//!   so [`resolve_image_blocks`] commits to the *probe's* store and emits probe
-//!   paths. The desktop renders them through the `fleet-attachment://` protocol,
-//!   whose handler goes through `Backend::get_user_attachment` — proxied to the
-//!   probe's `routes::USER_ATTACHMENT`. No local file access is assumed anywhere.
-//! * **Mobile.** The relay is started by `LocalBackend`, so in a remote
-//!   deployment it is the probe's own `fleet serve` that runs it — the store it
-//!   thumbnails from is the same one dsh committed into.
+//!   so [`resolve_image_blocks`] commits to the serving host's store and emits
+//!   its paths. The desktop renders them through the `fleet-attachment://`
+//!   protocol; a tab reads them from `routes::USER_ATTACHMENT`.
+//! * **Mobile.** The relay runs next to the same store dsh committed into,
+//!   so that is where it thumbnails from.
 
 use std::path::Path;
 

@@ -1022,18 +1022,14 @@ fn handle_request(
             crate::routes::STOP => route_stop(ctx, request, &query, json_header, path),
 
             // `/stop_workspace` kills every agent process (and its tree) rooted
-            // in a workspace. Retired in Phase 4 as a "lifecycle endpoint", but
-            // RemoteBackend::kill_workspace never stopped calling it, so a remote
-            // stop on an imprecise pid 404'd silently. Re-added to match the
-            // still-live client. `?path=` is percent-encoded (slashes as %2F).
+            // in a workspace, for clients whose pid is imprecise. `?path=` is
+            // percent-encoded (slashes as %2F).
             crate::routes::STOP_WORKSPACE => route_stop_workspace(ctx, request, &query, json_header, path),
 
             // ── Host settings the Settings panel reads and writes ────────────
             // GET returns the current config, POST saves it (side effects
-            // included) and answers with the stored value. Phase 4 P3 retired
-            // `/auto_resume_config` because RemoteBackend stopped calling it —
-            // over SSH these three govern the *desktop* machine, so it reads
-            // the local files instead. They are back for the browser build,
+            // included) and answers with the stored value. The desktop reads
+            // the local files directly; these exist for the browser build,
             // which has no host of its own: without them `fleet webui` would
             // paint a toggle that reads as the host's state and saves nowhere.
             // `/resume_session` was re-added separately (POST, with follow-up
@@ -1176,7 +1172,7 @@ fn handle_request(
                 if request.method() == &tiny_http::Method::Post => route_plugins_install(ctx, request, &query, json_header, path),
 
             // Resume a scanned session with an optional follow-up prompt
-            // (history panel's "恢复会话", remote backend). Detached
+            // (history panel's "恢复会话" in the browser build). Detached
             // `claude --resume <sid> -p <prompt>`; the resumed turn appears
             // via the scanner as the JSONL grows.
             crate::routes::RESUME_SESSION if request.method() == &tiny_http::Method::Post => route_resume_session(ctx, request, &query, json_header, path),
@@ -1217,7 +1213,7 @@ fn handle_request(
             crate::routes::CREATE_DIR if request.method() == &tiny_http::Method::Post => route_create_dir(ctx, request, &query, json_header, path),
 
             // Spawn a brand-new headless Claude Code session (sessions page's
-            // "new session" button, remote backend). Detached `claude -p`;
+            // "new session" button in the browser build). Detached `claude -p`;
             // the session appears via the scanner once its JSONL exists.
             crate::routes::SPAWN_SESSION if request.method() == &tiny_http::Method::Post => route_spawn_session(ctx, request, &query, json_header, path),
 

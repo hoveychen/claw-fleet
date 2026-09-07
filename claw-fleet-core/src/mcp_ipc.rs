@@ -750,7 +750,7 @@ fn synthesize_gallery(images: &[FleetAskImage]) -> String {
 /// leaks into the persisted request / history) and keeps `name` + `caption`.
 ///
 /// Runs inside the `fleet mcp` child — the same host as the agent's files — so
-/// the copy is a plain local `fs::copy` regardless of Local vs Remote backend.
+/// the copy is a plain local `fs::copy`.
 /// Best-effort per image: an unsafe name or missing/unreadable source is
 /// dropped from the question rather than failing the whole ask.
 pub fn ingest_images(req: &mut FleetAskRequest) -> Result<(), String> {

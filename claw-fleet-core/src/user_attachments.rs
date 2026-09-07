@@ -8,8 +8,8 @@
 //! resolve when the conversation is read back weeks later.
 //!
 //! Staging to `$TMPDIR` fails that on two counts: the OS reclaims the directory
-//! on its own schedule, and under `RemoteBackend` a desktop-side temp path names
-//! a file on the wrong machine entirely — the agent never could read it.
+//! on its own schedule, and for a browser tab a client-side temp path names a
+//! file on the wrong machine entirely — the agent never could read it.
 //!
 //! Layout: `~/.fleet/user-attachments/<sha256[..16]>/<name>`. Content-addressed,
 //! so the same screenshot pasted into five sessions costs one copy on disk.

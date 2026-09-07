@@ -64,9 +64,8 @@ pub(crate) fn route_sources_config(
                 );
             }
 
-/// `GET /codex_profiles` — the probe host's Codex profile-v2 files, so a
-/// desktop driving a remote workspace offers the models that host can actually
-/// resolve rather than its own.
+/// `GET /codex_profiles` — the serving host's Codex profile-v2 files, so a
+/// browser tab offers the models that host can actually resolve.
 pub(crate) fn route_codex_profiles(
     ctx: &ServeCtx,
     request: tiny_http::Request,

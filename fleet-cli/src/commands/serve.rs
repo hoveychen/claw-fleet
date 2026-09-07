@@ -5,8 +5,8 @@
 //! separate deployments with opposite defaults, and a flag combination is
 //! something you have to remember correctly every time:
 //!
-//! - `fleet serve` — the token-gated API probe. What RemoteBackend, the mobile
-//!   relay and the cloud container's `/v1/*` surface talk to. A token is
+//! - `fleet serve` — the token-gated API. What the mobile relay and the cloud
+//!   container's `/v1/*` surface talk to. A token is
 //!   required; the admin/scoped tiering applies. Its bind address comes from
 //!   `FLEET_SERVE_HOST` (read inside `hooks_server::serve`); there is no flag.
 //! - `fleet webui` — the browser build of the app: the UI bundle plus the data

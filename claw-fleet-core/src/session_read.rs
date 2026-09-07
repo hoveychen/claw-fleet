@@ -49,7 +49,7 @@ pub struct SessionReadItem {
 }
 
 /// HTTP request body for marking sessions read over the `fleet serve` boundary
-/// (`RemoteBackend` → `/session_read`). Always a batch (a single mark is a
+/// (`/session_read`). Always a batch (a single mark is a
 /// batch of one), stamped with the server's clock on receipt.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]

@@ -52,7 +52,7 @@ pub struct SessionMarkRecord {
 }
 
 /// HTTP request body for setting a mark over the `fleet serve` boundary
-/// (`RemoteBackend` → `/session_mark`). `mark: None` clears.
+/// (`/session_mark`). `mark: None` clears.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSessionMarkRequest {

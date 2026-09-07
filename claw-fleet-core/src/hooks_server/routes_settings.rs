@@ -3,8 +3,8 @@
 //! Each is a GET (current value) + POST (save, answer with the stored value).
 //! They exist for the browser build: a tab served by `fleet webui` has no host
 //! of its own, so without these the panel would render a toggle that reads as
-//! the host's state and saves nowhere. See `routes::AUTO_RESUME_CONFIG` for why
-//! `RemoteBackend` still reads these locally instead of calling them.
+//! the host's state and saves nowhere. The desktop reads the same files
+//! locally instead of calling them (see `routes::AUTO_RESUME_CONFIG`).
 //!
 //! Each POST mirrors what the desktop's Tauri command does — *including its
 //! side effects*, which is the part that is easy to drop: saving the
