@@ -882,6 +882,7 @@ pub fn parse_session_info(
         background_tasks: Vec::new(),
         handoff: None,
         user_mark: None,
+        task_outcome: None,
         title_override: None,
         last_read_ms: None,
         compact_count: stats.compact_count,

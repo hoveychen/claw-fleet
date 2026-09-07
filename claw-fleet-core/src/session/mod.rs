@@ -254,6 +254,14 @@ pub struct SessionInfo {
     /// parse — the mark changes while the session's jsonl doesn't.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub user_mark: Option<crate::session_mark::SessionMark>,
+    /// Terminal state of the task the session was doing: `completed` (the user
+    /// pressed 结束任务) or `abandoned` (放弃任务). `None` = the task is still
+    /// open. A third axis alongside `status` (running now?) and `user_mark`
+    /// (reviewed by me?) — see `task_outcome`. Stamped by
+    /// `task_outcome::enrich_sessions` at scan time, not during the cached deep
+    /// parse — the outcome changes while the session's jsonl doesn't.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub task_outcome: Option<crate::task_outcome::TaskOutcome>,
     /// Human-pinned title override for the task list. `None` = display the
     /// auto-derived title (`ai_title ?? slug ?? preview`); `Some` = show this
     /// verbatim instead. Orthogonal to `ai_title` (which stays the pristine
@@ -712,7 +720,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,
+            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None, last_read_ms: None,
             compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,

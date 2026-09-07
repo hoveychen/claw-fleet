@@ -2145,7 +2145,11 @@
     "mode_tooltip": "Switch this question between single and multi select",
     "select_placeholder": "Select…",
     "attach_failed": "Attachment upload failed",
-    "attach_error_dismiss": "Dismiss"
+    "attach_error_dismiss": "Dismiss",
+    "finish_task": "Finish task",
+    "abandon_task": "Abandon task",
+    "finish_task_tooltip": "The agent considers the task done. Ending here marks this session complete.",
+    "abandon_task_tooltip": "The agent does not consider the task done. Ending here marks this session unfinished."
   },
   "composer": {
     "attach": "Attach files",
@@ -2316,7 +2320,8 @@
     "group_collapse": "Collapse relay chain",
     "group_expand": "Show earlier sessions in this relay chain",
     "toggle_done": "Done — click to mark in progress again",
-    "toggle_pending": "In progress — click to mark done"
+    "toggle_pending": "In progress — click to mark done",
+    "outcome_abandoned": "Task abandoned (unfinished) — click to toggle the review mark"
   },
   "view_files": "Repos",
   "files": {

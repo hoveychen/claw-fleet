@@ -296,3 +296,11 @@
 .mark_toggle[data-done="true"] {
   color: var(--color-success); /* green — finished */
 }
+
+/* An abandoned task (v3 decision card: 放弃任务) reads amber, not red: it is an
+   outcome, not an error. Placed after the done rule so it wins — ending a task
+   also stamps the review mark done, and the verdict is the more informative of
+   the two. */
+.mark_toggle[data-outcome="abandoned"] {
+  color: var(--color-warning);
+}

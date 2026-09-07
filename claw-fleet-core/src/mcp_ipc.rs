@@ -40,6 +40,18 @@ pub struct FleetAskRequest {
     /// resumes the session instead of unblocking a (long-gone) MCP poll.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub parked: bool,
+    /// The agent's own verdict on whether the task is finished, as of raising
+    /// this card. It does NOT add an option — it decides how Fleet renders the
+    /// card's always-present terminal button: `true` → 「结束任务 / Finish task」
+    /// (ending here is a success), `false` → 「放弃任务 / Abandon task」 (ending
+    /// here means giving up unfinished).
+    ///
+    /// Before v3 the agent hand-rolled a "任务结束" entry into `options`, which
+    /// left Fleet with no machine-readable terminal state; this field is what
+    /// replaced that convention. The user's click is still the authority — the
+    /// flag only picks the wording and the default verdict.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub task_complete: bool,
     pub questions: Vec<FleetAskQuestion>,
     /// Documents the agent wants the user to review alongside the card — the
     /// `.md` files or wiki entries it just produced, so the user can read them
@@ -308,6 +320,14 @@ pub struct FleetAskResponse {
     pub answers: BTreeMap<String, String>,
     #[serde(default)]
     pub cancelled: bool,
+    /// Set when the user resolved the card with its terminal button rather than
+    /// by answering. Always accompanied by `cancelled: true` — from the agent's
+    /// side both mean "stop, no answer is coming" — but the outcome tells it
+    /// *why*, so 结束任务 and 放弃任务 produce different tool text, and lets
+    /// Fleet stamp `task_outcome` for the session. `None` on a plain dismissal
+    /// (the pre-v3 Cancel behaviour), which records no terminal state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_outcome: Option<crate::task_outcome::TaskOutcome>,
 }
 
 // ── File-based IPC (mirror of `elicitation` module) ──────────────────────────
@@ -385,6 +405,77 @@ pub fn write_response(resp: &FleetAskResponse) -> Result<(), String> {
     let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write fleet-ask response: {e}"))?;
     recover_orphaned_response(&resp.id).map(|_| ())
+}
+
+/// The single seam every `fleet__ask` response path goes through — the desktop
+/// backend, the `fleet serve` / hooks route, the mobile relay and the ACP
+/// watcher. Stamps the session's terminal state (when the card was resolved with
+/// its terminal button) and then hands the response to [`crate::parked::deliver`],
+/// which either wakes a parked session or writes the response file for the
+/// blocked MCP producer.
+///
+/// Stamping here rather than inside [`write_response`] is load-bearing: a
+/// **parked** card that the user ends is `discard`ed, so `write_response` is
+/// never reached — putting the stamp there would have silently dropped the
+/// terminal state for exactly the cards that sat around longest.
+pub fn deliver_response(resp: &FleetAskResponse) -> Result<(), String> {
+    stamp_task_outcome(resp);
+    crate::parked::deliver(&resp.id, resp, resp.cancelled, write_response)
+}
+
+/// Session id + the agent's `taskComplete` claim for a card that is being
+/// resolved. Live cards still have their request file; a parked card's request
+/// lives (verbatim, as JSON) inside the parked store instead.
+fn terminal_context(id: &str) -> Option<(String, bool)> {
+    if let Some(req) = read_request(id) {
+        return Some((req.session_id, req.task_complete));
+    }
+    let card = crate::parked::get(id)?;
+    let claimed = card
+        .request
+        .get("taskComplete")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    Some((card.session_id, claimed))
+}
+
+/// Record the task's terminal state when the card was resolved with its
+/// terminal button (结束任务 / 放弃任务). Also sets the manual review mark to
+/// `Done`: reaching a terminal state means the human is finished with this
+/// session either way, so leaving it in the "needs review" bucket would just be
+/// a stale chore. No-op for an ordinary answer or a plain dismissal.
+fn stamp_task_outcome(resp: &FleetAskResponse) {
+    let Some(outcome) = resp.task_outcome else {
+        return;
+    };
+    let Some((session_id, agent_claimed_complete)) = terminal_context(&resp.id) else {
+        return;
+    };
+    if session_id.trim().is_empty() {
+        return;
+    }
+    let workspace = crate::session::resolve_session_cwd(&session_id)
+        .or_else(|| crate::codex_source::codex_fleet_owned_cwd(&session_id))
+        .unwrap_or_default();
+    if let Err(e) = crate::task_outcome::set_outcome(
+        &session_id,
+        &workspace,
+        Some(outcome),
+        &resp.id,
+        agent_claimed_complete,
+    ) {
+        crate::log_debug(&format!("task outcome stamp for {session_id}: {e}"));
+    }
+    if let Err(e) = crate::session_mark::set_mark(
+        &session_id,
+        &workspace,
+        Some(crate::session_mark::SessionMark::Done),
+    ) {
+        crate::log_debug(&format!("session mark on terminal {session_id}: {e}"));
+    }
+    // Per-task retrospective. Returns immediately; the LLM pass runs detached,
+    // because this path is unblocking an agent that is waiting on the card.
+    crate::task_review::on_task_terminated(&session_id, &workspace, outcome);
 }
 
 /// Recover an answered request whose MCP producer no longer exists.
@@ -842,6 +933,10 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
         "properties": {
+            "taskComplete": {
+                "type": "boolean",
+                "description": "Is the task this session was given now FINISHED? Default false. This does NOT add an option — every card already carries a permanent terminal button, and this flag only decides what it says. `true` renders it as 「结束任务 / Finish task」 and closes the session as a SUCCESS when the user presses it; `false` renders 「放弃任务 / Abandon task」, which closes it as UNFINISHED. Set it true only on a card you raise after the work is actually done (final report, nothing left to do). NEVER hand-write your own \"任务结束\" / \"done\" / \"收工\" option into `options` — that is the pre-v3 convention and it records no terminal state; use this field instead.",
+            },
             "questions": {
                 "type": "array",
                 "minItems": 1,
@@ -1014,6 +1109,7 @@ mod tests {
             ai_title: None,
             timestamp: String::new(),
             review_docs: vec![],
+            task_complete: false,
             questions: vec![FleetAskQuestion {
                 question: "q".into(),
                 header: "h".into(),
@@ -1026,6 +1122,68 @@ mod tests {
         }
     }
 
+    /// The load-bearing v3 contract: resolving a card with a terminal outcome
+    /// stamps the session's task outcome AND its review mark, carrying the
+    /// agent's own `taskComplete` claim along so the retrospective can see when
+    /// the two disagreed.
+    #[test]
+    fn terminal_outcome_stamps_session_state() {
+        let home = TmpHome::new("terminal-stamp");
+        let workspace = home.dir.join("ws");
+        std::fs::create_dir_all(&workspace).unwrap();
+        home.plant_codex_session("sess-term-1", &workspace);
+
+        let mut req = empty_request("card-term-1");
+        req.session_id = "sess-term-1".into();
+        // The agent believed it was finished…
+        req.task_complete = true;
+        write_request(&req).unwrap();
+
+        // …and the user agreed, pressing 结束任务.
+        deliver_response(&FleetAskResponse {
+            id: "card-term-1".into(),
+            answers: BTreeMap::new(),
+            cancelled: true,
+            task_outcome: Some(crate::task_outcome::TaskOutcome::Completed),
+        })
+        .unwrap();
+
+        let rec = crate::task_outcome::read("sess-term-1").expect("outcome stamped");
+        assert_eq!(rec.outcome, crate::task_outcome::TaskOutcome::Completed);
+        assert_eq!(rec.card_id, "card-term-1");
+        assert!(rec.agent_claimed_complete, "the agent's claim is carried over");
+        assert_eq!(
+            crate::session_mark::read("sess-term-1"),
+            Some(crate::session_mark::SessionMark::Done),
+            "reaching a terminal state also clears the needs-review chore"
+        );
+    }
+
+    /// A plain dismissal (no terminal button) must record no terminal state —
+    /// waving a card away is not a verdict on the task.
+    #[test]
+    fn dismissal_without_outcome_stamps_nothing() {
+        let home = TmpHome::new("terminal-none");
+        let workspace = home.dir.join("ws");
+        std::fs::create_dir_all(&workspace).unwrap();
+        home.plant_codex_session("sess-term-2", &workspace);
+
+        let mut req = empty_request("card-term-2");
+        req.session_id = "sess-term-2".into();
+        write_request(&req).unwrap();
+
+        deliver_response(&FleetAskResponse {
+            id: "card-term-2".into(),
+            answers: BTreeMap::new(),
+            cancelled: true,
+            task_outcome: None,
+        })
+        .unwrap();
+
+        assert!(crate::task_outcome::read("sess-term-2").is_none());
+        assert_eq!(crate::session_mark::read("sess-term-2"), None);
+    }
+
     #[test]
     fn round_trip_minimal_request() {
         let req = FleetAskRequest {
@@ -1036,6 +1194,7 @@ mod tests {
             ai_title: None,
             timestamp: String::new(),
             review_docs: vec![],
+            task_complete: false,
             questions: vec![FleetAskQuestion {
                 question: "Pick one".into(),
                 header: "Choice".into(),
@@ -1307,6 +1466,7 @@ mod tests {
             id: req.id.clone(),
             answers: BTreeMap::from([("q".into(), "继续".into())]),
             cancelled: false,
+            task_outcome: None,
         };
         std::fs::write(
             response_path(&req.id).unwrap(),
@@ -1351,6 +1511,7 @@ mod tests {
             id: req.id.clone(),
             answers: BTreeMap::from([("q".into(), "继续".into())]),
             cancelled: false,
+            task_outcome: None,
         };
         std::fs::write(
             response_path(&req.id).unwrap(),
@@ -1384,6 +1545,7 @@ mod tests {
             id: req.id.clone(),
             answers: BTreeMap::new(),
             cancelled: true,
+            task_outcome: None,
         };
         std::fs::write(
             response_path(&req.id).unwrap(),
@@ -1424,6 +1586,7 @@ mod tests {
             id: "xyz".into(),
             answers,
             cancelled: false,
+            task_outcome: None,
         };
         let s = serde_json::to_string(&resp).unwrap();
         let back: FleetAskResponse = serde_json::from_str(&s).unwrap();
@@ -1438,6 +1601,7 @@ mod tests {
             id: "k".into(),
             answers: BTreeMap::new(),
             cancelled: true,
+            task_outcome: None,
         };
         let s = serde_json::to_string(&resp).unwrap();
         let back: FleetAskResponse = serde_json::from_str(&s).unwrap();

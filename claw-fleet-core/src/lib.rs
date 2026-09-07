@@ -134,6 +134,8 @@ pub mod session;
 pub mod session_launch;
 pub mod session_history;
 pub mod session_mark;
+pub mod task_outcome;
+pub mod task_review;
 pub mod session_notes;
 pub mod session_read;
 pub mod session_snapshot;

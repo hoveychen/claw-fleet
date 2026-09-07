@@ -634,6 +634,10 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         ai_title: None,
         timestamp: chrono::Utc::now().to_rfc3339(),
         parked: false,
+        task_complete: args
+            .get("taskComplete")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         questions,
         review_docs,
     };
@@ -719,9 +723,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
             crate::decision_history::FleetAskOutcome::Cancelled,
             std::collections::BTreeMap::new(),
         );
-        return Ok(tool_error(
-            "User cancelled the fleet__ask Decision Card.".into(),
-        ));
+        return Ok(tool_error(terminal_notice(resp.task_outcome)));
     }
 
     persist_fleet_ask_history(
@@ -740,6 +742,29 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         "structuredContent": { "answers": resp.answers },
         "isError": false,
     }))
+}
+
+/// What the agent is told when a card came back with `cancelled: true`.
+///
+/// v3 split one button into three meanings. A plain dismissal is the pre-v3
+/// Cancel; the other two come from the card's always-present terminal button and
+/// carry a [`crate::task_outcome::TaskOutcome`]. All three stop the turn, but
+/// the agent must not treat "the user declared this finished" the same as "the
+/// user swatted the card away" — the first means stop *and stay stopped*, the
+/// second leaves the work open.
+fn terminal_notice(outcome: Option<crate::task_outcome::TaskOutcome>) -> String {
+    match outcome {
+        Some(crate::task_outcome::TaskOutcome::Completed) => "TASK FINISHED — the user pressed 「结束任务」 and closed this task as complete. \
+             Stop here. Do not start further work, do not raise another card, and do not \
+             summarise again: end your turn with at most one short line of acknowledgement."
+            .into(),
+        Some(crate::task_outcome::TaskOutcome::Abandoned) => "TASK ABANDONED — the user pressed 「放弃任务」 and closed this task as \
+             unfinished. Stop working on it. Do not try to salvage it, do not raise another \
+             card, and do not push back: end your turn with at most one short line of \
+             acknowledgement. The remaining work is recorded as not done."
+            .into(),
+        None => "User dismissed the fleet__ask Decision Card without answering.".into(),
+    }
 }
 
 /// Best-effort persistence of a resolved fleet__ask card into the per-session
@@ -1189,6 +1214,29 @@ mod tests {
         let err = handle_image_call(&json!({ "arguments": { "description": "   " } }))
             .expect_err("blank description must be a protocol error");
         assert_eq!(err.code, -32602);
+    }
+
+    /// v3 splits `cancelled` into three meanings. The agent must be able to
+    /// tell "the user declared this finished" from "the user swatted the card
+    /// away" — the first means stop and stay stopped, the second leaves the
+    /// work open.
+    #[test]
+    fn terminal_notice_differentiates_the_three_cancels() {
+        let finished = terminal_notice(Some(crate::task_outcome::TaskOutcome::Completed));
+        let abandoned = terminal_notice(Some(crate::task_outcome::TaskOutcome::Abandoned));
+        let dismissed = terminal_notice(None);
+
+        assert!(finished.contains("TASK FINISHED"));
+        assert!(abandoned.contains("TASK ABANDONED"));
+        assert!(
+            !dismissed.contains("TASK FINISHED") && !dismissed.contains("TASK ABANDONED"),
+            "a plain dismissal is not a verdict on the task"
+        );
+        assert_ne!(finished, abandoned);
+        // Both terminal notices must tell the agent to stop rather than press on.
+        for notice in [&finished, &abandoned] {
+            assert!(notice.contains("Stop"), "notice must say to stop: {notice}");
+        }
     }
 
     #[test]

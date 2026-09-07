@@ -1101,9 +1101,21 @@ function QuestionsCard({
     }
   };
 
+  // v3 决策卡:fleet__ask 的那颗结束按钮是一等的、永远在的,不占 options 名额。
+  // agent 的 `taskComplete` 只决定它是「结束任务」(会话记成功) 还是「放弃任务」
+  // (会话记未完成)。elicitation 没有这个轴,仍然只是「拒绝回答」。
+  const taskComplete = isFleetAsk && (request as FleetAskRequest).taskComplete === true;
   const doSubmit = (declined: boolean) => {
     if (declined) {
-      submit(isFleetAsk ? { cancelled: true, answers: {} } : { declined: true, answers: {} });
+      submit(
+        isFleetAsk
+          ? {
+              cancelled: true,
+              answers: {},
+              taskOutcome: taskComplete ? "completed" : "abandoned",
+            }
+          : { declined: true, answers: {} },
+      );
       return;
     }
     const answers: Record<string, string> = {};
@@ -1313,8 +1325,13 @@ function QuestionsCard({
       ))}
       {error && <div className={styles.error}>{error}</div>}
       <div className={styles.actions}>
-        <button className={styles.ghostButton} onClick={() => doSubmit(true)}>
-          {isFleetAsk ? t("取消") : t("拒绝回答")}
+        <button
+          className={`${styles.ghostButton} ${
+            isFleetAsk ? (taskComplete ? styles.finishButton : styles.abandonButton) : ""
+          }`}
+          onClick={() => doSubmit(true)}
+        >
+          {isFleetAsk ? (taskComplete ? t("结束任务") : t("放弃任务")) : t("拒绝回答")}
         </button>
         {multiQ && qi > 0 && (
           <button className={styles.ghostButton} onClick={() => setStep(qi - 1)}>

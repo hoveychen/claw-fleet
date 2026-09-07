@@ -69,7 +69,7 @@ pub(crate) fn route_fleet_ask_respond(
                         // file, so `deliver` resumes the session with the answer
                         // instead (or drops the card when the user dismissed it).
                         let outcome =
-                            crate::parked::deliver(&resp.id, &resp, resp.cancelled, crate::mcp_ipc::write_response);
+                            crate::mcp_ipc::deliver_response(&resp);
                         match outcome {
                             Ok(()) => {
                                 // Don't cleanup here — the `fleet mcp` server

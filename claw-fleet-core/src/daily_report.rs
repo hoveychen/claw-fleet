@@ -142,7 +142,7 @@ pub struct DailyReportStats {
     pub total_projects: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Lesson {
@@ -162,6 +162,18 @@ pub struct ConversationPair {
     user_text: String,
     session_id: String,
     workspace_name: String,
+}
+
+impl ConversationPair {
+    /// The assistant turn immediately preceding the user's reply. Read by
+    /// `task_review`, which renders the same trace for a single task.
+    pub fn assistant_text(&self) -> &str {
+        &self.assistant_text
+    }
+    /// The user turn that followed it.
+    pub fn user_text(&self) -> &str {
+        &self.user_text
+    }
 }
 
 // ── Raw metrics from a single session's JSONL ────────────────────────────────
@@ -1144,12 +1156,14 @@ fn build_lessons_prompt(
     locale: &str,
     existing_rules: &str,
     other_picks: &[crate::decision_history::OtherPickContext],
+    task_reviews: &[crate::task_review::TaskReview],
 ) -> String {
     let lang_instruction = match locale {
         "zh" => "请用中文撰写输出。",
         _ => "Write the output in English.",
     };
     let decision_signals = build_decision_signals_section(other_picks);
+    let finished_tasks = build_task_review_section(task_reviews);
 
     let dedup_section = if existing_rules.is_empty() {
         String::new()
@@ -1215,6 +1229,7 @@ fn build_lessons_prompt(
          SESSION: <session id>\n\n\
          If no qualifying lessons exist, output NONE.\n\n\
          {lang_instruction}\n\n\
+         {finished_tasks}\
          {decision_signals}\
          ---\n\
          {sections}",
@@ -1304,9 +1319,20 @@ pub fn generate_lessons(
     let other_picks =
         crate::decision_history::collect_other_picks_for_date(&report.date, MAX_DECISION_SIGNALS);
 
+    // Tasks that reached a terminal state on this day were already reviewed
+    // individually, at the moment they ended, knowing whether they succeeded —
+    // context this day-level pass does not have. Their lessons are adopted
+    // as-is rather than re-derived, and they are listed in the prompt so the
+    // day-level pass does not restate them.
+    let task_reviews = task_reviews_for_date(&report.date);
+    let mut lessons_from_tasks: Vec<Lesson> = Vec::new();
+    for r in &task_reviews {
+        lessons_from_tasks.extend(r.lessons.iter().cloned());
+    }
+
     if all_pairs.is_empty() && other_picks.is_empty() {
         log_debug("[daily_report] no conversation pairs or decision signals found for lessons");
-        return Some(vec![]);
+        return Some(lessons_from_tasks);
     }
 
     // Collect workspace paths for deduplication against existing CLAUDE.md rules
@@ -1317,7 +1343,13 @@ pub fn generate_lessons(
         .collect();
     let existing_rules = collect_existing_rules(&workspace_paths);
 
-    let prompt = build_lessons_prompt(&all_pairs, locale, &existing_rules, &other_picks);
+    let prompt = build_lessons_prompt(
+        &all_pairs,
+        locale,
+        &existing_rules,
+        &other_picks,
+        &task_reviews,
+    );
 
     let raw = match crate::llm_usage::complete_accounted(
         provider,
@@ -1331,10 +1363,76 @@ pub fn generate_lessons(
     };
 
     if raw.is_empty() || raw.eq_ignore_ascii_case("NONE") {
-        return Some(vec![]);
+        return Some(lessons_from_tasks);
     }
 
-    Some(parse_lessons(&raw, &all_pairs))
+    // Per-task lessons first: they carry the outcome the day-level pass cannot see.
+    let mut lessons = lessons_from_tasks;
+    lessons.extend(parse_lessons(&raw, &all_pairs));
+    Some(lessons)
+}
+
+/// The task retrospectives whose task ended on `date` (local time). Soft: an
+/// unreadable / absent store yields none, and the day-level pass proceeds as it
+/// did before per-task reviews existed.
+fn task_reviews_for_date(date: &str) -> Vec<crate::task_review::TaskReview> {
+    use chrono::TimeZone;
+    let Some(start) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
+    else {
+        return Vec::new();
+    };
+    let from_ms = start.timestamp_millis().max(0) as u64;
+    let to_ms = from_ms + 24 * 60 * 60 * 1000;
+    crate::task_review::TaskReviewStore::open()
+        .and_then(|s| s.list_in_range(from_ms, to_ms))
+        .unwrap_or_default()
+}
+
+/// Render the day's finished task retrospectives for the lessons prompt: how
+/// many tasks ended, how they ended, and which lessons were already drawn from
+/// them so the day-level pass does not repeat them.
+fn build_task_review_section(reviews: &[crate::task_review::TaskReview]) -> String {
+    if reviews.is_empty() {
+        return String::new();
+    }
+    let done = reviews.iter().filter(|r| r.outcome.is_success()).count();
+    let abandoned = reviews.len() - done;
+    let mut body = String::new();
+    for r in reviews {
+        let verdict = if r.outcome.is_success() {
+            "COMPLETED"
+        } else {
+            "ABANDONED"
+        };
+        body.push_str(&format!(
+            "--- [{verdict}] {} (workspace: {}) ---\n  {}\n",
+            r.title, r.workspace_name, r.summary
+        ));
+        if r.outcome.is_success() != r.agent_claimed_complete {
+            body.push_str(
+                "  NOTE: the agent's own completion claim disagreed with the user's verdict.\n",
+            );
+        }
+        for l in &r.lessons {
+            body.push_str(&format!("  ALREADY-DRAWN LESSON: {}\n", l.content));
+        }
+        body.push('\n');
+    }
+    format!(
+        "FINISHED TASKS — {n} task(s) reached a terminal state today ({done} completed, \
+         {abandoned} abandoned). Each was already reviewed on its own, at the moment it \
+         ended, with its outcome known. Their conclusions are below. Do NOT restate any \
+         lesson marked ALREADY-DRAWN — those are adopted verbatim and adding them again \
+         would duplicate them. Use this section instead as context for what the day was \
+         actually about, and only emit a lesson that spans tasks or that none of these \
+         reviews caught.\n\
+         \n\
+         <finished_tasks>\n{body}</finished_tasks>\n\n",
+        n = reviews.len(),
+    )
 }
 
 pub fn generate_lessons_routed(
@@ -1540,7 +1638,7 @@ fn make_session_info_for_date(
         rate_limit: None,
         todos: None,
         background_tasks: Vec::new(),
-        task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,        compact_count: 0,
+        task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None, last_read_ms: None,        compact_count: 0,
         compact_pre_tokens: 0,
         compact_post_tokens: 0,
         compact_cost_usd: 0.0,
@@ -2261,7 +2359,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,            compact_count: 0,
+            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None, last_read_ms: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
@@ -2313,7 +2411,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,            compact_count: 0,
+            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None, last_read_ms: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,

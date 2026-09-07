@@ -617,16 +617,45 @@ pub struct OtherPickContext {
 /// Bounded to `max` contexts so the lessons prompt stays within budget.
 pub fn collect_other_picks_for_date(date: &str, max: usize) -> Vec<OtherPickContext> {
     let mut out: Vec<OtherPickContext> = Vec::new();
-    for_each_record_on_date(date, |rec| {
-        if out.len() >= max {
-            return;
+    for_each_record_on_date(date, |rec| push_other_pick(rec, Some(date), max, &mut out));
+    out
+}
+
+/// Same evidence extraction, scoped to one task's sessions instead of a
+/// calendar day — the per-task retrospective (`task_review`) reads the whole
+/// handoff chain, which routinely straddles midnight, so a date filter would
+/// silently drop the earlier hops. `date: None` means "no date filter".
+pub fn collect_other_picks_for_sessions(
+    session_ids: &[String],
+    max: usize,
+) -> Vec<OtherPickContext> {
+    let mut out: Vec<OtherPickContext> = Vec::new();
+    for sid in session_ids {
+        for rec in list_session_records(sid) {
+            push_other_pick(&rec, None, max, &mut out);
         }
+    }
+    out
+}
+
+/// Append the "user overrode the AI here" evidence a single record carries, if
+/// any. `date` filters by the record's local date when set.
+fn push_other_pick(
+    rec: &DecisionHistoryRecord,
+    date: Option<&str>,
+    max: usize,
+    out: &mut Vec<OtherPickContext>,
+) {
+    if out.len() >= max {
+        return;
+    }
+    {
         match rec {
             DecisionHistoryRecord::Elicitation(r) => {
                 if r.outcome != ElicitationOutcome::Answered {
                     return;
                 }
-                if local_date_of(&r.requested_at).as_deref() != Some(date) {
+                if date.is_some() && local_date_of(&r.requested_at).as_deref() != date {
                     return;
                 }
                 for q in &r.questions {
@@ -657,7 +686,7 @@ pub fn collect_other_picks_for_date(date: &str, max: usize) -> Vec<OtherPickCont
                 if r.outcome != FleetAskOutcome::Answered {
                     return;
                 }
-                if local_date_of(&r.requested_at).as_deref() != Some(date) {
+                if date.is_some() && local_date_of(&r.requested_at).as_deref() != date {
                     return;
                 }
                 for q in &r.questions {
@@ -691,7 +720,7 @@ pub fn collect_other_picks_for_date(date: &str, max: usize) -> Vec<OtherPickCont
                 if r.outcome != PlanApprovalOutcome::Rejected {
                     return;
                 }
-                if local_date_of(&r.requested_at).as_deref() != Some(date) {
+                if date.is_some() && local_date_of(&r.requested_at).as_deref() != date {
                     return;
                 }
                 let excerpt: String = r.plan_content.chars().take(300).collect();
@@ -706,8 +735,7 @@ pub fn collect_other_picks_for_date(date: &str, max: usize) -> Vec<OtherPickCont
             }
             DecisionHistoryRecord::UserPrompt(_) => {}
         }
-    });
-    out
+    }
 }
 
 // ── Storage ──────────────────────────────────────────────────────────────────
@@ -1428,6 +1456,7 @@ mod tests {
             ai_title: Some("v2 test".into()),
             timestamp: "2026-05-28T00:00:00Z".into(),
             review_docs: vec![],
+            task_complete: false,
             questions: vec![FleetAskQuestion {
                 question: "Pick or fill?".into(),
                 header: "Mix".into(),
@@ -1562,6 +1591,7 @@ mod tests {
             ai_title: None,
             timestamp: "2026-05-28T00:00:02Z".into(),
             review_docs: vec![],
+            task_complete: false,
             questions: vec![],
         };
         let fa_rec = build_fleet_ask_record(

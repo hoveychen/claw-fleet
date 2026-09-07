@@ -3,7 +3,7 @@ import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, WaitingAlert } from "./types";
 import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
@@ -1390,8 +1390,13 @@ interface DecisionState {
   declineElicitation: (id: string) => Promise<void>;
   /** Submit fleet__ask answers (options + form fields) back to the MCP server. */
   submitFleetAsk: (id: string) => Promise<void>;
-  /** Cancel a fleet__ask card (user explicitly dismissed). */
-  cancelFleetAsk: (id: string) => Promise<void>;
+  /**
+   * Resolve a fleet__ask card without answering it. `taskOutcome` is the v3
+   * terminal verdict from the card's always-present end-the-task button —
+   * `"completed"` (结束任务) or `"abandoned"` (放弃任务) — which Fleet stamps onto
+   * the session. Omit it for a plain dismissal, which records no terminal state.
+   */
+  cancelFleetAsk: (id: string, taskOutcome?: TaskOutcome | null) => Promise<void>;
   /** Toggle an option for a fleet__ask question. */
   toggleFleetAskOption: (id: string, question: string, option: string, multiSelect: boolean) => void;
   /** Set the "Other" free-text for a fleet__ask question. */
@@ -2004,11 +2009,16 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     );
   },
 
-  cancelFleetAsk: async (id) => {
+  cancelFleetAsk: async (id, taskOutcome) => {
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
     fireDecisionResponse("respond_to_fleet_ask (cancel)", () =>
-      invoke("respond_to_fleet_ask", { id, cancelled: true, answers: {} }),
+      invoke("respond_to_fleet_ask", {
+        id,
+        cancelled: true,
+        answers: {},
+        taskOutcome: taskOutcome ?? null,
+      }),
     );
   },
 
