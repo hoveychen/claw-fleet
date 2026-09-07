@@ -2274,7 +2274,7 @@
     "filter_workspace_off": "Chat-only mode ignores the workspace filter",
     "all_workspaces": "All workspaces",
     "workspaces": "Workspaces",
-    "workspace_session_count": "{{count}} sessions",
+    "workspace_session_count": "{{count}} groups",
     "only_active": "Active only",
     "filter_active_tip": "Show only sessions still running or waiting for input",
     "mark_all_read": "Mark all read",

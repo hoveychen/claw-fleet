@@ -817,7 +817,8 @@ export function HistoryView() {
                 key={workspace.path}
                 path={workspace.path}
                 name={workspace.name}
-                count={workspace.sessions.length}
+                // 折叠后的行数：一条接力链折成一组只算 1，与眼下看到的行一致。
+                count={workspace.items.length}
               >
                 <SessionRail
                   items={workspace.items}

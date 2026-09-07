@@ -979,7 +979,8 @@ export function TasksView({
               >
                 <Folder size={13} className={styles.workspaceFolder} />
                 <span className={styles.workspaceName}>{section.name}</span>
-                <span className={styles.workspaceCount}>{section.sessions.length}</span>
+                {/* 折叠后的组数：一条折叠的接力链算一组，与桌面端二级侧栏同义。 */}
+                <span className={styles.workspaceCount}>{section.items.length}</span>
                 <ChevronRight
                   size={14}
                   className={styles.workspaceChevron}

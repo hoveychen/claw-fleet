@@ -45,6 +45,7 @@ type SessionRailProps = {
 type WorkspaceRailSectionProps = {
   path: string;
   name: string;
+  /** 折叠后的组数（一条折叠的接力链算一组），不是会话总数。 */
   count: number;
   children: ReactNode;
 };
@@ -76,7 +77,7 @@ export function WorkspaceRailSection({
         <span className={styles.workspace_name}>{name}</span>
         <span
           className={styles.workspace_count}
-          aria-label={t("history.workspace_session_count", "{{count}} 个会话", { count })}
+          aria-label={t("history.workspace_session_count", "{{count}} 组会话", { count })}
         >
           {count}
         </span>
