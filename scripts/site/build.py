@@ -3,6 +3,7 @@
 from pathlib import Path
 from html import escape
 import json
+import struct
 
 ROOT = Path(__file__).resolve().parents[2]
 GITHUB = 'https://github.com/hoveychen/claw-fleet'
@@ -24,10 +25,12 @@ def build(lang, c):
     steps=''.join(f'<li><h3>{h}</h3><p>{p}</p></li>' for h,p in c['steps'])
     faq=''.join(f'<details><summary>{h}<span aria-hidden="true">+</span></summary><p>{p}</p></details>' for h,p in c['faqs'])
     shots=[f'work-{lang}.png',f'review-{lang}.png',f'results-{lang}.png']
-    dimensions=[(1206,820),(1000,700),(1206,720)]
+    def dimensions(name):
+        return struct.unpack('>II', (ROOT / 'docs/screenshots/current' / name).read_bytes()[16:24])
+    mobile_w, mobile_h = dimensions(f'mobile-{lang}.png')
     panels=''
     for i,shot in enumerate(shots):
-        w,h=dimensions[i]
+        w,h=dimensions(shot)
         panels+=f'''<div id="panel-{i}" class="demo-panel">
 <div class="product-stage stage-{i}"><div class="product-window"><img src="{base}screenshots/current/{shot}" width="{w}" height="{h}" {'fetchpriority="high"' if i==0 else 'loading="lazy"'} alt="{c['panelTitles'][i]}"></div></div>
 <div class="panel-caption"><h3>{c['panelTitles'][i]}</h3><p>{c['panelCopy'][i]}</p></div></div>'''
@@ -50,7 +53,7 @@ def build(lang, c):
 {panels}<p class="mobile-sample">{c['sample']}</p>
 </section>
 <section class="overview wrap"><div class="section-heading"><h2>{c['sectionHeading']}</h2><p>{c['sectionText']}</p></div><div class="feature-columns">{features}</div></section>
-<section class="mobile-section wrap" id="mobile"><div class="mobile-art"><div class="phone"><img src="{base}screenshots/current/mobile-{lang}.png" width="430" height="932" loading="lazy" alt="{c['mobileAlt']}"></div><p>{c['mobileCaption']}</p></div><div class="mobile-copy"><h2>{c['mobileHeading']}</h2><p>{c['mobileCopy']}</p><ul>{''.join(f'<li>{p}</li>' for p in c['mobilePoints'])}</ul><a class="text-link" href="#getting-started">{c['mobileCta']} <span aria-hidden="true">↗</span></a></div></section>
+<section class="mobile-section wrap" id="mobile"><div class="mobile-art"><div class="phone"><img src="{base}screenshots/current/mobile-{lang}.png" width="{mobile_w}" height="{mobile_h}" loading="lazy" alt="{c['mobileAlt']}"></div><p>{c['mobileCaption']}</p></div><div class="mobile-copy"><h2>{c['mobileHeading']}</h2><p>{c['mobileCopy']}</p><ul>{''.join(f'<li>{p}</li>' for p in c['mobilePoints'])}</ul><a class="text-link" href="#getting-started">{c['mobileCta']} <span aria-hidden="true">↗</span></a></div></section>
 <section class="work-depth wrap"><div class="section-heading"><h2>{c['moreHeading']}</h2><p>{c['moreCopy']}</p></div><div class="depth-list">{more}</div><div class="source-strip"><p>{c['sourceNames']}</p><span>{c['sourceBlurb']}</span></div></section>
 <section class="download-section" id="download"><div class="wrap"><div class="section-heading"><h2>{c['downloadHeading']}</h2><p>{c['downloadCopy']}</p></div><p class="version-note">{c['versionNote']}</p><div class="download-source"><label for="download-source">{c['source']}</label><select id="download-source"><option value="github">{c['globalSource']}</option></select><p id="source-note" data-ready="{c['sourceReady']}" data-china="{c['chinaSource']}">{c['sourceNote']}</p></div><div class="downloads">{rows}</div><a class="text-link release-link" href="{GITHUB}/releases">{c['allReleases']} <span aria-hidden="true">↗</span></a><details class="linux-help"><summary>{c['linuxHelp']}<span aria-hidden="true">+</span></summary><pre><code>chmod +x fleet-linux-x64\n./fleet-linux-x64 webui</code></pre><p>{c['linuxAfter']}</p></details></div></section>
 <section id="getting-started" class="getting-started wrap"><h2>{c['startHeading']}</h2><ol>{steps}</ol></section>

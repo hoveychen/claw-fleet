@@ -24,6 +24,10 @@ if (isMockMode && demoMode) {
 
 if (isMockMode && params.has("website")) {
   markWebBuild();
+  window.localStorage.setItem("mock-store:daily-report-last-popped", new Date().toISOString().slice(0, 10));
+  const seen = JSON.parse(window.localStorage.getItem("mock-store:onboarding-seen-features") || "[]");
+  window.localStorage.setItem("mock-store:onboarding-seen-features", JSON.stringify([...seen, "nav_modes"]));
+  window.localStorage.setItem("mock-store:wizard-completed", "1");
   window.localStorage.setItem("mock-store:lang", params.get("website") === "zh" ? "zh" : "en");
 }
 

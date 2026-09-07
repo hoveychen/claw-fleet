@@ -26,8 +26,8 @@ export function installWebsiteFixtures() {
   const artifactSeed = MOCK_ARTIFACTS[0];
   MOCK_ARTIFACTS.splice(0, MOCK_ARTIFACTS.length, ...c.artifacts.map((title, i) => ({
     ...artifactSeed, id: `website-${websiteLang}-${i}`, name: `deliverable-${i}.${i === 3 || i === 4 ? 'md' : 'html'}`,
-    title, note: c.tasks[i][1], kind: i === 3 || i === 4 ? 'text' : 'html', mime: i === 3 || i === 4 ? 'text/markdown' : 'text/html',
-    sizeBytes: 4200 + i * 731, workspaceName: c.projects[i % 4], workspacePath: MOCK_SESSIONS[i].workspacePath,
+    title, note: c.tasks[i][1], kind: 'text', mime: i === 3 || i === 4 ? 'text/markdown' : 'text/html',
+    sizeBytes: 4200 + i * 731, workspaceName: c.projects[[0,2,3,1,0,1,3,0][i]], workspacePath: `/Users/demo/workspace/${["launch","revenue","brand","research","launch","research","brand","launch"][i]}`,
     starred: i < 2, drifted: false, createdMs: Date.now() - i * 3600000,
   })));
   Object.assign(MOCK_ARTIFACT_USAGE, {count: MOCK_ARTIFACTS.length, totalBytes: MOCK_ARTIFACTS.reduce((sum, a) => sum + a.sizeBytes, 0)});
