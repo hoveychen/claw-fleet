@@ -1104,16 +1104,26 @@ export function SessionDetail({
                   ⋯ menu; the plan / handoff / watch rows ride along the bottom
                   edge, where they stay put instead of scrolling away with the
                   conversation. */}
-              <div className={styles.hero}>
-                <div className={styles.hero_top}>
-                  <div className={styles.hero_ident}>
+              {/* data-tauri-drag-region on every container of this banner: it
+                  now owns the window's top-right corner, and a frameless window
+                  can only be dragged by an element that carries the attribute
+                  itself (Tauri's shim reads e.target, not an ancestor). The
+                  fixed <WindowsFrameOverlay> strip above is pointer-events:none,
+                  so it does not cover this corner on macOS — every other surface
+                  reaching the window top (sidebar header, PageShell banner)
+                  carries its own region for the same reason. Buttons and chips
+                  are separate targets, so their clicks are unaffected. */}
+              <div className={styles.hero} data-tauri-drag-region>
+                <div className={styles.hero_top} data-tauri-drag-region>
+                  <div className={styles.hero_ident} data-tauri-drag-region>
                     <div
                       className={styles.header_title}
                       title={preferredTitle || liveSession.workspacePath}
+                      data-tauri-drag-region
                     >
                       {preferredTitle || liveSession.workspaceName}
                     </div>
-                  <div className={styles.meta_row}>
+                  <div className={styles.meta_row} data-tauri-drag-region>
                     {/* Only when the title line isn't already the workspace name. */}
                     {preferredTitle && preferredTitle !== liveSession.workspaceName && (
                       <span
@@ -1226,7 +1236,7 @@ export function SessionDetail({
                   {/* Toolbar. The auxiliary column's switch leads it: with the
                       facet buttons gone from this side, this is how you get the
                       panel back once it is closed. */}
-                  <div className={styles.hero_tools}>
+                  <div className={styles.hero_tools} data-tauri-drag-region>
                     <button
                       type="button"
                       className={`${styles.hero_tool} ${auxOpen ? styles.hero_tool_on : ""}`}
