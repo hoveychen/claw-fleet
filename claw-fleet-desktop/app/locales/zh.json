@@ -2250,7 +2250,15 @@
     "dc_type_plan_approval": "计划审批",
     "dc_no_rec": "无推荐",
     "total_cost": "总花费",
-    "dc_task_outcome": "完成/放弃"
+    "dc_task_outcome": "完成/放弃",
+    "task_reviews": "当日任务复盘",
+    "no_task_reviews": "今天还没有任务被结束或放弃。",
+    "task_review_untitled": "（无标题任务）",
+    "task_review_overclaimed": "自评已完成",
+    "task_review_overclaimed_hint": "Agent 当时判定任务已完成，老板却按了「放弃任务」——复盘的首要任务就是找出这个缺口。",
+    "task_review_underclaimed": "自评未完成",
+    "task_review_underclaimed_hint": "Agent 当时并未判定完成，老板直接按了「结束任务」——可能是它低报了进度。",
+    "task_review_hops": "接力 {{count}} 段"
   },
   "command": {
     "nested": {

@@ -1415,6 +1415,7 @@ fn handle_request(
             crate::routes::DAILY_REPORT => route_daily_report(ctx, request, &query, json_header, path),
 
             crate::routes::DAILY_REPORT_STATS => route_daily_report_stats(ctx, request, &query, json_header, path),
+            crate::routes::TASK_REVIEWS => route_task_reviews(request, &query, json_header),
 
             crate::routes::DAILY_REPORT_GENERATE => route_daily_report_generate(ctx, request, &query, json_header, path),
 

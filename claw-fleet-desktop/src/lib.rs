@@ -756,6 +756,10 @@ impl Backend for NullBackend {
     fn append_lesson_to_claude_md(&self, _: &Lesson) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn list_task_reviews(&self, _: &str) -> Vec<claw_fleet_core::task_review::TaskReview> {
+        Vec::new()
+    }
+
     fn list_managed_lessons(
         &self,
     ) -> Result<Vec<claw_fleet_core::lessons_store::ManagedLesson>, String> {

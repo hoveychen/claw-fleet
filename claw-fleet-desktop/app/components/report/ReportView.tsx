@@ -7,6 +7,7 @@ import { ContributionsHeatmap } from "./ContributionsHeatmap";
 import { HourlyActivityChart } from "./HourlyActivityChart";
 import { MetricsCards } from "./MetricsCards";
 import { DecisionCardsPanel } from "./DecisionCardsPanel";
+import { TaskReviewsCard } from "./TaskReviewsCard";
 import { AISummaryCard } from "./AISummaryCard";
 import { LessonsCard } from "./LessonsCard";
 import { ToolCallChart } from "./ToolCallChart";
@@ -302,6 +303,10 @@ function ReportDetail() {
               summary={currentReport.aiSummary}
               metrics={currentReport.metrics}
             />
+            {/* Between the card stats and the day's lessons on purpose: the
+                stats say how many tasks ended, this says which ones and why,
+                and the lessons are what was drawn from them. */}
+            <TaskReviewsCard date={currentReport.date} />
             <LessonsCard date={currentReport.date} lessons={currentReport.lessons} />
           </div>
         )}

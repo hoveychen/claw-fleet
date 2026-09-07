@@ -1311,6 +1311,10 @@ pub trait Backend: Send + Sync {
         -> Result<Vec<crate::lessons_store::ManagedLesson>, String>;
     /// Remove a managed lesson by its stable id.
     fn remove_managed_lesson(&self, id: &str) -> Result<(), String>;
+    /// Per-task retrospectives whose task reached a terminal state on `date`
+    /// (local time). Same set the day's lessons pass folds in, read through the
+    /// one definition in `daily_report::task_reviews_for_date`.
+    fn list_task_reviews(&self, date: &str) -> Vec<crate::task_review::TaskReview>;
 
     // ── LLM provider ────────────────────────────────────────────────────────
     fn list_llm_providers(&self) -> Vec<LlmProviderInfo>;

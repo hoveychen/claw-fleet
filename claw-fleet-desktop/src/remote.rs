@@ -1915,6 +1915,13 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::DAILY_REPORT_APPEND_LESSON, lesson)
     }
 
+    fn list_task_reviews(&self, date: &str) -> Vec<claw_fleet_core::task_review::TaskReview> {
+        let encoded = encode_path(date);
+        self.probe
+            .get(&format!("{}?date={}", claw_fleet_core::routes::TASK_REVIEWS, encoded))
+            .unwrap_or_default()
+    }
+
     fn list_managed_lessons(
         &self,
     ) -> Result<Vec<claw_fleet_core::lessons_store::ManagedLesson>, String> {

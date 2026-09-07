@@ -3382,6 +3382,10 @@ impl Backend for LocalBackend {
         crate::daily_report::append_lesson_to_claude_md(lesson)
     }
 
+    fn list_task_reviews(&self, date: &str) -> Vec<claw_fleet_core::task_review::TaskReview> {
+        claw_fleet_core::daily_report::task_reviews_for_date(date)
+    }
+
     fn list_managed_lessons(
         &self,
     ) -> Result<Vec<crate::lessons_store::ManagedLesson>, String> {
