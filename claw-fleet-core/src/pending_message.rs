@@ -190,15 +190,22 @@ pub fn all_pending() -> std::collections::HashMap<String, Vec<String>> {
 /// Attach each session's queued follow-ups to its [`SessionInfo`], so the
 /// desktop/mobile UIs can render "queued" chips without a separate fetch. Rides
 /// the existing sessions snapshot, so it works over both the local and remote
-/// backends. Sessions with no queue keep the empty default.
+/// backends.
+///
+/// The store is the whole truth: a session missing from it has *no* queue, so
+/// its `pending_messages` is cleared rather than left alone, and an empty store
+/// clears every session rather than being a no-op — same reasoning as
+/// [`crate::session_mark::enrich_sessions_in`]. That is what makes the "×" on a
+/// chip feel instant: the desktop's `restamp_marks_and_emit` re-enriches the
+/// *cached* list in place, so a write-on-hit-only enricher would leave the last
+/// cancelled chip on screen until the next full rescan.
 pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
     let map = all_pending();
-    if map.is_empty() {
-        return;
-    }
     for s in sessions.iter_mut() {
-        if let Some(msgs) = map.get(&s.id) {
-            s.pending_messages = msgs.clone();
+        match map.get(&s.id) {
+            Some(msgs) => s.pending_messages = msgs.clone(),
+            None if !s.pending_messages.is_empty() => s.pending_messages.clear(),
+            None => {}
         }
     }
 }
@@ -545,6 +552,54 @@ mod tests {
             assert_eq!(fired[0].0, "sess-idle");
             assert_eq!(fired[0].1, "first\n\nsecond", "messages joined in order");
             assert!(get("sess-idle").is_none(), "queue cleared after firing");
+        });
+    }
+
+    /// The desktop's `restamp_marks_and_emit` re-enriches the *cached* session
+    /// list in place, so an enricher that only ever writes on a hit leaves the
+    /// last cancelled chip stuck on screen until the next full rescan (tens of
+    /// seconds). The store is the whole truth — a session with no queue file
+    /// must come out with an empty `pending_messages`, whether or not any
+    /// *other* session still has one.
+    #[test]
+    fn enrich_clears_stale_pending_on_cached_list() {
+        with_temp_home(|| {
+            let mut list = vec![
+                base_session("sess-a", SessionStatus::Executing, true),
+                base_session("sess-b", SessionStatus::Executing, true),
+            ];
+            // Simulate an already-enriched cached list.
+            list[0].pending_messages = vec!["stale-a".into()];
+            list[1].pending_messages = vec!["stale-b".into()];
+
+            // Only sess-b still has a queue on disk; sess-a's was just cancelled.
+            write_queue(
+                &queue_path("sess-b").unwrap(),
+                &PendingQueue {
+                    session_id: "sess-b".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["live-b".into()],
+                },
+            )
+            .unwrap();
+
+            enrich_sessions(&mut list);
+            assert!(
+                list[0].pending_messages.is_empty(),
+                "cancelled queue must clear the cached chip, got {:?}",
+                list[0].pending_messages
+            );
+            assert_eq!(list[1].pending_messages, vec!["live-b".to_string()]);
+
+            // Cancelling the *last* queue in the whole store must clear too —
+            // an empty store is not "nothing to do".
+            clear("sess-b").unwrap();
+            enrich_sessions(&mut list);
+            assert!(
+                list[1].pending_messages.is_empty(),
+                "empty store must clear every cached chip, got {:?}",
+                list[1].pending_messages
+            );
         });
     }
 }
