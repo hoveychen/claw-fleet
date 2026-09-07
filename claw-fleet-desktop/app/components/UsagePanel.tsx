@@ -14,6 +14,7 @@ import { codexRateLimitBars, type TFunc } from "../codexUsage";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { UsageHistoryModal } from "./UsageHistoryModal";
 import { CodexUsageHistoryModal } from "./CodexUsageHistoryModal";
+import { RailStatTile } from "./RailStatTile";
 
 function formatResetIn(resets_at: string, t: TFunc): string {
   const diff = new Date(resets_at).getTime() - Date.now();
@@ -525,10 +526,7 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
   if (collapsed) {
     if (!ring) {
       return (
-        <div className={styles.tile} title={t("account.loading")}>
-          <span className={styles.tile_value}>—</span>
-          <span className={styles.tile_label}>{t("account.usage")}</span>
-        </div>
+        <RailStatTile value="—" label={t("account.usage")} title={t("account.loading")} accent />
       );
     }
     const detail = ring.sources
@@ -536,10 +534,12 @@ export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) 
       .join("\n");
     const tooltip = `${t("account.usage")} — ${ring.topSource} ${Math.round(ring.overall)}%\n${detail}`;
     return (
-      <div className={styles.tile} title={tooltip}>
-        <span className={styles.tile_value}>{Math.round(ring.overall)}%</span>
-        <span className={styles.tile_label}>{ring.topSource}</span>
-      </div>
+      <RailStatTile
+        value={`${Math.round(ring.overall)}%`}
+        label={ring.topSource}
+        title={tooltip}
+        accent
+      />
     );
   }
 

@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { TodayUsage } from "../types";
+import { fmtRailMoney } from "../railNumbers";
+import { RailStatTile } from "./RailStatTile";
 import { TokenReceiptModal } from "./TokenReceiptModal";
 import styles from "./TodayUsageBadge.module.css";
 
@@ -69,15 +71,15 @@ export function TodayUsageBadge({
   if (collapsed) {
     return (
       <>
-        <button
-          type="button"
-          className={styles.badge_collapsed}
-          title={openHint}
+        {/* Rail tile: `$3.2k`, not `$3165.41` — the exact figure lives in the
+            tooltip and in the receipt this opens. */}
+        <RailStatTile
+          value={fmtRailMoney(cost)}
+          label={label}
+          title={`${title}\n${openHint}`}
           onClick={() => setShowReceipt(true)}
-        >
-          <span className={styles.cost}>${cost.toFixed(2)}</span>
-          <span className={styles.tile_label}>{label}</span>
-        </button>
+          dataWizard="today-usage"
+        />
         {receipt}
       </>
     );
