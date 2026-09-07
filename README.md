@@ -7,7 +7,7 @@
 **Your agents write the code. The task never dies on your watch.**
 One dashboard for every **Claude Code** and **Codex** session you run — live status, real cost, and every question they need answered, in a single inbox you can reach from your phone.
 
-**[▶ 66-second field guide](https://hoveychen.github.io/claw-fleet/#demo)** · **[What it does](https://hoveychen.github.io/claw-fleet/)**
+**[Explore the workspace](https://hoveychen.github.io/claw-fleet/)** · **[中文介绍](https://hoveychen.github.io/claw-fleet/zh/)**
 
 [![Release](https://img.shields.io/github/v/release/hoveychen/claw-fleet?style=flat-square&logo=github&color=d97757)](https://github.com/hoveychen/claw-fleet/releases/latest)
 [![License](https://img.shields.io/github/license/hoveychen/claw-fleet?style=flat-square&color=4a9eff)](LICENSE)
