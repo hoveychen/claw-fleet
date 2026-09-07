@@ -395,14 +395,16 @@
   overflow: hidden;
 }
 
-/* Narrow pane: float over the conversation instead of halving it. Offsets are
-   resolved against .body_row's padding box, so the slab gutter already insets
-   it on three sides — it only has to lift itself off the page. */
+/* Narrow pane: float over the conversation instead of halving it. Absolute
+   offsets resolve against .body_row's *padding box*, which includes the
+   padding — so the gutter has to be spelled out here rather than inherited,
+   or the drawer runs edge-to-edge and its rounded corners sit half off the
+   window (verified in the mock at 1100px: rect was 0..820 tall, flush right). */
 .aux_overlay {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  top: var(--slab-gap, 0px);
+  right: var(--slab-gap, 0px);
+  bottom: var(--slab-gap, 0px);
   width: min(92%, 420px);
   z-index: 6;
   box-shadow: -10px 0 28px rgb(0 0 0 / 28%);
