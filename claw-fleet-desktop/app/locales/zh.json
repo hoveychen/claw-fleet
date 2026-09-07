@@ -2270,7 +2270,7 @@
     "filter_workspace_off": "仅聊天模式下不按目录筛选",
     "all_workspaces": "全部目录",
     "workspaces": "工作区",
-    "workspace_session_count": "{{count}} 个会话",
+    "workspace_session_count": "{{count}} 组会话",
     "only_active": "仅活跃",
     "filter_active_tip": "只显示仍在运行或等待输入的会话",
     "mark_all_read": "全部已读",
