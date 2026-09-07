@@ -221,7 +221,9 @@ pub(crate) fn upload_elicitation_attachment(
 
 /// Writes clipboard/drag-drop bytes to the OS temp dir and returns the absolute
 /// path so the caller can feed it to `upload_elicitation_attachment`.
-#[tauri::command]
+// Threadpool: writes up to `MAX_ATTACHMENT_BYTES` to disk. The filename carries
+// nanos + pid, so concurrent pastes cannot collide on a destination path.
+#[tauri::command(async)]
 pub(crate) fn stage_pasted_attachment(bytes: Vec<u8>, extension: String) -> Result<String, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
     if (bytes.len() as u64) > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
@@ -252,7 +254,9 @@ pub(crate) fn stage_pasted_attachment(bytes: Vec<u8>, extension: String) -> Resu
 /// Reads the contents of an arbitrary local file path so the renderer can
 /// turn a `plugin-dialog` selection into the same `bytes` payload that the
 /// existing paste / drag-drop path produces.
-#[tauri::command]
+// Threadpool: reads a whole picked file into memory before the size check can
+// reject it, so a large or network-mounted path is a multi-second blocking read.
+#[tauri::command(async)]
 pub(crate) fn read_local_file_bytes(path: String) -> Result<Vec<u8>, String> {
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
     if (bytes.len() as u64) > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {

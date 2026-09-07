@@ -126,7 +126,12 @@ pub(crate) async fn remove_managed_lesson(
     }).await.map_err(|e| format!("join: {e}"))?
 }
 
-#[tauri::command]
+// Threadpool, not the main thread: `check_update_now` does a blocking HTTP
+// fetch of the remote pattern manifest. As a plain `#[tauri::command] fn` it
+// ran inline on the event loop (see `cmd_probe` / tauri-macros
+// `ExecutionContext::Blocking`), so a slow or dead network froze the whole UI
+// for the length of the request.
+#[tauri::command(async)]
 pub(crate) fn check_pattern_update() -> String {
     pattern_update::check_update_now()
 }
@@ -138,7 +143,7 @@ pub(crate) struct PatternInfo {
     path: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_pattern_info() -> PatternInfo {
     let (version, path) = pattern_update::get_patterns_info();
     PatternInfo { version, path }
