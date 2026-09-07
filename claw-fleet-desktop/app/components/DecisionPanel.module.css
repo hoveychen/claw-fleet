@@ -878,6 +878,32 @@
   border-color: var(--color-error);
 }
 
+/* The v3 terminal button on a fleet__ask card. Two verdicts, one slot: the
+   agent's `taskComplete` picks which. Ink tokens (text + border + tinted hover)
+   like .btn_allow / .btn_block, not the solid fills — this sits in a footer row
+   of outlined buttons, and a filled block here would read as the primary
+   action, which Submit is. Abandon takes warning rather than error ink: giving
+   up on a task is an outcome, not a danger. */
+.btn_finish {
+  background: transparent;
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.btn_finish:hover {
+  background: rgba(var(--color-success-rgb), 0.08);
+}
+
+.btn_abandon {
+  background: transparent;
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.btn_abandon:hover {
+  background: rgba(var(--color-warning-rgb), 0.08);
+}
+
 .btn_always_allow {
   background: transparent;
   color: var(--color-accent);

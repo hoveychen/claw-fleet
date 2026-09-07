@@ -633,6 +633,7 @@ impl Backend for NullBackend {
         _: &str,
         _: bool,
         _: std::collections::BTreeMap<String, String>,
+        _: Option<claw_fleet_core::task_outcome::TaskOutcome>,
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }

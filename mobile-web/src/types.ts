@@ -18,6 +18,7 @@ export type { Connector as CmdConnector } from "./generated/types";
 import type {
   SessionStatus,
   SessionMark,
+  TaskOutcome,
   TodoSummary,
   TaskPlanSummary,
   SessionHandoffInfo,
@@ -127,6 +128,10 @@ export interface SessionInfo {
   pidPrecise?: boolean;
   entrypoint?: string | null;
   userMark?: SessionMark | null;
+  /** v3 任务终态:`completed` = 老板按了「结束任务」,`abandoned` = 按了「放弃任务」。
+   *  缺席 = 任务还没终结。与 `userMark`(我复核过没有)、`status`(此刻在跑没有)
+   *  是三个正交的轴。 */
+  taskOutcome?: TaskOutcome | null;
   /** True when the session's agent process is still alive. */
   procAlive?: boolean;
   /** Follow-ups queued while the session was mid-turn, delivered via

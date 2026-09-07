@@ -108,6 +108,7 @@ fn pipe_installer_plan(sh_url: &str, ps1_url: &str, envs: &[(&str, &str)]) -> In
     let envs = envs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     #[cfg(unix)]
     {
+        let _ = ps1_url;
         InstallPlan {
             program: "sh".into(),
             args: vec!["-c".into(), format!("curl -fsSL '{sh_url}' | sh")],

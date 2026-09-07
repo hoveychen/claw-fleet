@@ -425,6 +425,10 @@ pub fn form_answer_to_fleet_ask(
         id: id.to_string(),
         cancelled: action.is_refusal(),
         answers: stringify_map(&action.content()).into_iter().collect(),
+        // An ACP client refusing a form is a plain dismissal, not a verdict on
+        // the task — the terminal button is a Fleet-surface affordance and ACP
+        // clients have no way to express it.
+        task_outcome: None,
     }
 }
 
@@ -728,6 +732,7 @@ mod tests {
             ai_title: None,
             timestamp: "t".into(),
             parked: false,
+            task_complete: false,
             questions: vec![FleetAskQuestion {
                 question: "Which approach?".into(),
                 header: "Approach".into(),

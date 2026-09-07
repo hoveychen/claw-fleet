@@ -1505,9 +1505,15 @@ export function FleetAskCard({
     () => submitFleetAsk(decision.id),
     [submitFleetAsk, decision.id],
   );
-  const handleCancel = useCallback(
-    () => cancelFleetAsk(decision.id),
-    [cancelFleetAsk, decision.id],
+  // v3 terminal button. It is always present — the agent no longer hand-rolls a
+  // "任务结束" option — and `taskComplete` only decides which verdict it carries:
+  // the agent thinks the work is done → 结束任务 (session closes as a success),
+  // otherwise → 放弃任务 (closes as unfinished). Either way the card resolves as
+  // `cancelled` for the agent, which is what tells it to stop.
+  const taskComplete = decision.request.taskComplete === true;
+  const handleTerminate = useCallback(
+    () => cancelFleetAsk(decision.id, taskComplete ? "completed" : "abandoned"),
+    [cancelFleetAsk, decision.id, taskComplete],
   );
 
   return (
@@ -1702,10 +1708,17 @@ export function FleetAskCard({
         {parked && <ParkedBanner />}
         <div className={styles.actions}>
         <button
-          className={`${styles.btn} ${styles.btn_secondary}`}
-          onClick={handleCancel}
+          className={`${styles.btn} ${taskComplete ? styles.btn_finish : styles.btn_abandon}`}
+          onClick={handleTerminate}
+          title={
+            taskComplete
+              ? t("fleet_ask.finish_task_tooltip", "Ending here marks this session complete.")
+              : t("fleet_ask.abandon_task_tooltip", "Ending here marks this session unfinished.")
+          }
         >
-          {parked ? t("parked.discard", "Discard") : t("fleet_ask.cancel", "Cancel")}
+          {taskComplete
+            ? t("fleet_ask.finish_task", "Finish task")
+            : t("fleet_ask.abandon_task", "Abandon task")}
         </button>
         <div className={styles.actions_spacer} />
         {step > 0 && (

@@ -374,10 +374,9 @@ export function TasksView({
 }: Props) {
   const confirm = useConfirm();
   // 筛选状态落到 localStorage（复用 Composer 草稿那套 useDraft），这样切标签页
-  // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/仅活跃/分段都保持不变，
+  // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/分段都保持不变，
   // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
   const [search, setSearch] = useDraft<string>("tasks:search", "");
-  const [activeOnly, setActiveOnly] = useDraft<boolean>("tasks:activeOnly", false);
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
   // Group handoff-relay chains into one collapsible card. Default on; the setter
   // lives in the More tab. Tabs unmount on switch, so this re-reads the saved
@@ -429,15 +428,12 @@ export function TasksView({
   // 就折叠掉别的分区。「终端」按钮因此不带初始目录，由终端页自己的目录选择器接手。
   const multiDevice = deviceLabelOf !== undefined;
 
-  const activeCount = useMemo(() => all.filter((s) => LIVE.includes(s.status)).length, [all]);
-
   // Everything except the mark filter — the segment counts are taken over this
   // set so each count reflects how many rows its segment would reveal under the
-  // current workspace / query / active filters (mirrors the desktop `preMark`).
+  // current query (mirrors the desktop `preMark`).
   const preMark = useMemo(() => {
     const q = search.trim().toLowerCase();
     return all.filter((s) => {
-      if (activeOnly && !LIVE.includes(s.status)) return false;
       if (q) {
         const clientMatch =
           `${s.titleOverride ?? ""} ${s.aiTitle ?? ""} ${s.slug ?? ""} ${s.lastMessagePreview ?? ""} ${s.workspaceName}`
@@ -452,7 +448,7 @@ export function TasksView({
       }
       return true;
     });
-  }, [all, search, activeOnly, ftsMatchPaths]);
+  }, [all, search, ftsMatchPaths]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -881,17 +877,6 @@ export function TasksView({
             onChange={(e) => setSearch(e.target.value)}
           />
           {searching && <span className={styles.searchSpinner} />}
-        </div>
-        <div className={styles.filterRow}>
-          <button
-            className={styles.filterToggle}
-            data-active={activeOnly}
-            onClick={() => setActiveOnly((v) => !v)}
-          >
-            <span className={styles.activeDot} />
-            {t("仅活跃")}
-            <span className={styles.activeCount}>{activeCount}</span>
-          </button>
         </div>
         <div className={styles.segment}>
           {(["all", "pending", "done"] as MarkFilter[]).map((key) => (

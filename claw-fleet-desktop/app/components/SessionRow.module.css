@@ -80,9 +80,13 @@
   flex: 1;
 }
 
+/* Titles read at full contrast by default. They used to be dimmed with an
+   `.row_title_unread` override lifting the unread ones back up; with the
+   read/unread axis gone that left every row permanently in the "already read"
+   grey, so the base state is now the bright one. */
 .row_title {
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: var(--color-text);
   line-height: 1.35;
   /* One line, always: a mixed 1-/2-line rail makes rows read as different
      heights and the eye loses the column. The overflow lives in the row's
@@ -287,4 +291,12 @@
 
 .mark_toggle[data-done="true"] {
   color: var(--color-success); /* green — finished */
+}
+
+/* An abandoned task (v3 decision card: 放弃任务) reads amber, not red: it is an
+   outcome, not an error. Placed after the done rule so it wins — ending a task
+   also stamps the review mark done, and the verdict is the more informative of
+   the two. */
+.mark_toggle[data-outcome="abandoned"] {
+  color: var(--color-warning);
 }

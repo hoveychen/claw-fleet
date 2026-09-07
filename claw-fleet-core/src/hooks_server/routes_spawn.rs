@@ -24,6 +24,7 @@ pub(crate) fn route_resume_session(
                         // is active again — drop the done mark on the host where it
                         // lives so it re-surfaces as needs-review.
                         crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
+                        crate::task_outcome::clear_on_resume(&req.session_id);
                         // Same as the desktop resume: a retry clears the stale
                         // remote-disconnect verdict on the host where it lives.
                         crate::remote_disconnect::clear(&req.session_id);

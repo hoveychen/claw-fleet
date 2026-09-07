@@ -1105,6 +1105,7 @@ pub trait Backend: Send + Sync {
         id: &str,
         cancelled: bool,
         answers: std::collections::BTreeMap<String, String>,
+        task_outcome: Option<crate::task_outcome::TaskOutcome>,
     ) -> Result<(), String>;
 
     // ── fleet__permission_prompt MCP tool (headless native-permission bridge) ──
@@ -1464,7 +1465,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, title_override: None,            compact_count: 0,
+            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,

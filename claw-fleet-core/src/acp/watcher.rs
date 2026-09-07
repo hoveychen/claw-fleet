@@ -257,7 +257,7 @@ fn ask_fleet_ask(agent: &AcpAgent, acp_session: &str, id: &str) {
     let Some(action) = create_elicitation(agent, ask) else { return };
     let resp = decisions::form_answer_to_fleet_ask(id, &action);
     let _ =
-        crate::parked::deliver(&resp.id, &resp, resp.cancelled, crate::mcp_ipc::write_response);
+        crate::mcp_ipc::deliver_response(&resp);
 }
 
 fn ask_plan(agent: &AcpAgent, acp_session: &str, id: &str) {

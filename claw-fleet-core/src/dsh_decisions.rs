@@ -244,9 +244,8 @@ fn approval_outcome(allow: bool) -> Value {
 
 /// One card the bridge has raised and is waiting on.
 enum Pending {
-    Approval { session_id: String },
+    Approval,
     Question {
-        session_id: String,
         questions: Vec<DshQuestion>,
         /// The card's question texts, in the same order — the keys the answer
         /// map comes back under (which is the *rendered* text, not the dsh one,
@@ -259,7 +258,7 @@ impl Pending {
     /// Drop this card without answering it.
     fn cleanup(&self, id: &str) {
         match self {
-            Self::Approval { .. } => crate::permission_prompt_ipc::cleanup(id),
+            Self::Approval => crate::permission_prompt_ipc::cleanup(id),
             Self::Question { .. } => crate::elicitation::cleanup(id),
         }
     }
@@ -386,7 +385,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
             let (workspace_name, ai_title) = session_meta(client, &session_id);
             let request = PermissionPromptRequest {
                 id: event_id.clone(),
-                session_id: session_id.clone(),
+                session_id,
                 workspace_name,
                 ai_title,
                 timestamp: chrono::Utc::now().to_rfc3339(),
@@ -401,7 +400,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
             };
             match crate::permission_prompt_ipc::write_request(&request) {
                 Ok(()) => {
-                    pending.insert(event_id, Pending::Approval { session_id });
+                    pending.insert(event_id, Pending::Approval);
                 }
                 Err(e) => crate::log_debug(&format!("dsh decisions: approval card: {e}")),
             }
@@ -424,7 +423,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
             let texts = cards.iter().map(|c| c.question.clone()).collect();
             let request = ElicitationRequest {
                 id: event_id.clone(),
-                session_id: session_id.clone(),
+                session_id,
                 workspace_name,
                 ai_title,
                 questions: cards,
@@ -436,7 +435,6 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
                     pending.insert(
                         event_id,
                         Pending::Question {
-                            session_id,
                             questions,
                             texts,
                         },
