@@ -22,10 +22,14 @@ export const LIVE_CARD_CAP = 6;
  */
 export function SubagentLiveCards({
   agents,
+  heading,
   onOpen,
 }: {
   /** Live subagents, most-recently-active first. */
   agents: SessionInfo[];
+  /** Label the deck. Suppressed when the panel header already names it — i.e.
+   *  when the cards are the only thing the panel holds. */
+  heading: boolean;
   onOpen: (session: SessionInfo) => void;
 }) {
   const { t } = useTranslation();
@@ -35,9 +39,11 @@ export function SubagentLiveCards({
 
   return (
     <div className={styles.agents_deck}>
-      <div className={styles.agents_deck_head}>
-        {t("detail.live_agents", { count: agents.length })}
-      </div>
+      {heading && (
+        <div className={styles.agents_deck_head}>
+          {t("detail.live_agents", { count: agents.length })}
+        </div>
+      )}
       {shown.map((a) => (
         <button
           key={a.id}

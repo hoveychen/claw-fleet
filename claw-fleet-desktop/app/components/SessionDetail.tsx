@@ -1348,7 +1348,11 @@ export function SessionDetail({
               >
                 {/* Pinned above whatever else the panel holds: the live agents
                     stay visible while you read a token receipt or a doc. */}
-                <SubagentLiveCards agents={liveSubagents} onOpen={open} />
+                <SubagentLiveCards
+                  agents={liveSubagents}
+                  heading={activeFacet != null || activeDoc != null}
+                  onOpen={open}
+                />
                 <SessionAuxDocStrip
                   docs={aux.docs}
                   activeId={aux.active}
