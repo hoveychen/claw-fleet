@@ -51,6 +51,7 @@ import {
   initialAux,
   isAuxFacet,
   pruneFacet,
+  syncLiveAgents,
   toggleFacet,
   type AuxFacet,
   type AuxState,
@@ -58,6 +59,7 @@ import {
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { SessionAuxPanel } from "./SessionAuxPanel";
 import { SessionFacetPanel } from "./SessionFacetPanel";
+import { SubagentLiveCards } from "./SubagentLiveCards";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
 
@@ -911,6 +913,35 @@ export function SessionDetail({
     if (el) el.scrollTop = el.scrollHeight;
   }, [dockHeight]);
 
+  /** Subagents of this session family that are running *right now* — the deck
+   *  of cards pinned to the top of the auxiliary column. Workflow fan-out
+   *  agents are included (unlike the scope dropdown, which excludes them to
+   *  stay a menu): "看完整个任务的所有 agent 状态" means all of them, and the
+   *  deck caps its render rather than its input. Sorted most-recently-active
+   *  first so the cap keeps the ones actually moving. */
+  const liveSubagents = useMemo((): SessionInfo[] => {
+    if (!liveSession) return [];
+    const parentId = liveSession.isSubagent
+      ? liveSession.parentSessionId
+      : liveSession.id;
+    if (!parentId) return [];
+    return sessions
+      .filter(
+        (s) =>
+          s.isSubagent &&
+          s.parentSessionId === parentId &&
+          s.id !== liveSession.id &&
+          LIVE_STATUSES.has(s.status),
+      )
+      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  }, [liveSession, sessions]);
+
+  // A dismissal of the agent deck is spent once the last one finishes, so the
+  // next fan-out earns a fresh auto-open.
+  useEffect(() => {
+    setAux((st) => syncLiveAgents(st, liveSubagents.length));
+  }, [liveSubagents.length]);
+
   const tabs = useMemo((): SessionInfo[] => {
     if (!liveSession) return [];
 
@@ -1001,14 +1032,16 @@ export function SessionDetail({
   ]);
 
   const activeFacet = aux.active != null && isAuxFacet(aux.active) ? aux.active : null;
-  const auxOpen = auxVisible(aux, 0);
+  const auxOpen = auxVisible(aux, liveSubagents.length);
   // Overlay until the pane is wide enough for two columns. `paneWidth === 0` is
   // the pre-measure frame; treat it as wide so the panel doesn't flash as an
   // overlay on mount.
   const auxOverlay = paneWidth > 0 && paneWidth < AUX_OVERLAY_PX;
   const auxTitle = activeFacet
     ? facetButtons.find((b) => b.facet === activeFacet)?.label ?? ""
-    : t("detail.aux_title", "辅助信息");
+    : liveSubagents.length > 0
+      ? t("detail.live_agents", { count: liveSubagents.length })
+      : t("detail.aux_title", "辅助信息");
 
   return (
     // Both link capabilities cover the whole component, so the reader modal and
@@ -1293,6 +1326,9 @@ export function SessionDetail({
                 title={auxTitle}
                 onClose={closeAuxPanel}
               >
+                {/* Pinned above whatever else the panel holds: the live agents
+                    stay visible while you read a token receipt or a doc. */}
+                <SubagentLiveCards agents={liveSubagents} onOpen={open} />
                 {activeFacet && (
                   <SessionFacetPanel
                     facet={activeFacet}
