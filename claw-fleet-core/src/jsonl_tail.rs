@@ -30,7 +30,16 @@ pub fn read_tail_lines_as_json(path: &Path, n: usize) -> std::io::Result<Vec<Val
 
     // Read backward until we have collected at least n+1 newlines (so we can
     // safely discard the partial leading line) or until we reach BOF.
-    let mut buf: Vec<u8> = Vec::new();
+    //
+    // Chunks are kept apart and joined once at the end, and each chunk's
+    // newlines are counted once, when it is read. Both used to happen per
+    // iteration against the whole accumulated buffer — `chunk.extend(&buf)`
+    // copied everything read so far, and the newline count re-scanned it — so
+    // a wide tail cost O(bytes²). Measured on this machine before the change:
+    // an 11 MB / 4513-line transcript took 3ms at n=150, 54ms at n=1150 and
+    // 422ms at n=4513, and reading a 67 MB transcript whole took **24.2s**.
+    let mut chunks: Vec<Vec<u8>> = Vec::new();
+    let mut newline_count = 0usize;
     let mut pos = file_size;
     let target_newlines = n + 1;
 
@@ -40,12 +49,19 @@ pub fn read_tail_lines_as_json(path: &Path, n: usize) -> std::io::Result<Vec<Val
         file.seek(SeekFrom::Start(pos))?;
         let mut chunk = vec![0u8; read_len as usize];
         file.read_exact(&mut chunk)?;
-        chunk.extend_from_slice(&buf);
-        buf = chunk;
-        let newline_count = buf.iter().filter(|&&b| b == b'\n').count();
+        newline_count += chunk.iter().filter(|&&b| b == b'\n').count();
+        chunks.push(chunk);
         if newline_count >= target_newlines {
             break;
         }
+    }
+
+    // `chunks` holds them newest-first (we walked backward); stitch in file
+    // order, sized exactly so the join is one allocation and one pass.
+    let total: usize = chunks.iter().map(Vec::len).sum();
+    let mut buf: Vec<u8> = Vec::with_capacity(total);
+    for chunk in chunks.iter().rev() {
+        buf.extend_from_slice(chunk);
     }
 
     // `from_utf8_lossy` turns any mid-codepoint head bytes into U+FFFD; the
@@ -95,6 +111,7 @@ pub fn parse_incremental_tail(buf: &str) -> (Vec<Value>, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::io::Write;
 
     fn write_tmp(name: &str, content: &[u8]) -> std::path::PathBuf {
@@ -242,6 +259,42 @@ mod tests {
         for v in &out {
             assert!(v["x"].as_str().unwrap().starts_with('a'));
         }
+        std::fs::remove_file(p).ok();
+    }
+
+    /// The multi-iteration path, which nothing covered before.
+    ///
+    /// `spans_multiple_chunks` above asks for `n = 5`: the very first 64 KB
+    /// chunk already holds far more than 6 newlines, so the loop breaks after
+    /// one iteration and the stitching it means to exercise never runs. A tail
+    /// wide enough to need *many* chunks is the shape the detail pane actually
+    /// asked for (`tail = 4513` on a live session), and it is the shape whose
+    /// cost this reader used to square.
+    #[test]
+    fn wide_tail_spans_many_chunks_in_file_order() {
+        // ~1 KB per line × 4000 lines ≈ 4 MB — roughly 64 chunks.
+        let mut content = String::new();
+        for i in 0..4000 {
+            content.push_str(&format!("{{\"i\":{i},\"pad\":\"{}\"}}\n", "p".repeat(1000)));
+        }
+        let p = write_tmp("wide", content.as_bytes());
+
+        let out = read_tail_lines_as_json(&p, 3000).unwrap();
+        assert_eq!(out.len(), 3000, "must return exactly the requested tail");
+        // File order, oldest first, and the right slice of it: the last 3000 of
+        // 4000 lines starts at i = 1000.
+        assert_eq!(out[0]["i"], json!(1000));
+        assert_eq!(out[2999]["i"], json!(3999));
+        for (k, v) in out.iter().enumerate() {
+            assert_eq!(v["i"], json!(1000 + k as i64), "line {k} out of order");
+        }
+
+        // A tail wider than the file still yields the whole file, not a partial
+        // one — the loop has to run to BOF without miscounting.
+        let all = read_tail_lines_as_json(&p, 99_999).unwrap();
+        assert_eq!(all.len(), 4000);
+        assert_eq!(all[0]["i"], json!(0));
+
         std::fs::remove_file(p).ok();
     }
 }
