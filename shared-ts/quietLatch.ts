@@ -38,6 +38,9 @@ export function createQuietLatch(): QuietLatchState {
 }
 
 export type QuietObservation = {
+  /** 进程是否还活着。进程一没，迟滞立刻作废——否则一个真结束的会话会顶着暗绿点不放，
+   *  而且它的 id 万一被 resume 复用，新一轮开局就是暗的。 */
+  alive: boolean;
   /** 未经迟滞的原始判定：进程活着，但扫描算出的状态已经衰减成「结束」。 */
   rawQuiet: boolean;
   /** 该会话 transcript 的最后活动时间戳（`SessionInfo.lastActivityMs`）。 */
@@ -50,8 +53,12 @@ export type QuietObservation = {
 export function stickyQuiet(
   state: QuietLatchState,
   id: string,
-  { rawQuiet, lastActivityMs, now }: QuietObservation,
+  { alive, rawQuiet, lastActivityMs, now }: QuietObservation,
 ): boolean {
+  if (!alive) {
+    state.delete(id);
+    return false;
+  }
   const prev = state.get(id);
   if (rawQuiet) {
     state.set(id, {

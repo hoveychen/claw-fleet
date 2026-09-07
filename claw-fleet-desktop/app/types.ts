@@ -131,6 +131,7 @@ const quietLatch = createQuietLatch();
  *  wanting the raw, un-latched predicate use [`isQuietAlive`]. */
 export function isQuietAliveSticky(s: SessionInfo, now: number = Date.now()): boolean {
   return stickyQuiet(quietLatch, s.id, {
+    alive: s.procAlive,
     rawQuiet: isQuietAlive(s),
     lastActivityMs: s.lastActivityMs,
     now,

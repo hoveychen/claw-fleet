@@ -38,6 +38,7 @@ import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
 import { repoRootPath } from "../../../shared-ts/repoPath";
+import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import styles from "./TasksView.module.css";
 
 /** 文档级滚动条被所有 tab 共享，任务页又会随 tab 卸载重挂（见 App 里按 `tab` 的条件
@@ -100,13 +101,29 @@ const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimite
  *  `determine_status` derives status from transcript age alone and a session
  *  parked on one long tool call stops writing. Those rows must not read as
  *  ended — the detail composer offers to *queue* a follow-up for exactly this
- *  session, and the two surfaces must agree. */
-export function statusTone(s: SessionInfo): string | null {
-  if (WORKING.includes(s.status)) return "working";
+ *  session, and the two surfaces must agree.
+ *
+ *  The quiet tone is *latched* (`shared-ts/quietLatch.ts`, shared with the
+ *  desktop row): without hysteresis the same session alternated working ↔ quiet
+ *  several times a minute, because it writes one line every few minutes and
+ *  each write pushes the status back to a live one for core's hard window. */
+const quietLatch = createQuietLatch();
+
+export function statusTone(s: SessionInfo & { deviceId?: string }): string | null {
+  const quiet = stickyQuiet(quietLatch, `${s.deviceId ?? ""}/${s.id}`, {
+    alive: !!s.procAlive,
+    rawQuiet: !!s.procAlive && !LIVE.includes(s.status),
+    lastActivityMs: s.lastActivityMs ?? 0,
+    now: Date.now(),
+  });
   if (s.status === "waitingInput") return "waiting";
-  if (s.status === "active") return "active";
   if (s.status === "rateLimited" || s.status === "serverErrored" || s.status === "remoteDisconnected")
     return "error";
+  // A latched session stays dim even while its status momentarily reads live —
+  // that is the whole point of the hysteresis.
+  if (quiet) return "quiet";
+  if (WORKING.includes(s.status)) return "working";
+  if (s.status === "active") return "active";
   if (s.procAlive) return "quiet";
   return null;
 }
