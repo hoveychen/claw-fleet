@@ -11,13 +11,14 @@ import { SessionList } from "./components/SessionList";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { WaitingAlerts } from "./components/WaitingAlerts";
 import { DecisionPanel } from "./components/DecisionPanel";
+import { DailyReportPopup } from "./components/report/DailyReportPopup";
 import { FindBar } from "./components/FindBar";
 import { useFindController } from "./find/useFindController";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { Wizard } from "./components/Wizard";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
-import { type Connection, applyWindowTheme, navigateToSessionDetail, useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
+import { type Connection, applyWindowTheme, navigateToSessionDetail, useConnectionStore, useDetailStore, useReportStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
@@ -125,6 +126,20 @@ function App() {
     };
   }, []);
 
+  // Catch-up popup. The `daily-report-ready` event only reaches a running app,
+  // and the summary for a given day is usually written while the app is closed
+  // (or during the 10s the scheduler waits before its first pass). So on boot
+  // we ask directly whether yesterday's report is finished; `maybePopupReport`
+  // is idempotent per date, so this never double-fires with the event.
+  useEffect(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const t = window.setTimeout(() => {
+      void useReportStore.getState().maybePopupReport(d.toISOString().slice(0, 10));
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, []);
+
   // ── App-menu event handlers ────────────────────────────────────────
   // Forwarded by Rust's `on_menu_event` for items with `menu-*` ids.
   useEffect(() => {
@@ -140,6 +155,11 @@ function App() {
     }));
     ps.push(listen("menu-daily-report", () => {
       setViewMode("report");
+    }));
+    // The report scheduler announces a date the moment its AI summary lands.
+    // Rust has already raised the main window by the time this arrives.
+    ps.push(listen<string>("daily-report-ready", (e) => {
+      void useReportStore.getState().maybePopupReport(e.payload);
     }));
     ps.push(listen("menu-welcome", () => {
       setOnboardingMode("full");
@@ -266,6 +286,7 @@ function App() {
       </div>
       <DecisionPanel />
       {settingsOpen && <SettingsPanel onClose={closeSettings} />}
+      <DailyReportPopup />
       <WaitingAlerts />
       <UpdateNotice />
       <FindBar controller={find} />

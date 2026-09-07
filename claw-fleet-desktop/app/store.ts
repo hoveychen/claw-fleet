@@ -7,7 +7,7 @@ import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttac
 import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
-import { getItem, setItem } from "./storage";
+import { getItem, resolveFeature, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
@@ -1058,6 +1058,13 @@ interface ReportState {
   lastSeenReportDate: string;
   hasNewReport: boolean;
 
+  // Auto-popup: the date whose report is being shown in the overlay, or null
+  // when no overlay is up. Distinct from `lastSeenReportDate` on purpose —
+  // "opened the report page" and "had the report pushed at me" are different
+  // events, and reusing the former would let a visit to today's page suppress
+  // tomorrow's popup of yesterday's finished report.
+  reportPopupDate: string | null;
+
   // Timeline (earlier-days feed below the selected-day detail)
   timelineReports: DailyReport[];
   timelineLoading: boolean;
@@ -1070,6 +1077,15 @@ interface ReportState {
   refreshNewReportFlag: () => Promise<void>;
   /** Mark the current latest report date as seen and clear the red dot. */
   markReportSeen: () => void;
+  /**
+   * Raise the auto-popup for `date`, unless the toggle is off or that date has
+   * already been popped once. Loads the report into `currentReport` so the
+   * overlay reuses the normal report body. No-op when the report has no AI
+   * summary yet — the popup exists to show a finished report, not a spinner.
+   */
+  maybePopupReport: (date: string) => Promise<void>;
+  /** Close the auto-popup overlay. */
+  closeReportPopup: () => void;
   generateReport: (date: string) => Promise<void>;
   generateSummary: (date: string) => Promise<void>;
   generateLessons: (date: string) => Promise<void>;
@@ -1099,6 +1115,14 @@ function latestDateWithData(stats: DailyReportStats[]): string {
 
 const TIMELINE_PAGE_SIZE = 7;
 
+/** Newest date already shown in the auto-popup (YYYY-MM-DD). */
+export const REPORT_LAST_POPPED_KEY = "daily-report-last-popped";
+/** Auto-popup toggle. A tristate feature key — default ON via FEATURE_DEFAULTS. */
+export const REPORT_AUTO_POPUP_KEY = "daily-report-auto-popup";
+
+/** Dates whose popup check is mid-flight. See `maybePopupReport`. */
+const popupInFlight = new Set<string>();
+
 export const useReportStore = create<ReportState>((set, get) => ({
   currentReport: null,
   heatmapData: [],
@@ -1112,6 +1136,8 @@ export const useReportStore = create<ReportState>((set, get) => ({
   latestReportDate: "",
   lastSeenReportDate: getItem("daily-report-last-seen") ?? "",
   hasNewReport: false,
+
+  reportPopupDate: null,
 
   timelineReports: [],
   timelineLoading: false,
@@ -1166,6 +1192,35 @@ export const useReportStore = create<ReportState>((set, get) => ({
       // Best-effort — leave the flag as-is on failure.
     }
   },
+
+  maybePopupReport: async (date: string) => {
+    if (!date) return;
+    if (!resolveFeature(REPORT_AUTO_POPUP_KEY)) return;
+    // One popup per date, ever.
+    if ((getItem(REPORT_LAST_POPPED_KEY) ?? "") >= date) return;
+    if (get().reportPopupDate) return;
+    // The in-flight set — not the persisted key — is what keeps two racing
+    // signals (boot check + scheduler event) from both opening. The key is
+    // written only once we've actually shown something: the boot check runs
+    // seconds after launch and routinely finds a report whose summary the
+    // scheduler hasn't written yet, and burning the date on that read would
+    // suppress the very event we're waiting for.
+    if (popupInFlight.has(date)) return;
+    popupInFlight.add(date);
+    try {
+      const report = await invoke<DailyReport | null>("get_daily_report", { date });
+      if (!report?.aiSummary) return;
+      if (get().reportPopupDate) return;
+      setItem(REPORT_LAST_POPPED_KEY, date);
+      set({ currentReport: report, selectedDate: date, reportPopupDate: date, loading: false });
+    } catch {
+      // Best-effort: a failed read just means no popup this time.
+    } finally {
+      popupInFlight.delete(date);
+    }
+  },
+
+  closeReportPopup: () => set({ reportPopupDate: null }),
 
   markReportSeen: () => {
     const latest = get().latestReportDate;

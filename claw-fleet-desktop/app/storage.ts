@@ -106,6 +106,11 @@ const ALL_KEYS = [
   // The most recent daily-report date the user has viewed (YYYY-MM-DD). Drives
   // the "new report" red dot on the 每日报告 nav item.
   "daily-report-last-seen",
+  // The newest daily-report date already shown in the auto-popup overlay, and
+  // the toggle that governs it. The former must survive a restart, otherwise
+  // every launch re-pops the same day's report.
+  "daily-report-last-popped",
+  "daily-report-auto-popup",
   // The 任务 (HistoryView) detail column's open tabs: {tabIds, activeId}.
   // Restored on boot and pruned against the first scan, so ids of sessions that
   // have since been deleted drop out instead of accumulating forever.
@@ -226,6 +231,7 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   "model-guidance-enabled": true,
   "session-title-guidance-enabled": true,
   "auto-update-check": true,
+  "daily-report-auto-popup": true,
   // Default OFF.
   "tts-muted": false,
   "personalized-mascot": false,
