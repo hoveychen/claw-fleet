@@ -481,6 +481,31 @@ fn update_in(dir: &Path, u: &ScheduleUpdate, now: u64) -> Result<ScheduleRecord,
     // Spawn knobs: Some("") clears to inherit-default (None); Some(x) sets; None leaves.
     if let Some(m) = &u.model {
         rec.model = norm_knob(m);
+        // A new model that belongs to another harness re-points the schedule at
+        // that harness — otherwise the fired session would be launched by the
+        // old tool with a model it cannot serve ("model not found"). Only when
+        // the caller did not name a source itself: the desktop editor sends the
+        // tool and the model together, and its choice wins.
+        if u.agent_source.is_none() {
+            let target = rec
+                .model
+                .as_deref()
+                .and_then(crate::agent_source::source_for_model)
+                .filter(|t| {
+                    crate::agent_source::normalize_tool(t)
+                        != crate::agent_source::normalize_tool(
+                            rec.agent_source.as_deref().unwrap_or("claude-code"),
+                        )
+                });
+            if let Some(target) = target {
+                rec.agent_source = Some(target.to_string());
+                // The effort ladders differ per harness (Claude has xhigh/max,
+                // Codex has minimal), so a carried-over level may not exist on
+                // the new one. An effort named in this same update still wins,
+                // being applied just below.
+                rec.effort = None;
+            }
+        }
     }
     if let Some(e) = &u.effort {
         rec.effort = norm_knob(e);
@@ -1457,6 +1482,43 @@ mod tests {
         assert_eq!(u.model, None, "blank model clears to inherit-default");
         assert_eq!(u.effort.as_deref(), Some("max"), "effort left untouched");
         assert_eq!(u.agent_source, None, "blank source clears to inherit-default");
+    }
+
+    /// Editing a Claude schedule to a Codex model must move the schedule to
+    /// Codex too — otherwise it fires as `claude --model gpt-…`, which dies on
+    /// "model not found". The stale Claude-only effort goes with it.
+    #[test]
+    fn update_to_a_cross_harness_model_moves_the_source() {
+        let d = dir();
+        create_in(
+            d.path(), "/ws", "p", 300_000,
+            Some("claude-opus-5"), Some("xhigh"), Some("claude-code"),
+            None, None, "s1", 0,
+        )
+        .unwrap();
+        let u = update_in(
+            d.path(),
+            &ScheduleUpdate { model: Some("gpt-5.6-sol".into()), ..upd("s1") },
+            0,
+        )
+        .unwrap();
+        assert_eq!(u.agent_source.as_deref(), Some("codex"));
+        assert_eq!(u.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(u.effort, None, "Claude's xhigh must not ride along to Codex");
+
+        // An explicitly named source still wins — the desktop editor sends the
+        // tool and the model together, and its pick is not a guess.
+        let u = update_in(
+            d.path(),
+            &ScheduleUpdate {
+                model: Some("claude-opus-5".into()),
+                agent_source: Some("dsh".into()),
+                ..upd("s1")
+            },
+            0,
+        )
+        .unwrap();
+        assert_eq!(u.agent_source.as_deref(), Some("dsh"));
     }
 
     #[test]

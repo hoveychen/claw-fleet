@@ -198,9 +198,20 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
             let sid = read_fleet_session_id();
             let ctx = claw_fleet_core::session::inherit_launch_context(sid.as_deref());
             // An explicit --model/--effort flag overrides the value inherited from
-            // the creating session (mirrors handoff's --model/--effort override).
-            let model = model_flag.filter(|m| !m.trim().is_empty()).or(ctx.model);
-            let effort = effort_flag.filter(|e| !e.trim().is_empty()).or(ctx.effort);
+            // the creating session (mirrors handoff's --model/--effort override),
+            // and a model naming another harness re-points the fired session at
+            // that harness (see `agent_source::route_launch`).
+            let route = match claw_fleet_core::agent_source::route_launch(
+                &ctx,
+                model_flag.as_deref(),
+                effort_flag.as_deref(),
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(2);
+                }
+            };
             // Optional non-LLM gate. --poll/--timeout are only meaningful with
             // --until; reuse `fleet watch`'s duration grammar and floors so the
             // two features accept identical values.
@@ -244,20 +255,21 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 &ctx.workspace,
                 prompt,
                 fire_at,
-                model.as_deref(),
-                effort.as_deref(),
-                ctx.source.as_deref(),
+                route.model.as_deref(),
+                route.effort.as_deref(),
+                Some(route.agent_source.as_str()),
                 sid.as_deref(),
                 gate,
             ) {
                 Ok(rec) => match schedule::arm_timer(&rec) {
                     Ok(pid) => println!(
-                        "ok: schedule {} created — fires {} (in {}), model={}.{} \
+                        "ok: schedule {} created — fires {} (in {}), model={}{}.{} \
                          计时器已启动 (pid {})。取消用 `fleet schedule cancel {}`。",
                         rec.id,
                         fmt_local(rec.fire_at),
                         fmt_duration_ms(rec.due_in_ms(now)),
                         rec.model.as_deref().unwrap_or("<CLI 默认>"),
+                        route.switch_note(),
                         match &rec.until_cmd {
                             Some(c) => format!(
                                 " gate=`{c}`(到点每 {}s 轮询,{}s 内未满足则放弃)。",

@@ -301,7 +301,9 @@ enum Commands {
         /// auto-inherited model — otherwise recovered from Fleet's launch-spec or,
         /// for sessions Fleet did not launch, the transcript's most recent turn,
         /// which is unreliable when that turn ran on a rate-limit fallback. The
-        /// bracketed suffix (`[1m]`) is passed through verbatim.
+        /// bracketed suffix (`[1m]`) is passed through verbatim. Naming another
+        /// harness's model relays on that harness: `gpt-…` / `profile:<name>` →
+        /// codex, `claude-…` → claude, `<provider>/<model>` → dsh.
         #[arg(long)]
         model: Option<String>,
         /// Pin the successor's reasoning effort (e.g. low|medium|high|max).
@@ -590,7 +592,10 @@ pub(crate) enum ScheduleCommands {
         #[arg(long)]
         prompt: String,
         /// Model the fired session runs on (e.g. `claude-opus-5`,
-        /// `gpt-5.6-sol`). Overrides the value inherited from this session.
+        /// `gpt-5.6-sol`). Overrides the value inherited from this session, and
+        /// a model belonging to another harness also switches the session to
+        /// that harness (`gpt-…`/`profile:…` → codex, `claude-…` → claude,
+        /// `<provider>/<model>` → dsh).
         #[arg(long)]
         model: Option<String>,
         /// Reasoning effort for the fired session (`low`/`medium`/`high`/`xhigh`/
