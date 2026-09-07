@@ -62,6 +62,7 @@ def prepare(release, output, public_url):
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / 'docs' / name, target)
+    shutil.copytree(ROOT / 'docs' / 'player', output / 'player', dirs_exist_ok=True)
     manifest = {'schema': 1, 'version': tag, 'china': {'provider': 'Tencent Cloud COS', 'assets': {}}}
     checksum_lines = []
     for name, asset in sorted(assets.items()):
@@ -115,7 +116,10 @@ def publish(output, manifest, public_url):
     site_paths = [output/p for p in ('site.css','site.js','icon.png','hero.png','icon-apple.svg',
         'icon-windows.svg','icon-linux.svg','screenshots/01_gallery.png','screenshots/02_mobile_decisions.png',
         'index.html','zh/index.html')]
+    site_paths = sorted((output/'player').rglob('*')) + site_paths
     for path in site_paths:
+        if not path.is_file():
+            continue
         upload(path, 'public, max-age=300, must-revalidate')
     upload(output/'downloads.json', 'no-cache, max-age=0, must-revalidate')
     print('Published verified release and website:', public_url)
