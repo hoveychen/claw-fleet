@@ -12,7 +12,7 @@ import {
   useUIStore,
 } from "../store";
 import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
-import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
+import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow, messageToText } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
@@ -1010,7 +1010,7 @@ export function SessionDetail({
           s.isSubagent &&
           s.parentSessionId === parentId &&
           s.id !== liveSession.id &&
-          LIVE_STATUSES.has(s.status),
+          isLiveMember(s),
       )
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
   }, [liveSession, sessions]);
@@ -1056,9 +1056,9 @@ export function SessionDetail({
     // finished ones, and cap the list — a parent that fanned out dozens/hundreds
     // of subagents would otherwise flood the scope dropdown. The menu scrolls
     // (see AgentScopeSwitcher) so the capped set stays reachable.
-    const active = subagents.filter((s) => LIVE_STATUSES.has(s.status));
+    const active = subagents.filter((s) => isLiveMember(s));
     const finished = subagents
-      .filter((s) => !LIVE_STATUSES.has(s.status))
+      .filter((s) => !isLiveMember(s))
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
     let ordered = [...active, ...finished].slice(0, SUBAGENT_TAB_CAP);
 

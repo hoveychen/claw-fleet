@@ -24,6 +24,9 @@ import {
   resetQuietLatch,
   stickyQuiet,
 } from "../../shared-ts/quietLatch";
+import { memberDisplayStatus } from "../../shared-ts/memberStatus";
+
+export { memberDisplayStatus };
 
 // ── Session launch entrypoints / status helpers ──────────────────────────────
 
@@ -93,6 +96,20 @@ export const LIVE_STATUSES = new Set([
   "thinking", "executing", "streaming", "processing",
   "waitingInput", "active", "delegating",
 ]);
+
+/**
+ * Whether a member of a session family (the parent itself, or one of its
+ * subagents) still has something going on — the predicate behind the 运行中的
+ * Agent deck, the scope switcher's active-first ordering and the gallery's
+ * 活跃 grouping.
+ *
+ * `LIVE_STATUSES.has(s.status)` is what these sites used to ask, and it is
+ * wrong for a subagent: see [`memberDisplayStatus`] (shared with the mobile
+ * client) for why a subagent's `waitingInput` means "done", not "parked".
+ */
+export function isLiveMember(s: SessionInfo): boolean {
+  return LIVE_STATUSES.has(memberDisplayStatus(s));
+}
 
 /** Faded green for the quiet-alive third state (see [`isQuietAlive`]). Built on
  *  `--color-success-rgb` rather than a hex so it re-darkens with the light
