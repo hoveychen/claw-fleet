@@ -70,7 +70,6 @@ const ALL_KEYS = [
   // Chat mode — the pure-chat workspace filtered on its own, mutually exclusive
   // with the directory filter above (see store.ts readHistoryWorkspaceFilters).
   "history-chat-only",
-  "history-active-only",
   "history-group-handoff",
   "onboarding-dismissed",
   "wizard-completed",

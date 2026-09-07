@@ -100,23 +100,6 @@
   background: var(--color-accent-soft);
 }
 
-.activeDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-success);
-  flex-shrink: 0;
-}
-
-.activeCount {
-  color: var(--color-text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.filterToggle[data-active="true"] .activeCount {
-  color: var(--color-accent);
-}
-
 .segment {
   display: flex;
   background: var(--color-bg-secondary);

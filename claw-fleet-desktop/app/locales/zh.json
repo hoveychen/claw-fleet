@@ -2277,8 +2277,6 @@
     "workspace_session_count": "{{count}} 个会话",
     "chat_mode": "仅聊天",
     "filter_chat_tip": "只显示纯聊天会话，不按目录筛选；关闭时全部目录也含聊天",
-    "only_active": "仅活跃",
-    "filter_active_tip": "只显示仍在运行或等待输入的会话",
     "menu_open": "打开",
     "menu_mark_done": "标为已完成",
     "menu_mark_pending": "标为进行中",

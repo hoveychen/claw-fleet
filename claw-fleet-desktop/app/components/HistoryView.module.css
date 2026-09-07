@@ -70,8 +70,8 @@
 }
 
 /* Chat mode — the pure-chat workspace pulled out of the <select> beside it into
-   a mode of its own. Same pill shape as .active_toggle (row 2), tinted with the
-   accent instead of the success colour so the two read as different filters. */
+   a mode of its own. Tinted with the accent so it reads as a mode, not a
+   directory choice. */
 .chat_toggle {
   display: inline-flex;
   align-items: center;
@@ -105,48 +105,9 @@
   gap: 8px;
 }
 
-/* "Only active" pill — filters the list down to sessions the agent still owns. */
-.active_toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  padding: 5px 9px;
-  font-size: 12px;
-  color: var(--color-text-dim);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-
-.active_toggle:hover {
-  background: var(--color-bg-card-hover);
-}
-
-.active_toggle_on {
-  color: var(--color-text);
-  border-color: var(--color-success);
-  background: rgba(var(--color-success-rgb), 0.12);
-}
-
-.active_toggle_dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-text-dim);
-  flex: 0 0 auto;
-}
-
-.active_toggle_on .active_toggle_dot {
-  background: var(--color-success);
-}
-
 /* Segmented filter by manual review mark — one row can be active at a time;
    each segment shows how many sessions fall in its bucket under the current
-   workspace / query / active filters. */
+   workspace / query filters. */
 .mark_filter {
   display: flex;
   flex: 1 1 auto;

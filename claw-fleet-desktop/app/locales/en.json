@@ -2281,8 +2281,6 @@
     "workspace_session_count": "{{count}} sessions",
     "chat_mode": "Chat only",
     "filter_chat_tip": "Show only pure-chat sessions; when off, chat sessions appear under all workspaces too",
-    "only_active": "Active only",
-    "filter_active_tip": "Show only sessions still running or waiting for input",
     "menu_open": "Open",
     "menu_mark_done": "Mark as done",
     "menu_mark_pending": "Mark as in progress",

@@ -248,7 +248,7 @@ interface UIState {
    *  involuntary hops a waiting-input alert or the mascot bubble make by calling
    *  setViewMode("list"). Component state would be thrown away each time and the
    *  segmented filter would snap back to 「全部」, so these live in the store.
-   *  markFilter / workspaceFilter / activeOnly are also written to disk;
+   *  markFilter / workspaceFilter are also written to disk;
    *  `historyQuery` is deliberately store-only — a search box restored on boot
    *  would fire an FTS query the user never asked for. */
   historyMarkFilter: MarkFilter;
@@ -259,7 +259,6 @@ interface UIState {
    *  than a value inside it, so flipping it off returns to whatever directory
    *  was selected before. See `matchesWorkspaceFilter`. */
   historyChatOnly: boolean;
-  historyActiveOnly: boolean;
   historyQuery: string;
   /** Group handoff-relay sessions (sharing a `handoff.chainId`) into one
    *  collapsible row in the task list. Default on; lives in the store (not
@@ -278,7 +277,6 @@ interface UIState {
   setHistoryMarkFilter: (f: MarkFilter) => void;
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryChatOnly: (on: boolean) => void;
-  setHistoryActiveOnly: (on: boolean) => void;
   setHistoryQuery: (q: string) => void;
   setHistoryGroupHandoff: (on: boolean) => void;
   /** "+ New project" CTA → ProjectsView opens the
@@ -518,7 +516,6 @@ export const useUIStore = create<UIState>((set) => ({
   historyMarkFilter: readMarkFilter(),
   historyWorkspaceFilter: initialHistoryWorkspaceFilters.filter,
   historyChatOnly: initialHistoryWorkspaceFilters.chatOnly,
-  historyActiveOnly: getItem("history-active-only") === "true",
   historyQuery: "",
   // Default on — the empty/absent case yields grouping; only an explicit
   // "false" opts out. Mirrors the `autoUpdateCheck` default-on idiom.
@@ -548,10 +545,6 @@ export const useUIStore = create<UIState>((set) => ({
   setHistoryChatOnly: (on) => {
     setItem("history-chat-only", on ? "true" : "false");
     set({ historyChatOnly: on });
-  },
-  setHistoryActiveOnly: (on) => {
-    setItem("history-active-only", on ? "true" : "false");
-    set({ historyActiveOnly: on });
   },
   setHistoryQuery: (q) => set({ historyQuery: q }),
   setHistoryGroupHandoff: (on) => {

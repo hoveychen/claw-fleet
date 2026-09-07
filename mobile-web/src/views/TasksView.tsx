@@ -358,7 +358,7 @@ export function TasksView({
 }: Props) {
   const confirm = useConfirm();
   // 筛选状态落到 localStorage（复用 Composer 草稿那套 useDraft），这样切标签页
-  // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/仅活跃/分段都保持不变，
+  // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/分段都保持不变，
   // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
   const [search, setSearch] = useDraft<string>("tasks:search", "");
   // 设备作用域:筛选值是一个 workspace 路径,它在另一台机器上根本不存在,不分家
@@ -368,7 +368,6 @@ export function TasksView({
   // 仅聊天模式 —— 打开时盖过上面的目录筛选；关闭时不按模式过滤，聊天会话照常
   // 混在列表里（见 matchesWorkspaceFilter）。
   const [chatOnly, setChatOnly] = useDraft<boolean>("tasks:chatOnly", false);
-  const [activeOnly, setActiveOnly] = useDraft<boolean>("tasks:activeOnly", false);
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
   // Group handoff-relay chains into one collapsible card. Default on; the setter
   // lives in the More tab. Tabs unmount on switch, so this re-reads the saved
@@ -472,16 +471,13 @@ export function TasksView({
     setWorkspace("");
   }, [sessionsLoaded, workspace, workspaces, setWorkspace]);
 
-  const activeCount = useMemo(() => all.filter((s) => LIVE.includes(s.status)).length, [all]);
-
   // Everything except the mark filter — the segment counts are taken over this
   // set so each count reflects how many rows its segment would reveal under the
-  // current workspace / query / active filters (mirrors the desktop `preMark`).
+  // current workspace / query filters (mirrors the desktop `preMark`).
   const preMark = useMemo(() => {
     const q = search.trim().toLowerCase();
     return all.filter((s) => {
       if (!matchesWorkspaceFilter(s, workspace, chatPath, chatOnly)) return false;
-      if (activeOnly && !LIVE.includes(s.status)) return false;
       if (q) {
         const clientMatch =
           `${s.titleOverride ?? ""} ${s.aiTitle ?? ""} ${s.slug ?? ""} ${s.lastMessagePreview ?? ""} ${s.workspaceName}`
@@ -496,7 +492,7 @@ export function TasksView({
       }
       return true;
     });
-  }, [all, search, workspace, chatPath, chatOnly, activeOnly, ftsMatchPaths]);
+  }, [all, search, workspace, chatPath, chatOnly, ftsMatchPaths]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -945,15 +941,6 @@ export function TasksView({
           >
             <SquareTerminal size={13} />
             {t("终端")}
-          </button>
-          <button
-            className={styles.filterToggle}
-            data-active={activeOnly}
-            onClick={() => setActiveOnly((v) => !v)}
-          >
-            <span className={styles.activeDot} />
-            {t("仅活跃")}
-            <span className={styles.activeCount}>{activeCount}</span>
           </button>
         </div>
         <div className={styles.segment}>
