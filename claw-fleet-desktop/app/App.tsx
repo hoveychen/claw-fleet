@@ -9,7 +9,6 @@ import { Onboarding } from "./components/Onboarding";
 import { SessionDetail } from "./components/SessionDetail";
 import { SessionList } from "./components/SessionList";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { WaitingAlerts } from "./components/WaitingAlerts";
 import { DecisionPanel } from "./components/DecisionPanel";
 import { FindBar } from "./components/FindBar";
 import { useFindController } from "./find/useFindController";
@@ -22,6 +21,7 @@ import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type Onboarding
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
 import { useRemoteWorkspacesSync } from "./hooks/useRemoteWorkspaces";
+import { useWaitingAlertSound } from "./hooks/useWaitingAlertSound";
 
 const ONBOARDING_DISMISSED_KEY = "onboarding-dismissed";
 const WIZARD_COMPLETED_KEY = "wizard-completed";
@@ -45,6 +45,11 @@ function App() {
   // and tab strip all badge remote workspaces from it, and a per-card fetch
   // would be one IPC round trip per card per board render.
   useRemoteWorkspacesSync();
+
+  // Chime/TTS when a session starts waiting for input. Headless — the
+  // bottom-right alert cards this used to live in were dropped; only the
+  // sound survives.
+  useWaitingAlertSound();
 
   // Settings overlay. Lives in the store rather than component state because
   // the tray/app menu (a Rust-side event) and the sidebar gear button are both
@@ -259,14 +264,13 @@ function App() {
       {/* data-find-content scopes the Cmd+F find bar to the active page's
           content; the sidebar nav lives inside here too but is skipped by tag
           (<aside>/<nav>/<button>), and everything outside app_main (onboarding,
-          decision panel, alerts) is excluded by not being tagged. */}
+          decision panel) is excluded by not being tagged. */}
       <div className="app_main" data-find-content>
         <SessionList />
         {isSessionView && <SessionDetail />}
       </div>
       <DecisionPanel />
       {settingsOpen && <SettingsPanel onClose={closeSettings} />}
-      <WaitingAlerts />
       <UpdateNotice />
       <FindBar controller={find} />
     </div>
