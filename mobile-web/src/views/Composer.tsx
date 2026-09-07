@@ -187,9 +187,12 @@ export function resumeConfigChips({
  * 回复胶囊占住的下边界，供转录区补底部留白用。
  *
  * 只吃布局值：`offsetHeight` 是元素自身的布局高度，`bottomCss` 是
- * `getComputedStyle(el).bottom` 解析出来的 px —— 两者都不含 transform，所以
- * 折叠动画进行到哪一帧都量得到终值。用 rect 就会在展开的首帧量到一个近乎 0 的
- * 留白（那时元素还被 translateY 推在屏幕外），最后几行消息因此被胶囊盖住。
+ * `getComputedStyle(el).bottom` 解析出来的 px —— 两者都不含 transform。
+ *
+ * 别换回 `getBoundingClientRect()`：rect 把 transform 算在内。这里曾经就是那么
+ * 写的，配上一个 `translateY` 的折叠动画，展开的首帧量到的留白近乎 0，而此后
+ * 组件不再重渲染，那个 0 就成了终值 —— 最后几行消息被胶囊盖死。折叠动画已经
+ * 拆了，但取值口径得守住：任何 transform 都不该影响这个数。
  */
 export function composerInset(offsetHeight: number, bottomCss: string): number {
   const inset = Number.parseFloat(bottomCss);
@@ -1204,13 +1207,8 @@ interface ResumeProps {
    *  tail / live-thinking pollers and yield the single serialized WS to the
    *  resume req/reply instead of contending with a big tail response. */
   onSubmitInFlight?: (inFlight: boolean) => void;
-  /** The transcript is being read back (the reader scrolled up), so the box
-   *  folds away to give the messages the screen. A request, not an order: an
-   *  unsent draft, a focused field, a picked attachment or a queued follow-up
-   *  all outrank it — nothing the user is mid-way through may vanish. */
-  hidden?: boolean;
-  /** 本组件当前遮挡的高度（折叠时为 0）。它浮在转录之上、不占布局高度，父级
-   *  据此给滚动区补底部留白，最后一条消息才不会被压在胶囊底下。 */
+  /** 本组件当前遮挡的高度。它浮在转录之上、不占布局高度，父级据此给滚动区补
+   *  底部留白，最后一条消息才不会被压在胶囊底下。 */
   onHeight?: (px: number) => void;
 }
 
@@ -1220,7 +1218,6 @@ export function ResumeComposer({
   mode = "resume",
   onOptimisticSend,
   onSubmitInFlight,
-  hidden,
   onHeight,
 }: ResumeProps) {
   const enqueueing = mode === "enqueue";
@@ -1254,7 +1251,6 @@ export function ResumeComposer({
     client,
     `resume:${session.id}:attachments`,
   );
-  const [focused, setFocused] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   // 胶囊上报告的当前配置。dsh 的模型目录是主机运行时给的，这里认不出 id 就
@@ -1281,16 +1277,8 @@ export function ResumeComposer({
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
   useAutoGrow(voiceTailRef, voice.showingPreview ? voice.preview : prompt);
-  // Folded only when the parent asked AND the user has nothing in flight here.
-  const collapsed =
-    !!hidden &&
-    !focused &&
-    !prompt.trim() &&
-    attachments.length === 0 &&
-    pendingMessages.length === 0;
   // 实测高度上报给父级：浮起后本组件不占布局高度，转录区要靠这个数字给自己补
-  // 底部留白，否则最后一条消息会永远压在胶囊底下。折叠时报 0 —— 那一刻它确实
-  // 不遮挡任何东西。
+  // 底部留白，否则最后一条消息会永远压在胶囊底下。
   const boxRef = useRef<HTMLDivElement>(null);
   const [measureNonce, remeasure] = useReducer((n: number) => n + 1, 0);
   useLayoutEffect(() => {
@@ -1299,13 +1287,9 @@ export function ResumeComposer({
     // 报的是「从视口底到本组件顶」的距离，而不是自身高度：胶囊还会被决策折叠条
     // （--peek-inset）往上顶，那段空隙同样是转录区不能用的地方。
     //
-    // 但这段距离必须从**布局值**（offsetHeight + computed bottom）算，不能用
-    // getBoundingClientRect：折叠动画是 transform: translateY(100% + 24px)，
-    // 而 rect 把 transform 算在内。展开的那一帧 data-hidden 刚摘掉、过渡才起步，
-    // 元素还停在屏幕外，rect 量出来的留白几乎是 0；此后本组件不会再重渲染，
-    // 于是那个 0 就是转录区拿到的最终值——最后几行消息被胶囊盖死，正是这个。
-    // offsetHeight 与 computed bottom 都跟 transform 无关，首帧量到的就是终值。
-    onHeight?.(collapsed ? 0 : composerInset(el.offsetHeight, getComputedStyle(el).bottom));
+    // 用布局值（offsetHeight + computed bottom）而不是 getBoundingClientRect：
+    // rect 把 transform 算在内，任何 transform 动画进行中量到的都不是终值。
+    onHeight?.(composerInset(el.offsetHeight, getComputedStyle(el).bottom));
   });
   // 高度会在本组件不重渲染的情况下变：附件缩略图加载完撑高、textarea 自增高度
   // 是直接写 style 的、决策折叠条把 --peek-inset 写在 documentElement 上把整根
@@ -1424,12 +1408,7 @@ export function ResumeComposer({
   };
 
   return (
-    <div
-      className={styles.resumeBox}
-      ref={boxRef}
-      data-hidden={collapsed || undefined}
-      aria-hidden={collapsed || undefined}
-    >
+    <div className={styles.resumeBox} ref={boxRef}>
       {visiblePending.length > 0 && (
         <div className={styles.queuedList}>
           <div className={styles.queuedLabel}>{t("已排队，本轮结束后自动发送")}</div>
@@ -1504,8 +1483,6 @@ export function ResumeComposer({
             value={voice.showingPreview ? voice.preview : prompt}
             readOnly={voice.showingPreview}
             onChange={(e) => setPrompt(e.target.value)}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
           />
           {/* 有字了就把麦克风让位给发送：两颗一直并排会让右侧挤成两个 40px 的
               目标，而这一刻用户要的只有一个。 */}

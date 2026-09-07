@@ -354,8 +354,8 @@ describe("composerInset", () => {
     expect(composerInset(196, "auto")).toBe(196);
   });
 
-  it("折叠动画期间量到的仍是终值 —— 入参是布局值，transform 进不来", () => {
-    // 这条锁住的是取值口径：换回 getBoundingClientRect 会在展开首帧量到 ~0。
+  it("入参是布局值，transform 进不来 —— 亚像素也按整数收敛", () => {
+    // 这条锁住的是取值口径：换回 getBoundingClientRect 就会被 transform 污染。
     expect(composerInset(196.4, "21.6px")).toBe(218);
   });
 });
