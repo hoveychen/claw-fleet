@@ -17,6 +17,10 @@ interface HarnessStatus {
   channel: string | null;
   loggedIn: boolean | null;
   authDetail: string | null;
+  /** Installed, but below the harness's minimum — only dsh has a floor. */
+  outdated?: boolean;
+  /** The floor `outdated` was judged against, so this panel can name it. */
+  minVersion?: string | null;
 }
 
 interface FoxyCustody {
@@ -690,12 +694,21 @@ export function EnvironmentPanel() {
           <AgentSourceIcon source={s.source} />
           <span className={styles.card_name}>{SOURCE_NAMES[s.source] ?? s.source}</span>
           {s.installed ? (
-            <span className={styles.badge_ok}>
+            // Installed-but-too-old is a warning, not an OK: an ok badge next
+            // to a version Fleet refuses to launch is the state that left
+            // users staring at a healthy card and a session that would not
+            // start.
+            <span className={s.outdated ? styles.badge_warn : styles.badge_ok}>
               {t("env.installed")}
               {s.version ? ` v${s.version}` : ""}
             </span>
           ) : (
             <span className={styles.badge_warn}>{t("env.not_installed")}</span>
+          )}
+          {s.installed && s.outdated && (
+            <span className={styles.badge_warn}>
+              {t("env.outdated_badge", { min: s.minVersion ?? "" })}
+            </span>
           )}
           {renderLoginState(s)}
         </div>
@@ -703,6 +716,14 @@ export function EnvironmentPanel() {
           <div className={styles.card_meta}>
             {s.channel && <span>{t("env.channel_label")}: {channelLabel(s.channel)}</span>}
             {s.path && <span className={styles.path}>{s.path}</span>}
+          </div>
+        )}
+        {s.installed && s.outdated && (
+          <div className={styles.flow_hint}>
+            {t("env.outdated_hint", {
+              found: s.version ?? "?",
+              min: s.minVersion ?? "",
+            })}
           </div>
         )}
         <div className={styles.actions}>
@@ -716,12 +737,20 @@ export function EnvironmentPanel() {
             </button>
           )}
           {s.installed && !extensionChannel && (
+            // Promoted to the primary action when the install is too old:
+            // that is the one thing the user has to do before anything else
+            // on this card works, so it should not look like the optional
+            // "check for updates" it is the rest of the time.
             <button
-              className={styles.action_btn}
+              className={s.outdated ? styles.action_btn_primary : styles.action_btn}
               disabled={!!b || actionsDisabled}
               onClick={() => void runUpdate(s.source)}
             >
-              {b === "update" ? t("env.updating") : t("env.update_btn")}
+              {b === "update"
+                ? t("env.updating")
+                : s.outdated
+                  ? t("env.upgrade_btn")
+                  : t("env.update_btn")}
             </button>
           )}
           {s.source === "dsh" && needNode && (
@@ -784,12 +813,20 @@ export function EnvironmentPanel() {
               <AgentSourceIcon source={s.source} />
               <span className={styles.card_name}>{SOURCE_NAMES[s.source] ?? s.source}</span>
               {s.installed ? (
-                <span className={styles.badge_ok}>
+                <span className={s.outdated ? styles.badge_warn : styles.badge_ok}>
                   {t("env.installed")}
                   {s.version ? ` v${s.version}` : ""}
                 </span>
               ) : (
                 <span className={styles.badge_warn}>{t("env.not_installed")}</span>
+              )}
+              {/* The remote probe reads `--version` the same way, so a
+                  too-old remote dsh gets the same badge — it would fail its
+                  first session exactly like a local one. */}
+              {s.installed && s.outdated && (
+                <span className={styles.badge_warn}>
+                  {t("env.outdated_badge", { min: s.minVersion ?? "" })}
+                </span>
               )}
               {s.source !== "dsh" &&
                 (s.loggedIn === true ? (

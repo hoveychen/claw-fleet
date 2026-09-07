@@ -2550,11 +2550,15 @@
       "windsurf-extension": "Windsurf 扩展内置",
       "usr-local-bin": "/usr/local/bin",
       "path": "PATH",
-      "override": "手动指定"
+      "override": "手动指定",
+      "npx-cache": "npx 缓存(未全局安装)"
     },
     "install_btn": "一键安装",
     "installing": "安装中…",
     "update_btn": "检查更新",
+    "upgrade_btn": "升级到最新版",
+    "outdated_badge": "版本过旧(需 {{min}}+)",
+    "outdated_hint": "当前 v{{found}}，Fleet 需要 {{min}} 或更高版本才能驱动它——更旧的版本用的是另一套通信协议，会话起不来。点「升级到最新版」即可自动升级。",
     "updating": "更新中…",
     "updated": "已更新 {{before}} → {{after}}",
     "up_to_date": "已是最新版({{version}})",

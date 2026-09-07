@@ -2553,11 +2553,15 @@
       "windsurf-extension": "Bundled with Windsurf extension",
       "usr-local-bin": "/usr/local/bin",
       "path": "PATH",
-      "override": "Manual override"
+      "override": "Manual override",
+      "npx-cache": "npx cache (not installed globally)"
     },
     "install_btn": "Install",
     "installing": "Installing…",
     "update_btn": "Check for updates",
+    "upgrade_btn": "Upgrade to latest",
+    "outdated_badge": "Too old (needs {{min}}+)",
+    "outdated_hint": "Found v{{found}}; Fleet needs {{min}} or newer to drive it — older builds speak a different wire protocol and sessions will not start. Hit “Upgrade to latest” to update it automatically.",
     "updating": "Updating…",
     "updated": "Updated {{before}} → {{after}}",
     "up_to_date": "Up to date ({{version}})",

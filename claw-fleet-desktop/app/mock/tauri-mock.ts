@@ -193,11 +193,27 @@ interface MockHarness {
   channel: string | null;
   loggedIn: boolean | null;
   authDetail: string | null;
+  outdated?: boolean;
+  minVersion?: string | null;
 }
 const mockHarness: Record<EnvSource, MockHarness> = {
   "claude-code": { installed: true, path: "/Users/mock/.local/bin/claude", version: "2.1.246", channel: "native-installer", loggedIn: false, authDetail: null },
   codex: { installed: true, path: "/Users/mock/.codex/packages/standalone/current/bin/codex", version: "0.148.0", channel: "standalone", loggedIn: false, authDetail: null },
-  dsh: { installed: false, path: null, version: null, channel: null, loggedIn: null, authDetail: null },
+  // Installed but below the 0.1.2 floor, resolved out of an npx cache —
+  // the two dsh states the panel gained badges for, both walkable under
+  // ?mock so the upgrade guidance can be eye-checked without touching a
+  // real install. `update_harness` below bumps it to 0.1.2 and clears the
+  // flag, so the whole remediation is demoable.
+  dsh: {
+    installed: true,
+    path: "/Users/mock/.npm/_npx/deadbeef00000001/node_modules/.bin/dsh",
+    version: "0.1.1",
+    channel: "npx-cache",
+    loggedIn: null,
+    authDetail: null,
+    outdated: true,
+    minVersion: "0.1.2",
+  },
 };
 const mockRemoteHarness: Record<EnvSource, MockHarness> = {
   "claude-code": { installed: true, path: "/home/dev/.local/bin/claude", version: "2.1.246", channel: null, loggedIn: null, authDetail: null },
@@ -345,6 +361,12 @@ async function handleIPC(
       const before = mockHarness[src].version;
       await emitInstallLines(src, [`$ ${src} update`, "checking for updates…"]);
       if (src === "claude-code") mockHarness[src].version = "2.1.250";
+      if (src === "dsh") {
+        mockHarness[src].version = "0.1.2";
+        mockHarness[src].outdated = false;
+        mockHarness[src].channel = "npm-global";
+        mockHarness[src].path = "/Users/mock/.npm-global/bin/dsh";
+      }
       const after = mockHarness[src].version;
       await emitInstallLines(src, [before === after ? `already up to date (${after})` : `updated ${before} → ${after}`]);
       return { source: src, before, after, status: { source: src, ...mockHarness[src] } };
