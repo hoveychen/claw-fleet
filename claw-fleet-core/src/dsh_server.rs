@@ -54,6 +54,61 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 /// be the readiness signal.
 const HEALTH_ENDPOINT: &str = "settings/describe";
 
+/// The oldest dsh Fleet can actually drive.
+///
+/// Not a policy choice — every integration point here was written against the
+/// 0.1.2 wire contract, and older builds fail at a different layer each:
+/// `≤0.1.0-rc.7` rejects [`web_args`]' `--no-open` as an unknown option,
+/// `0.1.1` starts but prints no `?token=` for [`parse_launch_line`] to take,
+/// and before 0.1.2 the `{args:…}` gateway envelope and the paged
+/// `session/events` read were different shapes again
+/// ([`crate::dsh_client`], [`crate::dsh_source`]). Checking the version once
+/// up front turns three unrelated failures — all of which surface as "dsh web
+/// exited before reporting a port" — into one actionable message.
+pub const MIN_VERSION: &str = "0.1.2";
+
+/// Does `version` (a `--version` token like `0.1.2-rc.1`) meet [`MIN_VERSION`]?
+///
+/// **Prerelease tags are ignored, deliberately.** Under strict semver
+/// `0.1.2-rc.1 < 0.1.2`, but the published stream is still on rc tags and
+/// `0.1.2-rc.1` is the build every integration point here was verified
+/// against — a strict-semver floor would reject the only working version
+/// there is. So only the numeric `major.minor.patch` core is compared.
+///
+/// `None` in, `true` out: a version we could not read is not evidence of an
+/// old binary (the probe times out on a cold npm profile), and refusing to
+/// launch on a failed probe would turn a slow machine into a broken one.
+pub fn meets_min_version(version: Option<&str>) -> bool {
+    let Some(found) = version.and_then(numeric_core) else {
+        return true;
+    };
+    found >= numeric_core(MIN_VERSION).unwrap_or_default()
+}
+
+/// `"0.1.2-rc.1"` → `[0, 1, 2]`: leading numeric segments only, stopping at
+/// the first one carrying a non-numeric tail. Shorter is smaller, which is
+/// what `Vec<u32>`'s lexicographic `Ord` already gives us (`[0,1] < [0,1,2]`).
+///
+/// `None` when there is no leading numeric segment at all — `parse_version` in
+/// [`crate::claude_binary`] is the strict sibling of this: it rejects any
+/// non-numeric segment outright, because Claude's versions never carry tags.
+fn numeric_core(v: &str) -> Option<Vec<u32>> {
+    let mut nums = Vec::new();
+    for part in v.split('.') {
+        let digits: String = part.chars().take_while(char::is_ascii_digit).collect();
+        if digits.is_empty() {
+            break;
+        }
+        let Ok(n) = digits.parse::<u32>() else { break };
+        nums.push(n);
+        if digits.len() != part.len() {
+            // "2-rc" — took the 2, and everything past it is a prerelease tag.
+            break;
+        }
+    }
+    (!nums.is_empty()).then_some(nums)
+}
+
 /// Locate the `dsh` executable.
 ///
 /// Scans the augmented PATH — the process PATH plus every dir an `npm i -g`
@@ -619,6 +674,49 @@ fn read_launch_line(child: &mut Child) -> Result<(u16, String), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fleet can only drive dsh 0.1.2 and newer, and the floor has to accept
+    /// the *prerelease* line: the published stream is still on rc tags, so
+    /// `0.1.2-rc.1` is the build every integration point here was verified
+    /// against. Under strict semver that sorts *below* `0.1.2`, which would
+    /// reject the only working version there is — hence prerelease tags are
+    /// ignored and only the numeric core is compared.
+    ///
+    /// An unreadable version reads as acceptable, not as too old: the probe
+    /// times out on a cold npm profile, and refusing to launch on a failed
+    /// probe would turn a slow machine into a broken one.
+    #[test]
+    fn min_version_floor_ignores_prerelease_tags() {
+        // Too old — the three real failure modes documented on MIN_VERSION.
+        assert!(!meets_min_version(Some("0.1.1")), "0.1.1 must be rejected");
+        assert!(
+            !meets_min_version(Some("0.1.1-rc.2")),
+            "0.1.1-rc.2 must be rejected"
+        );
+        assert!(
+            !meets_min_version(Some("0.1.0-rc.7")),
+            "0.1.0-rc.7 must be rejected"
+        );
+        assert!(!meets_min_version(Some("0.0.9")), "0.0.9 must be rejected");
+
+        // Acceptable — including the rc line that is the only shipping build.
+        assert!(meets_min_version(Some("0.1.2")), "0.1.2 must be accepted");
+        assert!(
+            meets_min_version(Some("0.1.2-rc.1")),
+            "0.1.2-rc.1 must be accepted — it is the verified build"
+        );
+        assert!(meets_min_version(Some("0.1.3")), "0.1.3 must be accepted");
+        assert!(meets_min_version(Some("0.2.0")), "0.2.0 must be accepted");
+        assert!(meets_min_version(Some("1.0.0")), "1.0.0 must be accepted");
+
+        // Unknown is not old.
+        assert!(meets_min_version(None), "a missing version must not block");
+        assert!(
+            meets_min_version(Some("garbage")),
+            "an unparseable version must not block"
+        );
+        assert!(meets_min_version(Some("")), "an empty version must not block");
+    }
 
     /// dsh installs through `npm i -g`, so it lands in whatever bin dir the
     /// active Node.js runtime owns — and when Node comes from nvm / fnm /
