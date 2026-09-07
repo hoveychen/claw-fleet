@@ -186,6 +186,14 @@ export function isFleetOwnedTask(s: SessionInfo): boolean {
   );
 }
 
+/** 这条会话此刻是不是活的（进程还在，或这一轮还在飞）。
+ *  与 canResumeSession / canEnqueueSession 的区别：那两个还要求「Fleet 自己起的、
+ *  不是 subagent」——它们回答的是「我能不能给它发消息」；这个只回答「它在不在跑」，
+ *  用来数一个项目下有几个会话在动。 */
+export function isSessionLive(s: SessionInfo): boolean {
+  return !!s.procAlive || IN_FLIGHT.includes(s.status);
+}
+
 const IN_FLIGHT: SessionStatus[] = [
   "thinking",
   "executing",

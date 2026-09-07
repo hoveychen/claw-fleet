@@ -70,36 +70,85 @@
   padding: 20px 16px 30px;
 }
 
-/* 最近去过的 workspace。一屏能看见全部候选，选一个是一次点击 —— 原来它埋在
-   「运行位置」picker 里的一个 <select> 中，要三次。 */
-.recentGrid {
+/* 最近去过的项目。
+ *
+ * 一开始这里是一排小胶囊，结果整页只有上下两条边有东西、中间空四百多像素 ——
+ * 那不是「干净」，是「掉了一块」。改成一行一个项目，把 sessions 快照里本来就
+ * 算好、却被 recentWorkspaces 丢掉的两样信息拿出来：上次活动、几个会话在跑。
+ * 挑项目时想知道的正是这两件事。 */
+.recentList {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.recentChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 36px;
-  padding: 0 13px;
-  border-radius: 999px;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
   border: 1px solid var(--color-border);
   background: var(--color-bg-card);
-  color: var(--color-text-secondary);
-  font-size: var(--t-ui, 14px);
 }
 
-.recentChip[data-active] {
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft);
+.recentRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 7px 12px;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-text);
+}
+
+.recentRow:last-child {
+  border-bottom: none;
+}
+
+.recentRow:active {
+  background: var(--color-bg-card-hover);
+}
+
+.recentRow[data-active] .recentName {
   color: var(--color-accent);
   font-weight: 650;
 }
 
-.recentChip:active {
-  background: var(--color-bg-card-hover);
+.recentName {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-ctl, 15px);
+}
+
+.recentMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: var(--t-aux, 12px);
+}
+
+.recentRunning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-success);
+}
+
+.recentDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+}
+
+.recentCheck {
+  flex: none;
+  color: var(--color-accent);
 }
 
 .sectionLabel {
