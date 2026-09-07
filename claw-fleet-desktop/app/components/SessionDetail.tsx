@@ -891,7 +891,9 @@ export function SessionDetail({
     stalled: loadStalled,
     following: followRef.current.following,
     detached: followRef.current.detached,
-    tab: viewTab,
+    // The conversation is no longer a tab; what varies is which auxiliary
+    // panel is up beside it (null = closed).
+    tab: aux.active ?? "—",
     dockH: dockHeight,
   };
   useEffect(() => {
