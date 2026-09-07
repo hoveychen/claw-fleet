@@ -13,9 +13,11 @@
 //!
 //! # No account or quota surface (measured — do not re-probe)
 //!
-//! [`AgentSource::fetch_account`], [`AgentSource::fetch_usage`] and
-//! [`AgentSource::usage_summary`] stay at their refusing defaults for dsh, and
-//! that is not an omission: **dsh exposes nothing to implement them with.**
+//! [`AgentSource::fetch_account`] stays at its refusing default for dsh, and
+//! that is not an omission: **dsh exposes nothing to implement it with.**
+//! `fetch_usage` / `usage_summary` are implemented, but *not* out of dsh — they
+//! go straight to the providers behind the configured keys (see
+//! [`crate::dsh_balance`]), which is the only place the number exists.
 //!
 //! The `/api` method catalog (read off `@deepseek-ai/dsh-host-apiproxy`, then
 //! called against a live server) is `agentPresets/*`, `credentials/*`, `goal.*`,
@@ -38,9 +40,9 @@
 //!
 //! This follows from what dsh *is*: a bring-your-own-key harness. The quota
 //! belongs to whichever provider the user configured, so any real usage view for
-//! a dsh user has to come from that provider's own API (for the OpenRouter case,
-//! see the generation-cost path in [`dsh_token_breakdown`]'s neighbourhood), not
-//! from dsh. Per-session token accounting is a different question and dsh *does*
+//! a dsh user has to come from that provider's own API — which is exactly what
+//! [`crate::dsh_balance`] does, and what the OpenRouter generation-cost path in
+//! [`dsh_token_breakdown`]'s neighbourhood already did — not from dsh. Per-session token accounting is a different question and dsh *does*
 //! answer it — see [`dsh_token_breakdown`], which reads the `session/list`
 //! projections `@deepseek-ai/dsh-token-meter` publishes.
 
@@ -685,6 +687,27 @@ impl AgentSource for DshSource {
 
     fn is_available(&self) -> bool {
         crate::dsh_server::is_available()
+    }
+
+    /// What is left to spend behind this install.
+    ///
+    /// `fetch_account` stays refusing — dsh has no account to describe — but
+    /// usage does have an answer once you accept that for a BYOK harness the
+    /// answer is money rather than a quota window. It comes from the providers'
+    /// own APIs, reached with the keys dsh already stores; see
+    /// [`crate::dsh_balance`] for why dsh itself cannot answer.
+    fn fetch_usage(&self) -> Result<Value, String> {
+        serde_json::to_value(crate::dsh_balance::fetch_balances()).map_err(|e| e.to_string())
+    }
+
+    fn usage_summary(&self) -> Option<crate::backend::SourceUsageSummary> {
+        let item = crate::dsh_balance::fetch_balances();
+        if item.balances.is_empty() {
+            // No provider key configured: nothing to report, and an empty card
+            // is worse than no card.
+            return None;
+        }
+        Some(crate::backend::SourceUsageSummary::from_dsh(&item))
     }
 
     fn scan_sessions(&self) -> Vec<SessionInfo> {
