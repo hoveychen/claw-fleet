@@ -58,11 +58,13 @@ def prepare(release, output, public_url):
     output.mkdir(parents=True, exist_ok=True)
     for name in ('index.html', 'zh/index.html', 'site.css', 'site.js', 'icon.png', 'hero.png',
                  'icon-apple.svg', 'icon-windows.svg', 'icon-linux.svg',
-                 'screenshots/01_gallery.png', 'screenshots/02_mobile_decisions.png'):
+                 'screenshots/current/work-en.png', 'screenshots/current/work-zh.png',
+                 'screenshots/current/review-en.png', 'screenshots/current/review-zh.png',
+                 'screenshots/current/results.png', 'screenshots/current/mobile-en.png',
+                 'screenshots/current/mobile-zh.png'):
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / 'docs' / name, target)
-    shutil.copytree(ROOT / 'docs' / 'player', output / 'player', dirs_exist_ok=True)
     manifest = {'schema': 1, 'version': tag, 'china': {'provider': 'Tencent Cloud COS', 'assets': {}}}
     checksum_lines = []
     for name, asset in sorted(assets.items()):
@@ -114,9 +116,10 @@ def publish(output, manifest, public_url):
                 raise ValueError('Public download size verification failed: ' + path.name)
     # Upload dependencies first, both HTML documents next, manifest last.
     site_paths = [output/p for p in ('site.css','site.js','icon.png','hero.png','icon-apple.svg',
-        'icon-windows.svg','icon-linux.svg','screenshots/01_gallery.png','screenshots/02_mobile_decisions.png',
+        'icon-windows.svg','icon-linux.svg','screenshots/current/work-en.png','screenshots/current/work-zh.png',
+        'screenshots/current/review-en.png','screenshots/current/review-zh.png','screenshots/current/results.png',
+        'screenshots/current/mobile-en.png','screenshots/current/mobile-zh.png',
         'index.html','zh/index.html')]
-    site_paths = sorted((output/'player').rglob('*')) + site_paths
     for path in site_paths:
         if not path.is_file():
             continue

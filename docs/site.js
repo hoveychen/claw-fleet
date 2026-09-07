@@ -53,25 +53,6 @@
       link.href = target.href;
     }),
   );
-  const form = document.querySelector(".decision-demo");
-  const status = form.querySelector("[role=status]");
-  const submit = form.querySelector("[type=submit]");
-  const reset = form.querySelector("[type=reset]");
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    status.textContent = status.dataset.message;
-    form.querySelector("fieldset").disabled = true;
-    submit.hidden = true;
-    reset.hidden = false;
-    reset.focus();
-  });
-  form.addEventListener("reset", () => {
-    status.textContent = "";
-    form.querySelector("fieldset").disabled = false;
-    submit.hidden = false;
-    reset.hidden = true;
-    submit.focus();
-  });
   const selector = document.querySelector("#download-source");
   const links = [...document.querySelectorAll("[data-asset]")];
   const originals = new Map(links.map((link) => [link, link.href]));

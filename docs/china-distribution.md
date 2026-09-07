@@ -62,4 +62,4 @@ python3 scripts/site/distribute.py \
 
 ## 官网维护
 
-文案和模板：`scripts/site/build.py`；样式与交互：`docs/site.css` / `docs/site.js`。执行 `python3 scripts/site/build.py` 后提交两个 HTML 产物。无需 Node 构建依赖。不要直接改生成的 HTML。
+双语文案：`scripts/site/content/zh.json` / `en.json`；模板：`scripts/site/build.py`；当前产品截图：`docs/screenshots/current/`（实际组件、示例数据）；样式与交互：`docs/site.css` / `docs/site.js`。执行 `python3 scripts/site/build.py` 后提交两个 HTML 产物。无需 Node 构建依赖。不要直接改生成的 HTML。
