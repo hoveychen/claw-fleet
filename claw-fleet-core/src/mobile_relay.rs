@@ -984,7 +984,6 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "pidPrecise",
     "entrypoint",
     "userMark",
-    "lastReadMs",
     "procAlive",
     // Relay-chain position (hop/chainLen) — the mobile task row shows the same
     // handoff chip the desktop launchpad row does. Small object; enrich sets it
@@ -2115,7 +2114,6 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "decision_answer" => serve_decision_answer(params),
         "attachments_exist" => serve_attachments_exist(params),
         "user_attachment" => serve_user_attachment(params),
-        "session_read" => serve_session_read(params),
         // ── Repository "仓库" surface ─────────────────────────────────────
         "repo_list" => serve_repo_list(params),
         "repo_detail" => serve_repo_detail(params),
@@ -3087,14 +3085,6 @@ fn serve_user_attachment(params: &Value) -> Result<Value, String> {
         "mime": mime,
         "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
     }))
-}
-
-fn serve_session_read(params: &Value) -> Result<Value, String> {
-    let req: crate::session_read::MarkSessionsReadRequest =
-        serde_json::from_value(params.clone())
-            .map_err(|e| format!("bad session_read params: {e}"))?;
-    crate::session_read::mark_read(&req.items)?;
-    Ok(json!({ "ok": true }))
 }
 
 // ── Repository "仓库" surface ─────────────────────────────────────
@@ -5153,26 +5143,6 @@ mod tests {
             // (the client-side substring filter handles those).
             let short = request_ok("session_search", json!({"query": "z"}));
             assert_eq!(short.as_array().expect("array").len(), 0);
-        });
-    }
-
-    #[test]
-    fn request_session_read_stamps_records() {
-        with_temp_home(|| {
-            let data = request_ok(
-                "session_read",
-                json!({"items": [
-                    {"sessionId": "s1", "workspacePath": "/ws"},
-                    {"sessionId": "s2", "workspacePath": "/ws"},
-                ]}),
-            );
-            assert_eq!(data["ok"], true);
-            let dir = crate::session::real_home_dir()
-                .unwrap()
-                .join(".fleet")
-                .join("session-read");
-            assert!(dir.join("s1.json").is_file());
-            assert!(dir.join("s2.json").is_file());
         });
     }
 

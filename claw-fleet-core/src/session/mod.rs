@@ -262,13 +262,6 @@ pub struct SessionInfo {
     /// parse — the override changes while the session's jsonl doesn't.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub title_override: Option<String>,
-    /// Epoch-ms of the last time the human read this session, or `None` if never
-    /// read. Orthogonal to both `status` and `user_mark`: a session is "unread"
-    /// when `last_activity_ms > last_read_ms` (or this is `None`). Stamped by
-    /// `session_read::enrich_sessions` at scan time, not during the cached deep
-    /// parse — the read state changes while the session's jsonl doesn't.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub last_read_ms: Option<u64>,
     /// Number of times this session was context-compacted (auto or manual /compact).
     #[serde(default)]
     pub compact_count: u32,
@@ -712,7 +705,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,
+            task_plan: None, handoff: None, user_mark: None, title_override: None,
             compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
