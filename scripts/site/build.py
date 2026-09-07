@@ -11,7 +11,7 @@ ASSETS = [('claw-fleet-macos.pkg','macOS'),('claw-fleet-windows-x64-setup.exe','
 
 def build(lang, c):
     base = '../' if lang == 'zh' else './'
-    other = '../index.html' if lang == 'zh' else 'zh/index.html'
+    other = '../index.html?lang=en' if lang == 'zh' else 'zh/index.html?lang=zh'
     def dl(name, label):
         url=f'{GITHUB}/releases/latest/download/{name}'
         return f'<div class="download-link"><a class="button" data-asset="{name}" href="{url}">{label}<span aria-hidden="true">↓</span></a><a class="fallback" href="{url}" hidden>{c["fallback"]}</a></div>'
@@ -38,7 +38,7 @@ def build(lang, c):
 <title>{c['title']}</title><meta name="description" content="{escape(c['description'],quote=True)}">
 <meta name="color-scheme" content="light"><meta property="og:title" content="{c['title']}"><meta property="og:description" content="{escape(c['description'],quote=True)}"><meta property="og:type" content="website"><meta property="og:image" content="https://hoveychen.github.io/claw-fleet/screenshots/current/work-en.png"><meta name="twitter:card" content="summary_large_image">
 <link rel="alternate" hreflang="en" href="{base}index.html"><link rel="alternate" hreflang="zh-CN" href="{base}zh/index.html"><link rel="alternate" hreflang="x-default" href="{base}index.html">
-<link rel="icon" href="{base}icon.png"><link rel="stylesheet" href="{base}site.css"><script src="{base}site.js" defer></script>
+<script src="{base}locale.js"></script><link rel="icon" href="{base}icon.png"><link rel="stylesheet" href="{base}site.css"><script src="{base}site.js" defer></script>
 </head>
 <body data-locale="{lang}">
 <a class="skip" href="#main">{c['skip']}</a>

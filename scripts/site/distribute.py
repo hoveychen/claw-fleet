@@ -56,7 +56,7 @@ def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cl
     tag, assets = validate_release(release)
     public_url = validate_base_url(public_url)
     output.mkdir(parents=True, exist_ok=True)
-    for name in ('index.html', 'zh/index.html', 'site.css', 'site.js', 'icon.png', 'hero.png',
+    for name in ('index.html', 'zh/index.html', 'site.css', 'site.js', 'locale.js', 'icon.png', 'hero.png',
                  'icon-apple.svg', 'icon-windows.svg', 'icon-linux.svg',
                  'screenshots/current/work-en.png', 'screenshots/current/work-zh.png',
                  'screenshots/current/review-en.png', 'screenshots/current/review-zh.png',
@@ -115,7 +115,7 @@ def publish(output, manifest, public_url):
             if int(response.headers.get('Content-Length', '-1')) != path.stat().st_size:
                 raise ValueError('Public download size verification failed: ' + path.name)
     # Upload dependencies first, both HTML documents next, manifest last.
-    site_paths = [output/p for p in ('site.css','site.js','icon.png','hero.png','icon-apple.svg',
+    site_paths = [output/p for p in ('site.css','site.js','locale.js','icon.png','hero.png','icon-apple.svg',
         'icon-windows.svg','icon-linux.svg','screenshots/current/work-en.png','screenshots/current/work-zh.png',
         'screenshots/current/review-en.png','screenshots/current/review-zh.png','screenshots/current/results.png',
         'screenshots/current/mobile-en.png','screenshots/current/mobile-zh.png',
