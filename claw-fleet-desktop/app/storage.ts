@@ -57,9 +57,10 @@ const ALL_KEYS = [
   "plans-expand-overrides",
   "plans-show-completed",
   "plans-done-items",
-  // Auxiliary column inside a session detail pane (facet panels, live-subagent
-  // cards, docs opened from agent prose).
-  "detail-aux-width",
+  // Width of an expanded doc card in a session detail's auxiliary rail, stored
+  // as a *fraction* of the pane rather than a pixel count: the same setting has
+  // to mean the same thing on a 13" laptop and on a 3440px ultrawide.
+  "detail-doc-card-ratio",
   // File-tree columns inside a detail pane (SkillsView / FilesView / ScratchpadView).
   "skills-tree-width",
   "files-tree-width",

@@ -53,16 +53,16 @@ import {
   isAuxFacet,
   openDoc,
   pruneTab,
-  showTab,
-  toggleTab,
+  showFacet,
+  toggleDoc,
   type AuxDocKind,
+  type AuxFacet,
   type AuxFacetItem,
 } from "../detailAux";
 import { useSessionAux } from "../useSessionAux";
 import { SessionAuxPanel } from "./SessionAuxPanel";
 import { SessionAuxRail } from "./SessionAuxRail";
 import { SessionFacetPanel } from "./SessionFacetPanel";
-import { SessionAuxDoc } from "./SessionAuxDoc";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
 import { followGrowthBehavior, liveThinkingLanded, retainLiveThinking } from "../streamContinuity";
@@ -702,7 +702,7 @@ export function SessionDetail({
     if (isStandalone) return;
     const facet = global.initialTab;
     if (!facet || !isAuxFacet(facet)) return;
-    setAux((st) => showTab(st, facet));
+    setAux((st) => showFacet(st, facet));
   }, [isStandalone, global.session?.id, global.initialTab]);
 
   // TASKS.md plan for THIS session — scoped to the plan the session is focused
@@ -805,15 +805,16 @@ export function SessionDetail({
   const bgTasks = liveSession?.backgroundTasks ?? [];
   const hasBgTasks = bgTasks.length > 0;
 
-  const pickTab = useCallback((id: string) => {
-    setAux((st) => toggleTab(st, id));
+  /* Clicking a doc card expands it into a reader in place, and clicking the
+     expanded one collapses it back — the card is its own on/off control. */
+  const pickDoc = useCallback((id: string) => {
+    setAux((st) => toggleDoc(st, id));
   }, []);
-  /* Picking a facet from the overflow menu only ever *opens* it. The tab strip's
-     click is a toggle because the strip is also the panel's on/off control; a
-     menu item that sometimes closed the panel you just asked for would read as
-     the click having missed. */
-  const openFacet = useCallback((id: string) => {
-    setAux((st) => showTab(st, id));
+  /* Picking a facet from the overflow menu only ever *opens* it: a menu item
+     that sometimes closed the panel you just asked for would read as the click
+     having missed. */
+  const openFacet = useCallback((id: AuxFacet) => {
+    setAux((st) => showFacet(st, id));
   }, []);
   const closeAuxPanel = useCallback(() => {
     setAux((st) => closeAux(st));
@@ -1126,27 +1127,25 @@ export function SessionDetail({
     workflowTrees.length,
   ]);
 
-  // Everything the drawer could legitimately be showing: a facet this session
-  // actually offers, or a doc that still has a card in the rail. A selection
-  // whose subject has since disappeared (the session took another turn and
-  // emptied 后台任务, say) would otherwise hold the drawer open on nothing.
-  const auxIds = useMemo(() => {
-    const ids = new Set<string>(auxFacets.map((f) => f.id));
-    for (const d of aux.docs) ids.add(d.id);
-    return ids;
-  }, [auxFacets, aux.docs]);
+  // Every facet the drawer could legitimately be showing — one this session
+  // actually offers. A selection whose subject has since disappeared (the
+  // session took another turn and emptied 后台任务, say) would otherwise hold
+  // the drawer open on nothing. Docs are not in here: they live in the rail,
+  // and `closeDoc` already collapses the reader when its card goes.
+  const auxIds = useMemo(
+    () => new Set<string>(auxFacets.map((f) => f.id)),
+    [auxFacets],
+  );
   useEffect(() => {
     setAux((st) => pruneTab(st, (id) => auxIds.has(id)));
   }, [auxIds]);
 
-  const activeTab = aux.active;
-  const auxOpen = activeTab != null;
-  const activeFacet = activeTab != null && isAuxFacet(activeTab) ? activeTab : null;
-  const activeDoc = activeTab == null ? null : aux.docs.find((d) => d.id === activeTab) ?? null;
+  const activeFacet = aux.active;
+  const auxOpen = activeFacet != null;
   // The drawer names the one thing it holds, in place of the tab strip.
   const drawerTitle = activeFacet
     ? auxFacets.find((f) => f.id === activeFacet)?.label ?? activeFacet
-    : activeDoc?.label ?? "";
+    : "";
   const railCards = liveSubagents.length + aux.docs.length;
   /* The rail follows its content by default — present when it has cards, zero
      width when it does not — until the reader says otherwise with the toolbar
@@ -1363,7 +1362,7 @@ export function SessionDetail({
                   <PlanProgressRow
                     plan={liveSession.taskPlan}
                     variant="header"
-                    onOpen={() => setAux((st) => showTab(st, "tasks"))}
+                    onOpen={() => setAux((st) => showFacet(st, "tasks"))}
                   />
                 )}
                 {/* Handoff relay chain — chip toggles the chain detail panel */}
@@ -1459,23 +1458,17 @@ export function SessionDetail({
                   open={railOpen}
                   agents={liveSubagents}
                   docs={aux.docs}
-                  activeId={activeTab}
+                  expandedId={aux.expanded}
                   onOpenAgent={open}
-                  onOpenDoc={pickTab}
+                  onToggleDoc={pickDoc}
                   onCloseDoc={dropDoc}
+                  onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
                 />
               </div>
             </div>
 
             {auxOpen && (
               <SessionAuxPanel title={drawerTitle} onClose={closeAuxPanel}>
-                {activeDoc && (
-                  <SessionAuxDoc
-                    doc={activeDoc}
-                    onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
-                    onClose={() => dropDoc(activeDoc.id)}
-                  />
-                )}
                 {activeFacet && (
                   <SessionFacetPanel
                     facet={activeFacet}

@@ -41,10 +41,11 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
         open
         agents={[]}
         docs={[]}
-        activeId={null}
+        expandedId={null}
         onOpenAgent={() => {}}
-        onOpenDoc={() => {}}
+        onToggleDoc={() => {}}
         onCloseDoc={() => {}}
+        onOpenWiki={() => {}}
         {...props}
       />,
     ),
@@ -89,16 +90,30 @@ describe("SessionAuxRail", () => {
     expect(el.querySelectorAll("aside > *")).toHaveLength(2);
   });
 
-  it("opens a doc card in the drawer, and dismisses it from its own ✕", () => {
-    const onOpenDoc = vi.fn();
+  it("expands a doc card in place, and dismisses it from its own ✕", () => {
+    const onToggleDoc = vi.fn();
     const onCloseDoc = vi.fn();
     const doc = makeAuxDoc("wiki", "arch/overview");
-    const el = render({ docs: [doc], onOpenDoc, onCloseDoc });
+    const el = render({ docs: [doc], onToggleDoc, onCloseDoc });
     const [open, close] = Array.from(el.querySelectorAll("button")) as HTMLElement[];
 
     act(() => open.click());
     act(() => close.click());
-    expect(onOpenDoc).toHaveBeenCalledWith(doc.id);
+    expect(onToggleDoc).toHaveBeenCalledWith(doc.id);
     expect(onCloseDoc).toHaveBeenCalledWith(doc.id);
+  });
+
+  // The whole point of the change: a doc is read in its own card, and the
+  // drawer — which used to carry it, under a duplicate copy of this same
+  // name — is not involved. The reader lands inside the card's own element.
+  it("reads the expanded doc inside the card, with a width grip", () => {
+    const doc = makeAuxDoc("wiki", "arch/overview");
+    const el = render({ docs: [doc], expandedId: doc.id });
+    const card = el.querySelector("aside > div:last-child") as HTMLElement;
+
+    expect(card.querySelector('[role="separator"]')).not.toBeNull();
+    // WikiTabPane mounts inside the card rather than in a drawer beside it.
+    expect(card.childElementCount).toBeGreaterThan(2);
+    expect(el.querySelectorAll("aside > *")).toHaveLength(1);
   });
 });

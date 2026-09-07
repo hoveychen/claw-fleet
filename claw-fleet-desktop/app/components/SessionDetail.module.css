@@ -573,6 +573,17 @@
   pointer-events: auto;
 }
 
+/* A card expanded into a reader needs more than --rail-w, so the *box* widens
+   (its px width is set inline from the persisted ratio — see SessionAuxRail)
+   while every collapsed card keeps --rail-w and the right edge. The transcript's
+   reserved band does NOT widen with it: that is what keeps this a card floating
+   over the conversation instead of a column squeezing it, and it is why the
+   widened area has to stay pointer-transparent between the cards. */
+.rail_wide > *:not(.doc_card_expanded) {
+  width: var(--rail-w);
+  align-self: flex-end;
+}
+
 /* Only ever seen when the switch pinned the rail open with nothing in it.
    No card, no frame: a line of dim text over the transcript, so the empty rail
    still reads as absence rather than as a card that failed to fill. */
@@ -634,22 +645,51 @@
 }
 
 /* ── Doc cards ──────────────────────────────────────────────────────────────
-   A file / wiki doc / page the agent named. Deliberately one line: the card is
-   the handle, the drawer is where you read the thing. */
+   A file / wiki doc / page the agent named. One line while collapsed — a
+   handle. Clicking it expands *this card* into the reader (.doc_card_expanded
+   below); it used to open the drawer, which said the same name twice and threw
+   a fixed-width panel over the conversation. */
 .doc_card {
   display: flex;
   align-items: center;
 }
 
-/* The card whose doc the drawer is reading. A tinted fill alone read as
-   "pressed/disabled" in the light theme, so the cue is the accent: the card is
-   the handle for what is on screen, not a greyed-out row. */
-.doc_card_open {
-  background: var(--color-accent-soft);
+/* The reader. Same card — same fill, hairline and shadow — grown to hold one of
+   the three doc panes, and given the rail's whole (widened) box. It takes the
+   height the rail has left, so the page inside scrolls rather than the rail. */
+.doc_card_expanded {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 220px;
+  overflow: hidden;
 }
-.doc_card_open .doc_card_icon,
-.doc_card_open .doc_card_label {
-  color: var(--color-accent);
+
+/* The expanded card's own title row keeps the collapsed card's metrics, so
+   expanding does not make the name jump. Its bottom hairline is the only
+   divider in the rail, and it earns it: below it is a different document. */
+.doc_card_head {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Drag grip on the left edge — the card grows toward the conversation, so this
+   is the edge that moves. Sits half outside the card so the 7px target is
+   grabbable without eating into the reader's own left padding. */
+.doc_card_grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+}
+.doc_card_grip:hover,
+.doc_card_grip:active {
+  background: var(--color-accent-soft);
 }
 
 .doc_card_main {
