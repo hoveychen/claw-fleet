@@ -150,7 +150,7 @@ function chainTone(members: SessionInfo[]): string | null {
   return best;
 }
 
-function timeAgo(ms: number): string {
+export function timeAgo(ms: number): string {
   const diff = Date.now() - ms;
   if (diff < 60_000) return t("刚刚");
   if (diff < 3_600_000) return t("{0} 分钟前", Math.floor(diff / 60_000));

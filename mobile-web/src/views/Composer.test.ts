@@ -7,6 +7,7 @@ import {
   newSessionConfigSummary,
   newSessionLocationSummary,
   recentWorkspaces,
+  recentWorkspaceRows,
   resumeConfigChips,
 } from "./Composer";
 import { loadDraft, saveDraft, type DraftStorage } from "../draft";
@@ -301,5 +302,39 @@ describe("resumeConfigChips", () => {
         }),
       ).toEqual(["gpt-5.6-sol · medium"]);
     }
+  });
+});
+
+describe("recentWorkspaceRows", () => {
+  function live(path: string, name: string, ms: number, status: string): SessionInfo {
+    return { ...session(path, name, ms), status } as unknown as SessionInfo;
+  }
+
+  it("同一项目下的在跑会话被数出来，时间戳取最近的那条", () => {
+    const rows = recentWorkspaceRows(
+      [
+        live("/home/repo", "Repo", 100, "executing"),
+        live("/home/repo", "Repo", 500, "idle"),
+        live("/home/repo", "Repo", 300, "thinking"),
+      ],
+      null,
+    );
+    expect(rows).toEqual([{ path: "/home/repo", name: "Repo", lastMs: 500, running: 2 }]);
+  });
+
+  it("worktree 折叠进 repo 根之后，两边的在跑会话合并计数", () => {
+    const rows = recentWorkspaceRows(
+      [
+        live("/home/repo", "Repo", 100, "executing"),
+        live("/home/repo/.worktrees/feat-x", "Repo", 900, "streaming"),
+      ],
+      null,
+    );
+    expect(rows).toEqual([{ path: "/home/repo", name: "Repo", lastMs: 900, running: 2 }]);
+  });
+
+  it("全是闲置时 running 为 0", () => {
+    const rows = recentWorkspaceRows([live("/home/repo", "Repo", 100, "idle")], null);
+    expect(rows[0].running).toBe(0);
   });
 });

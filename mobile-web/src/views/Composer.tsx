@@ -19,7 +19,7 @@ import { scopedKey, useDeviceDraft, useDeviceScope } from "../deviceScope";
 import { t } from "../i18n";
 import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type FleetTransport } from "../transport";
 import { waitForSessionId } from "../spawnConfirm";
-import type { SessionInfo } from "../types";
+import { isSessionLive, type SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useSourcesConfig } from "../useSourcesConfig";
 import { toolChoicesForSources, toolForAgentSource } from "../agentSource";
@@ -27,6 +27,7 @@ import { dshEffortsFor, dshModelGroups, useDshModels } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
+import { timeAgo } from "./TasksView";
 import { useFollowTail, useVoiceRecorder } from "../useVoiceRecorder";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
@@ -527,28 +528,55 @@ export function isTempWorkspacePath(path: string): boolean {
  *  以去重；剔除临时目录（{@link isTempWorkspacePath}）与纯聊天路径（它单独钉在选项首位）。
  *  默认选中**不**依赖这里的顺序——它来自记住的「上次成功创建会话用的 repo」（见
  *  {@link defaultWorkspace}）。*/
-export function recentWorkspaces(
+/** 新会话页主区列出的一行项目。
+ *
+ * 名字之外还带「上次活动」与「几个会话在跑」：这两样 sessions 快照里本来就有，
+ * 只是过去被 recentWorkspaces 在返回时丢掉了。挑项目时真正想知道的就是这两件事
+ * ——哪个最近在动、哪个已经有人在跑。 */
+export interface WorkspaceRow {
+  path: string;
+  name: string;
+  lastMs: number;
+  running: number;
+}
+
+export function recentWorkspaceRows(
   sessions: SessionInfo[],
   chatPath: string | null,
   limit = 30,
-): [string, string][] {
-  const byPath = new Map<string, { name: string; lastMs: number }>();
+): WorkspaceRow[] {
+  const byPath = new Map<string, { name: string; lastMs: number; running: number }>();
   for (const s of sessions) {
     if (!s.workspacePath) continue;
     const path = repoRootPath(s.workspacePath);
     if (isTempWorkspacePath(path)) continue;
     if (path === chatPath) continue;
     const prev = byPath.get(path);
+    const running = (prev?.running ?? 0) + (isSessionLive(s) ? 1 : 0);
     // 同一路径下保留最近活动的那条会话的名字与时间戳。
     if (!prev || s.lastActivityMs > prev.lastMs) {
-      byPath.set(path, { name: s.workspaceName || basename(path), lastMs: s.lastActivityMs });
+      byPath.set(path, {
+        name: s.workspaceName || basename(path),
+        lastMs: s.lastActivityMs,
+        running,
+      });
+    } else {
+      prev.running = running;
     }
   }
   return [...byPath.entries()]
     .sort((a, b) => b[1].lastMs - a[1].lastMs)
     .slice(0, limit)
     .sort((a, b) => a[1].name.localeCompare(b[1].name))
-    .map(([path, { name }]) => [path, name]);
+    .map(([path, v]) => ({ path, ...v }));
+}
+
+export function recentWorkspaces(
+  sessions: SessionInfo[],
+  chatPath: string | null,
+  limit = 30,
+): [string, string][] {
+  return recentWorkspaceRows(sessions, chatPath, limit).map((r) => [r.path, r.name]);
 }
 
 /** localStorage key（走 draft.ts 的 `fleet-draft:` 前缀，再按设备加命名空间），
@@ -616,7 +644,8 @@ export function NewSessionSheet({
   // 纯聊天 workspace：不绑定项目，没有「最近会话」可被发现，必须显式钉在选项首位。
   const chatPath = useChatWorkspace(client);
 
-  const recents = recentWorkspaces(sessions, chatPath);
+  const recentRows = recentWorkspaceRows(sessions, chatPath);
+  const recents = recentRows.map((r): [string, string] => [r.path, r.name]);
   // 供超时后的宽限期确认读取最新快照(prop 每次快照推送都会更新)。
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
@@ -848,29 +877,43 @@ export function NewSessionSheet({
             底部的胶囊行之后，这块地才有东西可放。 */}
         <div className={styles.sheetBody}>
           <span className={styles.sectionLabel}>{t("最近")}</span>
-          <div className={styles.recentGrid}>
-            {recents.map(([path, name]) => (
+          <div className={styles.recentList}>
+            {recentRows.map((row) => (
               <button
-                key={path}
-                className={styles.recentChip}
-                data-active={workspace === path || undefined}
-                onClick={() => patch({ workspace: path })}
+                key={row.path}
+                className={styles.recentRow}
+                data-active={workspace === row.path || undefined}
+                onClick={() => patch({ workspace: row.path })}
               >
-                {name}
+                <span className={styles.recentName}>{row.name}</span>
+                <span className={styles.recentMeta}>
+                  {row.running > 0 && (
+                    <span className={styles.recentRunning}>
+                      <span className={styles.recentDot} />
+                      {t("{0} 个在跑", row.running)}
+                    </span>
+                  )}
+                  {timeAgo(row.lastMs)}
+                </span>
+                {workspace === row.path && <Check size={17} className={styles.recentCheck} />}
               </button>
             ))}
             {chatPath && (
               <button
-                className={styles.recentChip}
+                className={styles.recentRow}
                 data-active={isChat || undefined}
                 onClick={() => patch({ workspace: chatPath })}
               >
-                {t("纯聊天")}
+                <span className={styles.recentName}>{t("纯聊天")}</span>
+                <span className={styles.recentMeta}>{t("不绑定任何项目目录")}</span>
+                {isChat && <Check size={17} className={styles.recentCheck} />}
               </button>
             )}
-            <button className={styles.recentChip} onClick={() => setPicker("location")}>
-              <FolderSearch size={14} />
-              {t("选目录…")}
+            <button className={styles.recentRow} onClick={() => setPicker("location")}>
+              <span className={styles.recentName}>
+                <FolderSearch size={15} />
+                {t("选目录…")}
+              </span>
             </button>
           </div>
           {sendsPermissionMode && permissionMode === "bypassPermissions" && (
