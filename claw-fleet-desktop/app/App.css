@@ -16,6 +16,13 @@ html, body, #root {
 :root { --win-caption-inset-x: 0px; }
 html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
 
+/* The same reservation expressed as HEIGHT, for a column whose top-right corner
+   the caption buttons cover but which has no horizontal bar to pad — the detail
+   column of PageShell's three-column layout (see its `.col_last`). Matches the
+   38px caption strip in WindowsFrameOverlay.module.css. */
+:root { --win-caption-inset-y: 0px; }
+html.tauri-host.os-windows { --win-caption-inset-y: 38px; }
+
 /* ── Design scales (theme-independent) ────────────────────────────────────────
    Radius/space/type had NO scale before: a survey of the component CSS found
    border-radius hardcoded at 15 distinct values. These collapse it to a small

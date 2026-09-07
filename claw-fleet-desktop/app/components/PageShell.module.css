@@ -1,6 +1,9 @@
 /* ── PageShell ────────────────────────────────────────────────────────────────
    The one copy of the page structure that used to live, duplicated, in seven
-   module.css files: banner over [rail | main]. */
+   module.css files. Three columns: the app sidebar (SessionList, outside this
+   file) | the list column | the detail column. The banner rides INSIDE the list
+   column — see PageShell.tsx's header comment for why. A page with no rail is a
+   single column and keeps the full-width banner. */
 
 .page {
   flex: 1;
@@ -30,6 +33,52 @@
    clicks on the controls sitting in it. */
 .banner :is(input, button, select, a, textarea) {
   -webkit-app-region: no-drag;
+}
+
+/* Wide layout only: bannerCenter's nodes are direct flex children of the banner,
+   as they were before the wrapper existed. */
+.center {
+  display: contents;
+}
+
+/* ── Banner, column variant ───────────────────────────────────────────────────
+   Same nodes, restacked for a ~240–360px column: title + actions share row 1,
+   the search box takes row 2 edge to edge, bannerCenter takes row 3. Ordered
+   explicitly rather than by DOM position so the source order can stay the one
+   the wide layout wants. */
+
+.banner_column {
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: 14px var(--space-5) var(--space-4);
+  /* Not at the window's top-right corner any more — the caption buttons float
+     over the LAST column instead (see .col_last). */
+  padding-right: var(--space-5);
+}
+
+.banner_column .title_row { order: 1; }
+.banner_column .actions { order: 2; }
+
+.banner_column .search_wrap {
+  order: 3;
+  flex: 1 0 100%;
+  max-width: none;
+}
+
+.banner_column .center {
+  order: 4;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+/* A page's bannerCenter is usually a workspace <select> sized for a wide
+   banner. Let it use the column instead of overflowing it. */
+.banner_column .center > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .title_row {
@@ -112,6 +161,13 @@
   flex-shrink: 0;
 }
 
+/* Inside the list column the chips get the column's tighter gutter; they already
+   wrap, so a narrower measure just costs an extra row. */
+.sub_bar_column {
+  padding-left: var(--space-5);
+  padding-right: var(--space-5);
+}
+
 /* ── Body: rail + main ────────────────────────────────────────────────────── */
 
 .body {
@@ -149,4 +205,16 @@
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+}
+
+/* ── Windows caption buttons ──────────────────────────────────────────────────
+   They are drawn fixed at the window's top-right by WindowsFrameOverlay. The
+   full-width banner used to sit under them and reserved their width with
+   `--win-caption-inset-x`; with the banner moved into the list column, whatever
+   the LAST column puts at its top (a tab strip, a detail toolbar) is what they
+   now cover. Reserve their HEIGHT on that column instead — one rule here rather
+   than a padding-right every page's topmost widget has to remember. 0px off
+   Windows, so this is a no-op elsewhere. */
+.col_last {
+  padding-top: var(--win-caption-inset-y);
 }
