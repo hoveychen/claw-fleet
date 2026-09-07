@@ -47,14 +47,21 @@
      11.5 / 12.5 / 13.5 / 14.5 这些半像素值。那不是梯级，是每处随手挑的
      数——同一类信息在不同视图里是 11 还是 11.5 全凭当时手感。
 
-     四档，加一档标题。数值取各簇的主导值，正文抬到 17px —— iOS 原生正文
-     就是 17，手机上 15 明显偏小。已在 390×844 下量过横向溢出确认不撑破。
+     四档，加一档标题、一档控件。正文一度抬到 17（iOS 原生正文就是 17pt），
+     实际用下来在中文里偏胖 —— 汉字方块比等号字重的西文占更多横向空间，同一
+     个 17px 在中文段落里读起来比英文重一档。回到 16。已在 390×844 下量过
+     横向溢出确认不撑破。
      20 / 26 / 38 这三个大号不进梯级：它们是刻意的展示数字（首屏计数），
      不是正文体系的一部分。 */
   --t-meta: 11px; /* 时间戳、徽章、计数   (原 9.5/10/10.5/11) */
   --t-aux: 12px; /* 次要说明、等宽摘要   (原 11.5/12/12.5)  */
   --t-ui: 14px; /* 行标题、按钮、标签   (原 13/13.5/14/14.5) */
-  --t-body: 17px; /* 正文、气泡           (原 15/16)         */
+  /* 控件文字：下拉、菜单行、表单里的按钮。
+     它一度直接吃 --t-body —— 于是「新会话页比别的页胖一圈」：那一页的每个
+     下拉和按钮都按正文字号排版，而 iOS 的控件文字本就比正文小一档。这一档
+     专门收这些位置，正文不受影响。 */
+  --t-ctl: 15px; /* 控件文字：下拉/菜单行/表单按钮                */
+  --t-body: 16px; /* 正文、气泡           (原 15/16，一度 17)      */
   --t-h2: 18px; /* 小节标题             (原 17/18)         */
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
@@ -103,7 +110,7 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
-  font-size: var(--t-body, 17px);
+  font-size: var(--t-body, 16px);
   line-height: 1.5;
   overscroll-behavior-y: none;
   /* 锁双指/双击缩放：Chrome 48+ 起有意忽略 <meta user-scalable=no / maximum-scale>
@@ -135,7 +142,7 @@ select {
   font-family: inherit;
   /* 跟随正文字号。下限是 16px：聚焦时 <16px 会触发 iOS 页面缩放，所以这里
      可以比 16 大、绝不能比 16 小。 */
-  font-size: var(--t-body, 17px);
+  font-size: var(--t-body, 16px);
   color: var(--color-text);
   background: var(--color-bg-input);
   border: 1px solid var(--color-border);

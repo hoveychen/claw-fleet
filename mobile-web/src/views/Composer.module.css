@@ -28,7 +28,7 @@
 
 .sheetTitle {
   text-align: center;
-  font-size: var(--t-body, 17px);
+  font-size: var(--t-body, 16px);
   font-weight: 700;
 }
 
@@ -106,7 +106,9 @@
   display: block;
   margin: 0 2px 7px;
   color: var(--color-text-secondary);
-  font-size: var(--t-aux, 12px);
+  /* 13 而不是 --t-aux 的 12：暗底上 12px 的 650 字重发虚，13 是 iOS caption。
+     这一处不走 token —— 它是分组标题，不是「次要说明」。 */
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.04em;
 }
@@ -117,21 +119,21 @@
   background: var(--color-bg-input);
   border: 1px solid var(--color-border);
   border-radius: 10px;
-  min-height: 48px;
+  min-height: 46px;
   padding: 10px 12px;
   color: var(--color-text);
-  font-size: var(--t-body, 17px);
+  font-size: var(--t-ctl, 15px);
 }
 
 .deviceSelect {
   width: 100%;
-  min-height: 48px;
+  min-height: 46px;
   background: var(--color-bg-input);
   border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 10px 12px;
   color: var(--color-text);
-  font-size: var(--t-body, 17px);
+  font-size: var(--t-ctl, 15px);
 }
 
 .deviceOffline {
@@ -157,7 +159,7 @@
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
-  min-height: 48px;
+  min-height: 46px;
   background: var(--color-bg-input);
   border: 1px solid var(--color-border-strong);
   border-radius: 10px;
@@ -282,7 +284,7 @@
 
 .pickerHead strong {
   text-align: center;
-  font-size: var(--t-body, 17px);
+  font-size: var(--t-body, 16px);
 }
 
 .pickerHead button {
@@ -356,9 +358,9 @@
 }
 
 .pickerSheet .optionSelect {
-  min-height: 48px;
+  min-height: 46px;
   color: var(--color-text);
-  font-size: var(--t-body, 17px);
+  font-size: var(--t-ctl, 15px);
 }
 
 @media (max-height: 640px) {
@@ -434,7 +436,7 @@
   border: none;
   padding: 10px 2px;
   color: var(--color-text);
-  font-size: var(--t-body, 17px);
+  font-size: var(--t-body, 16px);
   line-height: 1.4;
   resize: none;
   overflow-y: auto;

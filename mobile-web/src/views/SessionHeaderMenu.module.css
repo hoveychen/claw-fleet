@@ -48,7 +48,7 @@
 }
 
 .sheetTitle {
-  font-size: var(--t-body, 17px);
+  font-size: var(--t-body, 16px);
   font-weight: 700;
 }
 
