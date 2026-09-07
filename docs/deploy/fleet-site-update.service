@@ -1,0 +1,19 @@
+[Unit]
+Description=Mirror stable Claw Fleet releases to the Shenzhen download site
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=fleet-site
+Group=fleet-site
+UMask=0022
+ExecStart=/usr/bin/python3 -u /opt/fleet-site-updater/selfhost.py --root /srv/claw-fleet-site --public-url https://fleet.eternizedlab.com
+TimeoutStartSec=45min
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/claw-fleet-site
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
