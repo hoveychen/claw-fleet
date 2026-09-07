@@ -56,10 +56,21 @@ const HEALTH_ENDPOINT: &str = "settings/describe";
 
 /// Locate the `dsh` executable.
 ///
-/// PATH first, then the standard global-npm install locations. Fleet never
-/// falls back to `npx`: a cold `npx @deepseek-ai/dsh` downloads ~300 MB before
-/// it serves anything, which would turn "start a session" into a multi-minute
-/// stall with no way to report progress. A user who wants dsh installs it
+/// Scans the augmented PATH — the process PATH plus every dir an `npm i -g`
+/// binary can land in (homebrew, `/usr/local`, `~/.npm-global`, `~/.local`,
+/// nvm / fnm / volta, and the wizard's own `~/.fleet/node`). Not a plain
+/// `which`: a GUI app's PATH is only the system dirs, so a dsh installed
+/// under a version-managed Node would be invisible to it even though the
+/// wizard had just installed it through the official channel
+/// ([`crate::harness_install`] locates `npm` across the same dirs, and the two
+/// must agree about what "installed" means).
+///
+/// Fleet never falls back to `npx`: a cold `npx @deepseek-ai/dsh` downloads
+/// ~300 MB before it serves anything, which would turn "start a session" into
+/// a multi-minute stall with no way to report progress. `npx` also installs
+/// nothing on PATH — it unpacks into `~/.npm/_npx/<content hash>/`, which no
+/// scan can enumerate — so a user who ran `npx @deepseek-ai/dsh web` by hand
+/// is not discoverable here by construction. A user who wants dsh installs it
 /// (`npm i -g @deepseek-ai/dsh`), exactly like Claude Code and Codex.
 pub fn discover() -> Option<PathBuf> {
     // Explicit override, same escape hatch `claude_binary` gives for a Claude
@@ -73,20 +84,26 @@ pub fn discover() -> Option<PathBuf> {
         }
     }
 
-    if let Some(p) = crate::process_util::which("dsh") {
-        return Some(PathBuf::from(p));
-    }
+    crate::session_launch::find_in_dirs(&search_dirs(), binary_names())
+}
 
-    let home = dirs::home_dir();
-    let candidates = [
-        home.as_ref()
-            .map(|h| h.join(".npm-global").join("bin").join("dsh")),
-        Some(PathBuf::from("/opt/homebrew/bin/dsh")),
-        Some(PathBuf::from("/usr/local/bin/dsh")),
-        home.as_ref()
-            .map(|h| h.join(".local").join("bin").join("dsh")),
-    ];
-    candidates.into_iter().flatten().find(|p| p.exists())
+/// Filenames an installed dsh can carry. npm's global bin on Windows is a
+/// generated `dsh.cmd` shim next to the extensionless shell script; ordering
+/// puts the runnable one first.
+fn binary_names() -> &'static [&'static str] {
+    #[cfg(windows)]
+    {
+        &["dsh.cmd", "dsh.exe", "dsh"]
+    }
+    #[cfg(not(windows))]
+    {
+        &["dsh"]
+    }
+}
+
+/// The directories [`discover`] scans, in order.
+fn search_dirs() -> Vec<PathBuf> {
+    crate::session_launch::augmented_path_dirs()
 }
 
 /// Is dsh installed on this machine?
@@ -537,6 +554,46 @@ fn read_launch_line(child: &mut Child) -> Result<(u16, String), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// dsh installs through `npm i -g`, so it lands in whatever bin dir the
+    /// active Node.js runtime owns — and when Node comes from nvm / fnm /
+    /// volta, or from the environment wizard's own bootstrap under
+    /// `~/.fleet/node`, that dir is none of the four classic globals. A GUI
+    /// app's PATH is only the system dirs, so the `which` step misses it too:
+    /// the wizard would install dsh through its official channel and then
+    /// still report it as not installed.
+    ///
+    /// The installer side already scans the augmented PATH
+    /// (`harness_install::find_in_augmented_path`); discovery must search the
+    /// same set, or the two disagree about what "installed" means.
+    #[test]
+    fn search_dirs_cover_the_runtime_managed_node_bin_dirs() {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", tmp.path()) };
+
+        let dirs = search_dirs();
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
+            None => unsafe { std::env::remove_var("FLEET_HOME") },
+        }
+
+        let home = tmp.path();
+        for expected in [
+            home.join(".fleet").join("node").join("bin"),
+            home.join(".volta").join("bin"),
+            home.join("Library/Application Support/fnm/aliases/default/bin"),
+            home.join(".local/share/fnm/aliases/default/bin"),
+        ] {
+            assert!(
+                dirs.contains(&expected),
+                "discover() does not search {}; dirs = {dirs:?}",
+                expected.display()
+            );
+        }
+    }
 
     /// The registry is blind to servers spawned under a throwaway `FLEET_HOME`
     /// (tests, harness scripts): their records evaporate with the temp dir and

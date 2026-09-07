@@ -90,6 +90,39 @@ pub(crate) fn augmented_path_with_front(front: &[PathBuf]) -> String {
         })
 }
 
+/// The same directory list [`augmented_path_with_front`] builds, unjoined.
+///
+/// Split out because two callers want to *search* those dirs rather than hand
+/// them to a child: [`find_in_augmented_path`] below, and
+/// [`crate::dsh_server::discover`]'s scan for an installed `dsh`.
+pub(crate) fn augmented_path_dirs() -> Vec<PathBuf> {
+    std::env::split_paths(&augmented_path_with_front(&[])).collect()
+}
+
+/// First existing file named one of `names` across the augmented PATH.
+///
+/// A GUI app's own PATH is only the system dirs, so a plain `which` misses
+/// every homebrew / nvm / fnm / volta / `~/.fleet/node` install — which is
+/// exactly where an `npm i -g` binary lands. Both the wizard's installer
+/// (locating `npm`) and dsh discovery go through here so the two never
+/// disagree about whether a harness is installed.
+pub(crate) fn find_in_augmented_path(names: &[&str]) -> Option<PathBuf> {
+    find_in_dirs(&augmented_path_dirs(), names)
+}
+
+/// First existing file named one of `names` under `dirs`, searched in order.
+pub(crate) fn find_in_dirs(dirs: &[PathBuf], names: &[&str]) -> Option<PathBuf> {
+    for dir in dirs {
+        for name in names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 /// Request body for the remote `/spawn_session` endpoint.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
