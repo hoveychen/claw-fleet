@@ -135,8 +135,35 @@ describe("statusTone quiet-alive", () => {
   });
 
   it("does not dim a genuinely working row down to quiet", () => {
-    expect(statusTone(row({ status: "executing", procAlive: true }))).toBe("working");
-    expect(statusTone(row({ status: "waitingInput", procAlive: true }))).toBe("waiting");
+    // Distinct ids: the tone mapping is what's under test, and the anti-flicker
+    // latch is per session — one id would carry the quiet state across.
+    expect(statusTone(row({ id: "w", status: "executing", procAlive: true }))).toBe("working");
+    expect(statusTone(row({ id: "i", status: "waitingInput", procAlive: true }))).toBe("waiting");
+  });
+
+  it("does not flick back to working on a single sparse write", () => {
+    // Same flicker the desktop row had: a session parked on one long tool call
+    // writes a line every few minutes, each write pushes the status back to a
+    // live one for its hard window, and the dot alternated quiet → working →
+    // quiet. One lone write must not win the bright tone back.
+    const now = Date.now();
+    const id = "flicker-1";
+    expect(
+      statusTone(row({ id, status: "idle", procAlive: true, lastActivityMs: now - 200_000 })),
+    ).toBe("quiet");
+    expect(
+      statusTone(row({ id, status: "executing", procAlive: true, lastActivityMs: now - 1_000 })),
+    ).toBe("quiet");
+  });
+
+  it("goes back to working once two writes land close together", () => {
+    const now = Date.now();
+    const id = "recover-1";
+    statusTone(row({ id, status: "idle", procAlive: true, lastActivityMs: now - 200_000 }));
+    statusTone(row({ id, status: "executing", procAlive: true, lastActivityMs: now - 20_000 }));
+    expect(
+      statusTone(row({ id, status: "executing", procAlive: true, lastActivityMs: now - 1_000 })),
+    ).toBe("working");
   });
 });
 

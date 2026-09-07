@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   canResumeSession,
   isQuietAlive,
+  resetQuietAliveLatch,
   rowBarColor,
   shouldFollowSession,
   HANDOFF_ENTRYPOINT,
@@ -106,6 +107,11 @@ describe("canResumeSession", () => {
 });
 
 describe("isQuietAlive / rowBarColor third state", () => {
+  // `rowBarColor` feeds a module-level anti-flicker latch keyed by session id,
+  // and every case here reuses the same fixture id — without this each case
+  // would inherit the previous one's latch.
+  beforeEach(() => resetQuietAliveLatch());
+
   it("marks a live process whose transcript went quiet as quiet-alive", () => {
     // The scan-computed status ages out on a hard clock (`determine_status`:
     // tool_use → Executing for 60s, then Idle), so a session sitting on one
@@ -125,13 +131,33 @@ describe("isQuietAlive / rowBarColor third state", () => {
   });
 
   it("paints quiet-alive rows a faded green, distinct from both live and ended", () => {
-    expect(rowBarColor(session({ status: "idle", procAlive: true }))).toBe(
+    // Distinct ids: the colour mapping is what's under test here, and the latch
+    // is per session — reusing one id would (correctly) carry the faded state
+    // from the first assertion into the second.
+    expect(rowBarColor(session({ id: "q", status: "idle", procAlive: true }))).toBe(
       "rgba(var(--color-success-rgb), 0.45)",
     );
-    expect(rowBarColor(session({ status: "executing", procAlive: true }))).toBe(
+    expect(rowBarColor(session({ id: "live", status: "executing", procAlive: true }))).toBe(
       "var(--color-success)",
     );
-    expect(rowBarColor(session({ status: "idle", procAlive: false }))).toBe(null);
+    expect(rowBarColor(session({ id: "dead", status: "idle", procAlive: false }))).toBe(null);
+  });
+
+  it("does not flick back to solid green on a single sparse write", () => {
+    // The flicker: a session parked on one long tool call writes a line every
+    // few minutes. Each write pushes the status back to a live one for its hard
+    // window, so the dot alternated solid → faded → solid. Once a live process
+    // has been seen quiet, one lone write must not win the solid green back.
+    const now = Date.now();
+    const id = "flicker-1";
+    expect(
+      rowBarColor(session({ id, status: "idle", procAlive: true, lastActivityMs: now - 200_000 })),
+    ).toBe("rgba(var(--color-success-rgb), 0.45)");
+    expect(
+      rowBarColor(
+        session({ id, status: "executing", procAlive: true, lastActivityMs: now - 1_000 }),
+      ),
+    ).toBe("rgba(var(--color-success-rgb), 0.45)");
   });
 });
 
