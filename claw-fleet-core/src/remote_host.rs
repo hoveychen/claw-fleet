@@ -599,6 +599,15 @@ pub(crate) fn parse_harness_probe(raw: &str) -> Vec<crate::harness_status::Harne
                 "codex" => Some(codex_auth),
                 _ => None,
             };
+            // A remote probe reads `<bin> --version` the same way, so the dsh
+            // floor applies there too: a too-old remote dsh fails its first
+            // session exactly like a local one, and the panel shows the same
+            // badge for both.
+            let is_dsh = *name == "dsh";
+            let outdated = is_dsh
+                && path.is_some()
+                && !crate::dsh_server::meets_min_version(version.as_deref());
+            let min_version = is_dsh.then(|| crate::dsh_server::MIN_VERSION.to_string());
             HarnessStatus {
                 source: source.to_string(),
                 installed: path.is_some(),
@@ -607,6 +616,8 @@ pub(crate) fn parse_harness_probe(raw: &str) -> Vec<crate::harness_status::Harne
                 channel: None,
                 logged_in,
                 auth_detail: None,
+                outdated,
+                min_version,
             }
         })
         .collect()

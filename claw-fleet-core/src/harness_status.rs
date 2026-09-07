@@ -46,6 +46,17 @@ pub struct HarnessStatus {
     /// Human-oriented auth detail: Claude subscription type ("max"), Codex
     /// auth mode ("chatgpt" / "api-key"), …
     pub auth_detail: Option<String>,
+    /// Installed, but too old for Fleet to drive. Only dsh has a floor today
+    /// (see [`crate::dsh_server::MIN_VERSION`]); Claude and Codex keep
+    /// themselves current and Fleet reads their transcripts off disk rather
+    /// than speaking a versioned wire protocol to them.
+    #[serde(default)]
+    pub outdated: bool,
+    /// The floor `outdated` was judged against, so the UI can name the version
+    /// to upgrade to instead of hardcoding it. `None` when the harness has no
+    /// minimum.
+    #[serde(default)]
+    pub min_version: Option<String>,
 }
 
 /// Probe every harness Fleet knows how to drive, in stable order.
@@ -106,6 +117,10 @@ fn probe_claude() -> HarnessStatus {
         channel,
         logged_in,
         auth_detail,
+        // Claude and Codex self-update and Fleet reads them off disk;
+        // no wire-protocol floor to enforce.
+        outdated: false,
+        min_version: None,
     }
 }
 
@@ -163,6 +178,10 @@ fn probe_codex() -> HarnessStatus {
         channel,
         logged_in,
         auth_detail,
+        // Claude and Codex self-update and Fleet reads them off disk;
+        // no wire-protocol floor to enforce.
+        outdated: false,
+        min_version: None,
     }
 }
 
@@ -227,28 +246,43 @@ fn codex_auth_state_from_json(v: &Value) -> (Option<bool>, Option<String>) {
 
 fn probe_dsh() -> HarnessStatus {
     let found = crate::dsh_server::discover();
-    let (installed, path, channel) = match &found {
-        Some(p) => {
-            let s = p.to_string_lossy().to_string();
-            let channel = dsh_channel_for_path(p);
-            (true, Some(s), Some(channel.to_string()))
-        }
-        None => (false, None, None),
+    let (path, channel) = match &found {
+        Some(p) => (
+            Some(p.to_string_lossy().to_string()),
+            Some(dsh_channel_for_path(p)),
+        ),
+        None => (None, None),
     };
-
     let version = path.as_deref().and_then(probe_version);
+    dsh_status_from_probe(path, channel, version)
+}
 
+/// Assemble the dsh status from an already-resolved probe, split out so the
+/// version verdict is testable without a dsh on the machine.
+fn dsh_status_from_probe(
+    path: Option<String>,
+    channel: Option<&str>,
+    version: Option<String>,
+) -> HarnessStatus {
+    let installed = path.is_some();
+    // Only judged when there is a binary *and* a readable version: "not
+    // installed" and "version unreadable" are both distinct from "too old",
+    // and reporting either as old would send the user upgrading something
+    // that is not the problem.
+    let outdated = installed && !crate::dsh_server::meets_min_version(version.as_deref());
     HarnessStatus {
         source: "dsh".to_string(),
         installed,
         path,
         version,
-        channel,
+        channel: channel.map(str::to_string),
         // dsh has no account layer at all (bring-your-own-key harness); the
         // wizard's dsh card shows provider-credential state instead, which is
         // the login-flows plan's concern, not this probe's.
         logged_in: None,
         auth_detail: None,
+        outdated,
+        min_version: Some(crate::dsh_server::MIN_VERSION.to_string()),
     }
 }
 
@@ -262,8 +296,16 @@ fn dsh_channel_for_path(path: &Path) -> &'static str {
         return "override";
     }
     let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let canon = canon.to_string_lossy();
-    if canon.contains("node_modules") {
+    let canon = canon.to_string_lossy().replace('\\', "/");
+    // Order matters: an npx cache entry lives at
+    // `_npx/<hash>/node_modules/.bin/dsh`, so it satisfies the node_modules
+    // test too — and calling that "npm-global" is a claim the user acts on
+    // (nothing was installed globally). The wizard still offers the same
+    // `npm i -g` remedy, but the row now says where the binary really came
+    // from. See `dsh_server::npx_cache_bin_dirs` for why such a copy exists.
+    if canon.contains("/_npx/") {
+        "npx-cache"
+    } else if canon.contains("node_modules") {
         "npm-global"
     } else {
         "path"
@@ -465,6 +507,66 @@ mod tests {
         let plain = tmp.path().join("plain-dsh");
         std::fs::write(&plain, b"bin").unwrap();
         assert_eq!(dsh_channel_for_path(&plain), "path");
+    }
+
+    /// An npx-cached dsh sits under `_npx/<hash>/node_modules/.bin`, so the
+    /// plain "contains node_modules" rule labels it `npm-global` — which is a
+    /// lie the user acts on: nothing was installed globally, and the panel's
+    /// channel row would claim otherwise. It gets its own label.
+    #[test]
+    fn dsh_channel_distinguishes_an_npx_cache_copy_from_a_global_install() {
+        let tmp = tempfile::tempdir().unwrap();
+        let npx = tmp
+            .path()
+            .join(".npm/_npx/deadbeef00000001/node_modules/.bin");
+        std::fs::create_dir_all(&npx).unwrap();
+        let npx_bin = npx.join("dsh");
+        std::fs::write(&npx_bin, b"#!/usr/bin/env node\n").unwrap();
+        assert_eq!(dsh_channel_for_path(&npx_bin), "npx-cache");
+
+        // A real global install must keep reading as npm-global.
+        let global_dir = tmp.path().join("lib/node_modules/@deepseek-ai/dsh/lib");
+        std::fs::create_dir_all(&global_dir).unwrap();
+        let global_bin = global_dir.join("bin.js");
+        std::fs::write(&global_bin, b"#!/usr/bin/env node\n").unwrap();
+        assert_eq!(dsh_channel_for_path(&global_bin), "npm-global");
+    }
+
+    /// The panel has to be able to say "installed, but too old" — otherwise a
+    /// user on 0.1.1 sees a healthy-looking dsh card and a session that fails
+    /// to start, with nothing connecting the two.
+    #[test]
+    fn dsh_status_flags_a_too_old_version_and_names_the_floor() {
+        let old = dsh_status_from_probe(
+            Some("/usr/local/bin/dsh".to_string()),
+            Some("npm-global"),
+            Some("0.1.1".to_string()),
+        );
+        assert!(old.installed, "an old dsh is still installed");
+        assert!(old.outdated, "0.1.1 must be flagged outdated");
+        assert_eq!(old.min_version.as_deref(), Some(crate::dsh_server::MIN_VERSION));
+
+        let shipping = dsh_status_from_probe(
+            Some("/usr/local/bin/dsh".to_string()),
+            Some("npm-global"),
+            Some("0.1.2-rc.1".to_string()),
+        );
+        assert!(
+            !shipping.outdated,
+            "0.1.2-rc.1 is the shipping build and must not be flagged"
+        );
+
+        // Not installed at all is not "outdated", and an unreadable version
+        // must not be reported as old either.
+        let missing = dsh_status_from_probe(None, None, None);
+        assert!(!missing.installed);
+        assert!(!missing.outdated);
+        let unknown = dsh_status_from_probe(
+            Some("/usr/local/bin/dsh".to_string()),
+            Some("path"),
+            None,
+        );
+        assert!(!unknown.outdated, "an unreadable version must not read as old");
     }
 
     /// Manual smoke probe against the real machine — run with
