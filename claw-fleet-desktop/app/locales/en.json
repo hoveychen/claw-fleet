@@ -7,7 +7,12 @@
       "watch": "Watch",
       "loop": "Loop",
       "schedule": "Schedule",
-      "wiki": "Wiki"
+      "wiki": "Wiki",
+      "artifact": "Artifact",
+      "inspect": "Inspect",
+      "control": "Signal",
+      "notes": "Notes",
+      "history": "History"
     },
     "param": {
       "plan_id": "Plan",
@@ -34,7 +39,21 @@
       "file": "File",
       "id": "ID",
       "model": "Model",
-      "effort": "Effort"
+      "effort": "Effort",
+      "all": "All",
+      "level": "Level",
+      "filter": "Filter",
+      "limit": "Limit",
+      "prefix": "Prefix",
+      "start_line": "From line",
+      "stop_line": "To line",
+      "max_files": "Max files",
+      "max_matches_per_file": "Max per file",
+      "session": "Session",
+      "line_no": "Line",
+      "offset_chars": "Char offset",
+      "limit_chars": "Char limit",
+      "force": "Force"
     },
     "summary": {
       "plan": {
@@ -78,6 +97,35 @@
         "cat": "View {{slug}}",
         "list": "List wiki",
         "search": "Search {{query}}"
+      },
+      "artifact": {
+        "add": "Stored artifact {{title}}",
+        "list": "Listed artifacts",
+        "get": "Artifact {{id}}",
+        "delete": "Deleted artifact {{id}}"
+      },
+      "inspect": {
+        "list": "Listed running agents",
+        "get": "Agent {{id}}",
+        "speed": "Token throughput",
+        "account": "Account usage",
+        "search": "Searched transcripts {{query}}",
+        "audit": "Audited risky commands"
+      },
+      "control": {
+        "stop": "Stopped agent {{id}}",
+        "interrupt": "Interrupted agent {{id}}"
+      },
+      "notes": {
+        "write": "Wrote note {{path}}",
+        "append": "Appended to note {{path}}",
+        "read": "Read note {{path}}",
+        "list": "Listed notes",
+        "search": "Searched notes {{query}}"
+      },
+      "history": {
+        "search": "Searched history {{query}}",
+        "read": "Read history line {{line}}"
       }
     },
     "rec": {
@@ -1726,7 +1774,15 @@
       "loop": "Loop",
       "schedule": "Schedule",
       "wiki": "Wiki",
-      "set_session_title": "Set title"
+      "set_session_title": "Set title",
+      "artifact": "Artifact",
+      "inspect": "Inspect",
+      "control": "Signal",
+      "notes": "Notes",
+      "history": "History",
+      "image": "Image",
+      "image_edit": "Image edit",
+      "permission_prompt": "Permission prompt"
     },
     "tool_patch_add": "Creating {{path}}",
     "tool_patch_update": "Editing {{path}}",
@@ -1774,7 +1830,18 @@
     "no_summary": "No summary recorded.",
     "tool_running": "Running…",
     "decision_task_completed": "Task finished",
-    "decision_task_abandoned": "Task abandoned"
+    "decision_task_abandoned": "Task abandoned",
+    "fleet_sum": {
+      "title": "Set session title",
+      "title_named": "Set session title: {{title}}",
+      "image": "Generated an image",
+      "image_named": "Generated an image: {{desc}}",
+      "image_edit": "Revised the image",
+      "image_edit_named": "Revised the image: {{desc}}",
+      "render_a2ui": "Rendered a rich card",
+      "ask": "Raised a decision card",
+      "permission_prompt": "Asked for command approval"
+    }
   },
   "settings": {
     "title": "Settings",

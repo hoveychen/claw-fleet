@@ -197,6 +197,59 @@ export function parseExecCommand(command: string): { cmd?: string; workdir?: str
   return { cmd: field("cmd"), workdir: field("workdir") };
 }
 
+/** Trim a free-text field down to a collapsed-row-sized snippet. */
+function snippet(value: unknown, max = 80): string {
+  if (typeof value !== "string") return "";
+  const one = value.trim().replace(/\s+/g, " ");
+  return one.length > max ? `${one.slice(0, max)}…` : one;
+}
+
+/**
+ * Friendly one-liner for Fleet's *non-control* MCP tools — the always-on six of
+ * `claw-fleet-core/src/mcp_server.rs::ALWAYS_ON_TOOL_NAMES`. The eleven control
+ * tools never reach here (ContentBlocks routes them to `FleetToolCard`, which
+ * builds its own summary from `action`), and `fleet__ask` normally goes to
+ * `DecisionToolCard` — but a card with no questions falls through, so it is
+ * covered too.
+ *
+ * Without these branches every one of them hit `formatInput`'s raw-JSON last
+ * resort: `render_a2ui` dumped an entire A2UI message tree onto one row, and
+ * `image` / `image_edit` / `set_session_title` dumped their args object. Matched
+ * on the name tail because MCP namespaces the wire name
+ * (`mcp__fleet__fleet__image`), the same `endsWith` convention `isFleetTool`
+ * and `isDecisionTool` use.
+ */
+export function fleetToolSummary(
+  name: string,
+  input: Record<string, unknown>,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string | null {
+  const is = (tail: string) => name === `fleet__${tail}` || name.endsWith(`fleet__fleet__${tail}`);
+  // { title } — the one field, and it reads as the summary itself.
+  if (is("set_session_title")) {
+    const title = snippet(input.title);
+    return title ? t("detail.fleet_sum.title_named", { title }) : t("detail.fleet_sum.title");
+  }
+  // { description, size?, images? } — `description` is the image prompt.
+  if (is("image")) {
+    const desc = snippet(input.description);
+    return desc ? t("detail.fleet_sum.image_named", { desc }) : t("detail.fleet_sum.image");
+  }
+  // { thread_id, instruction } — the instruction is the one targeted edit.
+  if (is("image_edit")) {
+    const desc = snippet(input.instruction);
+    return desc ? t("detail.fleet_sum.image_edit_named", { desc }) : t("detail.fleet_sum.image_edit");
+  }
+  // { messageTree } — a whole A2UI component tree; there is no short field to
+  // lift, so name the operation and leave the tree to the expanded body.
+  if (is("render_a2ui")) return t("detail.fleet_sum.render_a2ui");
+  // { questions } — only reached when DecisionToolCard declined it.
+  if (is("ask")) return t("detail.fleet_sum.ask");
+  // Claude Code's permission bridge; input is the tool call being asked about.
+  if (is("permission_prompt")) return t("detail.fleet_sum.permission_prompt");
+  return null;
+}
+
 /**
  * Friendly one-liner for codex's function-call tools, which otherwise fall
  * through to a raw `JSON.stringify` of their args (a survey of 156 local
@@ -1076,6 +1129,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // fallback keeps monospace. The distinction was already computed here; it
   // just wasn't reaching the CSS.
   const namedSummary =
+    fleetToolSummary(block.name, block.input, t) ??
     codexToolSummary(block.name, block.input, t) ??
     claudeToolSummary(block.name, block.input, t);
   const summary = namedSummary ?? formatInput(block.input, block.name);
