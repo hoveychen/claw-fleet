@@ -16,6 +16,23 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Tauri sets MACOSX_DEPLOYMENT_TARGET from bundle.macOS.minimumSystemVersion
+# while compiling the desktop app. The CLI sidecar is compiled first into the
+# same Cargo target directory, so leaving the variable unset here makes Cargo
+# flip the native dependency tree between "unset" and the Tauri value on every
+# run. Read the single source of truth up front so both builds use one cache.
+if [[ "$(uname)" == "Darwin" ]]; then
+  MACOSX_DEPLOYMENT_TARGET="$(python3 -c \
+    'import json,sys; print(json.load(open(sys.argv[1]))["bundle"]["macOS"]["minimumSystemVersion"])' \
+    "$ROOT_DIR/claw-fleet-desktop/tauri.conf.json")"
+  if [[ -z "$MACOSX_DEPLOYMENT_TARGET" ]]; then
+    echo "==> Missing bundle.macOS.minimumSystemVersion in tauri.conf.json" >&2
+    exit 1
+  fi
+  export MACOSX_DEPLOYMENT_TARGET
+  echo "==> macOS deployment target: $MACOSX_DEPLOYMENT_TARGET"
+fi
+
 # ── Serialise concurrent builds ──────────────────────────────────────────────
 # One build runs ~10 parallel rustc (measured peak: 1224MB for the largest
 # single rustc, 2.9GB for all of them together) on top of vite/esbuild and the
@@ -115,11 +132,9 @@ TARGET=$(rustc -vV | sed -n 's|host: ||p')
 echo "==> Target: $TARGET"
 
 # Where cargo actually writes artifacts. Deliberately NOT hardcoded to
-# `target/`: this repo's local `.cargo/config.toml` sets `build.target-dir` to a
-# machine-shared directory so that the main checkout and every
-# `.worktrees/<id>/` reuse one dependency build instead of compiling 901 crates
-# per worktree. Every path below (sidecar staging, app bundle, DMG, PKG) has to
-# follow that redirect.
+# `target/`: callers may redirect it with CARGO_TARGET_DIR,
+# CARGO_BUILD_TARGET_DIR, or a local Cargo config. Every path below (sidecar
+# staging, app bundle, DMG, PKG) has to follow the resolved directory.
 #
 # Getting this wrong fails *silently*: the app-bundle check below prints
 # "skipping macOS post-steps" and exits 0, so a stale bundle looks like a
