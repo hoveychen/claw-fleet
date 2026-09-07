@@ -112,7 +112,10 @@ it("preserves the human, attachment and each injection across repeated polls", (
     message: { role: "user", content: [{ type: "text", text }] },
   });
   const human = row("现在dsh没有计价？？？", false, "876");
-  human.message!.content!.push({ type: "image", attachment: { attachmentId: "sha256:prompt-image" } });
+  human.message!.content = [
+    { type: "text", text: "现在dsh没有计价？？？" },
+    { type: "image", source: { type: "path", media_type: "image/webp", path: "/tmp/prompt-image.webp" } },
+  ];
   const expected = [human, row("workspace instructions", true, "876"),
     ...Array.from({ length: 8 }, (_, i) => row(`injection ${i}`, true, "877")),
     msg("reply", "working")];
@@ -136,4 +139,14 @@ it("does not replace a sliding timestamp-only row with another row's body", () =
 it("does not substitute different content even when explicit ids collide", () => {
   const expected = [msg("duplicate", "one"), msg("duplicate", "two"), msg("tail", "end")];
   expect(reconcileMessages(expected, refetched(expected))).toEqual(expected);
+});
+
+it("recovers an already-corrupted rendered prompt on the next history read", () => {
+  const human: RawMessage = { type: "user", timestamp: "same-ms",
+    message: { role: "user", content: [{ type: "text", text: "recover me" }] } };
+  const injection: RawMessage = { ...human, isMeta: true,
+    message: { role: "user", content: [{ type: "text", text: "context" }] } };
+  const expected = [human, injection, msg("tail", "reply")];
+  const corrupted = [injection, injection, msg("tail", "reply")];
+  expect(reconcileMessages(corrupted, refetched(expected))).toEqual(expected);
 });

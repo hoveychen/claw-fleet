@@ -8,10 +8,10 @@
  * them is rebuilt from scratch. On a long transcript that is a full re-render
  * of the conversation several dozen times a minute, for nothing.
  *
- * Transcripts are append-only, so a record that is already on disk will not
- * change. That makes identity cheap to preserve: match by id, reuse the object
- * we already have, and when nothing at all changed hand back the *same array*,
- * which stops the recompute at the very top.
+ * Match by id and confirm content before reusing an object. Legacy normalized
+ * records may share the same timestamp-based identity, so an id match alone
+ * cannot establish that this is the same message. When nothing changed, return
+ * the same array to stop recomputes at the very top.
  */
 
 import type { RawMessage } from "./types";
@@ -74,11 +74,10 @@ export function reconcileMessages(prev: RawMessage[], next: RawMessage[]): RawMe
     const fresh = next[i];
     const id = identity(fresh);
     const old = id === null ? undefined : byId.get(id);
-    // The last record is the one a writer could still be revising, so it is the
-    // only one worth paying a deep comparison for. Everything above it is
-    // settled history and is reused on an id match alone.
-    const reusable =
-      old !== undefined && (i < next.length - 1 || sameContent(old, fresh));
+    // A key may collide (notably legacy dsh's same-millisecond user and
+    // system records). Never replace a fresh row with different old content,
+    // even above the tail: that can erase the user's prompt and attachments.
+    const reusable = old !== undefined && sameContent(old, fresh);
     if (reusable) {
       merged[i] = old;
     } else {
