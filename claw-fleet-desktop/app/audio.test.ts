@@ -86,3 +86,35 @@ describe("ensureAudioContext", () => {
     expect(FakeAudioContext.created).toHaveLength(1);
   });
 });
+
+/**
+ * Regression: a host that answers `get_tts_voices` with `null` (the browser
+ * build's fall-through, and any Tauri command that returns nothing) used to
+ * flow straight into `voices.length` in the Alerts tab and throw. That was
+ * survivable while Settings lived in its own window — it blanked that window
+ * alone. Now that the panel is an overlay inside the main window, the same
+ * throw unmounts the whole app, so the null has to stop here.
+ */
+describe("getVoices", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("@tauri-apps/api/core");
+  });
+
+  it("returns an array when the host answers null", async () => {
+    vi.doMock("@tauri-apps/api/core", () => ({
+      invoke: vi.fn(async () => null),
+    }));
+    const { getVoices } = await import("./audio");
+    await expect(getVoices()).resolves.toEqual([]);
+  });
+
+  it("passes a real voice list through", async () => {
+    const voice = { name: "v", lang: "en-US", display_name: "V", gender: "Female" };
+    vi.doMock("@tauri-apps/api/core", () => ({
+      invoke: vi.fn(async () => [voice]),
+    }));
+    const { getVoices } = await import("./audio");
+    await expect(getVoices()).resolves.toEqual([voice]);
+  });
+});
