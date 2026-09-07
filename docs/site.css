@@ -1147,3 +1147,32 @@ html[lang="zh-CN"] .hero-copy .intro {
   .product-stage { padding: 8px; }
   .product-stage .product-window { border-radius: 5px; }
 }
+
+/* Feature catalogue: secondary to the main workflow, complete and easy to scan. */
+.capabilities { padding-block: 58px 92px; }
+.capabilities-heading { display:flex;align-items:end;justify-content:space-between;gap:32px;margin-bottom:28px; }
+.capabilities-heading h2 { font-size:clamp(30px,4vw,48px);line-height:1.12;letter-spacing:-.035em;margin:0 0 14px; }
+.capabilities-heading p { color:#66726f;max-width:620px;margin:0; }
+.catalogue-toggle { background:transparent;border:0;border-bottom:1px solid #80958b;padding:7px 0;color:#294b3c;font:inherit;white-space:nowrap;cursor:pointer; }
+.capability-group { border-top:1px solid #d5dcd8; }
+.capability-group:last-child { border-bottom:1px solid #d5dcd8; }
+.capability-group summary { display:flex;align-items:center;gap:20px;padding:23px 0;cursor:pointer;list-style:none; }
+.capability-group summary::-webkit-details-marker { display:none; }
+.capability-group summary h3 { font-size:21px;font-weight:550;margin:0;flex:1; }
+.capability-group summary span { color:#75807a;font-size:14px; }
+.capability-group summary::after { content:'+';font-size:25px;font-weight:300;min-width:20px;text-align:center; }
+.capability-group[open] > summary span { transform:none; }
+.capability-group[open] summary::after { content:'−'; }
+.capability-group ul { margin:0;padding:6px 0 32px;list-style:none;display:grid;grid-template-columns:repeat(3,1fr);gap:28px 40px; }
+.capability-group h4 { font-size:16px;margin:0 0 6px;font-weight:600; }
+.capability-group li p { margin:0;color:#66726f;font-size:14px;line-height:1.65; }
+.screenshot-open { display:block;cursor:zoom-in; }
+@media(max-width:700px) {
+ .capabilities { padding-block:38px 56px; }
+ .capabilities-heading { display:block; }
+ .catalogue-toggle { margin-top:18px; }
+ .capability-group summary { gap:10px;padding-block:20px; }
+ .capability-group summary h3 { font-size:18px; }
+ .capability-group ul { grid-template-columns:1fr;gap:20px; }
+ .nav-capabilities { display:none; }
+}
