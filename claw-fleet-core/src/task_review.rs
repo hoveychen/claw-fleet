@@ -186,39 +186,53 @@ impl TaskReviewStore {
             )
             .map_err(|e| format!("prepare: {e}"))?;
         let rows = stmt
-            .query_map(params![from_ms, to_ms], |row| {
-                let ids: String = row.get(1)?;
-                let outcome: String = row.get(4)?;
-                let lessons: String = row.get(8)?;
-                Ok(TaskReview {
-                    root_session_id: row.get(0)?,
-                    session_ids: serde_json::from_str(&ids).unwrap_or_default(),
-                    workspace_name: row.get(2)?,
-                    workspace_path: row.get(3)?,
-                    outcome: if outcome == "completed" {
-                        TaskOutcome::Completed
-                    } else {
-                        TaskOutcome::Abandoned
-                    },
-                    agent_claimed_complete: row.get::<_, i32>(5)? != 0,
-                    title: row.get(6)?,
-                    summary: row.get(7)?,
-                    lessons: serde_json::from_str(&lessons).unwrap_or_default(),
-                    terminated_at: row.get(9)?,
-                    generated_at: row.get(10)?,
-                })
-            })
+            .query_map(params![from_ms, to_ms], row_to_review)
             .map_err(|e| format!("query: {e}"))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("row: {e}"))
     }
 
+    /// One review by its task identity. Queries the primary key rather than
+    /// scanning a range: `list_in_range(0, u64::MAX)` looks equivalent but is
+    /// not — rusqlite binds a `u64` as SQLite's signed 64-bit INTEGER, so
+    /// `u64::MAX` arrives as `-1` and the `terminated_at < ?` bound excludes
+    /// every row.
     pub fn get(&self, root_session_id: &str) -> Option<TaskReview> {
-        self.list_in_range(0, u64::MAX)
-            .ok()?
-            .into_iter()
-            .find(|r| r.root_session_id == root_session_id)
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT root_session_id, session_ids, workspace_name, workspace_path, outcome,
+                        agent_claimed_complete, title, summary, lessons, terminated_at, generated_at
+                 FROM task_reviews WHERE root_session_id = ?1",
+            )
+            .ok()?;
+        stmt.query_row(params![root_session_id], row_to_review).ok()
     }
+}
+
+/// Shared row → [`TaskReview`] mapper for every query in this module. Column
+/// order is fixed by the `SELECT` lists above.
+fn row_to_review(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskReview> {
+    let ids: String = row.get(1)?;
+    let outcome: String = row.get(4)?;
+    let lessons: String = row.get(8)?;
+    Ok(TaskReview {
+        root_session_id: row.get(0)?,
+        session_ids: serde_json::from_str(&ids).unwrap_or_default(),
+        workspace_name: row.get(2)?,
+        workspace_path: row.get(3)?,
+        outcome: if outcome == "completed" {
+            TaskOutcome::Completed
+        } else {
+            TaskOutcome::Abandoned
+        },
+        agent_claimed_complete: row.get::<_, i32>(5)? != 0,
+        title: row.get(6)?,
+        summary: row.get(7)?,
+        lessons: serde_json::from_str(&lessons).unwrap_or_default(),
+        terminated_at: row.get(9)?,
+        generated_at: row.get(10)?,
+    })
 }
 
 // ── Trigger ──────────────────────────────────────────────────────────────────
