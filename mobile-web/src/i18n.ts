@@ -808,4 +808,6 @@ const DICT: Record<string, string> = {
   复制会话记录路径: "Copy transcript path",
   复制恢复命令: "Copy resume command",
   "复制失败（需要 HTTPS 或用户手势）": "Copy failed (needs HTTPS or a user gesture)",
+  结束任务: "Finish task",
+  放弃任务: "Abandon task",
 };

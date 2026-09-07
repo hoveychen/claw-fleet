@@ -13,13 +13,22 @@ const promoScene = promoSceneFromSearch(window.location.search);
 // recording opens straight onto the populated board.
 const demoMode = params.has("demo");
 
-if (isMockMode && (promoScene || demoMode)) {
+if (isMockMode && (promoScene || demoMode || params.has("website"))) {
   primePromoStorage(window.localStorage);
 }
 // The promo screencast is an English piece — pin the UI language so no chrome
 // string (e.g. the composer placeholder) falls back to the boss's zh locale.
 if (isMockMode && demoMode) {
   window.localStorage.setItem("mock-store:lang", "en");
+}
+
+if (isMockMode && params.has("website")) {
+  markWebBuild();
+  window.localStorage.setItem("mock-store:daily-report-last-popped", new Date().toISOString().slice(0, 10));
+  const seen = JSON.parse(window.localStorage.getItem("mock-store:onboarding-seen-features") || "[]");
+  window.localStorage.setItem("mock-store:onboarding-seen-features", JSON.stringify([...seen, "nav_modes"]));
+  window.localStorage.setItem("mock-store:wizard-completed", "1");
+  window.localStorage.setItem("mock-store:lang", params.get("website") === "zh" ? "zh" : "en");
 }
 
 stampHostClasses();

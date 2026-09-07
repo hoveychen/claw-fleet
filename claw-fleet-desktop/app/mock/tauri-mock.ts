@@ -61,6 +61,9 @@ import {
   getMessagesForSession,
 } from "./data";
 
+import { installWebsiteFixtures, websiteScene } from "./website";
+installWebsiteFixtures();
+
 // ── Dynamic session state (simulates live updates) ──────────────────────────
 
 // Test harnesses can seed `mock-no-sessions` in localStorage before boot to
@@ -614,6 +617,7 @@ async function handleIPC(
       return MOCK_WIKI_BODIES[(args.slug as string) ?? ""]
         ?? "# Not published\n\nThis document has no mock body.";
     case "read_review_doc": {
+      if (websiteScene) return {format: "markdown", title: websiteScene.reviewTitle, body: websiteScene.reviewBody};
       const doc = (args.doc ?? {}) as { kind?: string; ref?: string; title?: string };
       if (doc.kind === "wiki") {
         return {
@@ -1485,7 +1489,7 @@ export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
 
   // Start ticking sessions every 2s. In live mode the board comes from the
   // probe poller, so the fixture ticker would fight it.
-  if (!LIVE_MODE) setInterval(tickSessions, 2000);
+  if (!LIVE_MODE && !websiteScene) setInterval(tickSessions, 2000);
 
   // Install screenplay driver for video pipeline
   installScreenplayDriver();
@@ -1511,6 +1515,13 @@ export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
   // v2 fleet__ask card: rich HTML preview + dynamic form fields + options.
   (window as any).__mock_fleet_ask = (overrides: Record<string, unknown> = {}) => {
     const id = `mock-ask-${Date.now()}`;
+    if (websiteScene) overrides = {
+      sessionId: "website-0", workspaceName: websiteScene.projects[0], aiTitle: websiteScene.decision,
+      reviewDocs: [{kind: "file", ref: "/Users/demo/launch/creative-brief.md", title: websiteScene.reviewTitle}],
+      questions: [{question: websiteScene.decision + "\n\n" + websiteScene.context, header: websiteScene.projects[0], multiSelect: false,
+        options: websiteScene.options.map((label, i) => ({label, description: websiteScene!.descriptions[i]}))}],
+      ...overrides,
+    };
     emit("fleet-ask-request", {
       id,
       sessionId: "sess-billing-3",
