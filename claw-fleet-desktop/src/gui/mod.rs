@@ -1288,11 +1288,9 @@ pub fn run() {
                 ));
             }
 
-            // Reclaim any `dsh web` a previous Fleet left behind. It is the
-            // same self-healing idea as the injectors' prune_dead_holders, but
-            // it has to kill a process rather than drop a record: dsh's server
-            // has no authentication layer, so an orphan is an open port onto
-            // every dsh session on this machine.
+            // Reclaim legacy token-less `dsh web` instances. Current 0.1.2
+            // records carry an owner-only launch token and survive here for
+            // DshSource to adopt without interrupting an active turn.
             let reaped = claw_fleet_core::dsh_server::reap_orphans();
             if reaped > 0 {
                 claw_fleet_core::log_debug(&format!(
@@ -1788,11 +1786,10 @@ pub fn run() {
                 let _ = claw_fleet_core::mcp_injector::release(
                     std::process::id(),
                 );
-                // dsh is the opposite case to the injectors above: its server is
-                // a process-global singleton nothing else drops, and `dsh web`
-                // has no authentication layer, so leaving it running would leave
-                // an open port onto every dsh session on this machine.
-                claw_fleet_core::dsh_source::shutdown();
+                // dsh 0.1.2 is an authenticated machine service. It deliberately
+                // survives this GUI process so an app update/relaunch cannot
+                // interrupt every active dsh turn; the next Fleet adopts it from
+                // the owner-only registry.
             }
         });
 }

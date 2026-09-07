@@ -97,9 +97,9 @@ pub const ROSTER_TTL: Duration = Duration::from_secs(2);
 /// already does, which is root itself at the harness home and observe every
 /// workspace from there.
 ///
-/// Because it is never dropped, [`shutdown`] is the only thing that stops it,
-/// and every process exit path must call it: `dsh web` has no authentication
-/// layer, so a leaked child is an open door onto every session on the machine.
+/// Because it is never dropped, normal process exit leaves the authenticated
+/// machine service alive for the next Fleet process to adopt. [`shutdown`] is
+/// reserved for explicit global teardown (tests, upgrades, or a user action).
 static SERVER: OnceLock<Mutex<Option<DshServer>>> = OnceLock::new();
 
 /// Follower of [`SERVER`]'s two downlinks, rebuilt whenever the server lands on
@@ -192,20 +192,18 @@ impl DshSource {
                     let binary = crate::dsh_server::discover().ok_or_else(|| {
                         "dsh is not installed (npm i -g @deepseek-ai/dsh)".to_string()
                     })?;
-                    // Before adding one, take away any this machine is still
-                    // carrying from a Fleet that died without stopping its own.
-                    // Servers whose owner is alive are left alone, so this never
-                    // touches a concurrently running Fleet's instance. The
-                    // signature sweep additionally catches servers the registry
-                    // never heard of (temp-FLEET_HOME spawns, dropped records).
-                    crate::dsh_server::reap_orphans();
-                    crate::dsh_server::sweep_unregistered_orphans();
                     // Root the server at the harness home rather than a project:
                     // observation spans every workspace, and a server rooted in a
                     // directory that later disappears would fail to restart.
                     let cwd = crate::session::real_home_dir()
                         .ok_or_else(|| "cannot determine home dir".to_string())?;
-                    *guard = Some(DshServer::start(&binary, &cwd)?);
+                    let server = DshServer::connect_or_start(&binary, &cwd)?;
+                    crate::log_debug(&format!(
+                        "dsh source: connected persistent dsh web pid={} port={}",
+                        server.pid(),
+                        server.port()
+                    ));
+                    *guard = Some(server);
                 }
             }
 

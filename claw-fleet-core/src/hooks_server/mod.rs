@@ -189,10 +189,8 @@ pub fn serve(opts: ServeOptions) {
     } else {
         let _ = crate::mcp_injector::release(serve_pid);
     }
-    // A previous Fleet that died without running its exit path (SIGKILL, an
-    // aborting panic, or simply the process-global server never being dropped)
-    // left its `dsh web` running with no authentication in front of it. Nothing
-    // else on the machine reclaims it, so every Fleet start sweeps.
+    // Remove only legacy token-less dsh servers. Current authenticated records
+    // are retained for DshSource to adopt without interrupting an active turn.
     let reaped = crate::dsh_server::reap_orphans();
     if reaped > 0 {
         eprintln!("[fleet serve] reaped {reaped} orphaned dsh web process(es)");
@@ -217,9 +215,8 @@ pub fn serve(opts: ServeOptions) {
     if let Err(e) = ctrlc::try_set_handler(move || {
         let _ = crate::permissions_injector::release(serve_pid);
         let _ = crate::mcp_injector::release(serve_pid);
-        // `dsh web` is a child of this process with no authentication layer;
-        // exiting without stopping it would leave the port open.
-        crate::dsh_source::shutdown();
+        // The authenticated dsh service is machine-level and must survive a
+        // `fleet serve` restart while a turn is still running.
         std::process::exit(0);
     }) {
         eprintln!("[fleet serve] ctrlc handler install failed: {e}");

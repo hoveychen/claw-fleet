@@ -76,7 +76,11 @@ pub(crate) async fn install_harness(
                 HarnessInstallProgress { source: progress_source.clone(), line: line.to_string() },
             );
         };
-        claw_fleet_core::harness_install::install_harness(&source, &progress)
+        let result = claw_fleet_core::harness_install::install_harness(&source, &progress);
+        if source == "dsh" && result.is_ok() {
+            claw_fleet_core::dsh_source::shutdown();
+        }
+        result
     })
     .await
     .map_err(|e| claw_fleet_core::harness_install::InstallError {
@@ -102,7 +106,14 @@ pub(crate) async fn update_harness(
                 HarnessInstallProgress { source: progress_source.clone(), line: line.to_string() },
             );
         };
-        claw_fleet_core::harness_install::update_harness(&source, &progress)
+        let result = claw_fleet_core::harness_install::update_harness(&source, &progress);
+        if source == "dsh" && result.is_ok() {
+            // An existing process still has the old JavaScript loaded. An
+            // explicit user upgrade is the one lifecycle edge where stopping
+            // the machine service is intentional; the next RPC starts latest.
+            claw_fleet_core::dsh_source::shutdown();
+        }
+        result
     })
     .await
     .map_err(|e| claw_fleet_core::harness_install::InstallError {
@@ -499,4 +510,3 @@ pub(crate) async fn get_source_usage(
     let _ = app.run_on_main_thread(move || rebuild_tray(&handle));
     Ok(val)
 }
-
