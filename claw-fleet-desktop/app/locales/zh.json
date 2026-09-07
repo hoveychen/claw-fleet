@@ -1754,6 +1754,8 @@
     "tool_todo": "更新待办",
     "tool_todo_count": "更新待办（{{count}}）",
     "tool_bash_output": "读取后台输出",
+    "tool_task_output": "读取后台任务输出",
+    "tool_task_output_timed": "等待后台任务 · 最多 {{secs}} 秒",
     "tool_kill_shell": "终止后台 shell",
     "tool_search": "加载工具",
     "tool_search_load": "加载工具 {{names}}",

@@ -190,6 +190,19 @@ describe("claudeToolSummary", () => {
     expect(claudeToolSummary("KillBash", { bash_id: "abc" }, t)).toBe("detail.tool_kill_shell");
   });
 
+  it("TaskOutput → background-task wait key with timeout in seconds", () => {
+    expect(
+      claudeToolSummary(
+        "TaskOutput",
+        { task_id: "b8gwhpz0g", block: true, timeout: 600000 },
+        t,
+      ),
+    ).toBe('detail.tool_task_output_timed|{"secs":"600"}');
+    expect(claudeToolSummary("TaskOutput", { task_id: "abc", block: false }, t)).toBe(
+      "detail.tool_task_output",
+    );
+  });
+
   it("returns null for any other tool (falls back to formatInput)", () => {
     expect(claudeToolSummary("Bash", { command: "ls" }, t)).toBeNull();
     expect(claudeToolSummary("Read", { file_path: "a.ts" }, t)).toBeNull();

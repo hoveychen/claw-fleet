@@ -379,6 +379,14 @@ export function claudeToolSummary(
     // { bash_id, filter? } — polls a background shell's output.
     case "BashOutput":
       return t("detail.tool_bash_output");
+    // { task_id, block, timeout? } — reads or waits for any Claude background
+    // task. A blocking call can sit for minutes, so keep its timeout visible.
+    case "TaskOutput": {
+      const secs = input.block === true ? timeoutMsToSecs(input.timeout) : null;
+      return secs
+        ? t("detail.tool_task_output_timed", { secs })
+        : t("detail.tool_task_output");
+    }
     // { shell_id | bash_id } — kills a background shell (KillBash is the older name).
     case "KillShell":
     case "KillBash":

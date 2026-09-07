@@ -5,6 +5,7 @@ import {
   Bot,
   Brain,
   CalendarClock,
+  Clock3,
   CircleCheck,
   Radar,
   RefreshCw,
@@ -75,6 +76,7 @@ export function railToolIcon(name: string): ReactNode {
   if (WEB_TOOLS.has(name)) return <Globe />;
   if (AGENT_TOOLS.has(name)) return <Bot />;
   if (PLAN_TOOLS.has(name)) return <ListTodo />;
+  if (name === "TaskOutput") return <Clock3 />;
   return <Wrench />;
 }
 
