@@ -5,7 +5,7 @@
       "items": [
         [
           "Three agent tools",
-          "Use Claude Code, Codex and dsh in one workspace."
+          "Use Claude Code, Codex and dsh (DeepSeek Harness) in one workspace."
         ],
         [
           "Model and reasoning controls",
@@ -247,7 +247,7 @@
       "items": [
         [
           "三种 Agent 入口",
-          "在同一工作台使用 Claude Code、Codex 和 dsh。"
+          "在同一工作台使用 Claude Code、Codex 和 dsh（DeepSeek Harness）。"
         ],
         [
           "模型与推理强度",
