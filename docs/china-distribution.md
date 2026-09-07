@@ -1,3 +1,5 @@
+> **当前已采用深圳自托管。** Boss 选择使用现有 own-api-sz 服务器；正式站点为 https://fleet.eternizedlab.com/zh/ 。更新与回退见 [自托管说明](china-selfhost.md)。下文 COS 为备选部署方案，未启用。
+
 # 国内官网与下载分发
 
 ## 推荐：腾讯云 COS；Gitee 作补充入口
@@ -48,7 +50,7 @@ python3 scripts/site/distribute.py \
 
 `--public-url` 必须换成实际配置的域名。默认只在本地下载、校验和生成站点，不会写云端。实际发布需安装 `cos-python-sdk-v5==1.9.38`，设置上述四个 `COS_*` 环境变量后显式加 `--publish`。`GH_TOKEN` 可选，仅用于 GitHub 元数据查询，不转发给安装包重定向地址。
 
-`docs/downloads.json` 的仓库默认值不配置镜像，页面不会显示假国内下载。真正部署输出中的清单由脚本自动生成，包含版本、每个包的 HTTPS 地址、大小和 SHA-256。中文页面默认国内线路，英文默认 GitHub，可手动切换。每个国内按钮旁有原始 GitHub 链接。不要把测试使用的 example.com 清单提交到官网。
+`docs/downloads.json` 已配置经实测的深圳自托管镜像。尚未开通镜像的新环境应使用空镜像配置，避免显示不存在的下载。真正部署输出中的清单由脚本自动生成，包含版本、每个包的 HTTPS 地址、大小和 SHA-256。中文页面默认国内线路，英文默认 GitHub，可手动切换。每个国内按钮旁有原始 GitHub 链接。不要把测试使用的 example.com 清单提交到官网。
 
 ## 上线验收
 
