@@ -52,7 +52,7 @@ def verify(path, asset):
     return digest.hexdigest()
 
 
-def prepare(release, output, public_url):
+def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cloud COS'):
     tag, assets = validate_release(release)
     public_url = validate_base_url(public_url)
     output.mkdir(parents=True, exist_ok=True)
@@ -64,8 +64,8 @@ def prepare(release, output, public_url):
                  'screenshots/current/mobile-zh.png'):
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / 'docs' / name, target)
-    manifest = {'schema': 1, 'version': tag, 'china': {'provider': 'Tencent Cloud COS', 'assets': {}}}
+        shutil.copy2((site_root or ROOT / 'docs') / name, target)
+    manifest = {'schema': 1, 'version': tag, 'china': {'provider': provider, 'assets': {}}}
     checksum_lines = []
     for name, asset in sorted(assets.items()):
         path = output / 'releases' / tag / name

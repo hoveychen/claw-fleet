@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for a new stable Claw Fleet release every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=60
+Persistent=true
+Unit=fleet-site-update.service
+
+[Install]
+WantedBy=timers.target
