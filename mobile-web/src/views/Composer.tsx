@@ -5,11 +5,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
-  ChevronRight,
   FolderSearch,
   LoaderCircle,
   MapPin,
-  Paperclip,
   Plus,
   Send,
   SlidersHorizontal,
@@ -29,7 +27,7 @@ import { dshEffortsFor, dshModelGroups, useDshModels } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
-import { useFollowTail, useVoiceRecorder, type VoiceRecorderApi } from "../useVoiceRecorder";
+import { useFollowTail, useVoiceRecorder } from "../useVoiceRecorder";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs } from "./AttachmentThumb";
@@ -316,82 +314,24 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
   };
 }
 
+/** 输入框按内容自增高。
+ *
+ * 先把 height 归零再按 scrollHeight 量 —— 不归零的话 scrollHeight 永远不小于当前
+ * 高度，删字时框只会越撑越高。封顶交给 CSS 的 max-height（超了就框内滚动），这里
+ * 不重复写死一个像素数。两处 composer（新会话、回复窗）共用同一个输入框形状，
+ * 所以这段也共用。 */
+function useAutoGrow(ref: React.RefObject<HTMLTextAreaElement | null>, text: string) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [ref, text]);
+}
+
 function withContextFiles(prompt: string, attachments: Attachment[]): string {
   if (attachments.length === 0) return prompt;
   return `${prompt}\n\nContext files:\n${attachments.map((a) => `- ${a.path}`).join("\n")}`;
-}
-
-function AttachmentRow({
-  attachments,
-  uploading,
-  onPick,
-  onRemove,
-  client,
-  previews,
-  voice,
-}: {
-  attachments: Attachment[];
-  uploading: boolean;
-  onPick: (files: FileList | null) => void;
-  onRemove: (path: string) => void;
-  client: FleetTransport | null;
-  previews?: Map<string, string>;
-  /** 语音录音机。状态住在 composer 里而不是这一行里，因为录音时输入框本身也要
-   *  跟着变（实时转写直接上屏）—— 那是这一行够不着的兄弟节点。
-   *  不传则不显示语音入口。 */
-  voice?: VoiceRecorderApi;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  // 录音时这一行整个让给录音条:附件缩略图和 📎 都退场。录音是一个有始有终的
-  // 模式,期间「顺手加个附件」既不是真需求,也会把这行挤成两截。
-  if (voice?.active) {
-    return (
-      <div className={styles.attachRow}>
-        <VoiceBar rec={voice} />
-      </div>
-    );
-  }
-  return (
-    <div className={styles.attachRow}>
-      {/* Images show as thumbnails (tap to enlarge), everything else keeps the
-          filename chip — same component the transcript and decision history
-          use, so a picture looks the same before and after it is sent. */}
-      <AttachmentThumbs
-        paths={attachments.map((a) => a.path)}
-        client={client}
-        previews={previews}
-        onRemove={onRemove}
-        compact
-      />
-      {/* 纯图标圆按钮，与语音按钮同款 —— 主流输入框里附件/相机/语音这类操作
-          入口都是纯图标，带文字的胶囊留给模式开关。上传中换成转圈图标而不是
-          只把按钮禁掉：反馈不能因为去掉文字标签就丢了。 */}
-      <button
-        className={styles.attachAdd}
-        disabled={uploading}
-        onClick={() => inputRef.current?.click()}
-        aria-label={uploading ? t("上传中…") : t("附件")}
-        title={uploading ? t("上传中…") : t("附件")}
-      >
-        {uploading ? (
-          <LoaderCircle size={17} className={styles.spin} />
-        ) : (
-          <Paperclip size={17} />
-        )}
-      </button>
-      {voice?.available && <VoiceMicButton rec={voice} />}
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        hidden
-        onChange={(e) => {
-          onPick(e.target.files);
-          e.target.value = "";
-        }}
-      />
-    </div>
-  );
 }
 
 function OptionSelects({
@@ -697,6 +637,8 @@ export function NewSessionSheet({
     onSend: () => void submit(),
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
+  useAutoGrow(voiceTailRef, voice.showingPreview ? voice.preview : draft.prompt);
+  const newFileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
@@ -901,104 +843,126 @@ export function NewSessionSheet({
           />
         </div>
 
+        {/* 主区给「最近去过哪」。原来这里是三个 64px 的摘要行 + 一个 190px 的输入
+            卡：一整屏 844px 只承载三件事，而开一个新会话要点三层。位置与配置退到
+            底部的胶囊行之后，这块地才有东西可放。 */}
         <div className={styles.sheetBody}>
-          <section className={styles.formSection}>
-            <span className={styles.sectionLabel}>{t("运行位置")}</span>
-            <button
-              className={styles.summaryRow}
-              onClick={() => setPicker("location")}
-              aria-label={`${t("运行位置")}：${locationSummary.title}，${locationSummary.detail}`}
-            >
-              <span className={styles.summaryIcon}><MapPin size={17} /></span>
-              <span className={styles.summaryCopy}>
-                <strong>{locationSummary.title}</strong>
-                <small>{locationSummary.detail}</small>
-              </span>
-              <ChevronRight size={20} className={styles.summaryChevron} />
+          <span className={styles.sectionLabel}>{t("最近")}</span>
+          <div className={styles.recentGrid}>
+            {recents.map(([path, name]) => (
+              <button
+                key={path}
+                className={styles.recentChip}
+                data-active={workspace === path || undefined}
+                onClick={() => patch({ workspace: path })}
+              >
+                {name}
+              </button>
+            ))}
+            {chatPath && (
+              <button
+                className={styles.recentChip}
+                data-active={isChat || undefined}
+                onClick={() => patch({ workspace: chatPath })}
+              >
+                {t("纯聊天")}
+              </button>
+            )}
+            <button className={styles.recentChip} onClick={() => setPicker("location")}>
+              <FolderSearch size={14} />
+              {t("选目录…")}
             </button>
-          </section>
+          </div>
+          {sendsPermissionMode && permissionMode === "bypassPermissions" && (
+            <span className={styles.permissionHint} data-danger="true">
+              {t("高风险：Agent 将不再请求命令或文件操作确认")}
+            </span>
+          )}
+        </div>
 
-          <section className={styles.promptSection}>
-            <span className={styles.sectionLabel}>{t("第一条指令")}</span>
-            <div className={styles.promptCard}>
+        {/* 底部就是回复窗那根胶囊的同一套形状：配置 chip 行 + 附件 + 输入胶囊。
+            「启动会话」不再是一颗 50px 的大按钮，而是胶囊右端的圆形发送 —— 两处
+            输入区从此长得一样，用户不必学两遍。 */}
+        <div className={styles.sheetFooter}>
+          <div className={styles.resumeChips}>
+            <button className={styles.resumeChip} onClick={() => setPicker("location")}>
+              <MapPin size={13} />
+              {locationSummary.title}
+            </button>
+            <button className={styles.resumeChip} onClick={() => setPicker("config")}>
+              <SlidersHorizontal size={13} />
+              {configSummary.title}
+            </button>
+          </div>
+          {attachments.length > 0 && !voice.active && (
+            <div className={styles.resumeThumbs}>
+              <AttachmentThumbs
+                paths={attachments.map((a) => a.path)}
+                client={client}
+                previews={previews}
+                onRemove={remove}
+                compact
+              />
+            </div>
+          )}
+          {voice.active ? (
+            <VoiceBar rec={voice} />
+          ) : (
+            <div className={styles.pill}>
+              <button
+                className={styles.pillBtn}
+                disabled={uploading}
+                onClick={() => newFileRef.current?.click()}
+                aria-label={uploading ? t("上传中…") : t("附件")}
+              >
+                {uploading ? (
+                  <LoaderCircle size={19} className={styles.spin} />
+                ) : (
+                  <Plus size={20} />
+                )}
+              </button>
               <textarea
                 ref={voiceTailRef}
-                className={styles.promptInput}
+                className={styles.composerInput}
                 aria-label={t("第一条指令")}
-                placeholder={
-                  voice.available
-                    ? t("要让 agent 做什么？也可点麦克风说")
-                    : t("要让 agent 做什么？")
-                }
-                rows={6}
+                placeholder={t("要让 agent 做什么？")}
+                rows={1}
                 value={voice.showingPreview ? voice.preview : prompt}
                 readOnly={voice.showingPreview}
                 onChange={(e) => patch({ prompt: e.target.value })}
               />
-              <div className={styles.promptTools}>
-                <AttachmentRow
-                  attachments={attachments}
-                  uploading={uploading}
-                  onPick={(f) => void addFiles(f)}
-                  onRemove={remove}
-                  client={client}
-                  previews={previews}
-                  voice={voice}
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className={styles.formSection}>
-            <span className={styles.sectionLabel}>{t("运行配置")}</span>
-            <button
-              className={styles.summaryRow}
-              onClick={() => setPicker("config")}
-              aria-label={`${t("运行配置")}：${configSummary.title}，${configSummary.detail}`}
-            >
-              <span className={styles.summaryIcon}><SlidersHorizontal size={17} /></span>
-              <span className={styles.summaryCopy}>
-                <strong>{configSummary.title}</strong>
-                <small>{configSummary.detail}</small>
-              </span>
-              <ChevronRight size={20} className={styles.summaryChevron} />
-            </button>
-            {sendsPermissionMode && (
-              <span
-                className={styles.permissionHint}
-                data-danger={permissionMode === "bypassPermissions"}
+              {voice.available && !prompt.trim() && (
+                <span className={styles.pillMic}>
+                  <VoiceMicButton rec={voice} />
+                </span>
+              )}
+              <button
+                className={styles.sendBtn}
+                data-success={created || undefined}
+                disabled={!canSubmit}
+                onClick={() => void submit()}
+                aria-label={created ? t("已启动") : busy ? t("创建中…") : t("启动会话")}
               >
-                {permissionMode === "bypassPermissions"
-                  ? t("高风险：Agent 将不再请求命令或文件操作确认")
-                  : permissionMode === "plan"
-                    ? t("Agent 只分析和规划，不修改项目文件")
-                    : t("Agent 可以修改项目文件；执行命令仍按权限规则处理")}
-              </span>
-            )}
-          </section>
-        </div>
-
-        <div className={styles.sheetFooter}>
-          <button
-            className={styles.submit}
-            data-success={created}
-            disabled={!canSubmit}
-            onClick={() => void submit()}
-          >
-            {created ? (
-              <>
-                <Check size={18} />
-                {t("已启动")}
-              </>
-            ) : busy ? (
-              t("创建中…")
-            ) : (
-              <>
-                <Send size={17} />
-                {t("启动会话")}
-              </>
-            )}
-          </button>
+                {created ? (
+                  <Check size={17} />
+                ) : busy ? (
+                  <LoaderCircle size={17} className={styles.spin} />
+                ) : (
+                  <Send size={16} />
+                )}
+              </button>
+              <input
+                ref={newFileRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  void addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+          )}
           <span className={styles.submitHint} aria-live="polite">
             {created
               ? t("目标设备已确认收到")
@@ -1006,7 +970,7 @@ export function NewSessionSheet({
                 ? t("正在发往 {0}…", deviceLabel)
                 : !prompt.trim()
                   ? t("输入任务后即可启动")
-                  : locationSummary.title}
+                  : locationSummary.detail}
           </span>
         </div>
 
@@ -1252,16 +1216,7 @@ export function ResumeComposer({
     onSend: () => void submit(),
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
-  // 输入框按内容自增高。先把 height 归零再按 scrollHeight 量 —— 不归零的话
-  // scrollHeight 永远不小于当前高度，删字时框只会越撑越高。封顶交给 CSS 的
-  // max-height（超了就框内滚动），这里不再重复写死一个像素数。
-  const shownText = voice.showingPreview ? voice.preview : prompt;
-  useLayoutEffect(() => {
-    const el = voiceTailRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [shownText, voiceTailRef]);
+  useAutoGrow(voiceTailRef, voice.showingPreview ? voice.preview : prompt);
   // Folded only when the parent asked AND the user has nothing in flight here.
   const collapsed =
     !!hidden &&
@@ -1451,7 +1406,7 @@ export function ResumeComposer({
           </button>
           <textarea
             ref={voiceTailRef}
-            className={styles.resumeInput}
+            className={styles.composerInput}
             /* 胶囊里一行只放得下十来个汉字，长 placeholder 会在静息态就把框撑成
                两行 —— 那正是这次要消灭的东西。麦克风就在右边，不必再用文案介绍；
                「留空 = continue」的行为没变，只是不再写在框里。 */

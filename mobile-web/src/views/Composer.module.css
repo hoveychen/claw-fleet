@@ -70,13 +70,36 @@
   padding: 20px 16px 30px;
 }
 
-.formSection,
-.promptSection {
-  width: 100%;
+/* 最近去过的 workspace。一屏能看见全部候选，选一个是一次点击 —— 原来它埋在
+   「运行位置」picker 里的一个 <select> 中，要三次。 */
+.recentGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.promptSection {
-  margin: 22px 0;
+.recentChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--t-ui, 14px);
+}
+
+.recentChip[data-active] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-weight: 650;
+}
+
+.recentChip:active {
+  background: var(--color-bg-card-hover);
 }
 
 .sectionLabel {
@@ -86,77 +109,6 @@
   font-size: var(--t-aux, 12px);
   font-weight: 650;
   letter-spacing: 0.04em;
-}
-
-.summaryRow {
-  width: 100%;
-  min-height: 64px;
-  display: grid;
-  grid-template-columns: 34px 1fr 22px;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 2px;
-  text-align: left;
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.summaryRow:active {
-  background: var(--color-bg-card-hover);
-}
-
-.summaryIcon {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-
-.summaryCopy {
-  min-width: 0;
-}
-
-.summaryCopy strong,
-.summaryCopy small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.summaryCopy strong {
-  font-size: var(--t-body, 17px);
-  line-height: 1.25;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.summaryCopy small {
-  margin-top: 3px;
-  color: var(--color-text-secondary);
-  font-size: var(--t-aux, 12px);
-  line-height: 1.3;
-  white-space: nowrap;
-}
-
-.summaryChevron {
-  color: var(--color-text-dim);
-}
-
-.promptCard {
-  overflow: hidden;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 17px;
-  background: var(--color-bg-input);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.06);
-}
-
-.promptCard:focus-within {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 .workspaceSelect,
@@ -218,94 +170,6 @@
   opacity: 0.5;
 }
 
-.promptInput {
-  width: 100%;
-  min-height: 190px;
-  max-height: 44dvh;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 16px 16px 10px;
-  color: var(--color-text);
-  font-size: var(--t-body, 17px);
-  line-height: 1.5;
-  resize: none;
-  font-family: inherit;
-  outline: none;
-}
-
-.promptInput:focus {
-  border-color: transparent;
-}
-
-.promptTools {
-  min-height: 56px;
-  padding: 5px 8px 7px;
-  border-top: 1px solid var(--color-border);
-}
-
-.attachRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  min-height: 44px;
-}
-
-.attachChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  padding: 3px 6px 3px 10px;
-  font-size: var(--t-aux, 12px);
-  color: var(--color-text-secondary);
-  max-width: 60vw;
-}
-
-.attachName {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.attachRemove {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-  border: none;
-  background: none;
-  color: var(--color-text-dim);
-  line-height: 1;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0 2px;
-}
-
-/* 圆形纯图标按钮，与 VoiceButton.module.css 的 .btn 同款 —— 主流输入框里
-   附件/相机/语音这类操作入口都是纯图标（带文字的胶囊留给模式开关），两个
-   并排才像一对。原来是「📎 附件」带文字的虚线胶囊。 */
-.attachAdd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  flex-shrink: 0;
-  border: 1px solid var(--color-border-strong);
-  background: none;
-  color: var(--color-text-dim);
-  border-radius: 999px;
-}
-
-.attachAdd:disabled {
-  opacity: 0.6;
-}
-
 /* 上传中的转圈。@keyframes 就近定义，避免依赖别处是否已有同名动画。 */
 .spin {
   animation: attach-spin 0.9s linear infinite;
@@ -354,37 +218,17 @@
   color: var(--color-error);
 }
 
+/* 底部的 composer 坞。和会话内那根胶囊是同一组零件（.resumeChips / .resumeThumbs
+   / .pill），只是这里它在流里、有自己的分隔边，而不是浮在转录上。 */
 .sheetFooter {
   flex: none;
-  padding: 9px 16px calc(10px + var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 12px calc(10px + var(--safe-bottom));
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-glass);
   backdrop-filter: blur(16px);
-}
-
-.submit {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  border: none;
-  background: var(--color-accent);
-  color: #fff;
-  min-height: 50px;
-  border-radius: 13px;
-  padding: 11px 14px;
-  font-size: var(--t-body, 17px);
-  font-weight: 700;
-}
-
-.submit:disabled {
-  opacity: 0.45;
-}
-
-.submit[data-success="true"] {
-  background: var(--color-success);
-  opacity: 1;
 }
 
 .submitHint {
@@ -521,12 +365,6 @@
   .sheetBody {
     padding-top: 12px;
   }
-  .promptSection {
-    margin: 14px 0;
-  }
-  .promptInput {
-    min-height: 124px;
-  }
 }
 
 /* 浮起，不占布局高度。
@@ -582,15 +420,13 @@
   }
 }
 
-/* 会话内回复框自己的输入框。
+/* 两处 composer（新会话、会话内回复）共用的输入框。
  *
- * 和新会话页的 .promptInput 分家：那个类在「新会话页重做」（8b2ec4f4）里被改成
- * min-height:190px + 去边框，因为它从此被套进全屏页的 .promptCard 里。回复框没有
- * 那层卡片，继承过去的结果是 —— 写着 rows={2} 却被 190px 顶掉，边框圆角也一起没了，
- * 整个回复区静息高度 ≈400px，吃掉 iPhone 14 的 47% 屏。
- *
- * 这里一行起步、按内容自增（高度由 JS 量 scrollHeight 写上来），封顶 30dvh。 */
-.resumeInput {
+ * 它一度和新会话页的 promptInput 是同一个类，而那个类为全屏页改成了
+ * min-height:190px + 去边框，于是回复框写着 rows={2} 却被顶掉，静息高度 ≈400px。
+ * 现在反过来：两处用同一根胶囊，所以真该共用的就是这个 —— 一行起步、按内容
+ * 自增（高度由 useAutoGrow 量 scrollHeight 写上来），封顶 30dvh。 */
+.composerInput {
   width: 100%;
   min-height: 42px;
   max-height: 30dvh;
