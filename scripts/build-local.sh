@@ -114,6 +114,26 @@ export OPENSSL_STATIC=1
 TARGET=$(rustc -vV | sed -n 's|host: ||p')
 echo "==> Target: $TARGET"
 
+# Where cargo actually writes artifacts. Deliberately NOT hardcoded to
+# `target/`: this repo's local `.cargo/config.toml` sets `build.target-dir` to a
+# machine-shared directory so that the main checkout and every
+# `.worktrees/<id>/` reuse one dependency build instead of compiling 901 crates
+# per worktree. Every path below (sidecar staging, app bundle, DMG, PKG) has to
+# follow that redirect.
+#
+# Getting this wrong fails *silently*: the app-bundle check below prints
+# "skipping macOS post-steps" and exits 0, so a stale bundle looks like a
+# successful build. `cargo metadata` is the only authority — it accounts for
+# CARGO_TARGET_DIR, CARGO_BUILD_TARGET_DIR and build.target-dir alike. It is
+# also exempt from the cargo concurrency guard, so it never queues.
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])' 2>/dev/null || true)"
+if [[ -z "$TARGET_DIR" || ! -d "$TARGET_DIR" ]]; then
+  echo "==> Could not resolve cargo target_directory; falling back to ./target" >&2
+  TARGET_DIR="target"
+fi
+echo "==> Target dir: $TARGET_DIR"
+
 # 1. Build fleet CLI sidecar (debug)
 echo "==> Building fleet CLI..."
 cargo build -p fleet-cli
@@ -125,11 +145,11 @@ cargo build -p fleet-cli
 mkdir -p claw-fleet-desktop/binaries
 
 # stage_sidecar <target-dir-binary-name> <externalBin-base-name>
-# Copies target/debug/<bin> → binaries/<base>-$TARGET only when content differs,
-# and mirrors a generic <base>-linux name for deb.files on Linux.
+# Copies $TARGET_DIR/debug/<bin> → binaries/<base>-$TARGET only when content
+# differs, and mirrors a generic <base>-linux name for deb.files on Linux.
 stage_sidecar() {
   local bin="$1" base="$2"
-  local src="target/debug/$bin"
+  local src="$TARGET_DIR/debug/$bin"
   local dst="claw-fleet-desktop/binaries/$base-$TARGET"
   if [[ ! -f "$dst" ]] || ! cmp -s "$src" "$dst"; then
     cp "$src" "$dst"
@@ -165,7 +185,7 @@ echo "==> Building Tauri app..."
 #    the app's sandbox entitlements, causing SIGTRAP when the sidecar is invoked
 #    externally (e.g. fleet by Claude Code hooks). Kept as a loop so adding
 #    sidecars later stays a one-line change.
-APP_BUNDLE="target/debug/bundle/macos/Claw Fleet.app"
+APP_BUNDLE="$TARGET_DIR/debug/bundle/macos/Claw Fleet.app"
 SIDECARS=("$APP_BUNDLE/Contents/MacOS/fleet")
 if [[ ! -d "$APP_BUNDLE" ]]; then
   echo "==> App bundle not produced at $APP_BUNDLE — skipping macOS post-steps."
@@ -200,7 +220,7 @@ else
 fi
 
 # 6. Create DMG
-DMG_DIR="target/debug/bundle/dmg"
+DMG_DIR="$TARGET_DIR/debug/bundle/dmg"
 mkdir -p "$DMG_DIR"
 DMG_NAME="claw-fleet-dev-${BUILD_STAMP}.dmg"
 echo "==> Creating DMG..."
@@ -215,7 +235,7 @@ rm -rf "$DMG_STAGING"
 echo "==> DMG: $DMG_DIR/$DMG_NAME"
 
 # 7. Build PKG installer
-PKG_DIR="target/debug/bundle/pkg"
+PKG_DIR="$TARGET_DIR/debug/bundle/pkg"
 mkdir -p "$PKG_DIR"
 PKG_NAME="claw-fleet-dev-${BUILD_STAMP}.pkg"
 echo "==> Building PKG installer..."
@@ -259,4 +279,4 @@ open "$PKG_DIR/$PKG_NAME"
 
 echo ""
 echo "Done! Build stamp: $BUILD_STAMP"
-echo "App bundle: target/debug/bundle/"
+echo "App bundle: $TARGET_DIR/debug/bundle/"
