@@ -108,6 +108,18 @@
   word-break: break-word;
 }
 
+/* Gray subtitle: the last message, one line, ellipsised — the same role the
+   card view's `.preview` plays. One line only, so the row height stays
+   uniform down the rail; the full text lives in the row tooltip. */
+.row_preview {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Unread rows carry the title at full contrast and weight; read rows fall back
    to the secondary text colour. The whole title line responds, which scans
    faster down a long list than a 7px dot did. */

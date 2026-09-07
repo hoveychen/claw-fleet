@@ -153,6 +153,13 @@ export const SessionRow = memo(function SessionRow({
     .filter((v): v is string => !!v && v.trim().length > 0)
     .filter((v, i, all) => all.indexOf(v) === i)
     .join("\n\n");
+  // Gray subtitle line, same idea as the card view's `.preview`: the last
+  // message at a glance, without hovering. Suppressed when it would just
+  // repeat the title, and when a search snippet already fills that slot.
+  const preview =
+    !snippet && s.lastMessagePreview && s.lastMessagePreview !== displayTitle
+      ? s.lastMessagePreview
+      : null;
   return (
     <div
       className={styles.row_wrap}
@@ -189,6 +196,7 @@ export const SessionRow = memo(function SessionRow({
             )}
             {displayTitle}
           </span>
+          {preview && <span className={styles.row_preview}>{preview}</span>}
           <span className={styles.row_meta}>
             {showWorkspace && (
               <span className={styles.row_project} title={s.workspacePath}>
