@@ -2165,6 +2165,25 @@ mod breakdown_tests {
         assert_eq!(b.total_cache_read_tokens, 60_000);
         assert!((b.agent_cost_usd - expected).abs() < 1e-9);
     }
+
+    /// P1 red: the daily report must include dsh sessions.
+    ///
+    /// `sessions_usage_for_date` early-returns on `agent_source == "dsh"`, so a
+    /// dsh session's spend never reaches a daily report — even though it shows on
+    /// today's receipt. A dsh session whose whole spend lives on one day must
+    /// open a receipt line for that day, like any Claude/Codex session. P3 drops
+    /// the skip; this test turns green there.
+    #[test]
+    fn dsh_daily_report_includes_dsh() {
+        let now_ms = chrono::Local::now().timestamp_millis() as u64;
+        let s = today_session_with_jsonl("p1-dsh-daily", "dsh", "{}", false);
+        let date = local_date_str(now_ms as i64);
+        let rows = sessions_usage_for_date(&[&s], &date);
+        assert!(
+            rows.iter().any(|lines| !lines.is_empty()),
+            "daily report must include dsh sessions; got {rows:?}"
+        );
+    }
 }
 
 #[cfg(test)]
