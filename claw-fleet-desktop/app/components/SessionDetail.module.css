@@ -45,7 +45,11 @@
 }
 /* With the rail present the drawer and its scrim stop at the rail's left edge:
    the rail is the *other* layer of information, and covering the card you just
-   clicked to open the drawer is the drawer answering a question by hiding it. */
+   clicked to open the drawer is the drawer answering a question by hiding it.
+   The transcript's reading column and the composer keep clear of the same
+   band (see .scroll_area / .dock_layer below) — the rail floats over the
+   conversation, so the space it needs is padding inside the scroller, not a
+   column of its own. */
 .rail_open .body_row {
   --rail-space: calc(var(--rail-w) + var(--slab-gap));
 }
@@ -67,15 +71,20 @@
 
 /* Windows frameless: leave room on the right for the three caption buttons
    drawn by <WindowsFrameOverlay> (3 x 46px). Only when the hero actually
-   reaches the pane's right edge — with the card rail or the drawer present,
-   that edge belongs to one of them (see .rail / .aux_head below). Skipped for
+   reaches the pane's right edge. The card rail no longer competes for it — it
+   floats over the transcript *below* the hero now — so the only element that
+   can take that corner away is the drawer, and only while the rail is not
+   holding a band open to the right of it (see .aux_head below). Skipped for
    the inline form, which sits below a host chrome that already accounts for
    the buttons. */
-.root:not(.inline):not(.aux_open):not(.rail_open) .hero {
+.root:not(.inline) .hero {
   /* The slab already stands --slab-gap clear of the window edge, so that much
      of the caption strip is cleared for free. max() keeps the term from going
      negative and eating the base padding off-Windows, where the inset is 0. */
   padding-right: calc(16px + max(0px, var(--win-caption-inset-x) - var(--slab-gap, 0px)));
+}
+.root:not(.inline).aux_open:not(.rail_open) .hero {
+  padding-right: 16px;
 }
 
 /* Identity on the left, toolbar on the right. */
@@ -313,10 +322,11 @@
   /* One knob for the gutter, so the resizer and the Windows caption inset can
      both be expressed in terms of it instead of repeating a magic 8. */
   --slab-gap: 8px;
-  /* The card rail's width, named here because three rules need the same
-     number: the rail's own flex-basis, and the right offset of the drawer and
-     its scrim (which stop short of the rail rather than covering it). The
-     percentage resolves against this element either way. */
+  /* The card rail's width, named here because four rules need the same number:
+     the rail's own box, the right padding the transcript and composer hold
+     clear for it, and the right offset of the drawer and its scrim (which stop
+     short of the rail rather than covering it). Declared on the row so the
+     percentage resolves against one element for all four. */
   --rail-w: clamp(220px, 18%, 320px);
   --rail-space: 0px;
   position: relative;
@@ -513,71 +523,98 @@
 
 /* ── Auxiliary card rail ────────────────────────────────────────────────────
    The ambient layer: one raised card per thing in play (each running subagent,
-   each doc the reader opened). Unlike the drawer this is a real column in the
-   row — it narrows the conversation — which it earns by rendering nothing at
-   all when it is empty (see SessionAuxRail).
+   each doc the reader opened).
 
-   No frame of its own: it sits directly on --color-bg-sunken between the two
-   slabs, so the cards read as objects on the ground rather than rows inside a
-   third panel. That is also why there are no dividers and no headings — the
-   card edges already do that work. */
+   It *floats over* the transcript's right side rather than being a column of
+   its own beside it. It used to be a real flex column in .body_row, which made
+   the conversation a narrower slab with its own frame and — the tell — put the
+   transcript's scrollbar in the *middle* of the pane, with a second surface to
+   the right of it. Cards are not a window; they are things resting on the
+   conversation. So the rail is absolutely positioned inside .messages_pane
+   (below the hero, above the scroller), the transcript keeps the full width and
+   its scrollbar stays on the pane's right edge, and the reading column simply
+   keeps clear of the band the cards occupy (see .scroll_area below).
+
+   pointer-events: none on the column, restored on each card: the empty space
+   between and below the cards is transcript, and the wheel/click belongs to it.
+
+   No frame of its own — the cards' own fill, hairline and shadow are the only
+   separation they need, which is also why there are no dividers and no
+   headings here. */
 .rail {
-  flex: 0 0 var(--rail-w);
-  min-width: 0;
-  min-height: 0;
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  /* Clear of the scroller's scrollbar (6px on Windows, an overlay bar on
+     macOS) so a card never sits under the thumb. */
+  right: 10px;
+  width: var(--rail-w);
+  box-sizing: border-box;
+  padding: 12px 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+  /* The rail scrolls its own overflow without handing the rest of the wheel
+     gesture to the transcript underneath. */
+  overscroll-behavior: contain;
   scrollbar-width: none;
   background: transparent;
+  pointer-events: none;
 }
 .rail::-webkit-scrollbar { display: none; }
+.rail > * {
+  pointer-events: auto;
+}
 
-/* Only ever seen when the switch pinned the column open with nothing in it.
-   No card, no frame: a line of dim text on the sunken ground, so the empty
-   rail still reads as ground rather than as a card that failed to fill. */
+/* Only ever seen when the switch pinned the rail open with nothing in it.
+   No card, no frame: a line of dim text over the transcript, so the empty rail
+   still reads as absence rather than as a card that failed to fill. */
 .rail_empty {
   margin: 0;
-  padding: 8px 6px;
+  padding: 8px 10px;
   font-size: 11px;
   line-height: 1.5;
   color: var(--color-text-dim);
-}
-
-/* Windows frameless: the rail owns the pane's right edge whenever it is there,
-   so the first card starts below the caption buttons. */
-.root:not(.inline) .rail {
-  padding-top: var(--win-caption-inset-y);
 }
 
 /* Inline hosts (DecisionPanel's detail column, the 任务 page's 4-way split)
    have a few hundred px to spend in total, so the rail takes a thinner cut of
    it than in the standalone pane. It stays rather than being dropped: "what is
    running right now" is exactly what those two surfaces are for. */
-.root.inline .rail {
+.root.inline .body_row {
   --rail-w: clamp(150px, 30%, 240px);
-  /* Inline hosts zero out --slab-gap, so the cards would otherwise butt
-     against the transcript on one side and the host's frame on the other. */
-  padding: 0 6px;
-  box-sizing: content-box;
+}
+.root.inline .rail {
+  right: 8px;
 }
 
-/* The raised card. One shape for both kinds, so the rail reads as one stack:
-   card fill lifted off the sunken ground by a hairline top highlight plus a
-   drop shadow, and no border — a border would draw exactly the dividing lines
-   this rail is meant not to have. */
+/* The raised card. One shape for both kinds, so the rail reads as one stack of
+   objects: card fill, a hairline all round, and a drop shadow. The hairline is
+   what the old inset-top-highlight version could not do once the ground under
+   the cards became the transcript itself — at #fbfaf7 on #f1efea the fill alone
+   is a one-step difference, and a card floating over prose has to state its own
+   edge. */
 .rail_card {
   flex: 0 0 auto;
-  border: none;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-card);
-  box-shadow: inset 0 1px 0 var(--color-border), var(--shadow-card-hover);
+  box-shadow: var(--shadow-card-hover);
   transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 .rail_card:hover {
   background: var(--color-bg-card-hover);
   transform: translateY(-1px);
+}
+
+/* One padding for every card in the rail, named once: an agent card and a doc
+   card are the same object seen from two sides, and they stack directly on top
+   of each other. Two different insets read as two different kinds of thing. */
+.rail {
+  --rail-card-pad-y: 9px;
+  --rail-card-pad-x: 11px;
 }
 
 .agent_card {
@@ -587,7 +624,7 @@
   width: 100%;
   text-align: left;
   font-family: inherit;
-  padding: 8px 10px;
+  padding: var(--rail-card-pad-y) var(--rail-card-pad-x);
   cursor: pointer;
 }
 
@@ -623,7 +660,9 @@
   color: var(--color-text);
   text-align: left;
   cursor: pointer;
-  padding: 8px 2px 8px 10px;
+  /* Right side is the close button's business — it carries the card's right
+     inset itself so its hit target reaches the card edge. */
+  padding: var(--rail-card-pad-y) 2px var(--rail-card-pad-y) var(--rail-card-pad-x);
 }
 
 .doc_card_icon {
@@ -646,7 +685,7 @@
   cursor: pointer;
   font-size: 9px;
   line-height: 1;
-  padding: 8px 9px;
+  padding: var(--rail-card-pad-y) var(--rail-card-pad-x);
   border-radius: var(--radius-lg);
 }
 .doc_card_close:hover {
@@ -700,7 +739,7 @@
 .agents_deck_more {
   font-size: 10px;
   color: var(--color-text-dim);
-  padding: 2px 2px 0;
+  padding: 2px var(--rail-card-pad-x, 11px) 0;
 }
 
 /* Status dot — leads each row in the agent scope dropdown (AgentScopeSwitcher),
@@ -908,6 +947,18 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+/* Make room for the floating card rail *inside* the scroller, not beside it.
+   Padding rather than a narrower box on purpose: the scrollbar belongs to this
+   element's edge, so it stays on the pane's right edge (where a scrollbar
+   belongs) while the centred reading column re-centres in what is left. The
+   composer floats over the same scroller and has to move with it. */
+.rail_open .scroll_area,
+.rail_open .dock_layer {
+  /* The rail's own width, its 10px offset from the pane edge, and a 16px
+     gutter so prose stops short of the cards instead of touching them. */
+  padding-right: calc(var(--rail-w) + 26px);
 }
 
 /* Codex calls fleet__ask from inside its code-mode exec tool. The pending

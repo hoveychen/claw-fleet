@@ -1449,21 +1449,23 @@ export function SessionDetail({
                     )}
                   </div>
                 )}
+
+                {/* The ambient layer — inside the messages pane on purpose, so
+                    it floats over the transcript's right side (below the hero)
+                    rather than standing beside it as a second column. The
+                    transcript keeps the full pane, which is what keeps its
+                    scrollbar on the pane's right edge. */}
+                <SessionAuxRail
+                  open={railOpen}
+                  agents={liveSubagents}
+                  docs={aux.docs}
+                  activeId={activeTab}
+                  onOpenAgent={open}
+                  onOpenDoc={pickTab}
+                  onCloseDoc={dropDoc}
+                />
               </div>
             </div>
-
-            {/* The ambient layer. A real column — it narrows the conversation —
-                which it earns by not rendering at all when there is nothing in
-                play and the reader has not asked for it. */}
-            <SessionAuxRail
-              open={railOpen}
-              agents={liveSubagents}
-              docs={aux.docs}
-              activeId={activeTab}
-              onOpenAgent={open}
-              onOpenDoc={pickTab}
-              onCloseDoc={dropDoc}
-            />
 
             {auxOpen && (
               <SessionAuxPanel title={drawerTitle} onClose={closeAuxPanel}>
