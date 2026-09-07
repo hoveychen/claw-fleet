@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   claudeToolSummary,
   codexToolSummary,
+  fleetToolSummary,
   parseExecCommand,
   parsePatchFiles,
   readRange,
@@ -341,5 +342,55 @@ describe("parsePatchFiles", () => {
 
   it("returns [] when there are no file headers", () => {
     expect(parsePatchFiles("just some text")).toEqual([]);
+  });
+});
+
+describe("fleetToolSummary", () => {
+  // Fleet's always-on MCP tools (mcp_server.rs ALWAYS_ON_TOOL_NAMES) don't go
+  // through FleetToolCard, so before this router they all landed on
+  // formatInput's raw-JSON last resort — render_a2ui dumping a whole A2UI
+  // component tree onto one collapsed row.
+  it("lifts the one meaningful field out of each tool's args", () => {
+    expect(fleetToolSummary("mcp__fleet__fleet__set_session_title", { title: "修工具行" }, t)).toBe(
+      'detail.fleet_sum.title_named|{"title":"修工具行"}',
+    );
+    expect(fleetToolSummary("mcp__fleet__fleet__image", { description: "a red fox" }, t)).toBe(
+      'detail.fleet_sum.image_named|{"desc":"a red fox"}',
+    );
+    expect(
+      fleetToolSummary("mcp__fleet__fleet__image_edit", { thread_id: "t1", instruction: "蓝围巾" }, t),
+    ).toBe('detail.fleet_sum.image_edit_named|{"desc":"蓝围巾"}');
+  });
+
+  it("names the operation when there is no short field to lift", () => {
+    expect(fleetToolSummary("mcp__fleet__fleet__render_a2ui", { messageTree: { root: {} } }, t)).toBe(
+      "detail.fleet_sum.render_a2ui",
+    );
+    expect(fleetToolSummary("mcp__fleet__fleet__ask", { questions: [] }, t)).toBe(
+      "detail.fleet_sum.ask",
+    );
+    expect(fleetToolSummary("mcp__fleet__fleet__permission_prompt", {}, t)).toBe(
+      "detail.fleet_sum.permission_prompt",
+    );
+  });
+
+  it("collapses whitespace and caps a long field", () => {
+    const long = "x".repeat(200);
+    const out = fleetToolSummary("mcp__fleet__fleet__image", { description: `a\n  b` }, t);
+    expect(out).toBe('detail.fleet_sum.image_named|{"desc":"a b"}');
+    expect(fleetToolSummary("mcp__fleet__fleet__image", { description: long }, t)).toBe(
+      `detail.fleet_sum.image_named|{"desc":"${"x".repeat(80)}…"}`,
+    );
+  });
+
+  it("falls back to the unnamed label when the field is absent or blank", () => {
+    expect(fleetToolSummary("fleet__set_session_title", {}, t)).toBe("detail.fleet_sum.title");
+    expect(fleetToolSummary("fleet__image", { description: "   " }, t)).toBe("detail.fleet_sum.image");
+  });
+
+  it("returns null for control tools (FleetToolCard owns those) and foreign tools", () => {
+    expect(fleetToolSummary("mcp__fleet__fleet__plan", { action: "check" }, t)).toBeNull();
+    expect(fleetToolSummary("mcp__fleet__fleet__inspect", { action: "list" }, t)).toBeNull();
+    expect(fleetToolSummary("Bash", { command: "ls" }, t)).toBeNull();
   });
 });

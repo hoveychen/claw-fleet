@@ -85,6 +85,7 @@ export const FLEET_TOOL_LABEL_KEYS: Record<string, string> = {
   set_session_title: "detail.fleet_tool.set_session_title",
   image: "detail.fleet_tool.image",
   image_edit: "detail.fleet_tool.image_edit",
+  permission_prompt: "detail.fleet_tool.permission_prompt",
 };
 
 /**
