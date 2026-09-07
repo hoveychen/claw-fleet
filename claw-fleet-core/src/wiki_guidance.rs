@@ -283,23 +283,26 @@ fn apply_wiki_guidance_inner(locale: &str) -> Result<(), String> {
     fs::write(&guidance_path, render_guidance(locale))
         .map_err(|e| format!("write guidance file: {e}"))?;
 
+    // Locked read-modify-write — see `claude_md_lock`.
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-    let stripped = strip_sentinel_block(&existing);
     let block = format!(
         "{begin}\n@{path}\n{end}\n",
         begin = BEGIN_MARKER,
         end = END_MARKER,
         path = guidance_path.display(),
     );
-    let new_content = if stripped.is_empty() {
-        block
-    } else if stripped.ends_with('\n') {
-        format!("{stripped}\n{block}")
-    } else {
-        format!("{stripped}\n\n{block}")
-    };
-    fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))
+    crate::claude_md_lock::with_lock(&claude_md, || {
+        let existing = fs::read_to_string(&claude_md).unwrap_or_default();
+        let stripped = strip_sentinel_block(&existing);
+        let new_content = if stripped.is_empty() {
+            block
+        } else if stripped.ends_with('\n') {
+            format!("{stripped}\n{block}")
+        } else {
+            format!("{stripped}\n\n{block}")
+        };
+        fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))
+    })
 }
 
 /// Remove wiki guidance: strip the sentinel block and delete the guidance
@@ -314,12 +317,15 @@ pub fn remove_wiki_guidance() -> Result<(), String> {
 
 fn remove_wiki_guidance_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
-        if let Ok(existing) = fs::read_to_string(&claude_md) {
-            let stripped = strip_sentinel_block(&existing);
-            if stripped != existing {
-                fs::write(&claude_md, stripped).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+        crate::claude_md_lock::with_lock(&claude_md, || {
+            if let Ok(existing) = fs::read_to_string(&claude_md) {
+                let stripped = strip_sentinel_block(&existing);
+                if stripped != existing {
+                    fs::write(&claude_md, stripped).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                }
             }
-        }
+            Ok::<(), String>(())
+        })?;
     }
     if let Some(path) = guidance_file_path() {
         if path.exists() {

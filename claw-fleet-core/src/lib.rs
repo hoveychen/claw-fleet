@@ -4,6 +4,7 @@ pub mod agent_loop;
 pub mod agent_source;
 pub mod artifacts;
 pub mod atomic_json;
+pub mod claude_md_lock;
 pub mod audit;
 pub mod auto_resume;
 pub mod ui_types;

@@ -443,23 +443,31 @@ pub fn list_lessons() -> Vec<ManagedLesson> {
 fn ensure_import_installed() -> Result<(), String> {
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
     let path = lessons_file_path().ok_or("cannot determine home dir")?;
-    let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-    let new_content = inject_import(&existing, &path.display().to_string());
-    if new_content != existing {
-        fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))?;
-    }
+    // Locked read-modify-write — see `claude_md_lock`.
+    crate::claude_md_lock::with_lock(&claude_md, || {
+        let existing = fs::read_to_string(&claude_md).unwrap_or_default();
+        let new_content = inject_import(&existing, &path.display().to_string());
+        if new_content != existing {
+            fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+        }
+        Ok::<(), String>(())
+    })?;
     Ok(())
 }
 
 /// Strip the `@fleet-lessons.md` import sentinel from CLAUDE.md.
 fn remove_import() -> Result<(), String> {
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    if let Ok(existing) = fs::read_to_string(&claude_md) {
-        let stripped = strip_import(&existing);
-        if stripped != existing {
-            fs::write(&claude_md, stripped).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+    // Locked read-modify-write — see `claude_md_lock`.
+    crate::claude_md_lock::with_lock(&claude_md, || {
+        if let Ok(existing) = fs::read_to_string(&claude_md) {
+            let stripped = strip_import(&existing);
+            if stripped != existing {
+                fs::write(&claude_md, stripped).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+            }
         }
-    }
+        Ok::<(), String>(())
+    })?;
     Ok(())
 }
 
@@ -468,17 +476,23 @@ fn remove_import() -> Result<(), String> {
 /// Idempotent — a second run finds nothing to move.
 pub fn migrate_legacy_lessons() -> Result<usize, String> {
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
-    let content = match fs::read_to_string(&claude_md) {
-        Ok(c) => c,
-        Err(_) => return Ok(0),
-    };
-    let (remaining, lessons) = extract_raw_lessons(&content);
+    // Clean CLAUDE.md first, then re-home each lesson (add_lesson re-adds the
+    // import at the end). Read and write under one lock — see `claude_md_lock`.
+    let lessons = crate::claude_md_lock::with_lock(&claude_md, || {
+        let content = match fs::read_to_string(&claude_md) {
+            Ok(c) => c,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let (remaining, lessons) = extract_raw_lessons(&content);
+        if lessons.is_empty() {
+            return Ok(Vec::new());
+        }
+        fs::write(&claude_md, remaining).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+        Ok::<Vec<Lesson>, String>(lessons)
+    })?;
     if lessons.is_empty() {
         return Ok(0);
     }
-    // Clean CLAUDE.md first, then re-home each lesson (add_lesson re-adds the
-    // import at the end).
-    fs::write(&claude_md, remaining).map_err(|e| format!("write CLAUDE.md: {e}"))?;
     let mut n = 0;
     for l in &lessons {
         add_lesson(l)?;
