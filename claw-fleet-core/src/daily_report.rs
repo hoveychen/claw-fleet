@@ -35,7 +35,9 @@ pub struct DailyReport {
 ///   0 — implicit for reports predating this field (last-turn input snapshot).
 ///   1 — cumulative input incl. cache (input + cache_creation + cache_read),
 ///       matching cost and the sidebar counter's口径.
-pub const CURRENT_METRICS_VERSION: u32 = 1;
+///   2 — usage attributed by finalized turn timestamp, including sessions that
+///       crossed midnight and live Claude/Codex sources.
+pub const CURRENT_METRICS_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -2171,10 +2173,11 @@ mod tests {
             "up-to-date report must NOT be regenerated"
         );
 
-        // Cached under an older口径 (e.g. version 0, the pre-field default) →
+        // Cached under the immediately previous口径 (version 1 used whole
+        // creation-day sessions) →
         // must be regenerated so its token totals move to the new basis.
         let mut stale = make_test_report("2026-07-09");
-        stale.metrics.metrics_version = 0;
+        stale.metrics.metrics_version = CURRENT_METRICS_VERSION - 1;
         assert!(
             past_report_needs_regen(Some(&stale)),
             "stale-口径 report must be regenerated"

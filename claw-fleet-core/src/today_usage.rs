@@ -477,18 +477,23 @@ pub(crate) fn session_usage_for_date(
     session: &SessionInfo,
     date: &str,
 ) -> Vec<ModelReceiptLine> {
-    let cells = fold_session_cells(session);
     let mut by_model = std::collections::HashMap::new();
     let mut by_day = std::collections::BTreeMap::new();
-    sum_cells_window(
-        &cells,
-        &session.agent_source,
-        date,
-        date,
-        &mut by_model,
-        &mut by_day,
-    );
-    build_lines(by_model)
+    let mut cache = usage_cache().lock().unwrap();
+    {
+        let cells = cache.cells(session);
+        sum_cells_window(
+            cells,
+            &session.agent_source,
+            date,
+            date,
+            &mut by_model,
+            &mut by_day,
+        );
+    }
+    let lines = build_lines(by_model);
+    persist_cache(&mut cache);
+    lines
 }
 
 // ── Arbitrary-range breakdown (receipt + per-day trend) ──────────────────────
