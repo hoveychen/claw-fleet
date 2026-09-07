@@ -2,13 +2,14 @@
 //!
 //! Unlike Claude Code and Codex — whose sessions are files on disk Fleet reads
 //! directly — dsh exposes its sessions only through a running server. Fleet
-//! therefore owns that process: it starts one `dsh web` per workspace root,
-//! learns the port the OS assigned it, health-checks it, and kills it on exit.
+//! therefore owns that process: it starts one machine-level `dsh web`, learns
+//! the port and launch token it announced, and lets later Fleet processes adopt
+//! that authenticated service without interrupting its in-flight turns.
 //!
-//! The server is deliberately **not** detached. `dsh web` has no authentication
-//! layer (only a Host-header loopback fence), so a stray instance surviving
-//! Fleet would leave an unauthenticated port open that can read every session
-//! and start new ones. Its lifetime is bound to ours through [`Drop`].
+//! dsh 0.1.2 protects the API with a per-process launch token. Fleet persists
+//! that token in an owner-only registry and deliberately lets the service
+//! outlive a desktop/CLI process. Direct `DshServer` users still get stop-on-drop
+//! cleanup unless they call [`DshServer::detach`].
 //!
 //! ## Why [`Drop`] is not enough, and what the registry adds
 //!
@@ -19,12 +20,13 @@
 //! parent's death does not kill its children on either platform.
 //!
 //! So ownership is also recorded on disk, at `~/.fleet/dsh-server.json`: every
-//! live server is one record pairing the *server* process with the *Fleet
-//! process that owns it*, both as [`HolderEntry`]s (pid plus start time, so pid
-//! reuse cannot fool the liveness check). [`reap_orphans`] walks that file and
-//! kills any server whose owner is gone — which is what makes the next Fleet
-//! start, or the next `dsh` use, clean up after the previous crash.
+//! live server is one record pairing the *server* process with its most recent
+//! Fleet client, both as [`HolderEntry`]s (pid plus start time, so pid reuse
+//! cannot fool the liveness check). The same record carries the launch token
+//! needed to adopt a current server; [`reap_orphans`] kills only legacy records
+//! that cannot be authenticated.
 
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
@@ -234,10 +236,18 @@ const REGISTRY_FILE: &str = "dsh-server.json";
 struct ServerRecord {
     /// The `dsh web` launcher process.
     server: HolderEntry,
-    /// The Fleet process that started it and is responsible for stopping it.
+    /// The most recent Fleet process that connected (diagnostics/migration).
     owner: HolderEntry,
     /// The port it reported. Diagnostics only — the killer works by pid.
     port: u16,
+    /// Secret minted by dsh 0.1.2. Missing means a legacy, non-adoptable record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    launch_token: Option<String>,
+    /// Spawn inputs retained so an adopted handle can restart after a crash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    binary: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workspace: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -284,6 +294,13 @@ fn edit_registry<R>(f: impl FnOnce(&mut Registry) -> R) -> Option<R> {
             Ok(bytes) => {
                 if let Err(e) = crate::atomic_json::write_atomic(&path, &bytes) {
                     crate::log_debug(&format!("dsh registry: write: {e}"));
+                } else {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt as _;
+                        let _ =
+                            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                    }
                 }
             }
             Err(e) => crate::log_debug(&format!("dsh registry: serialize: {e}")),
@@ -296,11 +313,14 @@ fn edit_registry<R>(f: impl FnOnce(&mut Registry) -> R) -> Option<R> {
 ///
 /// Also drops records whose server has since died, so a machine that has run
 /// Fleet for weeks does not accumulate them.
-fn register(server_pid: u32, port: u16) {
+fn register(server_pid: u32, port: u16, launch_token: &str, binary: &Path, workspace: &Path) {
     let record = ServerRecord {
         server: HolderEntry::capture(server_pid),
         owner: HolderEntry::capture(std::process::id()),
         port,
+        launch_token: Some(launch_token.to_string()),
+        binary: Some(binary.to_path_buf()),
+        workspace: Some(workspace.to_path_buf()),
     };
     edit_registry(|registry| {
         registry.servers.retain(|r| is_live(&r.server));
@@ -316,14 +336,11 @@ fn deregister(server_pid: u32) {
     });
 }
 
-/// Kill every recorded `dsh web` whose owning Fleet process is gone, and return
-/// how many were killed.
+/// Kill every legacy recorded `dsh web` whose owning Fleet process is gone.
 ///
-/// This is the crash-recovery path: an owner that died without running
-/// [`crate::dsh_source::shutdown`] left an unauthenticated server listening, and
-/// nothing else on the machine will ever reclaim it. Safe to call at any time —
-/// a server whose owner is still alive belongs to a running Fleet (possibly this
-/// one) and is left strictly alone.
+/// Current records carry the launch token and are retained for adoption even
+/// after their diagnostic owner exits. Legacy token-less records retain the old
+/// cleanup rule because no later Fleet can authenticate to them.
 pub fn reap_orphans() -> usize {
     edit_registry(|registry| {
         let mut killed = 0;
@@ -333,6 +350,9 @@ pub fn reap_orphans() -> usize {
                 return false;
             }
             if is_live(&record.owner) {
+                return true;
+            }
+            if record.launch_token.is_some() {
                 return true;
             }
             crate::log_debug(&format!(
@@ -378,6 +398,16 @@ pub fn sweep_unregistered_orphans() -> usize {
         ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
     );
 
+    let registered: HashSet<u32> = edit_registry(|registry| {
+        registry
+            .servers
+            .iter()
+            .filter(|record| is_live(&record.server))
+            .map(|record| record.server.pid)
+            .collect()
+    })
+    .unwrap_or_default();
+
     let mut killed = 0;
     for (pid, process) in sys.processes() {
         let cmd = process
@@ -387,6 +417,9 @@ pub fn sweep_unregistered_orphans() -> usize {
             .collect::<Vec<_>>()
             .join(" ");
         if !cmd.contains("dsh web --port 0") {
+            continue;
+        }
+        if registered.contains(&pid.as_u32()) {
             continue;
         }
         // Parent alive = that process owns it (Fleet keeps its server as a
@@ -404,9 +437,10 @@ pub fn sweep_unregistered_orphans() -> usize {
     killed
 }
 
-/// A running `dsh web` instance owned by this process.
+/// A running `dsh web` instance connected by this process.
 pub struct DshServer {
-    child: Child,
+    child: Option<Child>,
+    server: HolderEntry,
     port: u16,
     /// The per-process launch token read off the announcement line. Every
     /// [`DshClient`] trades it for the session cookie `/api` demands, so it has
@@ -415,9 +449,34 @@ pub struct DshServer {
     launch_token: String,
     binary: PathBuf,
     workspace: PathBuf,
+    /// Direct test/server handles clean up by default. A persisted/adopted
+    /// service must survive this client's process and therefore opts out.
+    preserve_on_drop: bool,
 }
 
 impl DshServer {
+    /// Adopt the machine service or start it exactly once across Fleet
+    /// processes. The outer start lock spans health-check through registration,
+    /// closing the race where two fresh clients both observed an empty registry.
+    pub fn connect_or_start(binary: &Path, workspace: &Path) -> Result<Self, String> {
+        let start_lock = crate::session::get_fleet_dir()
+            .ok_or_else(|| "cannot determine Fleet home".to_string())?
+            .join("dsh-server-start");
+        crate::atomic_json::with_file_lock(&start_lock, || {
+            if let Some(server) = Self::adopt_existing(binary, workspace)? {
+                return Ok(server);
+            }
+
+            // Legacy token-less and registry-invisible orphans cannot be
+            // authenticated or adopted; remove those before a fresh start.
+            reap_orphans();
+            sweep_unregistered_orphans();
+            let mut server = Self::start(binary, workspace)?;
+            server.detach();
+            Ok(server)
+        })
+    }
+
     /// Start a server rooted at `workspace` and wait until it answers RPC.
     ///
     /// The invoking directory is dsh's default workspace root, so `workspace`
@@ -460,12 +519,15 @@ impl DshServer {
             }
         };
 
+        let server_entry = HolderEntry::capture(child.id());
         let mut server = Self {
-            child,
+            child: Some(child),
+            server: server_entry,
             port,
             launch_token,
             binary: binary.to_path_buf(),
             workspace: workspace.to_path_buf(),
+            preserve_on_drop: false,
         };
 
         if let Err(e) = server.wait_healthy() {
@@ -476,8 +538,60 @@ impl DshServer {
         // Only a healthy server is worth recording: one that never answered has
         // already been killed above, and a record for it would just be noise the
         // next `reap_orphans` has to clear.
-        register(server.pid(), server.port);
+        register(
+            server.pid(),
+            server.port,
+            &server.launch_token,
+            &server.binary,
+            &server.workspace,
+        );
         Ok(server)
+    }
+
+    /// Adopt a healthy authenticated service left by an earlier Fleet process.
+    /// Invalid/stale credentials remove only their exact recorded server.
+    pub fn adopt_existing(binary: &Path, workspace: &Path) -> Result<Option<Self>, String> {
+        let records = edit_registry(|registry| {
+            registry.servers.retain(|record| is_live(&record.server));
+            registry.servers.clone()
+        })
+        .unwrap_or_default();
+
+        for record in records {
+            let Some(token) = record.launch_token.clone() else {
+                continue;
+            };
+            let healthy = DshClient::new(record.port, &token)
+                .and_then(|client| client.call(HEALTH_ENDPOINT, serde_json::json!({})))
+                .is_ok();
+            if !healthy {
+                if is_live(&record.server) {
+                    crate::llm_provider::kill_process(record.server.pid);
+                }
+                deregister(record.server.pid);
+                continue;
+            }
+
+            edit_registry(|registry| {
+                if let Some(current) = registry
+                    .servers
+                    .iter_mut()
+                    .find(|item| item.server == record.server)
+                {
+                    current.owner = HolderEntry::capture(std::process::id());
+                }
+            });
+            return Ok(Some(Self {
+                child: None,
+                server: record.server,
+                port: record.port,
+                launch_token: token,
+                binary: record.binary.unwrap_or_else(|| binary.to_path_buf()),
+                workspace: record.workspace.unwrap_or_else(|| workspace.to_path_buf()),
+                preserve_on_drop: true,
+            }));
+        }
+        Ok(None)
     }
 
     /// The OS-assigned port this instance listens on.
@@ -493,7 +607,7 @@ impl DshServer {
     /// session at once, which is why [`crate::dsh_source::DshSource`] does not
     /// implement `kill_pid`.
     pub fn pid(&self) -> u32 {
-        self.child.id()
+        self.server.pid
     }
 
     /// The workspace root this instance was started in.
@@ -516,7 +630,10 @@ impl DshServer {
     /// Has the process exited? Reaps it when it has, so a crashed server does
     /// not linger as a zombie until Fleet quits.
     pub fn is_alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        match self.child.as_mut() {
+            Some(child) => matches!(child.try_wait(), Ok(None)),
+            None => is_live(&self.server),
+        }
     }
 
     /// Restart after a crash, replacing the child and the port.
@@ -531,11 +648,14 @@ impl DshServer {
         // Swap the handles rather than moving out of `fresh` (this type has a
         // Drop impl, so it cannot be destructured). After the swap `fresh` owns
         // the already-reaped dead child, and its Drop is a no-op.
-        std::mem::swap(&mut self.child, &mut fresh.child);
+        self.child = fresh.child.take();
+        self.server = fresh.server.clone();
         self.port = fresh.port;
         // The fresh child minted its own token; the old one dies with the old
         // process, so keeping it would 401 every call after a restart.
         self.launch_token = std::mem::take(&mut fresh.launch_token);
+        self.preserve_on_drop = false;
+        fresh.preserve_on_drop = true;
         Ok(())
     }
 
@@ -549,12 +669,21 @@ impl DshServer {
 
     /// Terminate the server and reap it. Idempotent.
     pub fn stop(&mut self) {
-        let pid = self.child.id();
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let pid = self.pid();
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        } else if is_live(&self.server) {
+            crate::llm_provider::kill_process(pid);
+        }
         // After the wait, so the record never outlives a process this call has
         // already reaped — and never describes one still shutting down.
         deregister(pid);
+    }
+
+    /// Let this authenticated service outlive the current Fleet process.
+    pub fn detach(&mut self) {
+        self.preserve_on_drop = true;
     }
 
     /// Poll `host.describe` until it answers or the health budget runs out.
@@ -578,7 +707,9 @@ impl DshServer {
 
 impl Drop for DshServer {
     fn drop(&mut self) {
-        self.stop();
+        if !self.preserve_on_drop {
+            self.stop();
+        }
     }
 }
 
@@ -938,7 +1069,13 @@ mod tests {
     #[test]
     fn a_record_round_trips_through_its_file() {
         with_temp_fleet_home(|_| {
-            register(std::process::id(), 51234);
+            register(
+                std::process::id(),
+                51234,
+                "secret",
+                Path::new("/bin/dsh"),
+                Path::new("/tmp"),
+            );
             let registry = read_registry();
             assert_eq!(registry.servers.len(), 1);
             assert_eq!(registry.servers[0].port, 51234);
@@ -1008,14 +1145,48 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_clients_share_one_persistent_server() {
+        with_temp_fleet_home(|base| {
+            let binary = fake_dsh();
+            let workspace = base.to_path_buf();
+            let a_binary = binary.clone();
+            let a_workspace = workspace.clone();
+            let b_binary = binary.clone();
+            let b_workspace = workspace.clone();
+
+            let a = std::thread::spawn(move || {
+                DshServer::connect_or_start(&a_binary, &a_workspace).expect("client a")
+            });
+            let b = std::thread::spawn(move || {
+                DshServer::connect_or_start(&b_binary, &b_workspace).expect("client b")
+            });
+            let mut a = a.join().unwrap();
+            let b = b.join().unwrap();
+
+            assert_eq!(a.pid(), b.pid(), "the start lock must prevent duplicates");
+            assert_eq!(read_registry().servers.len(), 1);
+            a.stop();
+        });
+    }
+
+    #[test]
     fn deregister_removes_only_its_own_record() {
         with_temp_fleet_home(|_| {
-            register(std::process::id(), 1);
+            register(
+                std::process::id(),
+                1,
+                "secret",
+                Path::new("/bin/dsh"),
+                Path::new("/tmp"),
+            );
             edit_registry(|r| {
                 r.servers.push(ServerRecord {
                     server: dead(),
                     owner: HolderEntry::capture(std::process::id()),
                     port: 2,
+                    launch_token: None,
+                    binary: None,
+                    workspace: None,
                 })
             });
             deregister(std::process::id());
@@ -1043,6 +1214,9 @@ mod tests {
                     server: HolderEntry::capture(victim),
                     owner: dead(),
                     port: 4321,
+                    launch_token: None,
+                    binary: None,
+                    workspace: None,
                 })
             });
 
@@ -1064,7 +1238,13 @@ mod tests {
     fn a_server_with_a_live_owner_is_left_alone() {
         with_temp_fleet_home(|_| {
             // Owner and server are both this process: alive by construction.
-            register(std::process::id(), 7777);
+            register(
+                std::process::id(),
+                7777,
+                "secret",
+                Path::new("/bin/dsh"),
+                Path::new("/tmp"),
+            );
             assert_eq!(reap_orphans(), 0);
             assert_eq!(read_registry().servers.len(), 1);
         });
@@ -1080,6 +1260,9 @@ mod tests {
                     server: dead(),
                     owner: dead(),
                     port: 1,
+                    launch_token: None,
+                    binary: None,
+                    workspace: None,
                 })
             });
             assert_eq!(reap_orphans(), 0);
@@ -1103,6 +1286,9 @@ mod tests {
                     server: impostor,
                     owner: dead(),
                     port: 1,
+                    launch_token: None,
+                    binary: None,
+                    workspace: None,
                 })
             });
             assert_eq!(
@@ -1178,6 +1364,9 @@ mod tests {
                     server: HolderEntry::capture(orphan),
                     owner: dead(),
                     port: 0,
+                    launch_token: None,
+                    binary: None,
+                    workspace: None,
                 })
             });
 
