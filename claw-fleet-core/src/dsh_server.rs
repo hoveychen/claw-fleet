@@ -917,6 +917,13 @@ mod tests {
         }
     }
 
+    fn fake_dsh() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("fake-dsh.js")
+    }
+
     /// A pid that is certainly not a live process, paired with a start time no
     /// live process could match. `u32::MAX` is above every platform's pid_max.
     fn dead() -> HolderEntry {
@@ -940,6 +947,63 @@ mod tests {
             // The start times must be captured, not left at the "unknown"
             // sentinel — a 0 there disarms the pid-reuse defence.
             assert_ne!(registry.servers[0].server.start_time_secs, 0);
+        });
+    }
+
+    /// Regression for the 2026-09-06 incident: replacing the Fleet app ended
+    /// three unrelated dsh turns in the same 21-second window because the old
+    /// GUI process killed their shared server. A current authenticated server
+    /// is a machine service; an owner exit makes it adoptable, not killable.
+    #[test]
+    fn authenticated_server_survives_owner_exit_and_is_adopted() {
+        with_temp_fleet_home(|base| {
+            let mut first = DshServer::start(&fake_dsh(), base).expect("start fake dsh");
+            let pid = first.pid();
+
+            // Model the old desktop disappearing without terminating the dsh
+            // service. `detach` preserves the child and its authenticated
+            // registry record so another Fleet process can connect to it.
+            first.detach();
+            edit_registry(|registry| registry.servers[0].owner = dead());
+
+            assert_eq!(
+                reap_orphans(),
+                0,
+                "an authenticated service must not be killed with its GUI owner"
+            );
+            assert!(crate::session::is_process_alive(pid));
+
+            let mut adopted = DshServer::adopt_existing(&fake_dsh(), base)
+                .expect("read registry")
+                .expect("adopt the surviving authenticated service");
+            assert_eq!(adopted.pid(), pid, "restart must reuse the same dsh pid");
+            adopted
+                .client()
+                .expect("authenticate with persisted launch token")
+                .call(HEALTH_ENDPOINT, serde_json::json!({}))
+                .expect("adopted service answers RPC");
+
+            adopted.stop();
+        });
+    }
+
+    /// The adoption token grants the full dsh API, so persisting it in the
+    /// world-readable 0644 registry would trade availability for a local
+    /// privilege leak.
+    #[cfg(unix)]
+    #[test]
+    fn authenticated_registry_is_owner_readable_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        with_temp_fleet_home(|base| {
+            let mut server = DshServer::start(&fake_dsh(), base).expect("start fake dsh");
+            let mode = std::fs::metadata(registry_path().unwrap())
+                .expect("registry metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            server.stop();
+            assert_eq!(mode, 0o600, "launch-token registry must not be 0644");
         });
     }
 
