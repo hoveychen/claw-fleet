@@ -31,6 +31,35 @@
       "evidence": "claw-fleet-desktop/app/components/NewSessionForm.tsx"
     },
     {
+      "title": "More than one agent",
+      "items": [
+        [
+          "A tool per task",
+          "Pick Claude Code, Codex or dsh when you brief a task, then a model from that tool."
+        ],
+        [
+          "Handoff across tools",
+          "Name another tool's model in a handoff and the next session runs there."
+        ],
+        [
+          "The plan travels",
+          "A handoff can carry the plan and the step it stopped on."
+        ],
+        [
+          "Notes along the chain",
+          "A successor session can read the notes its predecessors left behind."
+        ],
+        [
+          "Shared wiki and deliverables",
+          "A report one tool publishes is what the next tool reads back."
+        ],
+        [
+          "Mixed sessions stay legible",
+          "When several tools are running, the session list marks which one each task is on."
+        ]
+      ]
+    },
+    {
       "title": "See the work as it happens",
       "items": [
         [
@@ -271,6 +300,35 @@
         ]
       ],
       "evidence": "claw-fleet-desktop/app/components/NewSessionForm.tsx"
+    },
+    {
+      "title": "多个 AI 工具协同",
+      "items": [
+        [
+          "每个任务各选工具",
+          "交代任务时选定 Claude Code、Codex 或 dsh，再挑它自己的模型。"
+        ],
+        [
+          "跨工具接力",
+          "交接时指定另一个工具的模型，下一棒就在那个工具里继续。"
+        ],
+        [
+          "计划跟着交接走",
+          "交接可以带上计划，以及停在哪一步。"
+        ],
+        [
+          "笔记沿接力链可读",
+          "后一棒读得到前几棒留下的笔记。"
+        ],
+        [
+          "共用知识库与产出",
+          "一个工具发布的报告和产出，另一个工具读得回来。"
+        ],
+        [
+          "混跑时看得清",
+          "几个工具同时在跑时，会话列表标出每个任务用的是哪一个。"
+        ]
+      ]
     },
     {
       "title": "看清 Agent 在做什么",

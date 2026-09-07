@@ -23,9 +23,9 @@ try {for(const lang of ['en','zh']) for(const width of [1440,390]) {
  if(dimensions.some(i=>i.width>i.parentWidth+2||i.height>i.parentHeight+2))throw Error(JSON.stringify(dimensions));
  if(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth)) throw Error('Horizontal overflow');
 
- if(await p.locator('.capability-group li').count()!==48)throw Error('Incomplete feature catalogue');
+ if(await p.locator('.capability-group li').count()!==54)throw Error('Incomplete feature catalogue');
  await p.locator('.catalogue-toggle').click();
- if(await p.locator('.capability-group[open]').count()!==8)throw Error('Catalogue did not expand');
+ if(await p.locator('.capability-group[open]').count()!==9)throw Error('Catalogue did not expand');
  if(await p.locator('.capability-group summary span').evaluateAll(items=>items.some(i=>getComputedStyle(i).transform!=='none')))throw Error('Rotated catalogue counts');
  await p.locator('#capabilities').screenshot({path:`.playwright-cli/features-${lang}-${width}.png`});
  await p.locator('.catalogue-toggle').click();

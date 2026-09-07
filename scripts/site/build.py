@@ -40,7 +40,7 @@ def build(lang, c):
         + '</ul></details>' for group in catalogue
     )
     catalogue_title = '工作台的每一面。' if lang == 'zh' else 'More of the workspace.'
-    catalogue_copy = '48 项能力，按使用场景整理。需要时展开，不必一次学完。' if lang == 'zh' else '48 capabilities, grouped by how you use them. Open a section when you need it.'
+    catalogue_copy = f'{capability_count} 项能力，按使用场景整理。需要时展开，不必一次学完。' if lang == 'zh' else f'{capability_count} capabilities, grouped by how you use them. Open a section when you need it.'
     catalogue_toggle = '展开全部' if lang == 'zh' else 'Expand all'
     catalogue_collapse = '收起全部' if lang == 'zh' else 'Collapse all'
     capabilities = f'<section class="capabilities wrap" id="capabilities"><div class="capabilities-heading"><div><h2>{catalogue_title}</h2><p>{catalogue_copy}</p></div><button class="catalogue-toggle" data-expand="{catalogue_toggle}" data-collapse="{catalogue_collapse}" aria-expanded="false">{catalogue_toggle}</button></div><div class="capability-list">{capability_rows}</div></section>'
