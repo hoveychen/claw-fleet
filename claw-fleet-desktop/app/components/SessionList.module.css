@@ -58,25 +58,8 @@
   margin: 6px 14px;
 }
 
-.sidebar_collapsed .footer_card {
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 4px;
-  align-items: center;
-}
-
-.sidebar_collapsed .footer_avatar {
-  width: 28px;
-  height: 28px;
-}
-
-.sidebar_collapsed .footer_gear {
-  font-size: 14px;
-}
-
-.sidebar_collapsed .footer_card:hover .footer_gear {
-  transform: rotate(45deg);
-}
+/* No `.sidebar_collapsed .footer*` rules: the whole footer is unmounted when
+   the sidebar is collapsed (see SessionList.tsx). */
 
 /* ── Sidebar collapse toggle (top-right) ─────────────────────────────────── */
 

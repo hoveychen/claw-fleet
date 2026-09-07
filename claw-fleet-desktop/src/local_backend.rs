@@ -891,16 +891,32 @@ impl LocalBackend {
         // during window resize drag — can't push the file's timestamp past the
         // hook's liveness_window (30s) and trigger a spurious panel-vanish.
         //
-        // Self-check: if our own monotonic gap between iterations ever exceeds
-        // STALL_WARN, the thread itself was starved (process suspended, GC
-        // stall, scheduler pressure). That instantly distinguishes "we stopped
-        // running" from "we ran but the file write was lost" without needing
-        // hook-side correlation.
+        // Self-check: the loop reports why an iteration was late, and the two
+        // causes are measured separately because they call for opposite fixes.
+        //
+        // The iteration-to-iteration gap spans the *previous* iteration's
+        // `write_heartbeat()` as well as the sleep, so a slow filesystem used to
+        // be indistinguishable here from the thread being descheduled — and the
+        // old single log line asserted the latter ("process likely
+        // suspended/throttled") for both. 2532 of those lines sent a diagnosis
+        // after App Nap and memory pressure for weeks. An A/B isolation run on
+        // 2026-09-06 settled it: writes to `~/.fleet/` took 3.2s while a
+        // bare-sleep thread in the same process saw zero drift, so every
+        // multi-second value came from the write (wiki
+        // `desktop/heartbeat-stall-is-io`).
+        //
+        // So: time the write on its own, subtract it from the gap, and let each
+        // half speak for itself. Both can fire in one iteration.
         {
             let running_hb = running.clone();
             std::thread::spawn(move || {
-                const STALL_WARN: Duration = Duration::from_millis(2000);
+                use claw_fleet_core::consumer_heartbeat::{
+                    scheduling_gap, SLOW_WRITE_WARN, STALL_WARN,
+                };
                 let mut last_tick: Option<Instant> = None;
+                // The write that happened inside the gap we are about to
+                // measure — i.e. the previous iteration's.
+                let mut write_in_gap = Duration::ZERO;
                 loop {
                     if !running_hb.load(Ordering::SeqCst) {
                         break;
@@ -908,15 +924,29 @@ impl LocalBackend {
                     let now = Instant::now();
                     if let Some(prev) = last_tick {
                         let gap = now.saturating_duration_since(prev);
-                        if gap >= STALL_WARN {
+                        let sched = scheduling_gap(gap, write_in_gap);
+                        if sched >= STALL_WARN {
                             claw_fleet_core::log_debug(&format!(
-                                "[heartbeat] self-check: thread stalled for {:.2}s (expected ~0.5s; process likely suspended/throttled)",
-                                gap.as_secs_f64()
+                                "[heartbeat] self-check: scheduling gap {:.2}s (expected ~0.5s; \
+                                 gap {:.2}s minus {:.0}ms of heartbeat write — process starved, \
+                                 not blocked on IO)",
+                                sched.as_secs_f64(),
+                                gap.as_secs_f64(),
+                                write_in_gap.as_secs_f64() * 1000.0,
                             ));
                         }
                     }
                     last_tick = Some(now);
+                    let write_started = Instant::now();
                     claw_fleet_core::consumer_heartbeat::write_heartbeat();
+                    write_in_gap = write_started.elapsed();
+                    if write_in_gap >= SLOW_WRITE_WARN {
+                        claw_fleet_core::log_debug(&format!(
+                            "[heartbeat] slow write: {:.2}s to write ~/.fleet/consumer.heartbeat \
+                             (filesystem latency, not scheduling)",
+                            write_in_gap.as_secs_f64(),
+                        ));
+                    }
                     std::thread::sleep(Duration::from_millis(500));
                 }
             });
