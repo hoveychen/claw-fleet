@@ -15,7 +15,7 @@ import {
 import { CalendarClock, LoaderCircle } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
-import { messageToText } from "../messageRows";
+import { isRenderableRow, messageToText } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
 import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
@@ -835,6 +835,24 @@ export function SessionDetail({
   // resizes the webview, which is the very thing known to clear the freeze: the
   // act of going to look would destroy the state being looked at.
   const [snapshots, setSnapshots] = useState<string[]>([]);
+  // Render-synced so the keydown listener (mounted once) reads current values
+  // without re-subscribing. What the DOM cannot say about itself: a pane
+  // measured holding one message while its owner had 1621 renderable records is
+  // only a contradiction once both halves are in the same reading.
+  const probeCountsRef = useRef<Record<string, string | number | boolean>>({});
+  probeCountsRef.current = {
+    msgs: messages.length,
+    displayed: displayedMessages.length,
+    renderable: displayedMessages.filter(isRenderableRow).length,
+    tail: isStandalone ? localTail : global.loadedTail ?? -1,
+    fullyLoaded,
+    isLoading,
+    stalled: loadStalled,
+    following: followRef.current.following,
+    detached: followRef.current.detached,
+    tab: viewTab,
+    dockH: dockHeight,
+  };
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       if (!ev.altKey || !ev.shiftKey || ev.code !== "KeyS") return;
@@ -842,7 +860,9 @@ export function SessionDetail({
       if (!el) return;
       ev.preventDefault();
       const stamp = new Date().toTimeString().slice(0, 8);
-      const text = formatSnapshot(takeScrollSnapshot(el, currentViewMetrics(), stamp));
+      const text = formatSnapshot(
+        takeScrollSnapshot(el, currentViewMetrics(), stamp, probeCountsRef.current),
+      );
       setSnapshots((prev) => [...prev, text]);
     };
     window.addEventListener("keydown", onKey);

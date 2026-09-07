@@ -54,7 +54,39 @@ export interface ScrollSnapshot {
   boxes: BoxReading[];
   /** `offsetHeight` of each direct child — the content the scroller holds. */
   childHeights: number[];
+  /** Rows the DOM actually holds, counted from it rather than from React. */
+  dom: DomRowCounts;
+  /**
+   * Whatever the caller knows that the DOM cannot say — how many records it
+   * holds, how wide its fetch window is, whether it is still loading. Free-form
+   * on purpose: this is a debug reading, and pinning a schema to it would mean
+   * editing three files every time a new number turns out to matter.
+   */
+  counts?: Record<string, string | number | boolean>;
   view: ViewMetrics;
+}
+
+export interface DomRowCounts {
+  /** Elements carrying `data-msg-idx` — one per record the list rendered. */
+  msgIdxNodes: number;
+  /** Element children of the scroller's first child (the message list). */
+  listChildren: number;
+}
+
+/**
+ * What the DOM holds, read from the DOM.
+ *
+ * The open question this exists for: the pane was measured holding 687px of
+ * content — one message — while its owner had 1621 renderable records in hand.
+ * A count taken from React state can't settle that; one taken from the DOM,
+ * next to a count taken from state, can.
+ */
+function readDomRows(el: HTMLElement): DomRowCounts {
+  const list = el.firstElementChild;
+  return {
+    msgIdxNodes: el.querySelectorAll("[data-msg-idx]").length,
+    listChildren: list ? list.children.length : 0,
+  };
 }
 
 function readBox(el: HTMLElement): BoxReading {
@@ -106,6 +138,7 @@ export function takeScrollSnapshot(
   el: HTMLElement,
   view: ViewMetrics,
   label: string,
+  counts?: Record<string, string | number | boolean>,
 ): ScrollSnapshot {
   // Before anything reads layout, so a stuck box is asked to move while still
   // in the state the reader is complaining about.
@@ -120,6 +153,8 @@ export function takeScrollSnapshot(
     writeTest,
     boxes: ancestry(el, document.body).map(readBox),
     childHeights: Array.from(el.children).map((c) => (c as HTMLElement).offsetHeight),
+    dom: readDomRows(el),
+    counts,
     view,
   };
 }
@@ -141,6 +176,14 @@ export function formatSnapshot(snap: ScrollSnapshot): string {
     `writeTest=${snap.writeTest} paddingBottom=${snap.paddingBottom}`,
     `view innerW=${snap.view.innerWidth} innerH=${snap.view.innerHeight} docClientH=${snap.view.documentClientHeight} visualH=${snap.view.visualViewportHeight ?? "-"}`,
     `children=[${snap.childHeights.join(", ")}]`,
+    `dom msgIdxNodes=${snap.dom.msgIdxNodes} listChildren=${snap.dom.listChildren}`,
+    ...(snap.counts
+      ? [
+          `state ${Object.entries(snap.counts)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" ")}`,
+        ]
+      : []),
   ];
   for (const box of snap.boxes) {
     lines.push(
