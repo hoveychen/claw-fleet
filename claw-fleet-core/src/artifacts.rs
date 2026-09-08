@@ -967,12 +967,7 @@ pub fn rollback_in(root: &Path, id: &str, version: &str) -> Result<Artifact, Str
 
 pub fn delete(id: &str) -> Result<(), String> {
     let root = artifacts_dir_or_err()?;
-    delete_in(&root, id)?;
-    // A share link outliving its artifact is a URL that 404s for whoever you
-    // sent it to. Best-effort: the artifact is already gone, and failing the
-    // delete over bookkeeping would be worse.
-    let _ = crate::artifact_share::revoke_for_artifact(id);
-    Ok(())
+    delete_in(&root, id)
 }
 
 pub fn delete_in(root: &Path, id: &str) -> Result<(), String> {
