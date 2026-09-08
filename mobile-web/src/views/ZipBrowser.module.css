@@ -1,0 +1,144 @@
+/* zip 浏览器占满预览台：预览台默认把子元素居中，这里要的是从上往下铺开的
+   面包屑 + 列表，所以 .root 自己把整个盒子撑满。行高按触摸目标给足。 */
+.root {
+  width: 100%;
+  height: 100%;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-bg);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  flex-wrap: wrap;
+}
+
+.crumbGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font: inherit;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.crumb:disabled {
+  color: var(--color-text-dim);
+}
+
+.crumbCurrent {
+  color: var(--color-text);
+  font-weight: 600;
+  padding: 4px 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.sep {
+  color: var(--color-text-dim);
+  flex: none;
+}
+
+.barSpacer {
+  flex: 1;
+}
+
+.barAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  padding: 5px 9px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+}
+
+/* 成员预览由 PreviewBody 画，交给它整块 body。 */
+.body > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rows {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* 44px 起的触摸目标，别照搬桌面端那套密排。 */
+  min-height: 44px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--color-text);
+  text-align: left;
+}
+
+.row:active {
+  background: var(--color-bg-secondary);
+}
+
+.rowIcon {
+  flex: none;
+  color: var(--color-text-dim);
+}
+
+.rowName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  flex: none;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}

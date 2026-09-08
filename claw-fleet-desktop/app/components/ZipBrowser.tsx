@@ -57,14 +57,16 @@ export interface ZipMemberPreview {
 }
 
 /**
- * Above this, a member is not inflated on click.
+ * Above this, a member is not read at all.
  *
- * Not a performance hedge — inflating happens in memory, and a 500 MB member
- * inside a 600 MB archive would be held twice (compressed slice + inflated
- * result) with a `blob:` on top. The export button reaches the same bytes
- * without any of that, so the honest move is to offer it instead.
+ * Inflating happens in memory: a 500 MB member would be held twice (the
+ * compressed slice and the inflated result) with a `blob:` on top, and
+ * exporting it would then hand that whole array across the Tauri IPC boundary.
+ * So the cap is checked *before* the read, not after — an over-cap member
+ * offers neither a preview nor a per-member export, and says to export the
+ * archive and open it locally instead.
  */
-const MAX_INLINE_BYTES = 50 * 1024 * 1024;
+const MAX_INLINE_BYTES = 25 * 1024 * 1024;
 
 const KIND_ICON: Record<string, typeof FileText> = {
   image: ImageIcon,
@@ -184,13 +186,15 @@ export function ZipBrowser({
     setMember(null);
     setMemberBytes(null);
     setMemberError(null);
+    // Over the cap nothing is read — but the previous member's blob still has
+    // to go, or it lives until the window closes.
+    revoke();
+    if (open.size > MAX_INLINE_BYTES) return;
     readZipEntryBytes(loaded.reader, open)
       .then((bytes) => {
         if (!alive) return;
         setMemberBytes(bytes);
-        if (open.size > MAX_INLINE_BYTES) return;
         const mime = zipEntryMime(open.name);
-        revoke();
         const blobUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
         objectUrl.current = blobUrl;
         setMember({ url: blobUrl, mime, kind: zipEntryKind(mime, open.name), title: open.name });
@@ -262,7 +266,7 @@ export function ZipBrowser({
                 {t("artifacts.zip.too_big", "这一项太大了，不在这里展开。")}
               </div>
               <div className={styles.centered_hint}>
-                {t("artifacts.zip.too_big_hint", "用上面的「导出这一项」把它存到本地再打开。")}
+                {t("artifacts.zip.too_big_hint", "把整个压缩包导出到本地再打开它。")}
               </div>
             </div>
           ) : member ? (

@@ -213,6 +213,24 @@ pub(crate) fn export_artifact(
     Ok(())
 }
 
+/// Write bytes the frontend already holds to `dest` — 导出 for one member of a
+/// zip artifact.
+///
+/// A member's bytes exist nowhere but the webview: the zip browser reads the
+/// archive's central directory over `Range` and inflates the one member the
+/// user opened (`shared-ts/zipDir.ts`), and the store has no notion of what is
+/// inside an artifact. So unlike [`export_artifact`], which streams from the
+/// store by id, this one has to take the bytes.
+///
+/// `dest` is whatever the frontend passes, exactly as in `export_artifact` —
+/// both are only ever called with a path the user just chose in the OS save
+/// dialog. The browser caps a member at 50 MB before it ever inflates one, so
+/// what crosses the IPC boundary here is bounded.
+#[tauri::command(async)]
+pub(crate) fn export_bytes(dest: String, bytes: Vec<u8>) -> Result<(), String> {
+    std::fs::write(&dest, &bytes).map_err(|e| format!("write '{dest}': {e}"))
+}
+
 /// Absolute path of an artifact's blob on this machine, for "reveal in Finder"
 /// and "open with the system app".
 ///

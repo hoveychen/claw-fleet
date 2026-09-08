@@ -175,12 +175,35 @@ describe("ZipBrowser", () => {
     expect(container.textContent).toContain("密码保护");
   });
 
-  it("offers export instead of inflating a member too large to hold twice", async () => {
+  it("never reads a member too large to hold in memory twice", async () => {
     // A directory that claims 60 MB: the guard is on the declared size, so it
-    // fires without the test producing 60 MB.
+    // fires without the test producing 60 MB. The point is that the cap is
+    // checked *before* the read — inflating first and refusing after would
+    // hold the whole thing, which is the cost being avoided.
     const zip = makeZip([
       { name: "dump.bin", body: zipText("small in the fixture"), declaredSize: 60 * 1024 * 1024 },
     ]);
+    serve(zip);
+    await mount(
+      <ZipBrowser
+        url="fleet-artifact://x"
+        size={zip.length}
+        renderPreview={renderPreview}
+        onExportMember={vi.fn()}
+      />,
+    );
+
+    const listingReads = ranges.length;
+    await click("dump.bin");
+    expect(preview()).toBeNull();
+    expect(container.textContent).toContain("太大");
+    // No per-member export either: with no bytes read there is nothing to save.
+    expect(container.textContent).not.toContain("导出这一项");
+    expect(ranges.length).toBe(listingReads);
+  });
+
+  it("exports an opened member through the host's save path", async () => {
+    const zip = ARCHIVE();
     serve(zip);
     const onExportMember = vi.fn();
     await mount(
@@ -192,12 +215,12 @@ describe("ZipBrowser", () => {
       />,
     );
 
-    await click("dump.bin");
-    expect(preview()).toBeNull();
-    expect(container.textContent).toContain("太大");
+    await click("readme.md");
     await click("导出这一项");
     expect(onExportMember).toHaveBeenCalledTimes(1);
-    expect(onExportMember.mock.calls[0][0]).toBe("dump.bin");
+    const [name, bytes] = onExportMember.mock.calls[0];
+    expect(name).toBe("readme.md");
+    expect(new TextDecoder().decode(bytes as Uint8Array)).toBe("# top level");
   });
 
   it("says so when the blob is not a zip at all", async () => {

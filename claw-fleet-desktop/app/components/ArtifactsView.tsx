@@ -1680,6 +1680,30 @@ function PreviewStage({ item }: { item: StageItem }) {
 }
 
 /**
+ * Save one zip member to disk.
+ *
+ * A member's bytes live only in the webview — the store knows nothing about
+ * what is inside an artifact — so this cannot go through `export_artifact`,
+ * which streams by id. In a tab there is no save dialog to ask (`save()`
+ * answers null there and the button would silently do nothing, the same trap
+ * `doExport` documents), so the browser gets a download instead.
+ */
+async function exportMemberBytes(name: string, bytes: Uint8Array) {
+  if (isWebBuild()) {
+    const href = URL.createObjectURL(new Blob([bytes as BlobPart]));
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(href);
+    return;
+  }
+  const dest = await save({ defaultPath: name });
+  if (!dest) return;
+  await invoke("export_bytes", { dest, bytes: Array.from(bytes) });
+}
+
+/**
  * What the detail pane shows for one artifact.
  *
  * A .zip gets a folder browser instead of a preview — it is the one archive
@@ -1697,6 +1721,7 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
           url={url}
           size={artifact.sizeBytes}
           renderPreview={(member) => <PreviewStage item={member} />}
+          onExportMember={exportMemberBytes}
         />
       </div>
     );

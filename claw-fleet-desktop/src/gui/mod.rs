@@ -1635,6 +1635,7 @@ pub fn run() {
             delete_artifact_folder,
             rename_artifact_folder,
             export_artifact,
+            export_bytes,
             artifact_local_path,
             open_artifact_external,
             list_wiki_docs,

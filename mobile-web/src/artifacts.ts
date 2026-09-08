@@ -16,6 +16,7 @@
 // 产出 tab stays what it has always been: browse and open one deliverable.
 // Filing and tidying stay desk work.
 
+import { isBrowsableArchive } from "../../shared-ts/zipDir";
 import { ASSET_REQUEST_TIMEOUT_MS, type FleetTransport } from "./transport";
 import type { Artifact, ArtifactBlobPayload } from "./types";
 
@@ -57,6 +58,7 @@ export function isFetchable(a: Artifact): boolean {
  */
 export type PreviewKind =
   | "image"
+  | "zip"
   | "pdf"
   | "markdown"
   | "html"
@@ -74,14 +76,28 @@ const OOXML_MIME: Record<string, PreviewKind> = {
 
 export function previewKind(a: Artifact): PreviewKind {
   if (!isFetchable(a)) return "none";
-  if (a.kind === "image") return "image";
-  if (a.kind === "pdf") return "pdf";
-  const base = a.mime.split(";")[0].trim().toLowerCase();
-  if (a.kind === "text") {
+  return previewKindFor(a.kind, a.mime);
+}
+
+/**
+ * `previewKind` for something that is not an artifact record — a member of a
+ * zip, whose kind comes from `zipEntryKind` and whose mime comes from its name.
+ *
+ * The relay ceiling is not rechecked here: a member of a fetchable archive is
+ * by definition already on the phone.
+ */
+export function previewKindFor(kind: string, mime: string): PreviewKind {
+  if (kind === "image") return "image";
+  if (kind === "pdf") return "pdf";
+  const base = mime.split(";")[0].trim().toLowerCase();
+  if (kind === "text") {
     if (base === "text/markdown") return "markdown";
     if (base === "text/html") return "html";
     return "text";
   }
+  // A .zip is browsable as a folder (shared-ts/zipDir.ts); tar/gz/7z are not,
+  // and stay on the placeholder.
+  if (isBrowsableArchive(base)) return "zip";
   return OOXML_MIME[base] ?? "none";
 }
 
