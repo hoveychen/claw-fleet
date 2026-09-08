@@ -10,14 +10,26 @@
 /* One line, not two: the workspace name rides after the title as a dim suffix
    instead of owning a second row. Together with the flatter .tabBar below this
    takes the detail page's top chrome from ~101px to ~72px on a 390×844 phone —
-   the transcript is what the page is for. */
+   the transcript is what the page is for.
+
+   The 10px padding is the app-wide detail-header value (Repo / RepoDetail /
+   Plans / Wiki / WikiDoc / Artifacts / Usage / Terminal all use it). It was 7px
+   here for a while to claw 6px back for the transcript, which made this the one
+   header in the app that sat at a different height than every other — a 6px win
+   paid for with a page that read as belonging to a different app.
+
+   No border-bottom, unlike those siblings: this is the only detail header with a
+   .tabBar under it, so a hairline here would cut the top chrome into two stacked
+   slabs of --color-bg-secondary. Everything that can follow the header
+   (.infoPanel, .parentCrumb, .tabBar) shares that same background, so dropping
+   the line lets them read as one continuous panel closed off by the tabBar's own
+   bottom border. */
 .header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px;
-  padding-top: calc(7px + env(safe-area-inset-top));
-  border-bottom: 1px solid var(--color-border);
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top));
   background: var(--color-bg-secondary);
   flex-shrink: 0;
 }
@@ -44,7 +56,11 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  font-size: var(--t-ui, 14px);
+  /* --t-body, not --t-ui: the .tabButton row right below is --t-ui, and at the
+     same 14px the title stopped out-ranking the tabs — the top of the page read
+     as six equal-weight labels with a seventh above them. This is also what the
+     other detail headers title at. */
+  font-size: var(--t-body, 16px);
   font-weight: 600;
   /* The title text ellipsizes via .headerTitleText. */
 }
