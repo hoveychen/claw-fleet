@@ -212,12 +212,13 @@ const KNOWN_WEB_GAPS = [
   // Same shape: writes to a path the user picks on the caller's filesystem.
   // The browser build downloads the blob instead (`downloadArtifact`).
   "export_artifact",
-  // Opens the blob with the host shell's default application. Never reached in
-  // a tab: the button sits behind `artifact_local_path`, which answers null
-  // here (see above), so the browser build offers the download instead. A
-  // local no-op would be worse than a gap — the call site reports success on a
-  // resolved promise, and nothing would have opened.
+  // Act on the host shell — open the blob with its default application, show
+  // it in the file manager. Never reached in a tab: both buttons sit behind
+  // `canRevealPath()`, which is false in the browser build, so it offers the
+  // download instead. A local no-op would be worse than a gap — the call site
+  // reports success on a resolved promise, and nothing would have opened.
   "open_artifact_external",
+  "reveal_artifact",
   // Emit onto the desktop's app-event bus.
   "test_decision_frontend_only",
   "test_fleet_ask_end_to_end",

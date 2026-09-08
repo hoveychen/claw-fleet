@@ -2533,6 +2533,7 @@
     "unstar": "Unstar",
     "export": "Export to…",
     "export_short": "Export",
+    "exporting": "Exporting…",
     "exported": "Exported",
     "export_failed": "Export failed: {{error}}",
     "open_failed": "Open failed: {{error}}",
