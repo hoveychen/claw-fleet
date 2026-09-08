@@ -730,6 +730,39 @@ addEventListener('load',send);addEventListener('resize',send);\
 if(window.ResizeObserver){new ResizeObserver(send).observe(document.documentElement);}\
 setTimeout(send,0);setTimeout(send,120);setTimeout(send,400);})();</script>";
 
+/// Marker the theme prelude carries; doubles as its idempotency probe.
+pub const THEME_MARKER: &str = "__fleetTheme";
+
+/// Prelude prepended to every **served** preview document
+/// (`~/.fleet/decision-assets/<id>/q<n>/index.html`).
+///
+/// The `srcDoc` path bakes the app's theme straight into the document
+/// (`decisionFrame.ts::framePreviewSrcDoc`), but a served document is written
+/// once at request time, when nothing knows which theme the card will be read
+/// in — and being cross-origin, the app cannot reach in later to restyle it.
+/// So the theme travels on the URL (`index.html?theme=dark`) and this inline
+/// script applies it as the document's used colour scheme, which is what makes
+/// `CanvasText` / `Canvas` and the UA defaults (form controls, scrollbars) land
+/// on the right side. It runs before the body parses, so there is no light flash.
+///
+/// It is a *prelude*: it comes before the agent's own markup, so any rule the
+/// agent writes at equal specificity still wins. An agent that hard-codes
+/// `background:#eeefec` keeps its light card — the point here is only that a
+/// preview which styles *nothing* inherits the app's theme instead of the OS's.
+pub const THEME_PRELUDE: &str = "<!doctype html><meta charset=\"utf-8\">\
+<style>:root{color-scheme:light dark}html,body{background:transparent}\
+body{margin:0;color:CanvasText;font:13px -apple-system,system-ui,sans-serif}</style>\
+<script>(function(){var m=/[?&]theme=(dark|light)/.exec(location.search);\
+if(m){document.documentElement.style.colorScheme=m[1];}window.__fleetTheme=m?m[1]:null;})();</script>";
+
+/// Prepend [`THEME_PRELUDE`] unless the document already carries it.
+pub fn with_theme_prelude(html: &str) -> String {
+    if html.contains(THEME_MARKER) {
+        return html.to_string();
+    }
+    format!("{THEME_PRELUDE}{html}")
+}
+
 /// Marker the find handler carries; present in [`FIND_SCRIPT`].
 pub const FIND_MARKER: &str = "__fleetFind";
 
@@ -855,12 +888,22 @@ pub fn resolve_review_docs(req: &mut FleetAskRequest, project_dir: Option<&Path>
 
 /// Build a minimal stacked-image gallery document for questions that ship
 /// `images` but no `html` of their own.
+///
+/// Deliberately theme-neutral. This document used to hard-code
+/// `background:#fff;color:#222`, which made every image-only card a white
+/// rectangle inside the dark card — the served path cannot be recoloured from
+/// the outside, because a document that paints its own background wins over the
+/// embedder's `color-scheme`. `transparent` lets the card's themed surface show
+/// through and `CanvasText` follows the used colour scheme, which
+/// [`THEME_SCRIPT`] pins to the app's theme.
 fn synthesize_gallery(images: &[FleetAskImage]) -> String {
     let mut body = String::from(
         "<!doctype html><meta charset=\"utf-8\"><style>\
-         body{margin:0;padding:8px;font:13px/1.5 system-ui,-apple-system,sans-serif;background:#fff;color:#222}\
+         body{margin:0;padding:8px;font:13px/1.5 system-ui,-apple-system,sans-serif;\
+         background:transparent;color:CanvasText}\
          figure{margin:0 0 12px}img{max-width:100%;height:auto;display:block;border-radius:6px}\
-         figcaption{margin-top:4px;color:#666;font-size:12px}</style>",
+         figcaption{margin-top:4px;color:color-mix(in srgb,CanvasText 65%,transparent);font-size:12px}\
+         </style>",
     );
     for img in images {
         body.push_str("<figure><img src=\"");
@@ -919,6 +962,9 @@ pub fn ingest_images(req: &mut FleetAskRequest) -> Result<(), String> {
             Some(h) if !h.trim().is_empty() => with_autoheight(h),
             _ => with_autoheight(&synthesize_gallery(&q.images)),
         };
+        // Served documents get no theme from the parent (see THEME_PRELUDE):
+        // it has to be inside the file, applied from the URL's `?theme=`.
+        let html = with_theme_prelude(&html);
         fs::write(&index, html).map_err(|e| format!("write decision-asset index.html: {e}"))?;
     }
     Ok(())
@@ -1953,8 +1999,16 @@ mod tests {
         let index = read_decision_asset("card-img", "q0", "index.html").unwrap();
         assert_eq!(index.mime, "text/html; charset=utf-8");
         let idx = String::from_utf8_lossy(&index.bytes);
-        assert!(idx.starts_with("<img src=\"chart.png\">"), "agent html served verbatim: {idx}");
+        assert!(idx.contains("<img src=\"chart.png\">"), "agent html served verbatim: {idx}");
         assert!(idx.contains(AUTOHEIGHT_MARKER), "served entry must report its height: {idx}");
+        // The theme prelude leads (a served document cannot be restyled from the
+        // cross-origin parent, so the theme has to travel inside it) and comes
+        // *before* the agent's markup so agent rules still win.
+        assert!(idx.starts_with(THEME_PRELUDE), "theme prelude must lead: {idx}");
+        assert!(
+            idx.find(THEME_MARKER).unwrap() < idx.find("<img src=").unwrap(),
+            "prelude must precede agent markup: {idx}"
+        );
 
         // The image serves with correct bytes + mime.
         let png = read_decision_asset("card-img", "q0", "chart.png").unwrap();
@@ -1993,6 +2047,23 @@ mod tests {
         let g = String::from_utf8_lossy(&gallery.bytes);
         assert!(g.contains("src=\"ok.png\""), "gallery must reference survivor: {g}");
         assert!(g.contains(AUTOHEIGHT_MARKER), "synthesized gallery must report its height: {g}");
+        // Theme regression guard: the gallery used to hard-code a white canvas,
+        // which made every image-only card a white rectangle in the dark theme.
+        // The served path cannot be recoloured from outside, so the document
+        // itself must stay theme-neutral.
+        assert!(g.contains(THEME_MARKER), "gallery must carry the theme prelude: {g}");
+        assert!(
+            !g.contains("background:#fff") && !g.contains("color:#222"),
+            "gallery must not hard-code a light canvas: {g}"
+        );
+        assert!(g.contains("color:CanvasText"), "gallery text follows the colour scheme: {g}");
+
+        // Idempotent: a document already carrying the prelude gets no second one.
+        assert_eq!(
+            with_theme_prelude(&g).matches(THEME_MARKER).count(),
+            g.matches(THEME_MARKER).count(),
+            "prelude must not stack"
+        );
 
         // restore env + clean up
         unsafe {

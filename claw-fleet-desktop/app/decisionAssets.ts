@@ -12,6 +12,14 @@ import { isWebBuild } from "./hostEnv";
  * and breaks relative-asset resolution inside the served index.html.
  * `qidx` is the question's `q<step>` dir; `rel` defaults to the served entry.
  *
+ * `theme` rides along as `?theme=dark|light` for the served `index.html`: the
+ * document is cross-origin, so the app cannot restyle it after load, and unlike
+ * the `srcDoc` path there is no chance to bake the theme in at render time. The
+ * prelude core writes into every served document (`mcp_ipc::THEME_PRELUDE`)
+ * reads this parameter and pins the used colour scheme to it. Without it an
+ * image-only card renders on the OS's preferred scheme — a white box under the
+ * dark theme. Harmless on image requests, where nothing reads it.
+ *
  * In the browser build there is no custom protocol to reach: the scheme is
  * registered on the Tauri webview, and Chromium blocks the navigation outright
  * for an `<iframe src="fleet-decision://…">` in a tab — measured, and the card
@@ -31,10 +39,16 @@ import { isWebBuild } from "./hostEnv";
  * `DecisionPanel` would close the cycle
  * `MessageList → DecisionToolCard → DecisionPanel → SessionDetail → MessageList`.
  */
-export function decisionAssetUrl(id: string, qidx: string, rel = "index.html"): string {
+export function decisionAssetUrl(
+  id: string,
+  qidx: string,
+  rel = "index.html",
+  theme?: "dark" | "light",
+): string {
   const path = [id, qidx, ...rel.split("/")].map(encodeURIComponent).join("/");
-  if (isWebBuild()) return `${window.location.origin}/decision_asset/${path}`;
+  const q = theme ? `?theme=${theme}` : "";
+  if (isWebBuild()) return `${window.location.origin}/decision_asset/${path}${q}`;
   return navigator.userAgent.includes("Windows")
-    ? `http://fleet-decision.localhost/${path}`
-    : `fleet-decision://localhost/${path}`;
+    ? `http://fleet-decision.localhost/${path}${q}`
+    : `fleet-decision://localhost/${path}${q}`;
 }

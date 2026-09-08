@@ -5,6 +5,8 @@ import type { ReviewDoc, ReviewDocContent } from "../types";
 import { ProgressiveMarkdown } from "../markdown/ProgressiveMarkdown";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { AutoHeightFrame } from "./AutoHeightFrame";
+import { framePreviewSrcDoc } from "../decisionFrame";
+import { useDocumentTheme } from "../hooks/useDocumentTheme";
 import styles from "./ReviewDocsColumn.module.css";
 
 type Loaded =
@@ -45,6 +47,7 @@ function ReviewDocsColumnInner({
 }) {
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(sessionId);
+  const theme = useDocumentTheme();
   const [activeIdx, setActiveIdx] = useState(0);
   // Per-doc fetch state, keyed by tab index. Lazily populated on first view.
   const [loaded, setLoaded] = useState<Record<number, Loaded>>({});
@@ -121,8 +124,12 @@ function ReviewDocsColumnInner({
         ) : active.content.format === "html" ? (
           <AutoHeightFrame
             title={active.content.title}
-            srcDoc={active.content.body}
+            // Same prelude as the card's own html preview: an html review doc
+            // that styles nothing would otherwise render on the iframe's default
+            // white canvas — a light page inside the dark panel.
+            srcDoc={framePreviewSrcDoc(active.content.body, theme)}
             className={styles.html_frame}
+            style={{ colorScheme: theme }}
           />
         ) : (
           <div className={styles.markdown}>
