@@ -5,7 +5,7 @@
 # Claw Fleet
 
 **Your agents write the code. The task never dies on your watch.**
-One dashboard for every **Claude Code**, **Codex** and **dsh** session you run — live status, real cost, and every question they need answered, in a single inbox you can reach from your phone.
+One dashboard for every **Claude Code**, **Codex** and **DeepSeek Harness** session you run — live status, real cost, and every question they need answered, in a single inbox you can reach from your phone.
 
 **[Explore the workspace](https://hoveychen.github.io/claw-fleet/)** · **[中文介绍](https://hoveychen.github.io/claw-fleet/zh/)**
 
@@ -156,7 +156,7 @@ The feature is off by default: the same crate produces the `fleet` sidecar that 
 **Mobile:** the desktop dials *out* to a content-agnostic relay over WebSocket and your phone joins the channel with the key from the QR code. `fleet serve` exposes the same data plane over HTTP for the browser build and the cloud container.
 
 ```
-agents (Claude Code / Codex / dsh)
+agents (Claude Code / Codex / DeepSeek Harness)
    │  JSONL + lock files            hooks + MCP
    ▼                                    ▼
  file watcher ──────────────► Fleet core (Rust)
