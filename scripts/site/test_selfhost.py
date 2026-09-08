@@ -1,6 +1,7 @@
 """Exercise activation boundaries without touching a live server."""
 import copy
 import hashlib
+import http.client
 import io
 import json
 from pathlib import Path
@@ -71,7 +72,87 @@ class SelfhostTests(unittest.TestCase):
                 selfhost.sync(self.root, 'https://dl.example.com', self.release)
         self.assertEqual((self.root / 'current').resolve(), self.old)
         self.assertEqual((self.old / 'downloads.json').read_bytes(), before)
-        self.assertEqual(list((self.root / 'deployments').iterdir()), [self.old])
+        # The stage is kept on purpose so the next round resumes into it; what
+        # matters is that nothing unverified became live.
+        staged = list((self.root / 'deployments').glob('.stage-v2.6.0-*'))
+        self.assertEqual(len(staged), 1)
+        self.assertFalse((staged[0] / 'downloads.json').exists())
+
+    def test_a_killed_round_is_resumed_instead_of_restarted(self):
+        # The mirror's route needs hours for the asset set and no unattended
+        # round survives that long, so bytes have to accumulate across rounds.
+        deployments = self.root / 'deployments'
+        delivered = []
+
+        def dies_after_two_assets(*args, **kwargs):
+            if len(delivered) >= 2:
+                raise http.client.RemoteDisconnected('Remote end closed connection without response')
+            delivered.append('ok')
+            return io.BytesIO(self.body)
+
+        with patch.object(distribute.time, 'sleep', lambda *_: None), \
+             patch.object(distribute.urllib.request, 'urlopen', side_effect=dies_after_two_assets):
+            with self.assertRaises(OSError):
+                selfhost.sync(self.root, 'https://dl.example.com', self.release)
+        stage = list(deployments.glob('.stage-v2.6.0-*'))[0]
+        kept = sorted(p.name for p in (stage / 'releases/v2.6.0').glob('*') if p.suffix != '.partial')
+        self.assertEqual(len(kept), 2, 'the killed round must leave its verified assets behind')
+
+        second = []
+
+        def healthy(*args, **kwargs):
+            second.append(args[0].full_url)
+            return io.BytesIO(self.body)
+
+        with patch.object(distribute.urllib.request, 'urlopen', side_effect=healthy):
+            self.assertTrue(selfhost.sync(self.root, 'https://dl.example.com', self.release))
+        # Only the two that were still missing were fetched again.
+        self.assertEqual(len(second), len(distribute.REQUIRED) - 2)
+        live = (self.root / 'current').resolve()
+        self.assertEqual(json.loads((live / 'downloads.json').read_text())['version'], 'v2.6.0')
+        # Reused the same stage rather than staging the set a second time, and
+        # swept it away once activated.
+        self.assertEqual(list(deployments.glob('.stage-*')), [])
+        for name in distribute.REQUIRED:
+            self.assertEqual((live / 'releases/v2.6.0' / name).read_bytes(), self.body)
+
+    def test_the_fullest_stage_wins_not_the_newest(self):
+        # A round that just started has the newest mtime and almost nothing in
+        # it; the round killed before it may hold most of the asset set.
+        deployments = self.root / 'deployments'
+        fuller = deployments / '.stage-v2.6.0-killed'
+        (fuller / 'releases/v2.6.0').mkdir(parents=True)
+        for name in sorted(distribute.REQUIRED)[:3]:
+            (fuller / 'releases/v2.6.0' / name).write_bytes(self.body)
+        newer = deployments / '.stage-v2.6.0-juststarted'
+        (newer / 'releases/v2.6.0').mkdir(parents=True)
+        (newer / 'releases/v2.6.0/claw-fleet-macos.pkg.partial').write_bytes(b'x')
+        self.assertGreater(newer.stat().st_mtime, fuller.stat().st_mtime)
+        self.assertEqual(selfhost.staging_directory(deployments, 'v2.6.0'), fuller)
+
+    def test_a_stage_for_another_tag_is_not_reused(self):
+        deployments = self.root / 'deployments'
+        stale = deployments / '.stage-v2.5.0-deadbeef'
+        (stale / 'releases/v2.5.0').mkdir(parents=True)
+        reused = selfhost.staging_directory(deployments, 'v2.6.0')
+        self.assertNotEqual(reused, stale)
+        self.assertTrue(stale.is_dir())
+
+    def test_a_bad_staged_asset_is_discarded_and_refetched(self):
+        # A round killed mid-write can leave a truncated file that is not a
+        # .partial; trusting it would wedge every later round identically.
+        deployments = self.root / 'deployments'
+        stage = deployments / '.stage-v2.6.0-abandoned'
+        assets = stage / 'releases/v2.6.0'
+        assets.mkdir(parents=True)
+        for name in distribute.REQUIRED:
+            (assets / name).write_bytes(b'half-written junk')
+        with patch.object(distribute.time, 'sleep', lambda *_: None), \
+             patch.object(distribute.urllib.request, 'urlopen', side_effect=lambda *a, **k: io.BytesIO(self.body)):
+            self.assertTrue(selfhost.sync(self.root, 'https://dl.example.com', self.release))
+        live = (self.root / 'current').resolve()
+        for name in distribute.REQUIRED:
+            self.assertEqual((live / 'releases/v2.6.0' / name).read_bytes(), self.body)
 
     def test_incomplete_release_does_not_stage_or_activate(self):
         release = self.release | {'assets': self.release['assets'][:-1]}

@@ -29,6 +29,31 @@ def latest_release():
         return json.load(response)
 
 
+def staging_directory(deployments, tag):
+    """Reuse this tag's abandoned stage so a killed round is not wasted.
+
+    Downloading the asset set over this route takes hours, far longer than any
+    single unattended round survives, so the only way the mirror can reach a
+    new release is by accumulating bytes across rounds. Only a stage for the
+    same tag is reused — a leftover from an older tag holds URLs and checksums
+    that no longer apply.
+
+    When several are lying around, the one holding the most downloaded bytes
+    wins, not the most recent: a fresh round that just started has the newest
+    mtime and almost nothing in it, while the round killed before it may hold
+    most of the set.
+    """
+    def staged_bytes(stage):
+        return sum(p.stat().st_size for p in (stage / 'releases' / tag).glob('*') if p.is_file())
+
+    existing = sorted(deployments.glob(f'.stage-{tag}-*'), key=staged_bytes)
+    if existing:
+        stage = existing[-1]
+        print(f'Resuming staged {tag} at {stage} ({staged_bytes(stage)} bytes downloaded)', flush=True)
+        return stage
+    return Path(tempfile.mkdtemp(prefix=f'.stage-{tag}-', dir=deployments))
+
+
 def sync(root, public_url, release, *, rebuild_current=False):
     """Caller holds the update lock. Failed preparation never changes current."""
     root = root.resolve()
@@ -58,17 +83,20 @@ def sync(root, public_url, release, *, rebuild_current=False):
         if not rebuild_current:
             print(f'Up to date: {tag}; no downloads or site changes', flush=True)
             return False
-    stage = Path(tempfile.mkdtemp(prefix=f'.stage-{tag}-', dir=deployments))
+    stage = staging_directory(deployments, tag)
     switch = root / ('.current-' + uuid.uuid4().hex)
     try:
         # Immutable historical binaries share disk blocks, never get rewritten.
         # SHA256SUMS is copied because prepare rewrites the current checksum file.
         def copy_history(src, dst):
+            if Path(dst).exists():
+                return dst  # Already linked by an earlier round into this stage.
             if Path(src).name == 'SHA256SUMS':
                 return shutil.copy2(src, dst)
             os.link(src, dst)
             return dst
-        shutil.copytree(current / 'releases', stage / 'releases', copy_function=copy_history)
+        shutil.copytree(current / 'releases', stage / 'releases', copy_function=copy_history,
+                        dirs_exist_ok=True)
         distribute.prepare(release, stage, public_url, site_root=current,
                            provider=saved['china'].get('provider', 'Self-hosted'))
         # mkdtemp is 0700: nginx must be able to traverse the ready deployment.
@@ -78,12 +106,21 @@ def sync(root, public_url, release, *, rebuild_current=False):
         switch.symlink_to(ready)
         os.replace(switch, current_link)
         print(f'Activated {tag}: {ready}; previous site retained at {current}', flush=True)
+        for orphan in deployments.glob('.stage-*'):
+            # The update lock means no other sync is running, so any staging
+            # directory still here was abandoned by a killed round.
+            shutil.rmtree(orphan, ignore_errors=True)
         return True
     finally:
         if switch.is_symlink():
             switch.unlink()
-        if stage.exists():
-            shutil.rmtree(stage)
+        # The stage is deliberately NOT removed on failure. On this mirror's
+        # route the asset set takes hours, so a round that dies partway is the
+        # normal case, and deleting its bytes made net progress permanently
+        # zero: every 45-minute systemd timeout threw away everything and the
+        # next round started from scratch, so a new release could never land.
+        # A retained stage is safe because prepare re-verifies every file it
+        # finds there and refetches anything that fails.
 
 
 def main():

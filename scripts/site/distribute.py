@@ -187,6 +187,16 @@ def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cl
     for name, asset in sorted(assets.items()):
         path = output / 'releases' / tag / name
         path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            try:
+                verify(path, asset)
+            except ValueError:
+                # selfhost.py hands us a staging directory retained from an
+                # earlier round, so a file sitting here is not proof of a good
+                # download — a round killed mid-write can leave a bad one, and
+                # trusting it would wedge every later round on the same error.
+                print(f'Discarding unverifiable staged {name}', flush=True)
+                path.unlink()
         if not path.exists():
             temporary = path.with_name(name + '.partial')
             download(asset, path, temporary)
