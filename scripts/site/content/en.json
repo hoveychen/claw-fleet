@@ -1,6 +1,6 @@
 {
   "title": "Claw Fleet — Your personal AI workspace",
-  "description": "Give AI the work, review the decisions, and take the results. A personal workspace for Claude Code, Codex and dsh, with projects, deliverables and mobile access.",
+  "description": "Give AI the work, review the decisions, and take the results. A personal workspace for Claude Code, Codex and dsh (DeepSeek Harness), with projects, deliverables and mobile access.",
   "nav": [
     "The workspace",
     "On your phone",
@@ -10,7 +10,7 @@
   "skip": "Skip to content",
   "headline": "Give it the work.<br>Make the calls.<br>Take the results.",
   "intro": "Your personal AI workspace.",
-  "lede": "Bring Claude Code, Codex and dsh together. Move work forward by project, review what needs your judgment, and keep the results within reach.",
+  "lede": "Bring Claude Code, Codex and dsh (DeepSeek Harness) together. Move work forward by project, review what needs your judgment, and keep the results within reach.",
   "cta": "Download Claw Fleet",
   "secondary": "See the workflow",
   "meta": "Free & open source. Bring your own AI tools and accounts.",
@@ -46,6 +46,38 @@
       "Open a deliverable, export it, and return to it later. Keep reusable conclusions in a versioned project wiki."
     ]
   ],
+  "navHarness": "Multiple agents",
+  "harnessHeading": "One piece of work.<br>More than one agent.",
+  "harnessCopy": "Planning, implementation and review don’t have to run on the same tool. You decide who takes which step.",
+  "relayNodes": [
+    [
+      "Claude Code",
+      "breaks down the plan"
+    ],
+    [
+      "dsh (DeepSeek Harness)",
+      "works through it"
+    ],
+    [
+      "Codex",
+      "reviews and wraps up"
+    ]
+  ],
+  "relayNote": "The split is only an example. Every task picks its own tool and model; name another tool’s model in a handoff and the next session runs there.",
+  "harnessPoints": [
+    [
+      "A tool per task.",
+      "Choose the agent tool when you brief the task, then pick a model from that tool’s own catalogue. When several are running, the session list shows which tool each task is on."
+    ],
+    [
+      "A handoff carries more than a note.",
+      "The workspace, the plan and its current step, and the notes the previous session left behind all travel to the next one. Whoever picks it up doesn’t rebuild the context."
+    ],
+    [
+      "The record belongs to the work.",
+      "Plans, the project wiki, deliverables and notes live in Fleet, not inside one tool. What Claude Code writes down, Codex and dsh can read back."
+    ]
+  ],
   "mobileHeading": "Away from your desk.<br>Still part of the work.",
   "mobileCopy": "An idea doesn’t have to wait until you get home. Start a task from your phone, choose the project and device, and come back when a decision needs you.",
   "mobilePoints": [
@@ -71,7 +103,7 @@
       "Use plans and handoff briefs for longer tasks. Schedule recurring work, or wait for a condition before continuing."
     ]
   ],
-  "sourceNames": "Claude Code, Codex, and dsh",
+  "sourceNames": "Claude Code, Codex, and dsh (DeepSeek Harness)",
   "sourceBlurb": "Choose the tools and models you already use. dsh can connect to configured model providers. Each tool keeps its own account and access requirements.",
   "downloadHeading": "Your next project<br>starts here.",
   "downloadCopy": "Install the desktop app, connect your AI tools, and give your next piece of work a home.",
@@ -122,7 +154,7 @@
   "faqs": [
     [
       "Which AI tools can I use?",
-      "Fleet connects to Claude Code, Codex and dsh. Install and configure the tools you want to use. dsh can select models from configured providers; availability depends on those providers and your credentials."
+      "Fleet connects to Claude Code, Codex and dsh (DeepSeek Harness, the @deepseek-ai/dsh CLI). Install and configure the tools you want to use. dsh can select models from configured providers; availability depends on those providers and your credentials."
     ],
     [
       "Is it free?",

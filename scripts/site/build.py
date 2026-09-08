@@ -25,6 +25,10 @@ def build(lang, c):
         links=dl(*ASSETS[i]) if i<2 else dl(*ASSETS[2])+dl(*ASSETS[3])
         rows+=f'<div class="download-row"><div class="platform"><img src="{base}icon-{["apple","windows","linux"][i]}.svg" width="28" height="28" alt=""><h3>{name}</h3></div><div class="architecture"><strong>{arch}</strong><span>{desc}</span></div><div class="download-actions">{links}</div></div>'
     features=''.join(f'<article><h3>{h}</h3><p>{p}</p></article>' for h,p in c['features'])
+    relay=('<span class="relay-arrow" aria-hidden="true">→</span>').join(
+        f'<div class="relay-node"><strong>{escape(name)}</strong><span>{escape(role)}</span></div>'
+        for name,role in c['relayNodes'])
+    harness_points=''.join(f'<article><h3>{h}</h3><p>{p}</p></article>' for h,p in c['harnessPoints'])
     more=''.join(f'<article><h3>{h}</h3><p>{p}</p></article>' for h,p in c['moreItems'])
     steps=''.join(f'<li><h3>{h}</h3><p>{p}</p></li>' for h,p in c['steps'])
     faq=''.join(f'<details><summary>{h}<span aria-hidden="true">+</span></summary><p>{p}</p></details>' for h,p in c['faqs'])
@@ -36,7 +40,7 @@ def build(lang, c):
         + '</ul></details>' for group in catalogue
     )
     catalogue_title = '工作台的每一面。' if lang == 'zh' else 'More of the workspace.'
-    catalogue_copy = '48 项能力，按使用场景整理。需要时展开，不必一次学完。' if lang == 'zh' else '48 capabilities, grouped by how you use them. Open a section when you need it.'
+    catalogue_copy = f'{capability_count} 项能力，按使用场景整理。需要时展开，不必一次学完。' if lang == 'zh' else f'{capability_count} capabilities, grouped by how you use them. Open a section when you need it.'
     catalogue_toggle = '展开全部' if lang == 'zh' else 'Expand all'
     catalogue_collapse = '收起全部' if lang == 'zh' else 'Collapse all'
     capabilities = f'<section class="capabilities wrap" id="capabilities"><div class="capabilities-heading"><div><h2>{catalogue_title}</h2><p>{catalogue_copy}</p></div><button class="catalogue-toggle" data-expand="{catalogue_toggle}" data-collapse="{catalogue_collapse}" aria-expanded="false">{catalogue_toggle}</button></div><div class="capability-list">{capability_rows}</div></section>'
@@ -61,7 +65,7 @@ def build(lang, c):
 </head>
 <body data-locale="{lang}">
 <a class="skip" href="#main">{c['skip']}</a>
-<header class="header"><a class="brand" href="{base}{'zh/' if lang=='zh' else ''}"><img src="{base}icon.png" width="32" height="32" alt="">Claw Fleet</a><nav aria-label="{'主导航' if lang=='zh' else 'Main navigation'}"><a class="nav-explore" href="#explore">{c['nav'][0]}</a><a class="nav-capabilities" href="#capabilities">{'全部功能' if lang=='zh' else 'Features'}</a><a class="nav-mobile" href="#mobile">{c['nav'][1]}</a><a class="language" href="{other}" lang="{'en' if lang=='zh' else 'zh-CN'}" hreflang="{'en' if lang=='zh' else 'zh-CN'}">{c['language']}</a><a class="nav-download" href="#download">{c['nav'][2]}<span aria-hidden="true"> ↓</span></a></nav></header>
+<header class="header"><a class="brand" href="{base}{'zh/' if lang=='zh' else ''}"><img src="{base}icon.png" width="32" height="32" alt="">Claw Fleet</a><nav aria-label="{'主导航' if lang=='zh' else 'Main navigation'}"><a class="nav-explore" href="#explore">{c['nav'][0]}</a><a class="nav-harness" href="#harness">{c['navHarness']}</a><a class="nav-capabilities" href="#capabilities">{'全部功能' if lang=='zh' else 'Features'}</a><a class="nav-mobile" href="#mobile">{c['nav'][1]}</a><a class="language" href="{other}" lang="{'en' if lang=='zh' else 'zh-CN'}" hreflang="{'en' if lang=='zh' else 'zh-CN'}">{c['language']}</a><a class="nav-download" href="#download">{c['nav'][2]}<span aria-hidden="true"> ↓</span></a></nav></header>
 <main id="main">
 <section class="hero wrap"><h1>{c['headline']}</h1><div class="hero-copy"><p class="intro">{c['intro']}</p><p>{c['lede']}</p><a class="button primary" href="#download">{c['cta']}<span aria-hidden="true">↓</span></a><a class="text-link" href="#explore">{c['secondary']} <span aria-hidden="true">↗</span></a><small>{c['meta']}</small></div></section>
 <section class="showcase wrap" id="explore" aria-label="{c['nav'][0]}"><span id="demo"></span>
@@ -69,6 +73,7 @@ def build(lang, c):
 {panels}<p class="mobile-sample">{c['sample']}</p>
 </section>
 <section class="overview wrap"><div class="section-heading"><h2>{c['sectionHeading']}</h2><p>{c['sectionText']}</p></div><div class="feature-columns">{features}</div></section>
+<section class="harness wrap" id="harness"><div class="section-heading"><h2>{c['harnessHeading']}</h2><p>{c['harnessCopy']}</p></div><div class="relay"><div class="relay-lane">{relay}</div><p class="relay-note">{c['relayNote']}</p></div><div class="feature-columns">{harness_points}</div></section>
 <section class="mobile-section wrap" id="mobile"><div class="mobile-art"><div class="phone"><img src="{asset(f'screenshots/current/mobile-{lang}.png')}" width="{mobile_w}" height="{mobile_h}" loading="lazy" alt="{c['mobileAlt']}"></div><p>{c['mobileCaption']}</p></div><div class="mobile-copy"><h2>{c['mobileHeading']}</h2><p>{c['mobileCopy']}</p><ul>{''.join(f'<li>{p}</li>' for p in c['mobilePoints'])}</ul><a class="text-link" href="#getting-started">{c['mobileCta']} <span aria-hidden="true">↗</span></a></div></section>
 <section class="work-depth wrap"><div class="section-heading"><h2>{c['moreHeading']}</h2><p>{c['moreCopy']}</p></div><div class="depth-list">{more}</div><div class="source-strip"><p>{c['sourceNames']}</p><span>{c['sourceBlurb']}</span></div></section>
 {capabilities}
