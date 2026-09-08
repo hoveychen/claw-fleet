@@ -178,6 +178,10 @@
       "Yes — a task picks its tool when you brief it, and Codex tasks get its own model catalogue, its own reasoning ladder and the ChatGPT-plan windows it reports. <a href=\"codex-gui.html\">A desktop workspace for Codex</a> goes through it."
     ],
     [
+      "Can I use my own provider keys instead of a subscription?",
+      "That is what DeepSeek Harness is for: you configure the providers, and the models you can reach are whatever those keys open. <a href=\"deepseek-harness-gui.html\">A desktop workspace for DeepSeek Harness</a> covers how spend and effort work there."
+    ],
+    [
       "Is it free?",
       "Claw Fleet itself is free and open source under AGPL-3.0. AI tools, model subscriptions and API usage stay on each vendor’s own bill. Costs shown in Fleet are estimated from usage, for reference only."
     ],
@@ -398,6 +402,82 @@
       ],
       "closingHeading": "Give the next long run somewhere to report.",
       "closing": "Install the desktop app, point it at the Codex CLI you already use, and stop reading a terminal to find out what happened.",
+      "cta": "Download Claw Fleet",
+      "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
+    },
+    "deepseek-harness-gui": {
+      "title": "A desktop workspace for DeepSeek Harness — Claw Fleet",
+      "description": "Drive the dsh CLI from a desktop app: models from the providers you configured, each with its own reasoning ladder, spend read from the provider's own API, and one local dsh server behind every session.",
+      "skip": "Skip to content",
+      "backHome": "Home",
+      "navDownload": "Download",
+      "eyebrow": "For people running the dsh CLI",
+      "h1": "Bring your own keys.<br>Keep the workspace.",
+      "lede": "DeepSeek Harness is a bring-your-own-key harness: you configure the providers, and the models you can reach are whatever those keys open. Claw Fleet is a desktop app that puts a workspace around it — the provider catalogue in the model picker, the spend read from the provider that actually bills you, and the tasks, decisions and deliverables kept the same way they are for every other tool.",
+      "sections": [
+        {
+          "h2": "The models are your providers' models",
+          "body": [
+            "dsh publishes what your configuration can reach, so the picker is built from your catalogue rather than a fixed list. Ids are provider-scoped — the vendor prefix in front of the model name — and Fleet groups them by vendor so a catalogue with dozens of entries is still something you can pick from.",
+            "Reasoning effort is per model here, not per tool: each model carries the ladder it accepts, and dsh's own default is named on the menu so the un-chosen state tells you what will happen rather than leaving you guessing. Some models expose no reasoning control at all, and then there is no ladder to show.",
+            "Fleet only offers dsh at all when the binary is actually installed. Unlike the other two sources, this one reaches its sessions through a server it has to start, so a machine without dsh gets no half-working entry in the menu."
+          ]
+        },
+        {
+          "h2": "What it costs comes from the provider, not from us",
+          "body": [
+            "dsh has no account, quota or rate-limit surface — that is not an omission, it follows from what the harness is. The quota belongs to whichever provider your key is for.",
+            "So Fleet reads the spend where it exists: the provider's own API. For a key you configured, that means the balance and generation cost that provider reports, which is the only number that corresponds to a real bill. There are no plan windows to draw, because dsh does not have a plan.",
+            "Per-session token accounting is a different question, and that one dsh does answer — Fleet reads the per-session token projections it publishes, so you still get tokens and a cost estimate for a specific task."
+          ]
+        },
+        {
+          "h2": "One local server behind every session",
+          "body": [
+            "Fleet talks to all dsh sessions through a single local dsh server, and treats it as a machine-level service rather than a child process that dies with a window. Close the app, open it again, and it adopts the running server instead of starting a second one.",
+            "That is the part you would otherwise have to run by hand, and the part that would go wrong quietly: two servers, two ports, sessions split between them. The lease is recorded with the port and launch token, readable only by you, so a later health failure can restart the same service rather than orphaning it."
+          ]
+        },
+        {
+          "h2": "Same board, same decisions, same deliverables",
+          "body": [
+            "Everything the workspace does around a session applies here unchanged. dsh tasks sit on the same board with their provider and model on the card, take follow-up instructions while running, raise decision cards with the material attached, and drop their finished files into the project's deliverables.",
+            "Images work in both directions: attach reference pictures to a brief and they reach the session as real files.",
+            "A plan written in a dsh session is the same plan another tool picks up, and a handoff can name a Claude Code or Codex model to continue in. The point of a bring-your-own-key harness is not having to commit — keeping the plan, the wiki and the results outside the CLI is what makes that true in practice."
+          ],
+          "shot": "screenshots/current/agents-en.png",
+          "shotAlt": "Fleet session board with DeepSeek Harness, Claude Code and Codex tasks side by side, each card labelled with its tool and model",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Where the keys live",
+          "body": [
+            "Provider credentials stay in your own dsh configuration. Fleet can tell you whether a credential a session needs is present, because that is what dsh reports — presence, not the key itself and not a balance attached to it.",
+            "Fleet runs on your machine next to dsh, is free and open source under AGPL-3.0, and adds no account of its own. The machine has to be online for its tasks to move; the phone connects back to it rather than replacing it."
+          ]
+        }
+      ],
+      "faqHeading": "Questions people ask first",
+      "faqs": [
+        [
+          "Which models can I actually use?",
+          "Whatever your configured providers expose — dsh publishes that catalogue and Fleet builds the picker from it. On a typical setup that is a couple of active providers out of the many dsh declares; the inactive ones stay out of your way."
+        ],
+        [
+          "Does Fleet need my provider keys?",
+          "No. They stay in your dsh configuration. Fleet asks dsh whether the credentials a session needs are set, which is presence rather than the key, and reads spend from the provider's API using the access you already granted."
+        ],
+        [
+          "Why does the effort menu look different from the Claude Code one?",
+          "Because it is per model here. Each dsh model carries the reasoning ladder it accepts and dsh's own default, and a model with no reasoning control shows no ladder at all."
+        ],
+        [
+          "Do I have to run the dsh server myself?",
+          "No. Fleet starts one local server and adopts it again the next time it opens, so sessions do not end up split across two of them."
+        ]
+      ],
+      "closingHeading": "Your keys, your models, one workspace.",
+      "closing": "Install the desktop app, keep the providers you configured, and give the work somewhere to live.",
       "cta": "Download Claw Fleet",
       "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
     }
