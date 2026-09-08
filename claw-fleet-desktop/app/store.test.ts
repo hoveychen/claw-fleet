@@ -704,3 +704,33 @@ describe("auto-collapse for a wide reader", () => {
     expect(getItem("sidebar-collapsed")).not.toBe("true");
   });
 });
+
+describe("精简模式", () => {
+  beforeEach(() => vi.resetModules());
+
+  it("persists the switch, enters Tasks, and restricts navigation until disabled", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+    useUIStore.getState().setViewMode("wiki");
+    useUIStore.getState().setSimplifiedMode(true);
+    expect(getItem("simplified-mode")).toBe("true");
+    expect(useUIStore.getState().viewMode).toBe("history");
+    useUIStore.getState().setViewMode("artifacts");
+    expect(useUIStore.getState().viewMode).toBe("artifacts");
+    useUIStore.getState().setViewMode("report");
+    expect(useUIStore.getState().viewMode).toBe("history");
+    useUIStore.getState().setSimplifiedMode(false);
+    useUIStore.getState().setViewMode("wiki");
+    expect(useUIStore.getState().viewMode).toBe("wiki");
+    expect(getItem("simplified-mode")).toBe("false");
+  });
+
+  it.each(["wiki", "artifacts"])("restores simplified mode on boot from %s", async (view) => {
+    const { setItem } = await import("./storage");
+    setItem("simplified-mode", "true");
+    setItem("viewMode", view);
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+    expect(useUIStore.getState().viewMode).toBe(view === "artifacts" ? "artifacts" : "history");
+  });
+});
