@@ -1021,11 +1021,21 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { id: a.id, declined: a.declined, answers: a.answers },
   }),
 
+  // `taskOutcome` is the v3 terminal verdict (结束任务 / 放弃任务). Dropping it
+  // here — as this arm did until 2026-09-08 — turned every terminal press in the
+  // browser build (fleet-cloud, `fleet webui`) into a plain dismissal: the
+  // server stamped no task outcome, left the session out of Done, and recorded
+  // the card as `cancelled` instead of task-completed / task-abandoned.
   respond_to_fleet_ask: (a) => ({
     method: "POST",
     path: "/fleet-ask/respond",
     empty: true,
-    body: { id: a.id, answers: a.answers, cancelled: a.cancelled },
+    body: {
+      id: a.id,
+      answers: a.answers,
+      cancelled: a.cancelled,
+      taskOutcome: a.taskOutcome ?? undefined,
+    },
   }),
 
   respond_to_guard: (a) => ({

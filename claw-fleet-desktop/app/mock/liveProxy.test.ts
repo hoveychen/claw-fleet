@@ -233,6 +233,25 @@ describe("live proxy route table", () => {
     ).toEqual({ wait_seconds: 600 });
   });
 
+  /**
+   * The v3 terminal button (结束任务 / 放弃任务) is the *only* thing that
+   * distinguishes it from a plain dismissal: `cancelled: true` alone is the
+   * pre-v3 Cancel. This arm dropped `taskOutcome` from the body until
+   * 2026-09-08, so every terminal press in the browser build (fleet-cloud,
+   * `fleet webui`) stamped no task outcome, never marked the session Done, and
+   * recorded the card as `cancelled` — the verdict was silently lost, with a
+   * `{"ok":true}` coming back.
+   */
+  it("carries the fleet-ask terminal verdict to the server", () => {
+    expect(
+      LIVE_ROUTES.respond_to_fleet_ask({ id: "c", answers: {}, cancelled: true, taskOutcome: "abandoned" }).body,
+    ).toMatchObject({ id: "c", cancelled: true, taskOutcome: "abandoned" });
+    // A real answer carries no verdict, and must not invent one.
+    expect(
+      LIVE_ROUTES.respond_to_fleet_ask({ id: "c", answers: { q: "a" }, cancelled: false }).body,
+    ).toMatchObject({ cancelled: false, taskOutcome: undefined });
+  });
+
   it("keeps camelCase bodies camelCase", () => {
     // `SpawnSessionRequest` / `SetSessionMarkRequest` are `rename_all = "camelCase"`.
     expect(LIVE_ROUTES.spawn_new_claude_session({ workspacePath: "/w" }).body).toMatchObject({
