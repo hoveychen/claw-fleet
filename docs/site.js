@@ -70,14 +70,27 @@
         !manifest.china
       )
         return;
+      // Per link, not all-or-nothing. An asset the mirror does not carry (the
+      // Android APK only exists in releases cut after it was wired up) used to
+      // make this `return`, which silently removed the China mirror option for
+      // every platform. A missing or malformed entry now just leaves that one
+      // link pointing at GitHub.
       const urls = new Map();
       for (const link of links) {
         const asset = manifest.china.assets?.[link.dataset.asset];
-        if (!asset || !/^[a-f0-9]{64}$/.test(asset.sha256)) return;
-        const url = new URL(asset.url);
-        if (url.protocol !== "https:" || url.username || url.password) return;
+        if (!asset || !/^[a-f0-9]{64}$/.test(asset.sha256)) continue;
+        let url;
+        try {
+          url = new URL(asset.url);
+        } catch {
+          continue;
+        }
+        if (url.protocol !== "https:" || url.username || url.password) continue;
         urls.set(link, url.href);
       }
+      // Nothing resolved — offering a "China mirror" that changes no link would
+      // be a lie, so leave the selector as it was.
+      if (urls.size === 0) return;
       const note = document.querySelector("#source-note");
       selector.add(new Option(note.dataset.china, "china"));
       note.textContent = note.dataset.ready.replace(
@@ -86,10 +99,11 @@
       );
       const changeSource = () =>
         links.forEach((link) => {
-          link.href =
-            selector.value === "china" ? urls.get(link) : originals.get(link);
-          link.parentElement.querySelector(".fallback").hidden =
-            selector.value !== "china";
+          const mirrored = selector.value === "china" && urls.has(link);
+          link.href = mirrored ? urls.get(link) : originals.get(link);
+          // The fallback is the "mirror not reachable? use GitHub" escape
+          // hatch, so it only makes sense on a link the mirror actually serves.
+          link.parentElement.querySelector(".fallback").hidden = !mirrored;
         });
       selector.addEventListener("change", changeSource);
       const requestedSource = new URL(location.href).searchParams.get("source");

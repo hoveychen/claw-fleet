@@ -130,11 +130,18 @@
       "Linux",
       "x64 / ARM64",
       "Run the workspace in your browser"
+    ],
+    [
+      "Android",
+      "Phone & tablet",
+      "Companion app · pair by QR"
     ]
   ],
   "allReleases": "Release notes & all downloads",
   "linuxHelp": "On Linux, download the binary for your processor, then run:",
   "linuxAfter": "Open http://127.0.0.1:4571 in your browser. For ARM64, replace x64 with arm64 in both commands.",
+  "androidHelp": "On Android, the APK installs directly — Claw Fleet is not distributed through an app store.",
+  "androidAfter": "Allow “install unknown apps” for whatever opens the file, then pair the phone by scanning the QR in the desktop app under Settings → Mobile. The phone is a companion to a desktop workspace, not a standalone app.",
   "startHeading": "Get your workspace ready.",
   "steps": [
     [

@@ -70,6 +70,23 @@ class DistributionTests(unittest.TestCase):
             self.assertNotIn('fleet/downloads.json',uploaded)
             self.assertNotIn('fleet/index.html',uploaded)
 
+    def test_android_apk_is_optional_but_mirrored_when_present(self):
+        # Releases cut before the APK job existed must still mirror, so its
+        # absence is not an error — but when it is there it has to reach COS,
+        # otherwise Chinese users are left with the GitHub direct download.
+        release,body = fixture()
+        d.validate_release(release)
+        self.assertNotIn('claw-fleet-android.apk', {a['name'] for a in release['assets']})
+        release['assets'].append(dict(
+            release['assets'][0],
+            name='claw-fleet-android.apk',
+            browser_download_url=f'https://github.com/{d.REPO}/releases/download/v2.6.0/claw-fleet-android.apk'))
+        with tempfile.TemporaryDirectory() as tmp, patch.object(d.urllib.request,'urlopen',side_effect=lambda *a,**k:io.BytesIO(body)):
+            manifest=d.prepare(release,Path(tmp),'https://dl.example.com/fleet')
+        asset=manifest['china']['assets'].get('claw-fleet-android.apk')
+        self.assertIsNotNone(asset)
+        self.assertTrue(asset['url'].startswith('https://dl.example.com/fleet/releases/v2.6.0/'))
+
     def test_invalid_public_origins(self):
         for value in ('http://example.com','https://u:p@example.com','https://example.com/?token=x','https://example.com/../bad'):
             with self.subTest(value=value),self.assertRaises(ValueError): d.validate_base_url(value)

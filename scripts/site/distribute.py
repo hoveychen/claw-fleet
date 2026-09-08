@@ -14,7 +14,11 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 REPO = 'hoveychen/claw-fleet'
 REQUIRED = {'claw-fleet-macos.pkg', 'claw-fleet-windows-x64-setup.exe', 'fleet-linux-x64', 'fleet-linux-arm64'}
-ALLOWED = REQUIRED | {'fleet-macos', 'fleet-windows-x64.exe', 'claw-fleet-webui.tar.gz'}
+# The Android APK is ALLOWED but deliberately not REQUIRED: releases cut before
+# the APK job existed carry no such asset, and putting it in REQUIRED would make
+# `--tag latest` refuse to refresh the China website until the next release.
+# The site degrades per link (docs/site.js), so a mirror without it is fine.
+ALLOWED = REQUIRED | {'fleet-macos', 'fleet-windows-x64.exe', 'claw-fleet-webui.tar.gz', 'claw-fleet-android.apk'}
 
 
 def validate_base_url(value):
@@ -57,7 +61,7 @@ def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cl
     public_url = validate_base_url(public_url)
     output.mkdir(parents=True, exist_ok=True)
     for name in ('index.html', 'zh/index.html', 'site.css', 'site.js', 'locale.js', 'icon.png', 'hero.png',
-                 'icon-apple.svg', 'icon-windows.svg', 'icon-linux.svg',
+                 'icon-apple.svg', 'icon-windows.svg', 'icon-linux.svg', 'icon-android.svg',
                  'screenshots/current/work-en.png', 'screenshots/current/work-zh.png',
                  'screenshots/current/review-en.png', 'screenshots/current/review-zh.png',
                  'screenshots/current/results-en.png', 'screenshots/current/results-zh.png', 'screenshots/current/mobile-en.png',
@@ -116,7 +120,7 @@ def publish(output, manifest, public_url):
                 raise ValueError('Public download size verification failed: ' + path.name)
     # Upload dependencies first, both HTML documents next, manifest last.
     site_paths = [output/p for p in ('site.css','site.js','locale.js','icon.png','hero.png','icon-apple.svg',
-        'icon-windows.svg','icon-linux.svg','screenshots/current/work-en.png','screenshots/current/work-zh.png',
+        'icon-windows.svg','icon-linux.svg','icon-android.svg','screenshots/current/work-en.png','screenshots/current/work-zh.png',
         'screenshots/current/review-en.png','screenshots/current/review-zh.png','screenshots/current/results-en.png', 'screenshots/current/results-zh.png',
         'screenshots/current/mobile-en.png','screenshots/current/mobile-zh.png',
         'index.html','zh/index.html')]
