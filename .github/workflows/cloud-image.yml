@@ -34,6 +34,11 @@ on:
       # 手机访问这个容器时看到的 `/m/`。漏掉它的后果和上面一模一样——只改移动端
       # 的那次推送 CI 全绿、没有镜像、线上还是旧的。
       - 'mobile-web/**'
+      # 两份前端各自 import 的仓库根源码，它们同样是镜像的构建输入：shared-ts/ 被两个
+      # 前端直接 import，scripts/site/fixtures/ 是 mock 模式的官网场景数据（见
+      # app/mock/website.ts 与 src/mock/relay.ts）。漏掉的后果和上面两条一样。
+      - 'shared-ts/**'
+      - 'scripts/site/fixtures/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/cloud-image.yml'

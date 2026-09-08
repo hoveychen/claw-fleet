@@ -42,6 +42,11 @@ COPY claw-fleet-desktop/ ./
 # 仓库根的跨包共享源码（`../../../shared-ts/...`，见 app/components/procCommandLabel.ts）。
 # 它在包目录之外，上面那层 COPY 带不进来；漏掉会在 build 时报 TS2307。
 COPY shared-ts/ /src/shared-ts/
+# 同理：mock 模式的官网双语场景数据（见 app/mock/website.ts）。这里要整个目录不是只要
+# JSON：除 scenes.json / assets.json 外还有 `en|zh/review.html?raw` 两个原文导入，漏了
+# tsc 过得去而 vite 在 rollup 阶段才炸 "Could not resolve"。~1MB 只落在这个 builder
+# stage，运行时镜像只取它的 dist。
+COPY scripts/site/fixtures/ /src/scripts/site/fixtures/
 RUN pnpm run build
 
 # ── Build the mobile web UI (same-origin variant) ───────────────────────────
@@ -60,6 +65,8 @@ RUN pnpm install --frozen-lockfile
 COPY mobile-web/ ./
 # 同上：mobile-web 也 import 仓库根的 shared-ts/（见 src/views/TerminalView.tsx）。
 COPY shared-ts/ /src/shared-ts/
+# 同理：mock 模式的官网双语场景文案（见 src/mock/relay.ts）。
+COPY scripts/site/fixtures/*.json /src/scripts/site/fixtures/
 RUN pnpm run build:webui
 
 # ── Build the fleet CLI, with the web UI compiled in ────────────────────────

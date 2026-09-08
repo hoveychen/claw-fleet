@@ -24,6 +24,10 @@ COPY mobile-web/ ./
 # 见 src/views/TerminalView.tsx）。它在包目录之外，`COPY mobile-web/` 带不进来，
 # 漏掉这层的症状是 `pnpm build` 报 TS2307 Cannot find module '../../../shared-ts/...'。
 COPY shared-ts/ /src/shared-ts/
+# 同理：mock 模式的官网双语场景文案，mobile-web 以 `../../../scripts/site/fixtures/scenes.json`
+# 直接 import（见 src/mock/relay.ts）。只带 fixtures 下的 JSON，同目录的 en/zh 生成资产
+# （近 1MB，只给官网截图脚本用）不进镜像。
+COPY scripts/site/fixtures/*.json /src/scripts/site/fixtures/
 # The commit this bundle is built from — `.git` isn't in the build context and
 # alpine has no git, so the build passes it in (relay-image.yml sets it to the
 # CI commit). vite bakes it into __APP_COMMIT__ → reported in client_hello so the

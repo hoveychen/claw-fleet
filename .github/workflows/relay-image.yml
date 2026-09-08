@@ -21,6 +21,10 @@ on:
       - '!mobile-web/ios/**'
       # 仓库根的跨包共享 TS：mobile-web 直接 import 它，改了必须重建 bundle。
       - 'shared-ts/**'
+      # 同理，第二处跨包 import：mock 模式的官网场景数据（见 src/mock/relay.ts）。
+      # 它是构建输入而不只是官网素材，漏掉这条的后果和上面两类一样——改了 fixtures
+      # 的那次推送 CI 全绿、没有镜像、线上还是旧 bundle。
+      - 'scripts/site/fixtures/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/relay-image.yml'
