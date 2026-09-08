@@ -1,0 +1,72 @@
+/* The one detail-page header. Nine views used to hand-copy this block; the
+   values below are the majority-party ones they had all drifted around
+   (10px padding, --t-body title, --color-bg-secondary, one hairline). */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  flex-shrink: 0;
+}
+
+/* No hairline: for a header with its own tab strip under it (会话详情), a line
+   here would cut the top chrome into two stacked slabs of the same background
+   colour. The strip's own bottom border closes the panel off instead. */
+.header[data-seamless="true"] {
+  border-bottom: none;
+}
+
+/* Icon-only back button. The text label it replaced came in three flavours
+   (accent-coral "返回", the destination's name, and icon-only) at three chevron
+   sizes; the coral text made the loudest thing in every header the way *out* of
+   the page rather than the title of it. The negative margin pulls the 32px hit
+   target's optical left edge back onto the header's 12px gutter. */
+.backButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: -6px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--t-body, 16px);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Only rendered when a view passes `sub`. Its own overflow rules stay here;
+   a view that needs different truncation (仓库详情's long paths keep their
+   *tail*) passes an already-styled node instead of a bare string. */
+.sub {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Trailing controls (refresh / export / version select / ☰). Laid out by the
+   header so every page's actions sit at the same distance from the edge. */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
