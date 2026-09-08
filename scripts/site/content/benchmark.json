@@ -1,7 +1,7 @@
 {
  "zh": {
-  "title": "实测报告：一台机器，30 天 — Claw Fleet",
-  "description": "一台开发机上 30.4 天的完整用量记录：并行度、单位人类注意力的产出、以及每个数字的口径。全部由本地 transcript 重算。",
+  "title": "实测报告：一台机器 30 天的 AI 并行编码实录 — Claw Fleet",
+  "description": "一台开发机上 30.4 天并行跑 AI 编码 agent 的完整用量记录：并行度、单位人类注意力的产出、以及每个数字的口径。全部由本地 transcript 重算。",
   "eyebrow": "实测报告",
   "headline": "一台机器，30 天，<br>1,660 个会话。",
   "lede": "这不是跑分，是一台开发机上 30.4 天的完整用量记录。每一条数字都从本地 transcript 重算——没有估算，没有挑样本。Fleet 卖的不是更快的模型，是把同一份人类注意力摊到更多条并行的活上；这页把它摊到了什么程度量出来。",
@@ -69,8 +69,8 @@
   "skip": "跳到正文"
  },
  "en": {
-  "title": "Field report: one machine, 30 days — Claw Fleet",
-  "description": "A complete 30.4-day usage record from one development machine: concurrency, output per unit of human attention, and the provenance of every number. All recomputed from local transcripts.",
+  "title": "Field report: 30 days of parallel AI coding — Claw Fleet",
+  "description": "A complete 30.4-day usage record from one development machine running AI coding agents in parallel: concurrency, output per unit of human attention, and the provenance of every number. All recomputed from local transcripts.",
   "eyebrow": "Field report",
   "headline": "One machine, 30 days,<br>1,660 sessions.",
   "lede": "This is not a benchmark run. It is the complete usage record of one development machine over 30.4 days, every number recomputed from local transcripts — nothing estimated, no samples cherry-picked. Fleet does not sell you a faster model; it spreads one person's attention across more parallel work. This page measures how far.",

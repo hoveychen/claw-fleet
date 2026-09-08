@@ -33,9 +33,19 @@ jobs:
           python3 scripts/site/pages_manifest.py
           --mirror-url https://fleet.eternizedlab.com/downloads.json
           --output docs/downloads.json
+      # docs/ also holds design notes, product research and the mirror's
+      # systemd units. Staging picks only the files that are part of the site
+      # and resolves __SITE_ORIGIN__ to this deployment's own origin, so the
+      # canonical, hreflang and sitemap URLs point at Pages rather than at the
+      # China mirror.
+      - name: Stage the published site
+        run: >-
+          python3 scripts/site/stage_pages.py
+          --output "$RUNNER_TEMP/pages"
+          --origin https://hoveychen.github.io/claw-fleet
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: docs
+          path: ${{ runner.temp }}/pages
       - id: deployment
         uses: actions/deploy-pages@v4

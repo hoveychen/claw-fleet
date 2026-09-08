@@ -1,6 +1,6 @@
 {
-  "title": "Claw Fleet — 你的个人 AI 工作台",
-  "description": "交代任务，随时接手，带走成果。把 Claude Code、Codex 和 DeepSeek Harness带进同一个工作台，按项目推进工作、看材料做决定，用手机继续参与。",
+  "title": "Claw Fleet — Claude Code、Codex 的桌面图形界面与 AI 工作台",
+  "description": "免费开源的桌面应用（macOS / Windows / Linux），把 Claude Code、Codex、DeepSeek Harness 装进同一个个人 AI 工作台：按项目交代任务、看材料做决定、带走成果，手机也能随时接手。",
   "nav": [
     "认识工作台",
     "手机接手",

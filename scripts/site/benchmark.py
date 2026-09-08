@@ -6,6 +6,11 @@ which is produced by re-reading the local transcripts — the page never carries
 hand-typed number, so refreshing the report is a data change, not an edit pass.
 """
 from html import escape
+from pathlib import Path
+
+import seo
+
+ROOT = Path(__file__).resolve().parents[2]
 
 # Chart geometry for the daily curve. One place, so the axis, the grid and the
 # hover targets cannot drift apart.
@@ -112,6 +117,22 @@ def _units_chart(d, c):
 
 
 def build(lang, c, d, asset, home, other, github):
+    # The field report is a page in its own right: before this it had no
+    # canonical and no hreflang at all, so the Chinese version was an orphan
+    # that no crawler could tie to the English one.
+    social_shot = f'screenshots/current/work-{lang}.png'
+    social_head = seo.head(
+        lang=lang, en_path='benchmark.html', zh_path='zh/benchmark.html',
+        title=c['title'], description=c['description'],
+        image=social_shot, image_size=seo.png_size(ROOT / 'docs' / social_shot),
+        image_alt=c['headline'], page_type='article')
+    page_path = 'zh/benchmark.html' if lang == 'zh' else 'benchmark.html'
+    structured = seo.graph([
+        seo.publisher_node(),
+        seo.breadcrumb_node([(seo.SITE_NAME, 'zh/' if lang == 'zh' else ''),
+                             (c['title'], page_path)], page_path),
+        seo.faq_node(c['faqs'], page_path),
+    ])
     tiles = ''.join(
         f'<div class="bm-tile"><p class="label">{label}</p><p class="value">{value}</p>'
         f'<p class="note">{note}</p></div>' for label, value, note in c['tiles'])
@@ -127,8 +148,8 @@ def build(lang, c, d, asset, home, other, github):
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{c['title']}</title><meta name="description" content="{escape(c['description'], quote=True)}">
-<meta name="color-scheme" content="light">
-<meta property="og:title" content="{c['title']}"><meta property="og:description" content="{escape(c['description'], quote=True)}"><meta property="og:type" content="article">
+{social_head}
+{structured}
 <link rel="icon" href="{home}icon.png">
 <link rel="stylesheet" href="{asset('site.css')}"><link rel="stylesheet" href="{asset('benchmark.css')}">
 </head>
