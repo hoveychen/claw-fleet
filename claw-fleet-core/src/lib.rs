@@ -45,6 +45,7 @@ pub mod dsh_plugin;
 pub mod dsh_server;
 pub mod dsh_source;
 pub mod elicitation;
+pub mod feature_flags;
 pub mod file_explorer;
 pub mod fleet_cli;
 pub mod foxy;
