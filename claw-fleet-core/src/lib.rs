@@ -2,6 +2,7 @@ pub mod account;
 pub mod acp;
 pub mod agent_loop;
 pub mod agent_source;
+pub mod artifact_share;
 pub mod artifacts;
 pub mod atomic_json;
 pub mod claude_md_lock;
