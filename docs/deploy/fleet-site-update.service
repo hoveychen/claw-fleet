@@ -9,7 +9,12 @@ User=fleet-site
 Group=fleet-site
 UMask=0022
 ExecStart=/usr/bin/python3 -u /opt/fleet-site-updater/selfhost.py --root /srv/claw-fleet-site --public-url https://fleet.eternizedlab.com
-TimeoutStartSec=45min
+# No start timeout: the Shenzhen route runs at 10-40 KB/s, so the 230 MB asset
+# set needs hours. The 45min cap this replaced SIGTERMed every round partway
+# through the download, and because a killed round's bytes were then thrown
+# away the mirror could never reach a new release at all. Concurrency is held
+# off by the .update.lock flock in selfhost.py, not by this timeout.
+TimeoutStartSec=infinity
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
