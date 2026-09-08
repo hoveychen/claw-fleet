@@ -2586,7 +2586,6 @@
     "zip": {
       "root": "Archive",
       "back": "Back",
-      "count": "{{count}} items",
       "empty": "This folder is empty.",
       "export_member": "Export this item",
       "too_big": "This item is too large to open here.",
@@ -2595,7 +2594,9 @@
       "err_encrypted": "This item is password-protected and cannot be opened here.",
       "err_method": "This item uses a compression method we cannot read.",
       "err_no_inflate": "This environment cannot decompress; export it instead.",
-      "err_read": "Could not read the archive."
+      "err_read": "Could not read the archive.",
+      "count": "{{count}} items",
+      "count_one": "1 item"
     }
   },
   "markdown": {
