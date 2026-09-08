@@ -835,6 +835,25 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { id: a.id, version: a.version },
   }),
 
+  list_artifact_shares: (a) => ({
+    method: "GET",
+    path: "/artifact_shares",
+    query: { id: q(a.id) },
+  }),
+
+  create_artifact_share: (a) => ({
+    method: "POST",
+    path: "/artifact_share_create",
+    body: { id: a.id, version: a.version, ttl_days: a.ttlDays },
+  }),
+
+  revoke_artifact_share: (a) => ({
+    method: "POST",
+    path: "/artifact_share_revoke",
+    empty: true,
+    body: { token: a.token },
+  }),
+
   list_artifact_folders: () => ({
     method: "GET",
     path: "/artifact_folders",
