@@ -170,6 +170,10 @@
       "Fleet connects to Claude Code, Codex and DeepSeek Harness (the @deepseek-ai/dsh CLI). Install and configure the tools you want to use. DeepSeek Harness can select models from configured providers; availability depends on those providers and your credentials."
     ],
     [
+      "I already use the Claude Code CLI. What does Fleet add?",
+      "A place for everything around a session: several tasks on one board, decisions with the proposal or image attached, plans that survive a handoff, and the files that came out. It starts the CLI you already have and reads the sessions it writes. <a href=\"claude-code-gui.html\">A desktop workspace for Claude Code</a> walks through it."
+    ],
+    [
       "Is it free?",
       "Claw Fleet itself is free and open source under AGPL-3.0. AI tools, model subscriptions and API usage stay on each vendor’s own bill. Costs shown in Fleet are estimated from usage, for reference only."
     ],
@@ -212,5 +216,99 @@
     "home": "Back to the home page",
     "download": "Download Claw Fleet",
     "report": "Read the field report"
+  },
+  "pages": {
+    "claude-code-gui": {
+      "title": "A desktop workspace for Claude Code — Claw Fleet",
+      "description": "You already run the Claude Code CLI. Claw Fleet is the desktop workspace around it: several sessions on one board, decisions with the material attached, plans that survive a handoff, and the results kept where you can find them.",
+      "skip": "Skip to content",
+      "backHome": "Home",
+      "navDownload": "Download",
+      "eyebrow": "For people already running Claude Code",
+      "h1": "You have the CLI.<br>This is the room around it.",
+      "lede": "Claude Code runs in a terminal, one session at a time, and every session forgets the room it was in. Claw Fleet is a desktop app that keeps the room: the project a task belongs to, the decision it is waiting on, the plan it is working through, and the file it produced. The CLI still does the work — Fleet is what you look at while it does.",
+      "sections": [
+        {
+          "h2": "When three of them are running",
+          "body": [
+            "Two terminals is fine. Four, and looking after them becomes the job — you are tabbing between panes to see which one finished, which one is stuck, and which one is waiting on you.",
+            "Fleet puts them on one board. Each task sits under the project it belongs to, with its tool and model on the card, and you can tell at a glance which sessions are thinking, which are running a command, and which stopped to ask something. Start a task from one place, add a follow-up instruction while it is still running, and keep talking to it after it stops.",
+            "The board is a view of your real sessions, not a copy of them: Fleet reads the transcripts Claude Code already writes, so a session you started in a terminal shows up too."
+          ],
+          "shot": "screenshots/current/agents-en.png",
+          "shotAlt": "Fleet session board with Claude Code, Codex and DeepSeek Harness tasks running side by side, each card labelled with its tool and model",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "The moment it asks whether to continue",
+          "body": [
+            "In a terminal, a question arrives as a prompt with no context: it wants an answer about a plan you would have to scroll back to read.",
+            "Fleet collects those moments into one queue and attaches the material to them. A proposed plan you can edit before approving. An image the agent made. An HTML report it wrote. A risky command, with the risk analysis, before it runs. You read the thing you are deciding about, then answer with an option, a form field or plain text, and the answer goes back to the task that asked.",
+            "Every question, the choice you made and anything you typed stays with the work, so a decision from last week is still readable next to what came out of it."
+          ],
+          "shot": "screenshots/current/review-en.png",
+          "shotAlt": "A Fleet decision card with a proposal preview on the left and two concrete options on the right",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Pick the model, and how hard it thinks",
+          "body": [
+            "You choose the model when you brief a task, from Claude Code's own catalogue — Fable 5.1 and Fable 5, Opus 5 and Opus 4.8, Sonnet 5 and Sonnet 4.6, Haiku 4.5 — and the reasoning effort along with it, across the five levels the CLI accepts: low, medium, high, xhigh and max. Permission mode is on the same composer, so a task you want to run unattended and one you want to approve step by step are two different picks, not two different setups.",
+            "Model subscriptions and API usage stay on your own Anthropic account, exactly as they are now. Fleet reads what your sessions consumed and shows tokens, estimated cost, output speed and your quota windows, so the numbers you see are your own usage rather than a bill from us.",
+            "Commands your agents run are recorded and grouped by risk category, which is a different thing from approving them one by one — it is the record you read afterwards."
+          ]
+        },
+        {
+          "h2": "Where the work ends up",
+          "body": [
+            "A long session produces things: a document, a spreadsheet, a rendered image, a report worth reading twice. In a terminal those end up as paths you have to remember.",
+            "Fleet keeps a deliverables view per project, where PDFs, Office files, images, video and web documents preview in place. Star one, leave yourself a note, export the file, come back to it a month later. Conclusions worth reusing go into a versioned project wiki that later sessions can search and cite — including sessions on a different tool.",
+            "What lands there is what an agent added or what the artifact command captured, not a sweep of everything you touched."
+          ],
+          "shot": "screenshots/current/results-en.png",
+          "shotAlt": "Fleet deliverables view with documents and media previewed in place, filtered by project",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Long jobs, and handing one over",
+          "body": [
+            "Work that takes a day does not fit in one session. Fleet gives that shape somewhere to live: a plan with its steps checked off as they finish, a handoff that starts a fresh session from a brief and carries the plan, the step it stopped on and the notes the previous session left behind, and a chain you can trace back through afterwards.",
+            "Recurring work goes on a schedule. Work that is waiting on something — a build, a deploy, a queue — waits for the condition and starts the agent when it is met, instead of holding a session open.",
+            "A handoff can name another tool's model, so the next session runs there. The plan, the wiki and the deliverables belong to the work rather than to whichever CLI produced them."
+          ]
+        },
+        {
+          "h2": "Your Claude Code setup stays yours",
+          "body": [
+            "Fleet does not replace your configuration. It reads the same directories the CLI does, so your CLAUDE.md files, skills, plugins and memory rules are what your sessions still run on — Fleet just gives you somewhere to browse them, see a rule's revision history, and sync skills across the tools that support them.",
+            "It runs on your machine, next to the CLI. The machine running a task has to be online for that task to move, which is also what makes the phone useful rather than a second place to configure things: pair a phone to the desktop and you can brief a task, add an instruction, answer a decision and preview a deliverable from wherever you are, while the work still happens on your own computer.",
+            "Fleet is free and open source under AGPL-3.0. It brings no model account of its own and no hosted subscription — you connect the tools and accounts you already have."
+          ]
+        }
+      ],
+      "faqHeading": "Questions people ask first",
+      "faqs": [
+        [
+          "Does this replace the Claude Code CLI?",
+          "No. Fleet starts the same CLI you have installed and reads the session data it writes. Sessions you start in a terminal show up in Fleet, and anything Fleet starts is an ordinary Claude Code session you can also resume from the terminal."
+        ],
+        [
+          "Do I need an API key, or a separate subscription?",
+          "Neither from us. You sign in to Claude Code the way you already do, and model usage stays on that account. Fleet itself is free and open source; the costs it shows are estimated from your usage, for reference."
+        ],
+        [
+          "Will it work with my existing CLAUDE.md, skills and plugins?",
+          "Yes — those live in your own configuration directories and Fleet reads them rather than replacing them. It also gives you a place to inspect skills, plugin sources and memory rules, including which scope a rule came from."
+        ],
+        [
+          "Which other agent tools does it support?",
+          "Claude Code, Codex and DeepSeek Harness, each with its own models and accounts. A task picks its tool when you brief it, and a handoff can move the work from one to another."
+        ]
+      ],
+      "closingHeading": "Point it at the next task.",
+      "closing": "Install the desktop app, connect the CLI you already use, and give the next piece of work a place to live.",
+      "cta": "Download Claw Fleet",
+      "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
+    }
   }
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the machine-readable half of the pages: head block, sitemap, robots."""
 from pathlib import Path
+import itertools
 import json
 import re
 import sys
@@ -214,6 +215,47 @@ class GeneratedSiteTests(unittest.TestCase):
                 self.assertTrue(marked, 'no questions in the FAQ markup')
                 for question in marked:
                     self.assertIn(question, rendered)
+
+    def test_each_content_page_is_reachable_and_marked_up(self):
+        from build import CONTENT_SLUGS
+        self.assertTrue(CONTENT_SLUGS)
+        for slug in CONTENT_SLUGS:
+            for name, canonical in ((f'{slug}.html', f'/{slug}.html'),
+                                    (f'zh/{slug}.html', f'/zh/{slug}.html')):
+                with self.subTest(page=name):
+                    html = (self.DOCS / name).read_text()
+                    token = site_origin.TOKEN
+                    self.assertIn(f'<link rel="canonical" href="{token}{canonical}">', html)
+                    doc = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>',
+                                               html, re.S).group(1).replace('<\\/', '</'))
+                    self.assertEqual([n['@type'] for n in doc['@graph']],
+                                     ['Organization', 'BreadcrumbList', 'FAQPage'])
+                    # An orphan page is a page nothing passes authority to, so
+                    # the sitemap entry alone is not enough.
+                    self.assertIn(f'{slug}.html', (self.DOCS / 'sitemap.xml').read_text())
+
+    def test_the_home_faq_links_to_each_content_page_from_the_right_directory(self):
+        from build import CONTENT_SLUGS
+        for slug in CONTENT_SLUGS:
+            with self.subTest(slug=slug):
+                # Both index pages link with a bare filename: the zh index sits
+                # in /zh/, so "zh/<slug>.html" from there resolves to /zh/zh/.
+                self.assertIn(f'href="{slug}.html"', (self.DOCS / 'index.html').read_text())
+                self.assertIn(f'href="{slug}.html"', (self.DOCS / 'zh/index.html').read_text())
+                self.assertNotIn(f'href="zh/{slug}.html"', (self.DOCS / 'zh/index.html').read_text())
+
+    def test_content_pages_do_not_repeat_one_another(self):
+        """Four pages differing by a product name are doorway pages."""
+        from build import CONTENT_SLUGS
+        bodies = {}
+        for slug in CONTENT_SLUGS:
+            html = (self.DOCS / f'{slug}.html').read_text()
+            paragraphs = set(re.findall(r'<p>(.*?)</p>', html, re.S))
+            bodies[slug] = {p for p in paragraphs if len(p) > 120}
+        for a, b in itertools.combinations(bodies, 2):
+            shared = bodies[a] & bodies[b]
+            with self.subTest(pair=(a, b)):
+                self.assertFalse(shared, f'{a} and {b} share body copy: {list(shared)[:1]}')
 
     def test_every_screenshot_ships_webp_with_a_png_fallback(self):
         for name in ('index.html', 'zh/index.html'):

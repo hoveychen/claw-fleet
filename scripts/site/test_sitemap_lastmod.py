@@ -75,19 +75,35 @@ class RepoDatingTests(unittest.TestCase):
             if done.returncode != 0:
                 self.skipTest('git clone unavailable: ' + done.stderr.strip()[:120])
             self.assertFalse(sl.is_usable_repo(shallow))
-            self.assertEqual(sl.page_lastmod(shallow, shallow / 'docs'), {})
+            self.assertEqual(sl.page_lastmod(shallow, shallow / 'docs', ['/', '/zh/']), {})
 
     def test_a_non_repo_yields_no_dates(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertFalse(sl.is_usable_repo(Path(tmp)))
-            self.assertEqual(sl.page_lastmod(Path(tmp), Path(tmp)), {})
+            self.assertEqual(sl.page_lastmod(Path(tmp), Path(tmp), ['/']), {})
 
-    def test_this_checkout_dates_every_page(self):
-        dates = sl.page_lastmod(REPO, REPO / 'docs')
-        self.assertEqual(set(dates), set(sl.PAGE_FILES))
+    def test_this_checkout_dates_the_pages_the_sitemap_lists(self):
+        paths = sl.sitemap_paths(REPO / 'docs/sitemap.xml')
+        self.assertIn('/', paths)
+        dates = sl.page_lastmod(REPO, REPO / 'docs', paths)
         for path, date in dates.items():
             with self.subTest(path=path):
                 self.assertRegex(date, r'^\d{4}-\d{2}-\d{2}$')
+        # A page git cannot date (a brand-new file, not yet committed) is
+        # simply absent -- never stamped with today.
+        self.assertLessEqual(set(dates), set(paths))
+
+    def test_the_url_to_file_mapping_covers_directory_and_file_urls(self):
+        self.assertEqual(sl.page_file('/'), 'index.html')
+        self.assertEqual(sl.page_file('/zh/'), 'zh/index.html')
+        self.assertEqual(sl.page_file('/benchmark.html'), 'benchmark.html')
+        self.assertEqual(sl.page_file('/zh/claude-code-gui.html'), 'zh/claude-code-gui.html')
+
+    def test_every_sitemap_entry_maps_to_a_file_that_exists(self):
+        # A sitemap loc with no file behind it is a URL the crawler will 404 on.
+        for path in sl.sitemap_paths(REPO / 'docs/sitemap.xml'):
+            with self.subTest(path=path):
+                self.assertTrue((REPO / 'docs' / sl.page_file(path)).is_file(), path)
 
     def test_the_committed_sitemap_carries_no_dates(self):
         # Stamping happens at publish time; a date committed here would be one

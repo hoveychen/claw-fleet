@@ -17,15 +17,27 @@ import argparse
 import re
 import subprocess
 
-# Which file on disk each sitemap URL is published from. A page's own commit
-# time is the honest answer; deriving it from content/*.json instead would miss
-# a change made to the generator or to a screenshot the page embeds.
-PAGE_FILES = {
-    '/': 'index.html',
-    '/zh/': 'zh/index.html',
-    '/benchmark.html': 'benchmark.html',
-    '/zh/benchmark.html': 'zh/benchmark.html',
-}
+
+def page_file(url_path):
+    """The file on disk a sitemap path is published from.
+
+    Derived rather than hand-listed: a map would go stale every time the site
+    grows a page, and the failure is silent (that page just never gets a date).
+    A page's own commit time is the honest answer -- deriving it from
+    content/*.json instead would miss a change to the generator or to a
+    screenshot the page embeds.
+    """
+    if url_path.endswith('/'):
+        return url_path.lstrip('/') + 'index.html'
+    return url_path.lstrip('/')
+
+
+def sitemap_paths(sitemap, origin_token='__SITE_ORIGIN__'):
+    """Every URL path the sitemap lists, in order."""
+    paths = []
+    for loc in re.findall(r'<loc>([^<]+)</loc>', sitemap.read_text(encoding='utf-8')):
+        paths.append(loc.split(origin_token, 1)[-1] if origin_token in loc else loc)
+    return paths
 
 
 def git(root, *args):
@@ -45,13 +57,13 @@ def is_usable_repo(root):
     return git(root, 'rev-parse', '--is-shallow-repository') == 'false'
 
 
-def page_lastmod(repo_root, docs, page_files=PAGE_FILES):
+def page_lastmod(repo_root, docs, url_paths):
     """{url path: YYYY-MM-DD} for the pages git can actually date."""
     if not is_usable_repo(repo_root):
         return {}
     dates = {}
-    for url_path, name in page_files.items():
-        target = (docs / name).resolve()
+    for url_path in url_paths:
+        target = (docs / page_file(url_path)).resolve()
         stamp = git(repo_root, 'log', '-1', '--format=%cs', '--', str(target))
         if stamp:
             dates[url_path] = stamp
@@ -87,11 +99,13 @@ if __name__ == '__main__':
     parser.add_argument('--docs', type=Path, help='Site directory; defaults to <root>/docs')
     args = parser.parse_args()
     docs = args.docs or args.root / 'docs'
-    dates = page_lastmod(args.root, docs)
+    sitemap = docs / 'sitemap.xml'
+    paths = sitemap_paths(sitemap)
+    dates = page_lastmod(args.root, docs, paths)
     if not dates:
         print('No usable git history (shallow clone or not a repo); '
               'sitemap published without lastmod rather than with invented dates')
-    count = stamp(docs / 'sitemap.xml', dates)
-    print(f'Stamped {count} of {len(PAGE_FILES)} sitemap entries')
+    count = stamp(sitemap, dates)
+    print(f'Stamped {count} of {len(paths)} sitemap entries')
     for path, date in sorted(dates.items()):
         print(f'  {path} -> {date}')

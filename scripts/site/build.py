@@ -13,6 +13,11 @@ GITHUB = 'https://github.com/hoveychen/claw-fleet'
 # is what ties the two language versions together in hreflang, so a new page
 # joins the sitemap and gets its alternates from one edit.
 PAGE_PAIRS = [('', 'zh/'), ('benchmark.html', 'zh/benchmark.html')]
+# Prose pages generated from content['pages'], one entry per slug. Listed here
+# so a new page joins PAGE_PAIRS (and therefore the sitemap, the hreflang set
+# and the lastmod map) by adding its content block and one line.
+CONTENT_SLUGS = ['claude-code-gui']
+PAGE_PAIRS += [(f'{slug}.html', f'zh/{slug}.html') for slug in CONTENT_SLUGS]
 # One entry per download row, positionally matched to content['platforms'].
 # Each row names its icon and the buttons it carries, so a row with two builds
 # (Linux) or a new platform (Android) is a data change, not an index trick.
@@ -182,6 +187,7 @@ def build_404(content, asset):
 
 if __name__ == '__main__':
     import benchmark
+    import content_page
     bm_copy=json.loads((ROOT/'scripts/site/content/benchmark.json').read_text())
     bm_data=json.loads((ROOT/'scripts/site/content/benchmark-data.json').read_text())
     for lang in ('en','zh'):
@@ -194,6 +200,30 @@ if __name__ == '__main__':
         def asset(name,base=base):
             digest=hashlib.sha256((ROOT/'docs'/name).read_bytes()).hexdigest()[:12]
             return f'{base}{name}?v={digest}'
+        def dims(name, _root=ROOT):
+            return seo.png_size(_root / 'docs' / name)
+        for slug in CONTENT_SLUGS:
+            page = content['pages'][slug]
+            en_path, zh_path = f'{slug}.html', f'zh/{slug}.html'
+            page_path = zh_path if lang == 'zh' else en_path
+            shot = next((s['shot'] for s in page['sections'] if s.get('shot')), None)
+            head = seo.head(lang=lang, en_path=en_path, zh_path=zh_path,
+                            title=page['title'], description=page['description'],
+                            image=shot or f'screenshots/current/work-{lang}.png',
+                            image_size=dims(shot) if shot else None,
+                            image_alt=page['h1'], page_type='article')
+            structured = seo.graph([
+                seo.publisher_node(),
+                seo.breadcrumb_node([(seo.SITE_NAME, 'zh/' if lang == 'zh' else ''),
+                                     (page['title'], page_path)], page_path),
+                seo.faq_node(page['faqs'], page_path),
+            ])
+            out = ROOT / 'docs' / page_path
+            out.write_text(content_page.render(
+                lang, slug, page, asset=asset, dims=dims, home=base,
+                other=('../' + en_path) if lang == 'zh' else zh_path,
+                github=GITHUB, social_head=head, structured=structured))
+            print(out.relative_to(ROOT))
         bm=ROOT/'docs'/('zh/benchmark.html' if lang=='zh' else 'benchmark.html')
         bm.write_text(benchmark.build(lang,bm_copy[lang],bm_data,asset,base,
             '../benchmark.html' if lang=='zh' else 'zh/benchmark.html',GITHUB))
