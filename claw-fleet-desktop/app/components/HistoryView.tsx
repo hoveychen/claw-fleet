@@ -110,6 +110,18 @@ function markBucket(s: SessionInfo): "pending" | "done" {
 // renders the identical row without duplicating it here.
 
 /**
+ * The one gate that decides what the 任务 page lists — deliberately taking no
+ * view mode, because it must not vary by mode. Simplified mode originally
+ * passed `sessions` through unfiltered, which let every scanned transcript onto
+ * the page, including the `subagents/agent-*.jsonl` transcripts `scan.rs`
+ * deliberately collects: one fan-out turn buried the list under a dozen rows
+ * each titled with a subagent's closing sentence.
+ */
+export function taskListSessions(sessions: SessionInfo[]): SessionInfo[] {
+  return sessions.filter(isFleetOwnedTask);
+}
+
+/**
  * Reorder `rows` (the live filtered+sorted list) back into a frozen id order,
  * used to hold the list still while the pointer is parked over it. Rows named in
  * `frozenOrder` keep that order (their live content is preserved — we resolve
@@ -224,11 +236,7 @@ export function HistoryView() {
 
   const { searching, ftsMatchPaths, snippetByPath } = useSessionSearch(query);
 
-  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
-  const adhocSessions = useMemo(
-    () => simplifiedMode ? sessions : sessions.filter(isFleetOwnedTask),
-    [sessions, simplifiedMode],
-  );
+  const adhocSessions = useMemo(() => taskListSessions(sessions), [sessions]);
 
   // The pure-chat workspace. It is no longer a mode of its own — chat sessions
   // sit in the rail like any other section — but the section is pinned to the
