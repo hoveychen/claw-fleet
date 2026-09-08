@@ -19,6 +19,10 @@ REQUIRED = {'claw-fleet-macos.pkg', 'claw-fleet-windows-x64-setup.exe', 'fleet-l
 # `--tag latest` refuse to refresh the China website until the next release.
 # The site degrades per link (docs/site.js), so a mirror without it is fine.
 ALLOWED = REQUIRED | {'fleet-macos', 'fleet-windows-x64.exe', 'claw-fleet-webui.tar.gz', 'claw-fleet-android.apk'}
+# Static site files that must exist in the source tree. Everything else in the
+# copy list below is best-effort, because selfhost.py reads it against a
+# previously published deployment (see prepare).
+REQUIRED_SITE_FILES = {'index.html', 'zh/index.html', 'site.css', 'site.js', 'locale.js'}
 
 
 def validate_base_url(value):
@@ -56,19 +60,69 @@ def verify(path, asset):
     return digest.hexdigest()
 
 
+def site_files(root):
+    """Every page reachable from the two entry documents, plus their assets.
+
+    Derived rather than hand-listed, because a hand-listed tuple goes stale
+    silently every time the site grows. It already had: the
+    `screenshots/current/agents-*` and `relay-*` images were on both pages and
+    in nobody's list, and `benchmark.html` arrived later with its own
+    stylesheet. An unattended mirror sync copies only what this returns, so
+    anything it misses is a 404 on the mirror while the origin site looks fine.
+
+    Pages are followed transitively so a new sub-page joins the mirror the
+    moment it is linked. Returns pages first, then assets.
+    """
+    pages = ['index.html', 'zh/index.html']
+    assets = ['site.css', 'site.js', 'locale.js']
+    pending = list(pages)
+    while pending:
+        page = pending.pop(0)
+        source = root / page
+        if not source.is_file():
+            continue
+        prefix = page.rpartition('/')[0]
+        for reference in re.findall(r'(?:src|href)="([^"]+)"', source.read_text()):
+            reference = reference.split('?')[0].split('#')[0]
+            if not reference or ':' in reference or reference.startswith('//') or reference.endswith('/'):
+                continue
+            if reference.startswith('../'):
+                candidate = reference[3:]
+            elif reference.startswith('./'):
+                candidate = reference[2:]
+            elif prefix:
+                candidate = prefix + '/' + reference
+            else:
+                candidate = reference
+            # Refuse anything that would escape the site root.
+            if '..' in candidate.split('/') or candidate.startswith('/'):
+                raise ValueError('Unsafe site reference: ' + reference)
+            if candidate.endswith('.html'):
+                if candidate not in pages:
+                    pages.append(candidate)
+                    pending.append(candidate)
+            elif candidate not in assets:
+                assets.append(candidate)
+    return pages + assets
+
+
 def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cloud COS'):
     tag, assets = validate_release(release)
     public_url = validate_base_url(public_url)
     output.mkdir(parents=True, exist_ok=True)
-    for name in ('index.html', 'zh/index.html', 'site.css', 'site.js', 'locale.js', 'icon.png', 'hero.png',
-                 'icon-apple.svg', 'icon-windows.svg', 'icon-linux.svg', 'icon-android.svg',
-                 'screenshots/current/work-en.png', 'screenshots/current/work-zh.png',
-                 'screenshots/current/review-en.png', 'screenshots/current/review-zh.png',
-                 'screenshots/current/results-en.png', 'screenshots/current/results-zh.png', 'screenshots/current/mobile-en.png',
-                 'screenshots/current/mobile-zh.png'):
+    root = site_root or ROOT / 'docs'
+    for name in site_files(root):
+        source = root / name
+        # selfhost.py passes site_root=<the live deployment>, so this list is
+        # also read against a site published before the file existed. A newly
+        # added asset must therefore be allowed to be absent there, or adding
+        # one to this list wedges the mirror's unattended updater on a
+        # FileNotFoundError until someone redeploys the pages by hand.
+        if not source.exists() and name not in REQUIRED_SITE_FILES:
+            continue
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2((site_root or ROOT / 'docs') / name, target)
+        shutil.copy2(source, target)
     manifest = {'schema': 1, 'version': tag, 'china': {'provider': provider, 'assets': {}}}
     checksum_lines = []
     for name, asset in sorted(assets.items()):
@@ -119,11 +173,11 @@ def publish(output, manifest, public_url):
             if int(response.headers.get('Content-Length', '-1')) != path.stat().st_size:
                 raise ValueError('Public download size verification failed: ' + path.name)
     # Upload dependencies first, both HTML documents next, manifest last.
-    site_paths = [output/p for p in ('site.css','site.js','locale.js','icon.png','hero.png','icon-apple.svg',
-        'icon-windows.svg','icon-linux.svg','icon-android.svg','screenshots/current/work-en.png','screenshots/current/work-zh.png',
-        'screenshots/current/review-en.png','screenshots/current/review-zh.png','screenshots/current/results-en.png', 'screenshots/current/results-zh.png',
-        'screenshots/current/mobile-en.png','screenshots/current/mobile-zh.png',
-        'index.html','zh/index.html')]
+    # Same derived list prepare copied, but assets before pages: a visitor must
+    # never load an HTML document whose stylesheet or images are not up yet.
+    names = site_files(output)
+    ordered = [n for n in names if not n.endswith('.html')] + [n for n in names if n.endswith('.html')]
+    site_paths = [output/p for p in ordered]
     for path in site_paths:
         if not path.is_file():
             continue

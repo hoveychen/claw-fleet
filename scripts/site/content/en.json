@@ -194,7 +194,7 @@
     ],
     [
       "How do I download in China?",
-      "When a China mirror is enabled, select it above. GitHub Releases remains the alternative. Mobile access currently starts from the pairing link in Fleet; these downloads do not include native mobile app packages."
+      "When a China mirror is enabled, select it above. GitHub Releases remains the alternative. The Android APK is served from GitHub Releases; whether the mirror carries it depends on the release you are downloading. There is no iOS or HarmonyOS package yet \u2014 on those, open the pairing link in the browser."
     ]
   ],
   "closing": "A thought to start with.<br>A result to come back to.",

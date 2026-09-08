@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import types
@@ -86,6 +87,54 @@ class DistributionTests(unittest.TestCase):
         asset=manifest['china']['assets'].get('claw-fleet-android.apk')
         self.assertIsNotNone(asset)
         self.assertTrue(asset['url'].startswith('https://dl.example.com/fleet/releases/v2.6.0/'))
+
+    def test_new_site_file_absent_from_an_older_site_root(self):
+        # selfhost.py mirrors with site_root=<live deployment>. A deployment
+        # published before icon-android.svg existed must still sync, or the
+        # unattended updater wedges on FileNotFoundError.
+        release,body = fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            older=Path(tmp)/'older'
+            shutil.copytree(d.ROOT/'docs', older, ignore=shutil.ignore_patterns('releases'),
+                            dirs_exist_ok=False)
+            (older/'icon-android.svg').unlink()
+            out=Path(tmp)/'out'
+            with patch.object(d.urllib.request,'urlopen',side_effect=lambda *a,**k:io.BytesIO(body)):
+                d.prepare(release,out,'https://dl.example.com/fleet',site_root=older)
+            self.assertFalse((out/'icon-android.svg').exists())
+            self.assertTrue((out/'index.html').is_file())
+        # A genuinely required file missing is still a hard error.
+        with tempfile.TemporaryDirectory() as tmp:
+            broken=Path(tmp)/'broken'; broken.mkdir()
+            with self.assertRaises(FileNotFoundError):
+                d.prepare(release,Path(tmp)/'out2','https://dl.example.com/fleet',site_root=broken)
+
+    def test_site_file_list_tracks_what_the_pages_reference(self):
+        # The hand-maintained tuple this replaced had already gone stale:
+        # agents-* and relay-* screenshots were on both pages and not in it.
+        names = d.site_files(d.ROOT / 'docs')
+        self.assertEqual(names[:2], ['index.html', 'zh/index.html'])
+        # Sub-pages are followed transitively, with their own stylesheets.
+        self.assertIn('benchmark.html', names)
+        self.assertIn('zh/benchmark.html', names)
+        self.assertIn('benchmark.css', names)
+        for name in names:
+            with self.subTest(name=name):
+                self.assertTrue((d.ROOT / 'docs' / name).is_file(), name)
+        for required in ('site.css', 'site.js', 'locale.js', 'icon-android.svg',
+                         'screenshots/current/agents-en.png', 'screenshots/current/relay-zh.png'):
+            self.assertIn(required, names)
+        self.assertEqual(len(names), len(set(names)))
+        pages=[n for n in names if n.endswith('.html')]
+        self.assertEqual(names[:len(pages)], pages)  # pages first, then assets
+
+    def test_site_reference_cannot_escape_the_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'zh').mkdir()
+            (root / 'index.html').write_text('<img src="../../etc/passwd">')
+            (root / 'zh/index.html').write_text('<img src="x.png">')
+            with self.assertRaises(ValueError): d.site_files(root)
 
     def test_invalid_public_origins(self):
         for value in ('http://example.com','https://u:p@example.com','https://example.com/?token=x','https://example.com/../bad'):
