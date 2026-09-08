@@ -17,6 +17,10 @@ pub(crate) fn route_decisions_pending(
     json_header: tiny_http::Header,
     path: &str,
 ) {
+    // Asking this question is proof a decision panel is watching — the only
+    // caller is a mounted one, on its 10s reconcile. Recorded before the answer
+    // is built so a slow scan cannot make a live head look absent.
+    super::note_decision_poll();
     let pending = crate::pending_decisions::collect(&ctx.snapshot.sessions());
     let body = serde_json::to_string(&pending).unwrap_or_default();
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
