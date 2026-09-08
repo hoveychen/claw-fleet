@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef } from "react";
 import { playDecisionAlert } from "../audio";
+import { flattenPending, reconcilePlan } from "../decisionReconcile";
 import { normalizeForSpeech } from "../decisionText";
 import { useDecisionStore } from "../store";
 import type {
@@ -24,6 +25,17 @@ function splitOnDivider(body: string): [string, string] {
   const after = body.slice(match.index + match[0].length).trim();
   return [before, after];
 }
+
+/**
+ * How often the panel re-asks the backend what is still outstanding.
+ *
+ * Bounds how long a lost `*-request` / `*-dismissed` / `decision-parked` emit
+ * can keep the panel wrong. 10s is short enough that a card feels live (an
+ * agent blocks for 600s by default, so this is 1.6% of its wait) and cheap
+ * enough to run forever: one HTTP round trip in the browser build, one
+ * in-process directory scan on the desktop.
+ */
+const RECONCILE_EVERY_MS = 10_000;
 
 // Pull the last sentence ending with ? or ？ from a markdown blob.
 function lastQuestionSentence(text: string): string {
@@ -53,31 +65,83 @@ export function useDecisionEvents() {
   // double-chime.
   const announcedIds = useRef<Set<string>>(new Set());
 
-  // Mount catch-up: the backend watcher emits each pending request exactly
-  // once, and Tauri events are NOT buffered for listeners that attach later.
-  // On a cold restart while a `fleet elicitation` / `fleet mcp` child process
-  // is still blocking on its poll, that one-shot emit fires before this hook's
-  // listeners are attached — so the decision panel never reappears and the
-  // agent stays blocked until its (default 600s) timeout. Pull the current
-  // pending set once on mount and seed the store directly; the add* actions
-  // dedup by id, so this is safe even when a live event also arrives.
+  // Continuous reconciliation against the backend's pending set.
+  //
+  // Every card arrives as a *one-shot* emit: the watcher broadcasts each new
+  // request id once and never again, and neither Tauri events nor SSE are
+  // buffered for a listener that was not attached at emit time. So a single
+  // missed frame is not a delayed card — it is a card nobody ever sees. Ways to
+  // miss one, all observed: a cold app restart while a `fleet mcp` child is
+  // still blocking on its poll; in the browser build, an `EventSource` that
+  // dropped and is mid-reconnect, a proxy that reaped the idle stream, a laptop
+  // that slept, or a socket the server can still write to while the page behind
+  // it is gone. On Boss's `fleet webui` box on 2026-09-08 that cost two cards
+  // in a row: raised at 21:54 and 21:57, invisible for the full 600s wait,
+  // recovered only by reloading the page half an hour later.
+  //
+  // Fixing the transport does not fix this class — the next transport gets its
+  // own hiccups. What fixes it is not depending on delivery: ask the backend
+  // what is still outstanding, on a timer, and make the store match. The
+  // `add*` actions dedup by id, so re-seeding is free, and `list_pending_decisions`
+  // is a local read (six directory listings) served by one route.
   useEffect(() => {
     let cancelled = false;
-    invoke<PendingDecisions>("list_pending_decisions")
-      .then((p) => {
-        if (cancelled || !p) return;
-        p.guard?.forEach((r) => addGuardRequest(r));
-        p.elicitation?.forEach((r) => addElicitationRequest(r));
-        p.fleetAsk?.forEach((r) => addFleetAskRequest(r));
-        p.a2uiRender?.forEach((r) => addA2uiRenderRequest(r));
-        p.planApproval?.forEach((r) => addPlanApprovalRequest(r));
-        p.permissionPrompt?.forEach((r) => addPermissionPromptRequest(r));
-      })
-      .catch((e) => {
-        console.warn("[decision] mount catch-up list_pending_decisions failed:", e);
-      });
+
+    const reconcile = (why: string) => {
+      // Ids present *before* the fetch. A card that shows up while the request
+      // is in flight is not stale — the backend read its directory before that
+      // card existed — so pruning is confined to this set.
+      const before = new Set(useDecisionStore.getState().decisions.map((d) => d.id));
+      invoke<PendingDecisions>("list_pending_decisions")
+        .then((p) => {
+          if (cancelled || !p) return;
+          p.guard?.forEach((r) => addGuardRequest(r));
+          p.elicitation?.forEach((r) => addElicitationRequest(r));
+          p.fleetAsk?.forEach((r) => addFleetAskRequest(r));
+          p.a2uiRender?.forEach((r) => addA2uiRenderRequest(r));
+          p.planApproval?.forEach((r) => addPlanApprovalRequest(r));
+          p.permissionPrompt?.forEach((r) => addPermissionPromptRequest(r));
+
+          // The other two directions, both just as losable as a `*-request`
+          // emit: a missed `*-dismissed` strands a card the backend already
+          // cleaned up (answering it gets "no pending request"), and a missed
+          // `decision-parked` leaves a timed-out card showing a running
+          // countdown — the opposite of the truth. `markParked` is in place, so
+          // whatever the user had already typed survives.
+          const plan = reconcilePlan(
+            useDecisionStore.getState().decisions,
+            before,
+            flattenPending(p),
+          );
+          if (plan.drop.length > 0) {
+            console.log(
+              `[decision] reconcile (${why}): dropping ${plan.drop.join(", ")} — no longer pending on the backend`,
+            );
+          }
+          plan.drop.forEach((id) => dismiss(id));
+          plan.park.forEach((id) => markParked(id));
+        })
+        .catch((e) => {
+          // Do NOT prune on a failed fetch: "the request errored" and "nothing
+          // is pending" are the same empty answer, and acting on the first
+          // would clear the panel every time the network blinks.
+          console.warn(`[decision] reconcile (${why}) list_pending_decisions failed:`, e);
+        });
+    };
+
+    reconcile("mount");
+    const timer = window.setInterval(() => reconcile("interval"), RECONCILE_EVERY_MS);
+    // Background tabs get their timers throttled to about once a minute, so the
+    // first thing a returning user would otherwise see is a stale panel.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") reconcile("visible");
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [
     addGuardRequest,
@@ -86,6 +150,8 @@ export function useDecisionEvents() {
     addA2uiRenderRequest,
     addPlanApprovalRequest,
     addPermissionPromptRequest,
+    dismiss,
+    markParked,
   ]);
 
   useEffect(() => {
