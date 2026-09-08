@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFrozenOrder,
+  taskListSessions,
 } from "./HistoryView";
+import { NEW_SESSION_ENTRYPOINT } from "../types";
 import { chainBarColor } from "./sessionGroups";
 import { sessionEq } from "./SessionRow";
 import type { SessionInfo, SessionStatus } from "../types";
@@ -145,6 +147,39 @@ describe("sessionEq", () => {
     const a = base();
     const b = { ...base(), someNewField: 1 } as unknown as SessionInfo;
     expect(sessionEq(a, b)).toBe(false);
+  });
+});
+
+/**
+ * `taskListSessions` is the single gate for the 任务 page. The regression it
+ * pins: simplified mode used to skip the filter and hand the raw scan to the
+ * list, so the subagent transcripts `scan.rs` collects
+ * (`<parent>/subagents/agent-*.jsonl`) showed up as top-level tasks — a
+ * fan-out turn on fleet-cloud produced a dozen rows titled with each
+ * subagent's closing sentence. The gate takes no mode argument on purpose.
+ */
+describe("taskListSessions", () => {
+  const s = (over: Partial<SessionInfo>): SessionInfo =>
+    ({
+      id: "x",
+      entrypoint: NEW_SESSION_ENTRYPOINT,
+      isSubagent: false,
+      fleetSpawned: true,
+      ...over,
+    }) as SessionInfo;
+
+  it("drops subagent transcripts the scan collects", () => {
+    const rows = [
+      s({ id: "parent" }),
+      s({ id: "agent-a1", isSubagent: true }),
+      s({ id: "agent-a2", isSubagent: true }),
+    ];
+    expect(taskListSessions(rows).map((r) => r.id)).toEqual(["parent"]);
+  });
+
+  it("drops sessions Fleet did not spawn", () => {
+    const rows = [s({ id: "own" }), s({ id: "outside", entrypoint: "cli", fleetSpawned: false })];
+    expect(taskListSessions(rows).map((r) => r.id)).toEqual(["own"]);
   });
 });
 
