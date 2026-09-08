@@ -70,7 +70,7 @@ const SOURCES = ["claude-code", "codex", "dsh"] as const;
 const SOURCE_NAMES: Record<string, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
-  dsh: "dsh",
+  dsh: "DeepSeek Harness",
 };
 
 function isInstallError(e: unknown): e is InstallError {

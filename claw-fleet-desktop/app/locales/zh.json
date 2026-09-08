@@ -403,7 +403,7 @@
     "no_usage_data": "暂无用量数据",
     "dsh_balance_tip": "这把 key 背后的 provider 报的剩余余额",
     "dsh_key_limit": "该 key 已用 {{used}} / {{limit}}",
-    "dsh_no_keys": "dsh 里没有配置 provider key，没有可查的余额"
+    "dsh_no_keys": "DeepSeek Harness 里没有配置 provider key，没有可查的余额"
   },
   "skills": {
     "panel_title": "Skills",
@@ -421,7 +421,7 @@
     "delete_failed": "删除失败：{{error}}",
     "source_claude": "Claude",
     "source_codex": "Codex",
-    "source_dsh": "dsh",
+    "source_dsh": "DeepSeek Harness",
     "scope_user": "用户级",
     "scope_repo": "仓库级",
     "scope_admin": "管理员",
@@ -888,7 +888,7 @@
     "caveat": "数据取自 Codex 累计的 total_token_usage。缓存输入是原始输入的子集，按缓存读取价计费；输出已包含推理 token。花费按模型公开价档估算。"
   },
   "dsh_token": {
-    "loading": "正在读取 dsh token…",
+    "loading": "正在读取 DeepSeek Harness token…",
     "no_data": "无数据",
     "kpi_total": "总 token（计费）",
     "kpi_context": "上下文占用",
@@ -909,7 +909,7 @@
     "cost_calls": "已向 provider 取到 {{count}} 次调用的实价",
     "cost_calls_rates": "{{count}} 次调用按公开价目算出",
     "cost_calls_mixed": "{{receipt}} 次取自 provider 实价 / {{rates}} 次按公开价目",
-    "caveat": "Token 计数来自 dsh 自己的会话投影。计费桶是整个会话的累计值，上下文构成是此刻窗口的快照，两者不会相加对齐。花费有两种来路，上方数字会标明是哪一种：对每次生成都开发票的 provider（OpenRouter），显示的是它实际收取的金额，绝不由 token 数推导 —— 因为同一模型经不同 provider 价钱不同；对只有一个卖方且价目公开的路线（DeepSeek 官方，它不开发票），显示的是把公开价目套在已计数的 token 上的结果，并逐次调用区分峰时/闲时。既无价目又无发票的调用只计数，绝不估价。"
+    "caveat": "Token 计数来自 DeepSeek Harness 自己的会话投影。计费桶是整个会话的累计值，上下文构成是此刻窗口的快照，两者不会相加对齐。花费有两种来路，上方数字会标明是哪一种：对每次生成都开发票的 provider（OpenRouter），显示的是它实际收取的金额，绝不由 token 数推导 —— 因为同一模型经不同 provider 价钱不同；对只有一个卖方且价目公开的路线（DeepSeek 官方，它不开发票），显示的是把公开价目套在已计数的 token 上的结果，并逐次调用区分峰时/闲时。既无价目又无发票的调用只计数，绝不估价。"
   },
   "inspect": {
     "close": "关闭",
@@ -1956,7 +1956,7 @@
     "source_name": {
       "claude-code": "Claude Code",
       "codex": "Codex",
-      "dsh": "dsh"
+      "dsh": "DeepSeek Harness"
     },
     "claude_binary": "Claude 程序位置",
     "claude_binary_desc": "Fleet 会自动找到你电脑上的 Claude，一般无需改动。只有想指定某个特定版本时，才在下面手动选择。",
@@ -2535,7 +2535,7 @@
     "render_rest": "展开剩余 {{n}} 段"
   },
   "env": {
-    "subtitle": "三个 agent 环境(Claude Code / Codex / dsh)的安装、升级与登录状态。",
+    "subtitle": "三个 agent 环境(Claude Code / Codex / DeepSeek Harness)的安装、升级与登录状态。",
     "refresh": "重新检测",
     "probing": "检测中…",
     "loading": "加载中…",
@@ -2584,14 +2584,14 @@
     "paste_code": "粘贴授权代码",
     "submit_code": "提交",
     "dsh_creds_btn": "配置 API Key",
-    "dsh_creds_hint": "dsh 使用你自己的模型 API Key;选择凭证名并粘贴 Key。",
-    "dsh_no_refs": "dsh 尚未配置任何模型 provider,先在 dsh 设置里添加 provider。",
+    "dsh_creds_hint": "DeepSeek Harness 使用你自己的模型 API Key;选择凭证名并粘贴 Key。",
+    "dsh_no_refs": "DeepSeek Harness 尚未配置任何模型 provider,先在 DeepSeek Harness 设置里添加 provider。",
     "dsh_key_placeholder": "粘贴 API Key",
     "dsh_key_saved": "{{ref}} 已保存。",
     "configured": "已配置",
     "err_details": "详细输出",
     "err": {
-      "node-missing": "缺少 Node.js:dsh 通过 npm 安装,需要先安装 Node.js。",
+      "node-missing": "缺少 Node.js:DeepSeek Harness 通过 npm 安装,需要先安装 Node.js。",
       "unsupported-channel": "该安装渠道由编辑器管理,请在编辑器里更新。",
       "not-installed": "尚未安装,请先安装。",
       "unsupported-source": "未知的 agent 类型。",
@@ -2603,7 +2603,7 @@
     "spawn_missing": {
       "claude-code": "还没有安装 Claude Code,没法启动这个会话。",
       "codex": "还没有安装 Codex CLI,没法启动这个会话。",
-      "dsh": "还没有安装 dsh,没法启动这个会话。"
+      "dsh": "还没有安装 DeepSeek Harness,没法启动这个会话。"
     },
     "open_env_panel": "去环境面板修复",
     "remote_hosts": "远端主机(rca workspace)",

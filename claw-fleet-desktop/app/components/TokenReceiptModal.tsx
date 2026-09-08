@@ -64,7 +64,7 @@ const SOURCE_LABEL: Record<string, string> = {
   "claude-code": "Claude",
   claude: "Claude",
   codex: "Codex",
-  dsh: "dsh",
+  dsh: "DeepSeek Harness",
   fleet: "Fleet",
 };
 

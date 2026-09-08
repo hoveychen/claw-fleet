@@ -209,7 +209,7 @@ export const AGENT_TOOL_CHOICES: { value: string; label: string }[] = [
   // needed. Its source is additionally gated on the binary existing (see
   // `agent_source::build_sources`), which is what keeps it out of the launcher
   // on a machine with no dsh installed.
-  { value: "dsh", label: "dsh" },
+  { value: "dsh", label: "DeepSeek Harness" },
 ];
 
 /** A source entry as returned by the `get_sources_config` backend command. */

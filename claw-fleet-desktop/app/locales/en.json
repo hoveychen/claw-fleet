@@ -403,7 +403,7 @@
     "no_usage_data": "No usage data",
     "dsh_balance_tip": "Remaining balance reported by the provider behind this key",
     "dsh_key_limit": "Key spend {{used}} of {{limit}}",
-    "dsh_no_keys": "No provider key configured in dsh — nothing to ask for a balance"
+    "dsh_no_keys": "No provider key configured in DeepSeek Harness — nothing to ask for a balance"
   },
   "skills": {
     "panel_title": "Skills",
@@ -421,7 +421,7 @@
     "delete_failed": "Failed to delete skill: {{error}}",
     "source_claude": "Claude",
     "source_codex": "Codex",
-    "source_dsh": "dsh",
+    "source_dsh": "DeepSeek Harness",
     "scope_user": "User",
     "scope_repo": "Repository",
     "scope_admin": "Admin",
@@ -891,7 +891,7 @@
     "caveat": "From Codex's cumulative total_token_usage. Cached input is a subset of raw input billed at the cache-read rate; output already includes reasoning tokens. Cost uses the model's public price tier."
   },
   "dsh_token": {
-    "loading": "Loading dsh token usage…",
+    "loading": "Loading DeepSeek Harness token usage…",
     "no_data": "No data",
     "kpi_total": "Total tokens (billed)",
     "kpi_context": "Context used",
@@ -912,7 +912,7 @@
     "cost_calls": "{{count}} call(s) priced by the provider",
     "cost_calls_rates": "{{count}} call(s) priced from published rates",
     "cost_calls_mixed": "{{receipt}} by the provider / {{rates}} from published rates",
-    "caveat": "Token counts come from dsh's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. Spend is obtained one of two ways, and the figure above says which: for providers that issue a receipt per generation (OpenRouter) it is what they actually charged, never derived from the token counts, because the same model costs different amounts through different providers; for a route with one seller and a published price list (DeepSeek official, which issues no receipt) it is those rates applied to the counted tokens, peak or off-peak per call. Calls on a model with no rate and no receipt are counted, never guessed at."
+    "caveat": "Token counts come from DeepSeek Harness's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. Spend is obtained one of two ways, and the figure above says which: for providers that issue a receipt per generation (OpenRouter) it is what they actually charged, never derived from the token counts, because the same model costs different amounts through different providers; for a route with one seller and a published price list (DeepSeek official, which issues no receipt) it is those rates applied to the counted tokens, peak or off-peak per call. Calls on a model with no rate and no receipt are counted, never guessed at."
   },
   "inspect": {
     "close": "Close",
@@ -1959,7 +1959,7 @@
     "source_name": {
       "claude-code": "Claude Code",
       "codex": "Codex",
-      "dsh": "dsh"
+      "dsh": "DeepSeek Harness"
     },
     "claude_binary": "Claude location",
     "claude_binary_desc": "Fleet finds Claude on your computer automatically — you usually don't need to change this. Pick one manually only if you want a specific version.",
@@ -2538,7 +2538,7 @@
     "render_rest": "Render the remaining {{n}} sections"
   },
   "env": {
-    "subtitle": "Install, upgrade and login state for the three agent harnesses (Claude Code / Codex / dsh).",
+    "subtitle": "Install, upgrade and login state for the three agent harnesses (Claude Code / Codex / DeepSeek Harness).",
     "refresh": "Re-check",
     "probing": "Checking…",
     "loading": "Loading…",
@@ -2587,14 +2587,14 @@
     "paste_code": "Paste authorization code",
     "submit_code": "Submit",
     "dsh_creds_btn": "Configure API key",
-    "dsh_creds_hint": "dsh uses your own model API key; pick the credential and paste the key.",
-    "dsh_no_refs": "dsh has no model providers configured yet — add one in dsh settings first.",
+    "dsh_creds_hint": "DeepSeek Harness uses your own model API key; pick the credential and paste the key.",
+    "dsh_no_refs": "DeepSeek Harness has no model providers configured yet — add one in DeepSeek Harness settings first.",
     "dsh_key_placeholder": "Paste API key",
     "dsh_key_saved": "{{ref}} saved.",
     "configured": "configured",
     "err_details": "Details",
     "err": {
-      "node-missing": "Node.js is missing: dsh installs via npm, which needs Node.js first.",
+      "node-missing": "Node.js is missing: DeepSeek Harness installs via npm, which needs Node.js first.",
       "unsupported-channel": "This install channel is managed by your editor — update it there.",
       "not-installed": "Not installed yet — install first.",
       "unsupported-source": "Unknown agent source.",
@@ -2606,7 +2606,7 @@
     "spawn_missing": {
       "claude-code": "Claude Code isn't installed, so this session can't start.",
       "codex": "The Codex CLI isn't installed, so this session can't start.",
-      "dsh": "dsh isn't installed, so this session can't start."
+      "dsh": "DeepSeek Harness isn't installed, so this session can't start."
     },
     "open_env_panel": "Fix in Environment panel",
     "remote_hosts": "Remote hosts (rca workspaces)",
