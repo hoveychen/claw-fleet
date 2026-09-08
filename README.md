@@ -74,7 +74,7 @@ The **Decision Panel** is one queue for everything that needs a human:
 - **Agent questions** — answered through a wizard: options, forms, attachments, free text.
 - **Plan approval** — review and edit an agent's plan before it starts.
 
-A floating window pops cards up even when the main window is minimized, and every answer is kept in history. Answering on desktop, the floating card, or your phone all unblock the same waiting agent.
+Every answer is kept in history. Answering on the desktop or on your phone unblocks the same waiting agent.
 
 ### Launch and relay tasks
 
@@ -86,7 +86,7 @@ When a task outgrows one context window, the agent registers a handoff and **Fle
 
 - **Reports** — AI-written daily summaries of what got built, plus "lessons learned" you can add to your `CLAUDE.md` in one click.
 - **Wiki** — versioned, full-text-searchable archive of everything your agents publish (HTML reports, demos, docs), cross-linked with `[[slug]]`.
-- **Repos** — file trees, git status and diffs, built-in terminal.
+- **Repos** — file trees, git status with push/pull, built-in terminal.
 - **Audit** — every Bash command your agents ran, classified by risk.
 
 ---
@@ -151,7 +151,7 @@ The feature is off by default: the same crate produces the `fleet` sidecar that 
 
 **Monitoring** reads each agent's local data directory (for Claude Code, `~/.claude/`) — append-only JSONL logs and lock files. OS-native file events (FSEvents / inotify) pick up new lines the moment they're written; status, speed, and cost are derived in-process. No network calls.
 
-**Decisions** ride on Claude Code's extension points — hooks (guard, questions, plan approval) and MCP tools (`fleet__ask`, `fleet__render_a2ui`, `fleet__permission_prompt`) — routed into a local hooks server. Desktop, floating card, and mobile are surfaces over the same queue.
+**Decisions** ride on Claude Code's extension points — hooks (guard, questions, plan approval) and MCP tools (`fleet__ask`, `fleet__render_a2ui`, `fleet__permission_prompt`) — routed into a local hooks server. Desktop, web UI, and mobile are surfaces over the same queue.
 
 **Mobile:** the desktop dials *out* to a content-agnostic relay over WebSocket and your phone joins the channel with the key from the QR code. `fleet serve` exposes the same data plane over HTTP for the browser build and the cloud container.
 
@@ -161,10 +161,10 @@ agents (Claude Code / Codex)
    ▼                                    ▼
  file watcher ──────────────► Fleet core (Rust)
                                    │
-      ┌──────────┬────────────┬────┴──────┬─────────────┐
-      ▼          ▼            ▼           ▼             ▼
-  desktop UI  floating card  web UI   mobile app    fleet CLI
-  (macOS/Win) (macOS/Win)   (Linux)   (via relay)    (--json)
+      ┌──────────────┬─────────────┴─────────────┐
+      ▼              ▼             ▼             ▼
+ desktop UI       web UI      mobile app     fleet CLI
+ (macOS/Win)      (Linux)     (via relay)    (--json)
 ```
 
 ---

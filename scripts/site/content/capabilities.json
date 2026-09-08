@@ -187,8 +187,8 @@
           "Browse project files, images and source code."
         ],
         [
-          "Git status and diffs",
-          "Inspect changes and pull or push from the interface."
+          "Git status, pull and push",
+          "See the branch, ahead/behind counts and changed files, then pull or push from the interface."
         ],
         [
           "Terminal and processes",
@@ -458,8 +458,8 @@
           "浏览项目文件、图片与代码内容。"
         ],
         [
-          "Git 状态与差异",
-          "查看改动，并在界面中执行拉取与推送。"
+          "Git 状态与拉取推送",
+          "查看分支、领先落后数与改动文件，并在界面中执行拉取与推送。"
         ],
         [
           "内置终端与进程",
