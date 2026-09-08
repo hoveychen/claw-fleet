@@ -55,6 +55,17 @@ ssh own-api-sz 'sudo systemctl start fleet-site-update.service && journalctl -u 
    重跑 `python3 scripts/site/build.py`。只有两个首页会带这些 meta——验证是对你提交的那个 URL 做的，全站重复没意义。
 2. **HTML 文件**：把控制台给的文件（`google*.html`、`baidu_verify_*.html` 等）直接放到 `docs/` 根下即可，`stage_pages.VERIFICATION_GLOBS` 会放行。文件名不在那几个模式里的，往 `EXTRA_FILES` 加一行。
 
+## 两个域的上线状态（2026-09-08 实测）
+
+| 域 | canonical | sitemap / robots | softwareVersion |
+|---|---|---|---|
+| `hoveychen.github.io/claw-fleet` | 指向自己 ✓ | 200 / 200 ✓ | 2.7.0 ✓ |
+| `fleet.eternizedlab.com` | 指向自己 ✓ | 200 / 200 ✓ | 2.7.0 ✓ |
+
+github.io 侧由 push 后的 Pages 工作流发布；镜像侧走了一次手动发布（`deployments/manual-v2.7.0-seo-20260908`，随后 `--rebuild-current` 又生成了 `auto-v2.7.0-4606ce1f58e3`）。`/site-review.md` 与 `/deploy/*.conf` 在 Pages 上已是 404。
+
+服务器副本 `/opt/fleet-site-updater/` 已同步到含 `site_origin.py` 的新版（旧版备份在同目录 `*.bak-preseo`），并用 `--rebuild-current` 真跑过一次：新生成的 auto deployment 带上了 sitemap.xml 与 robots.txt，说明下次发版不会把它们丢掉——这正是旧副本会犯的错（它的 assets 基线里没有这两个文件，而没有页面 href 引用它们）。
+
 ## 收录动作清单（需要老板的账号，代码侧已就绪）
 
 1. **Google Search Console**：加两个资源。github.io 是子路径，只能用 URL 前缀资源 `https://hoveychen.github.io/claw-fleet/`；镜像用域名资源 `fleet.eternizedlab.com`（要加 DNS TXT）。各自提交 `sitemap.xml`。
