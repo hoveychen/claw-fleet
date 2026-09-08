@@ -257,6 +257,45 @@ class DistributionTests(unittest.TestCase):
         pages=[n for n in names if n.endswith('.html')]
         self.assertEqual(names[:len(pages)], pages)  # pages first, then assets
 
+    def test_each_deployment_gets_its_own_origin_substituted(self):
+        # Both origins publish byte-identical files, so an absolute URL has to
+        # be resolved at publish time or the mirror declares github.io its
+        # canonical and drops out of Baidu while the origin site looks fine.
+        release, body = fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'site'
+            shutil.copytree(d.ROOT / 'docs', root, ignore=shutil.ignore_patterns('releases'))
+            (root / 'index.html').write_text(
+                f'<link rel="canonical" href="{d.site_origin.TOKEN}/index.html">'
+                f'<link rel="alternate" hreflang="zh-CN" href="{d.site_origin.TOKEN}/zh/index.html">'
+                '<img src="./icon.png">')
+            out = Path(tmp) / 'out'
+            with patch.object(d.urllib.request, 'urlopen', side_effect=lambda *a, **k: io.BytesIO(body)):
+                d.prepare(release, out, 'https://dl.example.com/fleet', site_root=root)
+            published = (out / 'index.html').read_text()
+            self.assertNotIn(d.site_origin.TOKEN, published)
+            self.assertIn('https://dl.example.com/fleet/index.html', published)
+            self.assertIn('https://dl.example.com/fleet/zh/index.html', published)
+            # Binary assets still arrive byte-for-byte.
+            self.assertEqual((out / 'icon.png').read_bytes(), (root / 'icon.png').read_bytes())
+
+    def test_a_token_reference_is_not_looked_for_on_disk(self):
+        # site_files() crawls src/href; a token URL is absolute once published,
+        # not a path, so treating it as one would invent an unmirrorable file.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'zh').mkdir()
+            for name in ('site.css', 'site.js', 'locale.js'):
+                (root / name).write_text('')
+            (root / 'index.html').write_text(
+                f'<link rel="alternate" href="{d.site_origin.TOKEN}/zh/index.html"><img src="icon.png">')
+            (root / 'zh/index.html').write_text('')
+            (root / 'icon.png').write_bytes(b'')
+            names = d.site_files(root)
+            self.assertNotIn(f'{d.site_origin.TOKEN}/zh/index.html', names)
+            self.assertFalse(any(d.site_origin.TOKEN in name for name in names))
+            self.assertIn('icon.png', names)
+
     def test_site_reference_cannot_escape_the_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

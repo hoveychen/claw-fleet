@@ -13,6 +13,8 @@ import time
 import urllib.parse
 import urllib.request
 
+import site_origin
+
 ROOT = Path(__file__).resolve().parents[2]
 REPO = 'hoveychen/claw-fleet'
 # GitHub Releases drops connections partway through this asset set on the
@@ -145,6 +147,11 @@ def site_files(root):
             reference = reference.split('?')[0].split('#')[0]
             if not reference or ':' in reference or reference.startswith('//') or reference.endswith('/'):
                 continue
+            # `__SITE_ORIGIN__/...` becomes absolute at publish time (hreflang,
+            # canonical). It is not a path on disk, so looking for it here would
+            # invent a file that can never be mirrored.
+            if site_origin.contains_token(reference):
+                continue
             if reference.startswith('../'):
                 candidate = reference[3:]
             elif reference.startswith('./'):
@@ -181,7 +188,16 @@ def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cl
             continue
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        # Text files carry `__SITE_ORIGIN__` wherever SEO needs an absolute URL
+        # (canonical, hreflang, og:url, JSON-LD, sitemap). The mirror serves a
+        # different origin than Pages, so substituting here is what keeps the
+        # mirror pointing at itself instead of declaring github.io canonical.
+        if site_origin.is_text(source):
+            target.write_text(site_origin.apply(source.read_text(encoding='utf-8'), public_url),
+                              encoding='utf-8')
+            shutil.copystat(source, target)
+        else:
+            shutil.copy2(source, target)
     manifest = {'schema': 1, 'version': tag, 'china': {'provider': provider, 'assets': {}}}
     checksum_lines = []
     for name, asset in sorted(assets.items()):
