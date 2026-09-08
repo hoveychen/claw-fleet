@@ -60,7 +60,8 @@
   "faqs": [
    ["Fleet 会不会更费 token？", "会。它往每次调用里注入纪律与计划上下文，也多产生记账、交接、出卡的往返：输入约 +23%、输出约 +9%、调用次数 +7%。换来的是这一页量出的并行度与无人值守——省 token 从来不是它的卖点。"],
    ["这些数字能在我自己的机器上复算吗？", "能。全部来自 <code>~/.claude/projects</code> 下的本地 transcript，采集与核算脚本随本页发布，读的是你自己的 usage 记录。"],
-   ["机器会不会因为 hook 变慢？", "实测可以忽略：每轮的计划注入约 10 毫秒，计划记账中位 0.0 秒，交接与 worktree 操作中位 1.4 秒。真正的等待来自决策卡等人回答——那是人的响应时间。"]
+   ["机器会不会因为 hook 变慢？", "实测可以忽略：每轮的计划注入约 10 毫秒，计划记账中位 0.0 秒，交接与 worktree 操作中位 1.4 秒。真正的等待来自决策卡等人回答——那是人的响应时间。"],
+  ["为什么不直接做同任务 A/B？", "因为这台机器上没有对照组——裸终端会话只有 2 个，事后合成一个比没有对照更糟。真做同任务 A/B 需要一套固定任务集、两种模式各跑一遍，还要控住模型版本与操作者自己的学习效应，那是另一项还没做的工作。这一页站得住的部分是差分测量：把 Fleet 注入的文本从同一次调用里减掉，误差来自分词而不是任务差异。并行度、接力与无人值守对照的是裸命令行的结构性上限，口径区已明说那不是实测样本。"]
   ],
   "backHome": "回到首页",
   "footer": "数据窗口 2026-08-08 → 2026-09-07（30.4 天）· 1,660 个会话 · 382,874 次 API 调用 · 全部数字由本地 transcript 重算。",
@@ -128,7 +129,8 @@
   "faqs": [
    ["Does Fleet burn more tokens?", "Yes. It injects discipline and plan context into every call and adds round trips for bookkeeping, handoffs and cards: about +23% input, +9% output, +7% calls. What you get back is the concurrency and unattended work measured on this page — saving tokens was never the pitch."],
    ["Can I recompute these numbers on my own machine?", "Yes. They all come from local transcripts under <code>~/.claude/projects</code>; the collection and accounting scripts ship with this page and read your own usage records."],
-   ["Do the hooks slow the machine down?", "Not measurably: the per-turn plan injection takes about 10 ms, plan bookkeeping a median 0.0s, handoff and worktree operations a median 1.4s. The real waiting is a decision card waiting on a person."]
+   ["Do the hooks slow the machine down?", "Not measurably: the per-turn plan injection takes about 10 ms, plan bookkeeping a median 0.0s, handoff and worktree operations a median 1.4s. The real waiting is a decision card waiting on a person."],
+  ["Why not run a same-task A/B against a bare terminal?", "Because the control group does not exist on this machine — only 2 bare-terminal sessions — and manufacturing one after the fact would be worse than having none. A real A/B needs a fixed task set, both modes run over it, and control for model version and the operator's own learning; that is separate work and it has not been done. What this page can stand behind is the differential measurement: Fleet's injected text subtracted from the same call, so the error comes from tokenization rather than task variance. The concurrency, relay and unattended figures compare against a bare terminal's structural ceiling, and the method section says plainly that those are not measured samples."]
   ],
   "backHome": "Back to home",
   "footer": "Window 2026-08-08 → 2026-09-07 (30.4 days) · 1,660 sessions · 382,874 API calls · every number recomputed from local transcripts.",
