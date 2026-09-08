@@ -20,6 +20,7 @@ function make(over: Partial<Artifact>): Artifact {
     createdMs: 1_756_000_000_000,
     workspacePath: "/w/one",
     workspaceName: "one",
+    path: "",
     sessionId: null,
     sourcePath: "/src/a.pdf",
     starred: false,
@@ -170,5 +171,48 @@ describe("buildArtifactDirectoryTree", () => {
     ]);
 
     expect(tree[0].children.map((node) => node.directory)).toEqual(["docs"]);
+  });
+
+  it("files an artifact by its own path, not by where the agent wrote it", () => {
+    const tree = buildArtifactDirectoryTree([
+      // Written into src/ by the agent, but filed under 交付 by the user.
+      make({ id: "1", path: "交付", sourcePath: "/w/one/src/app.ts" }),
+      make({ id: "2", path: "交付/2026Q3", sourcePath: "/w/one/src/app.ts" }),
+      // Unfiled: still derived from the source path, as before.
+      make({ id: "3", path: "", sourcePath: "/w/one/docs/readme.md" }),
+    ]);
+
+    expect(tree[0].children.map((node) => [node.label, node.count])).toEqual([
+      ["docs", 1],
+      ["交付", 2],
+    ]);
+    expect(tree[0].children[1].children.map((node) => [node.label, node.count])).toEqual([
+      ["2026Q3", 1],
+    ]);
+  });
+
+  it("shows a folder the user made before anything is filed in it", () => {
+    const tree = buildArtifactDirectoryTree(
+      [make({ id: "1", path: "", sourcePath: "/w/one/a.pdf" })],
+      [
+        { workspacePath: "/w/one", path: "交付" },
+        { workspacePath: "/w/one", path: "交付/2026Q3" },
+      ],
+    );
+
+    // Present, and counted as empty — an empty folder must not inflate a count.
+    expect(tree[0].children.map((node) => [node.label, node.count])).toEqual([["交付", 0]]);
+    expect(tree[0].children[0].children.map((node) => node.directory)).toEqual(["交付/2026Q3"]);
+  });
+
+  it("names a workspace whose only content is an empty folder", () => {
+    const tree = buildArtifactDirectoryTree(
+      [make({ id: "1", workspacePath: "/w/one", workspaceName: "one" })],
+      [{ workspacePath: "/w/two", path: "空的" }],
+    );
+
+    // /w/two has no artifact to carry a display name, so it falls back to the
+    // path rather than rendering "undefined".
+    expect(tree.map((node) => node.label)).toEqual(["/w/two", "one"]);
   });
 });

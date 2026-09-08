@@ -42,11 +42,25 @@ export interface Artifact {
   createdMs: number;
   workspacePath: string;
   workspaceName: string;
+  /**
+   * The folder the user filed this in, `/`-separated, `""` when unfiled.
+   *
+   * Empty falls back to a folder derived from `sourcePath` — see
+   * {@link artifactRelativeDirectory}. That fallback is what keeps every
+   * artifact ingested before folders existed in the place it always appeared.
+   */
+  path: string;
   sessionId: string | null;
   sourcePath: string;
   starred: boolean;
   hardlinked: boolean;
   drifted: boolean;
+}
+
+/** Mirrors `claw_fleet_core::artifacts::Folder`. */
+export interface ArtifactFolder {
+  workspacePath: string;
+  path: string;
 }
 
 interface StoreUsage {
@@ -156,7 +170,19 @@ function normalizeArtifactPath(path: string): string {
   return path.replaceAll("\\", "/").replace(/\/+$/, "");
 }
 
-function artifactRelativeDirectory(artifact: Artifact): string | null {
+/**
+ * Which folder an artifact shows up in.
+ *
+ * `path` — what the user filed it as — wins. Only an unfiled artifact falls
+ * back to deriving a folder from where the producing agent happened to write
+ * the file, which is all this page had before folders were user-owned; without
+ * the fallback every existing artifact would jump to the workspace root the
+ * day the field shipped.
+ *
+ * `null` means "no idea": unfiled *and* produced outside its own workspace.
+ */
+export function artifactRelativeDirectory(artifact: Artifact): string | null {
+  if (artifact.path) return artifact.path;
   const workspace = normalizeArtifactPath(artifact.workspacePath);
   const source = normalizeArtifactPath(artifact.sourcePath);
   const workspaceLower = workspace.toLowerCase();
@@ -172,26 +198,47 @@ interface MutableDirectoryNode extends Omit<ArtifactDirectoryNode, "children"> {
   childMap: Map<string, MutableDirectoryNode>;
 }
 
-/** Build the secondary navigation from the artifact store's real source paths. */
-export function buildArtifactDirectoryTree(items: Artifact[]): ArtifactDirectoryNode[] {
+/**
+ * Build the secondary navigation.
+ *
+ * Two inputs, because a folder has to be able to exist before anything is in
+ * it: the artifacts contribute the folders they are filed in (and the counts),
+ * `folders` contributes the ones the user made and has not filled yet. Walking
+ * artifacts alone would make a freshly created folder vanish until the first
+ * drop, which reads as the button not having worked.
+ */
+export function buildArtifactDirectoryTree(
+  items: Artifact[],
+  folders: ArtifactFolder[] = [],
+): ArtifactDirectoryNode[] {
   const roots = new Map<string, MutableDirectoryNode>();
+  // A workspace's display name only appears on its artifacts, so collect it up
+  // front for the folders' sake: an empty folder in an otherwise artifact-less
+  // workspace would be labelled with a raw absolute path without this.
+  const names = new Map<string, string>();
   for (const artifact of items) {
-    let root = roots.get(artifact.workspacePath);
+    if (artifact.workspaceName) names.set(artifact.workspacePath, artifact.workspaceName);
+  }
+
+  const ensureRoot = (workspacePath: string): MutableDirectoryNode => {
+    let root = roots.get(workspacePath);
     if (!root) {
       root = {
-        key: artifact.workspacePath,
-        label: artifact.workspaceName || artifact.workspacePath,
-        workspacePath: artifact.workspacePath,
+        key: workspacePath,
+        label: names.get(workspacePath) || workspacePath,
+        workspacePath,
         directory: "",
         count: 0,
         children: [],
         childMap: new Map(),
       };
-      roots.set(artifact.workspacePath, root);
+      roots.set(workspacePath, root);
     }
-    root.count += 1;
-    const directory = artifactRelativeDirectory(artifact);
-    if (!directory) continue;
+    return root;
+  };
+
+  /** Walk to `directory`, creating the levels that don't exist yet. */
+  const descend = (root: MutableDirectoryNode, directory: string, counts: boolean) => {
     let current = root;
     const parts = directory.split("/").filter(Boolean);
     for (let index = 0; index < parts.length; index += 1) {
@@ -199,9 +246,9 @@ export function buildArtifactDirectoryTree(items: Artifact[]): ArtifactDirectory
       let child = current.childMap.get(parts[index]);
       if (!child) {
         child = {
-          key: `${artifact.workspacePath}\u0000${path}`,
+          key: `${root.workspacePath}\u0000${path}`,
           label: parts[index],
-          workspacePath: artifact.workspacePath,
+          workspacePath: root.workspacePath,
           directory: path,
           count: 0,
           children: [],
@@ -210,11 +257,24 @@ export function buildArtifactDirectoryTree(items: Artifact[]): ArtifactDirectory
         current.childMap.set(parts[index], child);
         current.children.push(child);
       }
-      child.count += 1;
+      if (counts) child.count += 1;
       current = child;
     }
+  };
+
+  for (const artifact of items) {
+    const root = ensureRoot(artifact.workspacePath);
+    root.count += 1;
+    const directory = artifactRelativeDirectory(artifact);
+    if (!directory) continue;
+    descend(root, directory, true);
   }
 
+  // The folders the user made: they add nodes, never counts.
+  for (const folder of folders) {
+    if (!folder.path) continue;
+    descend(ensureRoot(folder.workspacePath), folder.path, false);
+  }
   const finalize = (node: MutableDirectoryNode): ArtifactDirectoryNode => ({
     key: node.key,
     label: node.label,
@@ -233,6 +293,7 @@ export function buildArtifactDirectoryTree(items: Artifact[]): ArtifactDirectory
 export function ArtifactsView() {
   const { t } = useTranslation();
   const [items, setItems] = useState<Artifact[] | null>(null);
+  const [folders, setFolders] = useState<ArtifactFolder[]>([]);
   const [usage, setUsage] = useState<StoreUsage | null>(null);
   const [query, setQuery] = useState("");
   const [workspace, setWorkspace] = useState("");
@@ -248,6 +309,7 @@ export function ArtifactsView() {
     // exact failure MOCK_WIKI_DOCS exists to prevent for the wiki.
     const list = (await invoke<Artifact[]>("list_artifacts").catch(() => [])) ?? [];
     setItems(list);
+    setFolders((await invoke<ArtifactFolder[]>("list_artifact_folders").catch(() => [])) ?? []);
     setUsage((await invoke<StoreUsage>("artifact_usage").catch(() => null)) ?? null);
   }, []);
 
@@ -255,7 +317,10 @@ export function ArtifactsView() {
     void load();
   }, [load]);
 
-  const directoryTree = useMemo(() => buildArtifactDirectoryTree(items ?? []), [items]);
+  const directoryTree = useMemo(
+    () => buildArtifactDirectoryTree(items ?? [], folders),
+    [items, folders],
+  );
 
   const shown = useMemo(
     () => sortArtifacts(filterArtifacts(items ?? [], { query, workspace, directory, starredOnly }), sortKey),
@@ -268,7 +333,10 @@ export function ArtifactsView() {
   );
 
   const patch = useCallback(
-    async (id: string, fields: { title?: string; note?: string; starred?: boolean }) => {
+    async (
+      id: string,
+      fields: { title?: string; note?: string; starred?: boolean; path?: string },
+    ) => {
       try {
         const updated = await invoke<Artifact>("update_artifact", { id, ...fields });
         setItems((prev) => (prev ?? []).map((a) => (a.id === id ? updated : a)));
