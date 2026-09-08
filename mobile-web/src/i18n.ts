@@ -83,6 +83,23 @@ export function t(zh: string, ...args: Array<string | number>): string {
 }
 
 const DICT: Record<string, string> = {
+  // ── 终端页（FLEET_TERMINAL）──
+  "新终端": "New terminal",
+  "没有终端": "No terminal",
+  "正在开终端…": "Opening a terminal…",
+  "还没有可用的工作目录": "No working directory yet",
+  "已退出": "Exited",
+  "已退出 · 退出码 {0}": "Exited · code {0}",
+  "重开": "Reopen",
+  "向上翻页": "Page up",
+  "向下翻页": "Page down",
+  "回到底部": "Back to bottom",
+  // ── 会话详情：花费 ──
+  "暂不可用": "Not available",
+  "（另有 {0} 次调用未能定价，token 已计入、金额未计入）":
+    "({0} more call(s) could not be priced — tokens counted, cost not)",
+  // ── 用量 ──
+  "{0} token": "{0} tokens",
   // ── 压缩包浏览（产出页的 zip 当文件夹开）──
   "压缩包": "Archive",
   // 「返回」「分享」已在别处登记过,不重复。
