@@ -570,10 +570,11 @@ async function handleIPC(
       return MOCK_ARTIFACTS;
     case "artifact_usage":
       return MOCK_ARTIFACT_USAGE;
-    // Remote-only in production; in mock there is no host, so the two
-    // OS-level actions stay hidden rather than pointing at nothing.
-    case "artifact_local_path":
-      return null;
+    // The two OS-level actions (`reveal_artifact` / `open_artifact_external`)
+    // fall through to `default: return null` on purpose: mock reads as the
+    // desktop, so both buttons are on screen exactly as they are in the real
+    // app, and clicking one in a screenshot harness must not try to reach a
+    // file manager that isn't there.
     case "update_artifact": {
       const a = MOCK_ARTIFACTS.find((x) => x.id === args.id);
       if (!a) return null;

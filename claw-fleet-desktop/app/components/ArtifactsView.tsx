@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   Archive,
   ChevronDown,
@@ -32,6 +31,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
+import { canRevealPath } from "../canReveal";
 import { isWebBuild } from "../hostEnv";
 import { getItem, setItem } from "../storage";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
@@ -1343,7 +1343,9 @@ function ArtifactCard({
   );
 }
 
-function ArtifactDetail({
+/** Exported for the regression test that pins the OS actions to the host
+ * predicate rather than to an `invoke` — see `ArtifactsView.osactions.test.tsx`. */
+export function ArtifactDetail({
   artifact,
   folderOptions,
   onBack,
@@ -1362,8 +1364,8 @@ function ArtifactDetail({
   onError: (msg: string | null) => void;
 }) {
   const { t } = useTranslation();
-  const [localPath, setLocalPath] = useState<string | null>(null);
   const [note, setNote] = useState(artifact.note);
+  const [exporting, setExporting] = useState(false);
   // Where this artifact currently shows up, editable. A text field with a
   // datalist rather than a picker: one control both files into an existing
   // folder and creates a new one by typing it, which is how a path field in a
@@ -1373,21 +1375,20 @@ function ArtifactDetail({
   useEffect(() => setNote(artifact.note), [artifact.id, artifact.note]);
   useEffect(() => setFolder(artifact.path), [artifact.id, artifact.path]);
 
-  // Null for a remote workspace — the two OS-level actions are hidden rather
-  // than pointed at a path on the other machine.
-  useEffect(() => {
-    let current = artifact.id;
-    invoke<string | null>("artifact_local_path", { id: artifact.id })
-      .then((p) => {
-        if (current === artifact.id) setLocalPath(p);
-      })
-      .catch(() => setLocalPath(null));
-    return () => {
-      current = "";
-    };
-  }, [artifact.id]);
+  // Whether the two OS-level actions can do anything here. Deliberately a
+  // synchronous host predicate and NOT the answer of an `invoke`: they used to
+  // hang off an `artifact_local_path` call whose failure branch was a bare
+  // `.catch(() => setLocalPath(null))`, so any hiccup on that one call — a
+  // reject, or a command that simply took its time while the desktop's IPC was
+  // busy (the debug log has `get_messages_tail` stalls up to 5.2s) — silently
+  // erased both buttons, with nothing on screen to say why and no retry. The
+  // path they need is resolved host-side from the artifact id anyway, so the
+  // frontend never needed it; the only real fork is the browser build, which
+  // has no file manager to hand anything to, and that is what this answers.
+  const osActions = canRevealPath();
 
   const doExport = async () => {
+    setExporting(true);
     try {
       // A tab cannot be given a destination path — `save()` answers null there
       // and the button would silently do nothing. Hand the browser a download
@@ -1403,6 +1404,8 @@ function ArtifactDetail({
       onError(null);
     } catch (e) {
       onError(t("artifacts.export_failed", "导出失败：{{error}}", { error: String(e) }));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -1416,10 +1419,16 @@ function ArtifactDetail({
           {artifact.title}
         </span>
         <div className={styles.detail_actions}>
-          <button className={styles.action} onClick={doExport}>
-            {t("artifacts.export_short", "导出")}
+          {/* Disabled + relabelled while outstanding: the whole span is a
+              native save panel plus a chunked copy (137 MB of zip is a real
+              wait), and with no state at all a click that had not opened its
+              panel yet was indistinguishable from a dead button. */}
+          <button className={styles.action} onClick={doExport} disabled={exporting}>
+            {exporting
+              ? t("artifacts.exporting", "导出中…")
+              : t("artifacts.export_short", "导出")}
           </button>
-          {localPath && (
+          {osActions && (
             <>
               <button
                 className={styles.action}
@@ -1445,8 +1454,13 @@ function ArtifactDetail({
                   // The blob can be gone by now — the drift banner below exists
                   // precisely because the source file moves under us. Without
                   // this the click is indistinguishable from a no-op.
+                  //
+                  // Resolved from the id host-side (like the button above)
+                  // rather than by shipping a path to the frontend first: that
+                  // extra round trip is exactly what used to decide whether
+                  // this button existed at all.
                   try {
-                    await revealItemInDir(localPath);
+                    await invoke("reveal_artifact", { id: artifact.id });
                     onError(null);
                   } catch (e) {
                     onError(t("artifacts.reveal_failed", "显示失败：{{error}}", { error: String(e) }));

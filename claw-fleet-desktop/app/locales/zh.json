@@ -2530,6 +2530,7 @@
     "unstar": "取消收藏",
     "export": "导出到…",
     "export_short": "导出",
+    "exporting": "导出中…",
     "exported": "已导出",
     "export_failed": "导出失败：{{error}}",
     "open_failed": "打开失败：{{error}}",
