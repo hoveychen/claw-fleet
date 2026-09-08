@@ -6,13 +6,23 @@ import json
 import mimetypes
 import os
 from pathlib import Path
+import http.client
 import re
 import shutil
+import time
 import urllib.parse
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO = 'hoveychen/claw-fleet'
+# GitHub Releases drops connections partway through this asset set on the
+# Shenzhen mirror's route often enough that a single-shot download never
+# finished: on 2026-09-08 five consecutive unattended rounds died with
+# RemoteDisconnected or a read timeout after 1-6 of the 8 assets, and each
+# death restarted the whole 230 MB from zero, so the mirror could not advance
+# to a new release at all.
+DOWNLOAD_ATTEMPTS = 8
+RETRY_DELAY = 5
 REQUIRED = {'claw-fleet-macos.pkg', 'claw-fleet-windows-x64-setup.exe', 'fleet-linux-x64', 'fleet-linux-arm64'}
 # The Android APK is ALLOWED but deliberately not REQUIRED: releases cut before
 # the APK job existed carry no such asset, and putting it in REQUIRED would make
@@ -58,6 +68,55 @@ def verify(path, asset):
     if path.stat().st_size != asset['size'] or 'sha256:' + digest.hexdigest() != asset['digest']:
         raise ValueError(f'Size or SHA-256 mismatch: {path.name}')
     return digest.hexdigest()
+
+
+def download(asset, path, temporary):
+    """Fetch one asset into `temporary`, resuming what is already on disk.
+
+    Bytes survive an attempt, so a connection that dies mid-asset costs only
+    the remainder rather than the whole set. The SHA-256 check is what makes
+    resuming safe to do at all: a server that ignores the Range request and
+    answers with the whole body would splice garbage onto the partial, so that
+    case restarts, and a partial that is full-length but fails verification is
+    thrown away rather than resumed onto — keeping it would make every later
+    attempt fail identically.
+    """
+    failure = None
+    for attempt in range(DOWNLOAD_ATTEMPTS):
+        offset = temporary.stat().st_size if temporary.exists() else 0
+        if offset > asset['size']:
+            # Longer than the asset: it can never become the asset.
+            temporary.unlink()
+            offset = 0
+        try:
+            if offset < asset['size']:
+                headers = {'User-Agent': 'Claw-Fleet-distribution'}
+                if offset:
+                    headers['Range'] = f'bytes={offset}-'
+                request = urllib.request.Request(asset['browser_download_url'], headers=headers)
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    # Only consulted when we asked to resume; a plain 200 first
+                    # attempt keeps working against any response object.
+                    resumed = bool(offset) and getattr(response, 'status', 200) == 206
+                    with temporary.open('ab' if resumed else 'wb') as stream:
+                        shutil.copyfileobj(response, stream)
+        except (OSError, http.client.HTTPException) as error:
+            failure = error
+        else:
+            written = temporary.stat().st_size if temporary.exists() else 0
+            if written < asset['size']:
+                failure = ValueError(f'Truncated download at {written}/{asset["size"]} bytes: {path.name}')
+            else:
+                try:
+                    verify(temporary, asset)
+                    return
+                except ValueError as error:
+                    failure = error
+                    temporary.unlink()
+        if attempt + 1 < DOWNLOAD_ATTEMPTS:
+            print(f'Retrying {path.name} after {type(failure).__name__}: {failure}', flush=True)
+            time.sleep(RETRY_DELAY)
+    raise failure
 
 
 def site_files(root):
@@ -130,10 +189,7 @@ def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cl
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
             temporary = path.with_name(name + '.partial')
-            request = urllib.request.Request(asset['browser_download_url'], headers={'User-Agent': 'Claw-Fleet-distribution'})
-            with urllib.request.urlopen(request, timeout=120) as response, temporary.open('wb') as stream:
-                shutil.copyfileobj(response, stream)
-            verify(temporary, asset)
+            download(asset, path, temporary)
             temporary.replace(path)
         digest = verify(path, asset)
         key = path.relative_to(output).as_posix()

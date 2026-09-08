@@ -61,7 +61,12 @@ class SelfhostTests(unittest.TestCase):
 
     def test_corrupt_package_never_replaces_current(self):
         before = (self.old / 'downloads.json').read_bytes()
-        with patch.object(distribute.urllib.request, 'urlopen', return_value=io.BytesIO(b'corrupt')):
+        # Full-length wrong bytes: this must exhaust the download retries and
+        # fail, not look like a truncated transfer worth resuming.
+        corrupt = b'x' * len(self.body)
+        with patch.object(distribute.time, 'sleep', lambda *_: None), \
+             patch.object(distribute.urllib.request, 'urlopen',
+                          side_effect=lambda *a, **k: io.BytesIO(corrupt)):
             with self.assertRaises(ValueError):
                 selfhost.sync(self.root, 'https://dl.example.com', self.release)
         self.assertEqual((self.root / 'current').resolve(), self.old)
