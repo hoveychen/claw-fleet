@@ -180,3 +180,27 @@ TOTAL 230360715 bytes in 85.2s = 2640 KB/s
 随后实际启动 systemd service：`Result=success`、`ExecMainStatus=0`，输出 `Up to date: v2.6.0; no downloads or site changes`。timer 为 enabled / active，已登记下次执行；服务用户 `fleet-site`，可写路径仅 `/srv/claw-fleet-site`。systemd 配置检查无本服务错误；仅提示服务器既有 cloudmonitor 服务的旧配置警告，本次未修改它。
 
 原子切换后重新运行正式域名的 23 项浏览器断言全部通过。尚不存在更新的真实稳定版，因此「未来新版本到达后的自动发现」以本地升级测试和真机当前版重建路径验证，没有伪造发布新版。
+
+## 站点文案更新的运维记录（2026-09-08，实测报告免责段改中性口吻）
+
+**官网文案的真实来源是 `scripts/site/content/*.json`，`docs/*.html` 是 `scripts/site/build.py` 的生成物。**本次先只改了 `docs/benchmark.html`，随后任意一次 `build.py` 就把它冲回旧文案——改文案必须改 content，再 build，两者一起提交。
+
+**镜像的 HTML 不由 `fleet-site-update.timer` 同步。**timer 的范围是发行文件与下载清单（见上节），站点 HTML 只能走本节的 SSH 流程；`selfhost.py` 用 `site_root=current` 把当前部署的 HTML 原样带进新部署，所以手工发布一次之后，后续自动同步会一直沿用它。
+
+本次「只换站点文件」的实际步骤（可复用）：
+
+```bash
+NEW=/srv/claw-fleet-site/deployments/manual-v2.7.0-neutral-copy-20260908
+ssh own-api-sz "cp -al /srv/claw-fleet-site/current/ $NEW"     # 硬链接整棵树，历史包不重传
+python3 scripts/site/site_origin.py --root <本地暂存> --origin https://fleet.eternizedlab.com
+rsync -a <本地暂存>/ own-api-sz:$NEW/                            # 写临时文件再 rename，不改旧部署 inode
+# 服务器上补备案页脚 + 生成 DEPLOY-SHA256SUMS（见上一节的 Python）
+ssh own-api-sz "cd $NEW && sha256sum -c DEPLOY-SHA256SUMS --quiet && chown -R fleet-site:fleet-site $NEW"
+ssh own-api-sz "ln -s $NEW /srv/claw-fleet-site/.current-switch && mv -T /srv/claw-fleet-site/.current-switch /srv/claw-fleet-site/current"
+```
+
+**改这棵树里的文件必须先 `unlink` 再写，不能原地 `write_text`。**整棵树是 `cp -al` 的硬链接，原地截断会改到共享 inode，等于同时改写所有历史部署。本次 4 个页面均先 unlink 再写，`manual-v2.7.0-seo-20260908` 的 `index.html` inode 131910 与新部署的不同，确认未被牵动。
+
+**顺带修复的合规问题：`manual-v2.7.0-seo-20260908` 这次部署丢了备案页脚**，`auto-v2.7.0-4606ce1f58e3` 又从它带下来，导致镜像四个页面（含首页）在线上都没有 `粤ICP备2026103741号-1`。本次部署已按上一节的推导式清单给全部 4 个页面补回，线上四页均验证到 1 处。发布 HTML 时这一步不能省。
+
+验收：`/benchmark.html` 与 `/zh/benchmark.html` 均 200 且含新文案（`Scope of these figures` / 「适用范围说明」），四页备案页脚各 1 处；`downloads.json` 仍为 v2.7.0、provider `Eternized Lab · Shenzhen`；`releases/v2.7.0/claw-fleet-windows-x64-setup.exe` 的 Range 请求返回 206。
