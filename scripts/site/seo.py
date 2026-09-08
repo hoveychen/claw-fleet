@@ -43,6 +43,44 @@ def url(path=''):
     return f'{TOKEN}/{path}'
 
 
+def sitemap(page_pairs):
+    """A sitemap for the whole site, each entry declaring its language alternates.
+
+    `page_pairs` is [(en_path, zh_path), ...]. Both members of a pair appear as
+    their own <url>, and each carries the full xhtml:link set including itself,
+    which is what Google's hreflang-via-sitemap form requires.
+
+    No <lastmod>, <changefreq> or <priority>: Google ignores the last two
+    outright and distrusts a lastmod it catches being wrong. Stamping build time
+    onto four pages that did not change would be exactly that.
+    """
+    urls = ''
+    for en_path, zh_path in page_pairs:
+        alternates = (f'<xhtml:link rel="alternate" hreflang="en" href="{url(en_path)}"/>'
+                      f'<xhtml:link rel="alternate" hreflang="zh-CN" href="{url(zh_path)}"/>'
+                      f'<xhtml:link rel="alternate" hreflang="x-default" href="{url(en_path)}"/>')
+        for path in (en_path, zh_path):
+            urls += f'\n<url><loc>{url(path)}</loc>{alternates}</url>'
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+            ' xmlns:xhtml="http://www.w3.org/1999/xhtml">'
+            f'{urls}\n</urlset>\n')
+
+
+def robots():
+    """robots.txt for a deployment served from the root of its own origin.
+
+    Note this only takes effect on the mirror: a crawler reads robots.txt from
+    the origin root, and on GitHub Pages the site lives under /claw-fleet/, so
+    hoveychen.github.io/robots.txt is not ours to write. Pages therefore relies
+    on submitting the sitemap in Search Console instead.
+    """
+    return ('User-agent: *\n'
+            'Allow: /\n'
+            '\n'
+            f'Sitemap: {url("sitemap.xml")}\n')
+
+
 def head(*, lang, en_path, zh_path, title, description, image, image_size=None,
          image_alt='', page_type='website'):
     """Canonical + hreflang + OpenGraph + Twitter for one page, as an HTML block.

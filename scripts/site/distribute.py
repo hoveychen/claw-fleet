@@ -135,7 +135,10 @@ def site_files(root):
     moment it is linked. Returns pages first, then assets.
     """
     pages = ['index.html', 'zh/index.html']
-    assets = ['site.css', 'site.js', 'locale.js']
+    # sitemap.xml and robots.txt are listed rather than discovered: no page
+    # links to them, and a mirror without them is a mirror no crawler is told
+    # how to index.
+    assets = ['site.css', 'site.js', 'locale.js', 'sitemap.xml', 'robots.txt']
     pending = list(pages)
     while pending:
         page = pending.pop(0)

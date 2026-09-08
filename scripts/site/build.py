@@ -12,6 +12,10 @@ GITHUB = 'https://github.com/hoveychen/claw-fleet'
 # One entry per download row, positionally matched to content['platforms'].
 # Each row names its icon and the buttons it carries, so a row with two builds
 # (Linux) or a new platform (Android) is a data change, not an index trick.
+# (english path, chinese path) for every real page, in sitemap order. The pair
+# is what ties the two language versions together in hreflang, so a new page
+# joins the sitemap and gets its alternates from one edit.
+PAGE_PAIRS = [('', 'zh/'), ('benchmark.html', 'zh/benchmark.html')]
 ROWS = [
     ('apple', [('claw-fleet-macos.pkg', 'macOS')]),
     ('windows', [('claw-fleet-windows-x64-setup.exe', 'Windows')]),
@@ -126,3 +130,8 @@ if __name__ == '__main__':
         bm.write_text(benchmark.build(lang,bm_copy[lang],bm_data,asset,base,
             '../benchmark.html' if lang=='zh' else 'zh/benchmark.html',GITHUB))
         print(bm.relative_to(ROOT))
+    # Nothing links to these two, so they are generated here rather than
+    # discovered; distribute.site_files() lists them explicitly for the mirror.
+    for name, body in (('sitemap.xml', seo.sitemap(PAGE_PAIRS)), ('robots.txt', seo.robots())):
+        (ROOT / 'docs' / name).write_text(body)
+        print(f'docs/{name}')
