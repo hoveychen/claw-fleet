@@ -255,7 +255,16 @@ pub(crate) fn set_session_mark(
 
 /// Set (or clear, when `title` is null/empty) the human's manual title override
 /// for a session. Written to the local side-channel file.
-#[tauri::command]
+///
+/// `(async)`: the write itself is one small per-session file, but it is
+/// followed by `restamp_marks_and_emit`, which re-enriches the whole session
+/// list (four passes, each reading files) and then emits the entire
+/// `Vec<SessionInfo>`. That is far too much to run inlined on the event loop —
+/// this command was simply missed by the 2026-07-16 sweep that moved every
+/// other `state.backend` delegate off it. Each title lives in its own file, so
+/// there is no shared read-modify-write to lose the main thread's serialization
+/// over.
+#[tauri::command(async)]
 pub(crate) fn set_session_title(
     session_id: String,
     workspace_path: String,

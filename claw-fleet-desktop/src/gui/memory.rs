@@ -50,11 +50,20 @@ pub(crate) fn get_plan_forest(
     state.backend.get_plan_forest(&workspace_path)
 }
 
-#[tauri::command]
+/// `(async)`: reading a workspace's CLAUDE.md is disk work of unbounded size
+/// (these files run to tens of KB and the read happens on every Memory-view
+/// open), and a read has nothing the event loop needs to serialize.
+#[tauri::command(async)]
 pub(crate) fn get_claude_md_content(workspace_path: String) -> Result<String, String> {
     memory::read_claude_md(&workspace_path)
 }
 
+/// Deliberately still a plain sync command, i.e. on the main thread.
+///
+/// This appends to the user's CLAUDE.md — a read-modify-write on a file the
+/// user also edits by hand. The event loop is that write's only serialization
+/// today, and a single append is milliseconds, so the trade the rest of this
+/// sweep makes (leave the loop, accept concurrency) is the wrong one here.
 #[tauri::command]
 pub(crate) fn promote_memory(memory_path: String, target: String, workspace_path: String) -> Result<(), String> {
     memory::promote_memory(&memory_path, &target, &workspace_path)

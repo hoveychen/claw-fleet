@@ -20,8 +20,11 @@ pub(crate) fn get_user_title(state: tauri::State<AppState>) -> String {
     state.user_title.lock().unwrap().clone()
 }
 
-#[tauri::command]
-pub(crate) fn set_user_title(title: String, state: tauri::State<AppState>) {
+/// `(async)` for the same reason as `set_locale`: the reapply below is a dozen
+/// file operations across six guidance carriers, and none of it belongs on the
+/// event loop. Nothing here needs the main thread.
+#[tauri::command(async)]
+pub(crate) fn set_user_title(title: String, state: tauri::State<'_, AppState>) {
     *state.user_title.lock().unwrap() = title.clone();
     reapply_all_guidance_if_installed(&state, &title, None);
 }

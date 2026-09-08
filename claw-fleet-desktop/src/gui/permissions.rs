@@ -17,6 +17,10 @@ pub(crate) fn get_permissions_config() -> claw_fleet_core::permissions_injector:
 /// them. `deactivate` is unconditional even when a peer `fleet serve` still
 /// holds the lock: the toggle is global, so every Fleet process's watchdog then
 /// reads `enabled == false` and stops re-injecting.
+///
+/// Left as a plain sync command (i.e. on the event loop) on purpose: both arms
+/// read-modify-write `~/.claude/settings.json` alongside the lock file, and one
+/// user toggle is worth a few ms of loop time to keep that sequence serialized.
 #[tauri::command]
 pub(crate) fn set_permissions_config(
     cfg: claw_fleet_core::permissions_injector::PermissionsConfig,
