@@ -33,10 +33,14 @@ def page_file(url_path):
 
 
 def sitemap_paths(sitemap, origin_token='__SITE_ORIGIN__'):
-    """Every URL path the sitemap lists, in order."""
+    """Every URL path the sitemap lists, in order.
+
+    `origin_token` is whatever prefixes the URLs: the build-time token, or a
+    resolved origin when reading a sitemap that has already been substituted.
+    """
     paths = []
     for loc in re.findall(r'<loc>([^<]+)</loc>', sitemap.read_text(encoding='utf-8')):
-        paths.append(loc.split(origin_token, 1)[-1] if origin_token in loc else loc)
+        paths.append((loc.split(origin_token, 1)[-1] or '/') if origin_token in loc else loc)
     return paths
 
 
@@ -70,8 +74,12 @@ def page_lastmod(repo_root, docs, url_paths):
     return dates
 
 
-def stamp(sitemap, dates, origin_token='__SITE_ORIGIN__'):
-    """Insert <lastmod> after each <loc> we have a date for. Idempotent."""
+def stamp(sitemap, dates, origin_token='__SITE_ORIGIN__', origin=None):
+    """Insert <lastmod> after each <loc> we have a date for. Idempotent.
+
+    `origin` lets this run on a sitemap whose token is already resolved (the
+    mirror substitutes while copying), because `dates` is keyed by path.
+    """
     body = sitemap.read_text(encoding='utf-8')
     if '<lastmod>' in body:
         body = re.sub(r'<lastmod>[^<]*</lastmod>', '', body)
@@ -80,7 +88,12 @@ def stamp(sitemap, dates, origin_token='__SITE_ORIGIN__'):
     def insert(match):
         nonlocal stamped
         loc = match.group(1)
-        path = loc.split(origin_token, 1)[-1] if origin_token in loc else loc
+        if origin_token in loc:
+            path = loc.split(origin_token, 1)[-1]
+        elif origin and loc.startswith(origin):
+            path = loc[len(origin):] or '/'
+        else:
+            path = loc
         date = dates.get(path)
         if not date:
             return match.group(0)

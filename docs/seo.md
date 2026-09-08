@@ -20,6 +20,23 @@
 
 `site_origin.assert_no_token()` 在两条路径上都会兜底：残留一个未替换的 token 页面照样能渲染、只有机器可读的那一半是错的，所以它必须是硬错误。
 
+### 发镜像用 `scripts/site/mirror_site.py`
+
+```
+python3 scripts/site/build.py
+python3 scripts/site/mirror_site.py --output /tmp/mirror --version v2.7.0
+```
+
+它做三件 Pages 不需要的事，其中第三件曾经差点被漏掉：
+
+1. 把 `__SITE_ORIGIN__` / `__SITE_VERSION__` 解析成镜像自己的域与它服务的版本。
+2. **给每个页面加 ICP 备案页脚。**镜像托管在境内，每页依法都要带备案号；构建产物里没有它（Pages 那份不是备案主体）。漏掉它页面看起来毫无异常——所以工具在写完之后会逐页断言，缺一页就报错。
+3. 只输出站点文件：`downloads.json` 与 `releases/` 是镜像自己的（自己的清单、自己校验过的安装包），所以这棵树是用来 rsync **覆盖**在现有部署的克隆之上的，而不是一个完整部署。
+
+它还会把和 Pages 同样的真实 `lastmod` 盖到**副本**的 sitemap 上（不动仓库里的那份）。
+
+服务器侧仍是文档里那套：`cp -al` 克隆现有部署 → rsync 覆盖 → 重算 `DEPLOY-SHA256SUMS`（它覆盖 `releases/`，那些文件只在服务器上）→ 拿 `flock .update.lock` 后 `ln -sfn` 原子切换。注意 `sudo -u fleet-site` 不能带 `-c`：那个用户的 shell 是 nologin。
+
 ### 镜像上的 HTML 不会自动更新
 
 服务器上的 `fleet-site-update.timer` 调 `selfhost.sync()`，而它是用 `site_root=current`（**上一次已发布的部署**）来跑 `distribute.prepare()` 的。也就是说：定时器只推进 release 产物和 `downloads.json`，**站点 HTML 从来不会自己从仓库刷新**。
