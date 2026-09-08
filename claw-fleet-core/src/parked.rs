@@ -229,6 +229,41 @@ pub fn request_of<T: for<'de> Deserialize<'de>>(id: &str) -> Option<T> {
     serde_json::from_value(get(id)?.request).ok()
 }
 
+/// One watcher tick's parked bookkeeping, shared by every client that polls a
+/// decision channel (the desktop's Tauri watchers, `fleet serve`'s SSE
+/// broadcaster).
+///
+/// Two things have to happen on every tick, and a client that does only the
+/// second one silently loses the card:
+///
+///  1. `parked_ids` join `pending`, because parking *deletes* the request file.
+///     Without the union the tick's dismissal step reads the deletion as
+///     "resolved", tells the UI to drop the card and (on the mobile relay)
+///     resolves it for the phone too — the exact disappearance parking exists to
+///     prevent. This was `fleet serve`'s bug until 2026-09-08: the desktop
+///     unioned, the SSE broadcaster did not, so a timed-out card vanished from
+///     the browser and the phone the moment it parked.
+///  2. Cards that *just* became parked and are already on screen are announced
+///     once, so the card can badge itself 「已超时」 instead of sitting there
+///     looking like it is still counting down. `known` alone cannot carry that —
+///     it only tracks existence.
+///
+/// Returns the ids to announce as newly parked (already recorded in
+/// `announced`, so a later tick stays quiet).
+pub fn fold_into_pending(
+    parked_ids: &[String],
+    pending: &mut std::collections::HashSet<String>,
+    known: &std::collections::HashSet<String>,
+    announced: &mut std::collections::HashSet<String>,
+) -> Vec<String> {
+    pending.extend(parked_ids.iter().cloned());
+    parked_ids
+        .iter()
+        .filter(|id| known.contains(*id) && announced.insert((*id).clone()))
+        .cloned()
+        .collect()
+}
+
 /// True when this session already has a card waiting for the user. The producers
 /// use it as a re-entry guard: an agent that ignored [`STOP_NOTICE`] and asked
 /// again must not get a second card queued behind the first — it gets the notice
@@ -691,6 +726,64 @@ fn value_text(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod fold_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn set(ids: &[&str]) -> HashSet<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The union is the whole point: without it the caller's dismissal step
+    /// (`known - pending`) reads a parked card as resolved and drops it.
+    #[test]
+    fn parked_ids_stay_pending_so_the_card_is_not_dismissed() {
+        let mut pending = set(&["live"]);
+        let known = set(&["live", "gone-quiet"]);
+        let mut announced = HashSet::new();
+        fold_into_pending(
+            &["gone-quiet".to_string()],
+            &mut pending,
+            &known,
+            &mut announced,
+        );
+        assert!(pending.contains("gone-quiet"), "parked id must rejoin pending");
+        let dismissed: Vec<&String> = known.iter().filter(|id| !pending.contains(*id)).collect();
+        assert!(dismissed.is_empty(), "nothing may be dismissed: {dismissed:?}");
+    }
+
+    #[test]
+    fn a_card_already_on_screen_is_announced_exactly_once() {
+        let known = set(&["a"]);
+        let mut announced = HashSet::new();
+        let mut pending = HashSet::new();
+        let first =
+            fold_into_pending(&["a".to_string()], &mut pending, &known, &mut announced);
+        assert_eq!(first, vec!["a".to_string()]);
+        let mut pending = HashSet::new();
+        let second =
+            fold_into_pending(&["a".to_string()], &mut pending, &known, &mut announced);
+        assert!(second.is_empty(), "second tick must stay quiet: {second:?}");
+    }
+
+    /// A card that parked before this client ever saw it needs no flip event —
+    /// it arrives as a brand-new request that already carries `parked: true`.
+    #[test]
+    fn a_card_the_client_never_saw_is_not_announced_as_parked() {
+        let mut pending = HashSet::new();
+        let mut announced = HashSet::new();
+        let out = fold_into_pending(
+            &["never-seen".to_string()],
+            &mut pending,
+            &HashSet::new(),
+            &mut announced,
+        );
+        assert!(out.is_empty(), "{out:?}");
+        assert!(pending.contains("never-seen"), "but it must still be pending");
     }
 }
 

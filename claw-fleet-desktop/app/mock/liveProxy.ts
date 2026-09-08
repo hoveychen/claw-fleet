@@ -1755,7 +1755,7 @@ function startSessionsPoll() {
  *     two sources write the board would make a stale one silently win. Left to
  *     the poller so a proxy that buffers SSE can't freeze the board.
  */
-const FORWARDED_SSE_EVENTS = [
+export const FORWARDED_SSE_EVENTS = [
   "guard-request",
   "guard-dismissed",
   "elicitation-request",
@@ -1768,6 +1768,10 @@ const FORWARDED_SSE_EVENTS = [
   "plan-approval-dismissed",
   "permission-prompt-request",
   "permission-prompt-dismissed",
+  // A card whose wait timed out. It is NOT dismissed — the backend parked the
+  // question and interrupted the turn, and the card stays until answered. Miss
+  // this and the card keeps counting down forever with no 「已超时」 badge.
+  "decision-parked",
 ];
 
 let eventStream: EventSource | null = null;

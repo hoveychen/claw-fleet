@@ -4,7 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { LIVE_COMPOSITES, LIVE_ROUTES } from "./liveProxy";
+import { FORWARDED_SSE_EVENTS, LIVE_COMPOSITES, LIVE_ROUTES } from "./liveProxy";
 
 /**
  * Commands the frontend reaches through a variable, not a literal — a ternary
@@ -491,5 +491,52 @@ describe("list_pending_decisions composite", () => {
 
   it("is no longer mapped as a single route", () => {
     expect(LIVE_ROUTES.list_pending_decisions).toBeUndefined();
+  });
+});
+
+/**
+ * The SSE bridge is the browser build's only live channel, and a name missing
+ * from `FORWARDED_SSE_EVENTS` fails *silently*: the server broadcasts, nobody
+ * listens, and the UI just never updates. That is how `decision-parked` was
+ * lost until 2026-09-08 — a card that timed out kept counting down in the
+ * browser with no 「已超时」 badge, while the desktop (Tauri events, no
+ * allowlist) showed it correctly.
+ */
+describe("forwarded SSE events", () => {
+  /** Event names `useDecisionEvents` attaches a listener for. */
+  function listenedDecisionEvents(): string[] {
+    const src = readFileSync(join(__dirname, "..", "hooks", "useDecisionEvents.ts"), "utf8");
+    const out = new Set<string>();
+    for (const m of src.matchAll(/listen(?:<[^>]*>)?\(\s*"([a-z0-9-]+)"/g)) out.add(m[1]);
+    // The dismissal listeners are built from an array literal, not a `listen("…")`
+    // call site, so pick those names up too.
+    for (const m of src.matchAll(/"([a-z0-9-]+-dismissed)"/g)) out.add(m[1]);
+    return [...out].sort();
+  }
+
+  /** Event names `hooks_server` broadcasts over `/events`. */
+  function broadcastEvents(): Set<string> {
+    const dir = join(__dirname, "..", "..", "..", "claw-fleet-core", "src", "hooks_server");
+    const src = readdirSync(dir)
+      .filter((f) => f.endsWith(".rs"))
+      .map((f) => readFileSync(join(dir, f), "utf8"))
+      .join("\n");
+    const out = new Set<string>();
+    for (const m of src.matchAll(/broadcast\(\s*"([a-z0-9-]+)"/g)) out.add(m[1]);
+    return out;
+  }
+
+  it("forwards every decision event the frontend listens for", () => {
+    const listened = listenedDecisionEvents();
+    // Guards the scanner itself.
+    expect(listened).toContain("fleet-ask-request");
+    expect(listened).toContain("decision-parked");
+    expect(listened.filter((e) => !FORWARDED_SSE_EVENTS.includes(e))).toEqual([]);
+  });
+
+  it("forwards only events hooks_server really broadcasts", () => {
+    const broadcast = broadcastEvents();
+    expect(broadcast.has("fleet-ask-request")).toBe(true);
+    expect(FORWARDED_SSE_EVENTS.filter((e) => !broadcast.has(e))).toEqual([]);
   });
 });
