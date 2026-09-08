@@ -195,7 +195,7 @@
     ],
     [
       "How do I download in China?",
-      "When a China mirror is enabled, select it above. GitHub Releases remains the alternative. The Android APK is served from GitHub Releases; whether the mirror carries it depends on the release you are downloading. There is no iOS or HarmonyOS package yet \u2014 on those, open the pairing link in the browser."
+      "When a China mirror is enabled, select it above. GitHub Releases remains the alternative. The Android APK is served from GitHub Releases; whether the mirror carries it depends on the release you are downloading. There is no iOS or HarmonyOS package yet — on those, open the pairing link in the browser."
     ]
   ],
   "closing": "A thought to start with.<br>A result to come back to.",
@@ -204,5 +204,13 @@
   "license": "License",
   "screenshotAlt": "Current Fleet project workspace, with tasks and the new-session composer",
   "mobileAlt": "Fleet mobile review with a launch decision and two concrete options",
-  "guide": "Project guide"
+  "guide": "Project guide",
+  "notFound": {
+    "title": "Page not found — Claw Fleet",
+    "heading": "That page isn’t here.",
+    "copy": "The link may be out of date, or the page moved. The workspace is still where you left it.",
+    "home": "Back to the home page",
+    "download": "Download Claw Fleet",
+    "report": "Read the field report"
+  }
 }

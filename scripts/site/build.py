@@ -121,6 +121,53 @@ def build(lang, c):
 </body></html>'''
 
 
+def build_404(content, asset):
+    """One page for both languages, served for any missing path.
+
+    Deliberately does NOT load locale.js: that script redirects to the other
+    language's index.html when the browser prefers it, which on a 404 would
+    bounce the visitor to the home page and hide the broken link entirely.
+    Both languages are in the markup and a tiny inline script picks one, so a
+    missing page stays a missing page.
+
+    noindex because the mirror serves this file through nginx's error_page and
+    a misconfiguration there could hand it out with a 200.
+    """
+    def block(lang, c):
+        base = './'
+        return (f'<div class="nf" lang="{"zh-CN" if lang == "zh" else "en"}" data-nf="{lang}">'
+                f'<h1>{c["heading"]}</h1><p>{c["copy"]}</p>'
+                f'<a class="button primary" href="{base}{"zh/" if lang == "zh" else ""}">{c["home"]}</a>'
+                f'<a class="text-link" href="{base}{"zh/" if lang == "zh" else ""}#download">{c["download"]}</a>'
+                f'<a class="text-link" href="{base}{"zh/benchmark.html" if lang == "zh" else "benchmark.html"}">{c["report"]}</a>'
+                '</div>')
+    en, zh = content['en']['notFound'], content['zh']['notFound']
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{en['title']} / {zh['title']}</title>
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light"><meta name="theme-color" content="{seo.THEME_COLOR}">
+<link rel="icon" href="./icon.png"><link rel="stylesheet" href="{asset('site.css')}">
+<script>
+// No redirect, no framework: read the language the visitor already chose on
+// this site, fall back to the browser, and reveal that half of the page.
+(() => {{
+  let saved; try {{ saved = localStorage.getItem('claw-fleet-site-language'); }} catch {{}}
+  const preferred = navigator.languages?.[0] || navigator.language || 'en';
+  const lang = saved === 'zh' || saved === 'en' ? saved : (/^zh(?:-|$)/i.test(preferred) ? 'zh' : 'en');
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  document.addEventListener('DOMContentLoaded', () => document.body.dataset.locale = lang);
+}})();
+</script>
+</head>
+<body data-locale="en" class="nf-page">
+<header class="header"><a class="brand" href="./"><img src="./icon.png" width="32" height="32" alt="">Claw Fleet</a></header>
+<main id="main">{block('en', en)}{block('zh', zh)}</main>
+</body></html>'''
+
+
 if __name__ == '__main__':
     import benchmark
     bm_copy=json.loads((ROOT/'scripts/site/content/benchmark.json').read_text())
@@ -141,6 +188,12 @@ if __name__ == '__main__':
         print(bm.relative_to(ROOT))
     # Nothing links to these two, so they are generated here rather than
     # discovered; distribute.site_files() lists them explicitly for the mirror.
-    for name, body in (('sitemap.xml', seo.sitemap(PAGE_PAIRS)), ('robots.txt', seo.robots())):
+    all_content = {lang: json.loads((ROOT / f'scripts/site/content/{lang}.json').read_text())
+                   for lang in ('en', 'zh')}
+    def root_asset(name):
+        digest = hashlib.sha256((ROOT / 'docs' / name).read_bytes()).hexdigest()[:12]
+        return f'./{name}?v={digest}'
+    for name, body in (('404.html', build_404(all_content, root_asset)),
+                       ('sitemap.xml', seo.sitemap(PAGE_PAIRS)), ('robots.txt', seo.robots())):
         (ROOT / 'docs' / name).write_text(body)
         print(f'docs/{name}')

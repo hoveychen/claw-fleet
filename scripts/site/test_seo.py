@@ -215,6 +215,22 @@ class GeneratedSiteTests(unittest.TestCase):
                 for question in marked:
                     self.assertIn(question, rendered)
 
+    def test_the_404_page_serves_both_languages_and_stays_out_of_the_index(self):
+        html = (self.DOCS / '404.html').read_text()
+        self.assertIn('<meta name="robots" content="noindex">', html)
+        # Both languages must be in the markup: the page is served for any
+        # missing path, so there is no per-language URL to send anyone to.
+        self.assertIn('data-nf="en"', html)
+        self.assertIn('data-nf="zh"', html)
+        # locale.js would redirect a preferred-language visitor to an index
+        # page, turning a broken link into a silent bounce to the home page.
+        self.assertNotIn('locale.js', html)
+        # No canonical either: a 404 is not a page with a preferred URL.
+        self.assertNotIn('rel="canonical"', html)
+
+    def test_the_404_page_is_not_in_the_sitemap(self):
+        self.assertNotIn('404', (self.DOCS / 'sitemap.xml').read_text())
+
     def test_the_sitemap_and_robots_are_generated_not_stale(self):
         from build import PAGE_PAIRS
         self.assertEqual((self.DOCS / 'sitemap.xml').read_text(), seo.sitemap(PAGE_PAIRS))

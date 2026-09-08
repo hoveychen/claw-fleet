@@ -134,7 +134,10 @@ def site_files(root):
     Pages are followed transitively so a new sub-page joins the mirror the
     moment it is linked. Returns pages first, then assets.
     """
-    pages = ['index.html', 'zh/index.html']
+    # 404.html is a page nothing links to: nginx serves it through error_page,
+    # GitHub Pages for any missing path. Listing it here (rather than among the
+    # assets) also keeps this function's pages-then-assets order intact.
+    pages = ['index.html', 'zh/index.html', '404.html']
     # sitemap.xml and robots.txt are listed rather than discovered: no page
     # links to them, and a mirror without them is a mirror no crawler is told
     # how to index.

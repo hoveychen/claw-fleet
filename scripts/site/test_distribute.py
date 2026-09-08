@@ -250,7 +250,7 @@ class DistributionTests(unittest.TestCase):
         for name in names:
             with self.subTest(name=name):
                 self.assertTrue((d.ROOT / 'docs' / name).is_file(), name)
-        for required in ('site.css', 'site.js', 'locale.js', 'sitemap.xml', 'robots.txt',
+        for required in ('site.css', 'site.js', 'locale.js', 'sitemap.xml', 'robots.txt', '404.html',
                          'icon-android.svg',
                          'screenshots/current/agents-en.png', 'screenshots/current/relay-zh.png'):
             self.assertIn(required, names)
