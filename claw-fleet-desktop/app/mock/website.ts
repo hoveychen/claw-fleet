@@ -4,7 +4,7 @@ import assets from '../../../scripts/site/fixtures/assets.json';
 import reviewEn from '../../../scripts/site/fixtures/en/review.html?raw';
 import reviewZh from '../../../scripts/site/fixtures/zh/review.html?raw';
 import scenes from '../../../scripts/site/fixtures/scenes.json';
-import { MOCK_SESSIONS, MOCK_MESSAGES, MOCK_ARTIFACTS, MOCK_ARTIFACT_USAGE } from './data';
+import { MOCK_SESSIONS, MOCK_MESSAGES, MOCK_ARTIFACTS, MOCK_ARTIFACT_USAGE, MOCK_HANDOFF_CHAINS } from './data';
 export const websiteLang = new URLSearchParams(location.search).get('website');
 export const websiteScene = websiteLang === 'en' || websiteLang === 'zh' ? scenes[websiteLang] : null;
 export const websiteReview = websiteLang === "zh" ? reviewZh : reviewEn;
@@ -37,6 +37,33 @@ export function installWebsiteFixtures() {
     workspaceName: c.projects[[0,0,0,4,0,3,0,5][i]], workspacePath: `/Users/demo/workspace/${projects[[0,0,0,4,0,3,0,5][i]]}`,
     starred: i < 2, drifted: false, createdMs: Date.now() - i * 3600000,
   })));
+  // One piece of work relayed across three harnesses — the landing page's
+  // "hand it to the next one" step needs a chain where the legs visibly ran on
+  // Claude Code, dsh and Codex rather than three copies of the same agent.
+  const relaySources = ['claude-code', 'dsh', 'codex'] as const;
+  const relayModels = ['claude-opus-4-8', 'deepseek/deepseek-v4-pro', 'gpt-5.6-sol'];
+  const relayNow = Date.now();
+  MOCK_SESSIONS.push(...c.relay.legs.map(([title, preview]: string[], i: number) => ({
+    ...structuredClone(seed), id: `relay-${i}`, aiTitle: title, slug: null,
+    workspaceName: c.relay.workspace, workspacePath: '/Users/demo/workspace/ember-coffee',
+    status: (i === 2 ? 'executing' : 'idle') as 'executing' | 'idle',
+    isSubagent: false, parentSessionId: null, runningSubagentCount: 0, watches: [],
+    agentSource: relaySources[i], model: relayModels[i],
+    entrypoint: 'fleet', fleetSpawned: true, procAlive: i === 2,
+    lastMessagePreview: preview, lastActivityMs: relayNow - (3 - i) * 45 * 60000,
+    jsonlPath: `/Users/demo/relay-${i}.jsonl`, tokenSpeed: i === 2 ? 31 : 0, agentTokenSpeed: 0,
+    totalOutputTokens: [38400, 52100, 17300][i], totalCostUsd: [2.14, 1.88, 0.71][i],
+    agentTotalCostUsd: 0, contextPercent: [0.82, 0.64, 0.21][i],
+    handoff: {chainId: 'chain-website-relay', hop: i + 1, chainLen: 3},
+  })));
+  MOCK_HANDOFF_CHAINS['chain-website-relay'] = {
+    chainId: 'chain-website-relay', workspacePath: '/Users/demo/workspace/ember-coffee', planId: c.relay.plan,
+    links: [0, 1].map(i => ({
+      fromSessionId: `relay-${i}`, toSessionId: `relay-${i + 1}`,
+      note: c.relay.notes[i], planId: c.relay.plan, nextTask: c.relay.nextTasks[i],
+      handedAt: relayNow - (2 - i) * 50 * 60000,
+    })),
+  };
   useComposerDraftStore.getState().patchDraft('new', {
     workspace: '/Users/demo/workspace/ember-coffee', prompt: c.brief,
     tool: 'claude', model: 'claude-opus-4-8', effort: 'high', permissionMode: 'acceptEdits',

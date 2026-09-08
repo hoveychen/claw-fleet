@@ -99,13 +99,34 @@ try {
       return {x: 74, y: 0, width: 926, height: Math.round(bottom) + 14};
     });
     await capture('agents', agentsClip);
+    // The relay chain itself — one job that changed hands across harnesses. The
+    // per-leg source/model line is what makes it readable as a cross-harness
+    // relay rather than three runs of the same agent.
+    await p.getByText(/(接力|Relay) 3\/3/).first().click();
+    await p.waitForFunction(() => document.querySelectorAll('[class*="handoff_leg_no"]').length === 3);
+    const relayClip = await p.evaluate(() => {
+      const modal = document.body.lastElementChild?.firstElementChild;
+      if (!modal) throw new Error('Relay modal did not open');
+      const text = modal.textContent || '';
+      for (const model of ['Opus', 'deepseek/', 'gpt-5.6']) {
+        if (!text.includes(model)) throw new Error('Relay chain missing ' + model);
+      }
+      const r = modal.getBoundingClientRect();
+      const pad = 54;
+      return {
+        x: Math.max(0, Math.round(r.x - pad)), y: Math.max(0, Math.round(r.y - pad)),
+        width: Math.round(Math.min(innerWidth - Math.max(0, r.x - pad), r.width + pad * 2)),
+        height: Math.round(r.height + pad * 2),
+      };
+    });
+    await capture('relay', relayClip);
     await p.setViewportSize({width:430,height:740});
     await p.goto(`http://localhost:5288/?mock&website=${lang}`);
     await p.getByText(c.options[1],{exact:true}).waitFor();
     await capture('mobile');
     await ctx.close();
     if(failed.length) throw new Error(JSON.stringify(failed));
-    console.log({lang,screenshots:5,failedResources:0});
+    console.log({lang,screenshots:6,failedResources:0});
   }
 } catch(error) {
  for(const context of browser.contexts()) for(const p of context.pages()) { console.error('CAPTURE PAGE',p.url(),await p.locator('body').innerText()); await p.screenshot({path:'/tmp/fleet-capture-failure.png'}); }

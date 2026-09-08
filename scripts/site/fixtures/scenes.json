@@ -104,7 +104,33 @@
       "Balcony garden · harvest model",
       "Ember · product film",
       "v1.2 release checklist"
-    ]
+    ],
+    "relay": {
+      "workspace": "Ember Coffee",
+      "plan": "ember-launch",
+      "legs": [
+        [
+          "Break the launch into a plan",
+          "Split website, packaging, launch deck and budget into seven steps, each with its own acceptance note."
+        ],
+        [
+          "Build the website and three packages",
+          "Work through it from P3: a previewable site and three packaging designs."
+        ],
+        [
+          "Check the copy and the budget figures",
+          "Align the bilingual copy and reconcile the budget table with the numbers in the deck."
+        ]
+      ],
+      "notes": [
+        "Plan is broken down, all seven steps have acceptance notes. Pick it up at P3 — the site skeleton is already in the worktree.",
+        "P3 through P5 are done and all three packaging versions are in deliverables. Copy alignment and the budget figures still need a check."
+      ],
+      "nextTasks": [
+        "P3",
+        "P6"
+      ]
+    }
   },
   "zh": {
     "projects": [
@@ -211,6 +237,32 @@
       "阳台菜园 · 收成模拟",
       "Ember · 产品短片",
       "v1.2 发布检查清单"
-    ]
+    ],
+    "relay": {
+      "workspace": "Ember 咖啡",
+      "plan": "ember-launch",
+      "legs": [
+        [
+          "拆出开店发布的执行计划",
+          "把官网、包装、发布提案和预算拆成七步，每步写清验收标准。"
+        ],
+        [
+          "按计划做出官网与三款包装",
+          "从 P3 开始逐步实现，产出可预览的页面和三版包装设计。"
+        ],
+        [
+          "复核文案与预算口径",
+          "统一中英文案，核对预算表和提案里的数字对得上。"
+        ]
+      ],
+      "notes": [
+        "计划拆完了，七步都写了验收标准。你从 P3 接着做，官网骨架已经在 worktree 里。",
+        "P3 到 P5 做完，三版包装都在产出里。剩下文案统一和预算口径需要复核。"
+      ],
+      "nextTasks": [
+        "P3",
+        "P6"
+      ]
+    }
   }
 }
