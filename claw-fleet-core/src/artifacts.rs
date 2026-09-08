@@ -978,6 +978,164 @@ pub fn delete_in(root: &Path, id: &str) -> Result<(), String> {
     fs::remove_dir_all(&dir).map_err(|e| format!("delete artifact '{id}': {e}"))
 }
 
+// ── Folder export ────────────────────────────────────────────────────────────
+
+/// What a folder export produced.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderZip {
+    /// Suggested filename for the archive.
+    pub filename: String,
+    pub member_count: usize,
+    pub total_bytes: u64,
+    /// Artifacts skipped because their stored bytes are missing, by title.
+    /// Non-fatal: better to hand over the rest than to fail the whole export
+    /// because one blob was deleted out from under the store.
+    #[serde(default)]
+    pub skipped: Vec<String>,
+}
+
+/// The artifacts a folder export would contain, in archive order.
+///
+/// Recursive: exporting `交付` includes `交付/2026Q3`. That is what the tree
+/// already implies — clicking `交付` shows everything underneath — so an
+/// export that took only the immediate level would disagree with what the
+/// user was looking at when they asked for it.
+pub fn folder_members(root: &Path, workspace_path: &str, directory: &str) -> Vec<Artifact> {
+    let mut out: Vec<Artifact> = list_in(root)
+        .into_iter()
+        .filter(|a| a.workspace_path == workspace_path)
+        .filter(|a| {
+            // The UI's own rule for "which folder is this in", including the
+            // pre-folders fallback, has to be reproduced here or an export
+            // would omit exactly the artifacts the tree showed inside it.
+            is_at_or_under(&effective_directory(a), directory)
+        })
+        .collect();
+    // Stable, human order: by folder, then by name.
+    out.sort_by(|a, b| {
+        effective_directory(a)
+            .cmp(&effective_directory(b))
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    out
+}
+
+/// Where an artifact shows up in the tree: its filed `path`, or — for one
+/// stored before folders existed — the directory implied by its source path.
+///
+/// Mirrors `artifactRelativeDirectory` in `ArtifactsView.tsx`. Duplicated
+/// rather than shared because the frontend needs it per render and the export
+/// needs it per artifact; if either changes the other has to follow, which is
+/// why both carry this note.
+///
+/// The fallback is a prefix comparison, so it only fires when the two fields
+/// were written from the same spelling of the path: `workspace_path` goes
+/// through [`crate::wiki::resolve_workspace_path`] at ingest while
+/// `source_path` is recorded verbatim, so an agent whose cwd was a symlink
+/// (`/tmp/...` → `/private/tmp/...` on macOS) yields no derived directory and
+/// the artifact reads as unfiled. That is deliberately left as-is: resolving
+/// here would make the export disagree with the tree, which cannot resolve
+/// anything in the browser — and a wrong folder is worse than none.
+pub fn effective_directory(artifact: &Artifact) -> String {
+    if !artifact.path.is_empty() {
+        return artifact.path.clone();
+    }
+    let workspace = artifact.workspace_path.replace('\\', "/");
+    let source = artifact.source_path.replace('\\', "/");
+    let workspace = workspace.trim_end_matches('/');
+    if workspace.is_empty() {
+        return String::new();
+    }
+    let prefix = format!("{}/", workspace.to_lowercase());
+    if !source.to_lowercase().starts_with(&prefix) {
+        return String::new();
+    }
+    let relative = &source[workspace.len() + 1..];
+    match relative.rfind('/') {
+        Some(i) => relative[..i].to_string(),
+        None => String::new(),
+    }
+}
+
+/// Stream a folder's artifacts into a zip at `dest`.
+///
+/// Written straight to the destination file rather than buffered: a folder of
+/// renders is exactly the case this feature is for, and holding it in memory
+/// first would trade a working export for an out-of-memory kill. Member paths
+/// are relative to `directory`, so extracting the archive reproduces the
+/// subtree the user saw rather than a flat pile.
+pub fn export_folder_zip(
+    root: &Path,
+    workspace_path: &str,
+    directory: &str,
+    dest: &Path,
+) -> Result<FolderZip, String> {
+    let directory = normalize_dir_path(directory)?;
+    let members = folder_members(root, workspace_path, &directory);
+
+    let file = fs::File::create(dest)
+        .map_err(|e| format!("create '{}': {e}", dest.display()))?;
+    let mut zip = crate::zip_stream::ZipStream::new(std::io::BufWriter::new(file));
+    let mut used = std::collections::HashSet::new();
+    let mut report = FolderZip { filename: zip_filename(&directory, workspace_path), ..Default::default() };
+
+    for artifact in &members {
+        let blob = blob_path(root, artifact);
+        let meta = match fs::metadata(&blob) {
+            Ok(m) => m,
+            // The blob is gone (a hard-linked source deleted, a store edited
+            // by hand). Skip it by name instead of failing the export.
+            Err(_) => {
+                report.skipped.push(artifact.title.clone());
+                continue;
+            }
+        };
+        let mut source = fs::File::open(&blob)
+            .map_err(|e| format!("open '{}': {e}", artifact.name))?;
+
+        // Path inside the archive, relative to the folder being exported.
+        let dir = effective_directory(artifact);
+        let relative = if directory.is_empty() {
+            dir.clone()
+        } else if dir == directory {
+            String::new()
+        } else {
+            dir[directory.len() + 1..].to_string()
+        };
+        let raw = if relative.is_empty() {
+            artifact.name.clone()
+        } else {
+            format!("{relative}/{}", artifact.name)
+        };
+        let name = crate::zip_stream::unique_member_name(
+            &crate::zip_stream::sanitize_member_name(&raw),
+            &mut used,
+        );
+
+        zip.add(&name, meta.len(), &mut source)
+            .map_err(|e| format!("archive '{}': {e}", artifact.name))?;
+        report.member_count += 1;
+        report.total_bytes += meta.len();
+    }
+
+    zip.finish().map_err(|e| format!("finish archive: {e}"))?;
+    Ok(report)
+}
+
+/// Suggested archive name: the folder's last segment, or the workspace's name
+/// when exporting its root.
+fn zip_filename(directory: &str, workspace_path: &str) -> String {
+    let stem = if directory.is_empty() {
+        crate::wiki::workspace_name_of(workspace_path)
+    } else {
+        directory.rsplit('/').next().unwrap_or(directory).to_string()
+    };
+    let stem = crate::user_attachments::sanitize_name_with(&stem, "artifacts");
+    format!("{stem}.zip")
+}
+
 // ── Folders ──────────────────────────────────────────────────────────────────
 //
 // One `folders.json` at the store root, unlike the per-artifact `meta.json`.
@@ -1539,6 +1697,215 @@ mod tests {
             get_in(root.path(), &a.id).unwrap().title,
             "deck.pptx",
             "the title must not have been written when the path was refused"
+        );
+    }
+
+    /// Read an archive back with python's zipfile — same reasoning as
+    /// `zip_stream`'s own tests: the macOS `unzip` predates UTF-8 names.
+    fn zip_members(path: &Path) -> Vec<(String, Vec<u8>)> {
+        let script = r#"
+import json, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    bad = z.testzip()
+    if bad is not None:
+        print("CRCFAIL:" + bad, file=sys.stderr); sys.exit(2)
+    print(json.dumps(sorted([[i.filename, z.read(i.filename).decode("latin-1")] for i in z.infolist()])))
+"#;
+        let run = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(script)
+            .arg(path)
+            .output()
+            .expect("python3 must be available");
+        assert!(
+            run.status.success(),
+            "zipfile rejected the archive: {}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        let parsed: Vec<Vec<String>> =
+            serde_json::from_str(String::from_utf8(run.stdout).unwrap().trim()).unwrap();
+        parsed
+            .into_iter()
+            .map(|p| (p[0].clone(), p[1].chars().map(|c| c as u8).collect()))
+            .collect()
+    }
+
+    #[test]
+    fn exporting_a_folder_includes_its_subfolders_and_keeps_the_shape() {
+        let root = store();
+        let ws = store();
+        let out = store();
+
+        let mk = |name: &str, body: &[u8], path: &str| {
+            let src = write_file(ws.path(), name, body);
+            let a = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+            update_in(root.path(), &a.id, None, None, None, Some(path)).unwrap();
+            a.id
+        };
+        mk("top.pdf", b"top bytes", "交付");
+        mk("deep.pdf", b"deep bytes", "交付/2026Q3");
+        mk("deeper.pdf", b"deeper", "交付/2026Q3/附件");
+        // Outside the exported folder — must not appear.
+        mk("elsewhere.pdf", b"nope", "归档");
+
+        let dest = out.path().join("a.zip");
+        let ws_path = crate::wiki::resolve_workspace_path(ws.path());
+        let report = export_folder_zip(root.path(), &ws_path, "交付", &dest).unwrap();
+
+        assert_eq!(report.member_count, 3, "recursive, and only this subtree");
+        assert_eq!(report.filename, "交付.zip");
+        assert!(report.skipped.is_empty());
+
+        let got = zip_members(&dest);
+        assert_eq!(
+            got.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            vec!["2026Q3/deep.pdf", "2026Q3/附件/deeper.pdf", "top.pdf"],
+            "member paths are relative to the exported folder"
+        );
+        assert_eq!(got[2].1, b"top bytes");
+        assert_eq!(got[0].1, b"deep bytes");
+    }
+
+    #[test]
+    fn exporting_the_workspace_root_takes_everything_including_unfiled() {
+        let root = store();
+        let ws = store();
+        let out = store();
+        let filed = write_file(ws.path(), "filed.pdf", b"a");
+        let loose = write_file(ws.path(), "loose.pdf", b"b");
+        let a = add_in(root.path(), &filed, None, None, ws.path(), None).unwrap();
+        update_in(root.path(), &a.id, None, None, None, Some("交付")).unwrap();
+        add_in(root.path(), &loose, None, None, ws.path(), None).unwrap();
+
+        let dest = out.path().join("root.zip");
+        let ws_path = crate::wiki::resolve_workspace_path(ws.path());
+        let report = export_folder_zip(root.path(), &ws_path, "", &dest).unwrap();
+
+        assert_eq!(report.member_count, 2);
+        let got = zip_members(&dest);
+        assert_eq!(
+            got.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            vec!["loose.pdf", "交付/filed.pdf"],
+            "the root export keeps each artifact under its own folder"
+        );
+    }
+
+    #[test]
+    fn two_artifacts_sharing_a_filename_both_survive_the_archive() {
+        let root = store();
+        let ws = store();
+        let out = store();
+        fs::create_dir_all(ws.path().join("one")).unwrap();
+        fs::create_dir_all(ws.path().join("two")).unwrap();
+        let a = write_file(&ws.path().join("one"), "report.pdf", b"first");
+        let b = write_file(&ws.path().join("two"), "report.pdf", b"second");
+        for src in [&a, &b] {
+            let art = add_in(root.path(), src, None, None, ws.path(), None).unwrap();
+            update_in(root.path(), &art.id, None, None, None, Some("交付")).unwrap();
+        }
+
+        let dest = out.path().join("dup.zip");
+        let ws_path = crate::wiki::resolve_workspace_path(ws.path());
+        assert_eq!(export_folder_zip(root.path(), &ws_path, "交付", &dest).unwrap().member_count, 2);
+
+        let got = zip_members(&dest);
+        // Without de-duplication the second would overwrite the first on
+        // extraction and one deliverable would vanish silently.
+        assert_eq!(
+            got.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            vec!["report (2).pdf", "report.pdf"]
+        );
+        let bodies: Vec<&[u8]> = got.iter().map(|(_, b)| b.as_slice()).collect();
+        assert!(bodies.contains(&b"first".as_slice()) && bodies.contains(&b"second".as_slice()));
+    }
+
+    #[test]
+    fn a_missing_blob_is_skipped_by_name_not_fatal() {
+        let root = store();
+        let ws = store();
+        let out = store();
+        let ok = write_file(ws.path(), "ok.pdf", b"fine");
+        let gone = write_file(ws.path(), "gone.pdf", b"doomed");
+        for src in [&ok, &gone] {
+            let art = add_in(root.path(), src, Some("标题"), None, ws.path(), None).unwrap();
+            update_in(root.path(), &art.id, None, None, None, Some("交付")).unwrap();
+        }
+        // Delete one artifact's stored bytes behind the store's back.
+        let victim = list_in(root.path())
+            .into_iter()
+            .find(|a| a.name == "gone.pdf")
+            .unwrap();
+        fs::remove_file(blob_path(root.path(), &victim)).unwrap();
+
+        let dest = out.path().join("partial.zip");
+        let ws_path = crate::wiki::resolve_workspace_path(ws.path());
+        let report = export_folder_zip(root.path(), &ws_path, "交付", &dest).unwrap();
+
+        assert_eq!(report.member_count, 1, "the intact one still exports");
+        assert_eq!(report.skipped, vec!["标题".to_string()]);
+        assert_eq!(zip_members(&dest).len(), 1);
+    }
+
+    #[test]
+    fn an_empty_folder_exports_an_empty_but_valid_archive() {
+        let root = store();
+        let ws = store();
+        let out = store();
+        create_folder_in(root.path(), ws.path(), "空的").unwrap();
+
+        let dest = out.path().join("empty.zip");
+        let ws_path = crate::wiki::resolve_workspace_path(ws.path());
+        let report = export_folder_zip(root.path(), &ws_path, "空的", &dest).unwrap();
+        assert_eq!(report.member_count, 0);
+        assert!(zip_members(&dest).is_empty());
+    }
+
+    #[test]
+    fn a_pre_folders_artifact_exports_from_the_directory_the_tree_shows_it_in() {
+        let root = store();
+        let ws = store();
+        let out = store();
+        // Never filed, but produced inside `reports/` — the tree shows it
+        // there, so an export of `reports` has to contain it.
+        //
+        // The source path is spelled the way `workspace_path` will be stored
+        // (resolved), because the derivation is a prefix comparison between
+        // the two — see `effective_directory`. A real ingest gets this for
+        // free when the agent's cwd is not a symlink; TempDir on macOS is
+        // (`/var` → `/private/var`), so the test has to be explicit.
+        let ws_path = crate::wiki::resolve_workspace_path(ws.path());
+        fs::create_dir_all(ws.path().join("reports")).unwrap();
+        write_file(&ws.path().join("reports"), "q3.pdf", b"derived");
+        let src = Path::new(&ws_path).join("reports").join("q3.pdf");
+        add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+        let members = folder_members(root.path(), &ws_path, "reports");
+        assert_eq!(members.len(), 1, "the derived directory counts as its folder");
+
+        let dest = out.path().join("derived.zip");
+        export_folder_zip(root.path(), &ws_path, "reports", &dest).unwrap();
+        assert_eq!(
+            zip_members(&dest).iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            vec!["q3.pdf"]
+        );
+    }
+
+    #[test]
+    fn a_sibling_folder_with_a_shared_prefix_is_not_swept_in() {
+        let root = store();
+        let ws = store();
+        let out = store();
+        for (name, path) in [("a.pdf", "docs"), ("b.pdf", "docs-old")] {
+            let src = write_file(ws.path(), name, b"x");
+            let art = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+            update_in(root.path(), &art.id, None, None, None, Some(path)).unwrap();
+        }
+        let ws_path = crate::wiki::resolve_workspace_path(ws.path());
+        let dest = out.path().join("docs.zip");
+        let report = export_folder_zip(root.path(), &ws_path, "docs", &dest).unwrap();
+        assert_eq!(report.member_count, 1, "docs-old is a different folder");
+        assert_eq!(
+            zip_members(&dest).iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            vec!["a.pdf"]
         );
     }
 
