@@ -218,3 +218,6 @@
 .col_last {
   padding-top: var(--win-caption-inset-y);
 }
+
+/* The simplified navigation owns the top strip; fill the remaining space. */
+:global(.app_simplified) .page { height: 100%; }

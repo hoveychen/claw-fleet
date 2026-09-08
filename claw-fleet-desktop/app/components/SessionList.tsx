@@ -49,6 +49,7 @@ export function SessionList() {
   const { sessions, refresh, setSessions, scanReady, setScanReady } = useSessionsStore();
   const { session: viewedSession, open } = useDetailStore();
   const {
+    simplifiedMode,
     viewMode,
     setViewMode,
     setNavGroup,
@@ -385,7 +386,7 @@ export function SessionList() {
 
   return (
     <>
-      <aside
+      {!simplifiedMode && <aside
         className={`${styles.sidebar}${sidebarCollapsed ? ` ${styles.sidebar_collapsed}` : ""}`}
         style={{ width: effectiveWidth }}
       >
@@ -567,7 +568,7 @@ export function SessionList() {
         {!sidebarCollapsed && (
           <ResizeHandle active={isDragging} onMouseDown={handleResizeMouseDown} />
         )}
-      </aside>
+      </aside>}
 
       {/* Main content area */}
       {viewMode === "list" ? (

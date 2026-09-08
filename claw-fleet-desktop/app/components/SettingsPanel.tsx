@@ -143,6 +143,7 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
 };
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
+  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   // Advanced group starts expanded only when an advanced tab is somehow the
@@ -1376,6 +1377,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             {activeTab === "general" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.appearance")}</div>
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.simplified_mode")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.simplified_mode_desc")}
+                    </span>
+                  </div>
+                  <input type="checkbox" role="switch"
+                    aria-label={t("settings.simplified_mode")}
+                    checked={simplifiedMode}
+                    onChange={(e) => useUIStore.getState().setSimplifiedMode(e.target.checked)}
+                  />
+                </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.theme")}</span>
                   <ThemeToggle />

@@ -1772,14 +1772,21 @@ export function FleetAskCard({
 
 // ── Card dispatcher ──────────────────────────────────────────────────────
 
-function DecisionCard({ decision }: { decision: PendingDecision }) {
+export function DecisionCard({ decision, compact = false }: { decision: PendingDecision; compact?: boolean }) {
   switch (decision.kind) {
     case "guard":
       return <GuardCard decision={decision} />;
     case "elicitation":
-      return <ElicitationCard decision={decision} />;
+      return <ElicitationCard decision={decision} compact={compact} />;
     case "fleet-ask":
-      return <FleetAskCard decision={decision} />;
+      return <>
+        {compact && !!decision.request.reviewDocs?.length && (
+          <div style={{ height: 320, minHeight: 0, display: "flex" }}>
+            <ReviewDocsColumn docs={decision.request.reviewDocs} sessionId={decision.request.sessionId} />
+          </div>
+        )}
+        <FleetAskCard decision={decision} compact={compact} />
+      </>;
     case "a2ui-render":
       return <A2uiRenderCard decision={decision} />;
     case "plan-approval":

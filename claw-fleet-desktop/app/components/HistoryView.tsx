@@ -224,9 +224,10 @@ export function HistoryView() {
 
   const { searching, ftsMatchPaths, snippetByPath } = useSessionSearch(query);
 
+  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const adhocSessions = useMemo(
-    () => sessions.filter(isFleetOwnedTask),
-    [sessions],
+    () => simplifiedMode ? sessions : sessions.filter(isFleetOwnedTask),
+    [sessions, simplifiedMode],
   );
 
   // The pure-chat workspace. It is no longer a mode of its own — chat sessions

@@ -2065,7 +2065,9 @@
     "remote_host_add_desc": "选一个 SSH 目标，Fleet 在其上安装 rca。装好之后，在新建会话里选这台主机并浏览它的目录即可。",
     "remote_host_install_btn": "安装 rca",
     "remote_host_remove_blocked": "这台主机上还有 {{count}} 个 workspace（{{paths}}）——先移除它们，否则它们会指向一个已不存在的主机。",
-    "remote_ws_unattached_title": "未归属主机的 workspace（旧条目）"
+    "remote_ws_unattached_title": "未归属主机的 workspace（旧条目）",
+    "simplified_mode": "精简模式",
+    "simplified_mode_desc": "仅显示任务与产出，决策直接在任务内操作。"
   },
   "usage": {
     "total_tokens": "Token 总数",
@@ -2295,7 +2297,8 @@
     "task_review_underclaimed_hint": "Agent 当时并未判定完成，老板直接按了「结束任务」——可能是它低报了进度。",
     "task_review_hops": "接力 {{count}} 段",
     "popup_title": "日报已生成",
-    "popup_open_full": "查看完整日报"  },
+    "popup_open_full": "查看完整日报"
+  },
   "command": {
     "nested": {
       "bash": "嵌入 bash -c",
@@ -2651,5 +2654,6 @@
     "select_workspace": "选择一个仓库开终端。",
     "no_workspaces": "还没有可用的仓库"
   },
-  "view_terminal": "终端"
+  "view_terminal": "终端",
+  "simple_navigation": "任务与产出"
 }

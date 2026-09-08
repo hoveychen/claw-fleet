@@ -213,6 +213,8 @@ function forgetSecondary(
 interface UIState {
   theme: Theme;
   viewMode: ViewMode;
+  simplifiedMode: boolean;
+  setSimplifiedMode: (enabled: boolean) => void;
   /** Last session-list sub-view (list vs gallery). Used by the unified
    *  "Sessions" nav entry to restore the user's preferred layout when they
    *  navigate back from audit/report/etc. */
@@ -480,6 +482,7 @@ function readLastViewByNavGroup(): Record<NavGroup, ViewMode> {
  *  through this (setViewMode and the three nav requests below); a path that set
  *  `viewMode` directly would leave its tab's memory pointing at a stale page. */
 function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
+  if (s.simplifiedMode && m !== "history" && m !== "artifacts") m = "history";
   setItem("viewMode", m);
   const lastViewByNavGroup = { ...s.lastViewByNavGroup, [navGroupOf(m)]: m };
   setItem("nav-group-last-view", JSON.stringify(lastViewByNavGroup));
@@ -497,7 +500,17 @@ const initialHistoryWorkspaceFilter = readHistoryWorkspaceFilter();
 
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
-  viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
+  simplifiedMode: getItem("simplified-mode") === "true",
+  setSimplifiedMode: (enabled) => set((s) => {
+    setItem("simplified-mode", String(enabled));
+    return { simplifiedMode: enabled, ...viewModePatch(
+      { ...s, simplifiedMode: enabled },
+      enabled ? "history" : s.viewMode,
+    ) };
+  }),
+  viewMode: getItem("simplified-mode") === "true"
+    ? (getItem("viewMode") === "artifacts" ? "artifacts" : "history")
+    : (getItem("viewMode") as ViewMode) ?? "gallery",
   lastSessionViewMode:
     (getItem("lastSessionViewMode") as SessionViewMode) ?? "gallery",
   lastViewByNavGroup: readLastViewByNavGroup(),
@@ -942,7 +955,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
  *  HistoryView filters `adhocSessions` by, so "would this appear on the 任务
  *  page" and "route it there" stay in lockstep. */
 export function navigateToSessionDetail(session: SessionInfo) {
-  if (isFleetOwnedTask(session)) {
+  if (useUIStore.getState().simplifiedMode || isFleetOwnedTask(session)) {
     useUIStore.getState().requestOpenTask(session.id);
   } else {
     // The drawer renders under both list and gallery (see App's isSessionView),
