@@ -81,7 +81,7 @@ def build(lang, c):
 </head>
 <body data-locale="{lang}">
 <a class="skip" href="#main">{c['skip']}</a>
-<header class="header"><a class="brand" href="{base}{'zh/' if lang=='zh' else ''}"><img src="{base}icon.png" width="32" height="32" alt="">Claw Fleet</a><nav aria-label="{'主导航' if lang=='zh' else 'Main navigation'}"><a class="nav-explore" href="#explore">{c['nav'][0]}</a><a class="nav-harness" href="#harness">{c['navHarness']}</a><a class="nav-capabilities" href="#capabilities">{'全部功能' if lang=='zh' else 'Features'}</a><a class="nav-mobile" href="#mobile">{c['nav'][1]}</a><a class="language" href="{other}" lang="{'en' if lang=='zh' else 'zh-CN'}" hreflang="{'en' if lang=='zh' else 'zh-CN'}">{c['language']}</a><a class="nav-download" href="#download">{c['nav'][2]}<span aria-hidden="true"> ↓</span></a></nav></header>
+<header class="header"><a class="brand" href="{base}{'zh/' if lang=='zh' else ''}"><img src="{base}icon.png" width="32" height="32" alt="">Claw Fleet</a><nav aria-label="{'主导航' if lang=='zh' else 'Main navigation'}"><a class="nav-explore" href="#explore">{c['nav'][0]}</a><a class="nav-harness" href="#harness">{c['navHarness']}</a><a class="nav-capabilities" href="#capabilities">{'全部功能' if lang=='zh' else 'Features'}</a><a class="nav-benchmark" href="benchmark.html">{c['navBenchmark']}</a><a class="nav-mobile" href="#mobile">{c['nav'][1]}</a><a class="language" href="{other}" lang="{'en' if lang=='zh' else 'zh-CN'}" hreflang="{'en' if lang=='zh' else 'zh-CN'}">{c['language']}</a><a class="nav-download" href="#download">{c['nav'][2]}<span aria-hidden="true"> ↓</span></a></nav></header>
 <main id="main">
 <section class="hero wrap"><h1>{c['headline']}</h1><div class="hero-copy"><p class="intro">{c['intro']}</p><p>{c['lede']}</p><a class="button primary" href="#download">{c['cta']}<span aria-hidden="true">↓</span></a><a class="text-link" href="#explore">{c['secondary']} <span aria-hidden="true">↗</span></a><small>{c['meta']}</small></div></section>
 <section class="showcase wrap" id="explore" aria-label="{c['nav'][0]}"><span id="demo"></span>
@@ -103,9 +103,20 @@ def build(lang, c):
 
 
 if __name__ == '__main__':
+    import benchmark
+    bm_copy=json.loads((ROOT/'scripts/site/content/benchmark.json').read_text())
+    bm_data=json.loads((ROOT/'scripts/site/content/benchmark-data.json').read_text())
     for lang in ('en','zh'):
         content=json.loads((ROOT/f'scripts/site/content/{lang}.json').read_text())
         path=ROOT/'docs'/('zh/index.html' if lang=='zh' else 'index.html')
         path.parent.mkdir(parents=True,exist_ok=True)
         path.write_text(build(lang,content))
         print(path.relative_to(ROOT))
+        base='../' if lang=='zh' else './'
+        def asset(name,base=base):
+            digest=hashlib.sha256((ROOT/'docs'/name).read_bytes()).hexdigest()[:12]
+            return f'{base}{name}?v={digest}'
+        bm=ROOT/'docs'/('zh/benchmark.html' if lang=='zh' else 'benchmark.html')
+        bm.write_text(benchmark.build(lang,bm_copy[lang],bm_data,asset,base,
+            '../benchmark.html' if lang=='zh' else 'zh/benchmark.html',GITHUB))
+        print(bm.relative_to(ROOT))
