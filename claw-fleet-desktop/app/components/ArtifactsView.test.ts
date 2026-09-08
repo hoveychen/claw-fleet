@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_SORT_DIR,
+  nextSelection,
   buildArtifactDirectoryTree,
   filterArtifacts,
   formatBytes,
@@ -256,5 +257,48 @@ describe("sortArtifacts direction", () => {
     const list = [make({ id: "1", sizeBytes: 1 }), make({ id: "2", sizeBytes: 2 })];
     sortArtifacts(list, "size", "asc");
     expect(list.map((a) => a.id)).toEqual(["1", "2"]);
+  });
+});
+
+describe("nextSelection", () => {
+  const order = ["a", "b", "c", "d"];
+
+  it("toggles one id and remembers it as the shift anchor", () => {
+    const first = nextSelection(new Set(), order, "b", { shift: false, anchor: null });
+    expect([...first.selected]).toEqual(["b"]);
+    expect(first.anchor).toBe("b");
+
+    const off = nextSelection(first.selected, order, "b", { shift: false, anchor: first.anchor });
+    expect([...off.selected]).toEqual([]);
+    // Deselecting the anchor must drop it, or a later shift-click extends from
+    // a row that is no longer checked.
+    expect(off.anchor).toBeNull();
+  });
+
+  it("shift-extends across the displayed order, inclusive of both ends", () => {
+    const r = nextSelection(new Set(["b"]), order, "d", { shift: true, anchor: "b" });
+    expect([...r.selected].sort()).toEqual(["b", "c", "d"]);
+    // The anchor stays put so a second shift-click re-extends from the origin.
+    expect(r.anchor).toBe("b");
+
+    const back = nextSelection(r.selected, order, "a", { shift: true, anchor: "b" });
+    expect([...back.selected].sort()).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("never deselects on a shift-click", () => {
+    const r = nextSelection(new Set(["a", "d"]), order, "b", { shift: true, anchor: "a" });
+    expect([...r.selected].sort()).toEqual(["a", "b", "d"]);
+  });
+
+  it("falls back to a plain toggle when there is no anchor to extend from", () => {
+    const r = nextSelection(new Set(), order, "c", { shift: true, anchor: null });
+    expect([...r.selected]).toEqual(["c"]);
+    expect(r.anchor).toBe("c");
+  });
+
+  it("does not mutate the set it was given", () => {
+    const before = new Set(["a"]);
+    nextSelection(before, order, "b", { shift: false, anchor: "a" });
+    expect([...before]).toEqual(["a"]);
   });
 });

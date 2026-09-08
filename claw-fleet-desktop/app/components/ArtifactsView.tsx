@@ -212,6 +212,43 @@ export function filterArtifacts(
   });
 }
 
+/**
+ * What the selection becomes after a click on `id`.
+ *
+ * `order` is the list as displayed, which is what makes a shift-click mean
+ * "everything between these two rows *on screen*" rather than "between these
+ * two ids" — the same click has to select a different set depending on how the
+ * list is sorted, so the ordering has to come in from the caller.
+ *
+ * Shift extends from the anchor and only ever *adds*: a shift-click that
+ * silently deselected what you already had checked would be a data-loss
+ * gesture right next to a 批量删除 button.
+ */
+export function nextSelection(
+  current: ReadonlySet<string>,
+  order: string[],
+  id: string,
+  opts: { shift: boolean; anchor: string | null },
+): { selected: Set<string>; anchor: string | null } {
+  const out = new Set(current);
+  const from = opts.anchor === null ? -1 : order.indexOf(opts.anchor);
+  const to = order.indexOf(id);
+  if (opts.shift && from >= 0 && to >= 0) {
+    for (let i = Math.min(from, to); i <= Math.max(from, to); i += 1) out.add(order[i]);
+    // The anchor stays put, so a second shift-click re-extends from the same
+    // origin instead of walking it forward one row at a time.
+    return { selected: out, anchor: opts.anchor };
+  }
+  if (out.has(id)) {
+    out.delete(id);
+    // Deselecting the anchor would leave a shift-click extending from a row
+    // that is no longer checked.
+    return { selected: out, anchor: opts.anchor === id ? null : opts.anchor };
+  }
+  out.add(id);
+  return { selected: out, anchor: id };
+}
+
 function normalizeArtifactPath(path: string): string {
   return path.replaceAll("\\", "/").replace(/\/+$/, "");
 }
@@ -359,6 +396,10 @@ export function ArtifactsView() {
     getItem("artifacts-sort-dir") === "asc" ? "asc" : "desc",
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The batch selection, separate from `selectedId` (which is "the one whose
+  // detail pane is open"). Two different questions, two different states.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const chooseLayout = useCallback((next: ArtifactLayout) => {
@@ -422,6 +463,42 @@ export function ArtifactsView() {
     () => (items ?? []).find((a) => a.id === selectedId) ?? null,
     [items, selectedId],
   );
+
+  /**
+   * Drop anything checked that is no longer on screen.
+   *
+   * Otherwise narrowing the filter and hitting 批量删除 would delete artifacts
+   * the user can't see — the checkbox count would say 5 while the list showed
+   * 2. Keyed on the visible ids so it also survives a reload that removed one.
+   */
+  const shownIds = useMemo(() => shown.map((a) => a.id), [shown]);
+  useEffect(() => {
+    setChecked((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(shownIds);
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [shownIds]);
+
+  const toggleChecked = useCallback(
+    (id: string, shift: boolean) => {
+      const { selected: next, anchor } = nextSelection(checked, shownIds, id, {
+        shift,
+        anchor: anchorId,
+      });
+      setChecked(next);
+      setAnchorId(anchor);
+    },
+    [checked, shownIds, anchorId],
+  );
+
+  const clearChecked = useCallback(() => {
+    setChecked(new Set());
+    setAnchorId(null);
+  }, []);
+
+  const checkedItems = useMemo(() => shown.filter((a) => checked.has(a.id)), [shown, checked]);
 
   const patch = useCallback(
     async (
@@ -502,6 +579,36 @@ export function ArtifactsView() {
     [folders, items],
   );
 
+  /**
+   * The sub-bar while something is checked.
+   *
+   * It *replaces* the filter bar rather than sitting beside it: a batch action
+   * applies to the current selection, and leaving the filter chips live next to
+   * it invites changing the visible set with a delete button already aimed.
+   */
+  const selectionBar = (
+    <div className={styles.filters}>
+      <span className={styles.selection_count}>
+        {t("artifacts.selected_n", "已选 {{count}} 份 · 共 {{size}}", {
+          count: checkedItems.length,
+          size: formatBytes(checkedItems.reduce((sum, a) => sum + a.sizeBytes, 0)),
+        })}
+      </span>
+      <button
+        className={styles.chip}
+        onClick={() => {
+          setChecked(new Set(shownIds));
+          setAnchorId(shownIds[shownIds.length - 1] ?? null);
+        }}
+      >
+        {t("artifacts.select_all", "全选当前")}
+      </button>
+      <button className={styles.chip} onClick={clearChecked}>
+        {t("artifacts.select_none", "清空选择")}
+      </button>
+    </div>
+  );
+
   const subBar = (
     <div className={styles.filters}>
       <button
@@ -570,7 +677,7 @@ export function ArtifactsView() {
         onChange: setQuery,
         placeholder: t("artifacts.search_placeholder", "搜索产出…"),
       }}
-      subBar={selected ? undefined : subBar}
+      subBar={selected ? undefined : checkedItems.length > 0 ? selectionBar : subBar}
       secondary={
         <ArtifactDirectoryTree
           nodes={directoryTree}
@@ -618,8 +725,10 @@ export function ArtifactsView() {
           items={shown}
           sortKey={sortKey}
           sortDir={sortDir}
+          checked={checked}
           onSort={chooseSort}
           onOpen={setSelectedId}
+          onToggleChecked={toggleChecked}
           onToggleStar={(a) => patch(a.id, { starred: !a.starred })}
         />
       ) : (
@@ -628,7 +737,9 @@ export function ArtifactsView() {
             <ArtifactCard
               key={a.id}
               artifact={a}
+              checked={checked.has(a.id)}
               onOpen={() => setSelectedId(a.id)}
+              onToggleChecked={(shift) => toggleChecked(a.id, shift)}
               onToggleStar={() => patch(a.id, { starred: !a.starred })}
             />
           ))}
@@ -651,15 +762,19 @@ function ArtifactTable({
   items,
   sortKey,
   sortDir,
+  checked,
   onSort,
   onOpen,
+  onToggleChecked,
   onToggleStar,
 }: {
   items: Artifact[];
   sortKey: SortKey;
   sortDir: SortDir;
+  checked: ReadonlySet<string>;
   onSort: (key: SortKey) => void;
   onOpen: (id: string) => void;
+  onToggleChecked: (id: string, shift: boolean) => void;
   onToggleStar: (artifact: Artifact) => void;
 }) {
   const { t } = useTranslation();
@@ -682,6 +797,7 @@ function ArtifactTable({
       <table className={styles.table}>
         <thead>
           <tr>
+            <th className={styles.col_check} />
             <th className={styles.col_star} />
             {header("name", t("artifacts.col_name", "名称"))}
             {header("workspace", t("artifacts.col_source", "来源"), styles.col_source)}
@@ -694,7 +810,28 @@ function ArtifactTable({
             const Icon = KIND_ICON[a.kind] ?? FileText;
             const folder = artifactRelativeDirectory(a);
             return (
-              <tr key={a.id} onClick={() => onOpen(a.id)} className={styles.row}>
+              <tr
+                key={a.id}
+                onClick={() => onOpen(a.id)}
+                className={`${styles.row} ${checked.has(a.id) ? styles.row_checked : ""}`}
+              >
+                <td className={styles.col_check}>
+                  <input
+                    type="checkbox"
+                    className={styles.check}
+                    checked={checked.has(a.id)}
+                    aria-label={t("artifacts.select_one", "选择「{{title}}」", { title: a.title })}
+                    onClick={(e) => {
+                      // Stop the row's own handler, or every checkbox click
+                      // also opens the detail pane.
+                      e.stopPropagation();
+                      onToggleChecked(a.id, e.shiftKey);
+                    }}
+                    // React warns about a checked input with no onChange even
+                    // when the click handler is what drives it.
+                    onChange={() => {}}
+                  />
+                </td>
                 <td className={styles.col_star}>
                   <button
                     type="button"
@@ -936,11 +1073,15 @@ function ArtifactDirectoryBranch({
 
 function ArtifactCard({
   artifact,
+  checked,
   onOpen,
+  onToggleChecked,
   onToggleStar,
 }: {
   artifact: Artifact;
+  checked: boolean;
   onOpen: () => void;
+  onToggleChecked: (shift: boolean) => void;
   onToggleStar: () => void;
 }) {
   const { t } = useTranslation();
@@ -951,7 +1092,7 @@ function ArtifactCard({
   const thumb = thumbFailed ? null : thumbMode(artifact.mime, artifact.sizeBytes);
   const onThumbFail = useCallback(() => setThumbFailed(true), []);
   return (
-    <div className={styles.card} onClick={onOpen} role="button" tabIndex={0}
+    <div className={`${styles.card} ${checked ? styles.card_checked : ""}`} onClick={onOpen} role="button" tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -959,6 +1100,19 @@ function ArtifactCard({
         }
       }}
     >
+      {/* Visible on hover, or whenever it is checked — an invisible checked box
+          would make the selection count unaccountable. */}
+      <input
+        type="checkbox"
+        className={`${styles.card_check} ${checked ? styles.card_check_on : ""}`}
+        checked={checked}
+        aria-label={t("artifacts.select_one", "选择「{{title}}」", { title: artifact.title })}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleChecked(e.shiftKey);
+        }}
+        onChange={() => {}}
+      />
       <div className={styles.thumb}>
         {artifact.kind === "image" ? (
           <img src={artifactBlobUrl(artifact.id, artifact.name)} alt={artifact.title} />
