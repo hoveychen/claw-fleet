@@ -1059,6 +1059,25 @@ pub fn effective_directory(artifact: &Artifact) -> String {
     }
 }
 
+/// What a folder export would contain, without writing anything.
+///
+/// Its own call so the UI can name the file and refuse an empty folder
+/// *before* putting a save dialog in front of the user. Sizes come from the
+/// metadata rather than from a stat of each blob: this runs on a click, and
+/// the export itself reports the real numbers.
+pub fn folder_zip_plan(root: &Path, workspace_path: &str, directory: &str) -> FolderZip {
+    let Ok(directory) = normalize_dir_path(directory) else {
+        return FolderZip::default();
+    };
+    let members = folder_members(root, workspace_path, &directory);
+    FolderZip {
+        filename: zip_filename(&directory, workspace_path),
+        member_count: members.len(),
+        total_bytes: members.iter().map(|a| a.size_bytes).sum(),
+        skipped: Vec::new(),
+    }
+}
+
 /// Stream a folder's artifacts into a zip at `dest`.
 ///
 /// Written straight to the destination file rather than buffered: a folder of
@@ -1728,6 +1747,37 @@ with zipfile.ZipFile(sys.argv[1]) as z:
             .into_iter()
             .map(|p| (p[0].clone(), p[1].chars().map(|c| c as u8).collect()))
             .collect()
+    }
+
+    #[test]
+    fn the_plan_matches_what_the_export_writes() {
+        let root = store();
+        let ws = store();
+        let out = store();
+        for (name, path) in [("a.pdf", "交付"), ("b.pdf", "交付/2026Q3"), ("c.pdf", "别处")] {
+            let src = write_file(ws.path(), name, b"1234");
+            let art = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+            update_in(root.path(), &art.id, None, None, None, Some(path)).unwrap();
+        }
+        let ws_path = crate::wiki::resolve_workspace_path(ws.path());
+
+        // The plan is what the UI shows before the save dialog, so a mismatch
+        // with the export would be a lie told at exactly the wrong moment.
+        let plan = folder_zip_plan(root.path(), &ws_path, "交付");
+        assert_eq!(plan.member_count, 2);
+        assert_eq!(plan.total_bytes, 8);
+        assert_eq!(plan.filename, "交付.zip");
+
+        let dest = out.path().join(&plan.filename);
+        let done = export_folder_zip(root.path(), &ws_path, "交付", &dest).unwrap();
+        assert_eq!((done.member_count, done.total_bytes), (plan.member_count, plan.total_bytes));
+        assert_eq!(done.filename, plan.filename);
+
+        // An empty folder is reported as empty rather than as an error, which
+        // is what lets the UI say so without a dialog.
+        let empty = folder_zip_plan(root.path(), &ws_path, "不存在的");
+        assert_eq!(empty.member_count, 0);
+        assert_eq!(empty.filename, "不存在的.zip");
     }
 
     #[test]

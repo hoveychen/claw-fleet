@@ -191,6 +191,105 @@ pub(crate) fn route_artifact_rollback(
     respond_json_result(request, json_header, rolled);
 }
 
+// ── Folder export ────────────────────────────────────────────────────────────
+
+/// `GET /artifact_folder_zip_plan?workspace_path=…&directory=…`
+pub(crate) fn route_artifact_folder_zip_plan(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let workspace_path = decoded(query, "workspace_path");
+    let directory = decoded(query, "directory");
+    let plan = match crate::artifacts::artifacts_dir() {
+        Some(root) => crate::artifacts::folder_zip_plan(&root, &workspace_path, &directory),
+        None => crate::artifacts::FolderZip::default(),
+    };
+    let body = serde_json::to_string(&plan).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
+/// `GET /artifact_folder_zip?workspace_path=…&directory=…` — the archive.
+///
+/// Packed to a temporary file first, then sent, rather than written straight
+/// into the socket: tiny_http needs a length or a reader up front, and a
+/// half-sent archive whose length was guessed is worse than a brief pause. The
+/// temp file is what keeps peak memory flat — the whole point of the streaming
+/// writer — and it is removed as soon as the response is handed off.
+pub(crate) fn route_artifact_folder_zip(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let workspace_path = decoded(query, "workspace_path");
+    let directory = decoded(query, "directory");
+    let Some(root) = crate::artifacts::artifacts_dir() else {
+        let _ = request.respond(tiny_http::Response::empty(500));
+        return;
+    };
+
+    let tmp = std::env::temp_dir().join(format!("fleet-folder-{}.zip", uuid::Uuid::new_v4()));
+    let report = match crate::artifacts::export_folder_zip(&root, &workspace_path, &directory, &tmp)
+    {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+            return;
+        }
+    };
+
+    match std::fs::File::open(&tmp).and_then(|f| f.metadata().map(|m| (f, m.len()))) {
+        Ok((file, len)) => {
+            let resp = tiny_http::Response::new(
+                tiny_http::StatusCode(200),
+                vec![
+                    header("Content-Type", "application/zip"),
+                    header(
+                        "Content-Disposition",
+                        &format!("attachment; filename=\"{}\"", ascii_fallback(&report.filename)),
+                    ),
+                ],
+                file,
+                Some(len as usize),
+                None,
+            );
+            let _ = request.respond(resp);
+        }
+        Err(_) => {
+            let _ = request.respond(tiny_http::Response::empty(500));
+        }
+    }
+    let _ = std::fs::remove_file(&tmp);
+}
+
+/// A filename safe inside a quoted header value.
+///
+/// Folder names are routinely CJK, and a raw non-ASCII byte in a header is
+/// not portable — so non-ASCII collapses to `_` here and the browser falls
+/// back to the URL's own name. Quotes, backslashes and control characters
+/// would let the value break out of its quoting, so they go too.
+fn ascii_fallback(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_ascii() && c != '"' && c != '\\' && !c.is_control() { c } else { '_' })
+        .collect();
+    if cleaned.trim_matches('_').is_empty() {
+        "artifacts.zip".to_string()
+    } else {
+        cleaned
+    }
+}
+
 // ── Folders ──────────────────────────────────────────────────────────────────
 
 /// `GET /artifact_folders` — every folder the user made, empty ones included.

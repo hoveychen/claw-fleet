@@ -1680,6 +1680,8 @@ pub fn run() {
             delete_artifact,
             artifact_usage,
             rollback_artifact,
+            export_artifact_folder,
+            artifact_folder_zip_plan,
             list_artifact_folders,
             create_artifact_folder,
             delete_artifact_folder,
