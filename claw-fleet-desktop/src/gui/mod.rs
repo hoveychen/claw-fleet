@@ -151,12 +151,44 @@ fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+/// Version check — `(async)` plus an `off_runtime` hop, and it must stay that way.
+///
+/// This was a plain `#[tauri::command] fn`, which tauri-macros classify as
+/// `ExecutionContext::Blocking` and run **inline on the event loop**. Its body
+/// reaches `reqwest::blocking` with a 10s timeout and tries each release source
+/// in turn (GitHub API, then the China manifest), so an unreachable network
+/// parks the main thread for ~20s. Nothing UI-facing survives that: invoke
+/// *responses* are delivered through the main thread, `emit()` ends in a
+/// webview eval there, and macOS presents native panels (the 导出 save dialog)
+/// there too. On 2026-09-08 the boss lost 「用系统应用打开」/「在访达中显示」
+/// and got a dead 导出 button in the same minute this command refreshed
+/// `~/.fleet/fleet-version-check.json` (checked_at 12:28:18, app launched
+/// 12:28) — see wiki `desktop/ipc-stall-forensics`.
+///
+/// `(async)` alone would move it from the main thread onto a tokio worker,
+/// which for `reqwest::blocking` is worse than the main thread: it panics
+/// there, the task harness swallows the panic and the invoke promise never
+/// settles at all (the dsh detail blackhole). Hence `off_runtime`, which is
+/// exactly the module written for that hazard.
+#[tauri::command(async)]
 fn check_app_version(
     force: Option<bool>,
     locale: Option<String>,
 ) -> version_check::VersionCheckResult {
-    version_check::check_app_version(force.unwrap_or(false), locale.as_deref().unwrap_or("en"))
+    let force = force.unwrap_or(false);
+    let locale = locale.unwrap_or_else(|| "en".to_string());
+    claw_fleet_core::off_runtime::off_runtime(move || {
+        version_check::check_app_version(force, &locale)
+    })
+    // The helper only errs when the thread itself panicked, and the inner call
+    // is documented never to panic. Answering "no update known" keeps the
+    // banner quiet rather than turning a version check into a UI error.
+    .unwrap_or_else(|_| version_check::VersionCheckResult {
+        current_version: env!("CARGO_PKG_VERSION").to_string(),
+        latest_version: String::new(),
+        has_update: false,
+        release_url: String::new(),
+    })
 }
 
 #[tauri::command]
@@ -1209,6 +1241,12 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("main") {
                 fit_main_window_to_work_area(&w);
             }
+
+            // Watch the event loop itself. Cheap, continuous, and the only
+            // thing that can tell "an invoke was slow" from "the answer could
+            // not be delivered because the main thread was busy" — the failure
+            // mode that ate two buttons and a save dialog on 2026-09-08.
+            crate::main_thread_probe::spawn(app.handle().clone());
 
             // Drop live-thinking sidecars left behind by finished turns. A
             // `claude --print` turn's sidecar goes stale as soon as it exits;
