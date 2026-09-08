@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_SORT_DIR,
+  joinExportPath,
+  nextSelection,
+  uniqueExportNames,
   buildArtifactDirectoryTree,
   filterArtifacts,
   formatBytes,
@@ -214,5 +218,130 @@ describe("buildArtifactDirectoryTree", () => {
     // /w/two has no artifact to carry a display name, so it falls back to the
     // path rather than rendering "undefined".
     expect(tree.map((node) => node.label)).toEqual(["/w/two", "one"]);
+  });
+});
+
+describe("sortArtifacts direction", () => {
+  it("keeps today's order when no direction is given", () => {
+    const list = [
+      make({ id: "1", sizeBytes: 10 }),
+      make({ id: "2", sizeBytes: 3000 }),
+    ];
+    // The grid never passes a direction, so biggest-first must be unchanged.
+    expect(sortArtifacts(list, "size").map((a) => a.id)).toEqual(["2", "1"]);
+    expect(sortArtifacts(list, "size", DEFAULT_SORT_DIR.size).map((a) => a.id)).toEqual(["2", "1"]);
+  });
+
+  it("reverses a key when asked for its non-default direction", () => {
+    const list = [
+      make({ id: "1", sizeBytes: 10, createdMs: 100, title: "a" }),
+      make({ id: "2", sizeBytes: 3000, createdMs: 900, title: "b" }),
+    ];
+    expect(sortArtifacts(list, "size", "asc").map((a) => a.id)).toEqual(["1", "2"]);
+    expect(sortArtifacts(list, "recent", "asc").map((a) => a.id)).toEqual(["1", "2"]);
+    // name defaults to A→Z, so "desc" is the flipped one here — the direction
+    // is per key, not one global "descending".
+    expect(sortArtifacts(list, "name", "desc").map((a) => a.id)).toEqual(["2", "1"]);
+    expect(sortArtifacts(list, "name", "asc").map((a) => a.id)).toEqual(["1", "2"]);
+  });
+
+  it("groups by workspace, then folder, for the 来源 column", () => {
+    const list = [
+      make({ id: "1", workspaceName: "two", path: "a" }),
+      make({ id: "2", workspaceName: "one", path: "b" }),
+      make({ id: "3", workspaceName: "one", path: "a" }),
+    ];
+    expect(sortArtifacts(list, "workspace", "asc").map((a) => a.id)).toEqual(["3", "2", "1"]);
+    expect(sortArtifacts(list, "workspace", "desc").map((a) => a.id)).toEqual(["1", "2", "3"]);
+  });
+
+  it("does not mutate the input", () => {
+    const list = [make({ id: "1", sizeBytes: 1 }), make({ id: "2", sizeBytes: 2 })];
+    sortArtifacts(list, "size", "asc");
+    expect(list.map((a) => a.id)).toEqual(["1", "2"]);
+  });
+});
+
+describe("nextSelection", () => {
+  const order = ["a", "b", "c", "d"];
+
+  it("toggles one id and remembers it as the shift anchor", () => {
+    const first = nextSelection(new Set(), order, "b", { shift: false, anchor: null });
+    expect([...first.selected]).toEqual(["b"]);
+    expect(first.anchor).toBe("b");
+
+    const off = nextSelection(first.selected, order, "b", { shift: false, anchor: first.anchor });
+    expect([...off.selected]).toEqual([]);
+    // Deselecting the anchor must drop it, or a later shift-click extends from
+    // a row that is no longer checked.
+    expect(off.anchor).toBeNull();
+  });
+
+  it("shift-extends across the displayed order, inclusive of both ends", () => {
+    const r = nextSelection(new Set(["b"]), order, "d", { shift: true, anchor: "b" });
+    expect([...r.selected].sort()).toEqual(["b", "c", "d"]);
+    // The anchor stays put so a second shift-click re-extends from the origin.
+    expect(r.anchor).toBe("b");
+
+    const back = nextSelection(r.selected, order, "a", { shift: true, anchor: "b" });
+    expect([...back.selected].sort()).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("never deselects on a shift-click", () => {
+    const r = nextSelection(new Set(["a", "d"]), order, "b", { shift: true, anchor: "a" });
+    expect([...r.selected].sort()).toEqual(["a", "b", "d"]);
+  });
+
+  it("falls back to a plain toggle when there is no anchor to extend from", () => {
+    const r = nextSelection(new Set(), order, "c", { shift: true, anchor: null });
+    expect([...r.selected]).toEqual(["c"]);
+    expect(r.anchor).toBe("c");
+  });
+
+  it("does not mutate the set it was given", () => {
+    const before = new Set(["a"]);
+    nextSelection(before, order, "b", { shift: false, anchor: "a" });
+    expect([...before]).toEqual(["a"]);
+  });
+});
+
+describe("uniqueExportNames", () => {
+  it("suffixes repeats before the extension so the file still opens", () => {
+    expect(uniqueExportNames(["a.pdf", "a.pdf", "a.pdf"])).toEqual([
+      "a.pdf",
+      "a (2).pdf",
+      "a (3).pdf",
+    ]);
+  });
+
+  it("handles names with no extension and dotfiles", () => {
+    expect(uniqueExportNames(["README", "README"])).toEqual(["README", "README (2)"]);
+    // A leading dot is the whole name, not an extension — do not turn
+    // ".env" into " (2).env".
+    expect(uniqueExportNames([".env", ".env"])).toEqual([".env", ".env (2)"]);
+  });
+
+  it("does not collide with a name the caller already used", () => {
+    expect(uniqueExportNames(["a.pdf", "a (2).pdf", "a.pdf"])).toEqual([
+      "a.pdf",
+      "a (2).pdf",
+      "a (3).pdf",
+    ]);
+  });
+
+  it("leaves distinct names alone", () => {
+    expect(uniqueExportNames(["a.pdf", "b.pdf"])).toEqual(["a.pdf", "b.pdf"]);
+  });
+});
+
+describe("joinExportPath", () => {
+  it("keeps the platform separator the picked directory used", () => {
+    expect(joinExportPath("/Users/me/out", "a.pdf")).toBe("/Users/me/out/a.pdf");
+    expect(joinExportPath("C:\\Users\\me", "a.pdf")).toBe("C:\\Users\\me\\a.pdf");
+  });
+
+  it("does not double the separator on a trailing slash", () => {
+    expect(joinExportPath("/out/", "a.pdf")).toBe("/out/a.pdf");
+    expect(joinExportPath("C:\\out\\", "a.pdf")).toBe("C:\\out\\a.pdf");
   });
 });

@@ -1,31 +1,39 @@
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   Archive,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
+  CheckCheck,
+  Download,
   FileSpreadsheet,
   FileText,
   FileType,
   Film,
   Folder,
   FolderOpen,
+  FolderInput,
   FolderPlus,
   Image as ImageIcon,
+  LayoutGrid,
   Music,
   Package,
   Pencil,
   Presentation,
+  Rows3,
   Star,
   Trash2,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
 import { isWebBuild } from "../hostEnv";
+import { getItem, setItem } from "../storage";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
 import { downloadArtifact } from "../mock/liveProxy";
 import { PageShell } from "./PageShell";
@@ -72,7 +80,25 @@ interface StoreUsage {
   hardlinkedBytes: number;
 }
 
-type SortKey = "recent" | "size" | "name";
+export type SortKey = "recent" | "size" | "name" | "workspace";
+export type SortDir = "asc" | "desc";
+
+/**
+ * Which way each key reads first.
+ *
+ * Times and sizes want the big end first ("what did I just make", "what is
+ * eating the disk"); names and workspaces want A→Z. A single global default
+ * would make one of the two groups useless on the first click.
+ */
+export const DEFAULT_SORT_DIR: Record<SortKey, SortDir> = {
+  recent: "desc",
+  size: "desc",
+  name: "asc",
+  workspace: "asc",
+};
+
+/** Grid of thumbnails, or a dense sortable table. */
+export type ArtifactLayout = "grid" | "list";
 
 export interface ArtifactDirectoryNode {
   key: string;
@@ -123,25 +149,46 @@ export function formatBytes(n: number): string {
 }
 
 /**
- * Order artifacts for the grid.
+ * Order artifacts.
  *
  * Its own exported function because the ordering is the part worth testing:
  * "newest first" has to survive same-millisecond ids (two `fleet artifact add`
  * calls in one script), and the name sort has to be locale-aware or a CJK
  * title lands in a random position.
+ *
+ * `dir` exists for the list view's column headers, where clicking the same
+ * column again has to reverse it. Omitted, every key keeps the direction the
+ * sub-bar's dropdown has always implied — newest and biggest first, names
+ * A→Z — so the grid is unaffected.
  */
-export function sortArtifacts(list: Artifact[], key: SortKey): Artifact[] {
+export function sortArtifacts(list: Artifact[], key: SortKey, dir?: SortDir): Artifact[] {
   const out = [...list];
+  const flip = dir && dir !== DEFAULT_SORT_DIR[key] ? -1 : 1;
   switch (key) {
     case "size":
-      return out.sort((a, b) => b.sizeBytes - a.sizeBytes || a.id.localeCompare(b.id));
+      return out.sort((a, b) => flip * (b.sizeBytes - a.sizeBytes || a.id.localeCompare(b.id)));
     case "name":
-      return out.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+      return out.sort(
+        (a, b) => flip * a.title.localeCompare(b.title, undefined, { numeric: true }),
+      );
+    case "workspace":
+      return out.sort(
+        (a, b) =>
+          flip *
+          (a.workspaceName.localeCompare(b.workspaceName, undefined, { numeric: true }) ||
+            // Within one workspace, the folder is the next meaningful level.
+            (artifactRelativeDirectory(a) ?? "").localeCompare(
+              artifactRelativeDirectory(b) ?? "",
+              undefined,
+              { numeric: true },
+            ) ||
+            b.createdMs - a.createdMs),
+      );
     case "recent":
     default:
       // Ids are timestamps with a collision suffix, so they break a createdMs
       // tie in the same direction the store's own listing does.
-      return out.sort((a, b) => b.createdMs - a.createdMs || b.id.localeCompare(a.id));
+      return out.sort((a, b) => flip * (b.createdMs - a.createdMs || b.id.localeCompare(a.id)));
   }
 }
 
@@ -167,6 +214,78 @@ export function filterArtifacts(
       a.note.toLowerCase().includes(q)
     );
   });
+}
+
+/**
+ * Filenames for a batch export, de-duplicated.
+ *
+ * Two artifacts can carry the same original filename — `report.pdf` from two
+ * different sessions is the normal case, not a corner one — and exporting them
+ * into one directory would silently leave only the second. Suffix the repeats
+ * the way a browser's download folder does, before the extension so the file
+ * still opens.
+ */
+export function uniqueExportNames(names: string[]): string[] {
+  const used = new Set<string>();
+  return names.map((name) => {
+    if (!used.has(name)) {
+      used.add(name);
+      return name;
+    }
+    const dot = name.lastIndexOf(".");
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : "";
+    for (let n = 2; ; n += 1) {
+      const candidate = `${stem} (${n})${ext}`;
+      if (!used.has(candidate)) {
+        used.add(candidate);
+        return candidate;
+      }
+    }
+  });
+}
+
+/** Join a picked directory with a filename, keeping the platform's separator. */
+export function joinExportPath(dir: string, name: string): string {
+  const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+  return `${dir.replace(/[/\\]+$/, "")}${sep}${name}`;
+}
+
+/**
+ * What the selection becomes after a click on `id`.
+ *
+ * `order` is the list as displayed, which is what makes a shift-click mean
+ * "everything between these two rows *on screen*" rather than "between these
+ * two ids" — the same click has to select a different set depending on how the
+ * list is sorted, so the ordering has to come in from the caller.
+ *
+ * Shift extends from the anchor and only ever *adds*: a shift-click that
+ * silently deselected what you already had checked would be a data-loss
+ * gesture right next to a 批量删除 button.
+ */
+export function nextSelection(
+  current: ReadonlySet<string>,
+  order: string[],
+  id: string,
+  opts: { shift: boolean; anchor: string | null },
+): { selected: Set<string>; anchor: string | null } {
+  const out = new Set(current);
+  const from = opts.anchor === null ? -1 : order.indexOf(opts.anchor);
+  const to = order.indexOf(id);
+  if (opts.shift && from >= 0 && to >= 0) {
+    for (let i = Math.min(from, to); i <= Math.max(from, to); i += 1) out.add(order[i]);
+    // The anchor stays put, so a second shift-click re-extends from the same
+    // origin instead of walking it forward one row at a time.
+    return { selected: out, anchor: opts.anchor };
+  }
+  if (out.has(id)) {
+    out.delete(id);
+    // Deselecting the anchor would leave a shift-click extending from a row
+    // that is no longer checked.
+    return { selected: out, anchor: opts.anchor === id ? null : opts.anchor };
+  }
+  out.add(id);
+  return { selected: out, anchor: id };
 }
 
 function normalizeArtifactPath(path: string): string {
@@ -302,9 +421,53 @@ export function ArtifactsView() {
   const [workspace, setWorkspace] = useState("");
   const [directory, setDirectory] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>("recent");
+  // Layout and ordering come off the persisted store, so the page opens the way
+  // it was left. `getItem` is a synchronous read of the cache `initStorage()`
+  // filled before render, so this is safe as a `useState` initializer.
+  const [layout, setLayout] = useState<ArtifactLayout>(
+    () => (getItem("artifacts-layout") === "list" ? "list" : "grid"),
+  );
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    const stored = getItem("artifacts-sort-key");
+    return stored && stored in DEFAULT_SORT_DIR ? (stored as SortKey) : "recent";
+  });
+  const [sortDir, setSortDir] = useState<SortDir>(() =>
+    getItem("artifacts-sort-dir") === "asc" ? "asc" : "desc",
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The batch selection, separate from `selectedId` (which is "the one whose
+  // detail pane is open"). Two different questions, two different states.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const chooseLayout = useCallback((next: ArtifactLayout) => {
+    setLayout(next);
+    setItem("artifacts-layout", next);
+  }, []);
+
+  /**
+   * Sort by `key`; clicking the column already sorted reverses it.
+   *
+   * The first click on a *new* column uses that key's natural direction rather
+   * than inheriting the previous column's — sorting by name and getting Z→A
+   * because you were last on "newest first" reads as a bug.
+   */
+  const chooseSort = useCallback(
+    (key: SortKey) => {
+      const next: SortDir =
+        key === sortKey
+          ? sortDir === "asc"
+            ? "desc"
+            : "asc"
+          : DEFAULT_SORT_DIR[key];
+      setSortKey(key);
+      setSortDir(next);
+      setItem("artifacts-sort-key", key);
+      setItem("artifacts-sort-dir", next);
+    },
+    [sortKey, sortDir],
+  );
 
   const load = useCallback(async () => {
     // `?? []` rather than the raw result: the mock's `default:` branch answers
@@ -326,14 +489,141 @@ export function ArtifactsView() {
   );
 
   const shown = useMemo(
-    () => sortArtifacts(filterArtifacts(items ?? [], { query, workspace, directory, starredOnly }), sortKey),
-    [items, query, workspace, directory, starredOnly, sortKey],
+    () =>
+      sortArtifacts(
+        filterArtifacts(items ?? [], { query, workspace, directory, starredOnly }),
+        sortKey,
+        sortDir,
+      ),
+    [items, query, workspace, directory, starredOnly, sortKey, sortDir],
   );
 
   const selected = useMemo(
     () => (items ?? []).find((a) => a.id === selectedId) ?? null,
     [items, selectedId],
   );
+
+  /**
+   * Drop anything checked that is no longer on screen.
+   *
+   * Otherwise narrowing the filter and hitting 批量删除 would delete artifacts
+   * the user can't see — the checkbox count would say 5 while the list showed
+   * 2. Keyed on the visible ids so it also survives a reload that removed one.
+   */
+  const shownIds = useMemo(() => shown.map((a) => a.id), [shown]);
+  useEffect(() => {
+    setChecked((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(shownIds);
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [shownIds]);
+
+  const toggleChecked = useCallback(
+    (id: string, shift: boolean) => {
+      const { selected: next, anchor } = nextSelection(checked, shownIds, id, {
+        shift,
+        anchor: anchorId,
+      });
+      setChecked(next);
+      setAnchorId(anchor);
+    },
+    [checked, shownIds, anchorId],
+  );
+
+  const clearChecked = useCallback(() => {
+    setChecked(new Set());
+    setAnchorId(null);
+  }, []);
+
+  const checkedItems = useMemo(() => shown.filter((a) => checked.has(a.id)), [shown, checked]);
+  const [busy, setBusy] = useState(false);
+
+  /**
+   * Run `step` for every checked artifact, collecting failures instead of
+   * stopping at the first one.
+   *
+   * Aborting halfway through a batch of 20 leaves the user with no idea which
+   * ones landed. Every item is attempted; the ones that failed are named in one
+   * error line at the end, and the successes stand.
+   */
+  const runBatch = useCallback(
+    async (items: Artifact[], step: (artifact: Artifact, index: number) => Promise<void>) => {
+      setBusy(true);
+      const failed: string[] = [];
+      for (const [index, artifact] of items.entries()) {
+        try {
+          await step(artifact, index);
+        } catch (e) {
+          failed.push(`${artifact.title}: ${String(e)}`);
+        }
+      }
+      setBusy(false);
+      setError(
+        failed.length === 0
+          ? null
+          : t("artifacts.batch_failed", "{{count}} 份失败：{{detail}}", {
+              count: failed.length,
+              detail: failed.join("；"),
+            }),
+      );
+      return failed.length;
+    },
+    [t],
+  );
+
+  const batchDelete = useCallback(async () => {
+    const items = checkedItems;
+    if (
+      !window.confirm(
+        t("artifacts.batch_delete_confirm", "删除选中的 {{count}} 份产出？此操作不可撤销。", {
+          count: items.length,
+        }),
+      )
+    ) {
+      return;
+    }
+    await runBatch(items, (a) => invoke("delete_artifact", { id: a.id }));
+    clearChecked();
+    await load();
+  }, [checkedItems, runBatch, clearChecked, load, t]);
+
+  const batchMove = useCallback(async () => {
+    const items = checkedItems;
+    // Everything in one batch shares a destination, so one prompt. The path is
+    // normalized (and refused) server-side, so a typo comes back as an error
+    // rather than creating a folder named "  交付 / ".
+    const target = window.prompt(
+      t("artifacts.batch_move_prompt", "把选中的 {{count}} 份移动到哪个文件夹？（留空＝工作区根目录）", {
+        count: items.length,
+      }),
+      items[0]?.path ?? "",
+    );
+    if (target === null) return;
+    await runBatch(items, async (a) => {
+      await invoke<Artifact>("update_artifact", { id: a.id, path: target });
+    });
+    clearChecked();
+    await load();
+  }, [checkedItems, runBatch, clearChecked, load, t]);
+
+  const batchExport = useCallback(async () => {
+    const items = checkedItems;
+    const names = uniqueExportNames(items.map((a) => a.name));
+    // A tab cannot be handed a destination directory, so it falls back to the
+    // browser's own download folder, one file at a time — same split the
+    // single-artifact 导出 already makes.
+    if (isWebBuild()) {
+      await runBatch(items, (a, i) => downloadArtifact(a.id, names[i]));
+      return;
+    }
+    const dir = await openDialog({ multiple: false, directory: true });
+    if (typeof dir !== "string") return;
+    await runBatch(items, (a, i) =>
+      invoke("export_artifact", { id: a.id, dest: joinExportPath(dir, names[i]) }),
+    );
+  }, [checkedItems, runBatch]);
 
   const patch = useCallback(
     async (
@@ -414,6 +704,83 @@ export function ArtifactsView() {
     [folders, items],
   );
 
+  /**
+   * The sub-bar while something is checked.
+   *
+   * It *replaces* the filter bar rather than sitting beside it: a batch action
+   * applies to the current selection, and leaving the filter chips live next to
+   * it invites changing the visible set with a delete button already aimed.
+   */
+  const selectionBar = (
+    /* One row, icon verbs.
+     *
+     * This sub-bar lives in the ~260px middle column, where five labelled
+     * chips wrapped onto three lines. Icons with a `title` keep the whole
+     * batch vocabulary on one line and leave the count — the thing you check
+     * before pressing 删除 — as the only text. */
+    <div className={styles.selection_bar}>
+      <span className={styles.selection_count}>
+        {t("artifacts.selected_n_short", "{{count}} 份 · {{size}}", {
+          count: checkedItems.length,
+          size: formatBytes(checkedItems.reduce((sum, a) => sum + a.sizeBytes, 0)),
+        })}
+      </span>
+      <span className={styles.selection_actions}>
+        <button
+          type="button"
+          className={styles.selection_action}
+          title={t("artifacts.select_all", "全选当前")}
+          aria-label={t("artifacts.select_all", "全选当前")}
+          onClick={() => {
+            setChecked(new Set(shownIds));
+            setAnchorId(shownIds[shownIds.length - 1] ?? null);
+          }}
+        >
+          <CheckCheck size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          className={styles.selection_action}
+          title={t("artifacts.batch_move", "移动到…")}
+          aria-label={t("artifacts.batch_move", "移动到…")}
+          disabled={busy}
+          onClick={batchMove}
+        >
+          <FolderInput size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          className={styles.selection_action}
+          title={t("artifacts.batch_export", "导出到…")}
+          aria-label={t("artifacts.batch_export", "导出到…")}
+          disabled={busy}
+          onClick={batchExport}
+        >
+          <Download size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          className={`${styles.selection_action} ${styles.selection_action_danger}`}
+          title={t("artifacts.batch_delete", "删除")}
+          aria-label={t("artifacts.batch_delete", "删除")}
+          disabled={busy}
+          onClick={batchDelete}
+        >
+          <Trash2 size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          className={styles.selection_action}
+          title={t("artifacts.select_none", "清空选择")}
+          aria-label={t("artifacts.select_none", "清空选择")}
+          onClick={clearChecked}
+        >
+          <X size={14} strokeWidth={1.5} />
+        </button>
+      </span>
+    </div>
+  );
+
   const subBar = (
     <div className={styles.filters}>
       <button
@@ -431,13 +798,36 @@ export function ArtifactsView() {
       <select
         className={styles.select}
         value={sortKey}
-        onChange={(e) => setSortKey(e.target.value as SortKey)}
+        onChange={(e) => chooseSort(e.target.value as SortKey)}
         aria-label={t("artifacts.sort_by", "排序方式")}
       >
         <option value="recent">{t("artifacts.sort_recent", "最近加入")}</option>
         <option value="size">{t("artifacts.sort_size", "大小")}</option>
         <option value="name">{t("artifacts.sort_name", "名称")}</option>
+        <option value="workspace">{t("artifacts.sort_workspace", "来源")}</option>
       </select>
+      <span className={styles.layout_switch}>
+        <button
+          type="button"
+          className={`${styles.layout_button} ${layout === "grid" ? styles.layout_button_on : ""}`}
+          title={t("artifacts.layout_grid", "网格视图")}
+          aria-label={t("artifacts.layout_grid", "网格视图")}
+          aria-pressed={layout === "grid"}
+          onClick={() => chooseLayout("grid")}
+        >
+          <LayoutGrid size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          className={`${styles.layout_button} ${layout === "list" ? styles.layout_button_on : ""}`}
+          title={t("artifacts.layout_list", "列表视图")}
+          aria-label={t("artifacts.layout_list", "列表视图")}
+          aria-pressed={layout === "list"}
+          onClick={() => chooseLayout("list")}
+        >
+          <Rows3 size={14} strokeWidth={1.5} />
+        </button>
+      </span>
       {usage && usage.count > 0 && (
         <span className={styles.usage}>
           {t("artifacts.usage", "{{count}} 份 · 共 {{size}}", {
@@ -459,7 +849,7 @@ export function ArtifactsView() {
         onChange: setQuery,
         placeholder: t("artifacts.search_placeholder", "搜索产出…"),
       }}
-      subBar={selected ? undefined : subBar}
+      subBar={selected ? undefined : checkedItems.length > 0 ? selectionBar : subBar}
       secondary={
         <ArtifactDirectoryTree
           nodes={directoryTree}
@@ -502,19 +892,169 @@ export function ArtifactsView() {
             "Agent 用 `fleet artifact add <path>` 把交付物存进来。",
           )}
         />
+      ) : layout === "list" ? (
+        <ArtifactTable
+          items={shown}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          checked={checked}
+          onSort={chooseSort}
+          onOpen={setSelectedId}
+          onToggleChecked={toggleChecked}
+          onToggleStar={(a) => patch(a.id, { starred: !a.starred })}
+        />
       ) : (
         <div className={styles.grid}>
           {shown.map((a) => (
             <ArtifactCard
               key={a.id}
               artifact={a}
+              checked={checked.has(a.id)}
               onOpen={() => setSelectedId(a.id)}
+              onToggleChecked={(shift) => toggleChecked(a.id, shift)}
               onToggleStar={() => patch(a.id, { starred: !a.starred })}
             />
           ))}
         </div>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * The dense view: one row per artifact, sortable columns.
+ *
+ * A real table rather than a flex grid of rows, so a screen reader announces
+ * "row 3 of 40, 大小 1.4 MB" and the column headers carry `aria-sort`. The
+ * thumbnail grid is for recognising a deliverable by sight; this is for the
+ * jobs where you are comparing across many of them (what is biggest, what came
+ * from which repo) and a 280px card per item shows five at a time.
+ */
+function ArtifactTable({
+  items,
+  sortKey,
+  sortDir,
+  checked,
+  onSort,
+  onOpen,
+  onToggleChecked,
+  onToggleStar,
+}: {
+  items: Artifact[];
+  sortKey: SortKey;
+  sortDir: SortDir;
+  checked: ReadonlySet<string>;
+  onSort: (key: SortKey) => void;
+  onOpen: (id: string) => void;
+  onToggleChecked: (id: string, shift: boolean) => void;
+  onToggleStar: (artifact: Artifact) => void;
+}) {
+  const { t } = useTranslation();
+
+  const header = (key: SortKey, label: string, className?: string) => (
+    <th
+      className={className}
+      aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button type="button" className={styles.col_button} onClick={() => onSort(key)}>
+        <span>{label}</span>
+        {sortKey === key &&
+          (sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+      </button>
+    </th>
+  );
+
+  return (
+    <div className={styles.table_pane}>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th className={styles.col_check} />
+            <th className={styles.col_star} />
+            {header("name", t("artifacts.col_name", "名称"))}
+            {header("workspace", t("artifacts.col_source", "来源"), styles.col_source)}
+            {header("size", t("artifacts.col_size", "大小"), styles.col_size)}
+            {header("recent", t("artifacts.col_added", "加入时间"), styles.col_added)}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((a) => {
+            const Icon = KIND_ICON[a.kind] ?? FileText;
+            const folder = artifactRelativeDirectory(a);
+            return (
+              <tr
+                key={a.id}
+                onClick={() => onOpen(a.id)}
+                className={`${styles.row} ${checked.has(a.id) ? styles.row_checked : ""}`}
+              >
+                <td className={styles.col_check}>
+                  <input
+                    type="checkbox"
+                    className={styles.check}
+                    checked={checked.has(a.id)}
+                    aria-label={t("artifacts.select_one", "选择「{{title}}」", { title: a.title })}
+                    onClick={(e) => {
+                      // Stop the row's own handler, or every checkbox click
+                      // also opens the detail pane.
+                      e.stopPropagation();
+                      onToggleChecked(a.id, e.shiftKey);
+                    }}
+                    // React warns about a checked input with no onChange even
+                    // when the click handler is what drives it.
+                    onChange={() => {}}
+                  />
+                </td>
+                <td className={styles.col_star}>
+                  <button
+                    type="button"
+                    className={styles.row_star}
+                    aria-label={
+                      a.starred ? t("artifacts.unstar", "取消收藏") : t("artifacts.star", "收藏")
+                    }
+                    aria-pressed={a.starred}
+                    // Or the click also opens the detail pane behind it.
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleStar(a);
+                    }}
+                  >
+                    <Star
+                      size={13}
+                      strokeWidth={1.5}
+                      fill={a.starred ? "currentColor" : "none"}
+                      className={a.starred ? styles.row_star_on : ""}
+                    />
+                  </button>
+                </td>
+                <td>
+                  <span className={styles.row_name}>
+                    <Icon size={14} strokeWidth={1.4} />
+                    <span className={styles.row_title} title={a.name}>
+                      {a.title}
+                    </span>
+                    {a.drifted && (
+                      <TriangleAlert
+                        size={12}
+                        className={styles.row_drift}
+                        aria-label={t("artifacts.drifted", "源文件已被改写")}
+                      />
+                    )}
+                  </span>
+                </td>
+                <td className={styles.col_source}>
+                  <span className={styles.row_source} title={a.workspacePath}>
+                    {a.workspaceName}
+                    {folder ? <span className={styles.row_folder}>/{folder}</span> : null}
+                  </span>
+                </td>
+                <td className={styles.col_size}>{formatBytes(a.sizeBytes)}</td>
+                <td className={styles.col_added}>{new Date(a.createdMs).toLocaleString()}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -705,11 +1245,15 @@ function ArtifactDirectoryBranch({
 
 function ArtifactCard({
   artifact,
+  checked,
   onOpen,
+  onToggleChecked,
   onToggleStar,
 }: {
   artifact: Artifact;
+  checked: boolean;
   onOpen: () => void;
+  onToggleChecked: (shift: boolean) => void;
   onToggleStar: () => void;
 }) {
   const { t } = useTranslation();
@@ -720,7 +1264,7 @@ function ArtifactCard({
   const thumb = thumbFailed ? null : thumbMode(artifact.mime, artifact.sizeBytes);
   const onThumbFail = useCallback(() => setThumbFailed(true), []);
   return (
-    <div className={styles.card} onClick={onOpen} role="button" tabIndex={0}
+    <div className={`${styles.card} ${checked ? styles.card_checked : ""}`} onClick={onOpen} role="button" tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -728,6 +1272,19 @@ function ArtifactCard({
         }
       }}
     >
+      {/* Visible on hover, or whenever it is checked — an invisible checked box
+          would make the selection count unaccountable. */}
+      <input
+        type="checkbox"
+        className={`${styles.card_check} ${checked ? styles.card_check_on : ""}`}
+        checked={checked}
+        aria-label={t("artifacts.select_one", "选择「{{title}}」", { title: artifact.title })}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleChecked(e.shiftKey);
+        }}
+        onChange={() => {}}
+      />
       <div className={styles.thumb}>
         {artifact.kind === "image" ? (
           <img src={artifactBlobUrl(artifact.id, artifact.name)} alt={artifact.title} />

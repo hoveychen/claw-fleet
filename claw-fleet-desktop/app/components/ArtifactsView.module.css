@@ -152,6 +152,8 @@
 }
 
 .card {
+  /* Anchors the selection checkbox, which floats over the thumbnail well. */
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-card);
@@ -170,6 +172,30 @@
   background: var(--color-bg-card-hover);
   border-color: var(--color-border);
   box-shadow: var(--shadow-card-hover);
+}
+
+.card_checked {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+.card_check {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 1;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  /* Hidden until useful: a checkbox on every card turns the grid into a form.
+   * `.card_check_on` re-shows it so a checked card is never ambiguous. */
+  opacity: 0;
+}
+
+.card:hover .card_check,
+.card_check:focus-visible,
+.card_check_on {
+  opacity: 1;
 }
 
 /* Fixed-ratio well so a grid of mixed thumbnails and icons stays on a baseline
@@ -301,10 +327,230 @@
   font-size: var(--font-size-xs);
 }
 
+.layout_switch {
+  display: inline-flex;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.layout_button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: var(--color-bg-field);
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.layout_button_on {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
 .usage {
   margin-left: auto;
   font-size: var(--font-size-2xs);
   color: var(--color-text-dim);
+}
+
+/* ── List view ───────────────────────────────────────────────────────────── */
+
+/* Same flex/min-height/overflow trio as `.grid` — PageShell's `.main` clips,
+ * so the scroller has to be here and not on the table. */
+.table_pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 var(--space-7) var(--space-7);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* Opaque, not transparent: rows scroll *under* this and a translucent header
+   * would show them through the column labels. */
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border-soft);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+}
+
+.col_button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.col_button:hover {
+  color: var(--color-text);
+}
+
+.table tbody td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-soft);
+  color: var(--color-text-secondary);
+  vertical-align: middle;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:hover td {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.col_check,
+.col_star {
+  width: 30px;
+}
+
+.check {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.row_checked td {
+  background: var(--color-accent-soft);
+}
+
+/* Deliberately no `flex-wrap`: this bar sits in the narrow middle column, and
+ * wrapping is what turned five labelled chips into three lines. Icon buttons
+ * plus a short count fit one line at that width. */
+.selection_bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  min-width: 0;
+}
+
+.selection_actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.selection_action {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.selection_action:hover:not(:disabled) {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.selection_action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.selection_action_danger {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chip_danger {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.selection_count {
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.col_size,
+.col_added {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.col_source {
+  max-width: 220px;
+}
+
+.row_star {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.row_star_on {
+  color: var(--color-accent);
+}
+
+.row_name,
+.row_source {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.row_title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.row_folder,
+.row_source {
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row_drift {
+  flex: 0 0 auto;
+  color: var(--color-warning);
 }
 
 /* ── Detail ──────────────────────────────────────────────────────────────── */

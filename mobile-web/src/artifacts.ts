@@ -7,6 +7,14 @@
 // on top — there is no honest way to push a rendered video through it. So
 // anything over `MAX_RELAY_BYTES` shows its card and points at the desktop's
 // export instead of pretending it can fetch it.
+//
+// The desktop's list view and multi-select batch actions (移动 / 导出 / 删除)
+// have no counterpart here, on purpose. A sortable four-column table is a
+// pointer-and-wide-screen affordance, and batch delete/export both end in a
+// destination on the machine that holds the bytes — a phone has nowhere to put
+// twenty exported files and no undo for a mistaken delete-twenty. The phone's
+// 产出 tab stays what it has always been: browse and open one deliverable.
+// Filing and tidying stay desk work.
 
 import { ASSET_REQUEST_TIMEOUT_MS, type FleetTransport } from "./transport";
 import type { Artifact, ArtifactBlobPayload } from "./types";

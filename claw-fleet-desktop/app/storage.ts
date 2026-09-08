@@ -121,6 +121,12 @@ const ALL_KEYS = [
   // Which session (or the new-session composer) the 任务 page detail column
   // was showing when the app last closed.
   "launchpad-open",
+  // 产出 page: thumbnail grid or dense sortable list, and how that list is
+  // ordered. Persisted because it is a working preference — someone who
+  // manages deliverables in the list view wants it back on next launch.
+  "artifacts-layout",
+  "artifacts-sort-key",
+  "artifacts-sort-dir",
 ] as const;
 
 // ── Onboarding feature registry ─────────────────────────────────────────────
