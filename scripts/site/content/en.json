@@ -174,6 +174,10 @@
       "A place for everything around a session: several tasks on one board, decisions with the proposal or image attached, plans that survive a handoff, and the files that came out. It starts the CLI you already have and reads the sessions it writes. <a href=\"claude-code-gui.html\">A desktop workspace for Claude Code</a> walks through it."
     ],
     [
+      "I use Codex, not Claude Code. Does that work?",
+      "Yes — a task picks its tool when you brief it, and Codex tasks get its own model catalogue, its own reasoning ladder and the ChatGPT-plan windows it reports. <a href=\"codex-gui.html\">A desktop workspace for Codex</a> goes through it."
+    ],
+    [
       "Is it free?",
       "Claw Fleet itself is free and open source under AGPL-3.0. AI tools, model subscriptions and API usage stay on each vendor’s own bill. Costs shown in Fleet are estimated from usage, for reference only."
     ],
@@ -307,6 +311,93 @@
       ],
       "closingHeading": "Point it at the next task.",
       "closing": "Install the desktop app, connect the CLI you already use, and give the next piece of work a place to live.",
+      "cta": "Download Claw Fleet",
+      "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
+    },
+    "codex-gui": {
+      "title": "A desktop workspace for Codex — Claw Fleet",
+      "description": "Run Codex from a desktop app instead of a terminal: its own model catalogue and reasoning ladder on the composer, the ChatGPT-plan windows it reports, decision cards that reach a headless run, and work that can hand off to a different tool mid-plan.",
+      "skip": "Skip to content",
+      "backHome": "Home",
+      "navDownload": "Download",
+      "eyebrow": "For people already running Codex",
+      "h1": "Codex, with somewhere<br>to put the work.",
+      "lede": "Codex is good at long unattended stretches, which is exactly when a terminal tells you least. Claw Fleet is a desktop app that starts your Codex CLI, follows what it is doing, and gives the run a place to report back to — with the plan, the questions and the finished files where you can find them.",
+      "sections": [
+        {
+          "h2": "Its own models, its own effort ladder",
+          "body": [
+            "The composer offers Codex's catalogue, not a generic list: GPT-6 Astra, the GPT-5.6 trio of Sol, Terra and Luna, and GPT-5.5. Reasoning effort follows Codex's own scale — minimal, low, medium and high — except on Astra, which declines minimal and adds the deeper xhigh and max instead. Fleet shows the ladder that model actually accepts, so a picker cannot hand Codex a level it will reject.",
+            "Effort is passed per task rather than stored in your config, so a profile you already keep in Codex still applies and one task can run deeper than the next without you editing anything.",
+            "Codex has no permission-mode concept of Claude's, and Fleet does not pretend otherwise: that pill is simply absent for a Codex task."
+          ]
+        },
+        {
+          "h2": "The quota windows it reports, on a chart",
+          "body": [
+            "Codex bills against your ChatGPT plan, and it reports its own rate-limit windows. Fleet records each report and draws them over time, so a week of heavy use is something you can look at rather than something you discover when a run stops.",
+            "Different plans report different shapes — a Team plan sends a single seven-day window where others send two — and the chart follows what your account actually reports instead of assuming a layout.",
+            "Alongside it: tokens per session, estimated cost, live output speed. Estimates for orientation, not an invoice; the plan itself stays between you and OpenAI."
+          ]
+        },
+        {
+          "h2": "A headless run can still ask you something",
+          "body": [
+            "The hard part of unattended work is the moment it needs a human. A `codex exec` run has no interactive channel to reach you through, so historically it either stopped or guessed.",
+            "Fleet registers itself as a tool the run can call, which turns \"ask the operator\" into a decision card on your desk and on your phone: a question, real options, a form when the answer has fields, and the material — a plan, an image, an HTML report — attached to it. The answer travels back into the same run.",
+            "You get the same queue as every other tool's questions, so a Codex run waiting on you looks like everything else waiting on you."
+          ],
+          "shot": "screenshots/current/review-en.png",
+          "shotAlt": "A Fleet decision card showing a proposal preview beside two concrete options",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Asking Codex for a picture",
+          "body": [
+            "Codex ships an image-generation skill backed by gpt-image-2, billed against the same ChatGPT plan. Fleet borrows it: a task can ask for an illustration, a mockup or a hero image and get a file back into the project, which is the one thing the Claude side cannot do at all.",
+            "Images go the other way too. Attach reference pictures to a brief and they reach the run as real files rather than as a description of a picture."
+          ]
+        },
+        {
+          "h2": "Mid-plan, a different tool can take over",
+          "body": [
+            "Plans and handoffs are not per-tool. A plan written during a Codex session is the same plan a Claude Code session picks up, and a handoff carries the step it stopped on plus the notes left behind.",
+            "So the split can follow what each tool is good at — one drafts, another implements, a third reviews — and you decide the split per task instead of committing your whole workflow to one vendor. The project wiki and the deliverables sit with the work, readable by whichever tool comes next.",
+            "Scheduled and condition-based runs work the same way: a nightly check or a job waiting on a build can be a Codex task without becoming a Codex-only setup."
+          ],
+          "shot": "screenshots/current/agents-en.png",
+          "shotAlt": "Fleet session board with Codex, Claude Code and DeepSeek Harness tasks side by side, each card labelled with its tool and model",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Where it runs, and what it costs",
+          "body": [
+            "Fleet starts the Codex CLI on your own machine and reads the session files it writes, so a run you started in a terminal appears in Fleet too, and a run Fleet started stays an ordinary Codex session. The machine has to be online for its tasks to move; that is also what the phone connects back to.",
+            "Fleet is free and open source under AGPL-3.0. It carries no model account and no hosted subscription of its own — Codex usage stays on the ChatGPT plan you already pay for."
+          ]
+        }
+      ],
+      "faqHeading": "Questions people ask first",
+      "faqs": [
+        [
+          "Does Fleet need an OpenAI API key?",
+          "No. It starts the Codex CLI, which authenticates the way you already set it up — for most people that is a ChatGPT plan rather than an API key. Fleet adds no account of its own."
+        ],
+        [
+          "Can I still use my Codex profiles and config?",
+          "Yes. Fleet reads the same Codex home directory the CLI uses. A model or effort you pick for one task is passed for that task; anything you have not overridden comes from your own config."
+        ],
+        [
+          "Can a Codex task hand work to Claude Code?",
+          "Yes — a handoff can name another tool's model, and the plan, notes and deliverables travel with it. That is the point of keeping them in Fleet rather than inside one CLI."
+        ],
+        [
+          "Which Codex models can it drive?",
+          "Whatever your account can reach, from Codex's own catalogue: GPT-6 Astra, GPT-5.6 Sol, Terra and Luna, and GPT-5.5. Availability depends on your plan, not on Fleet."
+        ]
+      ],
+      "closingHeading": "Give the next long run somewhere to report.",
+      "closing": "Install the desktop app, point it at the Codex CLI you already use, and stop reading a terminal to find out what happened.",
       "cta": "Download Claw Fleet",
       "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
     }
