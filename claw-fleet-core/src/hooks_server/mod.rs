@@ -384,6 +384,10 @@ pub fn serve(opts: ServeOptions) {
             let mut prev_fleet_ask_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_a2ui_render_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_permission_prompt_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            // Ids already announced as parked (across all channels — request
+            // ids are uuids), so the flip is broadcast once instead of on
+            // every tick for as long as the card sits there.
+            let mut announced_parked: std::collections::HashSet<String> = std::collections::HashSet::new();
 
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -502,11 +506,22 @@ pub fn serve(opts: ServeOptions) {
                 prev_guard_ids.retain(|id| guard_ids.contains(id));
 
                 // Broadcast new elicitation requests
-                let elicit_ids: std::collections::HashSet<String> =
+                let mut elicit_ids: std::collections::HashSet<String> =
                     elicitation::list_pending_requests().into_iter().collect();
+                broadcast_parked(
+                    &sse_bg,
+                    crate::parked::fold_into_pending(
+                        &crate::parked::ids_of(crate::parked::ParkedKind::Elicitation),
+                        &mut elicit_ids,
+                        &prev_elicit_ids,
+                        &mut announced_parked,
+                    ),
+                );
                 for id in &elicit_ids {
                     if prev_elicit_ids.insert(id.clone()) {
-                        if let Some(mut req) = elicitation::read_request(id) {
+                        if let Some(mut req) = elicitation::read_request(id).or_else(|| {
+                            crate::parked::request_of::<elicitation::ElicitationRequest>(id)
+                        }) {
                             if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
                                 if req.workspace_name.is_empty() {
                                     req.workspace_name = s.workspace_name.clone();
@@ -540,15 +555,27 @@ pub fn serve(opts: ServeOptions) {
                         sse_bg.broadcast("elicitation-dismissed", &json);
                     }
                     crate::mobile_relay::publish_decision_resolved("elicitation", id);
+                    announced_parked.remove(id);
                 }
                 prev_elicit_ids.retain(|id| elicit_ids.contains(id));
 
                 // Broadcast new plan-approval requests
-                let plan_approval_ids: std::collections::HashSet<String> =
+                let mut plan_approval_ids: std::collections::HashSet<String> =
                     plan_approval::list_pending_requests().into_iter().collect();
+                broadcast_parked(
+                    &sse_bg,
+                    crate::parked::fold_into_pending(
+                        &crate::parked::ids_of(crate::parked::ParkedKind::PlanApproval),
+                        &mut plan_approval_ids,
+                        &prev_plan_approval_ids,
+                        &mut announced_parked,
+                    ),
+                );
                 for id in &plan_approval_ids {
                     if prev_plan_approval_ids.insert(id.clone()) {
-                        if let Some(mut req) = plan_approval::read_request(id) {
+                        if let Some(mut req) = plan_approval::read_request(id).or_else(|| {
+                            crate::parked::request_of::<plan_approval::PlanApprovalRequest>(id)
+                        }) {
                             if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
                                 if req.workspace_name.is_empty() {
                                     req.workspace_name = s.workspace_name.clone();
@@ -582,15 +609,27 @@ pub fn serve(opts: ServeOptions) {
                         sse_bg.broadcast("plan-approval-dismissed", &json);
                     }
                     crate::mobile_relay::publish_decision_resolved("plan-approval", id);
+                    announced_parked.remove(id);
                 }
                 prev_plan_approval_ids.retain(|id| plan_approval_ids.contains(id));
 
                 // Broadcast new fleet__ask requests (MCP tool bridge)
-                let fleet_ask_ids: std::collections::HashSet<String> =
+                let mut fleet_ask_ids: std::collections::HashSet<String> =
                     crate::mcp_ipc::list_pending_requests().into_iter().collect();
+                broadcast_parked(
+                    &sse_bg,
+                    crate::parked::fold_into_pending(
+                        &crate::parked::ids_of(crate::parked::ParkedKind::FleetAsk),
+                        &mut fleet_ask_ids,
+                        &prev_fleet_ask_ids,
+                        &mut announced_parked,
+                    ),
+                );
                 for id in &fleet_ask_ids {
                     if prev_fleet_ask_ids.insert(id.clone()) {
-                        if let Some(mut req) = crate::mcp_ipc::read_request(id) {
+                        if let Some(mut req) = crate::mcp_ipc::read_request(id).or_else(|| {
+                            crate::parked::request_of::<crate::mcp_ipc::FleetAskRequest>(id)
+                        }) {
                             if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
                                 if req.workspace_name.is_empty() {
                                     req.workspace_name = s.workspace_name.clone();
@@ -628,15 +667,27 @@ pub fn serve(opts: ServeOptions) {
                         sse_bg.broadcast("fleet-ask-dismissed", &json);
                     }
                     crate::mobile_relay::publish_decision_resolved("fleet-ask", id);
+                    announced_parked.remove(id);
                 }
                 prev_fleet_ask_ids.retain(|id| fleet_ask_ids.contains(id));
 
                 // Broadcast new fleet__render_a2ui requests (parallel MCP tool)
-                let a2ui_render_ids: std::collections::HashSet<String> =
+                let mut a2ui_render_ids: std::collections::HashSet<String> =
                     crate::mcp_a2ui_ipc::list_pending_requests().into_iter().collect();
+                broadcast_parked(
+                    &sse_bg,
+                    crate::parked::fold_into_pending(
+                        &crate::parked::ids_of(crate::parked::ParkedKind::A2uiRender),
+                        &mut a2ui_render_ids,
+                        &prev_a2ui_render_ids,
+                        &mut announced_parked,
+                    ),
+                );
                 for id in &a2ui_render_ids {
                     if prev_a2ui_render_ids.insert(id.clone()) {
-                        if let Some(mut req) = crate::mcp_a2ui_ipc::read_request(id) {
+                        if let Some(mut req) = crate::mcp_a2ui_ipc::read_request(id).or_else(|| {
+                            crate::parked::request_of::<crate::mcp_a2ui_ipc::A2uiRenderRequest>(id)
+                        }) {
                             if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
                                 if req.workspace_name.is_empty() {
                                     req.workspace_name = s.workspace_name.clone();
@@ -655,6 +706,7 @@ pub fn serve(opts: ServeOptions) {
                     if let Ok(json) = serde_json::to_string(id) {
                         sse_bg.broadcast("a2ui-render-dismissed", &json);
                     }
+                    announced_parked.remove(id);
                 }
                 prev_a2ui_render_ids.retain(|id| a2ui_render_ids.contains(id));
 
@@ -843,6 +895,19 @@ pub fn serve(opts: ServeOptions) {
         sse,
         snapshot,
     );
+}
+
+/// Tell the browser clients that these cards just timed out and were parked.
+///
+/// One event name for all four channels (the payload is the request id, which
+/// is unique across them) — same shape the desktop emits as a Tauri event, so
+/// the frontend's `useDecisionEvents` handles both without a branch.
+fn broadcast_parked(sse: &sse::SseBroadcaster, ids: Vec<String>) {
+    for id in ids {
+        if let Ok(json) = serde_json::to_string(&id) {
+            sse.broadcast("decision-parked", &json);
+        }
+    }
 }
 
 /// How many threads serve requests.

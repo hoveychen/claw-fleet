@@ -229,6 +229,41 @@ pub fn request_of<T: for<'de> Deserialize<'de>>(id: &str) -> Option<T> {
     serde_json::from_value(get(id)?.request).ok()
 }
 
+/// One watcher tick's parked bookkeeping, shared by every client that polls a
+/// decision channel (the desktop's Tauri watchers, `fleet serve`'s SSE
+/// broadcaster).
+///
+/// Two things have to happen on every tick, and a client that does only the
+/// second one silently loses the card:
+///
+///  1. `parked_ids` join `pending`, because parking *deletes* the request file.
+///     Without the union the tick's dismissal step reads the deletion as
+///     "resolved", tells the UI to drop the card and (on the mobile relay)
+///     resolves it for the phone too — the exact disappearance parking exists to
+///     prevent. This was `fleet serve`'s bug until 2026-09-08: the desktop
+///     unioned, the SSE broadcaster did not, so a timed-out card vanished from
+///     the browser and the phone the moment it parked.
+///  2. Cards that *just* became parked and are already on screen are announced
+///     once, so the card can badge itself 「已超时」 instead of sitting there
+///     looking like it is still counting down. `known` alone cannot carry that —
+///     it only tracks existence.
+///
+/// Returns the ids to announce as newly parked (already recorded in
+/// `announced`, so a later tick stays quiet).
+pub fn fold_into_pending(
+    parked_ids: &[String],
+    pending: &mut std::collections::HashSet<String>,
+    known: &std::collections::HashSet<String>,
+    announced: &mut std::collections::HashSet<String>,
+) -> Vec<String> {
+    pending.extend(parked_ids.iter().cloned());
+    parked_ids
+        .iter()
+        .filter(|id| known.contains(*id) && announced.insert((*id).clone()))
+        .cloned()
+        .collect()
+}
+
 /// True when this session already has a card waiting for the user. The producers
 /// use it as a re-entry guard: an agent that ignored [`STOP_NOTICE`] and asked
 /// again must not get a second card queued behind the first — it gets the notice
