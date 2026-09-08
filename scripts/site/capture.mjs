@@ -78,13 +78,34 @@ try {
     await p.waitForFunction(() => document.querySelectorAll('[data-ready="1"]').length >= 7,{},{timeout:30000});
     await p.waitForFunction(() => [...document.querySelectorAll('img')].filter(i=>i.src.includes('artifact_blob')).every(i=>i.complete&&i.naturalWidth>0));
     await capture('results',{x:74,y:0,width:926,height:690});
+    // Session board with the three harnesses side by side — the landing page's
+    // multi-agent section needs one frame where claude/codex/dsh are all live.
+    await p.setViewportSize({width:1000,height:900});
+    await p.locator('nav button').filter({has:p.locator('svg.lucide-menu')}).click();
+    await p.getByText(c.tasks[0][0],{exact:true}).first().waitFor();
+    await p.waitForFunction(() => document.querySelectorAll('[data-session-id]').length >= 8);
+    await p.mouse.move(0,0);
+    const agentsClip = await p.evaluate(() => {
+      const cards = [...document.querySelectorAll('[data-session-id]')];
+      if (cards.length < 8) throw new Error('Too few session cards: ' + cards.length);
+      const shown = cards.slice(0, 8).map(el => el.innerText).join(' ');
+      for (const model of ['Opus', 'gpt-5.6', 'deepseek/']) {
+        if (!shown.includes(model)) throw new Error('Agent board missing ' + model);
+      }
+      const rects = cards.map(el => el.getBoundingClientRect());
+      const tops = [...new Set(rects.map(r => Math.round(r.top)))].sort((a, b) => a - b).slice(0, 4);
+      const last = tops[tops.length - 1];
+      const bottom = Math.max(...rects.filter(r => Math.round(r.top) === last).map(r => r.bottom));
+      return {x: 74, y: 0, width: 926, height: Math.round(bottom) + 14};
+    });
+    await capture('agents', agentsClip);
     await p.setViewportSize({width:430,height:740});
     await p.goto(`http://localhost:5288/?mock&website=${lang}`);
     await p.getByText(c.options[1],{exact:true}).waitFor();
     await capture('mobile');
     await ctx.close();
     if(failed.length) throw new Error(JSON.stringify(failed));
-    console.log({lang,screenshots:4,failedResources:0});
+    console.log({lang,screenshots:5,failedResources:0});
   }
 } catch(error) {
  for(const context of browser.contexts()) for(const p of context.pages()) { console.error('CAPTURE PAGE',p.url(),await p.locator('body').innerText()); await p.screenshot({path:'/tmp/fleet-capture-failure.png'}); }
