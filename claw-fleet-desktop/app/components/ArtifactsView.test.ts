@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { filterArtifacts, formatBytes, sortArtifacts } from "./ArtifactsView";
+import {
+  buildArtifactDirectoryTree,
+  filterArtifacts,
+  formatBytes,
+  sortArtifacts,
+} from "./ArtifactsView";
 import type { Artifact } from "./ArtifactsView";
 
 function make(over: Partial<Artifact>): Artifact {
@@ -116,5 +121,54 @@ describe("filterArtifacts", () => {
 
   it("returns everything when no filter is set", () => {
     expect(filterArtifacts(items, all)).toHaveLength(3);
+  });
+
+  it("filters a selected directory recursively without leaking sibling folders", () => {
+    const nested = [
+      make({ id: "docs", workspacePath: "/w/one", sourcePath: "/w/one/docs/readme.md" }),
+      make({ id: "deep", workspacePath: "/w/one", sourcePath: "/w/one/docs/review/final.pdf" }),
+      make({ id: "sibling", workspacePath: "/w/one", sourcePath: "/w/one/src/app.ts" }),
+      make({ id: "other", workspacePath: "/w/two", sourcePath: "/w/two/docs/other.md" }),
+    ];
+
+    expect(
+      filterArtifacts(nested, {
+        ...all,
+        workspace: "/w/one",
+        directory: "docs",
+      }).map((artifact) => artifact.id),
+    ).toEqual(["docs", "deep"]);
+  });
+});
+
+describe("buildArtifactDirectoryTree", () => {
+  it("builds workspace roots and nested directories with recursive counts", () => {
+    const tree = buildArtifactDirectoryTree([
+      make({ id: "1", workspacePath: "/w/one", workspaceName: "one", sourcePath: "/w/one/docs/readme.md" }),
+      make({ id: "2", workspacePath: "/w/one", workspaceName: "one", sourcePath: "/w/one/docs/review/final.pdf" }),
+      make({ id: "3", workspacePath: "/w/one", workspaceName: "one", sourcePath: "/w/one/src/app.ts" }),
+      make({ id: "4", workspacePath: "/w/two", workspaceName: "two", sourcePath: "/outside/export.zip" }),
+    ]);
+
+    expect(tree.map((node) => [node.label, node.count])).toEqual([
+      ["one", 3],
+      ["two", 1],
+    ]);
+    expect(tree[0].children.map((node) => [node.label, node.count])).toEqual([
+      ["docs", 2],
+      ["src", 1],
+    ]);
+    expect(tree[0].children[0].children.map((node) => [node.label, node.count])).toEqual([
+      ["review", 1],
+    ]);
+    expect(tree[1].children).toEqual([]);
+  });
+
+  it("normalizes Windows separators and keeps deterministic labels", () => {
+    const tree = buildArtifactDirectoryTree([
+      make({ id: "1", workspacePath: "C:\\repo", workspaceName: "repo", sourcePath: "C:\\repo\\docs\\guide.pdf" }),
+    ]);
+
+    expect(tree[0].children.map((node) => node.directory)).toEqual(["docs"]);
   });
 });

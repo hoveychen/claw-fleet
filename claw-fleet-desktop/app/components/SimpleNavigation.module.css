@@ -2,18 +2,20 @@
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  gap: 24px;
-  padding: 8px 20px 8px 88px;
+  min-height: 50px;
+  gap: var(--space-2);
+  padding: 8px 12px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg);
 }
-.tabs { display: flex; gap: 8px; }
+.tabs { display: flex; min-width: 0; gap: 2px; }
 .tab, .settings {
+  -webkit-app-region: no-drag;
   border: 0;
   background: transparent;
   color: var(--color-text-dim);
   cursor: pointer;
-  padding: 8px 12px;
+  padding: 8px 10px;
   font: inherit;
 }
 .tab[aria-current="page"] {
@@ -22,4 +24,7 @@
 }
 .settings { margin-left: auto; display: flex; align-items: center; }
 .tab:hover, .settings:hover { color: var(--color-text); }
-:global(.os-windows) .header { padding-right: 148px; }
+
+:global(html[data-platform="macos"]) .header {
+  padding-left: 82px;
+}

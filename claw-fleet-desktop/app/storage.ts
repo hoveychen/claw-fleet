@@ -52,6 +52,8 @@ const ALL_KEYS = [
   "audit-rail-width",
   "report-rail-width",
   "plans-rail-width",
+  "artifacts-rail-width",
+  "simplified-rail-width",
   // 计划树 folds + repo selection. The view's whole value is that the finished
   // plans stay folded; an unregistered key here means re-folding on every boot.
   "plans-workspace",

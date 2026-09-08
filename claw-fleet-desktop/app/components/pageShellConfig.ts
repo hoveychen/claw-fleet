@@ -21,6 +21,7 @@ export interface RailConfig {
  *  "re-clicking the nav item collapses it" cannot disagree — they used to be two
  *  hand-maintained lists. */
 export const RAILS: Partial<Record<ViewMode, RailConfig>> = {
+  artifacts: { storageKey: "artifacts-rail-width", min: 190, max: 420, initial: 260 },
   history: { storageKey: "history-rail-width", min: 240, max: 640, initial: 300 },
   audit: { storageKey: "audit-rail-width", min: 280, max: 720, initial: 380, side: "right" },
   memory: { storageKey: "memory-rail-width", min: 200, max: 640, initial: 340 },

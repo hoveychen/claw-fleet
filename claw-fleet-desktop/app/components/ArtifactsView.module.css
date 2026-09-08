@@ -1,8 +1,86 @@
-/* 产出 page. Card grid over the artifact store, plus a full-width detail pane.
- *
- * No secondary rail on purpose: the filters are three chips and a select, which
- * fit the sub-bar, and every pixel of width is worth more to a video or a PDF
- * preview than to a tree nobody navigates. */
+/* 产出 page. Directory rail + card grid, with the detail preview in the main pane. */
+
+.tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) 0 var(--space-5);
+}
+
+.tree_row {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-3);
+  color: var(--color-text-secondary);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree_row:hover,
+.tree_row_active {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.tree_row_active {
+  box-shadow: inset 2px 0 var(--color-accent);
+}
+
+.tree_spacer,
+.tree_twisty {
+  width: 20px;
+  flex: 0 0 20px;
+}
+
+.tree_twisty,
+.tree_target {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tree_twisty {
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.tree_twisty:disabled { cursor: default; }
+
+.tree_target {
+  min-width: 0;
+  flex: 1;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  text-align: left;
+}
+
+.tree_label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+}
+
+.tree_count {
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+}
 
 /* PageShell's `.main` is a clipping flex column — every page's content root owns
  * its own scrolling (`.rail_pane` in Wiki, `.list_pane` in Memory). Without the

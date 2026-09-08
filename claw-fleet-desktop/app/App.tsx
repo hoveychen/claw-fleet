@@ -15,7 +15,6 @@ import { useFindController } from "./find/useFindController";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { versionCheckArgs } from "./versionCheck";
 import { Wizard } from "./components/Wizard";
-import { SimpleNavigation } from "./components/SimpleNavigation";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { applyWindowTheme, navigateToSessionDetail, useReportStore, useSessionsStore, useUIStore } from "./store";
@@ -264,7 +263,6 @@ function App() {
   return (
     <div className={simplifiedMode ? "app app_simplified" : "app"}>
       <WindowsFrameOverlay />
-      {simplifiedMode && <SimpleNavigation />}
       {onboardingMode && <Onboarding mode={onboardingMode} onDismiss={finishOnboarding} />}
       {showWizard && <Wizard onDone={dismissWizard} />}
       {/* data-find-content scopes the Cmd+F find bar to the active page's

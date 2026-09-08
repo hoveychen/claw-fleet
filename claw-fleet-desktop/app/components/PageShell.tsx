@@ -5,6 +5,7 @@ import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { RAILS } from "./pageShellConfig";
+import { SimpleNavigation } from "./SimpleNavigation";
 import styles from "./PageShell.module.css";
 
 interface SearchProps {
@@ -89,17 +90,18 @@ export function PageShell({
   className,
 }: Props) {
   const rail = RAILS[view];
+  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed[view]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
 
   // Hooks cannot be conditional, so a rail-less page still calls this — with a
   // key it never writes, because the drag handle is never rendered.
   const { width, isDragging, onMouseDown } = useResizableWidth(
-    rail?.storageKey ?? "__page_shell_no_rail__",
+    simplifiedMode ? "simplified-rail-width" : rail?.storageKey ?? "__page_shell_no_rail__",
     {
-      min: rail?.min ?? 0,
-      max: rail?.max ?? 0,
-      initial: rail?.initial ?? 0,
+      min: simplifiedMode ? 240 : rail?.min ?? 0,
+      max: simplifiedMode ? 520 : rail?.max ?? 0,
+      initial: simplifiedMode ? 320 : rail?.initial ?? 0,
       side: rail?.side,
     },
   );
@@ -110,7 +112,8 @@ export function PageShell({
   // search box, and losing the page title + search on collapse would be a worse
   // trade than the wide header.
   const hasRail = secondary !== undefined;
-  const inColumn = hasRail && !collapsed;
+  const effectiveCollapsed = simplifiedMode ? false : collapsed;
+  const inColumn = hasRail && !effectiveCollapsed;
 
   const header = (
     <>
@@ -151,7 +154,7 @@ export function PageShell({
 
   const railIsList = rail?.side !== "right";
 
-  const railEl = !hasRail ? null : collapsed ? (
+  const railEl = !hasRail ? null : effectiveCollapsed ? (
     <CollapsedSidebarRail
       side={rail?.side}
       onExpand={() => setSecondarySidebar(view, false)}
@@ -161,6 +164,7 @@ export function PageShell({
       className={`${styles.rail}${railIsList ? "" : ` ${styles.col_last}`}`}
       style={{ width }}
     >
+      {simplifiedMode && railIsList && <SimpleNavigation />}
       {inColumn && railIsList && header}
       {secondary}
       <ResizeHandle side={rail?.side} active={isDragging} onMouseDown={onMouseDown} />
