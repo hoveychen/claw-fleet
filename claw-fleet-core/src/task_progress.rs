@@ -105,6 +105,41 @@ pub(crate) fn clear_in(dir: &std::path::Path, session_id: &str) {
     let _ = fs::remove_file(dir.join(format!("{session_id}.json")));
 }
 
+/// Newest focus timestamp per plan id, over every session's record.
+///
+/// "Which plans is somebody actually on" — the injection uses it to put those
+/// first in the list an unattributed session sees. No age cutoff: a record only
+/// exists because a session claimed that plan, and "claimed three days ago"
+/// still outranks "nobody ever touched it" as a reason to show it. Records are
+/// keyed by session, so several sessions on one plan collapse to the newest.
+/// Ids are matched across every workspace — the same id in two repos can only
+/// nudge one list's ordering, which is not worth a path-canonicalising filter.
+pub fn latest_focus_by_plan() -> std::collections::HashMap<String, u64> {
+    progress_dir()
+        .map(|d| latest_focus_by_plan_in(&d))
+        .unwrap_or_default()
+}
+
+pub(crate) fn latest_focus_by_plan_in(
+    dir: &std::path::Path,
+) -> std::collections::HashMap<String, u64> {
+    let mut out: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let Ok(s) = fs::read_to_string(e.path()) else {
+            continue;
+        };
+        let Ok(rec) = serde_json::from_str::<TaskProgressRecord>(&s) else {
+            continue;
+        };
+        let slot = out.entry(rec.plan_id).or_insert(0);
+        *slot = (*slot).max(rec.updated);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

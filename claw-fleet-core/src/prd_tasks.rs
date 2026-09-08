@@ -981,6 +981,31 @@ pub fn render_with_sources(blocks: &[SourcedBlock], main_root: Option<&Path>) ->
     out
 }
 
+/// Put the plans somebody is actually on first, newest focus first; everything
+/// else keeps its file order behind them.
+///
+/// Only [`UNATTRIBUTED_PLAN_CAP`] plans survive into an unattributed session's
+/// listing, so *which* ones is now a real choice. File order is arbitrary —
+/// whoever appended their block last — while a focus record means a session
+/// claimed that plan with `fleet plan create/resume/check`, which is the best
+/// signal available for "this is live work".
+fn order_by_focus(
+    blocks: Vec<SourcedBlock>,
+    focus: &HashMap<String, u64>,
+) -> Vec<SourcedBlock> {
+    let mut indexed: Vec<(usize, SourcedBlock)> = blocks.into_iter().enumerate().collect();
+    indexed.sort_by_key(|(i, b)| {
+        // Newest focus first: negate so a bigger timestamp sorts earlier.
+        let recency = b
+            .id
+            .as_deref()
+            .and_then(|id| focus.get(id))
+            .map(|t| -(*t as i128));
+        (recency.is_none(), recency.unwrap_or(0), *i)
+    });
+    indexed.into_iter().map(|(_, b)| b).collect()
+}
+
 /// How many plans an unattributed session sees expanded. A session with no
 /// focus is not supposed to pick from this menu (it claims one with
 /// `fleet plan resume`, and the injection then narrows to that plan), so the
@@ -1469,7 +1494,10 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
     // active-only pass plus the backstop's separate re-read.
     let (all_raw, problems) = collect_from_sources(&sources, false);
     let warning = render_problem_warning(&problems);
-    let all_blocks = dedup_blocks_keep_latest_mtime(all_raw);
+    let all_blocks = order_by_focus(
+        dedup_blocks_keep_latest_mtime(all_raw),
+        &crate::task_progress::latest_focus_by_plan(),
+    );
     let backtrack_note = backtrack_backstop(cwd, session_id);
 
     // Cursor mode: this session is attributed to one of the active plans, so
@@ -1972,6 +2000,27 @@ trailing notes outside\n";
         );
         // The count in the header still describes the whole workspace.
         assert!(out.contains(&format!("holds {} active plans", UNATTRIBUTED_PLAN_CAP + 5)));
+    }
+
+    #[test]
+    fn focused_plans_sort_ahead_of_untouched_ones() {
+        let block = |id: &str| SourcedBlock {
+            id: Some(id.to_string()),
+            body: format!("**Plan:** {id}\n- [ ] **P1** — 任务\n"),
+            source: PathBuf::from("/ws/TASKS.md"),
+            kind: PlanKind::Exec,
+            parent: None,
+            mtime: SystemTime::UNIX_EPOCH,
+        };
+        let blocks = vec![block("a"), block("b"), block("c"), block("d")];
+        let focus = HashMap::from([("c".to_string(), 200u64), ("a".to_string(), 100u64)]);
+
+        let ids: Vec<String> = order_by_focus(blocks, &focus)
+            .into_iter()
+            .filter_map(|b| b.id)
+            .collect();
+        // c (newest focus), a (older focus), then b and d in file order.
+        assert_eq!(ids, ["c", "a", "b", "d"]);
     }
 
     #[test]
