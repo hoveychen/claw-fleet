@@ -611,14 +611,17 @@ fn for_each_record_on_date(date: &str, mut f: impl FnMut(&DecisionHistoryRecord)
         let Ok(content) = fs::read_to_string(&path) else {
             continue;
         };
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Ok(rec) = serde_json::from_str::<DecisionHistoryRecord>(line) {
-                f(&rec);
-            }
+        // Collapse per file, not per line: a parked card that was answered later
+        // carries two records, and counting both would inflate the day's totals.
+        // All records for one card live in that card's session file.
+        let parsed: Vec<DecisionHistoryRecord> = content
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .filter_map(|l| serde_json::from_str::<DecisionHistoryRecord>(l).ok())
+            .collect();
+        for rec in collapse_superseded(parsed) {
+            f(&rec);
         }
     }
 }
@@ -824,7 +827,7 @@ fn read_persisted_records(session_id: &str) -> Vec<DecisionHistoryRecord> {
     let Ok(content) = fs::read_to_string(&path) else {
         return Vec::new();
     };
-    content
+    let records = content
         .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| match serde_json::from_str::<DecisionHistoryRecord>(l) {
@@ -837,6 +840,33 @@ fn read_persisted_records(session_id: &str) -> Vec<DecisionHistoryRecord> {
                 None
             }
         })
+        .collect();
+    collapse_superseded(records)
+}
+
+/// Keep only the **last** record for each id.
+///
+/// One card can legitimately be recorded twice. A card that times out is
+/// recorded as `timeout` by its producer at park time; if the boss answers it
+/// later, [`crate::parked::try_resolve`] appends the real outcome. The file is
+/// append-only on purpose (several processes append to it concurrently, and
+/// `append_record`'s single-write contract is what keeps their lines intact), so
+/// superseding happens here on read instead of by rewriting the line.
+///
+/// Without this, every consumer sees the stale first record: the transcript card
+/// would keep reading 「已超时」 with no answer, and the daily stats would count
+/// the same card twice.
+fn collapse_superseded(records: Vec<DecisionHistoryRecord>) -> Vec<DecisionHistoryRecord> {
+    let mut last_at: HashMap<String, usize> = HashMap::new();
+    for (i, r) in records.iter().enumerate() {
+        last_at.insert(r.id().to_string(), i);
+    }
+    let keep: std::collections::HashSet<usize> = last_at.into_values().collect();
+    records
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| keep.contains(i))
+        .map(|(_, r)| r)
         .collect()
 }
 
@@ -1602,6 +1632,45 @@ mod tests {
         assert_eq!(listed.len(), 1);
         match &listed[0] {
             DecisionHistoryRecord::FleetAsk(r) => assert_eq!(r.id, "card-9"),
+            other => panic!("expected FleetAsk, got {other:?}"),
+        }
+    }
+
+    /// A parked card is recorded twice: `timeout` when it parked, then its real
+    /// outcome when the boss finally resolved it. The reader must show only the
+    /// later one — the transcript card reads the first match, and the daily stats
+    /// would otherwise count one card as two.
+    #[test]
+    fn a_re_recorded_card_reads_as_its_latest_outcome_only() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = temp_dir("fleet-ask-supersede");
+        let _home = FleetHomeOverride::new(&tmp);
+
+        let req = sample_fleet_ask_request("ssn-sup", "card-sup");
+        append_record(&DecisionHistoryRecord::FleetAsk(build_fleet_ask_record(
+            &req,
+            FleetAskOutcome::Timeout,
+            BTreeMap::new(),
+            "2026-05-28T00:10:00Z".into(),
+        )))
+        .unwrap();
+        let mut answers = BTreeMap::new();
+        answers.insert("Pick or fill?".into(), "A".into());
+        append_record(&DecisionHistoryRecord::FleetAsk(build_fleet_ask_record(
+            &req,
+            FleetAskOutcome::Answered,
+            answers,
+            "2026-05-28T01:00:00Z".into(),
+        )))
+        .unwrap();
+
+        let listed = list_session_records("ssn-sup");
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        match &listed[0] {
+            DecisionHistoryRecord::FleetAsk(r) => {
+                assert_eq!(r.outcome, FleetAskOutcome::Answered);
+                assert_eq!(r.answers.get("Pick or fill?").map(String::as_str), Some("A"));
+            }
             other => panic!("expected FleetAsk, got {other:?}"),
         }
     }

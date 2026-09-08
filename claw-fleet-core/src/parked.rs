@@ -637,7 +637,122 @@ pub fn try_resolve(id: &str, response: &Value, dismissed: bool) -> Option<Result
     if !is_parked(id) {
         return None;
     }
-    Some(if dismissed { discard(id) } else { answer(id, response) })
+    Some(resolve_with(id, response, dismissed, answer))
+}
+
+/// [`try_resolve`]'s body with the wake-up injected, so tests can exercise the
+/// history bookkeeping without spawning a real agent CLI.
+fn resolve_with<A>(id: &str, response: &Value, dismissed: bool, answer_fn: A) -> Result<(), String>
+where
+    A: FnOnce(&str, &Value) -> Result<(), String>,
+{
+    // Captured before the action runs: both branches destroy the card.
+    let card = get(id);
+    let outcome = if dismissed {
+        discard(id)
+    } else {
+        answer_fn(id, response)
+    };
+    if outcome.is_ok() {
+        if let Some(card) = card {
+            record_resolution(&card, response, dismissed);
+        }
+    }
+    outcome
+}
+
+/// Write the card's *real* terminal state into the per-session decision history.
+///
+/// The producer already recorded this card once — as `timeout`, with no answers,
+/// the moment it parked ([`crate::mcp_server`]'s `persist_fleet_ask_history` and
+/// the hook CLIs do the same for their channels). That record is what the
+/// transcript's inline card and the history view read, so without this second,
+/// superseding record an answered parked card reads 「已超时」 with every option
+/// unpicked *forever*: the boss's reply reaches the agent (as the resume prompt)
+/// but is nowhere on the card they answered. Same for 结束任务 / 放弃任务, whose
+/// verdict would otherwise be lost behind the earlier `timeout`.
+///
+/// Duplicate ids are collapsed on the read side
+/// ([`crate::decision_history::list_session_records`] keeps the last), so
+/// appending is enough — no rewrite of a file other appenders share.
+///
+/// Best-effort: a disk hiccup here must not fail an answer that already woke the
+/// session up.
+fn record_resolution(card: &ParkedCard, response: &Value, dismissed: bool) {
+    use crate::decision_history as dh;
+    let resolved_at = chrono::Utc::now().to_rfc3339();
+    let record = match card.kind {
+        ParkedKind::FleetAsk => {
+            let Ok(req) = serde_json::from_value::<crate::mcp_ipc::FleetAskRequest>(
+                card.request.clone(),
+            ) else {
+                return;
+            };
+            let resp =
+                serde_json::from_value::<crate::mcp_ipc::FleetAskResponse>(response.clone()).ok();
+            let task_outcome = resp.as_ref().and_then(|r| r.task_outcome);
+            let answers = resp.map(|r| r.answers).unwrap_or_default();
+            dh::DecisionHistoryRecord::FleetAsk(dh::build_fleet_ask_record(
+                &req,
+                dh::FleetAskOutcome::for_resolution(dismissed, task_outcome),
+                answers,
+                resolved_at,
+            ))
+        }
+        ParkedKind::Elicitation => {
+            let Ok(req) = serde_json::from_value::<crate::elicitation::ElicitationRequest>(
+                card.request.clone(),
+            ) else {
+                return;
+            };
+            let answers = serde_json::from_value::<crate::elicitation::ElicitationResponse>(
+                response.clone(),
+            )
+            .map(|r| r.answers)
+            .unwrap_or_default();
+            let outcome = if dismissed {
+                dh::ElicitationOutcome::Declined
+            } else {
+                dh::ElicitationOutcome::Answered
+            };
+            dh::DecisionHistoryRecord::Elicitation(dh::build_elicitation_record(
+                &req,
+                outcome,
+                &answers,
+                resolved_at,
+            ))
+        }
+        ParkedKind::PlanApproval => {
+            let Ok(req) = serde_json::from_value::<crate::plan_approval::PlanApprovalRequest>(
+                card.request.clone(),
+            ) else {
+                return;
+            };
+            let resp = serde_json::from_value::<crate::plan_approval::PlanApprovalResponse>(
+                response.clone(),
+            )
+            .ok();
+            let outcome = match resp.as_ref() {
+                Some(r) if r.decision == "approve" && r.edited_plan.is_some() => {
+                    dh::PlanApprovalOutcome::ApprovedWithEdits
+                }
+                Some(r) if r.decision == "approve" => dh::PlanApprovalOutcome::Approved,
+                Some(_) => dh::PlanApprovalOutcome::Rejected,
+                None => return,
+            };
+            dh::DecisionHistoryRecord::PlanApproval(dh::build_plan_approval_record(
+                &req,
+                outcome,
+                resp.as_ref(),
+                resolved_at,
+            ))
+        }
+        // A2UI renders have no decision-history variant to supersede.
+        ParkedKind::A2uiRender => return,
+    };
+    if let Err(e) = crate::decision_history::append_record(&record) {
+        crate::log_debug(&format!("parked: history append for {}: {e}", card.id));
+    }
 }
 
 /// Render "here is what you asked, here is what the boss said" for the resume
@@ -1160,6 +1275,99 @@ mod tests {
         assert_eq!(session_pid("sess-ghost"), None);
         // Answering a card that was never parked is an error, not a panic.
         assert!(answer("nope", &json!({})).is_err());
+    }
+
+    /// The card the boss finally answers must stop reading 「已超时」.
+    ///
+    /// The producer records the card as `timeout` with no answers the moment it
+    /// parks — that record is what the transcript's inline card and the history
+    /// view render. Before this, resolving the parked card wrote nothing, so the
+    /// boss's reply reached the agent (as the resume prompt) but was invisible on
+    /// the card they had just answered, forever.
+    #[test]
+    fn answering_a_parked_card_supersedes_its_timeout_record() {
+        let _home = TmpHome::new("history-answer");
+        let req = fleet_ask_request("card-h1", "sess-h1");
+        // What the producer wrote on its way out.
+        crate::decision_history::append_record(
+            &crate::decision_history::DecisionHistoryRecord::FleetAsk(
+                crate::decision_history::build_fleet_ask_record(
+                    &req,
+                    crate::decision_history::FleetAskOutcome::Timeout,
+                    Default::default(),
+                    "2026-07-13T00:10:00Z".into(),
+                ),
+            ),
+        )
+        .unwrap();
+        park("card-h1", ParkedKind::FleetAsk, "sess-h1", "/ws/a", &req).unwrap();
+
+        let mut answers = std::collections::BTreeMap::new();
+        answers.insert("要不要保留向后兼容？".to_string(), "保留".to_string());
+        let resp = crate::mcp_ipc::FleetAskResponse {
+            id: "card-h1".into(),
+            answers,
+            cancelled: false,
+            task_outcome: None,
+        };
+        // `answer` would spawn a real `claude --resume`; the seam stands in for it.
+        resolve_with(
+            "card-h1",
+            &serde_json::to_value(&resp).unwrap(),
+            false,
+            |id, _| discard(id),
+        )
+        .unwrap();
+
+        let records = crate::decision_history::list_session_records("sess-h1");
+        assert_eq!(records.len(), 1, "the stale timeout record must be superseded, not duplicated: {records:?}");
+        let crate::decision_history::DecisionHistoryRecord::FleetAsk(rec) = &records[0] else {
+            panic!("expected a fleet-ask record, got {records:?}");
+        };
+        assert_eq!(rec.outcome, crate::decision_history::FleetAskOutcome::Answered);
+        assert_eq!(
+            rec.answers.get("要不要保留向后兼容？").map(String::as_str),
+            Some("保留"),
+            "the boss's pick has to be on the card"
+        );
+    }
+
+    /// 结束任务 / 放弃任务 on a parked card is a verdict, not a shrug: it has to
+    /// land as `task-abandoned`, not stay behind the earlier `timeout`.
+    #[test]
+    fn a_terminal_press_on_a_parked_card_records_its_verdict() {
+        let _home = TmpHome::new("history-terminal");
+        let req = fleet_ask_request("card-h2", "sess-h2");
+        crate::decision_history::append_record(
+            &crate::decision_history::DecisionHistoryRecord::FleetAsk(
+                crate::decision_history::build_fleet_ask_record(
+                    &req,
+                    crate::decision_history::FleetAskOutcome::Timeout,
+                    Default::default(),
+                    "2026-07-13T00:10:00Z".into(),
+                ),
+            ),
+        )
+        .unwrap();
+        park("card-h2", ParkedKind::FleetAsk, "sess-h2", "/ws/a", &req).unwrap();
+
+        let resp = crate::mcp_ipc::FleetAskResponse {
+            id: "card-h2".into(),
+            answers: Default::default(),
+            cancelled: true,
+            task_outcome: Some(crate::task_outcome::TaskOutcome::Abandoned),
+        };
+        assert!(try_resolve("card-h2", &serde_json::to_value(&resp).unwrap(), true).is_some());
+
+        let records = crate::decision_history::list_session_records("sess-h2");
+        assert_eq!(records.len(), 1, "{records:?}");
+        let crate::decision_history::DecisionHistoryRecord::FleetAsk(rec) = &records[0] else {
+            panic!("expected a fleet-ask record, got {records:?}");
+        };
+        assert_eq!(
+            rec.outcome,
+            crate::decision_history::FleetAskOutcome::TaskAbandoned
+        );
     }
 
     /// Real-process end-to-end for the liveness gate the watch/auto-resume fixes
