@@ -516,6 +516,37 @@ describe("list_pending_decisions", () => {
  * browser with no 「已超时」 badge, while the desktop (Tauri events, no
  * allowlist) showed it correctly.
  */
+/**
+ * The stream used to close itself for good after three failed attempts. Three
+ * strikes takes about 24 seconds to collect — a server restart, a wifi switch or
+ * a sleeping laptop is enough — and the page that spent them then had no live
+ * channel for the rest of its life *and* stopped counting as a consumer, so the
+ * server quit writing `~/.fleet/consumer.heartbeat` and every agent question
+ * fell through to its own terminal prompt. Nothing in the UI said so.
+ */
+describe("event stream reconnection", () => {
+  it("backs off and keeps trying, with no attempt count that ends in surrender", async () => {
+    const { eventStreamRetryDelayMs } = await import("./liveProxy");
+    // Doubling from 1s…
+    expect(eventStreamRetryDelayMs(1)).toBe(1000);
+    expect(eventStreamRetryDelayMs(2)).toBe(2000);
+    expect(eventStreamRetryDelayMs(3)).toBe(4000);
+    // …capped, so a deployment that cannot serve SSE is retried cheaply
+    // forever rather than abandoned.
+    expect(eventStreamRetryDelayMs(50)).toBe(30_000);
+    expect(eventStreamRetryDelayMs(1_000_000)).toBe(30_000);
+    // Finite for every input: an `Infinity` here would schedule a timeout that
+    // never fires, which is surrender wearing a backoff's clothes.
+    expect(Number.isFinite(eventStreamRetryDelayMs(1_000_000))).toBe(true);
+  });
+
+  it("no longer has a give-up threshold in the source", () => {
+    const src = readFileSync(join(__dirname, "liveProxy.ts"), "utf8");
+    expect(src).not.toContain("EVENT_STREAM_MAX_FAILURES");
+    expect(src).not.toContain("gave up after");
+  });
+});
+
 describe("forwarded SSE events", () => {
   /** Event names `useDecisionEvents` attaches a listener for. */
   function listenedDecisionEvents(): string[] {

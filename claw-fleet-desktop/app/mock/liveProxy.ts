@@ -1786,16 +1786,34 @@ export const FORWARDED_SSE_EVENTS = [
 ];
 
 let eventStream: EventSource | null = null;
-/** Failed connection attempts that never reached `onopen`. */
+/** Consecutive failed attempts — resets on `onopen`. Drives the backoff. */
 let eventStreamFailures = 0;
+/** Pending reconnect, so a double failure cannot schedule two streams. */
+let eventStreamRetry: number | null = null;
+
 /**
- * How many failures before giving up.
+ * How many consecutive failures before the log stops being chatty about it.
  *
- * `EventSource` retries forever by design, which is right for a stream that
- * merely dropped — and wrong for one the deployment cannot serve at all. Three
- * strikes tells "the proxy won't pass this" from "the server restarted".
+ * It used to be how many before *giving up*: after three the stream was closed
+ * for the life of the tab. That is wrong in both directions. A deployment whose
+ * proxy cannot pass SSE at all is not fixed by stopping, and a deployment that
+ * merely restarted (or a laptop that slept, or a wifi switch) gets a permanent
+ * outage from a transient one — 24 seconds of bad luck for a page that then
+ * silently never shows another decision card and stops counting as a consumer
+ * for the server's heartbeat. Reconnection is now unbounded; this only caps how
+ * loud it is about it.
  */
-const EVENT_STREAM_MAX_FAILURES = 3;
+const EVENT_STREAM_NOISY_FAILURES = 3;
+
+/** Backoff between reconnects: 1s, 2s, 4s … capped. */
+const EVENT_STREAM_RETRY_MIN_MS = 1000;
+const EVENT_STREAM_RETRY_MAX_MS = 30_000;
+
+/** Delay before attempt number `failures + 1`. Exported for the test. */
+export function eventStreamRetryDelayMs(failures: number): number {
+  const backoff = EVENT_STREAM_RETRY_MIN_MS * 2 ** Math.max(0, failures - 1);
+  return Math.min(backoff, EVENT_STREAM_RETRY_MAX_MS);
+}
 
 /**
  * How long to wait for `onopen` before treating the attempt as failed.
@@ -1824,9 +1842,10 @@ const EVENT_STREAM_OPEN_TIMEOUT_MS = 8000;
  * Two things ride on this connection, and the second one is the load-bearing
  * one:
  *
- *  1. **Live delivery.** `list_pending_decisions` is a mount-only catch-up in
- *     `useDecisionEvents`; everything after that arrives as an event. Without a
- *     stream, a card raised while the tab is open never shows up at all.
+ *  1. **Live delivery.** Cards arrive as events; `useDecisionEvents` reconciles
+ *     against `list_pending_decisions` every 10s, so a stream that is down
+ *     costs latency (up to that interval) rather than the card itself. It used
+ *     to cost the card: the catch-up ran only on mount.
  *
  *  2. **Consumer presence.** `hooks_server`'s watcher loop writes
  *     `~/.fleet/consumer.heartbeat` only while `client_count() > 0` (or a phone
@@ -1837,43 +1856,55 @@ const EVENT_STREAM_OPEN_TIMEOUT_MS = 8000;
  *     pushes every agent question back to the terminal. Being a real SSE client
  *     is what makes this page count as the head.
  *
- * `EventSource` reconnects on its own (that is its whole contract), and each
- * reconnect re-registers on the server, so the heartbeat resumes with it.
+ * Reconnection is ours, not `EventSource`'s. Its own retry covers a stream that
+ * *errored*, but not one that hung before answering (see the open timeout
+ * above) — and mixing the two made the failure paths asymmetric: a timeout
+ * restarted the stream while an error left it to the browser, on a counter that
+ * eventually gave up on both. Now every failure takes the same route: close,
+ * back off, try again, forever.
  */
 function startEventStream() {
   if (eventStream) return;
+  if (eventStreamRetry != null) {
+    window.clearTimeout(eventStreamRetry);
+    eventStreamRetry = null;
+  }
   try {
     eventStream = new EventSource(`${LIVE_BASE}/events`);
   } catch (e) {
+    // Constructing it threw (a malformed base, say). Still not terminal — the
+    // page has no other live channel, so keep trying on the same backoff.
     logLine(`SSE unavailable: ${String(e).slice(0, 120)}`);
+    eventStreamFailures += 1;
+    eventStreamRetry = window.setTimeout(
+      startEventStream,
+      eventStreamRetryDelayMs(eventStreamFailures),
+    );
     return;
   }
-  // Fires whether the attempt errored or simply hung; `giveUp` decides.
+  // Fires whether the attempt errored or simply hung.
   const attemptFailed = (why: string) => {
+    eventStream?.close();
+    eventStream = null;
     eventStreamFailures += 1;
-    if (eventStreamFailures >= EVENT_STREAM_MAX_FAILURES) {
-      // Stop rather than hold a dead connection for the life of the tab. The
-      // consequences are worth spelling out in the log, because they are
-      // invisible in the UI: decision cards raised while this tab is open will
-      // not appear (only the mount catch-up runs), and with no SSE client the
-      // server stops writing the consumer heartbeat, so the agent's questions
-      // fall through to its own terminal prompt.
-      eventStream?.close();
-      eventStream = null;
+    const delay = eventStreamRetryDelayMs(eventStreamFailures);
+    // Once past the noisy threshold, say what the deployment is actually
+    // costing itself. Not fatal any more — the decision panel reconciles over
+    // HTTP — but with no SSE client the server stops writing the consumer
+    // heartbeat, so `fleet guard` / `fleet elicitation` fall through to the
+    // agent's own terminal prompt, and cards arrive a poll late instead of
+    // instantly.
+    if (eventStreamFailures === EVENT_STREAM_NOISY_FAILURES) {
       logLine(
-        `SSE gave up after ${EVENT_STREAM_MAX_FAILURES} attempts (${why}) — ` +
-          "no live decision cards, and no consumer heartbeat for this page",
+        `SSE still failing after ${eventStreamFailures} attempts (${why}) — ` +
+          "cards now arrive on the reconcile poll, and this page is not counted " +
+          "as a consumer; retrying every " +
+          `${Math.round(EVENT_STREAM_RETRY_MAX_MS / 1000)}s`,
       );
-      return;
+    } else if (eventStreamFailures < EVENT_STREAM_NOISY_FAILURES) {
+      logLine(`SSE ${why} (attempt ${eventStreamFailures}) — retrying in ${delay}ms`);
     }
-    logLine(`SSE ${why} ${eventStreamFailures}/${EVENT_STREAM_MAX_FAILURES} — retrying`);
-    if (why === "timeout") {
-      // A hung attempt is not retried by EventSource (it never failed, from its
-      // point of view), so tear it down and start a fresh one ourselves.
-      eventStream?.close();
-      eventStream = null;
-      window.setTimeout(startEventStream, 1000);
-    }
+    eventStreamRetry = window.setTimeout(startEventStream, delay);
   };
 
   const openDeadline = window.setTimeout(
@@ -1882,7 +1913,6 @@ function startEventStream() {
   );
 
   eventStream.onopen = () => {
-    // A stream that opened is healthy; let EventSource own any later retry.
     window.clearTimeout(openDeadline);
     eventStreamFailures = 0;
     logLine("SSE open → /events (consumer heartbeat now live)");
