@@ -122,6 +122,7 @@ pub mod plan_forest;
 pub mod plan_gate;
 pub mod plan_ops;
 pub mod plugins;
+pub mod prd_context_dedup;
 pub mod prd_discipline;
 pub mod prd_tasks;
 pub mod task_progress;

@@ -18,9 +18,13 @@ pub(crate) fn cmd_prd_discipline_apply(title: &str, locale: &str) {
 
 // ── PRD-context CLI (hook entrypoint for UserPromptSubmit) ─────────────────
 
-/// Re-inject the workspace's `TASKS.md` (active plan region) into every user
+/// Re-inject the workspace's `TASKS.md` (active plan region) into the user
 /// prompt as additional context. Companion to PRD Discipline mode — survives
 /// context compression, since the file lives on disk.
+///
+/// Silent when the previous prompt already injected byte-identical text that
+/// no compaction has swallowed since ([`claw_fleet_core::prd_context_dedup`]):
+/// an unchanged TASKS.md used to cost a fresh 5–12 KB copy every single turn.
 ///
 /// Multi-source: discovers the repo's main checkout root and scans both
 /// `<main>/TASKS.md` and every `<main>/.worktrees/*/TASKS.md`, so a worker
@@ -58,6 +62,20 @@ pub(crate) fn cmd_prd_context() {
     else {
         return;
     };
+
+    // Nothing to say when the copy from the previous prompt is byte-identical
+    // and still in front of the model — see `prd_context_dedup`. No
+    // `transcript_path` (older Claude Code, or a hand-fed payload) means no
+    // evidence, so the reminder goes in as it always did.
+    let transcript = parsed
+        .as_ref()
+        .and_then(|v| v.get("transcript_path").and_then(|t| t.as_str()))
+        .map(PathBuf::from);
+    if let Some(transcript) = transcript {
+        if !claw_fleet_core::prd_context_dedup::claude_needs_injection(&transcript, &reminder) {
+            return;
+        }
+    }
 
     let out = serde_json::json!({
         "hookSpecificOutput": {
