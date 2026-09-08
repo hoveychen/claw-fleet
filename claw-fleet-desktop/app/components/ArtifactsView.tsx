@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   Archive,
@@ -210,6 +210,41 @@ export function filterArtifacts(
       a.note.toLowerCase().includes(q)
     );
   });
+}
+
+/**
+ * Filenames for a batch export, de-duplicated.
+ *
+ * Two artifacts can carry the same original filename — `report.pdf` from two
+ * different sessions is the normal case, not a corner one — and exporting them
+ * into one directory would silently leave only the second. Suffix the repeats
+ * the way a browser's download folder does, before the extension so the file
+ * still opens.
+ */
+export function uniqueExportNames(names: string[]): string[] {
+  const used = new Set<string>();
+  return names.map((name) => {
+    if (!used.has(name)) {
+      used.add(name);
+      return name;
+    }
+    const dot = name.lastIndexOf(".");
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : "";
+    for (let n = 2; ; n += 1) {
+      const candidate = `${stem} (${n})${ext}`;
+      if (!used.has(candidate)) {
+        used.add(candidate);
+        return candidate;
+      }
+    }
+  });
+}
+
+/** Join a picked directory with a filename, keeping the platform's separator. */
+export function joinExportPath(dir: string, name: string): string {
+  const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+  return `${dir.replace(/[/\\]+$/, "")}${sep}${name}`;
 }
 
 /**
@@ -499,6 +534,92 @@ export function ArtifactsView() {
   }, []);
 
   const checkedItems = useMemo(() => shown.filter((a) => checked.has(a.id)), [shown, checked]);
+  const [busy, setBusy] = useState(false);
+
+  /**
+   * Run `step` for every checked artifact, collecting failures instead of
+   * stopping at the first one.
+   *
+   * Aborting halfway through a batch of 20 leaves the user with no idea which
+   * ones landed. Every item is attempted; the ones that failed are named in one
+   * error line at the end, and the successes stand.
+   */
+  const runBatch = useCallback(
+    async (items: Artifact[], step: (artifact: Artifact, index: number) => Promise<void>) => {
+      setBusy(true);
+      const failed: string[] = [];
+      for (const [index, artifact] of items.entries()) {
+        try {
+          await step(artifact, index);
+        } catch (e) {
+          failed.push(`${artifact.title}: ${String(e)}`);
+        }
+      }
+      setBusy(false);
+      setError(
+        failed.length === 0
+          ? null
+          : t("artifacts.batch_failed", "{{count}} 份失败：{{detail}}", {
+              count: failed.length,
+              detail: failed.join("；"),
+            }),
+      );
+      return failed.length;
+    },
+    [t],
+  );
+
+  const batchDelete = useCallback(async () => {
+    const items = checkedItems;
+    if (
+      !window.confirm(
+        t("artifacts.batch_delete_confirm", "删除选中的 {{count}} 份产出？此操作不可撤销。", {
+          count: items.length,
+        }),
+      )
+    ) {
+      return;
+    }
+    await runBatch(items, (a) => invoke("delete_artifact", { id: a.id }));
+    clearChecked();
+    await load();
+  }, [checkedItems, runBatch, clearChecked, load, t]);
+
+  const batchMove = useCallback(async () => {
+    const items = checkedItems;
+    // Everything in one batch shares a destination, so one prompt. The path is
+    // normalized (and refused) server-side, so a typo comes back as an error
+    // rather than creating a folder named "  交付 / ".
+    const target = window.prompt(
+      t("artifacts.batch_move_prompt", "把选中的 {{count}} 份移动到哪个文件夹？（留空＝工作区根目录）", {
+        count: items.length,
+      }),
+      items[0]?.path ?? "",
+    );
+    if (target === null) return;
+    await runBatch(items, async (a) => {
+      await invoke<Artifact>("update_artifact", { id: a.id, path: target });
+    });
+    clearChecked();
+    await load();
+  }, [checkedItems, runBatch, clearChecked, load, t]);
+
+  const batchExport = useCallback(async () => {
+    const items = checkedItems;
+    const names = uniqueExportNames(items.map((a) => a.name));
+    // A tab cannot be handed a destination directory, so it falls back to the
+    // browser's own download folder, one file at a time — same split the
+    // single-artifact 导出 already makes.
+    if (isWebBuild()) {
+      await runBatch(items, (a, i) => downloadArtifact(a.id, names[i]));
+      return;
+    }
+    const dir = await openDialog({ multiple: false, directory: true });
+    if (typeof dir !== "string") return;
+    await runBatch(items, (a, i) =>
+      invoke("export_artifact", { id: a.id, dest: joinExportPath(dir, names[i]) }),
+    );
+  }, [checkedItems, runBatch]);
 
   const patch = useCallback(
     async (
@@ -606,6 +727,21 @@ export function ArtifactsView() {
       <button className={styles.chip} onClick={clearChecked}>
         {t("artifacts.select_none", "清空选择")}
       </button>
+      <span className={styles.selection_actions}>
+        <button className={styles.chip} disabled={busy} onClick={batchMove}>
+          {t("artifacts.batch_move", "移动到…")}
+        </button>
+        <button className={styles.chip} disabled={busy} onClick={batchExport}>
+          {t("artifacts.batch_export", "导出到…")}
+        </button>
+        <button
+          className={`${styles.chip} ${styles.chip_danger}`}
+          disabled={busy}
+          onClick={batchDelete}
+        >
+          {t("artifacts.batch_delete", "删除")}
+        </button>
+      </span>
     </div>
   );
 

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_SORT_DIR,
+  joinExportPath,
   nextSelection,
+  uniqueExportNames,
   buildArtifactDirectoryTree,
   filterArtifacts,
   formatBytes,
@@ -300,5 +302,46 @@ describe("nextSelection", () => {
     const before = new Set(["a"]);
     nextSelection(before, order, "b", { shift: false, anchor: "a" });
     expect([...before]).toEqual(["a"]);
+  });
+});
+
+describe("uniqueExportNames", () => {
+  it("suffixes repeats before the extension so the file still opens", () => {
+    expect(uniqueExportNames(["a.pdf", "a.pdf", "a.pdf"])).toEqual([
+      "a.pdf",
+      "a (2).pdf",
+      "a (3).pdf",
+    ]);
+  });
+
+  it("handles names with no extension and dotfiles", () => {
+    expect(uniqueExportNames(["README", "README"])).toEqual(["README", "README (2)"]);
+    // A leading dot is the whole name, not an extension — do not turn
+    // ".env" into " (2).env".
+    expect(uniqueExportNames([".env", ".env"])).toEqual([".env", ".env (2)"]);
+  });
+
+  it("does not collide with a name the caller already used", () => {
+    expect(uniqueExportNames(["a.pdf", "a (2).pdf", "a.pdf"])).toEqual([
+      "a.pdf",
+      "a (2).pdf",
+      "a (3).pdf",
+    ]);
+  });
+
+  it("leaves distinct names alone", () => {
+    expect(uniqueExportNames(["a.pdf", "b.pdf"])).toEqual(["a.pdf", "b.pdf"]);
+  });
+});
+
+describe("joinExportPath", () => {
+  it("keeps the platform separator the picked directory used", () => {
+    expect(joinExportPath("/Users/me/out", "a.pdf")).toBe("/Users/me/out/a.pdf");
+    expect(joinExportPath("C:\\Users\\me", "a.pdf")).toBe("C:\\Users\\me\\a.pdf");
+  });
+
+  it("does not double the separator on a trailing slash", () => {
+    expect(joinExportPath("/out/", "a.pdf")).toBe("/out/a.pdf");
+    expect(joinExportPath("C:\\out\\", "a.pdf")).toBe("C:\\out\\a.pdf");
   });
 });
