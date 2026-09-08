@@ -41,6 +41,18 @@ try {for(const lang of ['en','zh']) for(const width of [1440,390]) {
  await p.locator('#tab-0').click();
  await p.evaluate(()=>scrollTo(0,0));
  await p.screenshot({path:`.playwright-cli/full-${lang}-${width}.png`,fullPage:true});
+
+ // Field report page — reached the way a reader reaches it, through the nav entry.
+ await p.locator('.nav-benchmark').click();
+ await p.waitForURL(/benchmark\.html/);
+ const report=await p.evaluate(()=>({charts:document.querySelectorAll('.bm-chart').length,squares:document.querySelectorAll('.bm-units i').length,tables:document.querySelectorAll('.bm-data table').length,days:document.querySelectorAll('.bm-hit').length,tiles:document.querySelectorAll('.bm-tile').length,caps:document.querySelectorAll('.bm-cap').length}));
+ if(report.charts!==3||report.squares!==82||report.tables!==3||report.days<28||report.tiles!==4||report.caps!==6)throw Error('Field report incomplete: '+JSON.stringify(report));
+ // The curve draws outside its own <svg> box (peak label, axis text), so assert
+ // the page — not the element — stays inside the viewport at both widths.
+ if(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('Field report overflows horizontally');
+ if(await p.evaluate(()=>{const s=document.querySelector('.bm-svg');const r=s.getBoundingClientRect();return r.width<200||r.height<120;}))throw Error('Daily curve collapsed');
+ await p.screenshot({path:`.playwright-cli/benchmark-${lang}-${width}.png`,fullPage:true});
+
  if(failed.length)throw Error(JSON.stringify(failed));
  console.log({lang,width,images:dimensions,failedResources:failed.length});await p.close();
 }} finally {await browser.close();}
