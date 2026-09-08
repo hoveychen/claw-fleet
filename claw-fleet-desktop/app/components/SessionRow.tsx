@@ -1,8 +1,10 @@
 import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Bot, ChevronRight, Clock, FolderGit2, Radar, Waypoints } from "lucide-react";
+import { Bot, ChevronRight, Clock, FolderGit2, MessageCircleQuestion, Radar, Waypoints } from "lucide-react";
 import type { SessionInfo } from "../types";
 import { LIVE_STATUSES, isQuietAlive, isQuietAliveSticky, rowBarColor } from "../types";
+import { pendingDecisionState } from "../pendingDecisionState";
+import { useDecisionStore } from "../store";
 import { MarkControl } from "./MarkControl";
 import { AgentSourceIcon } from "./SessionCard";
 import styles from "./SessionRow.module.css";
@@ -144,6 +146,14 @@ export const SessionRow = memo(function SessionRow({
   // the window right after a sparse write, which gets its own wording: the
   // transcript just moved, but the cadence is still "one line every few
   // minutes", which is what the faded dot is saying.
+  // Does this task have a card waiting on 老板? Simplified mode has no
+  // always-on DecisionPanel, so without this chip a card raised on a task you
+  // are not currently reading is invisible — and a *parked* (timed-out) one
+  // stays invisible for as long as it takes to open that task by hand.
+  // A store subscription, not a prop: the memo below compares props only, and
+  // the selector returns a plain string so a re-render happens exactly when
+  // this row's state changes.
+  const decisionState = useDecisionStore((st) => pendingDecisionState(st.decisions, s.id));
   const quiet = isQuietAlive(s);
   const sparse = !quiet && isQuietAliveSticky(s);
   const quietMins = quiet
@@ -208,6 +218,26 @@ export const SessionRow = memo(function SessionRow({
               <span className={styles.row_project} title={s.workspacePath}>
                 <FolderGit2 size={10} strokeWidth={1.6} />
                 {s.workspaceName}
+              </span>
+            )}
+            {decisionState !== "none" && (
+              <span
+                className={
+                  decisionState === "parked" ? styles.row_decision_parked : styles.row_decision
+                }
+                title={
+                  decisionState === "parked"
+                    ? t(
+                        "history.decision_parked",
+                        "决策卡已超时 — 会话被暂停，问题还在等你回复",
+                      )
+                    : t("history.decision_pending", "有决策卡在等你回复")
+                }
+              >
+                <MessageCircleQuestion size={10} strokeWidth={1.6} />
+                {decisionState === "parked"
+                  ? t("history.decision_parked_chip", "已超时")
+                  : t("history.decision_pending_chip", "待决策")}
               </span>
             )}
             {s.handoff && (

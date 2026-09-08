@@ -312,3 +312,25 @@
 .mark_toggle[data-outcome="abandoned"] {
   color: var(--color-warning);
 }
+
+/* Card waiting on the user. Same chip geometry as .row_handoff; the colour is
+   what carries the meaning — accent while it is still counting down, warning
+   once it timed out and parked (the session is stopped until it is answered). */
+.row_decision {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--color-accent);
+  background: var(--color-bg-tool);
+  border-radius: 5px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.row_decision_parked {
+  composes: row_decision;
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
