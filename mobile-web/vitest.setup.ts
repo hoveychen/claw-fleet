@@ -36,3 +36,15 @@ if (!("window" in globalThis)) {
     },
   });
 }
+// 裸的全局 `location` 是另一个名字，上面那个 window shim 覆盖不到它：mock/relay.ts
+// 顶层用 `new URLSearchParams(location.search)` 判官网演示场景，devScrollHarness.tsx
+// 读 `location.search` 拿 latency。任何 import 到它们的测试都会在 import 期就
+// ReferenceError: location is not defined —— 与测试自身断言什么无关。
+// search 给空串：默认走「不是官网演示」那条路，正是单测想要的常态。
+if (!("location" in globalThis)) {
+  Object.defineProperty(globalThis, "location", {
+    configurable: true,
+    writable: true,
+    value: { origin: "http://localhost", href: "http://localhost/", hash: "", search: "" },
+  });
+}
