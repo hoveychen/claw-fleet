@@ -11,11 +11,14 @@ import {
   Film,
   Folder,
   FolderOpen,
+  FolderPlus,
   Image as ImageIcon,
   Music,
   Package,
+  Pencil,
   Presentation,
   Star,
+  Trash2,
   TriangleAlert,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
@@ -348,6 +351,69 @@ export function ArtifactsView() {
     [],
   );
 
+  /**
+   * Run a folder mutation, then reload.
+   *
+   * A full reload rather than a local splice: renaming a folder re-files every
+   * artifact under it server-side, so the artifact list is stale too and
+   * patching only the folder array would leave the counts wrong.
+   */
+  const folderOp = useCallback(
+    async (op: () => Promise<unknown>) => {
+      try {
+        await op();
+        setError(null);
+        await load();
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [load],
+  );
+
+  const createFolder = useCallback(
+    (workspacePath: string, path: string) =>
+      folderOp(() => invoke("create_artifact_folder", { workspacePath, path })),
+    [folderOp],
+  );
+
+  const renameFolder = useCallback(
+    (workspacePath: string, from: string, to: string) =>
+      folderOp(() => invoke("rename_artifact_folder", { workspacePath, from, to })),
+    [folderOp],
+  );
+
+  const deleteFolder = useCallback(
+    (workspacePath: string, path: string) =>
+      folderOp(async () => {
+        await invoke("delete_artifact_folder", { workspacePath, path });
+        // The rail's selection may have just been deleted from under it.
+        if (workspace === workspacePath && directory.startsWith(path)) {
+          setDirectory("");
+        }
+      }),
+    [folderOp, workspace, directory],
+  );
+
+  /** Folder paths offered when filing an artifact, for one workspace. */
+  const folderOptions = useCallback(
+    (workspacePath: string): string[] => {
+      const out = new Set<string>();
+      for (const f of folders) {
+        if (f.workspacePath === workspacePath && f.path) out.add(f.path);
+      }
+      // Paths already in use count as folders even without a record — a
+      // pre-folders artifact's derived directory is a real place to file into.
+      for (const a of items ?? []) {
+        if (a.workspacePath !== workspacePath) continue;
+        const dir = artifactRelativeDirectory(a);
+        if (dir) out.add(dir);
+      }
+      return [...out].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+    },
+    [folders, items],
+  );
+
   const subBar = (
     <div className={styles.filters}>
       <button
@@ -404,6 +470,9 @@ export function ArtifactsView() {
             setDirectory(nextDirectory);
             setSelectedId(null);
           }}
+          onCreateFolder={createFolder}
+          onRenameFolder={renameFolder}
+          onDeleteFolder={deleteFolder}
         />
       }
     >
@@ -411,6 +480,7 @@ export function ArtifactsView() {
       {selected ? (
         <ArtifactDetail
           artifact={selected}
+          folderOptions={folderOptions(selected.workspacePath)}
           onBack={() => setSelectedId(null)}
           onPatch={patch}
           onDeleted={async () => {
@@ -453,11 +523,17 @@ function ArtifactDirectoryTree({
   selectedKey,
   totalCount,
   onSelect,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
 }: {
   nodes: ArtifactDirectoryNode[];
   selectedKey: string;
   totalCount: number;
   onSelect: (workspacePath: string, directory: string) => void;
+  onCreateFolder: (workspacePath: string, path: string) => void;
+  onRenameFolder: (workspacePath: string, from: string, to: string) => void;
+  onDeleteFolder: (workspacePath: string, path: string) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -473,7 +549,16 @@ function ArtifactDirectoryTree({
         <span className={styles.tree_count}>{totalCount}</span>
       </button>
       {nodes.map((node) => (
-        <ArtifactDirectoryBranch key={node.key} node={node} depth={0} selectedKey={selectedKey} onSelect={onSelect} />
+        <ArtifactDirectoryBranch
+          key={node.key}
+          node={node}
+          depth={0}
+          selectedKey={selectedKey}
+          onSelect={onSelect}
+          onCreateFolder={onCreateFolder}
+          onRenameFolder={onRenameFolder}
+          onDeleteFolder={onDeleteFolder}
+        />
       ))}
     </nav>
   );
@@ -484,15 +569,50 @@ function ArtifactDirectoryBranch({
   depth,
   selectedKey,
   onSelect,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
 }: {
   node: ArtifactDirectoryNode;
   depth: number;
   selectedKey: string;
   onSelect: (workspacePath: string, directory: string) => void;
+  onCreateFolder: (workspacePath: string, path: string) => void;
+  onRenameFolder: (workspacePath: string, from: string, to: string) => void;
+  onDeleteFolder: (workspacePath: string, path: string) => void;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
+  /**
+   * Which inline editor this row is showing, if any.
+   *
+   * Inline rather than a dialog on purpose: `window.prompt` is not reliably
+   * available in a Tauri webview, and a second window is exactly what the
+   * desktop is moving away from.
+   */
+  const [editing, setEditing] = useState<null | "create" | "rename">(null);
   const hasChildren = node.children.length > 0;
   const selected = selectedKey === `${node.workspacePath}\u0000${node.directory}`;
+  // The workspace row is the drive, not a folder: it can hold new folders but
+  // cannot itself be renamed or deleted.
+  const isWorkspaceRoot = node.directory === "";
+
+  const commit = (value: string) => {
+    const name = value.trim();
+    setEditing(null);
+    if (!name) return;
+    if (editing === "create") {
+      onCreateFolder(node.workspacePath, node.directory ? `${node.directory}/${name}` : name);
+      setExpanded(true);
+      return;
+    }
+    // Rename replaces the last segment only — moving a folder elsewhere is a
+    // different gesture, and typing a `/` here would silently re-nest it.
+    if (name === node.label) return;
+    const parent = node.directory.split("/").slice(0, -1).join("/");
+    onRenameFolder(node.workspacePath, node.directory, parent ? `${parent}/${name}` : name);
+  };
+
   return (
     <div>
       <div className={`${styles.tree_row} ${selected ? styles.tree_row_active : ""}`} style={{ paddingLeft: 12 + depth * 15 }}>
@@ -510,9 +630,74 @@ function ArtifactDirectoryBranch({
           <span className={styles.tree_label} title={node.label}>{node.label}</span>
           <span className={styles.tree_count}>{node.count}</span>
         </button>
+        <span className={styles.tree_actions}>
+          <button
+            type="button"
+            className={styles.tree_action}
+            title={t("artifacts.folder_new", "新建文件夹")}
+            aria-label={t("artifacts.folder_new", "新建文件夹")}
+            onClick={() => setEditing("create")}
+          >
+            <FolderPlus size={13} strokeWidth={1.5} />
+          </button>
+          {!isWorkspaceRoot && (
+            <>
+              <button
+                type="button"
+                className={styles.tree_action}
+                title={t("artifacts.folder_rename", "重命名")}
+                aria-label={t("artifacts.folder_rename", "重命名")}
+                onClick={() => setEditing("rename")}
+              >
+                <Pencil size={13} strokeWidth={1.5} />
+              </button>
+              <button
+                type="button"
+                className={styles.tree_action}
+                title={t("artifacts.folder_delete", "删除文件夹")}
+                aria-label={t("artifacts.folder_delete", "删除文件夹")}
+                onClick={() => {
+                  // Core refuses a folder that still holds anything, so this
+                  // confirm is about the folder itself, not its contents.
+                  if (!window.confirm(t("artifacts.folder_delete_confirm", "删除文件夹「{{name}}」？", { name: node.label }))) {
+                    return;
+                  }
+                  onDeleteFolder(node.workspacePath, node.directory);
+                }}
+              >
+                <Trash2 size={13} strokeWidth={1.5} />
+              </button>
+            </>
+          )}
+        </span>
       </div>
+      {editing && (
+        <input
+          className={styles.tree_input}
+          style={{ marginLeft: 32 + depth * 15 }}
+          autoFocus
+          defaultValue={editing === "rename" ? node.label : ""}
+          placeholder={t("artifacts.folder_name_placeholder", "文件夹名")}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit(e.currentTarget.value);
+            if (e.key === "Escape") setEditing(null);
+          }}
+          // Blur commits too: clicking away from a half-typed name and having
+          // it silently discarded is the more annoying of the two failures.
+          onBlur={(e) => commit(e.currentTarget.value)}
+        />
+      )}
       {expanded && node.children.map((child) => (
-        <ArtifactDirectoryBranch key={child.key} node={child} depth={depth + 1} selectedKey={selectedKey} onSelect={onSelect} />
+        <ArtifactDirectoryBranch
+          key={child.key}
+          node={child}
+          depth={depth + 1}
+          selectedKey={selectedKey}
+          onSelect={onSelect}
+          onCreateFolder={onCreateFolder}
+          onRenameFolder={onRenameFolder}
+          onDeleteFolder={onDeleteFolder}
+        />
       ))}
     </div>
   );
@@ -603,22 +788,33 @@ function ArtifactCard({
 
 function ArtifactDetail({
   artifact,
+  folderOptions,
   onBack,
   onPatch,
   onDeleted,
   onError,
 }: {
   artifact: Artifact;
+  folderOptions: string[];
   onBack: () => void;
-  onPatch: (id: string, fields: { title?: string; note?: string; starred?: boolean }) => void;
+  onPatch: (
+    id: string,
+    fields: { title?: string; note?: string; starred?: boolean; path?: string },
+  ) => void;
   onDeleted: () => void;
   onError: (msg: string | null) => void;
 }) {
   const { t } = useTranslation();
   const [localPath, setLocalPath] = useState<string | null>(null);
   const [note, setNote] = useState(artifact.note);
+  // Where this artifact currently shows up, editable. A text field with a
+  // datalist rather than a picker: one control both files into an existing
+  // folder and creates a new one by typing it, which is how a path field in a
+  // file manager already behaves.
+  const [folder, setFolder] = useState(artifact.path);
 
   useEffect(() => setNote(artifact.note), [artifact.id, artifact.note]);
+  useEffect(() => setFolder(artifact.path), [artifact.id, artifact.path]);
 
   // Null for a remote workspace — the two OS-level actions are hidden rather
   // than pointed at a path on the other machine.
@@ -747,6 +943,31 @@ function ArtifactDetail({
           <span title={artifact.workspacePath}>{artifact.workspaceName}</span>
           <span>{new Date(artifact.createdMs).toLocaleString()}</span>
         </div>
+        <label className={styles.folder_row}>
+          <Folder size={13} strokeWidth={1.5} />
+          <span className={styles.folder_label}>{t("artifacts.folder", "所在文件夹")}</span>
+          <input
+            className={styles.folder_input}
+            list={`artifact-folders-${artifact.id}`}
+            value={folder}
+            placeholder={t("artifacts.folder_placeholder", "工作区根目录")}
+            onChange={(e) => setFolder(e.target.value)}
+            // Same commit-on-blur rule as the note: one disk write per edit,
+            // not one per keystroke.
+            onBlur={() => {
+              if (folder !== artifact.path) onPatch(artifact.id, { path: folder });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") setFolder(artifact.path);
+            }}
+          />
+          <datalist id={`artifact-folders-${artifact.id}`}>
+            {folderOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </label>
         <textarea
           className={styles.note_input}
           value={note}
