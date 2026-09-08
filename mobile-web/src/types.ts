@@ -397,6 +397,19 @@ export interface Artifact {
   hardlinked: boolean;
   /** Hard-linked and the source was rewritten in place since ingest. */
   drifted: boolean;
+  /** Which entry of `versions` the fields above describe. */
+  currentVersion: string;
+  /** Every ingest of this deliverable, newest first — always at least one. */
+  versions: ArtifactVersion[];
+}
+
+/** One ingest of an artifact (claw_fleet_core::artifacts::ArtifactVersion). */
+export interface ArtifactVersion {
+  id: string;
+  addedMs: number;
+  sizeBytes: number;
+  sourcePath: string;
+  hardlinked: boolean;
 }
 
 /** One user-made folder (claw_fleet_core::artifacts::Folder). */

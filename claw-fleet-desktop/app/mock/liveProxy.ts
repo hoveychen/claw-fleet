@@ -829,6 +829,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { id: a.id },
   }),
 
+  rollback_artifact: (a) => ({
+    method: "POST",
+    path: "/artifact_rollback",
+    body: { id: a.id, version: a.version },
+  }),
+
   list_artifact_folders: () => ({
     method: "GET",
     path: "/artifact_folders",

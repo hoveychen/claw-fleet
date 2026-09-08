@@ -2571,6 +2571,24 @@ impl LocalBackend {
         crate::artifacts::read_bytes(id, range)
     }
 
+    /// Bytes of one specific version; `None` is the current one.
+    pub fn read_artifact_version_bytes(
+        &self,
+        id: &str,
+        version: Option<&str>,
+        range: Option<(u64, u64)>,
+    ) -> Result<crate::artifacts::ArtifactBytes, String> {
+        crate::artifacts::read_version_bytes(id, version, range)
+    }
+
+    pub fn rollback_artifact(
+        &self,
+        id: &str,
+        version: &str,
+    ) -> Result<crate::artifacts::Artifact, String> {
+        crate::artifacts::rollback(id, version)
+    }
+
     pub fn artifact_usage(&self) -> crate::artifacts::StoreUsage {
         crate::artifacts::usage()
     }

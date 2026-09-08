@@ -59,3 +59,27 @@ describe("artifactBlobUrl", () => {
     expect(decodeURIComponent(firstSegment)).toBe(id);
   });
 });
+
+describe("artifactBlobUrl versions", () => {
+  it("pins the browser URL to a version without losing the id", async () => {
+    const web = await loadFor("web");
+    expect(web.artifactBlobUrl("20260827-1", "a.pdf", "v2")).toBe(
+      `${window.location.origin}/artifact_blob?id=20260827-1&version=v2`,
+    );
+    // No version means current, exactly as before.
+    expect(web.artifactBlobUrl("20260827-1", "a.pdf")).toBe(
+      `${window.location.origin}/artifact_blob?id=20260827-1`,
+    );
+  });
+
+  it("keeps the filename as the last path segment on the protocol host", async () => {
+    const desktop = await loadFor("desktop");
+    const url = desktop.artifactBlobUrl("20260827-1", "报告.pdf", "v3");
+    // The `<name>` tail is what gives a <video>/<embed> its decoder hint, so
+    // the version rides as a query rather than as another path segment.
+    expect(url).toBe(
+      "fleet-artifact://localhost/20260827-1/%E6%8A%A5%E5%91%8A.pdf?version=v3",
+    );
+    expect(url.replace("fleet-artifact://localhost/", "").split("/")).toHaveLength(2);
+  });
+});

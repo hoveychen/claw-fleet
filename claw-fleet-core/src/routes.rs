@@ -34,6 +34,7 @@ pub const ARTIFACT_UPDATE: &str = "/artifact_update";
 pub const ARTIFACT_USAGE: &str = "/artifact_usage";
 /// The user's own folders. Separate records from the artifacts because an
 /// empty folder has no artifact to hang off — see `artifacts::Folder`.
+pub const ARTIFACT_ROLLBACK: &str = "/artifact_rollback";
 pub const ARTIFACT_FOLDERS: &str = "/artifact_folders";
 pub const ARTIFACT_FOLDER_CREATE: &str = "/artifact_folder_create";
 pub const ARTIFACT_FOLDER_DELETE: &str = "/artifact_folder_delete";

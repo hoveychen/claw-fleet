@@ -169,6 +169,28 @@ pub(crate) fn route_artifact_delete(
     }
 }
 
+/// `POST /artifact_rollback` — make an older version current again.
+pub(crate) fn route_artifact_rollback(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        id: String,
+        version: String,
+    }
+    let rolled = read_body(&mut request)
+        .and_then(|b| {
+            serde_json::from_slice::<Req>(&b)
+                .map_err(|e| format!("bad /artifact_rollback body: {e}"))
+        })
+        .and_then(|r| crate::artifacts::rollback(&r.id, &r.version));
+    respond_json_result(request, json_header, rolled);
+}
+
 // ── Folders ──────────────────────────────────────────────────────────────────
 
 /// `GET /artifact_folders` — every folder the user made, empty ones included.
@@ -292,13 +314,16 @@ pub(crate) fn route_artifact_blob(
     path: &str,
 ) {
     let id = decoded(query, "id");
+    // `&version=v2` pins the response to one version; absent means current.
+    let version = decoded(query, "version");
     let range = request
         .headers()
         .iter()
         .find(|h| h.field.equiv("Range"))
         .and_then(|h| crate::artifacts::parse_range_header(h.value.as_str()));
 
-    match crate::artifacts::read_bytes(&id, range) {
+    let version = if version.is_empty() { None } else { Some(version.as_str()) };
+    match crate::artifacts::read_version_bytes(&id, version, range) {
         Ok(blob) => {
             let mut resp = tiny_http::Response::from_data(blob.bytes)
                 .with_header(header("Content-Type", &blob.mime))

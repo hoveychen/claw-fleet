@@ -111,6 +111,17 @@ pub(crate) fn update_artifact(
     )
 }
 
+/// Make an older version current again. Nothing is discarded, so this is
+/// itself undoable — see `artifacts::rollback`.
+#[tauri::command(async)]
+pub(crate) fn rollback_artifact(
+    id: String,
+    version: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::artifacts::Artifact, String> {
+    state.backend.rollback_artifact(&id, &version)
+}
+
 // ── Folders ──────────────────────────────────────────────────────────────────
 //
 // Folders are records of their own so that "新建文件夹, then drag things in"

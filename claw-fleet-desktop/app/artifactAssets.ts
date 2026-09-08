@@ -22,11 +22,17 @@ import { isWebBuild } from "./hostEnv";
  * host-dependent behaviour is the part worth unit-testing, and importing it
  * from the view would drag the whole board into the test.
  */
-export function artifactBlobUrl(id: string, name: string): string {
+export function artifactBlobUrl(id: string, name: string, version?: string): string {
+  // `version` pins the URL to one entry of the artifact's history; omitted, it
+  // means the current version. Passed as a query on both hosts so the `<name>`
+  // tail — which is what gives a `<video>` its decoder hint — stays the last
+  // path segment either way.
+  const pinned = version ? `version=${encodeURIComponent(version)}` : "";
   if (isWebBuild()) {
-    return `${window.location.origin}/artifact_blob?id=${encodeURIComponent(id)}`;
+    const query = `id=${encodeURIComponent(id)}${pinned ? `&${pinned}` : ""}`;
+    return `${window.location.origin}/artifact_blob?${query}`;
   }
-  const path = `${encodeURIComponent(id)}/${encodeURIComponent(name)}`;
+  const path = `${encodeURIComponent(id)}/${encodeURIComponent(name)}${pinned ? `?${pinned}` : ""}`;
   return navigator.userAgent.includes("Windows")
     ? `http://fleet-artifact.localhost/${path}`
     : `fleet-artifact://localhost/${path}`;
