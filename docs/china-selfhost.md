@@ -27,11 +27,12 @@
 ```bash
 ssh own-api-sz 'install -d -m 755 /srv/claw-fleet-site/deployments/20260907-v2.6.0'
 rsync -a /tmp/fleet-site-selfhost/ own-api-sz:/srv/claw-fleet-site/deployments/20260907-v2.6.0/
+ssh own-api-sz 'chmod 755 /srv/claw-fleet-site/deployments/20260907-v2.6.0'
 ssh own-api-sz 'cd /srv/claw-fleet-site/deployments/20260907-v2.6.0 && sha256sum -c DEPLOY-SHA256SUMS'
 ssh own-api-sz 'test ! -e /srv/claw-fleet-site/current && test ! -L /srv/claw-fleet-site/current && ln -s /srv/claw-fleet-site/deployments/20260907-v2.6.0 /srv/claw-fleet-site/current'
 ```
 
-先完整上传到未公开目录，服务器校验全部文件通过后才建立入口软链接。新增 Fleet 虚拟主机的 `try_files` 提供该目录。首次配置需要 `nginx -t` 后 reload；后续仅切换站点入口不需要 reload。官网主目录与现有服务不改动。发布不会 git push，不创建 COS 资源。
+先完整上传到未公开目录，服务器校验全部文件通过后才建立入口软链接。`rsync -a` 会把本地 `mktemp` 目录常见的 `0700` 根权限同步过去，因此切换前必须显式恢复部署根为 `0755`，否则 Nginx 无法穿越目录并返回 403。新增 Fleet 虚拟主机的 `try_files` 提供该目录。首次配置需要 `nginx -t` 后 reload；后续仅切换站点入口不需要 reload。官网主目录与现有服务不改动。发布不会 git push，不创建 COS 资源。
 
 ## 验证与回退
 
