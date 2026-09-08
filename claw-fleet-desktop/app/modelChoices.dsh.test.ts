@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DSH_FEATURED_VENDORS, dshFindPick, dshModelMenu } from "./modelChoices";
+import { DSH_FEATURED_VENDORS, dshFindPick, dshLadderSpec, dshModelMenu } from "./modelChoices";
 import type { DshModelCatalog } from "./generated/types";
 
 /** Shapes taken from the live `/dsh_models` payload on this machine (dsh
@@ -58,6 +58,10 @@ function catalog(): DshModelCatalog {
       },
     ],
     failures: [],
+    // dsh's `agent-default-model` — what a session mounts when the launcher
+    // names no model.
+    defaultSpec: "deepseek-official/deepseek-v4-pro",
+    defaultEffort: "high",
   };
 }
 
@@ -159,7 +163,11 @@ describe("dshModelMenu", () => {
     // The launcher then shows only its "default" item, which is honest: the
     // session runs on whatever ~/.dsh/settings.yaml selects. A thrown error
     // here would blank the whole pill row.
-    for (const empty of [null, undefined, { groups: [], failures: [] }]) {
+    for (const empty of [
+      null,
+      undefined,
+      { groups: [], failures: [], defaultSpec: null, defaultEffort: null },
+    ]) {
       const menu = dshModelMenu(empty as DshModelCatalog | null);
       expect(menu.inline).toEqual([]);
       expect(menu.folders).toEqual([]);
@@ -174,6 +182,37 @@ describe("dshModelMenu", () => {
     c.failures = [{ id: "moonshot", name: "Moonshot", message: "missing credential" }];
     const menu = dshModelMenu(c);
     expect(menu.inline.length).toBeGreaterThan(0);
+  });
+
+  it("shows the default model's effort ladder while the model pill still says default", () => {
+    // The boss's report: on a machine that always runs dsh's default model the
+    // effort menu never offered anything but "default", because the ladder was
+    // looked up by the *explicit* pick only. The ladder must follow the model
+    // the session will actually run on, which the catalogue names.
+    const c = catalog();
+    const menu = dshModelMenu(c);
+    expect(dshLadderSpec(c, "")).toBe("deepseek-official/deepseek-v4-pro");
+    const ladder = dshFindPick(menu, dshLadderSpec(c, ""))!;
+    expect(ladder.efforts).toEqual(["off", "high"]);
+    expect(ladder.defaultEffort).toBe("high");
+
+    // An explicit pick still wins over the default.
+    expect(dshLadderSpec(c, "openrouter/openai/gpt-5.6-sol")).toBe(
+      "openrouter/openai/gpt-5.6-sol",
+    );
+    expect(dshFindPick(menu, dshLadderSpec(c, "openrouter/openai/gpt-5.6-sol"))!.efforts).toEqual([
+      "low",
+      "medium",
+      "high",
+    ]);
+
+    // No catalogue, or a catalogue naming no default: nothing to show, which
+    // `dshFindPick` turns into "no pick" — the old, honest degradation.
+    expect(dshLadderSpec(null, "")).toBe("");
+    expect(dshLadderSpec({ ...c, defaultSpec: null }, "")).toBe("");
+    expect(dshFindPick(menu, dshLadderSpec(null, ""))).toBeUndefined();
+    // A host older than this field: `defaultSpec` undefined, not null.
+    expect(dshLadderSpec({ groups: [], failures: [] } as never, "")).toBe("");
   });
 
   it("tolerates a payload whose arrays are missing outright", () => {

@@ -415,7 +415,12 @@ impl DshSource {
         model: Option<&str>,
         effort: Option<&str>,
     ) -> Result<(), String> {
-        let Some((provider, model)) = model.and_then(split_model) else {
+        let Some((spec, effort)) = resolve_selection(model, effort, || {
+            Self::current_model_for(client, session_id)
+        }) else {
+            return Ok(());
+        };
+        let Some((provider, model)) = split_model(&spec) else {
             return Ok(());
         };
         let mut payload = json!({
@@ -423,13 +428,45 @@ impl DshSource {
             "provider": provider,
             "model": model,
         });
-        if let Some(effort) = effort.filter(|e| !e.is_empty()) {
+        if let Some(effort) = effort {
             payload["reasoningEffort"] = json!(effort);
         }
         client
             .call("session/selectModel", json!({ "request": payload }))
             .map(|_| ())
             .map_err(Into::into)
+    }
+
+    /// The model a session is on when the caller names only an effort.
+    ///
+    /// `session/selectModel` insists on `provider` + `model`, so an effort-only
+    /// request has to be completed with the model the session would run on
+    /// anyway. Two sources, in order:
+    ///
+    /// 1. The route Fleet last saw in this session's own log
+    ///    ([`known_model`]) — exact, but only present once this process has
+    ///    read the session's history (a resume from a card that was opened).
+    /// 2. dsh's default selection from `session/modelCatalog`. Exact for a
+    ///    brand-new session (that is precisely the model dsh will mount) and
+    ///    the only answer available for a cold resume; it is what
+    ///    `session/models` would also say, without that RPC's side effect of
+    ///    attaching an agent to the session for good.
+    ///
+    /// `None` when neither answers, in which case the effort is dropped — as
+    /// it always was — rather than guessed.
+    fn current_model_for(client: &DshClient, session_id: &str) -> Option<String> {
+        if let Some(spec) = known_model(session_id) {
+            return Some(spec);
+        }
+        let value = client.call("session/modelCatalog", json!({})).ok()?;
+        let spec = parse_model_catalog(&value).default_spec;
+        if spec.is_none() {
+            crate::log_debug(&format!(
+                "dsh select_model: effort given for {session_id} but no model is known and \
+                 the catalogue names no default — effort not applied"
+            ));
+        }
+        spec
     }
 
     /// Hand a prompt to a session. Returns once dsh has admitted the turn, not
@@ -573,6 +610,33 @@ fn split_model(model: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((provider, rest))
+}
+
+/// What `session/selectModel` should be told, given what the caller named.
+///
+/// * model named → that spec, with the effort if one was named too;
+/// * effort only → `current()`'s spec (the model the session is on or will
+///   mount) with the effort, or nothing when it cannot be resolved;
+/// * neither → nothing: dsh's own default applies, no RPC.
+///
+/// Blank strings count as absent — the launchers send `""` for "inherit".
+/// Pure, so the effort-only branch (the one that used to be dropped on the
+/// floor because `selectModel` needs a model) is unit-testable without a
+/// server.
+fn resolve_selection(
+    model: Option<&str>,
+    effort: Option<&str>,
+    current: impl FnOnce() -> Option<String>,
+) -> Option<(String, Option<String>)> {
+    fn clean(s: Option<&str>) -> Option<&str> {
+        s.map(str::trim).filter(|s| !s.is_empty())
+    }
+    let effort = clean(effort).map(str::to_string);
+    match (clean(model), effort) {
+        (Some(model), effort) => Some((model.to_string(), effort)),
+        (None, Some(effort)) => current().map(|spec| (spec, Some(effort))),
+        (None, None) => None,
+    }
 }
 
 /// dsh's own id shape. Fleet mints one when the caller did not pre-assign an id,
@@ -1806,6 +1870,17 @@ pub struct DshModelCatalogFailure {
 pub struct DshModelCatalog {
     pub groups: Vec<DshModelGroup>,
     pub failures: Vec<DshModelCatalogFailure>,
+    /// What dsh runs when a caller names no model: its `agent-default-model`
+    /// setting, as the same `provider/model` spec the entries carry. This is
+    /// what lets a launcher show the *default* model's effort ladder while the
+    /// model pill still says "default" — without it the effort menu was empty
+    /// until a model was explicitly picked, so the dial looked missing. `None`
+    /// when the catalogue names none (older dsh, or no default saved yet).
+    #[serde(default)]
+    pub default_spec: Option<String>,
+    /// The effort that default selection carries, if any.
+    #[serde(default)]
+    pub default_effort: Option<String>,
 }
 
 /// Map an `session/modelCatalog` answer onto [`DshModelCatalog`].
@@ -1881,7 +1956,23 @@ fn parse_model_catalog(value: &Value) -> DshModelCatalog {
         })
         .collect();
 
-    DshModelCatalog { groups, failures }
+    // `default` is dsh's `agent-default-model` selection — the model a session
+    // mounts when the launcher names none. Re-spelled as `provider/model` so
+    // the UI can look it up among the entries with the same key.
+    let default = value.get("default");
+    let default_spec = default.and_then(|d| {
+        let provider = text(d, "provider")?;
+        let model = text(d, "model")?;
+        Some(format!("{provider}/{model}"))
+    });
+    let default_effort = default.and_then(|d| text(d, "reasoningEffort"));
+
+    DshModelCatalog {
+        groups,
+        failures,
+        default_spec,
+        default_effort,
+    }
 }
 
 /// dsh's model catalogue, for the launcher's model / effort menus.
@@ -3134,6 +3225,12 @@ mod tests {
     /// object at all, or carry `efforts` with no `defaultEffort`.
     fn live_models_value() -> Value {
         json!({
+            "default": {
+                "provider": "deepseek-official",
+                "model": "deepseek-v4-pro",
+                "reasoningEffort": "high"
+            },
+            "routableProviders": ["deepseek-official", "openrouter"],
             "groups": [
                 {
                     "id": "deepseek-official",
@@ -3247,6 +3344,86 @@ mod tests {
             Some("Fast and cheap.")
         );
         assert_eq!(cat.groups[0].models[0].description, None);
+    }
+
+    #[test]
+    /// The catalogue's `default` is what dsh mounts when the launcher leaves
+    /// the model on "default", so the launcher needs it to show *that* model's
+    /// effort ladder — the dial was invisible until a model was picked by
+    /// hand. It comes through as the same `provider/model` spec the entries use,
+    /// so the UI can look it up like any pick.
+    fn the_catalogue_names_dsh_s_default_selection() {
+        let cat = parse_model_catalog(&live_models_value());
+        assert_eq!(
+            cat.default_spec.as_deref(),
+            Some("deepseek-official/deepseek-v4-pro")
+        );
+        assert_eq!(cat.default_effort.as_deref(), Some("high"));
+
+        // An older dsh (or one with no default saved yet) names none: both
+        // absent, not an error and not an invented value.
+        let mut without = live_models_value();
+        without.as_object_mut().unwrap().remove("default");
+        let cat = parse_model_catalog(&without);
+        assert_eq!(cat.default_spec, None);
+        assert_eq!(cat.default_effort, None);
+
+        // A default with no effort is still a usable model.
+        let mut bare = live_models_value();
+        bare["default"] = json!({ "provider": "openrouter", "model": "anthropic/claude-haiku-4.5" });
+        let cat = parse_model_catalog(&bare);
+        assert_eq!(
+            cat.default_spec.as_deref(),
+            Some("openrouter/anthropic/claude-haiku-4.5")
+        );
+        assert_eq!(cat.default_effort, None);
+    }
+
+    /// `session/selectModel` needs a model, so an effort named on its own used
+    /// to be dropped silently: `fleet … --effort max` on a dsh session ran at
+    /// dsh's default. The effort-only branch must complete itself from the
+    /// model the session is on.
+    #[test]
+    fn an_effort_named_alone_is_applied_to_the_current_model() {
+        let current = || Some("deepseek-official/deepseek-v4-pro".to_string());
+
+        // Effort only: resolved against the current model.
+        assert_eq!(
+            resolve_selection(None, Some("max"), current),
+            Some((
+                "deepseek-official/deepseek-v4-pro".to_string(),
+                Some("max".to_string())
+            ))
+        );
+        // The launchers send "" for "inherit"; that is absent, not a model.
+        assert_eq!(
+            resolve_selection(Some(""), Some(" low "), current),
+            Some((
+                "deepseek-official/deepseek-v4-pro".to_string(),
+                Some("low".to_string())
+            ))
+        );
+
+        // A named model wins over the current one, effort or not.
+        assert_eq!(
+            resolve_selection(Some("openrouter/x/y"), Some("low"), current),
+            Some(("openrouter/x/y".to_string(), Some("low".to_string())))
+        );
+        assert_eq!(
+            resolve_selection(Some("openrouter/x/y"), None, current),
+            Some(("openrouter/x/y".to_string(), None))
+        );
+
+        // Nothing named: no RPC at all, and `current` is never consulted.
+        assert_eq!(
+            resolve_selection(None, None, || panic!("must not resolve a model for nothing")),
+            None
+        );
+        assert_eq!(resolve_selection(Some(""), Some(""), || unreachable!()), None);
+
+        // Effort only, but no model can be found: drop the effort rather than
+        // guess — the old behaviour, now the explicit last resort.
+        assert_eq!(resolve_selection(None, Some("max"), || None), None);
     }
 
     #[test]

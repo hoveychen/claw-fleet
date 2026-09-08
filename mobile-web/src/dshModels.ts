@@ -79,6 +79,17 @@ export function dshModelGroups(
   return out;
 }
 
+/** effort 阶梯该跟着哪个模型走:选了模型就是它;模型还停在「默认」时,是 dsh
+ *  自己真正会挂上的那个 —— 目录 `defaultSpec`(主机 agent-default-model 设置)。
+ *  以前只认显式选中的模型,于是一直用默认模型的机器上 effort 下拉永远只有
+ *  「默认」一项,档位像是不存在。两者都没有时返 "",下游当「没有阶梯」。 */
+export function dshLadderSpec(
+  catalog: DshModelCatalog | null | undefined,
+  model: string,
+): string {
+  return model || catalog?.defaultSpec || "";
+}
+
 /** 选中模型自己的 effort 阶梯,以及 dsh 自己的默认值。每个模型的阶梯不同,选
  *  Claude 那套固定档位会发出 dsh 不认的值。 */
 export function dshEffortsFor(
