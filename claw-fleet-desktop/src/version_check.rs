@@ -161,11 +161,21 @@ where
     Err(errors.join("; "))
 }
 
-fn fetch_latest(country: Option<&str>) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
+/// The blocking carrier both release sources are fetched with.
+///
+/// Split out so a test can build and drive it from inside a tokio worker — the
+/// context in which `reqwest::blocking` panics rather than erroring, which is
+/// why `gui::check_app_version` hops through `off_runtime` before reaching
+/// here. A 10s timeout per source, two sources tried in turn.
+fn blocking_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("http client: {e}"))?;
+        .map_err(|e| format!("http client: {e}"))
+}
+
+fn fetch_latest(country: Option<&str>) -> Result<String, String> {
+    let client = blocking_client()?;
     fetch_latest_with(country, |source| {
         let url = match source {
             ReleaseSource::Github => GITHUB_API_URL,
@@ -380,5 +390,36 @@ mod tests {
         });
         assert_eq!(refreshed, "2.7.1");
         assert_eq!(*calls.borrow(), 1);
+    }
+
+    /// The hazard `gui::check_app_version`'s `off_runtime` hop exists for.
+    ///
+    /// `reqwest::blocking` does not merely misbehave inside a tokio runtime —
+    /// it panics (`wait::enter`), tauri's task harness swallows that, and the
+    /// invoke promise then never settles at all. So the healthy outcome here is
+    /// a transport **error**, not a panic: port 1 has no listener.
+    #[test]
+    fn blocking_client_survives_a_tokio_worker_via_off_runtime() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let joined = rt.block_on(async {
+            tokio::spawn(async {
+                claw_fleet_core::off_runtime::off_runtime(|| {
+                    let client = blocking_client()?;
+                    client
+                        .get("http://127.0.0.1:1/latest")
+                        .send()
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                })
+            })
+            .await
+        });
+        let hop = joined.expect("the command's thread must not panic inside a tokio worker");
+        let inner = hop.expect("off_runtime's helper thread must not panic");
+        assert!(inner.is_err(), "a closed port must surface as Err, not a panic");
     }
 }

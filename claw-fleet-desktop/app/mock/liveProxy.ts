@@ -829,6 +829,31 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { id: a.id },
   }),
 
+  rollback_artifact: (a) => ({
+    method: "POST",
+    path: "/artifact_rollback",
+    body: { id: a.id, version: a.version },
+  }),
+
+  list_artifact_shares: (a) => ({
+    method: "GET",
+    path: "/artifact_shares",
+    query: { id: q(a.id) },
+  }),
+
+  create_artifact_share: (a) => ({
+    method: "POST",
+    path: "/artifact_share_create",
+    body: { id: a.id, version: a.version, ttl_days: a.ttlDays },
+  }),
+
+  revoke_artifact_share: (a) => ({
+    method: "POST",
+    path: "/artifact_share_revoke",
+    empty: true,
+    body: { token: a.token },
+  }),
+
   list_artifact_folders: () => ({
     method: "GET",
     path: "/artifact_folders",
@@ -861,6 +886,14 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   list_workspace_procs: () => ({
     method: "GET",
     path: "/procs",
+  }),
+
+  // 浏览器构建问的是「服务我这张页面的那个 fleet serve 开了哪些面」——终端页
+  // 由那台主机的 FLEET_TERMINAL 决定,不由这个标签页决定,所以必须走 HTTP 而
+  // 不能在本地编一个答案。
+  host_features: () => ({
+    method: "GET",
+    path: "/host_features",
   }),
 
   // 直连(手机不经中转)。浏览器构建走同一套 HTTP 路由 —— 少了这几条,那几个

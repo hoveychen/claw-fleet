@@ -62,13 +62,19 @@ const STORE_PREFIX = "fleet-web:";
 export function localCommand(cmd: string, args: Record<string, unknown>): { handled: boolean; value?: unknown } {
   const key = () => `${STORE_PREFIX}${String(args.key ?? "")}`;
 
-  // ── Artifacts ────────────────────────────────────────────────────────────
-  // "Where does this artifact sit on disk" is a question about the machine
-  // serving the page, and the only uses of the answer — reveal in Finder, open
-  // with the system app — act on the machine the *tab* is on. Answering null
-  // is what makes the detail pane hide both actions and offer the download
-  // instead, so this is the honest answer rather than a gap.
-  if (cmd === "artifact_local_path") return { handled: true, value: null };
+  // A share link's URL is "where do I reach the server that will serve this",
+  // and in a tab that question is already answered: this page came from that
+  // server. So the origin *is* the answer, and it is a better one than the
+  // desktop's — it is whatever address the viewer actually used to get here,
+  // so a phone that loaded the UI over the LAN gets the LAN address, and there
+  // is no dependency on `~/.fleet/port` being readable from this process.
+  if (cmd === "artifact_share_url") {
+    const token = String(args.token ?? "");
+    return {
+      handled: true,
+      value: `${window.location.origin}/shared?t=${encodeURIComponent(token)}`,
+    };
+  }
 
   // ── plugin:window ────────────────────────────────────────────────────────
   // The custom titlebar and the theme sync drive `getCurrentWindow()`. A tab

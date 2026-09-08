@@ -1169,6 +1169,11 @@ export const MOCK_ARTIFACTS: Artifact[] = [
     starred: true,
     hardlinked: true,
     drifted: false,
+    currentVersion: "v2",
+    versions: [
+      { id: "v2", addedMs: 1_756_290_330_000, sizeBytes: 284119, sourcePath: "/Users/me/repo/out/Q3-财务分析.xlsx", hardlinked: true },
+      { id: "v1", addedMs: 1_756_100_000_000, sizeBytes: 271044, sourcePath: "/Users/me/repo/out/Q3-财务分析.xlsx", hardlinked: false },
+    ],
   },
   {
     id: "20260827-101204",
@@ -1187,6 +1192,8 @@ export const MOCK_ARTIFACTS: Artifact[] = [
     starred: false,
     hardlinked: true,
     drifted: false,
+    currentVersion: "v1",
+    versions: [{ id: "v1", addedMs: 1_756_200_000_000, sizeBytes: 1, sourcePath: "", hardlinked: true }],
   },
   {
     // Over the relay's 16 MiB frame limit — the one row that must render the
@@ -1207,6 +1214,8 @@ export const MOCK_ARTIFACTS: Artifact[] = [
     starred: false,
     hardlinked: true,
     drifted: true,
+    currentVersion: "v1",
+    versions: [{ id: "v1", addedMs: 1_756_200_000_000, sizeBytes: 1, sourcePath: "", hardlinked: true }],
   },
 ];
 

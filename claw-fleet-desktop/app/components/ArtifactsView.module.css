@@ -747,6 +747,156 @@
   min-height: 44px;
 }
 
+/* ── Share links ─────────────────────────────────────────────────────────── */
+
+.share_new {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) 0 var(--space-2);
+}
+
+.share_ttl {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+}
+
+.share_ttl_input {
+  width: 56px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-2xs);
+}
+
+/* Not an error — the links exist, they just have nothing serving them yet. */
+.share_warn {
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-warning);
+  font-size: var(--font-size-2xs);
+}
+
+.share_meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-2xs);
+}
+
+/* ── Version history ─────────────────────────────────────────────────────── */
+
+.versions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.versions_head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+  padding-bottom: var(--space-1);
+}
+
+.version_row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.version_row:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.version_row_on {
+  background: var(--color-accent-soft);
+}
+
+.version_target {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-2xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.version_id {
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.version_time {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version_size {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.version_current {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-field);
+  color: var(--color-text-dim);
+}
+
+.version_restore {
+  flex: 0 0 auto;
+  margin-right: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-2xs);
+  cursor: pointer;
+}
+
+.version_restore:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.version_restore:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Says out loud that previewing is not restoring — the one confusion this
+ * two-verb design can cause. */
+.version_hint {
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-accent);
+  font-size: var(--font-size-2xs);
+}
+
 .drift_banner {
   display: flex;
   align-items: flex-start;

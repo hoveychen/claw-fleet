@@ -10,6 +10,7 @@ mod cmd_probe;
 pub mod fleet_binary;
 mod gui;
 pub mod keep_awake;
+mod main_thread_probe;
 pub mod local_backend;
 pub mod rca_provision;
 pub mod traffic_lights;

@@ -570,10 +570,11 @@ async function handleIPC(
       return MOCK_ARTIFACTS;
     case "artifact_usage":
       return MOCK_ARTIFACT_USAGE;
-    // Remote-only in production; in mock there is no host, so the two
-    // OS-level actions stay hidden rather than pointing at nothing.
-    case "artifact_local_path":
-      return null;
+    // The two OS-level actions (`reveal_artifact` / `open_artifact_external`)
+    // fall through to `default: return null` on purpose: mock reads as the
+    // desktop, so both buttons are on screen exactly as they are in the real
+    // app, and clicking one in a screenshot harness must not try to reach a
+    // file manager that isn't there.
     case "update_artifact": {
       const a = MOCK_ARTIFACTS.find((x) => x.id === args.id);
       if (!a) return null;
@@ -640,6 +641,11 @@ async function handleIPC(
     // empty list, which left the 终端 page drawing a bare black rectangle under
     // ?mock — indistinguishable from a layout bug. Mock now serves a scripted
     // pty instead; see MOCK_PTY_SCRIPT.
+    // 开着:mock 存在的意义就是让每个页面都能被看见和截图,而这里没有真 shell
+    // 可以被开(pty 是 MOCK_PTY_SCRIPT 脚本),所以关掉终端页只会让 ?mock 少一页
+    // 可眼验的界面,换不来任何安全性。
+    case "host_features":
+      return { terminal: true };
     case "list_workspace_procs":
       return listMockProcs();
     case "clear_workspace_procs":

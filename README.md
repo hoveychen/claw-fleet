@@ -86,8 +86,20 @@ When a task outgrows one context window, the agent registers a handoff and **Fle
 
 - **Reports** — AI-written daily summaries of what got built, plus "lessons learned" you can add to your `CLAUDE.md` in one click.
 - **Wiki** — versioned, full-text-searchable archive of everything your agents publish (HTML reports, demos, docs), cross-linked with `[[slug]]`.
-- **Repos** — file trees, git status with push/pull, built-in terminal.
+- **Repos** — file trees, git status with push/pull, and run a command in a workspace.
 - **Audit** — every Bash command your agents ran, classified by risk.
+
+### Optional: the built-in terminal
+
+Fleet can also give you a real interactive shell in a workspace — a 终端 page on the desktop, a matching one on the phone, both talking to the same detached pty on the machine Fleet runs on. It ships **off**, because "open me a shell" is the one thing here whose reach is the whole machine, and it is reachable from your phone. Turn it on by starting Fleet with:
+
+```bash
+FLEET_TERMINAL=1     # 1 / true / yes / on; anything else (including unset) is off
+```
+
+Read once at startup — every surface asks the backend what it allows, so with the variable unset the pages are absent *and* the backend refuses to open a shell. Running a *named* command (the clone dialog, the 命令 panel's build/test runs) is a narrower capability and is unaffected either way.
+
+macOS, app launched from the Dock or Finder: a GUI process does not inherit your shell, so an `export` in `~/.zshrc` never reaches it. Use `launchctl setenv FLEET_TERMINAL 1` and restart the app, or launch the app from a shell that has it. `fleet serve` / `fleet webui` are started from a shell, so prefixing the command is enough.
 
 ---
 

@@ -34,6 +34,24 @@ pub const ARTIFACT_UPDATE: &str = "/artifact_update";
 pub const ARTIFACT_USAGE: &str = "/artifact_usage";
 /// The user's own folders. Separate records from the artifacts because an
 /// empty folder has no artifact to hang off — see `artifacts::Folder`.
+pub const ARTIFACT_ROLLBACK: &str = "/artifact_rollback";
+/// Share-link management (admin, like every other artifact route).
+pub const ARTIFACT_SHARES: &str = "/artifact_shares";
+pub const ARTIFACT_SHARE_CREATE: &str = "/artifact_share_create";
+pub const ARTIFACT_SHARE_REVOKE: &str = "/artifact_share_revoke";
+/// The one route on this server that answers **without** a Fleet token.
+///
+/// `GET /shared?t=<share-token>` serves one artifact's bytes at one pinned
+/// version. It is handled before the auth gate (see
+/// `hooks_server::handle_request`) because the recipient has no Fleet token by
+/// definition — the 256-bit share token in the URL *is* the capability, the
+/// same argument as [`DECISION_ASSET_PREFIX`].
+///
+/// Deliberately NOT on [`is_public`]: that whitelist is about what a scoped
+/// *admin-tier* customer token may reach, which is a different question. A
+/// share token grants one file and nothing else, and its handler returns
+/// without ever falling through to the dispatch table below.
+pub const SHARED: &str = "/shared";
 pub const ARTIFACT_FOLDERS: &str = "/artifact_folders";
 pub const ARTIFACT_FOLDER_CREATE: &str = "/artifact_folder_create";
 pub const ARTIFACT_FOLDER_DELETE: &str = "/artifact_folder_delete";
@@ -192,6 +210,11 @@ pub const PROC_OUTPUT: &str = "/proc_output";
 pub const PROC_RESIZE: &str = "/proc_resize";
 pub const PROC_RUN: &str = "/proc_run";
 pub const PROCS: &str = "/procs";
+/// `GET /host_features` — which optional surfaces this host exposes
+/// ([`crate::feature_flags::HostFeatures`]). Read once at boot by the browser
+/// build so its nav matches what this backend will allow, rather than offering
+/// a 终端 page whose first spawn is refused.
+pub const HOST_FEATURES: &str = "/host_features";
 /// The ssh host book (`remote_host::SshHost`): list / upsert / remove.
 ///
 /// On the backend host, not this desktop. The book is spawn-time state —

@@ -111,6 +111,59 @@ pub(crate) fn update_artifact(
     )
 }
 
+/// Make an older version current again. Nothing is discarded, so this is
+/// itself undoable — see `artifacts::rollback`.
+#[tauri::command(async)]
+pub(crate) fn rollback_artifact(
+    id: String,
+    version: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::artifacts::Artifact, String> {
+    state.backend.rollback_artifact(&id, &version)
+}
+
+// ── Share links ──────────────────────────────────────────────────────────────
+//
+// Management only. The recipient-facing download is a `fleet serve` /
+// `fleet webui` route (`/shared`), not a Tauri command — the whole point is
+// that it answers a browser with no Fleet credentials at all.
+
+#[tauri::command(async)]
+pub(crate) fn list_artifact_shares(
+    id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Vec<claw_fleet_core::artifact_share::ShareLink> {
+    state.backend.list_artifact_shares(id.as_deref())
+}
+
+#[tauri::command(async)]
+pub(crate) fn create_artifact_share(
+    id: String,
+    version: Option<String>,
+    ttl_days: Option<u64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::artifact_share::ShareLink, String> {
+    state.backend.create_artifact_share(&id, version.as_deref(), ttl_days)
+}
+
+#[tauri::command(async)]
+pub(crate) fn revoke_artifact_share(
+    token: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.revoke_artifact_share(&token)
+}
+
+/// The shareable URL for a token — errors when no local server is listening,
+/// which is the honest answer rather than a link that refuses to connect.
+#[tauri::command(async)]
+pub(crate) fn artifact_share_url(
+    token: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    state.backend.artifact_share_url(&token)
+}
+
 // ── Folders ──────────────────────────────────────────────────────────────────
 //
 // Folders are records of their own so that "新建文件夹, then drag things in"
@@ -184,6 +237,23 @@ pub(crate) fn export_artifact(
     dest: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    // A big deliverable takes real time here, and the log is the only place
+    // that can later say whether a slow-feeling 导出 was the copy or the
+    // dialog in front of it.
+    let probe = crate::cmd_probe::CmdProbe::start("export_artifact", &id);
+    let result = export_artifact_inner(&id, &dest, &state);
+    probe.done(|| match &result {
+        Ok(()) => format!("→ {dest}"),
+        Err(e) => e.clone(),
+    });
+    result
+}
+
+fn export_artifact_inner(
+    id: &str,
+    dest: &str,
+    state: &tauri::State<'_, AppState>,
+) -> Result<(), String> {
     use std::io::Write;
 
     const CHUNK: u64 = claw_fleet_core::artifacts::MAX_RANGE_CHUNK;
@@ -191,14 +261,14 @@ pub(crate) fn export_artifact(
     // empty answer: `start >= total` is how "you seeked past the end" is
     // reported, and for a 0-byte artifact even `start = 0` satisfies that.
     // Exporting an empty deliverable must still produce an empty file.
-    let size = state.backend.get_artifact(&id)?.size_bytes;
+    let size = state.backend.get_artifact(id)?.size_bytes;
     let mut file =
         std::fs::File::create(&dest).map_err(|e| format!("create '{dest}': {e}"))?;
     let mut offset: u64 = 0;
     while offset < size {
         let slice = {
             let backend = &state.backend;
-            backend.read_artifact_bytes(&id, Some((offset, offset + CHUNK - 1)))?
+            backend.read_artifact_bytes(id, Some((offset, offset + CHUNK - 1)))?
         };
         let read = slice.bytes.len() as u64;
         // A backend that answers a range with nothing would otherwise spin
@@ -224,29 +294,56 @@ pub(crate) fn export_artifact(
 ///
 /// `dest` is whatever the frontend passes, exactly as in `export_artifact` —
 /// both are only ever called with a path the user just chose in the OS save
-/// dialog. The browser caps a member at 50 MB before it ever inflates one, so
-/// what crosses the IPC boundary here is bounded.
+/// dialog. The browser refuses to inflate a member over 25 MB at all, so what
+/// crosses the IPC boundary here is bounded.
 #[tauri::command(async)]
 pub(crate) fn export_bytes(dest: String, bytes: Vec<u8>) -> Result<(), String> {
     std::fs::write(&dest, &bytes).map_err(|e| format!("write '{dest}': {e}"))
 }
 
-/// Absolute path of an artifact's blob on this machine, for "reveal in Finder"
-/// and "open with the system app".
+/// Resolve an artifact id to its blob path on this machine.
 ///
-/// Still an `Option` on the wire: the frontend hides both actions when this is
-/// `None` and offers 导出 instead, and the browser build answers `None` because
-/// a tab has no file manager to hand the path to.
-#[tauri::command(async)]
-pub(crate) fn artifact_local_path(
-    id: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<Option<String>, String> {
-    let artifact = state.backend.get_artifact(&id)?;
+/// Shared by the two OS-level actions below. There is deliberately no command
+/// that hands this path to the frontend: the 产出 detail bar used to fetch it
+/// through an `artifact_local_path` invoke and gate both buttons on the answer,
+/// so one slow or failed call erased both of them with nothing on screen to
+/// explain it. The buttons now decide on the host alone (`canRevealPath`) and
+/// pass an id, which is also the narrower thing to accept from a webview.
+fn blob_path_of(id: &str, state: &tauri::State<'_, AppState>) -> Result<std::path::PathBuf, String> {
+    let artifact = state.backend.get_artifact(id)?;
     let root = claw_fleet_core::artifacts::artifacts_dir()
         .ok_or_else(|| "cannot determine home dir".to_string())?;
-    let path = claw_fleet_core::artifacts::blob_path(&root, &artifact);
-    Ok(Some(path.display().to_string()))
+    Ok(claw_fleet_core::artifacts::blob_path(&root, &artifact))
+}
+
+/// Show an artifact's blob in the OS file manager (Finder / Explorer).
+///
+/// `reveal_item_in_dir` has no scope check, so this could have stayed in the
+/// frontend — but then the frontend needs the path, and fetching the path is
+/// what used to make the button disappear. Same shape as
+/// [`open_artifact_external`] instead: hand over an id, resolve here.
+#[tauri::command(async)]
+pub(crate) fn reveal_artifact(
+    app: tauri::AppHandle,
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let probe = crate::cmd_probe::CmdProbe::start_watched("reveal_artifact", &id);
+    let result = (|| {
+        let path = blob_path_of(&id, &state)?;
+        if !path.exists() {
+            return Err(format!("file no longer exists: {}", path.display()));
+        }
+        app.opener()
+            .reveal_item_in_dir(&path)
+            .map_err(|e| e.to_string())
+    })();
+    probe.done(|| match &result {
+        Ok(()) => "ok".to_string(),
+        Err(e) => e.clone(),
+    });
+    result
 }
 
 /// Hand an artifact's blob to whatever application the OS opens it with.
@@ -262,7 +359,7 @@ pub(crate) fn artifact_local_path(
 /// side is not scope-checked, and resolving the path here means the frontend
 /// hands over an artifact id rather than an arbitrary path.
 ///
-/// Like `artifact_local_path` this is a shell action, not a data-fetching
+/// Like [`reveal_artifact`] this is a shell action, not a data-fetching
 /// capability, so it is a plain command rather than a `LocalBackend` method
 /// (same reasoning as `reveal_path`).
 #[tauri::command(async)]
@@ -272,16 +369,21 @@ pub(crate) fn open_artifact_external(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let artifact = state.backend.get_artifact(&id)?;
-    let root = claw_fleet_core::artifacts::artifacts_dir()
-        .ok_or_else(|| "cannot determine home dir".to_string())?;
-    let path = claw_fleet_core::artifacts::blob_path(&root, &artifact);
-    if !path.exists() {
-        return Err(format!("file no longer exists: {}", path.display()));
-    }
-    app.opener()
-        .open_path(path.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
+    let probe = crate::cmd_probe::CmdProbe::start_watched("open_artifact_external", &id);
+    let result = (|| {
+        let path = blob_path_of(&id, &state)?;
+        if !path.exists() {
+            return Err(format!("file no longer exists: {}", path.display()));
+        }
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|e| e.to_string())
+    })();
+    probe.done(|| match &result {
+        Ok(()) => "ok".to_string(),
+        Err(e) => e.clone(),
+    });
+    result
 }
 
 #[cfg(test)]

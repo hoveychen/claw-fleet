@@ -2538,6 +2538,34 @@ impl LocalBackend {
         crate::artifacts::delete(id)
     }
 
+    pub fn list_artifact_shares(
+        &self,
+        artifact_id: Option<&str>,
+    ) -> Vec<crate::artifact_share::ShareLink> {
+        match artifact_id.filter(|s| !s.is_empty()) {
+            Some(id) => crate::artifact_share::list_for(id),
+            None => crate::artifact_share::list(),
+        }
+    }
+
+    pub fn create_artifact_share(
+        &self,
+        artifact_id: &str,
+        version: Option<&str>,
+        ttl_days: Option<u64>,
+    ) -> Result<crate::artifact_share::ShareLink, String> {
+        crate::artifact_share::create(artifact_id, version, ttl_days)
+    }
+
+    pub fn revoke_artifact_share(&self, token: &str) -> Result<(), String> {
+        crate::artifact_share::revoke(token)
+    }
+
+    /// The URL to hand someone, or why there isn't one (no local server up).
+    pub fn artifact_share_url(&self, token: &str) -> Result<String, String> {
+        crate::artifact_share::share_url(token)
+    }
+
     pub fn list_artifact_folders(&self) -> Vec<crate::artifacts::Folder> {
         crate::artifacts::list_folders()
     }
@@ -2569,6 +2597,24 @@ impl LocalBackend {
         range: Option<(u64, u64)>,
     ) -> Result<crate::artifacts::ArtifactBytes, String> {
         crate::artifacts::read_bytes(id, range)
+    }
+
+    /// Bytes of one specific version; `None` is the current one.
+    pub fn read_artifact_version_bytes(
+        &self,
+        id: &str,
+        version: Option<&str>,
+        range: Option<(u64, u64)>,
+    ) -> Result<crate::artifacts::ArtifactBytes, String> {
+        crate::artifacts::read_version_bytes(id, version, range)
+    }
+
+    pub fn rollback_artifact(
+        &self,
+        id: &str,
+        version: &str,
+    ) -> Result<crate::artifacts::Artifact, String> {
+        crate::artifacts::rollback(id, version)
     }
 
     pub fn artifact_usage(&self) -> crate::artifacts::StoreUsage {

@@ -8,6 +8,24 @@
 #![allow(unused_variables, unused_mut, clippy::all)]
 use super::*;
 
+/// `GET /host_features` — the launch-time feature flags of *this* host.
+///
+/// Lives beside the proc routes because the only flag so far gates them: a
+/// browser build that shows a 终端 page against a backend started without
+/// `FLEET_TERMINAL` would offer a shell it cannot open. The answer comes from
+/// the same `feature_flags::terminal_enabled()` that `proc_runner` enforces, so
+/// UI and enforcement cannot disagree.
+pub(crate) fn route_host_features(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let body = serde_json::to_string(&crate::feature_flags::host_features()).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_procs(
     ctx: &ServeCtx,
     request: tiny_http::Request,

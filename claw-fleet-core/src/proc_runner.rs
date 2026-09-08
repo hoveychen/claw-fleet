@@ -251,8 +251,26 @@ pub fn default_shell_command() -> String {
     }
 }
 
+/// Whether this spawn request is a bare "give me a shell" that the 终端 feature
+/// flag must refuse. Kept as a named predicate so the rule is one testable
+/// line: **blank command + flag off**. A named command is never refused — see
+/// the comment in [`spawn_proc_in`] for why the flag is not about those.
+fn interactive_shell_denied(command: &str, terminal_enabled: bool) -> bool {
+    command.trim().is_empty() && !terminal_enabled
+}
+
+/// Surfaced verbatim in the terminal panel of whichever client asked, so it
+/// names the variable rather than just saying no.
+fn terminal_disabled_error() -> String {
+    format!(
+        "terminal feature is disabled on this host — start Fleet with {}=1 to enable it",
+        crate::feature_flags::TERMINAL_ENV
+    )
+}
+
 /// Spawn `command` at `workspace_path`'s cwd under a detached host process.
-/// An empty `command` means [`default_shell_command`].
+/// An empty `command` means [`default_shell_command`], which requires the 终端
+/// feature flag ([`crate::feature_flags::terminal_enabled`]).
 /// `host_exe` is the binary to re-exec with the [`HOST_ARGV_MARKER`] argv —
 /// callers pass their own `std::env::current_exe()` (both the desktop app and
 /// the fleet CLI intercept the marker), so no PATH lookup is involved.
@@ -278,6 +296,18 @@ pub fn spawn_proc_in(
     // A blank command means "just give me a terminal here" — the caller (a
     // terminal panel) has no business knowing what this host's shell is, and
     // guessing client-side would get Windows wrong.
+    //
+    // That same blankness is what makes this the one gate the 终端 feature flag
+    // needs: it is the only request in the app that means "an interactive shell
+    // on this machine, with no command named". Named commands (the clone
+    // dialog, the 仓库 page's 命令 panel) keep working with the flag off — they
+    // are a narrower capability and the flag is not about them. Gating here
+    // rather than in each client's handler is deliberate: all three clients
+    // (Tauri command, `/proc_run` route, relay `proc_run`) funnel through this
+    // function, so none of them can be the one that forgot.
+    if interactive_shell_denied(command, crate::feature_flags::terminal_enabled()) {
+        return Err(terminal_disabled_error());
+    }
     let command = if command.trim().is_empty() {
         default_shell_command()
     } else {
@@ -1052,6 +1082,58 @@ mod tests {
         };
         write_record(dir, &rec).unwrap();
         rec
+    }
+
+    /// The 终端 flag gate, stated as the two facts that matter: a bare shell
+    /// request needs the flag, a named command never does. Everything the three
+    /// clients do funnels through `spawn_proc_in`, so this predicate is the
+    /// whole policy.
+    #[test]
+    fn only_a_blank_command_is_gated_by_the_terminal_flag() {
+        assert!(
+            interactive_shell_denied("", false),
+            "a bare shell request with the flag off must be refused"
+        );
+        assert!(
+            interactive_shell_denied("   ", false),
+            "whitespace is still a bare shell request"
+        );
+        assert!(
+            !interactive_shell_denied("", true),
+            "the flag being on is exactly what makes the terminal work"
+        );
+        for named in ["pnpm build", "git clone https://x/y.git .", "cargo test"] {
+            assert!(
+                !interactive_shell_denied(named, false),
+                "{named:?} is a named command — the flag is not about those"
+            );
+        }
+    }
+
+    /// End of the wire, not just the predicate: with the flag off, the spawn
+    /// path itself refuses and names the variable, and it does so *before*
+    /// writing a registry record (a refused request must leave no `starting`
+    /// proc behind for `list_procs` to later self-heal into an exit).
+    #[test]
+    fn blank_command_spawn_refuses_and_writes_no_record_when_flag_is_off() {
+        crate::feature_flags::force_terminal_for_tests(Some(false));
+        let dir = temp_dir("flagoff");
+        let err = spawn_proc_in(
+            &dir,
+            Path::new("/nonexistent-host-exe"),
+            &std::env::temp_dir().to_string_lossy(),
+            "",
+            80,
+            24,
+        )
+        .expect_err("blank command must be refused while the flag is off");
+        assert!(
+            err.contains(crate::feature_flags::TERMINAL_ENV),
+            "the refusal must name the variable that lifts it: {err}"
+        );
+        let records = fs::read_dir(&dir).unwrap().count();
+        assert_eq!(records, 0, "a refused spawn must not leave a record behind");
+        crate::feature_flags::force_terminal_for_tests(None);
     }
 
     /// The blank-command terminal must not defer the shell lookup to the shell

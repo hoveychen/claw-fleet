@@ -98,6 +98,7 @@ export function ProcPanel({
   const procs = useProcStore((s) => s.procs);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const requestTerminalNav = useUIStore((s) => s.requestTerminalNav);
+  const terminalEnabled = useUIStore((s) => s.hostFeatures.terminal);
   const [command, setCommand] = useState("");
   const [runError, setRunError] = useState<string | null>(null);
   const [openTermId, setOpenTermId] = useState<string | null>(null);
@@ -237,16 +238,20 @@ export function ProcPanel({
           {t("files.proc_run")}
         </button>
         {/* 这里不自己起 shell,只是带着本仓库跳到终端页 —— 终端页进去会接回已有的
-            pty、没有才开新的,那套「不留孤儿 shell」的逻辑只该有一份。 */}
-        <button
-          className={styles.proc_term_btn}
-          type="button"
-          onClick={() => requestTerminalNav(workspace)}
-          title={t("files.proc_open_terminal")}
-        >
-          <SquareTerminal size={12} strokeWidth={1.8} />
-          {t("files.proc_open_terminal")}
-        </button>
+            pty、没有才开新的,那套「不留孤儿 shell」的逻辑只该有一份。
+            终端页本身受 FLEET_TERMINAL 门控,关着时这个入口一并撤掉:上面的
+            「运行」照旧可用,它跑的是具名命令,不在开关管辖范围内。 */}
+        {terminalEnabled && (
+          <button
+            className={styles.proc_term_btn}
+            type="button"
+            onClick={() => requestTerminalNav(workspace)}
+            title={t("files.proc_open_terminal")}
+          >
+            <SquareTerminal size={12} strokeWidth={1.8} />
+            {t("files.proc_open_terminal")}
+          </button>
+        )}
       </form>
       {runError && (
         <div className={styles.proc_error}>{t("files.proc_run_error", { error: runError })}</div>

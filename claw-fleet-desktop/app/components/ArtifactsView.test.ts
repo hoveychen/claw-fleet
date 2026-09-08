@@ -25,6 +25,10 @@ function make(over: Partial<Artifact>): Artifact {
     workspacePath: "/w/one",
     workspaceName: "one",
     path: "",
+    currentVersion: "v1",
+    versions: [
+      { id: "v1", addedMs: 1_756_000_000_000, sizeBytes: 1000, sourcePath: "/src/a.pdf", hardlinked: true },
+    ],
     sessionId: null,
     sourcePath: "/src/a.pdf",
     starred: false,

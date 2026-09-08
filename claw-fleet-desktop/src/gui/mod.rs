@@ -151,12 +151,44 @@ fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+/// Version check — `(async)` plus an `off_runtime` hop, and it must stay that way.
+///
+/// This was a plain `#[tauri::command] fn`, which tauri-macros classify as
+/// `ExecutionContext::Blocking` and run **inline on the event loop**. Its body
+/// reaches `reqwest::blocking` with a 10s timeout and tries each release source
+/// in turn (GitHub API, then the China manifest), so an unreachable network
+/// parks the main thread for ~20s. Nothing UI-facing survives that: invoke
+/// *responses* are delivered through the main thread, `emit()` ends in a
+/// webview eval there, and macOS presents native panels (the 导出 save dialog)
+/// there too. On 2026-09-08 the boss lost 「用系统应用打开」/「在访达中显示」
+/// and got a dead 导出 button in the same minute this command refreshed
+/// `~/.fleet/fleet-version-check.json` (checked_at 12:28:18, app launched
+/// 12:28) — see wiki `desktop/ipc-stall-forensics`.
+///
+/// `(async)` alone would move it from the main thread onto a tokio worker,
+/// which for `reqwest::blocking` is worse than the main thread: it panics
+/// there, the task harness swallows the panic and the invoke promise never
+/// settles at all (the dsh detail blackhole). Hence `off_runtime`, which is
+/// exactly the module written for that hazard.
+#[tauri::command(async)]
 fn check_app_version(
     force: Option<bool>,
     locale: Option<String>,
 ) -> version_check::VersionCheckResult {
-    version_check::check_app_version(force.unwrap_or(false), locale.as_deref().unwrap_or("en"))
+    let force = force.unwrap_or(false);
+    let locale = locale.unwrap_or_else(|| "en".to_string());
+    claw_fleet_core::off_runtime::off_runtime(move || {
+        version_check::check_app_version(force, &locale)
+    })
+    // The helper only errs when the thread itself panicked, and the inner call
+    // is documented never to panic. Answering "no update known" keeps the
+    // banner quiet rather than turning a version check into a UI error.
+    .unwrap_or_else(|_| version_check::VersionCheckResult {
+        current_version: env!("CARGO_PKG_VERSION").to_string(),
+        latest_version: String::new(),
+        has_update: false,
+        release_url: String::new(),
+    })
 }
 
 #[tauri::command]
@@ -1051,6 +1083,16 @@ pub fn run() {
                 };
                 let path = request.uri().path().trim_start_matches('/').to_string();
                 let id = dec(path.split('/').next().unwrap_or(""));
+                // `?version=v2` pins the response to one version of the
+                // artifact, which is what lets the detail pane preview an old
+                // version — including seeking inside it, since this is the
+                // only surface that answers 206.
+                let version = request.uri().query().and_then(|q| {
+                    q.split('&')
+                        .filter_map(|kv| kv.split_once('='))
+                        .find(|(k, _)| *k == "version")
+                        .map(|(_, v)| dec(v))
+                });
                 let range = request
                     .headers()
                     .get("Range")
@@ -1060,7 +1102,7 @@ pub fn run() {
                 let result = {
                     let state = app.state::<AppState>();
                     let backend = &state.backend;
-                    backend.read_artifact_bytes(&id, range)
+                    backend.read_artifact_version_bytes(&id, version.as_deref(), range)
                 };
                 let response = artifact_response(result, range.is_some());
                 responder.respond(response);
@@ -1199,6 +1241,12 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("main") {
                 fit_main_window_to_work_area(&w);
             }
+
+            // Watch the event loop itself. Cheap, continuous, and the only
+            // thing that can tell "an invoke was slow" from "the answer could
+            // not be delivered because the main thread was busy" — the failure
+            // mode that ate two buttons and a save dialog on 2026-09-08.
+            crate::main_thread_probe::spawn(app.handle().clone());
 
             // Drop live-thinking sidecars left behind by finished turns. A
             // `claude --print` turn's sidecar goes stale as soon as it exits;
@@ -1569,6 +1617,7 @@ pub fn run() {
             set_auto_resume_config,
             set_session_mark,
             set_session_title,
+            host_features,
             list_workspace_procs,
             run_workspace_proc,
             kill_workspace_proc,
@@ -1630,13 +1679,18 @@ pub fn run() {
             update_artifact,
             delete_artifact,
             artifact_usage,
+            rollback_artifact,
+            list_artifact_shares,
+            create_artifact_share,
+            revoke_artifact_share,
+            artifact_share_url,
             list_artifact_folders,
             create_artifact_folder,
             delete_artifact_folder,
             rename_artifact_folder,
             export_artifact,
             export_bytes,
-            artifact_local_path,
+            reveal_artifact,
             open_artifact_external,
             list_wiki_docs,
             get_wiki_doc,

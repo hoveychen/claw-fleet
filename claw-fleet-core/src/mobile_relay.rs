@@ -2133,6 +2133,10 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "repo_push" => serve_repo_push(params),
         "repo_pull" => serve_repo_pull(params),
         // ── Terminal 「终端」 surface ──────────────────────────────────────
+        // Asked first, at connect: the whole surface below is off unless this
+        // host was started with FLEET_TERMINAL, and the phone hides its 终端
+        // entries rather than opening a panel whose first spawn is refused.
+        "host_features" => serve_host_features(params),
         "procs" => serve_procs(params),
         "proc_run" => serve_proc_run(params),
         "proc_output" => serve_proc_output(params),
@@ -2697,15 +2701,28 @@ fn serve_artifact_folders(_params: &Value) -> Result<Value, String> {
 fn serve_artifact_blob(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
     let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    // Optional `version`; absent means the current one. The phone browses
+    // history read-only, so this is the whole of its version support.
+    let version = params.get("version").and_then(Value::as_str).filter(|v| !v.is_empty());
     let artifact = crate::artifacts::get(id)?;
-    if artifact.size_bytes > MAX_ARTIFACT_FRAME_BYTES {
+    // The size gate has to name the version actually being fetched: an old
+    // version can be far bigger (or smaller) than what is current.
+    let size = match version {
+        Some(v) => artifact
+            .versions
+            .iter()
+            .find(|entry| entry.id == v)
+            .map(|entry| entry.size_bytes)
+            .ok_or_else(|| format!("artifact '{id}' has no version '{v}'"))?,
+        None => artifact.size_bytes,
+    };
+    if size > MAX_ARTIFACT_FRAME_BYTES {
         return Err(format!(
-            "artifact is {} bytes, over the {MAX_ARTIFACT_FRAME_BYTES}-byte relay limit — \
-             export it from the desktop instead",
-            artifact.size_bytes
+            "artifact is {size} bytes, over the {MAX_ARTIFACT_FRAME_BYTES}-byte relay limit — \
+             export it from the desktop instead"
         ));
     }
-    let blob = crate::artifacts::read_bytes(id, None)?;
+    let blob = crate::artifacts::read_version_bytes(id, version, None)?;
     Ok(json!({
         "filename": artifact.name,
         "mime": blob.mime,
@@ -3173,6 +3190,10 @@ fn serve_repo_pull(params: &Value) -> Result<Value, String> {
 // already exposes `spawn_session`, which starts an agent that can run any
 // command it likes. A terminal is that existing authority made visible, not a
 // new one — so gating the cwd here would only stop the honest use of it.
+
+fn serve_host_features(_params: &Value) -> Result<Value, String> {
+    serde_json::to_value(crate::feature_flags::host_features()).map_err(|e| e.to_string())
+}
 
 fn serve_proc_run(params: &Value) -> Result<Value, String> {
     let req: crate::proc_runner::SpawnProcRequest = serde_json::from_value(params.clone())
@@ -7368,7 +7389,7 @@ mod tests {
     }
 
     /// The terminal panel is only as reachable as this table: `proc_runner` has
-    /// been a complete pty host for months, but until these seven names existed
+    /// been a complete pty host for months, but until these names existed
     /// here the phone and the browser build could not say any of them — both
     /// transports go through `serve_request` and nothing else.
     #[test]
@@ -7378,6 +7399,7 @@ mod tests {
             // handler without spawning anything: a missing/!malformed body is
             // rejected before `proc_runner` ever re-execs a host.
             for method in [
+                "host_features",
                 "procs",
                 "proc_run",
                 "proc_output",
@@ -7397,6 +7419,24 @@ mod tests {
             // assertion above cannot pass vacuously.
             let err = serve_request("proc_nonsense", &json!({})).unwrap_err();
             assert!(err.contains("unknown method"), "unexpected error: {err}");
+        });
+    }
+
+    /// What the phone hides its 终端 entries on. The payload must carry the
+    /// `terminal` key under exactly that (camelCase) name and as a boolean —
+    /// a missing key reads as `undefined` on the client, which is falsy and
+    /// would hide the surface on a host that actually has it enabled.
+    #[test]
+    fn host_features_reports_the_terminal_flag_as_a_boolean() {
+        with_temp_home(|| {
+            let data = serve_request("host_features", &json!({})).expect("host_features");
+            let terminal = data.get("terminal").expect("terminal key present");
+            assert!(terminal.is_boolean(), "terminal must be a bool: {data}");
+            assert_eq!(
+                terminal.as_bool(),
+                Some(crate::feature_flags::terminal_enabled()),
+                "the wire answer must be the same flag proc_runner enforces"
+            );
         });
     }
 

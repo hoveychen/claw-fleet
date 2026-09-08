@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   Archive,
   ChevronDown,
@@ -16,8 +15,10 @@ import {
   FolderOpen,
   FolderInput,
   FolderPlus,
+  History,
   Image as ImageIcon,
   LayoutGrid,
+  Link2,
   Music,
   Package,
   Pencil,
@@ -32,6 +33,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
+import { canRevealPath } from "../canReveal";
 import { formatBytes } from "../formatBytes";
 import { isWebBuild } from "../hostEnv";
 import { getItem, setItem } from "../storage";
@@ -69,6 +71,32 @@ export interface Artifact {
   starred: boolean;
   hardlinked: boolean;
   drifted: boolean;
+  /** Which entry of `versions` the fields above describe. */
+  currentVersion: string;
+  /** Every ingest of this deliverable, newest first — always at least one. */
+  versions: ArtifactVersion[];
+}
+
+/** Mirrors `claw_fleet_core::artifact_share::ShareLink`. */
+export interface ShareLink {
+  token: string;
+  artifactId: string;
+  version: string;
+  name: string;
+  createdMs: number;
+  /** 0 means no expiry. */
+  expiresMs: number;
+  hits: number;
+  lastHitMs: number;
+}
+
+/** Mirrors `claw_fleet_core::artifacts::ArtifactVersion`. */
+export interface ArtifactVersion {
+  id: string;
+  addedMs: number;
+  sizeBytes: number;
+  sourcePath: string;
+  hardlinked: boolean;
 }
 
 /** Mirrors `claw_fleet_core::artifacts::Folder`. */
@@ -868,6 +896,10 @@ export function ArtifactsView() {
             setSelectedId(null);
             await load();
           }}
+          // A rollback rewrites the artifact's current version, size and
+          // source, so the list has to be refetched — but the detail pane
+          // stays open on the same card.
+          onReloaded={load}
           onError={setError}
         />
       ) : items === null ? (
@@ -1334,12 +1366,15 @@ function ArtifactCard({
   );
 }
 
-function ArtifactDetail({
+/** Exported for the regression test that pins the OS actions to the host
+ * predicate rather than to an `invoke` — see `ArtifactsView.osactions.test.tsx`. */
+export function ArtifactDetail({
   artifact,
   folderOptions,
   onBack,
   onPatch,
   onDeleted,
+  onReloaded,
   onError,
 }: {
   artifact: Artifact;
@@ -1350,35 +1385,44 @@ function ArtifactDetail({
     fields: { title?: string; note?: string; starred?: boolean; path?: string },
   ) => void;
   onDeleted: () => void;
+  onReloaded: () => Promise<void> | void;
   onError: (msg: string | null) => void;
 }) {
   const { t } = useTranslation();
-  const [localPath, setLocalPath] = useState<string | null>(null);
   const [note, setNote] = useState(artifact.note);
+  const [exporting, setExporting] = useState(false);
   // Where this artifact currently shows up, editable. A text field with a
   // datalist rather than a picker: one control both files into an existing
   // folder and creates a new one by typing it, which is how a path field in a
   // file manager already behaves.
   const [folder, setFolder] = useState(artifact.path);
+  /**
+   * Which version the stage is previewing; null means the current one.
+   *
+   * Reset whenever the artifact changes — and whenever its current version
+   * does, so that a rollback lands you on what is now current rather than
+   * leaving you pinned to a version that just stopped being history.
+   */
+  const [previewVersion, setPreviewVersion] = useState<string | null>(null);
 
   useEffect(() => setNote(artifact.note), [artifact.id, artifact.note]);
   useEffect(() => setFolder(artifact.path), [artifact.id, artifact.path]);
+  useEffect(() => setPreviewVersion(null), [artifact.id, artifact.currentVersion]);
 
-  // Null for a remote workspace — the two OS-level actions are hidden rather
-  // than pointed at a path on the other machine.
-  useEffect(() => {
-    let current = artifact.id;
-    invoke<string | null>("artifact_local_path", { id: artifact.id })
-      .then((p) => {
-        if (current === artifact.id) setLocalPath(p);
-      })
-      .catch(() => setLocalPath(null));
-    return () => {
-      current = "";
-    };
-  }, [artifact.id]);
+  // Whether the two OS-level actions can do anything here. Deliberately a
+  // synchronous host predicate and NOT the answer of an `invoke`: they used to
+  // hang off an `artifact_local_path` call whose failure branch was a bare
+  // `.catch(() => setLocalPath(null))`, so any hiccup on that one call — a
+  // reject, or a command that simply took its time while the desktop's IPC was
+  // busy (the debug log has `get_messages_tail` stalls up to 5.2s) — silently
+  // erased both buttons, with nothing on screen to say why and no retry. The
+  // path they need is resolved host-side from the artifact id anyway, so the
+  // frontend never needed it; the only real fork is the browser build, which
+  // has no file manager to hand anything to, and that is what this answers.
+  const osActions = canRevealPath();
 
   const doExport = async () => {
+    setExporting(true);
     try {
       // A tab cannot be given a destination path — `save()` answers null there
       // and the button would silently do nothing. Hand the browser a download
@@ -1394,6 +1438,8 @@ function ArtifactDetail({
       onError(null);
     } catch (e) {
       onError(t("artifacts.export_failed", "导出失败：{{error}}", { error: String(e) }));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -1407,10 +1453,16 @@ function ArtifactDetail({
           {artifact.title}
         </span>
         <div className={styles.detail_actions}>
-          <button className={styles.action} onClick={doExport}>
-            {t("artifacts.export_short", "导出")}
+          {/* Disabled + relabelled while outstanding: the whole span is a
+              native save panel plus a chunked copy (137 MB of zip is a real
+              wait), and with no state at all a click that had not opened its
+              panel yet was indistinguishable from a dead button. */}
+          <button className={styles.action} onClick={doExport} disabled={exporting}>
+            {exporting
+              ? t("artifacts.exporting", "导出中…")
+              : t("artifacts.export_short", "导出")}
           </button>
-          {localPath && (
+          {osActions && (
             <>
               <button
                 className={styles.action}
@@ -1436,8 +1488,13 @@ function ArtifactDetail({
                   // The blob can be gone by now — the drift banner below exists
                   // precisely because the source file moves under us. Without
                   // this the click is indistinguishable from a no-op.
+                  //
+                  // Resolved from the id host-side (like the button above)
+                  // rather than by shipping a path to the frontend first: that
+                  // extra round trip is exactly what used to decide whether
+                  // this button existed at all.
                   try {
-                    await revealItemInDir(localPath);
+                    await invoke("reveal_artifact", { id: artifact.id });
                     onError(null);
                   } catch (e) {
                     onError(t("artifacts.reveal_failed", "显示失败：{{error}}", { error: String(e) }));
@@ -1473,7 +1530,7 @@ function ArtifactDetail({
         </div>
       </div>
 
-      <ArtifactStage artifact={artifact} />
+      <ArtifactStage artifact={artifact} version={previewVersion ?? undefined} />
 
       <div className={styles.detail_meta}>
         {artifact.drifted && (
@@ -1527,6 +1584,16 @@ function ArtifactDetail({
             if (note !== artifact.note) onPatch(artifact.id, { note });
           }}
         />
+        <ArtifactShares artifact={artifact} onError={onError} />
+        {artifact.versions.length > 1 && (
+          <ArtifactVersions
+            artifact={artifact}
+            previewVersion={previewVersion}
+            onPreview={setPreviewVersion}
+            onReloaded={onReloaded}
+            onError={onError}
+          />
+        )}
       </div>
     </div>
   );
@@ -1547,6 +1614,264 @@ export interface StageItem {
   /** The store's coarse bucket (`artifacts::kind_for`). */
   kind: string;
   title: string;
+}
+
+/**
+ * Share links for one artifact.
+ *
+ * A link is served by the local `fleet serve` / `fleet webui` port, so it
+ * reaches this LAN and no further — that was the explicit choice over hosting
+ * the bytes somewhere public. The URL is fetched from the backend rather than
+ * assembled here because only the host knows whether a server is even
+ * listening, and "no link yet, start the server" is a real state the UI has to
+ * be able to show.
+ *
+ * Every link is pinned to the version that was current when it was made, so
+ * regenerating the deliverable cannot change what the recipient downloads.
+ */
+function ArtifactShares({
+  artifact,
+  onError,
+}: {
+  artifact: Artifact;
+  onError: (msg: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [links, setLinks] = useState<ShareLink[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [ttlDays, setTtlDays] = useState("7");
+
+  const load = useCallback(async () => {
+    const list = (await invoke<ShareLink[]>("list_artifact_shares", { id: artifact.id }).catch(
+      () => [],
+    )) ?? [];
+    setLinks(list);
+    // One URL per token: the host resolves each, and a missing local server is
+    // reported once rather than per row.
+    const next: Record<string, string> = {};
+    let failure: string | null = null;
+    for (const link of list) {
+      try {
+        next[link.token] = await invoke<string>("artifact_share_url", { token: link.token });
+      } catch (e) {
+        failure = String(e);
+      }
+    }
+    setUrls(next);
+    setUrlError(failure);
+  }, [artifact.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const ttl = Number.parseInt(ttlDays, 10);
+      await invoke<ShareLink>("create_artifact_share", {
+        id: artifact.id,
+        // Pinned explicitly to what is current now, so the link keeps serving
+        // these bytes even after the next version lands.
+        version: artifact.currentVersion,
+        ttlDays: Number.isFinite(ttl) && ttl > 0 ? ttl : null,
+      });
+      onError(null);
+      await load();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async (token: string) => {
+    setBusy(true);
+    try {
+      await invoke("revoke_artifact_share", { token });
+      onError(null);
+      await load();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const now = Date.now();
+
+  return (
+    <div className={styles.versions}>
+      <div className={styles.versions_head}>
+        <Link2 size={13} strokeWidth={1.5} />
+        <span>{t("artifacts.share", "分享链接（仅本机/局域网）")}</span>
+      </div>
+      <div className={styles.share_new}>
+        <label className={styles.share_ttl}>
+          {t("artifacts.share_ttl", "有效期（天，0＝永久）")}
+          <input
+            className={styles.share_ttl_input}
+            type="number"
+            min={0}
+            max={365}
+            value={ttlDays}
+            onChange={(e) => setTtlDays(e.target.value)}
+          />
+        </label>
+        <button type="button" className={styles.chip} disabled={busy} onClick={create}>
+          {t("artifacts.share_create", "生成链接")}
+        </button>
+      </div>
+      {urlError && <div className={styles.share_warn}>{urlError}</div>}
+      {links.map((link) => {
+        const expired = link.expiresMs !== 0 && now >= link.expiresMs;
+        const url = urls[link.token];
+        return (
+          <div key={link.token} className={styles.version_row}>
+            <span className={styles.share_meta}>
+              <span className={styles.version_id}>{link.version}</span>
+              <span className={styles.version_time}>
+                {expired
+                  ? t("artifacts.share_expired", "已过期")
+                  : link.expiresMs === 0
+                    ? t("artifacts.share_forever", "永久有效")
+                    : t("artifacts.share_until", "有效至 {{when}}", {
+                        when: new Date(link.expiresMs).toLocaleString(),
+                      })}
+              </span>
+              <span className={styles.version_size}>
+                {t("artifacts.share_hits", "{{count}} 次访问", { count: link.hits })}
+              </span>
+            </span>
+            {url && !expired && (
+              <button
+                type="button"
+                className={styles.version_restore}
+                onClick={() => {
+                  void navigator.clipboard?.writeText(url);
+                  onError(null);
+                }}
+                title={url}
+              >
+                {t("artifacts.share_copy", "复制")}
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.version_restore}
+              disabled={busy}
+              onClick={() => revoke(link.token)}
+            >
+              {t("artifacts.share_revoke", "吊销")}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * An artifact's history.
+ *
+ * Only rendered when there is more than one version — a card with a single
+ * ingest has no history worth a section, and showing "v1" alone would imply
+ * the feature is doing something it is not.
+ *
+ * Selecting a row previews *that* version in the stage above without changing
+ * what is stored; 恢复 is the separate, explicit act. That split matters:
+ * looking at an old version is how you decide whether you want it back.
+ */
+function ArtifactVersions({
+  artifact,
+  previewVersion,
+  onPreview,
+  onReloaded,
+  onError,
+}: {
+  artifact: Artifact;
+  previewVersion: string | null;
+  onPreview: (version: string | null) => void;
+  onReloaded: () => Promise<void> | void;
+  onError: (msg: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const shown = previewVersion ?? artifact.currentVersion;
+
+  const rollback = async (version: string) => {
+    setBusy(true);
+    try {
+      await invoke("rollback_artifact", { id: artifact.id, version });
+      onError(null);
+      await onReloaded();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.versions}>
+      <div className={styles.versions_head}>
+        <History size={13} strokeWidth={1.5} />
+        <span>
+          {t("artifacts.versions", "版本历史（{{count}} 个）", {
+            count: artifact.versions.length,
+          })}
+        </span>
+      </div>
+      {artifact.versions.map((v) => {
+        const isCurrent = v.id === artifact.currentVersion;
+        return (
+          <div
+            key={v.id}
+            className={`${styles.version_row} ${shown === v.id ? styles.version_row_on : ""}`}
+          >
+            <button
+              type="button"
+              className={styles.version_target}
+              onClick={() => onPreview(isCurrent ? null : v.id)}
+              title={v.sourcePath}
+            >
+              <span className={styles.version_id}>{v.id}</span>
+              <span className={styles.version_time}>
+                {new Date(v.addedMs).toLocaleString()}
+              </span>
+              <span className={styles.version_size}>{formatBytes(v.sizeBytes)}</span>
+              {isCurrent && (
+                <span className={styles.version_current}>
+                  {t("artifacts.version_current", "当前")}
+                </span>
+              )}
+            </button>
+            {!isCurrent && (
+              <button
+                type="button"
+                className={styles.version_restore}
+                disabled={busy}
+                onClick={() => rollback(v.id)}
+              >
+                {t("artifacts.version_restore", "恢复")}
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {previewVersion && (
+        <div className={styles.version_hint}>
+          {t(
+            "artifacts.version_previewing",
+            "正在预览 {{version}}，存储的仍是 {{current}}。",
+            { version: previewVersion, current: artifact.currentVersion },
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -1680,6 +2005,19 @@ function PreviewStage({ item }: { item: StageItem }) {
 }
 
 /**
+ * Byte length of the version being previewed.
+ *
+ * The zip browser is told the archive's size up front so it can read the
+ * central directory at the tail without a probe request — and when an older
+ * version is pinned in the stage, `artifact.sizeBytes` describes the *current*
+ * one. Reading a stale length would put the tail scan in the wrong place.
+ */
+function versionSize(artifact: Artifact, version?: string): number {
+  if (!version) return artifact.sizeBytes;
+  return artifact.versions.find((v) => v.id === version)?.sizeBytes ?? artifact.sizeBytes;
+}
+
+/**
  * Save one zip member to disk.
  *
  * A member's bytes live only in the webview — the store knows nothing about
@@ -1712,14 +2050,21 @@ async function exportMemberBytes(name: string, bytes: Uint8Array) {
  * through the very same `PreviewStage`, handed down as `renderPreview`, so a
  * member never grows a second, drifting renderer.
  */
-function ArtifactStage({ artifact }: { artifact: Artifact }) {
-  const url = artifactBlobUrl(artifact.id, artifact.name);
+function ArtifactStage({
+  artifact,
+  version,
+}: {
+  artifact: Artifact;
+  /** Preview this version instead of the current one. */
+  version?: string;
+}) {
+  const url = artifactBlobUrl(artifact.id, artifact.name, version);
   if (artifact.kind === "archive" && isBrowsableArchive(artifact.mime)) {
     return (
       <div className={`${styles.stage} ${styles.stage_office}`}>
         <ZipBrowser
           url={url}
-          size={artifact.sizeBytes}
+          size={versionSize(artifact, version)}
           renderPreview={(member) => <PreviewStage item={member} />}
           onExportMember={exportMemberBytes}
         />

@@ -203,6 +203,7 @@ fn build_bundle() -> String {
         claw_fleet_core::proc_runner::ProcStatus,
         claw_fleet_core::proc_runner::ProcRecord,
         claw_fleet_core::proc_runner::ProcOutputChunk,
+        claw_fleet_core::feature_flags::HostFeatures,
     );
 
     out
