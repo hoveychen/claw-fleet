@@ -1158,9 +1158,63 @@ pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
 pub fn session_events(uri: &str) -> Result<Vec<Value>, String> {
     let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
     let source = DshSource::new();
-    history_with(id, None, |before, max| {
-        source.fetch_history(id, before, max)
-    })
+    raw_history_with(|before, max| source.fetch_history(id, before, max))
+}
+
+/// Walk `session/page` backwards and keep the **durable events themselves**.
+///
+/// Deliberately *not* [`history_with`]. That walk exists to serve transcripts,
+/// so it folds every page through [`crate::dsh_messages::normalize`] and returns
+/// Claude-Code-vocabulary messages — `{type: "user" | "assistant", message, …}`.
+/// The typed metadata dsh hangs off each record (`data.message.source`, the
+/// per-call `data.usage`, the event's own `seq` and `time`) does not survive that
+/// translation, and it is exactly what [`crate::dsh_cost`] reads.
+///
+/// This is not hypothetical. `session_events` used to POST a standalone
+/// `session.history`, which returned raw events; when 0.1.2 replaced that
+/// endpoint the call was rewired onto `history_with`, whose *shape* nothing
+/// checked. Measured against the live server on 2026-09-07: four real sessions
+/// answered 220 / 19 / 371 / 176 records, all of them `user` or `assistant` and
+/// none carrying a `source` — so `generation_refs` and `metered_calls` found
+/// zero model calls in **every** session on the machine, and every dsh session
+/// reported "no model calls in this session yet" instead of a price. Hence
+/// [`crate::dsh_source::tests::raw_history_keeps_the_durable_event_shape`],
+/// which pins the shape rather than trusting the walk to preserve it.
+///
+/// Order-preserving front to back, and deduplicated on `seq`: pages overlap at
+/// their boundary, and a repeated event would be a repeated charge.
+fn raw_history_with<F>(fetch: F) -> Result<Vec<Value>, String>
+where
+    F: Fn(Option<i64>, Option<usize>) -> Result<Value, String>,
+{
+    let mut all: Vec<Value> = Vec::new();
+    let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut before: Option<i64> = None;
+    loop {
+        let page = fetch(before, Some(BACKFILL_MESSAGES))?;
+        let events = history_events(&page);
+        if events.is_empty() {
+            break;
+        }
+        let oldest = min_seq(&events);
+        let fresh: Vec<Value> = events
+            .into_iter()
+            .filter(|e| seq_of(e).is_none_or(|seq| seen.insert(seq)))
+            .collect();
+        // Pages arrive newest-first, so each one goes in front of what we have.
+        all.splice(0..0, fresh);
+        if !has_more(&page) {
+            break;
+        }
+        // No page reached further back: nothing older exists, and asking again
+        // would spin on the same request forever.
+        let Some(oldest) = oldest else { break };
+        if before == Some(oldest) {
+            break;
+        }
+        before = Some(oldest);
+    }
+    Ok(all)
 }
 
 /// Pull the raw `SessionEvent`s out of a `session.history` answer.
@@ -2841,6 +2895,54 @@ mod tests {
         assert_eq!(events_before(2, &events).len(), 1);
         assert_eq!(min_seq(&events), Some(1));
         assert_eq!(max_seq(&events), Some(3));
+    }
+
+    /// The cost module's input must be the **durable events**, not the
+    /// transcript's normalized messages.
+    ///
+    /// This is the regression that made every dsh session report "no model calls
+    /// in this session yet": `session_events` was rewired onto the transcript
+    /// walk, which folds each page through `dsh_messages::normalize`, and the
+    /// typed `source` / `usage` / `seq` / `time` that pricing reads do not
+    /// survive that. Nothing checked the shape, so it failed silently for every
+    /// session on the machine.
+    #[test]
+    fn raw_history_keeps_the_durable_event_shape() {
+        let page = |before: Option<i64>, _max: Option<usize>| {
+            Ok(match before {
+                None => json!({
+                    "records": [
+                        { "event": { "type": "assistant/message", "seq": 20, "time": 5,
+                                     "data": { "usage": { "inputTokens": 7 },
+                                               "message": { "source": { "kind": "model",
+                                                                        "provider": "deepseek-official",
+                                                                        "model": "deepseek-v4-flash" } } } } },
+                    ],
+                    "hasMore": true
+                }),
+                Some(20) => json!({
+                    "records": [
+                        { "event": { "type": "user/message", "seq": 10, "time": 1 } },
+                        // Pages overlap at the boundary; the repeat must not be
+                        // kept, or the session is charged for it twice.
+                        { "event": { "type": "assistant/message", "seq": 20, "time": 5 } },
+                    ],
+                    "hasMore": false
+                }),
+                other => panic!("unexpected beforeSeq {other:?}"),
+            })
+        };
+        let events = raw_history_with(page).expect("walk");
+        assert_eq!(events.len(), 2, "the boundary repeat is dropped: {events:?}");
+        assert_eq!(events[0]["seq"], 10, "oldest first");
+        assert_eq!(events[1]["type"], "assistant/message");
+        assert_eq!(
+            events[1].pointer("/data/message/source/provider"),
+            Some(&json!("deepseek-official")),
+            "the typed source must survive — it is the whole reason this walk exists"
+        );
+        // …and the cost module must actually find the call in it.
+        assert_eq!(crate::dsh_cost::metered_calls(&events).len(), 1);
     }
 
     #[test]
