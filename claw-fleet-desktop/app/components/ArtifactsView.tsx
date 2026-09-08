@@ -32,11 +32,14 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
+import { formatBytes } from "../formatBytes";
 import { isWebBuild } from "../hostEnv";
 import { getItem, setItem } from "../storage";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
 import { downloadArtifact } from "../mock/liveProxy";
+import { isBrowsableArchive } from "../../../shared-ts/zipDir";
 import { PageShell } from "./PageShell";
+import { ZipBrowser } from "./ZipBrowser";
 import { EmptyState } from "./EmptyState";
 import { TextBlock } from "./blocks/TextBlock";
 import styles from "./ArtifactsView.module.css";
@@ -134,19 +137,7 @@ const OfficePreview = lazy(() => import("./OfficePreview"));
 /** Same libraries, same reason to defer them — see `ArtifactThumb`. */
 const ArtifactThumb = lazy(() => import("./ArtifactThumb"));
 
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  // One decimal below 10 so "1.4 MB" doesn't round to a useless "1 MB", none
-  // above it where the extra digit is noise.
-  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
-}
+export { formatBytes };
 
 /**
  * Order artifacts.
@@ -1542,6 +1533,23 @@ function ArtifactDetail({
 }
 
 /**
+ * Anything the stage can render: an artifact, or one member of a zip.
+ *
+ * The stage used to take an `Artifact` and reach for `artifactBlobUrl` itself.
+ * It takes this instead so a zip member — which has no id, and whose bytes
+ * live behind a `blob:` URL — goes through the *same* dispatch. A `report.md`
+ * must look identical whether it arrived loose or inside an archive, and one
+ * renderer is the only way to keep that true.
+ */
+export interface StageItem {
+  url: string;
+  mime: string;
+  /** The store's coarse bucket (`artifacts::kind_for`). */
+  kind: string;
+  title: string;
+}
+
+/**
  * The preview surface. Which element renders is decided by `kind`, plus one
  * sub-split inside the `text` bucket (see `textPreviewMode`) so a markdown or
  * html deliverable is shown rendered instead of as source. Both come off the
@@ -1552,16 +1560,16 @@ function ArtifactDetail({
  * than re-downloading. The webview has no Office viewer of its own — an
  * `<iframe>` at a .docx renders a blank frame — so the OOXML three get one in
  * JavaScript, lazily (see `OfficePreview`). Everything left over (legacy .doc /
- * .xls / .ppt, ODF, archives) still gets the typed placeholder with 导出 / 打开
- * one click away in the bar above.
+ * .xls / .ppt, ODF, non-zip archives) still gets the typed placeholder with
+ * 导出 / 打开 one click away in the bar above.
  */
-function ArtifactStage({ artifact }: { artifact: Artifact }) {
+function PreviewStage({ item }: { item: StageItem }) {
   const { t } = useTranslation();
   const [text, setText] = useState<string | null>(null);
-  const url = artifactBlobUrl(artifact.id, artifact.name);
+  const url = item.url;
   // html goes to the frame by URL, so only the two rendered-from-source modes
   // pull the bytes into React.
-  const textMode = artifact.kind === "text" ? textPreviewMode(artifact.mime) : null;
+  const textMode = item.kind === "text" ? textPreviewMode(item.mime) : null;
   const needsBody = textMode === "markdown" || textMode === "plain";
 
   useEffect(() => {
@@ -1581,33 +1589,33 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
     return () => {
       alive = false;
     };
-  }, [artifact.id, needsBody, url]);
+  }, [needsBody, url]);
 
-  if (artifact.kind === "image") {
+  if (item.kind === "image") {
     return (
       <div className={styles.stage}>
-        <img src={url} alt={artifact.title} />
+        <img src={url} alt={item.title} />
       </div>
     );
   }
-  if (artifact.kind === "video") {
+  if (item.kind === "video") {
     return (
       <div className={styles.stage}>
         <video src={url} controls preload="metadata" />
       </div>
     );
   }
-  if (artifact.kind === "audio") {
+  if (item.kind === "audio") {
     return (
       <div className={styles.stage}>
         <audio src={url} controls />
       </div>
     );
   }
-  if (artifact.kind === "pdf") {
+  if (item.kind === "pdf") {
     return (
       <div className={styles.stage}>
-        <iframe className={styles.doc_frame} src={url} title={artifact.title} />
+        <iframe className={styles.doc_frame} src={url} title={item.title} />
       </div>
     );
   }
@@ -1621,7 +1629,7 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
           className={styles.doc_frame}
           sandbox="allow-scripts"
           src={url}
-          title={artifact.title}
+          title={item.title}
         />
       </div>
     );
@@ -1642,17 +1650,17 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
       </div>
     );
   }
-  const office = officeMode(artifact.mime);
+  const office = officeMode(item.mime);
   if (office) {
     return (
       <div className={`${styles.stage} ${styles.stage_office}`}>
         <Suspense fallback={<div className={styles.no_preview_hint}>{t("artifacts.loading", "加载中…")}</div>}>
-          <OfficePreview mode={office} url={url} title={artifact.title} />
+          <OfficePreview mode={office} url={url} title={item.title} />
         </Suspense>
       </div>
     );
   }
-  const Icon = KIND_ICON[artifact.kind] ?? FileText;
+  const Icon = KIND_ICON[item.kind] ?? FileText;
   return (
     <div className={styles.stage}>
       <div className={styles.no_preview}>
@@ -1661,11 +1669,41 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
           {t("artifacts.no_preview_title", "这个格式没法在这里预览")}
         </div>
         <div className={styles.no_preview_hint}>
-          {/* docx/xlsx/pptx now render above; what lands here is the legacy
-              binary Office formats, ODF, archives and unknown blobs. */}
+          {/* docx/xlsx/pptx render above and a .zip is browsable; what lands
+              here is the legacy binary Office formats, ODF, tar/gz/7z and
+              unknown blobs. */}
           {t("artifacts.no_preview_hint", "这个格式只能导出，或者用系统应用打开。")}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * What the detail pane shows for one artifact.
+ *
+ * A .zip gets a folder browser instead of a preview — it is the one archive
+ * format with a directory at the tail, so listing it costs a couple of KB
+ * rather than a download (see `shared-ts/zipDir.ts`). Its members render
+ * through the very same `PreviewStage`, handed down as `renderPreview`, so a
+ * member never grows a second, drifting renderer.
+ */
+function ArtifactStage({ artifact }: { artifact: Artifact }) {
+  const url = artifactBlobUrl(artifact.id, artifact.name);
+  if (artifact.kind === "archive" && isBrowsableArchive(artifact.mime)) {
+    return (
+      <div className={`${styles.stage} ${styles.stage_office}`}>
+        <ZipBrowser
+          url={url}
+          size={artifact.sizeBytes}
+          renderPreview={(member) => <PreviewStage item={member} />}
+        />
+      </div>
+    );
+  }
+  return (
+    <PreviewStage
+      item={{ url, mime: artifact.mime, kind: artifact.kind, title: artifact.title }}
+    />
   );
 }
