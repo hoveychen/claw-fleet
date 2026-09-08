@@ -84,6 +84,7 @@ import { ArtifactsView } from "./views/ArtifactsView";
 import { RepoView } from "./views/RepoView";
 import { RepoDetailView } from "./views/RepoDetailView";
 import { TerminalView, type TerminalWorkspace } from "./views/TerminalView";
+import { useHostFeatures } from "./useHostFeatures";
 import { SessionDetailView } from "./views/SessionDetailView";
 import { sessionDetailKey } from "./sessionDetailKey";
 import { TasksView } from "./views/TasksView";
@@ -451,6 +452,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const activeState = states[activeDeviceId] ?? EMPTY_DEVICE_STATE;
   const client = handles[activeDeviceId]?.transport ?? null;
+  // 当前这台桌面主机开了哪些可选面。是**按设备**问的:两台桌面端的
+  // FLEET_TERMINAL 可以不一样,所以切设备要重问,而不是缓一份全局的。
+  const hostFeatures = useHostFeatures(client);
   const {
     sessionsFrame,
     rttSplit,
@@ -1022,6 +1026,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           <MoreView
             endpointLabel={client?.endpointLabel ?? ""}
             onOpenTerminal={() => setTerminal({ workspace: null })}
+            terminalEnabled={hostFeatures.terminal}
             devices={book.devices}
             activeDeviceId={deviceId}
             activeKind={current?.kind ?? (NEEDS_PAIRING && !MOCK ? "relay" : "http")}
@@ -1130,7 +1135,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </>
       )}
 
-      {terminal && (
+      {/* hostFeatures 默认全关,所以这一层在答案回来之前也不会闪一下 */}
+      {terminal && hostFeatures.terminal && (
         <>
           <HistoryLayer onBack={() => setTerminal(null)} />
           <TerminalView

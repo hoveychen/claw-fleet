@@ -60,6 +60,9 @@ interface Props {
   onOpenWiki: () => void;
   onOpenUsage: () => void;
   onOpenTerminal: () => void;
+  /** 这台桌面主机开了终端面没有（后端的 FLEET_TERMINAL，见 useHostFeatures）。
+   *  关着时整行不出：入口在、点进去开不出 shell 才是更差的体验。 */
+  terminalEnabled: boolean;
   /** 这台手机配对过的每一台 Fleet，按加入顺序。 */
   devices: PairedDevice[];
   /** 当前作用域那一台的 id；一台都没配对时 null（同源形态恒为 null）。 */
@@ -94,6 +97,7 @@ export function MoreView({
   onOpenWiki,
   onOpenUsage,
   onOpenTerminal,
+  terminalEnabled,
   devices,
   activeDeviceId,
   activeKind,
@@ -182,17 +186,23 @@ export function MoreView({
             </span>
             <ChevronRight size={18} className={styles.navChevron} />
           </button>
-          <div className={styles.divider} />
-          <button className={styles.navRow} onClick={onOpenTerminal}>
-            <span className={styles.navIcon}>
-              <SquareTerminal size={18} />
-            </span>
-            <span className={styles.navText}>
-              <span className={styles.navLabel}>{t("终端")}</span>
-              <span className={styles.navSub}>{t("在桌面端主机的某个目录里开一个 shell")}</span>
-            </span>
-            <ChevronRight size={18} className={styles.navChevron} />
-          </button>
+          {terminalEnabled && (
+            <>
+              <div className={styles.divider} />
+              <button className={styles.navRow} onClick={onOpenTerminal}>
+                <span className={styles.navIcon}>
+                  <SquareTerminal size={18} />
+                </span>
+                <span className={styles.navText}>
+                  <span className={styles.navLabel}>{t("终端")}</span>
+                  <span className={styles.navSub}>
+                    {t("在桌面端主机的某个目录里开一个 shell")}
+                  </span>
+                </span>
+                <ChevronRight size={18} className={styles.navChevron} />
+              </button>
+            </>
+          )}
           <div className={styles.divider} />
           <button className={styles.navRow} onClick={onOpenUsage}>
             <span className={styles.navIcon}>
