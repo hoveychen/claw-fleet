@@ -3,10 +3,14 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   Archive,
+  ChevronDown,
+  ChevronRight,
   FileSpreadsheet,
   FileText,
   FileType,
   Film,
+  Folder,
+  FolderOpen,
   Image as ImageIcon,
   Music,
   Package,
@@ -52,6 +56,15 @@ interface StoreUsage {
 }
 
 type SortKey = "recent" | "size" | "name";
+
+export interface ArtifactDirectoryNode {
+  key: string;
+  label: string;
+  workspacePath: string;
+  directory: string;
+  count: number;
+  children: ArtifactDirectoryNode[];
+}
 
 const KIND_ICON: Record<string, typeof FileText> = {
   image: ImageIcon,
@@ -118,12 +131,16 @@ export function sortArtifacts(list: Artifact[], key: SortKey): Artifact[] {
 /** Apply the sub-bar's filters. Exported for the same reason as the sort. */
 export function filterArtifacts(
   list: Artifact[],
-  opts: { query: string; workspace: string; starredOnly: boolean },
+  opts: { query: string; workspace: string; directory?: string; starredOnly: boolean },
 ): Artifact[] {
   const q = opts.query.trim().toLowerCase();
   return list.filter((a) => {
     if (opts.starredOnly && !a.starred) return false;
     if (opts.workspace && a.workspacePath !== opts.workspace) return false;
+    if (opts.directory) {
+      const directory = artifactRelativeDirectory(a);
+      if (directory !== opts.directory && !directory?.startsWith(`${opts.directory}/`)) return false;
+    }
     if (!q) return true;
     // Note and filename included on purpose: the title is often the filename,
     // and what the user remembers is as likely to be "the one about Q3".
@@ -135,12 +152,91 @@ export function filterArtifacts(
   });
 }
 
+function normalizeArtifactPath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
+function artifactRelativeDirectory(artifact: Artifact): string | null {
+  const workspace = normalizeArtifactPath(artifact.workspacePath);
+  const source = normalizeArtifactPath(artifact.sourcePath);
+  const workspaceLower = workspace.toLowerCase();
+  const sourceLower = source.toLowerCase();
+  if (!sourceLower.startsWith(`${workspaceLower}/`)) return null;
+  const relative = source.slice(workspace.length + 1);
+  const slash = relative.lastIndexOf("/");
+  return slash < 0 ? "" : relative.slice(0, slash);
+}
+
+interface MutableDirectoryNode extends Omit<ArtifactDirectoryNode, "children"> {
+  children: MutableDirectoryNode[];
+  childMap: Map<string, MutableDirectoryNode>;
+}
+
+/** Build the secondary navigation from the artifact store's real source paths. */
+export function buildArtifactDirectoryTree(items: Artifact[]): ArtifactDirectoryNode[] {
+  const roots = new Map<string, MutableDirectoryNode>();
+  for (const artifact of items) {
+    let root = roots.get(artifact.workspacePath);
+    if (!root) {
+      root = {
+        key: artifact.workspacePath,
+        label: artifact.workspaceName || artifact.workspacePath,
+        workspacePath: artifact.workspacePath,
+        directory: "",
+        count: 0,
+        children: [],
+        childMap: new Map(),
+      };
+      roots.set(artifact.workspacePath, root);
+    }
+    root.count += 1;
+    const directory = artifactRelativeDirectory(artifact);
+    if (!directory) continue;
+    let current = root;
+    const parts = directory.split("/").filter(Boolean);
+    for (let index = 0; index < parts.length; index += 1) {
+      const path = parts.slice(0, index + 1).join("/");
+      let child = current.childMap.get(parts[index]);
+      if (!child) {
+        child = {
+          key: `${artifact.workspacePath}\u0000${path}`,
+          label: parts[index],
+          workspacePath: artifact.workspacePath,
+          directory: path,
+          count: 0,
+          children: [],
+          childMap: new Map(),
+        };
+        current.childMap.set(parts[index], child);
+        current.children.push(child);
+      }
+      child.count += 1;
+      current = child;
+    }
+  }
+
+  const finalize = (node: MutableDirectoryNode): ArtifactDirectoryNode => ({
+    key: node.key,
+    label: node.label,
+    workspacePath: node.workspacePath,
+    directory: node.directory,
+    count: node.count,
+    children: node.children
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true }))
+      .map(finalize),
+  });
+  return [...roots.values()]
+    .sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true }))
+    .map(finalize);
+}
+
 export function ArtifactsView() {
   const { t } = useTranslation();
   const [items, setItems] = useState<Artifact[] | null>(null);
   const [usage, setUsage] = useState<StoreUsage | null>(null);
   const [query, setQuery] = useState("");
   const [workspace, setWorkspace] = useState("");
+  const [directory, setDirectory] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("recent");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -159,15 +255,11 @@ export function ArtifactsView() {
     void load();
   }, [load]);
 
-  const workspaces = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const a of items ?? []) seen.set(a.workspacePath, a.workspaceName);
-    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [items]);
+  const directoryTree = useMemo(() => buildArtifactDirectoryTree(items ?? []), [items]);
 
   const shown = useMemo(
-    () => sortArtifacts(filterArtifacts(items ?? [], { query, workspace, starredOnly }), sortKey),
-    [items, query, workspace, starredOnly, sortKey],
+    () => sortArtifacts(filterArtifacts(items ?? [], { query, workspace, directory, starredOnly }), sortKey),
+    [items, query, workspace, directory, starredOnly, sortKey],
   );
 
   const selected = useMemo(
@@ -204,18 +296,6 @@ export function ArtifactsView() {
       </button>
       <select
         className={styles.select}
-        value={workspace}
-        onChange={(e) => setWorkspace(e.target.value)}
-      >
-        <option value="">{t("artifacts.all_workspaces", "全部工作区")}</option>
-        {workspaces.map(([path, name]) => (
-          <option key={path} value={path}>
-            {name}
-          </option>
-        ))}
-      </select>
-      <select
-        className={styles.select}
         value={sortKey}
         onChange={(e) => setSortKey(e.target.value as SortKey)}
         aria-label={t("artifacts.sort_by", "排序方式")}
@@ -246,6 +326,18 @@ export function ArtifactsView() {
         placeholder: t("artifacts.search_placeholder", "搜索产出…"),
       }}
       subBar={selected ? undefined : subBar}
+      secondary={
+        <ArtifactDirectoryTree
+          nodes={directoryTree}
+          selectedKey={workspace ? `${workspace}\u0000${directory}` : ""}
+          totalCount={items?.length ?? 0}
+          onSelect={(nextWorkspace, nextDirectory) => {
+            setWorkspace(nextWorkspace);
+            setDirectory(nextDirectory);
+            setSelectedId(null);
+          }}
+        />
+      }
     >
       {error && <div className={styles.error_line}>{error}</div>}
       {selected ? (
@@ -264,9 +356,11 @@ export function ArtifactsView() {
       ) : shown.length === 0 ? (
         <EmptyState
           icon={<Package size={30} strokeWidth={1.1} />}
-          title={t("artifacts.empty_title", "还没有产出")}
+          title={items.length === 0
+            ? t("artifacts.empty_title", "还没有产出")
+            : t("artifacts.empty_directory", "这个目录里没有匹配的产出")}
           subtitle={t(
-            "artifacts.empty_subtitle",
+            items.length === 0 ? "artifacts.empty_subtitle" : "artifacts.empty_directory_hint",
             "Agent 用 `fleet artifact add <path>` 把交付物存进来。",
           )}
         />
@@ -283,6 +377,76 @@ export function ArtifactsView() {
         </div>
       )}
     </PageShell>
+  );
+}
+
+function ArtifactDirectoryTree({
+  nodes,
+  selectedKey,
+  totalCount,
+  onSelect,
+}: {
+  nodes: ArtifactDirectoryNode[];
+  selectedKey: string;
+  totalCount: number;
+  onSelect: (workspacePath: string, directory: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <nav className={styles.tree} aria-label={t("artifacts.directory_tree", "产出目录")}>
+      <button
+        type="button"
+        className={`${styles.tree_row} ${selectedKey === "" ? styles.tree_row_active : ""}`}
+        onClick={() => onSelect("", "")}
+      >
+        <span className={styles.tree_spacer} />
+        <Package size={15} strokeWidth={1.4} />
+        <span className={styles.tree_label}>{t("artifacts.all_artifacts", "全部产出")}</span>
+        <span className={styles.tree_count}>{totalCount}</span>
+      </button>
+      {nodes.map((node) => (
+        <ArtifactDirectoryBranch key={node.key} node={node} depth={0} selectedKey={selectedKey} onSelect={onSelect} />
+      ))}
+    </nav>
+  );
+}
+
+function ArtifactDirectoryBranch({
+  node,
+  depth,
+  selectedKey,
+  onSelect,
+}: {
+  node: ArtifactDirectoryNode;
+  depth: number;
+  selectedKey: string;
+  onSelect: (workspacePath: string, directory: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const hasChildren = node.children.length > 0;
+  const selected = selectedKey === `${node.workspacePath}\u0000${node.directory}`;
+  return (
+    <div>
+      <div className={`${styles.tree_row} ${selected ? styles.tree_row_active : ""}`} style={{ paddingLeft: 12 + depth * 15 }}>
+        <button
+          type="button"
+          className={styles.tree_twisty}
+          aria-label={expanded ? "Collapse" : "Expand"}
+          onClick={() => setExpanded((value) => !value)}
+          disabled={!hasChildren}
+        >
+          {hasChildren ? (expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}
+        </button>
+        <button type="button" className={styles.tree_target} onClick={() => onSelect(node.workspacePath, node.directory)}>
+          {expanded && hasChildren ? <FolderOpen size={15} strokeWidth={1.4} /> : <Folder size={15} strokeWidth={1.4} />}
+          <span className={styles.tree_label} title={node.label}>{node.label}</span>
+          <span className={styles.tree_count}>{node.count}</span>
+        </button>
+      </div>
+      {expanded && node.children.map((child) => (
+        <ArtifactDirectoryBranch key={child.key} node={child} depth={depth + 1} selectedKey={selectedKey} onSelect={onSelect} />
+      ))}
+    </div>
   );
 }
 
