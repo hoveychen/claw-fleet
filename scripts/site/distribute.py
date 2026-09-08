@@ -60,17 +60,51 @@ def verify(path, asset):
     return digest.hexdigest()
 
 
+def site_files(root):
+    """The two pages plus every local asset they reference, in copy order.
+
+    Derived rather than hand-listed. The old hard-coded tuple silently went
+    stale every time the site gained an image: `screenshots/current/agents-*`
+    and `relay-*` were added to both pages and never added here, so an
+    unattended mirror sync would have published pages whose new screenshots
+    404. Reading the references out of the HTML that is being copied keeps the
+    two in step by construction.
+    """
+    pages = ['index.html', 'zh/index.html']
+    names = list(pages) + ['site.css', 'site.js', 'locale.js']
+    for page in pages:
+        source = root / page
+        if not source.is_file():
+            continue
+        prefix = page.rpartition('/')[0]
+        for reference in re.findall(r'(?:src|href)="([^"]+)"', source.read_text()):
+            reference = reference.split('?')[0].split('#')[0]
+            if not reference or ':' in reference or reference.startswith('//') or reference.endswith('/'):
+                continue
+            if reference.startswith('../'):
+                candidate = reference[3:]
+            elif reference.startswith('./'):
+                candidate = reference[2:]
+            elif prefix:
+                candidate = prefix + '/' + reference
+            else:
+                candidate = reference
+            # Refuse anything that would escape the site root.
+            if '..' in candidate.split('/') or candidate.startswith('/'):
+                raise ValueError('Unsafe site reference: ' + reference)
+            if candidate.endswith('.html') or candidate in names:
+                continue
+            names.append(candidate)
+    return names
+
+
 def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cloud COS'):
     tag, assets = validate_release(release)
     public_url = validate_base_url(public_url)
     output.mkdir(parents=True, exist_ok=True)
-    for name in ('index.html', 'zh/index.html', 'site.css', 'site.js', 'locale.js', 'icon.png', 'hero.png',
-                 'icon-apple.svg', 'icon-windows.svg', 'icon-linux.svg', 'icon-android.svg',
-                 'screenshots/current/work-en.png', 'screenshots/current/work-zh.png',
-                 'screenshots/current/review-en.png', 'screenshots/current/review-zh.png',
-                 'screenshots/current/results-en.png', 'screenshots/current/results-zh.png', 'screenshots/current/mobile-en.png',
-                 'screenshots/current/mobile-zh.png'):
-        source = (site_root or ROOT / 'docs') / name
+    root = site_root or ROOT / 'docs'
+    for name in site_files(root):
+        source = root / name
         # selfhost.py passes site_root=<the live deployment>, so this list is
         # also read against a site published before the file existed. A newly
         # added asset must therefore be allowed to be absent there, or adding
@@ -131,11 +165,10 @@ def publish(output, manifest, public_url):
             if int(response.headers.get('Content-Length', '-1')) != path.stat().st_size:
                 raise ValueError('Public download size verification failed: ' + path.name)
     # Upload dependencies first, both HTML documents next, manifest last.
-    site_paths = [output/p for p in ('site.css','site.js','locale.js','icon.png','hero.png','icon-apple.svg',
-        'icon-windows.svg','icon-linux.svg','icon-android.svg','screenshots/current/work-en.png','screenshots/current/work-zh.png',
-        'screenshots/current/review-en.png','screenshots/current/review-zh.png','screenshots/current/results-en.png', 'screenshots/current/results-zh.png',
-        'screenshots/current/mobile-en.png','screenshots/current/mobile-zh.png',
-        'index.html','zh/index.html')]
+    # Same derived list prepare copied, but dependencies before the two pages:
+    # a visitor must never load an HTML document whose assets are not up yet.
+    names = site_files(output)
+    site_paths = [output/p for p in names[2:] + names[:2]]
     for path in site_paths:
         if not path.is_file():
             continue

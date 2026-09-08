@@ -109,6 +109,28 @@ class DistributionTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 d.prepare(release,Path(tmp)/'out2','https://dl.example.com/fleet',site_root=broken)
 
+    def test_site_file_list_tracks_what_the_pages_reference(self):
+        # The hand-maintained tuple this replaced had already gone stale:
+        # agents-* and relay-* screenshots were on both pages and not in it.
+        names = d.site_files(d.ROOT / 'docs')
+        self.assertEqual(names[:2], ['index.html', 'zh/index.html'])
+        for name in names:
+            with self.subTest(name=name):
+                self.assertTrue((d.ROOT / 'docs' / name).is_file(), name)
+        for required in ('site.css', 'site.js', 'locale.js', 'icon-android.svg',
+                         'screenshots/current/agents-en.png', 'screenshots/current/relay-zh.png'):
+            self.assertIn(required, names)
+        self.assertEqual(len(names), len(set(names)))
+        self.assertFalse([n for n in names[2:] if n.endswith('.html')])
+
+    def test_site_reference_cannot_escape_the_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'zh').mkdir()
+            (root / 'index.html').write_text('<img src="../../etc/passwd">')
+            (root / 'zh/index.html').write_text('<img src="x.png">')
+            with self.assertRaises(ValueError): d.site_files(root)
+
     def test_invalid_public_origins(self):
         for value in ('http://example.com','https://u:p@example.com','https://example.com/?token=x','https://example.com/../bad'):
             with self.subTest(value=value),self.assertRaises(ValueError): d.validate_base_url(value)
