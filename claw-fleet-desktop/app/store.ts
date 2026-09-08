@@ -200,6 +200,16 @@ function persistPlansView(s: MainViewState["plans"]): void {
   setItem("plans-done-items", JSON.stringify(s.doneItemsShown));
 }
 
+/** Drop `view` from the auto-collapse record — the reader no longer owns a
+ *  panel the user has just toggled by hand. */
+function forgetSecondary(
+  s: { autoCollapsed: { sidebar: boolean; secondary: ViewMode | null } },
+  view: ViewMode,
+): { sidebar: boolean; secondary: ViewMode | null } {
+  if (s.autoCollapsed.secondary !== view) return s.autoCollapsed;
+  return { ...s.autoCollapsed, secondary: null };
+}
+
 interface UIState {
   theme: Theme;
   viewMode: ViewMode;
@@ -218,6 +228,17 @@ interface UIState {
    *  keyed by ViewMode. Re-clicking the already-active nav item toggles the
    *  entry. Persisted to localStorage as JSON. A missing key ⇒ expanded. */
   secondarySidebarCollapsed: Record<string, boolean>;
+  /** What the layout collapsed *on its own* to make room for a wide reader (a
+   *  doc card expanded in a session's auxiliary rail), so it can put back
+   *  exactly what it took and nothing else.
+   *
+   *  Deliberately not persisted and deliberately separate from the two fields
+   *  above: an auto-collapse is the layout coping with a narrow pane, not a
+   *  preference, and a reader closed after the app quit must not boot into a
+   *  collapsed sidebar the user never chose. Any manual toggle clears the
+   *  matching entry — once the reader has an opinion, the layout stops
+   *  pretending it owns that panel. */
+  autoCollapsed: { sidebar: boolean; secondary: ViewMode | null };
   mascotVisible: boolean;
   /** 启动台 rail filters. HistoryView is mounted through SessionList's `viewMode`
    *  ternary, so it unmounts on every trip to another page — including the
@@ -261,6 +282,12 @@ interface UIState {
   toggleSecondarySidebar: (view: ViewMode) => void;
   /** Explicitly set `view`'s secondary sidebar collapsed state. */
   setSecondarySidebar: (view: ViewMode, collapsed: boolean) => void;
+  /** Collapse a panel to make room for a reader, remembering that *we* did it.
+   *  In-memory only — see `autoCollapsed`. No-op if it is already collapsed,
+   *  which is what keeps a user's own collapse from being "restored" open. */
+  autoCollapse: (what: "sidebar" | ViewMode) => void;
+  /** Put back whatever `autoCollapse` took, and forget it. */
+  autoRestore: () => void;
   setMascotVisible: (on: boolean) => void;
   /** Settings overlay visibility. Deliberately not persisted — a settings
    *  panel restored on boot is not a preference, it is a surprise. */
@@ -476,6 +503,7 @@ export const useUIStore = create<UIState>((set) => ({
   lastViewByNavGroup: readLastViewByNavGroup(),
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
+  autoCollapsed: { sidebar: false, secondary: null },
   mascotVisible: getItem("mascot-visible") === "true",
   historyMarkFilter: readMarkFilter(),
   historyWorkspaceFilter: initialHistoryWorkspaceFilter,
@@ -575,7 +603,9 @@ export const useUIStore = create<UIState>((set) => ({
   clearOpenTaskNav: () => set({ openTaskNav: null }),
   setSidebarCollapsed: (on) => {
     setItem("sidebar-collapsed", on ? "true" : "false");
-    set({ sidebarCollapsed: on });
+    // A hand toggle takes the panel back: whatever the reader does next, it is
+    // not this panel's business any more.
+    set((s) => ({ sidebarCollapsed: on, autoCollapsed: { ...s.autoCollapsed, sidebar: false } }));
   },
   toggleSecondarySidebar: (view) =>
     set((s) => {
@@ -584,13 +614,36 @@ export const useUIStore = create<UIState>((set) => ({
         [view]: !s.secondarySidebarCollapsed[view],
       };
       setItem("secondary-sidebar-collapsed", JSON.stringify(next));
-      return { secondarySidebarCollapsed: next };
+      return { secondarySidebarCollapsed: next, autoCollapsed: forgetSecondary(s, view) };
     }),
   setSecondarySidebar: (view, collapsed) =>
     set((s) => {
       const next = { ...s.secondarySidebarCollapsed, [view]: collapsed };
       setItem("secondary-sidebar-collapsed", JSON.stringify(next));
-      return { secondarySidebarCollapsed: next };
+      return { secondarySidebarCollapsed: next, autoCollapsed: forgetSecondary(s, view) };
+    }),
+  autoCollapse: (what) =>
+    set((s) => {
+      if (what === "sidebar") {
+        if (s.sidebarCollapsed) return {};
+        return { sidebarCollapsed: true, autoCollapsed: { ...s.autoCollapsed, sidebar: true } };
+      }
+      if (s.secondarySidebarCollapsed[what]) return {};
+      return {
+        secondarySidebarCollapsed: { ...s.secondarySidebarCollapsed, [what]: true },
+        autoCollapsed: { ...s.autoCollapsed, secondary: what },
+      };
+    }),
+  autoRestore: () =>
+    set((s) => {
+      const { sidebar, secondary } = s.autoCollapsed;
+      if (!sidebar && secondary == null) return {};
+      const patch: Partial<UIState> = { autoCollapsed: { sidebar: false, secondary: null } };
+      if (sidebar) patch.sidebarCollapsed = false;
+      if (secondary != null) {
+        patch.secondarySidebarCollapsed = { ...s.secondarySidebarCollapsed, [secondary]: false };
+      }
+      return patch;
     }),
   settingsOpen: false,
   setSettingsOpen: (on) => set({ settingsOpen: on }),

@@ -1686,6 +1686,7 @@
     "rail_show": "展开辅助栏",
     "rail_hide": "收起辅助栏",
     "rail_empty": "暂无运行中的 Agent 或已打开的文档",
+    "doc_card_resize": "调整卡片宽度",
     "tab_decisions": "决策",
     "task_notification": "后台任务",
     "task_done": "已完成",

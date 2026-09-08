@@ -13,9 +13,16 @@
 }
 
 .root.open {
-  width: 50vw;
+  /* Half the window, plus whatever an expanded doc reader needs on top of it
+     (`--reader-grow`, set inline by SessionDetail; 0 the rest of the time).
+     Standing at a fixed 50vw meant the space the auto-collapsed nav gave up
+     went to the session list beside this pane instead of to the reader that
+     asked for it — the chrome folded away and the transcript was no wider.
+     The cap keeps a usable list column on the other side. */
+  width: min(calc(50vw + var(--reader-grow, 0px)), calc(100vw - 340px));
   min-width: 360px;
   border-left: 1px solid var(--color-border);
+  transition: width 0.25s ease, min-width 0.25s ease;
 }
 
 /* Inline variant: used when SessionDetail is embedded inside another panel
@@ -51,12 +58,12 @@
    conversation, so the space it needs is padding inside the scroller, not a
    column of its own. */
 .rail_open .body_row {
-  /* The rail's width plus its own 10px offset from the pane edge and a gutter,
+  /* The band's width plus its own 10px offset from the pane edge and a gutter,
      measured from the row's padding box — the drawer's `right` is relative to
      that, the rail's to the slab inside it. Verified in the mock at 1512px:
      with a bare `+ slab-gap` the drawer's right edge landed 3px *over* the
      cards' left edge. */
-  --rail-space: calc(var(--rail-w) + 24px);
+  --rail-space: calc(var(--rail-band) + 24px);
 }
 
 /* ── Hero banner ────────────────────────────────────────────────────────────
@@ -333,6 +340,11 @@
      short of the rail rather than covering it). Declared on the row so the
      percentage resolves against one element for all four. */
   --rail-w: clamp(220px, 18%, 320px);
+  /* The band on the right that the conversation, the composer and the drawer
+     all hold clear. It is the rail's own width — until a doc card expands, when
+     SessionDetail overrides it inline with that card's measured width, so the
+     reader pushes the prose aside instead of covering it. */
+  --rail-band: var(--rail-w);
   --rail-space: 0px;
   position: relative;
   flex: 1;
@@ -573,6 +585,17 @@
   pointer-events: auto;
 }
 
+/* A card expanded into a reader needs more than --rail-w, so the *box* widens
+   (its px width is set inline from the persisted ratio — see SessionAuxRail)
+   while every collapsed card keeps --rail-w and the right edge. The transcript's
+   reserved band does NOT widen with it: that is what keeps this a card floating
+   over the conversation instead of a column squeezing it, and it is why the
+   widened area has to stay pointer-transparent between the cards. */
+.rail_wide > *:not(.doc_card_expanded) {
+  width: var(--rail-w);
+  align-self: flex-end;
+}
+
 /* Only ever seen when the switch pinned the rail open with nothing in it.
    No card, no frame: a line of dim text over the transcript, so the empty rail
    still reads as absence rather than as a card that failed to fill. */
@@ -634,22 +657,51 @@
 }
 
 /* ── Doc cards ──────────────────────────────────────────────────────────────
-   A file / wiki doc / page the agent named. Deliberately one line: the card is
-   the handle, the drawer is where you read the thing. */
+   A file / wiki doc / page the agent named. One line while collapsed — a
+   handle. Clicking it expands *this card* into the reader (.doc_card_expanded
+   below); it used to open the drawer, which said the same name twice and threw
+   a fixed-width panel over the conversation. */
 .doc_card {
   display: flex;
   align-items: center;
 }
 
-/* The card whose doc the drawer is reading. A tinted fill alone read as
-   "pressed/disabled" in the light theme, so the cue is the accent: the card is
-   the handle for what is on screen, not a greyed-out row. */
-.doc_card_open {
-  background: var(--color-accent-soft);
+/* The reader. Same card — same fill, hairline and shadow — grown to hold one of
+   the three doc panes, and given the rail's whole (widened) box. It takes the
+   height the rail has left, so the page inside scrolls rather than the rail. */
+.doc_card_expanded {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 220px;
+  overflow: hidden;
 }
-.doc_card_open .doc_card_icon,
-.doc_card_open .doc_card_label {
-  color: var(--color-accent);
+
+/* The expanded card's own title row keeps the collapsed card's metrics, so
+   expanding does not make the name jump. Its bottom hairline is the only
+   divider in the rail, and it earns it: below it is a different document. */
+.doc_card_head {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Drag grip on the left edge — the card grows toward the conversation, so this
+   is the edge that moves. Sits half outside the card so the 7px target is
+   grabbable without eating into the reader's own left padding. */
+.doc_card_grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+}
+.doc_card_grip:hover,
+.doc_card_grip:active {
+  background: var(--color-accent-soft);
 }
 
 .doc_card_main {
@@ -961,9 +1013,16 @@
    composer floats over the same scroller and has to move with it. */
 .rail_open .scroll_area,
 .rail_open .dock_layer {
-  /* The rail's own width, its 10px offset from the pane edge, and a 16px
-     gutter so prose stops short of the cards instead of touching them. */
-  padding-right: calc(var(--rail-w) + 26px);
+  /* The band's width, its 10px offset from the pane edge, and a 16px gutter so
+     prose stops short of the cards instead of touching them. Transitioned
+     because expanding a doc card changes it: the prose reflowing in one step
+     reads as the page having jumped. */
+  padding-right: calc(var(--rail-band) + 26px);
+  transition: padding-right 140ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail_open .scroll_area,
+  .rail_open .dock_layer { transition: none; }
 }
 
 /* Codex calls fleet__ask from inside its code-mode exec tool. The pending

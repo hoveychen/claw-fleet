@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openDoc, showTab, type AuxState } from "./detailAux";
+import { openDoc, showFacet, type AuxState } from "./detailAux";
 import { useSessionAux } from "./useSessionAux";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -55,11 +55,12 @@ describe("useSessionAux", () => {
   it("hands the next session a clean rail and a closed drawer", () => {
     const { probe, switchTo } = mount("s1");
     act(() => probe.set((st) => openDoc(st, "file", "/repo/src/main.rs")));
-    act(() => probe.set((st) => showTab(st, "tokens")));
+    act(() => probe.set((st) => showFacet(st, "tokens")));
 
     switchTo("s2");
 
     expect(probe.state.docs).toEqual([]);
     expect(probe.state.active).toBe(null);
+    expect(probe.state.expanded).toBe(null);
   });
 });

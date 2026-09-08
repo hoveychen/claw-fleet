@@ -1689,6 +1689,7 @@
     "rail_show": "Show side rail",
     "rail_hide": "Hide side rail",
     "rail_empty": "No running agents or opened docs yet",
+    "doc_card_resize": "Resize card",
     "tab_decisions": "Decisions",
     "task_notification": "Background task",
     "task_done": "Completed",

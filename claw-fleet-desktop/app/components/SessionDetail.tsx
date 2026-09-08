@@ -44,6 +44,8 @@ import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { effortChipLabel, effortTitle, formatModel } from "./SessionCard";
 import { inlineCodexFleetAsk, withCodexDecisionHistory } from "./codexDecision";
+import { useChromeYield } from "../hooks/useChromeYield";
+import { useDocCardWidth } from "../hooks/useDocCardWidth";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
@@ -53,16 +55,16 @@ import {
   isAuxFacet,
   openDoc,
   pruneTab,
-  showTab,
-  toggleTab,
+  showFacet,
+  toggleDoc,
   type AuxDocKind,
+  type AuxFacet,
   type AuxFacetItem,
 } from "../detailAux";
 import { useSessionAux } from "../useSessionAux";
 import { SessionAuxPanel } from "./SessionAuxPanel";
 import { SessionAuxRail } from "./SessionAuxRail";
 import { SessionFacetPanel } from "./SessionFacetPanel";
-import { SessionAuxDoc } from "./SessionAuxDoc";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
 import { followGrowthBehavior, liveThinkingLanded, retainLiveThinking } from "../streamContinuity";
@@ -155,8 +157,15 @@ export function SessionDetail({
   sessionInfo = null,
   searchQuery: standaloneSearchQuery = null,
   paused = false,
+  chromeAdaptive = true,
 }: {
   inline?: boolean;
+  /** May this pane fold the window's chrome away when a doc reader leaves the
+   *  transcript too narrow (see useChromeYield)? True for the two hosts that
+   *  ARE the page — the standalone pane and 任务's detail column. False for the
+   *  DecisionPanel, an overlay that has no business rearranging the page it is
+   *  floating over. */
+  chromeAdaptive?: boolean;
   /** When set, the component runs in standalone mode: its own local
    *  session/messages state, independent from the global useDetailStore.
    *  Used by DecisionPanel's inline detail column and HistoryView so they
@@ -448,6 +457,9 @@ export function SessionDetail({
   // last message hides underneath it. Measured, not guessed: the box grows with
   // the draft, the option pills and the queued-follow-up chips.
   const dockRef = useRef<HTMLDivElement>(null);
+  /* The messages pane. The expanded doc card's width is a ratio of *this* box,
+     and the transcript reserves the same number as a right-hand band. */
+  const messagesPaneRef = useRef<HTMLDivElement>(null);
   const [dockHeight, setDockHeight] = useState(0);
   /* The conversation is no longer one tab among many — it owns this column for
      good. Beside it are two surfaces, at two different levels: a permanent rail
@@ -702,7 +714,7 @@ export function SessionDetail({
     if (isStandalone) return;
     const facet = global.initialTab;
     if (!facet || !isAuxFacet(facet)) return;
-    setAux((st) => showTab(st, facet));
+    setAux((st) => showFacet(st, facet));
   }, [isStandalone, global.session?.id, global.initialTab]);
 
   // TASKS.md plan for THIS session — scoped to the plan the session is focused
@@ -805,15 +817,16 @@ export function SessionDetail({
   const bgTasks = liveSession?.backgroundTasks ?? [];
   const hasBgTasks = bgTasks.length > 0;
 
-  const pickTab = useCallback((id: string) => {
-    setAux((st) => toggleTab(st, id));
+  /* Clicking a doc card expands it into a reader in place, and clicking the
+     expanded one collapses it back — the card is its own on/off control. */
+  const pickDoc = useCallback((id: string) => {
+    setAux((st) => toggleDoc(st, id));
   }, []);
-  /* Picking a facet from the overflow menu only ever *opens* it. The tab strip's
-     click is a toggle because the strip is also the panel's on/off control; a
-     menu item that sometimes closed the panel you just asked for would read as
-     the click having missed. */
-  const openFacet = useCallback((id: string) => {
-    setAux((st) => showTab(st, id));
+  /* Picking a facet from the overflow menu only ever *opens* it: a menu item
+     that sometimes closed the panel you just asked for would read as the click
+     having missed. */
+  const openFacet = useCallback((id: AuxFacet) => {
+    setAux((st) => showFacet(st, id));
   }, []);
   const closeAuxPanel = useCallback(() => {
     setAux((st) => closeAux(st));
@@ -1126,27 +1139,25 @@ export function SessionDetail({
     workflowTrees.length,
   ]);
 
-  // Everything the drawer could legitimately be showing: a facet this session
-  // actually offers, or a doc that still has a card in the rail. A selection
-  // whose subject has since disappeared (the session took another turn and
-  // emptied 后台任务, say) would otherwise hold the drawer open on nothing.
-  const auxIds = useMemo(() => {
-    const ids = new Set<string>(auxFacets.map((f) => f.id));
-    for (const d of aux.docs) ids.add(d.id);
-    return ids;
-  }, [auxFacets, aux.docs]);
+  // Every facet the drawer could legitimately be showing — one this session
+  // actually offers. A selection whose subject has since disappeared (the
+  // session took another turn and emptied 后台任务, say) would otherwise hold
+  // the drawer open on nothing. Docs are not in here: they live in the rail,
+  // and `closeDoc` already collapses the reader when its card goes.
+  const auxIds = useMemo(
+    () => new Set<string>(auxFacets.map((f) => f.id)),
+    [auxFacets],
+  );
   useEffect(() => {
     setAux((st) => pruneTab(st, (id) => auxIds.has(id)));
   }, [auxIds]);
 
-  const activeTab = aux.active;
-  const auxOpen = activeTab != null;
-  const activeFacet = activeTab != null && isAuxFacet(activeTab) ? activeTab : null;
-  const activeDoc = activeTab == null ? null : aux.docs.find((d) => d.id === activeTab) ?? null;
+  const activeFacet = aux.active;
+  const auxOpen = activeFacet != null;
   // The drawer names the one thing it holds, in place of the tab strip.
   const drawerTitle = activeFacet
     ? auxFacets.find((f) => f.id === activeFacet)?.label ?? activeFacet
-    : activeDoc?.label ?? "";
+    : "";
   const railCards = liveSubagents.length + aux.docs.length;
   /* The rail follows its content by default — present when it has cards, zero
      width when it does not — until the reader says otherwise with the toolbar
@@ -1156,6 +1167,22 @@ export function SessionDetail({
      invent which facet to show, which is how pressing it on a fresh session
      landed on Skills — an answer to a question nobody asked. */
   const railOpen = railOverride ?? railCards > 0;
+  /* Width of the expanded doc card, and the grip that changes it. Owned here
+     rather than in the rail because the conversation needs the same number: it
+     holds a band of exactly this width clear (`--rail-band` below), which is
+     what stops the card from covering the prose it was opened from. */
+  const docExpanded = railOpen && aux.expanded != null;
+  const uiViewMode = useUIStore((s) => s.viewMode);
+  const { width: docCardW, paneW, onGripDown } = useDocCardWidth(messagesPaneRef, docExpanded);
+  /* When the pane cannot hold both the reader and a readable transcript, the
+     window's own chrome yields instead — nav sidebar first, session list after
+     — and comes back when the reader closes. See useChromeYield. */
+  useChromeYield({
+    active: docExpanded,
+    view: uiViewMode,
+    proseW: paneW > 0 ? paneW - docCardW - 26 : 0,
+    enabled: chromeAdaptive,
+  });
   const toggleRail = useCallback(() => {
     setRailOverride((prev) => !(prev ?? railCards > 0));
   }, [railCards]);
@@ -1168,6 +1195,14 @@ export function SessionDetail({
       <WebLinkProvider value={openWebInAux}>
       <div
         className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railOpen ? styles.rail_open : ""}`}
+        /* Standalone only: the pane grows by what the reader needs, so the room
+           the auto-collapsed chrome gave up lands here rather than in the list
+           beside it. Inline hosts own their own width. */
+        style={
+          !inline && docCardW > 0
+            ? ({ "--reader-grow": `${docCardW + 26}px` } as React.CSSProperties)
+            : undefined
+        }
       >
         {liveSession && (
           <>
@@ -1176,7 +1211,18 @@ export function SessionDetail({
               and the aux tab strip do (Tauri's shim reads e.target, not an
               ancestor). The resize handle inside it is a child without the
               attribute, so col-resize dragging still wins there. */}
-          <div className={styles.body_row} data-tauri-drag-region>
+          <div
+            className={styles.body_row}
+            data-tauri-drag-region
+            /* The band the transcript, the composer and the drawer all hold
+               clear on the right. It is the rail's own width until a doc card
+               expands, and that card's width while it is open. */
+            style={
+              docCardW > 0
+                ? ({ "--rail-band": `${docCardW}px` } as React.CSSProperties)
+                : undefined
+            }
+          >
             <div className={styles.main_col}>
               {/* Hero banner. The session's identity and the controls that act
                   on it, as one surface rather than a title row with a tab strip
@@ -1363,7 +1409,7 @@ export function SessionDetail({
                   <PlanProgressRow
                     plan={liveSession.taskPlan}
                     variant="header"
-                    onOpen={() => setAux((st) => showTab(st, "tasks"))}
+                    onOpen={() => setAux((st) => showFacet(st, "tasks"))}
                   />
                 )}
                 {/* Handoff relay chain — chip toggles the chain detail panel */}
@@ -1374,7 +1420,7 @@ export function SessionDetail({
                 )}
               </div>
 
-              <div className={styles.messages_pane}>
+              <div className={styles.messages_pane} ref={messagesPaneRef}>
                 {syncingLatest && (
                   <div className={styles.syncing_latest} role="status" aria-live="polite">
                     <LoaderCircle size={14} aria-hidden="true" />
@@ -1459,23 +1505,19 @@ export function SessionDetail({
                   open={railOpen}
                   agents={liveSubagents}
                   docs={aux.docs}
-                  activeId={activeTab}
+                  expandedId={aux.expanded}
                   onOpenAgent={open}
-                  onOpenDoc={pickTab}
+                  onToggleDoc={pickDoc}
                   onCloseDoc={dropDoc}
+                  onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
+                  cardWidth={docCardW}
+                  onGripDown={onGripDown}
                 />
               </div>
             </div>
 
             {auxOpen && (
               <SessionAuxPanel title={drawerTitle} onClose={closeAuxPanel}>
-                {activeDoc && (
-                  <SessionAuxDoc
-                    doc={activeDoc}
-                    onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
-                    onClose={() => dropDoc(activeDoc.id)}
-                  />
-                )}
                 {activeFacet && (
                   <SessionFacetPanel
                     facet={activeFacet}

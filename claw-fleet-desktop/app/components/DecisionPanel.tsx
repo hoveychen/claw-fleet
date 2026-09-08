@@ -2150,7 +2150,7 @@ export function DecisionPanel() {
               sessionId={active.request.sessionId}
             />
           ) : (
-            <SessionDetail inline sessionInfo={activeSessionInfo} />
+            <SessionDetail inline chromeAdaptive={false} sessionInfo={activeSessionInfo} />
           )}
         </div>
       )}
