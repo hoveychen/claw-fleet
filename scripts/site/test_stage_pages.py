@@ -41,6 +41,21 @@ class PayloadTests(unittest.TestCase):
                 self.assertIn(name, left)
                 self.assertNotIn(name, self.names)
 
+    def test_a_verification_file_dropped_in_the_root_gets_published(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'zh').mkdir()
+            for name in ('index.html', 'zh/index.html', 'site.css', 'site.js', 'locale.js'):
+                (root / name).write_text('')
+            (root / 'google1234abcd.html').write_text('google-site-verification')
+            (root / 'baidu_verify_codeva-xyz.html').write_text('xyz')
+            (root / 'scratch-notes.txt').write_text('not part of the site')
+            names = stage_pages.payload(root)
+            self.assertIn('google1234abcd.html', names)
+            self.assertIn('baidu_verify_codeva-xyz.html', names)
+            # The whitelist still exists: an unrelated file stays unpublished.
+            self.assertNotIn('scratch-notes.txt', names)
+
     def test_nothing_is_published_twice(self):
         self.assertEqual(len(self.names), len(set(self.names)))
 

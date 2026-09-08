@@ -28,6 +28,15 @@ import site_origin
 #              would 404 a URL that is already out in the world.
 EXTRA_FILES = ('downloads.json', 'sitemap.xml', 'robots.txt')
 EXTRA_TREES = ('player',)
+# Search-console ownership proofs have to sit at the site root under a name the
+# console picks, so they cannot be listed one by one ahead of time. Dropping the
+# file into docs/ is all it should take -- a whitelist that silently withholds
+# it turns "verify your site" into an afternoon of confusion.
+# Narrow patterns on purpose: a catch-all like '*.txt' would quietly publish
+# whatever else lands in docs/, which is the thing this whitelist exists to stop.
+VERIFICATION_GLOBS = ('google*.html', 'baidu_verify_*.html', 'baidu_verify_*.txt',
+                      'sogousiteverification.txt', 'BingSiteAuth.xml',
+                      'yandex_*.html', '*_verify.html')
 
 
 def payload(root):
@@ -36,6 +45,11 @@ def payload(root):
     for name in EXTRA_FILES:
         if (root / name).is_file() and name not in names:
             names.append(name)
+    for pattern in VERIFICATION_GLOBS:
+        for path in sorted(root.glob(pattern)):
+            name = path.name
+            if path.is_file() and name not in names:
+                names.append(name)
     for tree in EXTRA_TREES:
         for path in sorted((root / tree).rglob('*')):
             if path.is_file():

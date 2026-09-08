@@ -68,6 +68,21 @@ class HeadTests(unittest.TestCase):
         self.assertIn('og:type" content="article"', head(page_type='article'))
         self.assertIn('og:type" content="website"', head())
 
+    def test_ownership_proofs_only_appear_where_asked_for(self):
+        # A proof is checked at the URL you submitted; repeating it on every
+        # page is noise, and emitting an empty one before 老板 supplies codes
+        # would be a meta tag with no content.
+        original = seo.VERIFICATION
+        try:
+            seo.VERIFICATION = {'google-site-verification': 'abc', 'baidu-site-verification': 'def'}
+            with_proof = head(verify_ownership=True)
+            self.assertIn('<meta name="google-site-verification" content="abc">', with_proof)
+            self.assertIn('<meta name="baidu-site-verification" content="def">', with_proof)
+            self.assertNotIn('site-verification', head())
+        finally:
+            seo.VERIFICATION = original
+        self.assertNotIn('site-verification', head(verify_ownership=True))
+
     def test_site_paths_are_root_relative(self):
         with self.assertRaises(ValueError):
             seo.url('/zh/')

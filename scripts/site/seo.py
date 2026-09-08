@@ -22,6 +22,13 @@ OG_LOCALE = {'en': 'en_US', 'zh': 'zh_CN'}
 LANG_TAG = {'en': 'en', 'zh': 'zh-CN'}
 GITHUB = 'https://github.com/hoveychen/claw-fleet'
 THEME_COLOR = '#ffffff'
+# Search-console ownership proofs, as {meta name: content}. Empty until 老板
+# hands over the codes; kept here rather than in the content files because it
+# is the same proof in every language and has nothing to do with copy.
+# The file-based alternative (a google*.html / baidu_verify_*.html at the site
+# root) is allowed through by stage_pages.VERIFICATION_GLOBS, so either form
+# works without touching the generator.
+VERIFICATION = {}
 
 
 def plain(markup):
@@ -173,19 +180,25 @@ def robots():
 
 
 def head(*, lang, en_path, zh_path, title, description, image, image_size=None,
-         image_alt='', page_type='website'):
+         image_alt='', page_type='website', verify_ownership=False):
     """Canonical + hreflang + OpenGraph + Twitter for one page, as an HTML block.
 
     `en_path` / `zh_path` are the canonical, site-root-relative paths of this
     page's two language versions ('' for the English home page, 'zh/' for the
     Chinese one). Directory form is the canonical form: index.html and ?lang=
     variants exist as links and must fold into it.
+
+    `verify_ownership` emits the search-console proofs from VERIFICATION. Only
+    the home pages ask for it: a proof is checked at the URL you submitted, and
+    repeating it site-wide is noise in every other page's head.
     """
     self_path = en_path if lang == 'en' else zh_path
     other_lang = 'zh' if lang == 'en' else 'en'
     desc = escape(plain(description), quote=True)
     image_alt = plain(image_alt)
-    tags = [
+    tags = [f'<meta name="{name}" content="{escape(content, quote=True)}">'
+            for name, content in VERIFICATION.items()] if verify_ownership else []
+    tags += [
         f'<link rel="canonical" href="{url(self_path)}">',
         f'<link rel="alternate" hreflang="en" href="{url(en_path)}">',
         f'<link rel="alternate" hreflang="zh-CN" href="{url(zh_path)}">',

@@ -9,13 +9,13 @@ import seo
 
 ROOT = Path(__file__).resolve().parents[2]
 GITHUB = 'https://github.com/hoveychen/claw-fleet'
-# One entry per download row, positionally matched to content['platforms'].
-# Each row names its icon and the buttons it carries, so a row with two builds
-# (Linux) or a new platform (Android) is a data change, not an index trick.
 # (english path, chinese path) for every real page, in sitemap order. The pair
 # is what ties the two language versions together in hreflang, so a new page
 # joins the sitemap and gets its alternates from one edit.
 PAGE_PAIRS = [('', 'zh/'), ('benchmark.html', 'zh/benchmark.html')]
+# One entry per download row, positionally matched to content['platforms'].
+# Each row names its icon and the buttons it carries, so a row with two builds
+# (Linux) or a new platform (Android) is a data change, not an index trick.
 ROWS = [
     ('apple', [('claw-fleet-macos.pkg', 'macOS')]),
     ('windows', [('claw-fleet-windows-x64-setup.exe', 'Windows')]),
@@ -75,7 +75,7 @@ def build(lang, c):
         lang=lang, en_path='', zh_path='zh/',
         title=c['title'], description=c['description'],
         image=social_shot, image_size=dimensions(f'work-{lang}.png'),
-        image_alt=c['panelTitles'][0])
+        image_alt=c['panelTitles'][0], verify_ownership=True)
     mobile_w, mobile_h = dimensions(f'mobile-{lang}.png')
     agents_w, agents_h = dimensions(f'agents-{lang}.png')
     agents_src = asset(f'screenshots/current/agents-{lang}.png')
