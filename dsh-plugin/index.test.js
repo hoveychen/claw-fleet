@@ -4,12 +4,14 @@ import { join } from 'node:path'
 import { after, describe, test } from 'node:test'
 
 import {
+  TURN_SCOPED_SECTIONS,
   apply,
   ensureSandboxMode,
   fetchContext,
   fetchSections,
   latestInjectedText,
   name,
+  startsTurn,
 } from './index.js'
 
 // Scratch dir for the stub `fleet` executables. `/tmp` rather than os.tmpdir()
@@ -47,8 +49,16 @@ function injected(sectionName, text) {
  * @param {{fleetBin: string, timeoutMs?: number, userTitle?: string, locale?: string}} config
  * @param {any} agent
  * @param {{kind: string, messages?: Array<any>}} decision - what `next()` returns
+ * @param {{turn?: number, step?: number, messages?: Array<any>}} [position] - the
+ *   step's place in its turn and the batch dsh claimed for it; defaults to a
+ *   turn's first step, which is where every section is allowed to enter
  */
-async function runPreStep(config, agent, decision = { kind: 'enter', messages: [] }) {
+async function runPreStep(
+  config,
+  agent,
+  decision = { kind: 'enter', messages: [] },
+  position = { turn: 1, step: 1 },
+) {
   let listener
   const ctx = {
     on(event, fn, options) {
@@ -59,7 +69,10 @@ async function runPreStep(config, agent, decision = { kind: 'enter', messages: [
   }
   apply(ctx, config)
   assert.ok(listener, 'apply must register a pre-step listener')
-  return listener({ agent, turn: 1, step: 1, signal: { aborted: false } }, async () => decision)
+  return listener(
+    { agent, turn: 1, messages: [], ...position, signal: { aborted: false } },
+    async () => decision,
+  )
 }
 
 describe('fetchSections', () => {
@@ -273,6 +286,80 @@ describe('apply', () => {
     ])
   })
 
+  test('a changed plan section waits for the next user prompt', async () => {
+    // Parity with the Claude hook, which renders the same TASKS.md text only on
+    // UserPromptSubmit. Mid-turn, every checkbox any session in the workspace
+    // ticks would otherwise append another full copy — 21 copies in one turn
+    // was measured. This step is mid-turn: step 3, no user message in the batch.
+    const fleetBin = stubFleet('plan-midturn', `echo '{"sections":[{"name":"fleet-prd","text":"PLANS v2"}]}'`)
+    const agent = fakeAgent({ events: [injected('fleet-prd', 'PLANS v1')] })
+    const decision = await runPreStep(
+      { fleetBin },
+      agent,
+      { kind: 'enter', messages: [{ id: 'tool-results', role: 'user', source: { kind: 'tool' } }] },
+      { turn: 1, step: 3, messages: [{ source: { kind: 'tool' } }] },
+    )
+    assert.equal(decision.messages.length, 1, 'only the batch dsh claimed, nothing appended')
+  })
+
+  test('the deferred plan change enters on the next turn-opening step', async () => {
+    const fleetBin = stubFleet('plan-nextturn', `echo '{"sections":[{"name":"fleet-prd","text":"PLANS v2"}]}'`)
+    const agent = fakeAgent({ events: [injected('fleet-prd', 'PLANS v1')] })
+    const decision = await runPreStep(
+      { fleetBin },
+      agent,
+      { kind: 'enter', messages: [{ id: 'prompt', role: 'user', source: { kind: 'user' } }] },
+      { turn: 2, step: 1, messages: [{ source: { kind: 'user' } }] },
+    )
+    assert.equal(decision.messages.length, 2)
+    assert.deepEqual(decision.messages[1].source.sections, [{ name: 'fleet-prd', text: 'PLANS v2' }])
+  })
+
+  test('a user message spliced in mid-turn also lets the plan section in', async () => {
+    // The user typing while the agent runs lands in a later step's inbox with
+    // source.kind === 'user'; that intervention gets a fresh plan reading too.
+    const fleetBin = stubFleet('plan-steer', `echo '{"sections":[{"name":"fleet-prd","text":"PLANS v2"}]}'`)
+    const agent = fakeAgent({ events: [injected('fleet-prd', 'PLANS v1')] })
+    const decision = await runPreStep(
+      { fleetBin },
+      agent,
+      { kind: 'enter', messages: [{ id: 'steer', role: 'user', source: { kind: 'user' } }] },
+      { turn: 1, step: 7, messages: [{ source: { kind: 'user' } }] },
+    )
+    assert.equal(decision.messages.length, 2)
+    assert.equal(decision.messages[1].content[0].text, 'PLANS v2')
+  })
+
+  test('the first plan reading of a session is not delayed', async () => {
+    // No prior reading in the log: a fresh session's first step is step 1 anyway,
+    // and a session resumed mid-plan opens with a prompt. Both are turn starts.
+    const fleetBin = stubFleet('plan-first', `echo '{"sections":[{"name":"fleet-prd","text":"PLANS"}]}'`)
+    const decision = await runPreStep({ fleetBin }, fakeAgent(), { kind: 'enter', messages: [] })
+    assert.equal(decision.messages.length, 1)
+  })
+
+  test('static guidance is not turn-scoped and still enters mid-turn when it changes', async () => {
+    // Guidance text only changes when Fleet itself is updated; there is nothing
+    // to throttle, and holding it back would leave a session on stale rules.
+    const fleetBin = stubFleet(
+      'guidance-midturn',
+      `echo '{"sections":[{"name":"fleet-guidance-prd","text":"RULES v2"},{"name":"fleet-prd","text":"PLANS v2"}]}'`,
+    )
+    const agent = fakeAgent({
+      events: [injected('fleet-guidance-prd', 'RULES v1'), injected('fleet-prd', 'PLANS v1')],
+    })
+    const decision = await runPreStep(
+      { fleetBin },
+      agent,
+      { kind: 'enter', messages: [] },
+      { turn: 1, step: 4, messages: [{ source: { kind: 'tool' } }] },
+    )
+    assert.equal(decision.messages.length, 1)
+    assert.deepEqual(decision.messages[0].source.sections, [
+      { name: 'fleet-guidance-prd', text: 'RULES v2' },
+    ])
+  })
+
   test('a rejected step is passed through untouched', async () => {
     const fleetBin = stubFleet('reject', `echo '{"sections":[{"name":"p","text":"BODY"}]}'`)
     const decision = await runPreStep({ fleetBin }, fakeAgent(), { kind: 'reject' })
@@ -286,6 +373,38 @@ describe('apply', () => {
       messages: [],
     })
     assert.deepEqual(decision.messages, [])
+  })
+})
+
+describe('startsTurn', () => {
+  test('step 1 opens a turn regardless of the batch', () => {
+    assert.equal(startsTurn({ step: 1, messages: [] }), true)
+    assert.equal(startsTurn({ step: 1 }), true)
+  })
+
+  test('a later step opens a turn only when a user message is in the batch', () => {
+    assert.equal(startsTurn({ step: 2, messages: [{ source: { kind: 'tool' } }] }), false)
+    assert.equal(startsTurn({ step: 2, messages: [{ source: { kind: 'user' } }] }), true)
+    assert.equal(startsTurn({ step: 9, messages: [{ source: { kind: 'plugin' } }, { source: { kind: 'user' } }] }), true)
+  })
+
+  test("another agent's message is not a prompt", () => {
+    // Subagent replies arrive as `agent-message`; dsh's own context as `plugin`
+    // and `agent-instructions`. None of those is the user speaking.
+    assert.equal(startsTurn({ step: 5, messages: [{ source: { kind: 'agent-message' } }] }), false)
+    assert.equal(startsTurn({ step: 5, messages: [{ source: { kind: 'agent-instructions' } }] }), false)
+  })
+
+  test('an unrecognised payload is not a turn start rather than a throw', () => {
+    // Runs inside agent/pre-step, where a throw ends the turn.
+    assert.equal(startsTurn(undefined), false)
+    assert.equal(startsTurn({}), false)
+    assert.equal(startsTurn({ step: 3, messages: 'nope' }), false)
+    assert.equal(startsTurn({ step: 3, messages: [null, 7, {}] }), false)
+  })
+
+  test('only the plan section is turn-scoped', () => {
+    assert.deepEqual([...TURN_SCOPED_SECTIONS], ['fleet-prd'])
   })
 })
 
