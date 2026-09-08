@@ -24,7 +24,7 @@ interface Props {
 /** 各源在标题里的显示名；未知源回落到原始 id。 */
 const SOURCE_LABEL: Record<string, string> = {
   codex: "Codex",
-  dsh: "dsh",
+  dsh: "DeepSeek Harness",
 };
 
 /** 按 provider 报的币种格式化金额。两家不一样——DeepSeek 结的是人民币，
