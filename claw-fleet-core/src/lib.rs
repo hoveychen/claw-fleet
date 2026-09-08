@@ -156,6 +156,7 @@ pub mod wakeup_guard;
 pub mod watch;
 pub mod web_assets;
 pub mod wiki;
+pub mod zip_stream;
 pub mod wiki_guidance;
 pub mod workflow;
 pub mod workflow_sidecar;
