@@ -368,3 +368,13 @@ jobs:
     with:
       tag: ${{ needs.resolve.outputs.tag }}
     secrets: inherit
+
+  pages:
+    name: Publish latest stable version to Pages
+    needs: [resolve, publish, china-distribution]
+    if: ${{ always() && needs.publish.result == 'success' && !contains(needs.resolve.outputs.tag, '-') }}
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

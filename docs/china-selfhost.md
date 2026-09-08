@@ -105,6 +105,7 @@ Boss 已授权接入自动发版。采用深圳服务器的 systemd timer 主动
 - 失败退出会记录到 journal，当前站点继续工作；下一次定时检查重试。任务最多运行 45 分钟，同一时间只允许一个更新实例。
 - 以无登录权限的 `fleet-site` 系统账号运行，代码安装在 root 所有的 `/opt/fleet-site-updater/`；systemd 将可写范围限定在 `/srv/claw-fleet-site`。不授予 sudo，也不改变 Nginx 配置。
 - 自动更新范围是**发行文件与下载清单**。官网视觉与文案仍按上面的 SSH 站点发布流程更新；不是从 GitHub 拉任意代码执行。GitHub Pages 是独立站点，仓库中的下载清单是提交时快照，不由服务器回写或自动 git push。
+- GitHub Pages 在 Release 成功后由复用的 Pages workflow 立即读取 GitHub 最新稳定版。其浏览器只对本域 `downloads.json` 开放给 `https://hoveychen.github.io` 的 CORS 读取；镜像与 GitHub 版本完全一致后，Pages 无需再次部署即可显示国内线路。旧版、缺包或摘要不一致的镜像不会暴露给访客。
 
 ```bash
 # 查看下次检查时间和最近一次执行结果
