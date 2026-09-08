@@ -143,6 +143,24 @@ const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — 
 中间产物，两个都不用，留在临时目录就行。
 "#;
 
+/// The full brief written to the chat workspace's `CLAUDE.md`: the static
+/// [`CHAT_CLAUDE_MD`] plus the session-title section when that feature is
+/// installed.
+///
+/// The title instruction has to be appended here because the *only* place it
+/// otherwise lives is the user's global `CLAUDE.md`, which
+/// [`chat_session_args`] deliberately drops — so before this, chat sessions
+/// never learned to name themselves and their titles fell all the way back to a
+/// raw prompt excerpt (`ai_title ?? slug ?? last_message_preview`, and Claude
+/// Code stopped writing `ai-title` on 2026-09-06). The wording still has a
+/// single owner in [`crate::session_title_guidance`]; this only relocates it.
+fn chat_claude_md() -> String {
+    match crate::session_title_guidance::installed_section() {
+        Some(section) => format!("{CHAT_CLAUDE_MD}\n{section}\n"),
+        None => CHAT_CLAUDE_MD.to_string(),
+    }
+}
+
 /// Where the chat workspace is *created*: straight under the fleet dir, whose
 /// own path may still contain symlinks. Writes go here; identity comparisons go
 /// through [`chat_workspace_path`].
@@ -226,10 +244,14 @@ pub fn ensure_chat_workspace() -> Result<String, String> {
     let path = resolved(&path).unwrap_or(path);
     let md = path.join("CLAUDE.md");
     // Only rewrite when the content actually differs — a chat session may be
-    // reading this file while a sibling spawn ensures the workspace.
-    let stale = fs::read_to_string(&md).map(|c| c != CHAT_CLAUDE_MD).unwrap_or(true);
+    // reading this file while a sibling spawn ensures the workspace. The
+    // comparison is against the *composed* brief, so renaming the user,
+    // switching locale or toggling the session-title feature off all self-heal
+    // on the next spawn.
+    let brief = chat_claude_md();
+    let stale = fs::read_to_string(&md).map(|c| c != brief).unwrap_or(true);
     if stale {
-        fs::write(&md, CHAT_CLAUDE_MD).map_err(|e| format!("write chat CLAUDE.md: {e}"))?;
+        fs::write(&md, &brief).map_err(|e| format!("write chat CLAUDE.md: {e}"))?;
     }
     Ok(path.to_string_lossy().to_string())
 }
@@ -307,6 +329,75 @@ mod tests {
         out
     }
 
+    /// Point `CLAUDE_CONFIG_DIR` at a temp dir for the duration of `f`, so the
+    /// composed brief is decided by *this* fixture's session-title guidance file
+    /// and not by whatever the developer has installed in their real
+    /// `~/.claude`. Restored even on panic. Shares `fleet_home_lock` with
+    /// [`with_home`], which is the process-global serialisation both overrides
+    /// need.
+    fn with_claude_dir<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+        struct Guard(Option<std::ffi::OsString>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                unsafe {
+                    match &self.0 {
+                        Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+                        None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+                    }
+                }
+            }
+        }
+        let _guard = Guard(std::env::var_os("CLAUDE_CONFIG_DIR"));
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", dir) };
+        f()
+    }
+
+    /// Regression (2026-09-08): a chat session showed up in the task list titled
+    /// with a raw excerpt of its own prompt. `chat_session_args` drops the
+    /// user's global `CLAUDE.md`, which is the only place the "call
+    /// `fleet__set_session_title`" instruction lives, so the agent never learned
+    /// to name itself — and Claude Code stopped writing its own `ai-title`
+    /// record on 2026-09-06, leaving `last_message_preview` as the only
+    /// fallback. Verified in the transcript at the time: `会话标题` appeared 0
+    /// times and the tool was never called.
+    #[test]
+    fn brief_carries_the_session_title_instruction_when_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        with_home(tmp.path(), || {
+            with_claude_dir(&tmp.path().join(".claude"), || {
+                crate::session_title_guidance::apply_session_title_guidance("老板", "zh").unwrap();
+                ensure_chat_workspace().unwrap();
+                let body =
+                    std::fs::read_to_string(tmp.path().join(".fleet/chat/CLAUDE.md")).unwrap();
+                assert!(body.contains("纯聊天工作区"), "still the chat brief");
+                assert!(body.contains("## 会话标题"), "section heading appended");
+                assert!(
+                    body.contains("fleet__set_session_title"),
+                    "the tool the agent has to call"
+                );
+                assert!(
+                    !body.contains("# Fleet 会话标题"),
+                    "the guidance file's own top-level header must not be embedded"
+                );
+            });
+        });
+    }
+
+    /// The settings-panel toggle stays authoritative: `remove` deletes the
+    /// guidance file, and with no file there is no section to append.
+    #[test]
+    fn brief_omits_the_section_when_the_feature_is_off() {
+        let tmp = tempfile::tempdir().unwrap();
+        with_home(tmp.path(), || {
+            with_claude_dir(&tmp.path().join(".claude"), || {
+                ensure_chat_workspace().unwrap();
+                let body =
+                    std::fs::read_to_string(tmp.path().join(".fleet/chat/CLAUDE.md")).unwrap();
+                assert_eq!(body, CHAT_CLAUDE_MD);
+            });
+        });
+    }
+
     #[test]
     fn ensure_creates_dir_and_brief() {
         let tmp = tempfile::tempdir().unwrap();
@@ -361,11 +452,15 @@ mod tests {
     fn ensure_self_heals_a_clobbered_brief() {
         let tmp = tempfile::tempdir().unwrap();
         with_home(tmp.path(), || {
-            ensure_chat_workspace().unwrap();
-            let md = tmp.path().join(".fleet/chat/CLAUDE.md");
-            std::fs::write(&md, "garbage").unwrap();
-            ensure_chat_workspace().unwrap();
-            assert_eq!(std::fs::read_to_string(&md).unwrap(), CHAT_CLAUDE_MD);
+            // Isolate the claude dir so the expected brief is this fixture's,
+            // not the developer's installed session-title guidance.
+            with_claude_dir(&tmp.path().join(".claude"), || {
+                ensure_chat_workspace().unwrap();
+                let md = tmp.path().join(".fleet/chat/CLAUDE.md");
+                std::fs::write(&md, "garbage").unwrap();
+                ensure_chat_workspace().unwrap();
+                assert_eq!(std::fs::read_to_string(&md).unwrap(), chat_claude_md());
+            });
         });
     }
 
