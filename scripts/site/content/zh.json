@@ -1,6 +1,6 @@
 {
   "title": "Claw Fleet — 你的个人 AI 工作台",
-  "description": "交代任务，随时接手，带走成果。把 Claude Code、Codex 和 dsh（DeepSeek Harness）带进同一个工作台，按项目推进工作、看材料做决定，用手机继续参与。",
+  "description": "交代任务，随时接手，带走成果。把 Claude Code、Codex 和 DeepSeek Harness带进同一个工作台，按项目推进工作、看材料做决定，用手机继续参与。",
   "nav": [
     "认识工作台",
     "手机接手",
@@ -10,7 +10,7 @@
   "skip": "跳至正文",
   "headline": "交代任务。<br>接手关键处。<br>带走成果。",
   "intro": "你的个人 AI 工作台。",
-  "lede": "在同一个工作台里用 Claude Code、Codex 和 dsh（DeepSeek Harness）。工作按项目走，该你拍板时材料就在眼前，做出来的东西留得下、找得回。",
+  "lede": "在同一个工作台里用 Claude Code、Codex 和 DeepSeek Harness。工作按项目走，该你拍板时材料就在眼前，做出来的东西留得下、找得回。",
   "cta": "下载 Claw Fleet",
   "secondary": "看它怎么运转",
   "meta": "免费开源。用你自己的 AI 工具和账号。",
@@ -58,7 +58,7 @@
       "拆计划"
     ],
     [
-      "dsh · DeepSeek Harness",
+      "DeepSeek Harness",
       "照着计划实现"
     ],
     [
@@ -78,10 +78,10 @@
     ],
     [
       "记录不属于某一个工具。",
-      "计划、项目知识库、产出和笔记都存放在 Fleet 这一层。Claude Code 写下的结论，Codex 和 dsh 也读得回来。"
+      "计划、项目知识库、产出和笔记都存放在 Fleet 这一层。Claude Code 写下的结论，Codex 和 DeepSeek Harness 也读得回来。"
     ]
   ],
-  "agentsAlt": "Fleet 会话看板：Claude Code、Codex 和 dsh 的任务同时在跑，每张卡片标出自己用的工具与模型",
+  "agentsAlt": "Fleet 会话看板：Claude Code、Codex 和 DeepSeek Harness 的任务同时在跑，每张卡片标出自己用的工具与模型",
   "mobileHeading": "人离开电脑。<br>依然接得上。",
   "mobileCopy": "想法冒出来时，不用等回到电脑前。用手机就能派活，选好项目和跑任务的那台机器；轮到你拿主意时，再回来接手。",
   "mobilePoints": [
@@ -107,8 +107,8 @@
       "长任务拆成计划推进，写份交接说明就能换人接着做；重复的活排进日程，也可以等某个条件满足了再自动继续。"
     ]
   ],
-  "sourceNames": "Claude Code、Codex，还有 dsh（DeepSeek Harness）",
-  "sourceBlurb": "用你已经在用的工具和模型。dsh 可以接你自己配好的模型提供商；三个工具各用各的账号和额度。",
+  "sourceNames": "Claude Code、Codex，还有 DeepSeek Harness",
+  "sourceBlurb": "用你已经在用的工具和模型。DeepSeek Harness 可以接你自己配好的模型提供商；三个工具各用各的账号和额度。",
   "downloadHeading": "下一个项目，<br>从这里开始。",
   "downloadCopy": "装好桌面应用，接上你的 AI 工具，给下一件工作找个落脚的地方。",
   "versionNote": "页面展示当前开发界面；下方提供最近稳定版下载，手机布局可能有所不同。",
@@ -165,7 +165,7 @@
   "faqs": [
     [
       "可以接哪些 AI 工具？",
-      "Fleet 接入 Claude Code、Codex 和 dsh（DeepSeek Harness，命令行工具 @deepseek-ai/dsh）。使用前需要安装并配置对应工具。dsh 可选择已配置提供商的模型；具体可用性取决于提供商和你的凭证。"
+      "Fleet 接入 Claude Code、Codex 和 DeepSeek Harness（命令行工具 @deepseek-ai/dsh）。使用前需要安装并配置对应工具。DeepSeek Harness 可选择已配置提供商的模型；具体可用性取决于提供商和你的凭证。"
     ],
     [
       "需要付费吗？",

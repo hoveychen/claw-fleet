@@ -1,6 +1,6 @@
 {
   "title": "Claw Fleet — Your personal AI workspace",
-  "description": "Give AI the work, review the decisions, and take the results. A personal workspace for Claude Code, Codex and dsh (DeepSeek Harness), with projects, deliverables and mobile access.",
+  "description": "Give AI the work, review the decisions, and take the results. A personal workspace for Claude Code, Codex and DeepSeek Harness, with projects, deliverables and mobile access.",
   "nav": [
     "The workspace",
     "On your phone",
@@ -10,7 +10,7 @@
   "skip": "Skip to content",
   "headline": "Give it the work.<br>Make the calls.<br>Take the results.",
   "intro": "Your personal AI workspace.",
-  "lede": "One workspace for Claude Code, Codex and dsh (DeepSeek Harness). Work moves by project, the material is in front of you when a call is yours to make, and what gets made stays where you can find it.",
+  "lede": "One workspace for Claude Code, Codex and DeepSeek Harness. Work moves by project, the material is in front of you when a call is yours to make, and what gets made stays where you can find it.",
   "cta": "Download Claw Fleet",
   "secondary": "See how it runs",
   "meta": "Free & open source. Bring your own AI tools and accounts.",
@@ -58,7 +58,7 @@
       "breaks down the plan"
     ],
     [
-      "dsh (DeepSeek Harness)",
+      "DeepSeek Harness",
       "works through it"
     ],
     [
@@ -78,10 +78,10 @@
     ],
     [
       "The record belongs to the work.",
-      "Plans, the project wiki, deliverables and notes live in Fleet, not inside one tool. What Claude Code writes down, Codex and dsh can read back."
+      "Plans, the project wiki, deliverables and notes live in Fleet, not inside one tool. What Claude Code writes down, Codex and DeepSeek Harness can read back."
     ]
   ],
-  "agentsAlt": "Fleet session board with Claude Code, Codex and dsh tasks running side by side, each card labelled with its tool and model",
+  "agentsAlt": "Fleet session board with Claude Code, Codex and DeepSeek Harness tasks running side by side, each card labelled with its tool and model",
   "mobileHeading": "Away from your desk.<br>Still part of the work.",
   "mobileCopy": "An idea doesn’t have to wait until you’re back at your desk. Hand out work from your phone — pick the project and the machine that runs it — and come back when a call is yours to make.",
   "mobilePoints": [
@@ -107,8 +107,8 @@
       "Long tasks run as plans, and a handoff brief lets someone else pick them up. Recurring work goes on a schedule, or waits for a condition to be met."
     ]
   ],
-  "sourceNames": "Claude Code, Codex, and dsh (DeepSeek Harness)",
-  "sourceBlurb": "Use the tools and models you already have. dsh connects to the model providers you configure; all three keep their own accounts and quotas.",
+  "sourceNames": "Claude Code, Codex, and DeepSeek Harness",
+  "sourceBlurb": "Use the tools and models you already have. DeepSeek Harness connects to the model providers you configure; all three keep their own accounts and quotas.",
   "downloadHeading": "Your next project<br>starts here.",
   "downloadCopy": "Install the desktop app, connect your AI tools, and give the next piece of work somewhere to live.",
   "versionNote": "Screens show the current development interface. Downloads below are the latest stable release; mobile layout may differ.",
@@ -165,7 +165,7 @@
   "faqs": [
     [
       "Which AI tools can I use?",
-      "Fleet connects to Claude Code, Codex and dsh (DeepSeek Harness, the @deepseek-ai/dsh CLI). Install and configure the tools you want to use. dsh can select models from configured providers; availability depends on those providers and your credentials."
+      "Fleet connects to Claude Code, Codex and DeepSeek Harness (the @deepseek-ai/dsh CLI). Install and configure the tools you want to use. DeepSeek Harness can select models from configured providers; availability depends on those providers and your credentials."
     ],
     [
       "Is it free?",
