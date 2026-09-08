@@ -2108,6 +2108,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "codex_profiles" => serve_codex_profiles(params),
         "dsh_models" => serve_dsh_models(params),
         "dsh_token_breakdown" => serve_dsh_token_breakdown(params),
+        "dsh_session_cost" => serve_dsh_session_cost(params),
         "browse_dir" => serve_browse_dir(params),
         // ── Write methods ────────────────────────────────────────────────
         "create_dir" => serve_create_dir(params),
@@ -2808,6 +2809,18 @@ fn serve_dsh_token_breakdown(params: &Value) -> Result<Value, String> {
     let uri = params.get("uri").and_then(Value::as_str).ok_or("missing uri")?;
     let breakdown = crate::dsh_source::dsh_token_breakdown(uri)?;
     serde_json::to_value(breakdown).map_err(|e| e.to_string())
+}
+
+/// What one dsh session actually cost. The counterpart to
+/// [`serve_dsh_token_breakdown`]: that one answers "how many tokens", this one
+/// "how much money", and they are separate calls because the token counts are
+/// local and instant while this may walk the session's history and ask a
+/// provider. The desktop and `fleet serve` have both had this since the feature
+/// landed; the phone had the counts with no money beside them.
+fn serve_dsh_session_cost(params: &Value) -> Result<Value, String> {
+    let uri = params.get("uri").and_then(Value::as_str).ok_or("missing uri")?;
+    let cost = crate::dsh_cost::dsh_session_cost(uri)?;
+    serde_json::to_value(cost).map_err(|e| e.to_string())
 }
 
 // Directory picker for the new-session composer. Deliberately NOT gated
@@ -6099,6 +6112,7 @@ mod tests {
         for (method, params) in [
             ("dsh_models", json!({})),
             ("dsh_token_breakdown", json!({ "uri": "dsh://nonexistent" })),
+            ("dsh_session_cost", json!({ "uri": "dsh://nonexistent" })),
         ] {
             if let Err(e) = serve_request(method, &params) {
                 assert!(
