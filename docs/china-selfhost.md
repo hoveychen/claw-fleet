@@ -51,22 +51,32 @@ ssh own-api-sz 'test ! -e /srv/claw-fleet-site/current && test ! -L /srv/claw-fl
 
 每次准备新目录后，在该目录运行以下 Python。它只调整站点配置，不修改官方发行包；重复执行不会重复添加备案号。
 
+**页面清单必须推导，不能手列。**下面这段早先硬列 `index.html` 与 `zh/index.html`，于是 2026-09-08 新增的 `/benchmark` 双语页**没有备案页脚**——大陆站点每个页面都要有，这是合规问题而不只是遗漏。改为遍历 `distribute.site_files()` 推导出的所有 `.html`，跟镜像同步用的是同一份清单，新页面加进来就自动覆盖。
+
 ```python
 from pathlib import Path
-import hashlib, json
+import hashlib, json, sys
+sys.path.insert(0, "<仓库>/scripts/site")
+import distribute
+
 root = Path.cwd()
 origin = "https://fleet.eternizedlab.com"
+BEIAN = "粤ICP备2026103741号-1"
+# 只在全新部署时需要；只换站点文件时不要动 downloads.json（它由 selfhost 维护）。
 p = root / "downloads.json"
-manifest = json.loads(p.read_text())
-manifest["china"]["provider"] = "Eternized Lab · Shenzhen"
-p.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-for p in [root / "index.html", root / "zh/index.html"]:
+if p.is_file():
+    manifest = json.loads(p.read_text())
+    manifest["china"]["provider"] = "Eternized Lab · Shenzhen"
+    p.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+names = distribute.site_files(root)
+for name in (n for n in names if n.endswith(".html")):
+    p = root / name
     text = p.read_text().replace(
         "https://hoveychen.github.io/claw-fleet/screenshots/current/work-en.png",
         origin + "/screenshots/current/work-en.png",
     )
-    if "粤ICP备2026103741号-1" not in text:
-        text = text.replace("</footer>", '<p><a href="https://beian.miit.gov.cn/" rel="noopener noreferrer">粤ICP备2026103741号-1</a></p></footer>')
+    if BEIAN not in text:
+        text = text.replace("</footer>", f'<p><a href="https://beian.miit.gov.cn/" rel="noopener noreferrer">{BEIAN}</a></p></footer>')
     p.write_text(text)
 paths = sorted(p for p in root.rglob("*") if p.is_file() and p.name != "DEPLOY-SHA256SUMS")
 (root / "DEPLOY-SHA256SUMS").write_text("".join(
@@ -74,6 +84,10 @@ paths = sorted(p for p in root.rglob("*") if p.is_file() and p.name != "DEPLOY-S
     for p in paths
 ))
 ```
+
+**只换站点文件时**（历史包不必重传）：`cp -al <current> <新目录>` 把整棵树硬链接过来，再用 `rsync -a` 覆盖站点文件——rsync 写临时文件再 rename，所以不会经硬链接改到旧部署（务必事后比对旧部署的 inode 未变）。`downloads.json` 与 `releases/` 保持沿用。
+
+**Pages 那份清单用 `scripts/site/pages_manifest.py` 生成，不要手工 curl 镜像的 `downloads.json` 覆盖。**两者格式不同：Pages 那份要带 `mirror_manifest_url`，`docs/site.js` 靠它去 fetch 镜像的实时清单，镜像一追上就自动生效、不必为每个版本再发一次 Pages。该工具还会逐个比对镜像清单的 URL / size / sha256 与 GitHub 官方 digest，只有全部匹配才写入 `china` 段。
 
 新目录必须包含仍需保留的旧版本包，然后再生成全站清单。用普通 rsync 复制旧 `releases/`，不要使用 `--delete` 清除历史包。HTML 不设置长期缓存；安装包版本路径设置一年 immutable；`downloads.json` 必须重新验证。新增版本不要复用已公开的 tag 路径来放不同字节。
 
