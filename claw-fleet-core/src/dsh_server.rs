@@ -250,23 +250,85 @@ pub fn is_available() -> bool {
     discover().is_some()
 }
 
-/// The argv Fleet always launches the server with, after the binary itself.
+/// The argv Fleet launches the server with, after the binary itself.
 ///
 /// One place, because two other things read it back: [`sweep_unregistered_orphans`]
-/// matches leaked servers by this exact command line, and the startup contract
-/// (`--port 0`, so the OS assigns the port) is what makes [`parse_launch_line`]
-/// the only way to learn it.
+/// matches leaked servers by this command-line shape ([`is_fleet_launch_cmd`]),
+/// and whatever port dsh actually binds is learned back from
+/// [`parse_launch_line`] — the only way to learn it when `port` is `0`.
 ///
-/// `--no-open` last, so the sweep's `dsh web --port 0` signature still matches.
-/// Without it `dsh web` hands its URL to the default browser on startup — dsh's
-/// own default for a human running it in a terminal, but wrong here: Fleet
-/// drives this server over RPC and renders its sessions in its own UI, so every
-/// Fleet start (and every crash restart) popped a browser tab nobody asked for.
-/// The flag arrives in dsh-web-app 0.1.0-rc.8 (verified against the published
-/// tarballs); on 0.1.0-rc.7 and older it is an unknown option — those versions
-/// never opened a browser either, and Fleet no longer supports them.
-fn web_args() -> &'static [&'static str] {
-    &["web", "--port", "0", "--no-open"]
+/// `port` is [`preferred_port`]'s answer: the port the previous server on this
+/// machine listened on when it is still free, else `0` for an OS-assigned one.
+/// **Why a stable port matters:** dsh writes its own GUI URL,
+/// `http://127.0.0.1:<port>`, into the *system prompt* of every request
+/// (`dsh-web-app`'s `app:web-surface` section). A new port therefore changes
+/// the first bytes of every session's prompt, and the provider's prefix cache
+/// misses on the whole history: measured 2026-09-07, three sessions' next
+/// turns after Fleet restarts each re-billed 80–190k tokens as uncached
+/// (`cacheReadTokens` fell to 0), ~1M tokens in one evening, while the one
+/// turn whose port had not changed hit 238k cached tokens. `--port 0` was
+/// chosen so Fleet never had to pick a free port or collide with another
+/// instance; remembering the last port and checking it is free keeps both
+/// properties and adds the one that was missing.
+///
+/// `--no-open` last, and always. Without it `dsh web` hands its URL to the
+/// default browser on startup — dsh's own default for a human running it in a
+/// terminal, but wrong here: Fleet drives this server over RPC and renders its
+/// sessions in its own UI, so every Fleet start (and every crash restart)
+/// popped a browser tab nobody asked for. The flag arrives in dsh-web-app
+/// 0.1.0-rc.8 (verified against the published tarballs); on 0.1.0-rc.7 and
+/// older it is an unknown option — those versions never opened a browser
+/// either, and Fleet no longer supports them. It is also half of the sweep
+/// signature: a human's `dsh web --port 3080` opens a browser and carries no
+/// `--no-open`, which is what keeps [`sweep_unregistered_orphans`] off servers
+/// the user started by hand.
+fn web_args(port: u16) -> Vec<String> {
+    vec![
+        "web".to_string(),
+        "--port".to_string(),
+        port.to_string(),
+        "--no-open".to_string(),
+    ]
+}
+
+/// Is this command line one Fleet's [`web_args`] produced?
+///
+/// `… dsh web --port <digits> --no-open` — the port is whatever
+/// [`preferred_port`] chose that day, so it is matched as a number, not a
+/// literal `0`. The trailing `--no-open` is load-bearing: a `dsh web --port
+/// 3080` a user started from a terminal (dsh's documented default port) must
+/// never match, even once the terminal is gone and the process is reparented
+/// to init.
+fn is_fleet_launch_cmd(cmd: &str) -> bool {
+    let Some(rest) = cmd.split("dsh web --port ").nth(1) else {
+        return false;
+    };
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    if digits == 0 {
+        return false;
+    }
+    rest[digits..].starts_with(" --no-open")
+}
+
+/// The port a fresh server should ask for: the one the previous server on this
+/// machine bound, if it is still free; else `0`.
+///
+/// Free is checked by binding it here, in this process, for an instant. A
+/// port another program has taken since (or that a user's own `dsh web` sits
+/// on) falls straight through to OS assignment instead of a failed spawn and a
+/// 120 s startup timeout. The check is a race against the next binder, which
+/// is why [`DshServer::start`] also falls back to `0` when the remembered port
+/// cannot be started on.
+fn preferred_port() -> u16 {
+    let remembered = edit_registry(|registry| registry.preferred_port).flatten();
+    match remembered {
+        Some(port) if port != 0 && port_is_free(port) => port,
+        _ => 0,
+    }
+}
+
+fn port_is_free(port: u16) -> bool {
+    std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).is_ok()
 }
 
 /// Extract the listening port and launch token from one launcher stdout line.
@@ -323,9 +385,17 @@ struct ServerRecord {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Registry {
     #[serde(default)]
     servers: Vec<ServerRecord>,
+    /// The port the most recently started server bound. Outlives the server
+    /// record itself, which is dropped once that process dies — this is what
+    /// lets the *next* server ask for the same port and keep every session's
+    /// system prompt (and so its prefix cache) intact across a Fleet restart.
+    /// See [`web_args`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preferred_port: Option<u16>,
 }
 
 fn registry_path() -> Option<PathBuf> {
@@ -397,6 +467,7 @@ fn register(server_pid: u32, port: u16, launch_token: &str, binary: &Path, works
     edit_registry(|registry| {
         registry.servers.retain(|r| is_live(&r.server));
         registry.servers.push(record);
+        registry.preferred_port = Some(port);
     });
 }
 
@@ -446,10 +517,10 @@ pub fn reap_orphans() -> usize {
 /// throwaway `FLEET_HOME` (tests, harness scripts) records itself into a temp
 /// registry that evaporates with the run, and a one-shot CLI whose record was
 /// dropped without a kill leaves nothing behind either. The processes are
-/// still identifiable: Fleet always launches `dsh web --port 0` (an
-/// OS-assigned port is the spawn contract) and always keeps the server as a
-/// direct child — so a `… dsh web --port 0` whose parent died (ppid 1) is
-/// ownerless by construction, whoever started it. 13 such invisible orphans
+/// still identifiable: Fleet always launches `dsh web --port <n> --no-open`
+/// ([`is_fleet_launch_cmd`]) and always keeps the server as a direct child —
+/// so one whose parent died (ppid 1) is ownerless by construction, whoever
+/// started it. 13 such invisible orphans
 /// accumulated on 2026-08-18 alone; this sweep is what makes the leak class
 /// self-healing instead of hand-cleaned.
 ///
@@ -488,7 +559,7 @@ pub fn sweep_unregistered_orphans() -> usize {
             .map(|s| s.to_string_lossy())
             .collect::<Vec<_>>()
             .join(" ");
-        if !cmd.contains("dsh web --port 0") {
+        if !is_fleet_launch_cmd(&cmd) {
             continue;
         }
         if registered.contains(&pid.as_u32()) {
@@ -567,8 +638,31 @@ impl DshServer {
             return Err(too_old_message(version.as_deref()));
         }
 
+        // Ask for last time's port first (see `web_args` for why). The free
+        // check inside `preferred_port` is racy by nature, and a dsh that
+        // cannot bind exits without ever printing its URL — so a failure on
+        // the remembered port costs one retry on an OS-assigned one, never the
+        // start itself.
+        let preferred = preferred_port();
+        match Self::spawn_on(binary, workspace, preferred) {
+            Ok(server) => Ok(server),
+            Err(e) if preferred != 0 => {
+                crate::log_debug(&format!(
+                    "dsh web: could not come up on remembered port {preferred} ({e}); \
+                     falling back to an OS-assigned port"
+                ));
+                Self::spawn_on(binary, workspace, 0)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Spawn `dsh web --port <port> --no-open`, wait for its URL line and its
+    /// first RPC answer, and record it. The port actually bound is read back
+    /// from the launch line, so `port == 0` is fine here.
+    fn spawn_on(binary: &Path, workspace: &Path, port: u16) -> Result<Self, String> {
         let mut cmd = crate::process_util::command(binary);
-        cmd.args(web_args())
+        cmd.args(web_args(port))
             .current_dir(workspace)
             // `dsh` is a `#!/usr/bin/env node` script, so starting it needs
             // `node` on PATH — not just the script itself, which `discover()`
@@ -717,10 +811,12 @@ impl DshServer {
         }
     }
 
-    /// Restart after a crash, replacing the child and the port.
+    /// Restart after a crash, replacing the child.
     ///
-    /// The port changes: the old one was OS-assigned and the new listener gets
-    /// its own, so every cached [`DshClient`] must be rebuilt from [`client`].
+    /// The port is normally kept (`start` asks for the remembered one — see
+    /// [`web_args`] for why that matters), but the token never is: dsh mints
+    /// one per process. So every cached [`DshClient`] is stale after a restart
+    /// and must be rebuilt from [`client`], port reuse or not.
     ///
     /// [`client`]: Self::client
     pub fn restart(&mut self) -> Result<(), String> {
@@ -998,9 +1094,10 @@ mod tests {
     /// (tests, harness scripts): their records evaporate with the temp dir and
     /// the real `dsh web` lives on forever — 13 such invisible orphans piled up
     /// on 2026-08-18 alone. `reap_orphans` must therefore ALSO sweep by
-    /// signature: any `… dsh web --port 0` process whose parent died (ppid 1)
-    /// is ownerless by construction — Fleet always keeps its server as a
-    /// direct child — and gets killed even when no registry record names it.
+    /// signature: any `… dsh web --port <n> --no-open` process whose parent
+    /// died (ppid 1) is ownerless by construction — Fleet always keeps its
+    /// server as a direct child — and gets killed even when no registry record
+    /// names it.
     #[cfg(unix)]
     #[test]
     fn reap_sweeps_a_registry_invisible_orphan_by_signature() {
@@ -1023,7 +1120,7 @@ mod tests {
         let out = std::process::Command::new("sh")
             .arg("-c")
             .arg(format!(
-                "\"{}\" web --port 0 >/dev/null 2>&1 & echo $!",
+                "\"{}\" web --port 0 --no-open >/dev/null 2>&1 & echo $!",
                 fake.display()
             ))
             .output()
@@ -1066,22 +1163,126 @@ mod tests {
     /// restart — was popping a browser tab nobody asked for.
     #[test]
     fn launches_the_server_without_a_browser_handoff() {
-        assert!(
-            web_args().contains(&"--no-open"),
-            "dsh web would open a browser tab on every Fleet start: {:?}",
-            web_args()
-        );
+        for port in [0, 57695] {
+            assert!(
+                web_args(port).iter().any(|a| a == "--no-open"),
+                "dsh web would open a browser tab on every Fleet start: {:?}",
+                web_args(port)
+            );
+        }
     }
 
-    /// The sweep matches leaked servers by command line, so the flag must not
-    /// break that signature by landing between `web` and `--port 0`.
+    /// The sweep matches leaked servers by command line, so whatever port
+    /// `start` asks for — remembered or `0` — the argv must keep the shape the
+    /// matcher expects, and the matcher must accept every port it can emit.
     #[test]
     fn keeps_the_orphan_sweep_signature() {
-        assert!(
-            web_args().join(" ").starts_with("web --port 0"),
-            "sweep_unregistered_orphans matches `dsh web --port 0`: {:?}",
-            web_args()
-        );
+        assert_eq!(web_args(0).join(" "), "web --port 0 --no-open");
+        for port in [0, 3080, 57695, 65535] {
+            let cmd = format!("/opt/homebrew/bin/dsh {}", web_args(port).join(" "));
+            assert!(
+                is_fleet_launch_cmd(&cmd),
+                "sweep would not recognise Fleet's own launch: {cmd}"
+            );
+        }
+        // `node` in front, as sysinfo reports a shebang script.
+        assert!(is_fleet_launch_cmd(
+            "node /opt/homebrew/bin/dsh web --port 57695 --no-open"
+        ));
+    }
+
+    /// Matching by port number instead of the literal `0` widened the sweep,
+    /// so `--no-open` has to carry the "Fleet started this" meaning: a user's
+    /// own `dsh web --port 3080` (dsh's documented default), left running
+    /// after their terminal closed, is orphaned too — and must survive.
+    #[test]
+    fn sweep_signature_spares_a_hand_started_dsh_web() {
+        for hand_started in [
+            "node /opt/homebrew/bin/dsh web --port 3080",
+            "node /opt/homebrew/bin/dsh web",
+            "node /opt/homebrew/bin/dsh web --no-open",
+        ] {
+            assert!(
+                !is_fleet_launch_cmd(hand_started),
+                "sweep must spare a user's own server: {hand_started}"
+            );
+        }
+        assert!(!is_fleet_launch_cmd("dsh web --port abc --no-open"));
+        assert!(!is_fleet_launch_cmd("dsh web --port 3080 --open"));
+        assert!(!is_fleet_launch_cmd(""));
+    }
+
+    /// With no server ever recorded there is nothing to prefer: OS assignment,
+    /// exactly the old `--port 0` behaviour.
+    #[test]
+    fn preferred_port_is_zero_on_a_fresh_machine() {
+        with_temp_fleet_home(|_| {
+            assert_eq!(preferred_port(), 0);
+        });
+    }
+
+    /// The point of the whole change: a Fleet restart brings dsh back on the
+    /// port every session's system prompt already names, so the provider's
+    /// prefix cache survives it. Exercised through `restart`, the path
+    /// `ensure_alive` takes after a crash, which used to guarantee a *new*
+    /// port.
+    #[test]
+    fn a_restarted_server_comes_back_on_the_same_port() {
+        with_temp_fleet_home(|base| {
+            let mut server = DshServer::start(&fake_dsh(), base).expect("start fake dsh");
+            let first = server.port();
+            assert_ne!(first, 0);
+            assert_eq!(
+                read_registry().preferred_port,
+                Some(first),
+                "start must remember the port it was given"
+            );
+
+            server.stop();
+            assert!(
+                read_registry().servers.is_empty(),
+                "the server record goes with the process"
+            );
+            assert_eq!(
+                read_registry().preferred_port,
+                Some(first),
+                "but the remembered port must outlive it — that is what the next start reads"
+            );
+
+            server.restart().expect("restart");
+            assert_eq!(
+                server.port(),
+                first,
+                "a restart on a free remembered port must reuse it"
+            );
+            server
+                .client()
+                .expect("client")
+                .call(HEALTH_ENDPOINT, serde_json::json!({}))
+                .expect("the restarted server answers on the reused port");
+            server.stop();
+        });
+    }
+
+    /// A remembered port someone else has since taken — another program, or a
+    /// user's own `dsh web` — must not cost a failed spawn: the free check
+    /// falls through to OS assignment, and the port actually bound becomes the
+    /// new remembered one.
+    #[test]
+    fn a_busy_remembered_port_falls_back_to_os_assignment() {
+        with_temp_fleet_home(|base| {
+            let blocker =
+                std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let busy = blocker.local_addr().unwrap().port();
+            edit_registry(|registry| registry.preferred_port = Some(busy));
+            assert_eq!(preferred_port(), 0, "a busy port must not be preferred");
+
+            let mut server = DshServer::start(&fake_dsh(), base).expect("start fake dsh");
+            assert_ne!(server.port(), busy);
+            assert_eq!(read_registry().preferred_port, Some(server.port()));
+            server.stop();
+            drop(blocker);
+        });
     }
 
     #[test]
@@ -1469,7 +1670,7 @@ mod tests {
             let launched = crate::process_util::command("sh")
                 .arg("-c")
                 .arg(format!(
-                    "'{}' web --port 0 >/dev/null 2>&1 & echo $!",
+                    "'{}' web --port 0 --no-open >/dev/null 2>&1 & echo $!",
                     binary.display()
                 ))
                 .output()

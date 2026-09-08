@@ -30,6 +30,13 @@ const http = require('http');
 const fs = require('fs');
 const crypto = require('crypto');
 
+// `--port <n>` is honoured like dsh's own launcher does: Fleet asks for the
+// port the previous server bound (so every session's system prompt keeps
+// naming the same GUI URL) and falls back to 0 when it is taken. A fixture
+// that always bound 0 could not exercise the reuse.
+const portFlag = process.argv.indexOf('--port');
+const PORT = portFlag >= 0 ? Number(process.argv[portFlag + 1] ?? 0) : 0;
+
 const LIST_DELAY = Number(process.env.FAKE_DSH_LIST_DELAY_MS ?? 3000);
 const HISTORY_DELAY = Number(process.env.FAKE_DSH_HISTORY_DELAY_MS ?? 50);
 const LOG = process.env.FAKE_DSH_LOG;
@@ -329,7 +336,7 @@ server.on('upgrade', (req, socket) => {
   socket.on('error', () => socket.destroy());
 });
 
-server.listen(0, '127.0.0.1', () => {
+server.listen(PORT, '127.0.0.1', () => {
   process.stdout.write(
     `dsh web: http://127.0.0.1:${server.address().port}/?token=${LAUNCH_TOKEN}\n`,
   );

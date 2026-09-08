@@ -59,8 +59,9 @@ fn live_start_serves_rpc_then_stops_on_drop() {
 #[test]
 #[ignore = "starts two real `dsh web` instances; run manually with --ignored"]
 fn live_two_instances_get_distinct_ports() {
-    // `--port 0` exists precisely so Fleet never has to pick a port; two
-    // concurrent workspaces must not collide.
+    // The first start takes the remembered port (or 0 on a fresh machine); the
+    // second finds it busy and falls back to `--port 0`, so two concurrent
+    // servers must never collide.
     let a = DshServer::start(&binary(), &std::env::temp_dir()).expect("start a");
     let b = DshServer::start(&binary(), &std::env::temp_dir()).expect("start b");
     println!("ports: {} and {}", a.port(), b.port());
@@ -80,9 +81,12 @@ fn live_ensure_alive_restarts_a_killed_server() {
     assert!(server.is_alive(), "ensure_alive must bring it back");
     println!("restarted: {first_port} -> {}", server.port());
 
-    // A restarted listener gets a fresh OS-assigned port, so any cached client
-    // is stale — this is why `client()` is called per use, not memoized.
-    assert_ne!(first_port, server.port());
+    // A restarted listener comes back on the remembered port (dsh writes its
+    // GUI URL into every session's system prompt, so a new port would miss the
+    // provider's prefix cache on the whole history). Any cached client is
+    // still stale — the token is minted per process — which is why `client()`
+    // is called per use, not memoized.
+    assert_eq!(first_port, server.port());
     server
         .client()
         .expect("client")
