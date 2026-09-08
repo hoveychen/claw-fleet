@@ -15,6 +15,7 @@ function make(over: Partial<Artifact>): Artifact {
     createdMs: 1_756_000_000_000,
     workspacePath: "/w",
     workspaceName: "w",
+    path: "",
     sessionId: null,
     sourcePath: "/src/a.pdf",
     starred: false,

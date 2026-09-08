@@ -389,12 +389,20 @@ export interface Artifact {
   createdMs: number;
   workspacePath: string;
   workspaceName: string;
+  /** The folder the user filed it in (`/`-separated), `""` when unfiled. */
+  path: string;
   sessionId: string | null;
   sourcePath: string;
   starred: boolean;
   hardlinked: boolean;
   /** Hard-linked and the source was rewritten in place since ingest. */
   drifted: boolean;
+}
+
+/** One user-made folder (claw_fleet_core::artifacts::Folder). */
+export interface ArtifactFolder {
+  workspacePath: string;
+  path: string;
 }
 
 /** Payload of `artifact_blob` — one artifact's bytes, base64-framed. */

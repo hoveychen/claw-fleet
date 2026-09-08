@@ -819,7 +819,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   update_artifact: (a) => ({
     method: "POST",
     path: "/artifact_update",
-    body: { id: a.id, title: a.title, note: a.note, starred: a.starred },
+    body: { id: a.id, title: a.title, note: a.note, starred: a.starred, path: a.path },
   }),
 
   delete_artifact: (a) => ({
@@ -827,6 +827,30 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/artifact_delete",
     empty: true,
     body: { id: a.id },
+  }),
+
+  list_artifact_folders: () => ({
+    method: "GET",
+    path: "/artifact_folders",
+  }),
+
+  create_artifact_folder: (a) => ({
+    method: "POST",
+    path: "/artifact_folder_create",
+    body: { workspace_path: a.workspacePath, path: a.path },
+  }),
+
+  delete_artifact_folder: (a) => ({
+    method: "POST",
+    path: "/artifact_folder_delete",
+    empty: true,
+    body: { workspace_path: a.workspacePath, path: a.path },
+  }),
+
+  rename_artifact_folder: (a) => ({
+    method: "POST",
+    path: "/artifact_folder_rename",
+    body: { workspace_path: a.workspacePath, from: a.from, to: a.to },
   }),
 
   list_wiki_docs: () => ({

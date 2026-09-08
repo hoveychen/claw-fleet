@@ -82,6 +82,52 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The per-folder verbs. Hidden until the row is hovered so the rail stays a
+ * list of folders rather than a wall of icons — but `:focus-within` keeps them
+ * reachable by keyboard, where there is no hover to trigger. */
+.tree_actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+  opacity: 0;
+}
+
+.tree_row:hover .tree_actions,
+.tree_actions:focus-within {
+  opacity: 1;
+}
+
+.tree_action {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.tree_action:hover {
+  background: var(--color-bg-field);
+  color: var(--color-text);
+}
+
+.tree_input {
+  width: calc(100% - 44px);
+  margin-block: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+}
+
 /* PageShell's `.main` is a clipping flex column — every page's content root owns
  * its own scrolling (`.rail_pane` in Wiki, `.list_pane` in Memory). Without the
  * flex/min-height/overflow trio here the grid sized to its content inside that
@@ -416,6 +462,30 @@
   flex-wrap: wrap;
   font-size: var(--font-size-2xs);
   color: var(--color-text-dim);
+}
+
+.folder_row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+}
+
+.folder_label {
+  flex: 0 0 auto;
+}
+
+.folder_input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
 }
 
 .note_input {

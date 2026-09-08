@@ -90,14 +90,16 @@ pub(crate) fn add_artifact(
     )
 }
 
-/// Patch title / note / starred. An omitted field is left alone, so the card's
-/// star toggle cannot blank the title beside it.
+/// Patch title / note / starred / path. An omitted field is left alone, so the
+/// card's star toggle cannot blank the title beside it — and `path: ""` is a
+/// real move back to the workspace root rather than "leave it where it is".
 #[tauri::command(async)]
 pub(crate) fn update_artifact(
     id: String,
     title: Option<String>,
     note: Option<String>,
     starred: Option<bool>,
+    path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::artifacts::Artifact, String> {
     state.backend.update_artifact(
@@ -105,7 +107,52 @@ pub(crate) fn update_artifact(
         title.as_deref(),
         note.as_deref(),
         starred,
+        path.as_deref(),
     )
+}
+
+// ── Folders ──────────────────────────────────────────────────────────────────
+//
+// Folders are records of their own so that "新建文件夹, then drag things in"
+// works — an artifact's `path` alone cannot express an empty folder.
+
+#[tauri::command(async)]
+pub(crate) fn list_artifact_folders(
+    state: tauri::State<'_, AppState>,
+) -> Vec<claw_fleet_core::artifacts::Folder> {
+    state.backend.list_artifact_folders()
+}
+
+#[tauri::command(async)]
+pub(crate) fn create_artifact_folder(
+    workspace_path: String,
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::artifacts::Folder, String> {
+    state.backend.create_artifact_folder(&workspace_path, &path)
+}
+
+/// Refused by core while anything is still filed inside, so this cannot orphan
+/// a deliverable.
+#[tauri::command(async)]
+pub(crate) fn delete_artifact_folder(
+    workspace_path: String,
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.delete_artifact_folder(&workspace_path, &path)
+}
+
+/// Rename or re-nest a folder, carrying its subfolders and contents. Returns
+/// how many artifacts were re-filed.
+#[tauri::command(async)]
+pub(crate) fn rename_artifact_folder(
+    workspace_path: String,
+    from: String,
+    to: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
+    state.backend.rename_artifact_folder(&workspace_path, &from, &to)
 }
 
 #[tauri::command(async)]
