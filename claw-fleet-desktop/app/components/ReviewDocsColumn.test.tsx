@@ -1,3 +1,8 @@
+// @vitest-environment jsdom
+//
+// The render itself is static (renderToStaticMarkup), but the column reads the
+// app's resolved theme off `<html data-theme>` to hand the html frame a matching
+// prelude — `useDocumentTheme` needs a document to read.
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
