@@ -50,6 +50,7 @@
     ]
   ],
   "navHarness": "Multiple agents",
+  "navBenchmark": "Field report",
   "harnessHeading": "Three agent tools,<br>one workspace.",
   "harnessCopy": "Planning, implementation and review can go to different tools. You decide who takes which step.",
   "relayNodes": [
