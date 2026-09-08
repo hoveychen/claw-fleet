@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useSessionsStore } from "../store";
 import type { HandoffChain } from "../types";
+import { AgentSourceIcon, formatModel } from "./SessionCard";
 import styles from "./HandoffChainModal.module.css";
 
 interface Props {
@@ -56,6 +57,12 @@ export function HandoffChainModal({
     return s?.aiTitle || `${sid.slice(0, 8)}…`;
   };
 
+  // A relay can cross harnesses (`fleet handoff --model` routes the successor
+  // onto codex or dsh), and until you can see which leg ran where, the chain
+  // reads as one uniform run. Fall back to nothing when the leg's session is no
+  // longer on this machine — a guessed source is worse than a blank.
+  const sourceOf = (sid: string) => sessions.find((x) => x.id === sid);
+
   // Ordered session ids on the chain, derived from the links.
   const legIds: string[] = [];
   for (const l of chain?.links ?? []) {
@@ -99,6 +106,16 @@ export function HandoffChainModal({
                 }
               >
                 <span className={styles.handoff_leg_no}>{t("card.handoff_hop", { n: i + 1 })}</span>
+                {(() => {
+                  const leg = sourceOf(sid);
+                  if (!leg) return null;
+                  return (
+                    <span className={styles.handoff_leg_source}>
+                      <AgentSourceIcon source={leg.agentSource} />
+                      {leg.model && <span className={styles.handoff_leg_model}>{formatModel(leg.model)}</span>}
+                    </span>
+                  );
+                })()}
                 <span className={styles.handoff_leg_title} title={sid}>{labelOf(sid)}</span>
               </div>
               {i < chain.links.length && (

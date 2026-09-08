@@ -97,6 +97,19 @@
   opacity: 0.75;
 }
 
+.handoff_leg_source {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.85;
+}
+
+.handoff_leg_model {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
 .handoff_leg_title {
   overflow: hidden;
   text-overflow: ellipsis;
