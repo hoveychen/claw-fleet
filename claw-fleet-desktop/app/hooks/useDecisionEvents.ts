@@ -44,6 +44,68 @@ function lastQuestionSentence(text: string): string {
 }
 
 /**
+ * The fields any channel's request might carry that an announcement reads.
+ *
+ * Deliberately loose: every real request type is structurally assignable to it,
+ * so one table can announce all six without a discriminated union whose only
+ * job would be to pick a speech format.
+ */
+type Announcable = {
+  id: string;
+  workspaceName?: string;
+  aiTitle?: string | null;
+  toolName?: string | null;
+  commandSummary?: string | null;
+  parked?: boolean;
+  questions?: { question?: string }[];
+};
+
+/** Workspace, then the card's own two-sentence speech summary. */
+function spokenForQuestions(r: Announcable): string {
+  const body = r.questions?.[0]?.question ?? "";
+  const [intro, after] = splitOnDivider(body);
+  const followup = after ? lastQuestionSentence(after) : "";
+  return [r.workspaceName, normalizeForSpeech(intro), followup]
+    .filter((s): s is string => !!s && s.length > 0)
+    .join("。");
+}
+
+/** For cards whose body Fleet cannot read (A2UI surfaces, plan approvals). */
+function spokenForTitle(r: Announcable): string {
+  return [r.workspaceName, r.aiTitle ?? ""]
+    .filter((s): s is string => !!s && s.length > 0)
+    .join("。");
+}
+
+/** For the two "an agent is blocked on a yes/no" channels. */
+function spokenForTool(r: Announcable): string {
+  return [r.workspaceName, r.aiTitle, r.toolName || r.commandSummary]
+    .filter((s): s is string => !!s && s.length > 0)
+    .join(" ");
+}
+
+/**
+ * Which chime a bucket gets, and how its announcement reads.
+ *
+ * Shared by the live listeners and the reconcile poll, because a card the poll
+ * recovered is exactly the one the user most needs to hear about: the push
+ * channel dropped it, so the panel appearing is the *only* other signal, and it
+ * is worthless if he is looking at another window. Keyed by the bucket name in
+ * `PendingDecisions` so the poll can announce without knowing each shape.
+ */
+const ANNOUNCERS: Record<
+  keyof PendingDecisions,
+  { chime: "guard" | "elicitation"; speak: (r: Announcable) => string }
+> = {
+  guard: { chime: "guard", speak: spokenForTool },
+  elicitation: { chime: "elicitation", speak: spokenForQuestions },
+  fleetAsk: { chime: "elicitation", speak: spokenForQuestions },
+  a2uiRender: { chime: "elicitation", speak: spokenForTitle },
+  planApproval: { chime: "elicitation", speak: spokenForTitle },
+  permissionPrompt: { chime: "guard", speak: spokenForTool },
+};
+
+/**
  * Subscribe to backend decision events and push them into the decision store.
  *
  * Must be mounted at the App root (unconditionally) so events are never
@@ -99,15 +161,32 @@ export function useDecisionEvents() {
           // answer round trip, so without this a just-answered card comes
           // straight back on screen.
           const skip = suppressedIds();
-          const add = <T extends { id: string }>(r: T, action: (r: T) => void) => {
-            if (!skip.has(r.id)) action(r);
+          const add = <T extends Announcable>(
+            bucket: keyof PendingDecisions,
+            r: T,
+            action: (r: T) => void,
+          ) => {
+            if (skip.has(r.id)) return;
+            // Chime for a card this poll is the *first* to see, and only when
+            // the page was already open: the panel appearing is no signal at
+            // all to someone looking at another window, and a recovered card is
+            // precisely the one whose push was dropped. Silent on mount (a card
+            // that predates the page is not news) and silent for a parked card,
+            // which is an old question being re-listed — same two exemptions
+            // the live listeners make.
+            if (why !== "mount" && !r.parked && !announcedIds.current.has(r.id)) {
+              announcedIds.current.add(r.id);
+              const a = ANNOUNCERS[bucket];
+              playDecisionAlert(a.chime, a.speak(r));
+            }
+            action(r);
           };
-          p.guard?.forEach((r) => add(r, addGuardRequest));
-          p.elicitation?.forEach((r) => add(r, addElicitationRequest));
-          p.fleetAsk?.forEach((r) => add(r, addFleetAskRequest));
-          p.a2uiRender?.forEach((r) => add(r, addA2uiRenderRequest));
-          p.planApproval?.forEach((r) => add(r, addPlanApprovalRequest));
-          p.permissionPrompt?.forEach((r) => add(r, addPermissionPromptRequest));
+          p.guard?.forEach((r) => add("guard", r, addGuardRequest));
+          p.elicitation?.forEach((r) => add("elicitation", r, addElicitationRequest));
+          p.fleetAsk?.forEach((r) => add("fleetAsk", r, addFleetAskRequest));
+          p.a2uiRender?.forEach((r) => add("a2uiRender", r, addA2uiRenderRequest));
+          p.planApproval?.forEach((r) => add("planApproval", r, addPlanApprovalRequest));
+          p.permissionPrompt?.forEach((r) => add("permissionPrompt", r, addPermissionPromptRequest));
 
           // The other two directions, both just as losable as a `*-request`
           // emit: a missed `*-dismissed` strands a card the backend already
@@ -166,10 +245,7 @@ export function useDecisionEvents() {
       const r = e.payload;
       if (!announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
-        const spoken = [r.workspaceName, r.aiTitle, r.toolName || r.commandSummary]
-          .filter((s): s is string => !!s && s.length > 0)
-          .join(" ");
-        playDecisionAlert("guard", spoken);
+        playDecisionAlert("guard", spokenForTool(r));
       }
       addGuardRequest(r);
     });
@@ -185,13 +261,7 @@ export function useDecisionEvents() {
       // for it would re-announce the same question on every app restart.
       if (!r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
-        const body = r.questions[0]?.question ?? "";
-        const [intro, after] = splitOnDivider(body);
-        const followup = after ? lastQuestionSentence(after) : "";
-        const spoken = [r.workspaceName, normalizeForSpeech(intro), followup]
-          .filter((s): s is string => !!s && s.length > 0)
-          .join("。");
-        playDecisionAlert("elicitation", spoken);
+        playDecisionAlert("elicitation", spokenForQuestions(r));
       }
       addElicitationRequest(r);
     });
@@ -207,15 +277,9 @@ export function useDecisionEvents() {
       // for it would re-announce the same question on every app restart.
       if (!r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
-        const body = r.questions[0]?.question ?? "";
-        const [intro, after] = splitOnDivider(body);
-        const followup = after ? lastQuestionSentence(after) : "";
-        const spoken = [r.workspaceName, normalizeForSpeech(intro), followup]
-          .filter((s): s is string => !!s && s.length > 0)
-          .join("。");
         // Reuse the elicitation chime — `fleet__ask` is the same
         // "agent needs your input" feel as AskUserQuestion.
-        playDecisionAlert("elicitation", spoken);
+        playDecisionAlert("elicitation", spokenForQuestions(r));
       }
       addFleetAskRequest(r);
     });
@@ -233,10 +297,7 @@ export function useDecisionEvents() {
         announcedIds.current.add(r.id);
         // A2UI surfaces are opaque to Fleet — speak the workspace + title
         // only; the actual UI is announced by `@a2ui/react` accessibility.
-        const spoken = [r.workspaceName, r.aiTitle ?? ""]
-          .filter((s): s is string => !!s && s.length > 0)
-          .join("。");
-        playDecisionAlert("elicitation", spoken);
+        playDecisionAlert("elicitation", spokenForTitle(r));
       }
       addA2uiRenderRequest(r);
     });
@@ -252,10 +313,7 @@ export function useDecisionEvents() {
       // for it would re-announce the same question on every app restart.
       if (!r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
-        const spoken = [r.workspaceName, r.aiTitle ?? ""]
-          .filter((s): s is string => !!s && s.length > 0)
-          .join("。");
-        playDecisionAlert("elicitation", spoken);
+        playDecisionAlert("elicitation", spokenForTitle(r));
       }
       addPlanApprovalRequest(r);
     });
@@ -271,10 +329,7 @@ export function useDecisionEvents() {
       if (!announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         // Same urgency as guard: the headless agent is blocked until answered.
-        const spoken = [r.workspaceName, r.aiTitle, r.toolName]
-          .filter((s): s is string => !!s && s.length > 0)
-          .join(" ");
-        playDecisionAlert("guard", spoken);
+        playDecisionAlert("guard", spokenForTool(r));
       }
       addPermissionPromptRequest(r);
     });
