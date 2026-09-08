@@ -3,13 +3,14 @@
 // 仓库排在最前、标黄点。点开进 RepoDetailView 看逐个 worktree 明细并 push/pull。
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, FolderGit2 } from "lucide-react";
+import { ChevronRight, FolderGit2 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { RepoSummary } from "../types";
 import { listRepos } from "../repo";
 import styles from "./RepoView.module.css";
+import { AppHeader } from "./AppHeader";
 
 interface Props {
   client: FleetTransport | null;
@@ -39,17 +40,15 @@ export function RepoView({ client, onBack, onOpenRepo }: Props) {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={20} />
-        </button>
-        <div className={styles.headerText}>
-          <div className={styles.headerTitle}>{t("仓库")}</div>
-        </div>
-        <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")}>
-          ⟳
-        </button>
-      </div>
+      <AppHeader
+        onBack={onBack}
+        title={t("仓库")}
+        actions={
+          <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")}>
+            ⟳
+          </button>
+        }
+      />
 
       <div className={styles.body}>
         {error && <div className={styles.hint}>{t("仓库加载失败：{0}", error)}</div>}

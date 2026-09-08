@@ -4,7 +4,7 @@
 // 数据走 relay 的 `account_usage`（见 ../account.ts）。
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronLeft } from "lucide-react";
+import {  } from "lucide-react";
 import { fetchAccountUsage } from "../account";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
@@ -13,6 +13,7 @@ import { FoxyIcon } from "./AgentSourceIcon";
 import { UsageChart } from "./UsageChart";
 import { CodexUsageChart } from "./CodexUsageChart";
 import styles from "./UsageView.module.css";
+import { AppHeader } from "./AppHeader";
 
 interface Props {
   client: FleetTransport | null;
@@ -161,22 +162,20 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={20} />
-        </button>
-        <div className={styles.headerText}>
-          <div className={styles.headerTitle}>{t("账号与用量")}</div>
-        </div>
-        <button
-          className={styles.refresh}
-          onClick={() => void refresh()}
-          disabled={loading}
-          aria-label={t("刷新")}
-        >
-          ⟳
-        </button>
-      </div>
+      <AppHeader
+        onBack={onBack}
+        title={t("账号与用量")}
+        actions={
+          <button
+            className={styles.refresh}
+            onClick={() => void refresh()}
+            disabled={loading}
+            aria-label={t("刷新")}
+          >
+            ⟳
+          </button>
+        }
+      />
 
       <div className={styles.body}>
         {/* ── 今日累计 ── */}

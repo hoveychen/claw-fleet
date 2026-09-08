@@ -29,53 +29,6 @@
   padding: 1px 8px;
 }
 
-/* 下面的 .header / .backButton / .title 归 .detail 那层浮层用。 */
-.header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  padding-top: calc(10px + env(safe-area-inset-top));
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
-  flex-shrink: 0;
-}
-
-/* Icon-only back button — one shape across all nine detail headers.
-   It used to come in three flavours: an accent-coral text label reading
-   "返回" (会话详情 / 知识库文档 / 终端), the same label reading the
-   *destination's* name instead (计划 / 仓库 / 仓库详情 / 用量 wrote "‹ 更多",
-   "‹ 仓库"), and this icon-only form (产出详情 / 知识库列表) — with the chevron
-   at 18, 20 or 22px depending on the page. The coral text made the loudest
-   thing in every header the way *out* of the page rather than the title of it,
-   and the destination-name variant was never available to 会话详情 anyway,
-   which is reachable from four different entry points.
-   The negative margin pulls the 32px hit target's optical left edge back onto
-   the header's 12px gutter, so the chevron lines up with the content below. */
-.backButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-left: -6px;
-  border: none;
-  background: transparent;
-  color: var(--color-text);
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
-.title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .body {
   display: flex;
   flex-direction: column;

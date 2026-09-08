@@ -9,7 +9,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
-  ChevronLeft,
   FileSpreadsheet,
   FileText,
   FileType,
@@ -39,6 +38,7 @@ import {
 } from "../artifacts";
 import styles from "./ArtifactsView.module.css";
 import mdStyles from "./markdownBody.module.css";
+import { AppHeader } from "./AppHeader";
 
 // 三个 Office 渲染器合计约 1.6 MB（pptx-preview 自带 echarts 占 1.25 MB）。
 // 手机网络下这必须推迟到真的要看某份文档时——模块内部还会对每个库再动态
@@ -230,12 +230,7 @@ function ArtifactDetail({
 
   return (
     <div className={styles.detail}>
-      <div className={styles.header}>
-        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={20} />
-        </button>
-        <span className={styles.title}>{artifact.title}</span>
-      </div>
+      <AppHeader onBack={onBack} title={artifact.title} />
 
       <div className={styles.stage}>
         {err ? (

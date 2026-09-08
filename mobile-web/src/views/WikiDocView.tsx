@@ -5,7 +5,7 @@
 
 import type { ComponentPropsWithoutRef } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Loader2, Share2 } from "lucide-react";
+import { Loader2, Share2 } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mdComponents as sharedMdComponents } from "../markdown/components";
@@ -18,6 +18,7 @@ import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
 import styles from "./WikiDocView.module.css";
 import mdStyles from "./markdownBody.module.css";
+import { AppHeader } from "./AppHeader";
 
 interface Props {
   doc: WikiDoc;
@@ -187,39 +188,37 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={20} />
-        </button>
-        <div className={styles.headerText}>
-          <div className={styles.headerTitle}>{doc.title || doc.slug}</div>
-          <div className={styles.headerSub}>
-            {doc.slug} · {doc.workspaceName}
-          </div>
-        </div>
-        {versions.length > 1 && (
-          <select
-            className={styles.versionSelect}
-            value={version}
-            onChange={(e) => setVersion(e.target.value)}
-          >
-            {versions.map((v, i) => (
-              <option key={v.id} value={v.id}>
-                {i === 0 ? t("最新") : fmtVersion(v.publishedMs)}
-              </option>
-            ))}
-          </select>
-        )}
-        <button
-          className={styles.exportButton}
-          onClick={() => void handleExport()}
-          disabled={exporting || !client}
-          aria-label={t("导出 / 分享")}
-          title={t("导出 / 分享")}
-        >
-          {exporting ? <Loader2 size={18} className={styles.spinning} /> : <Share2 size={18} />}
-        </button>
-      </header>
+      <AppHeader
+        onBack={onBack}
+        title={doc.title || doc.slug}
+        sub={`${doc.slug} · ${doc.workspaceName}`}
+        actions={
+          <>
+            {versions.length > 1 && (
+              <select
+                className={styles.versionSelect}
+                value={version}
+                onChange={(e) => setVersion(e.target.value)}
+              >
+                {versions.map((v, i) => (
+                  <option key={v.id} value={v.id}>
+                    {i === 0 ? t("最新") : fmtVersion(v.publishedMs)}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              className={styles.exportButton}
+              onClick={() => void handleExport()}
+              disabled={exporting || !client}
+              aria-label={t("导出 / 分享")}
+              title={t("导出 / 分享")}
+            >
+              {exporting ? <Loader2 size={18} className={styles.spinning} /> : <Share2 size={18} />}
+            </button>
+          </>
+        }
+      />
 
       <div className={styles.body}>
         {error && <div className={styles.hint}>{t("加载失败：{0}", error)}</div>}

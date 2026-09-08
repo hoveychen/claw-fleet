@@ -4,13 +4,14 @@
 // 的 repo_detail / repo_push / repo_pull 打到 git_ops.rs。
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { DirtyFile, RepoDetail, RepoSummary, WorktreeHealth } from "../types";
 import { fetchRepoDetail, pullRepo, pushRepo } from "../repo";
 import { useConfirm } from "../confirmDialog";
 import styles from "./RepoDetailView.module.css";
+import { AppHeader } from "./AppHeader";
 
 interface Props {
   repo: RepoSummary;
@@ -63,15 +64,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={20} />
-        </button>
-        <div className={styles.headerText}>
-          <div className={styles.headerTitle}>{repo.label}</div>
-          <div className={styles.headerSub}>{repo.root}</div>
-        </div>
-      </div>
+      <AppHeader onBack={onBack} title={repo.label} sub={repo.root} subKeepsTail />
 
       <div className={styles.body}>
         {error && <div className={styles.hint}>{t("仓库加载失败：{0}", error)}</div>}

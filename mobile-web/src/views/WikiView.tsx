@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
-  ChevronLeft,
   ChevronRight,
   FileQuestion,
   RefreshCw,
@@ -22,6 +21,7 @@ import type { WikiDoc } from "../types";
 import { useWikiSearch } from "../useWikiSearch";
 import { listWikiDocs } from "../wiki";
 import styles from "./WikiView.module.css";
+import { AppHeader } from "./AppHeader";
 
 const KIND_BADGE: Record<WikiDoc["kind"], string> = {
   markdown: "MD",
@@ -133,16 +133,16 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={20} />
-        </button>
-        <span className={styles.title}>{t("知识库")}</span>
-        {total > 0 && <span className={styles.count}>{total}</span>}
-        <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")}>
-          <RefreshCw size={16} />
-        </button>
-      </div>
+      <AppHeader
+        onBack={onBack}
+        title={t("知识库")}
+        titleAfter={total > 0 && <span className={styles.count}>{total}</span>}
+        actions={
+          <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")}>
+            <RefreshCw size={16} />
+          </button>
+        }
+      />
 
       <div className={styles.view}>
         <div className={styles.filters}>
