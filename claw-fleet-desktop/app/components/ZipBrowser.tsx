@@ -26,7 +26,7 @@ import {
   Music,
   Package,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { formatBytes } from "../formatBytes";
@@ -40,6 +40,7 @@ import {
   zipEntryKind,
   zipEntryMime,
   type ByteReader,
+  type ZipErrorCode,
   type ZipDir,
   type ZipEntry,
 } from "../../../shared-ts/zipDir";
@@ -83,6 +84,17 @@ interface Loaded {
   root: ZipDir;
 }
 
+/** A failure held as a code, so the message is produced at render time. */
+interface Failure {
+  code: ZipErrorCode | "other";
+  detail: string;
+}
+
+function failure(e: unknown): Failure {
+  if (e instanceof ZipError) return { code: e.code, detail: e.message };
+  return { code: "other", detail: e instanceof Error ? e.message : String(e) };
+}
+
 export function ZipBrowser({
   url,
   size,
@@ -100,36 +112,38 @@ export function ZipBrowser({
 }) {
   const { t } = useTranslation();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [listError, setListError] = useState<string | null>(null);
+  const [listError, setListError] = useState<Failure | null>(null);
   const [cwd, setCwd] = useState("");
   const [open, setOpen] = useState<ZipEntry | null>(null);
   const [member, setMember] = useState<ZipMemberPreview | null>(null);
-  const [memberError, setMemberError] = useState<string | null>(null);
+  const [memberError, setMemberError] = useState<Failure | null>(null);
   const [memberBytes, setMemberBytes] = useState<Uint8Array | null>(null);
   // Every blob: URL handed out has to be revoked, or the archive stays in
   // memory for the life of the window.
   const objectUrl = useRef<string | null>(null);
 
-  const message = useCallback(
-    (e: unknown): string => {
-      if (e instanceof ZipError) {
-        switch (e.code) {
-          case "not-zip":
-            return t("artifacts.zip.err_not_zip", "这个文件不是有效的 zip，或者已损坏。");
-          case "encrypted":
-            return t("artifacts.zip.err_encrypted", "这一项有密码保护，没法在这里打开。");
-          case "unsupported-method":
-            return t("artifacts.zip.err_method", "这一项用了不支持的压缩算法。");
-          case "no-inflate":
-            return t("artifacts.zip.err_no_inflate", "当前环境不支持解压，只能导出。");
-          default:
-            return t("artifacts.zip.err_read", "读取压缩包失败。");
-        }
-      }
-      return e instanceof Error ? e.message : String(e);
-    },
-    [t],
-  );
+  /** Translate at render, not where the failure happened.
+   *
+   *  `t`'s identity is not guaranteed stable across renders, and a `t`-derived
+   *  callback in an effect's dependencies is a render loop: the effect reruns,
+   *  sets state, re-renders, gets a fresh `t`. Keeping the effects free of `t`
+   *  is what makes them run once per archive. */
+  const message = (failure: Failure): string => {
+    switch (failure.code) {
+      case "not-zip":
+        return t("artifacts.zip.err_not_zip", "这个文件不是有效的 zip，或者已损坏。");
+      case "encrypted":
+        return t("artifacts.zip.err_encrypted", "这一项有密码保护，没法在这里打开。");
+      case "unsupported-method":
+        return t("artifacts.zip.err_method", "这一项用了不支持的压缩算法。");
+      case "no-inflate":
+        return t("artifacts.zip.err_no_inflate", "当前环境不支持解压，只能导出。");
+      case "read":
+        return t("artifacts.zip.err_read", "读取压缩包失败。");
+      default:
+        return failure.detail;
+    }
+  };
 
   // ── Listing ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -144,12 +158,12 @@ export function ZipBrowser({
         if (alive) setLoaded({ reader, entries, root: buildZipTree(entries) });
       })
       .catch((e) => {
-        if (alive) setListError(message(e));
+        if (alive) setListError(failure(e));
       });
     return () => {
       alive = false;
     };
-  }, [url, size, message]);
+  }, [url, size]);
 
   // ── Opening one member ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -182,12 +196,12 @@ export function ZipBrowser({
         setMember({ url: blobUrl, mime, kind: zipEntryKind(mime, open.name), title: open.name });
       })
       .catch((e) => {
-        if (alive) setMemberError(message(e));
+        if (alive) setMemberError(failure(e));
       });
     return () => {
       alive = false;
     };
-  }, [open, loaded, message]);
+  }, [open, loaded]);
 
   useEffect(() => () => {
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
@@ -202,7 +216,7 @@ export function ZipBrowser({
     return (
       <div className={styles.centered}>
         <Package size={40} strokeWidth={1.1} />
-        <div className={styles.centered_title}>{listError}</div>
+        <div className={styles.centered_title}>{message(listError)}</div>
       </div>
     );
   }
@@ -239,7 +253,7 @@ export function ZipBrowser({
           {memberError ? (
             <div className={styles.centered}>
               <Lock size={40} strokeWidth={1.1} />
-              <div className={styles.centered_title}>{memberError}</div>
+              <div className={styles.centered_title}>{message(memberError)}</div>
             </div>
           ) : tooBig ? (
             <div className={styles.centered}>
