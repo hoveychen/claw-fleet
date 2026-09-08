@@ -553,18 +553,43 @@ fn codex_fallback_models() -> Vec<LlmModel> {
     ]
 }
 
-/// Read `~/.codex/models_cache.json` and return non-hidden models.
+/// Whether a `models_cache.json` row should be offered in a picker.
+///
+/// The cache marks this with `visibility` (`"list"` / `"hide"`), which is the
+/// only key it actually carries. This used to test `is_hidden` — a key the file
+/// has never had — so the filter was a no-op and the picker offered Codex's
+/// internal rows: on this machine `gpt-reserve` and `codex-auto-review`, neither
+/// of which is a model anyone should be selecting as an analysis provider.
+///
+/// A row with no `visibility` at all is kept: an unfamiliar cache shape should
+/// under-filter (offer a model that maybe shouldn't be listed) rather than
+/// over-filter into an empty list, which would silently fall back to the
+/// hardcoded set.
+fn codex_model_is_listed(m: &serde_json::Value) -> bool {
+    match m.get("visibility").and_then(|v| v.as_str()) {
+        Some(v) => !v.eq_ignore_ascii_case("hide"),
+        None => true,
+    }
+}
+
+/// Read `~/.codex/models_cache.json` and return the models it lists.
 fn parse_codex_models_cache() -> Option<Vec<LlmModel>> {
     let path = crate::session::real_home_dir()?.join(".codex").join("models_cache.json");
     let content = std::fs::read_to_string(path).ok()?;
-    let val: serde_json::Value = serde_json::from_str(&content).ok()?;
+    parse_codex_models_doc(&content)
+}
+
+/// [`parse_codex_models_cache`] against a document, so tests can supply a cache
+/// shape instead of depending on whatever the developer's Codex login wrote.
+fn parse_codex_models_doc(content: &str) -> Option<Vec<LlmModel>> {
+    let val: serde_json::Value = serde_json::from_str(content).ok()?;
 
     // The cache is either `{ "models": [...] }` or a bare array.
     let arr = val.get("models").and_then(|v| v.as_array())
         .or_else(|| val.as_array())?;
 
     let models: Vec<LlmModel> = arr.iter()
-        .filter(|m| !m.get("is_hidden").and_then(|v| v.as_bool()).unwrap_or(false))
+        .filter(|m| codex_model_is_listed(m))
         .filter_map(|m| {
             let slug = m.get("slug").and_then(|v| v.as_str())?;
             let display = m.get("display_name").and_then(|v| v.as_str()).unwrap_or(slug);
@@ -837,6 +862,46 @@ mod tests {
         assert_eq!(rank_providers("codex", &healthy), ["codex", "claude"]);
         let limited = vec![("claude".into(), QuotaState::Limited), ("codex".into(), QuotaState::Healthy)];
         assert_eq!(rank_providers("claude", &limited), ["codex"]);
+    }
+
+    /// The cache marks internal rows with `visibility: "hide"` — never with an
+    /// `is_hidden` boolean, which is what this filter used to look for. With the
+    /// wrong key the filter was a no-op, so `gpt-reserve` and `codex-auto-review`
+    /// were offered as selectable analysis providers.
+    #[test]
+    fn hidden_codex_models_are_filtered_by_visibility() {
+        let doc = r#"{"models":[
+            {"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list"},
+            {"slug":"gpt-reserve","display_name":"GPT-Reserve","visibility":"hide"},
+            {"slug":"codex-auto-review","display_name":"Codex Auto Review","visibility":"hide"}
+        ]}"#;
+        let ids: Vec<String> = parse_codex_models_doc(doc)
+            .expect("cache doc must parse")
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, ["gpt-5.6-sol"]);
+    }
+
+    /// A row with no `visibility` is kept. Under-filtering an unfamiliar cache
+    /// shape offers one model too many; over-filtering empties the list and
+    /// silently drops the whole provider back to the hardcoded fallback set.
+    #[test]
+    fn rows_without_visibility_are_kept() {
+        let doc = r#"{"models":[{"slug":"gpt-future","display_name":"GPT Future"}]}"#;
+        let models = parse_codex_models_doc(doc).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "gpt-future");
+    }
+
+    /// The bare-array shape the parser also accepts keeps working.
+    #[test]
+    fn bare_array_cache_shape_still_parses() {
+        let doc = r#"[{"slug":"gpt-5.6-luna","display_name":"GPT-5.6-Luna","visibility":"list"},
+                      {"slug":"hidden-one","visibility":"hide"}]"#;
+        let models = parse_codex_models_doc(doc).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "gpt-5.6-luna");
     }
 
     #[test]
