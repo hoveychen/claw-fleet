@@ -11,6 +11,7 @@ import {
   codexEffortChoices,
   codexProfileChoices,
   dshFindPick,
+  dshLadderSpec,
   dshModelMenu,
   type CodexProfile,
 } from "../modelChoices";
@@ -154,8 +155,16 @@ export function SessionOptionPills({
   // knob", where showing the previous model's ladder would invite a value dsh
   // will not honour.
   const dshPick = useMemo(() => dshFindPick(dshMenu, model), [dshMenu, model]);
+  // The ladder follows the model the session will *run on*, which is the
+  // explicit pick when there is one and dsh's own default selection otherwise
+  // (`dshLadderSpec`). The model pill keeps reading off `dshPick` so the
+  // un-chosen state still shows its bare category name, not the default's.
+  const dshLadderPick = useMemo(
+    () => dshFindPick(dshMenu, dshLadderSpec(dshCatalog, model)),
+    [dshMenu, dshCatalog, model],
+  );
   const effortChoices = isDsh
-    ? (dshPick?.efforts ?? [])
+    ? (dshLadderPick?.efforts ?? [])
     : isCodex
       ? codexEffortChoices(model)
       : CLAUDE_EFFORT_CHOICES;
@@ -177,8 +186,8 @@ export function SessionOptionPills({
   // dsh names a per-model default, so the un-chosen effort item can say which
   // one it means instead of a bare "Default".
   const effortDefaultLabel =
-    isDsh && dshPick?.defaultEffort
-      ? `${t("new_session.effort_default")} (${dshPick.defaultEffort})`
+    isDsh && dshLadderPick?.defaultEffort
+      ? `${t("new_session.effort_default")} (${dshLadderPick.defaultEffort})`
       : t("new_session.effort_default");
   // The model menu's rows. Every agent but dsh has one flat list; dsh gets two
   // levels because its catalogue is the host's whole provider space (278 models

@@ -232,7 +232,9 @@ name: string, models: Array<DshModelEntry>, };
 
 export type DshModelCatalogFailure = { id: string, name: string, message: string, };
 
-export type DshModelCatalog = { groups: Array<DshModelGroup>, failures: Array<DshModelCatalogFailure>, };
+export type DshModelCatalog = { groups: Array<DshModelGroup>, failures: Array<DshModelCatalogFailure>, 
+defaultSpec: string | null, 
+defaultEffort: string | null, };
 
 export type SessionTodo = { content: string, activeForm: string, 
 status: string, };

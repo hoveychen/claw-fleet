@@ -2840,6 +2840,10 @@ export const MOCK_DSH_MODELS = {
     },
   ],
   failures: [],
+  // dsh's saved default selection: what the launcher's "default" model item
+  // means, and whose effort ladder the effort pill shows in that state.
+  defaultSpec: "deepseek-official/deepseek-v4-flash",
+  defaultEffort: "high",
 };
 
 // ── Setup status ────────────────────────────────────────────────────────────

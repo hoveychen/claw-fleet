@@ -189,6 +189,17 @@ export function dshModelMenu(catalog: DshModelCatalog | null | undefined): DshMo
   return { inline, folders };
 }
 
+/** The spec whose effort ladder the picker should show: the explicit pick, or
+ *  — while the model pill still says "default" — the model dsh will actually
+ *  mount, which the catalogue names in `defaultSpec` (its
+ *  `agent-default-model` setting). Before this the effort menu was empty until
+ *  a model was picked by hand, so on a machine that always runs the default
+ *  model the dial simply looked missing. `""` when neither is known, which
+ *  `dshFindPick` turns into "no pick" and the menu into "default only". */
+export function dshLadderSpec(catalog: DshModelCatalog | null | undefined, model: string): string {
+  return model || catalog?.defaultSpec || "";
+}
+
 /** Look a spec up across both menu levels — the selected model may live in a
  *  folder, and the pill label plus the effort ladder both need it. */
 export function dshFindPick(menu: DshModelMenu, spec: string): DshModelPick | undefined {

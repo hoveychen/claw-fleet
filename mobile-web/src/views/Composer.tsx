@@ -31,7 +31,7 @@ import { isSessionLive, type SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useSourcesConfig } from "../useSourcesConfig";
 import { toolChoicesForSources, toolForAgentSource } from "../agentSource";
-import { dshEffortsFor, dshModelGroups, useDshModels } from "../dshModels";
+import { dshEffortsFor, dshLadderSpec, dshModelGroups, useDshModels } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
@@ -390,8 +390,13 @@ function OptionSelects({
     () => (isDsh ? dshModelGroups(dshCatalog) : []),
     [isDsh, dshCatalog],
   );
+  // 阶梯跟着会话真正会跑的模型:显式选了就用它,模型还是「默认」就用目录里
+  // dsh 自己的默认选择 —— 否则默认模型下 effort 只剩「默认」一项。
   const dshEffort = useMemo(
-    () => (isDsh ? dshEffortsFor(dshCatalog, model) : { efforts: [], defaultEffort: "" }),
+    () =>
+      isDsh
+        ? dshEffortsFor(dshCatalog, dshLadderSpec(dshCatalog, model))
+        : { efforts: [], defaultEffort: "" },
     [isDsh, dshCatalog, model],
   );
   const modelChoices = isCodex
