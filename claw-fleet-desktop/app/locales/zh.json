@@ -2593,7 +2593,9 @@
       "err_encrypted": "这一项有密码保护，没法在这里打开。",
       "err_method": "这一项用了不支持的压缩算法。",
       "err_no_inflate": "当前环境不支持解压，只能导出。",
-      "err_read": "读取压缩包失败。"
+      "err_read": "读取压缩包失败。",
+      "search": "在包里搜索…",
+      "no_hits": "包里没有匹配的文件。"
     }
   },
   "markdown": {

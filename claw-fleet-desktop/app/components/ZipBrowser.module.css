@@ -68,6 +68,25 @@
   flex: 1;
 }
 
+/* Filters the whole archive, so it sits in the bar next to the breadcrumbs
+   rather than above one folder's list. */
+.search {
+  flex: 0 1 180px;
+  min-width: 90px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  border-radius: var(--radius-xs);
+  padding: 2px var(--space-2);
+  font: inherit;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text);
+}
+
+.search:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
 .bar_size {
   color: var(--color-text-dim);
   font-size: var(--font-size-2xs);

@@ -2597,7 +2597,9 @@
       "err_no_inflate": "This environment cannot decompress; export it instead.",
       "err_read": "Could not read the archive.",
       "count": "{{count}} items",
-      "count_one": "1 item"
+      "count_one": "1 item",
+      "search": "Search in archive…",
+      "no_hits": "No file in this archive matches."
     }
   },
   "markdown": {

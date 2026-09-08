@@ -77,6 +77,24 @@ async function click(label: string) {
   });
 }
 
+async function search(text: string) {
+  const box = container.querySelector<HTMLInputElement>('input[type="search"]');
+  if (!box) throw new Error("no search box");
+  await act(async () => {
+    // React tracks the last value it wrote; setting `.value` directly is
+    // invisible to it, so the native setter has to be used before dispatching.
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(box, text);
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 /** Stands in for the page's `PreviewStage`, so the test can see exactly what
  *  the browser hands it. */
 const renderPreview = (m: ZipMemberPreview) => (
@@ -180,6 +198,57 @@ describe("ZipBrowser", () => {
     await click("readme.md");
     await click("返回");
     expect(preview()).toBeNull();
+    expect(container.textContent).toContain("docs");
+  });
+
+  it("searches the whole archive, not just the folder you are standing in", async () => {
+    // The reason search exists: the deep file is the one you cannot be
+    // bothered to walk to. Hits show full paths, since a bare name out of
+    // context names nothing.
+    const zip = ARCHIVE();
+    serve(zip);
+    await mount(<ZipBrowser url="fleet-artifact://x" size={zip.length} renderPreview={renderPreview} />);
+
+    await search("spec");
+    expect(container.textContent).toContain("docs/spec.md");
+    expect(container.textContent).not.toContain("readme.md");
+
+    // …and a hit opens directly, without walking there first. The preview is
+    // titled by the member's own name; its full path is in the bar above it.
+    await click("docs/spec.md");
+    expect(preview()).toContain("|spec.md|");
+    expect(container.textContent).toContain("docs/spec.md");
+  });
+
+  it("matches on the path, so a folder name finds what is inside it", async () => {
+    const zip = ARCHIVE();
+    serve(zip);
+    await mount(<ZipBrowser url="fleet-artifact://x" size={zip.length} renderPreview={renderPreview} />);
+
+    await search("img/");
+    expect(container.textContent).toContain("docs/img/shot.png");
+    expect(container.textContent).not.toContain("spec.md");
+  });
+
+  it("says so when nothing in the archive matches", async () => {
+    const zip = ARCHIVE();
+    serve(zip);
+    await mount(<ZipBrowser url="fleet-artifact://x" size={zip.length} renderPreview={renderPreview} />);
+
+    await search("nothing-like-this");
+    expect(container.textContent).toContain("没有匹配");
+    // Not the empty-folder message — the folder is not empty, the search is.
+    expect(container.textContent).not.toContain("这个文件夹是空的");
+  });
+
+  it("returns to the folder listing when the search is cleared", async () => {
+    const zip = ARCHIVE();
+    serve(zip);
+    await mount(<ZipBrowser url="fleet-artifact://x" size={zip.length} renderPreview={renderPreview} />);
+
+    await search("spec");
+    await search("");
+    expect(container.textContent).toContain("readme.md");
     expect(container.textContent).toContain("docs");
   });
 
