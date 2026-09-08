@@ -1,6 +1,18 @@
 /* The one detail-page header. Nine views used to hand-copy this block; the
    values below are the majority-party ones they had all drifted around
-   (10px padding, --t-body title, --color-bg-secondary, one hairline). */
+   (10px padding, --t-body title, one hairline).
+
+   `--color-bg`, not `--color-bg-secondary`: these headers used to sit one shade
+   darker than the app bar above the tabs, which rendered at #f4f1ea against
+   #ebe7de here — measured as a (9,10,12) RGB gap, plainly visible when you went
+   from a tab into a detail page. The app bar looks the way it does because its
+   `--color-bg-glass` is `rgba(244,241,234,0.93)` over a `--color-bg` of exactly
+   `rgb(244,241,234)`: 93% of a colour composited over itself is that colour, so
+   the bar is the page's own background plus a hairline, and the blur only shows
+   as content scrolls beneath it. Matching that here means a detail header is
+   also just the page plus a hairline. Everything that continues the panel
+   (.tabBar / .infoPanel / .parentCrumb, TerminalView's .tabs) moved with it, so
+   `seamless` still means one continuous surface. */
 .header {
   display: flex;
   align-items: center;
@@ -8,7 +20,7 @@
   padding: 10px 12px;
   padding-top: calc(10px + env(safe-area-inset-top));
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
+  background: var(--color-bg);
   flex-shrink: 0;
 }
 
