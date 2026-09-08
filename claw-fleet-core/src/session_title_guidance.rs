@@ -232,6 +232,32 @@ fn remove_inner() -> Result<(), String> {
     Ok(())
 }
 
+/// The `## Session title` section exactly as currently installed on disk, or
+/// `None` when the feature is not installed.
+///
+/// For the one caller that needs the section but cannot reach the user's global
+/// `CLAUDE.md`: a chat-workspace session launches with `--setting-sources
+/// project`, which drops that file (and with it the `@import` sentinel block) to
+/// keep the 22k-token engineering doctrine out of a conversation — see
+/// [`crate::chat_workspace`]. Reading the rendered file back, rather than
+/// re-rendering, is what keeps the user's configured `title`/`locale` and the
+/// settings-panel toggle authoritative: `remove_session_title_guidance` deletes
+/// this file, so a switched-off feature reads as `None` here too.
+pub fn installed_section() -> Option<String> {
+    let content = fs::read_to_string(guidance_file_path()?).ok()?;
+    // Drop the managed-file `# …` header; keep from the `## …` heading on.
+    let start = content
+        .split_inclusive('\n')
+        .scan(0usize, |offset, line| {
+            let at = *offset;
+            *offset += line.len();
+            Some((at, line))
+        })
+        .find(|(_, line)| line.starts_with("## "))
+        .map(|(at, _)| at)?;
+    Some(content[start..].trim_end().to_string())
+}
+
 /// Whether the sentinel block is present in `~/.claude/CLAUDE.md`.
 pub fn is_session_title_guidance_installed() -> bool {
     let Some(claude_md) = claude_md_path() else {
