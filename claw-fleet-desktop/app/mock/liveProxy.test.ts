@@ -4,7 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { FORWARDED_SSE_EVENTS, LIVE_COMPOSITES, LIVE_ROUTES } from "./liveProxy";
+import { FORWARDED_SSE_EVENTS, LIVE_ROUTES } from "./liveProxy";
 
 /**
  * Commands the frontend reaches through a variable, not a literal — a ternary
@@ -327,19 +327,6 @@ describe("live proxy route table", () => {
 });
 
 /**
- * `list_pending_decisions` is the frontend's *mount catch-up*: Tauri events are
- * not buffered, so a card raised before the page loaded is only ever seen
- * through this one call. `RemoteBackend` builds it by fanning out to all six
- * `/…/pending` endpoints and then filling in each request's display fields from
- * the session list — it is not one route, and mapping it to `/guard/pending`
- * alone left five of the six buckets permanently empty *and* handed the caller
- * a bare array where it reads `p.elicitation` / `p.fleetAsk` / ….
- *
- * `useDecisionEvents` guards with `p.guard?.forEach`, so the wrong shape did
- * not throw — it silently did nothing, which is why a click-through never
- * caught it.
- */
-/**
  * Query encoding, which is not a detail: `hooks_server::parse_query` splits on
  * `&` / `=` and hands each raw value to `percent_decode_str`. Percent-decoding
  * does not touch `+`, so a value serialized the *form* way — which is what
@@ -453,66 +440,71 @@ describe("query encoding matches RemoteBackend", () => {
   });
 });
 
-describe("list_pending_decisions composite", () => {
-  // Paths carry the `/__live` dev-proxy prefix, so match on the suffix.
-  const bucketFor = (path: string) => {
-    if (path.endsWith("/guard/pending")) return [mk("g1", "guard-ws")];
-    if (path.endsWith("/elicitation/pending")) return [mk("e1", "")];
-    if (path.endsWith("/fleet-ask/pending")) return [mk("f1", "")];
-    if (path.endsWith("/a2ui-render/pending")) return [mk("a1", "")];
-    if (path.endsWith("/plan-approval/pending")) return [mk("p1", "")];
-    if (path.endsWith("/permission-prompt/pending")) return [mk("m1", "")];
-    if (path.endsWith("/sessions")) {
-      return [{ id: "s1", workspaceName: "resolved-ws", aiTitle: "resolved-title" }];
-    }
-    return [];
-  };
-  function mk(id: string, workspaceName: string) {
-    return { id, sessionId: "s1", workspaceName, aiTitle: null };
-  }
+/**
+ * `list_pending_decisions` is what the page reconciles its card set against —
+ * on mount, on SSE reconnect, when the tab becomes visible, and on a timer. It
+ * used to fan out to all six `/…/pending` routes and stitch the buckets (plus
+ * the display-field resolution) back together in TypeScript, which put a third
+ * copy of that union next to `LocalBackend`'s and the route handlers'. Now it
+ * is one request to `/decisions/pending`, answered by the same
+ * `pending_decisions::collect` the Tauri command calls.
+ *
+ * The failure mode this pins is silence: `useDecisionEvents` reads
+ * `p.elicitation` / `p.fleetAsk` / … with `?.forEach`, so a payload that is the
+ * wrong shape — or a path nobody serves — throws nothing and simply produces no
+ * cards, which no click-through catches.
+ */
+describe("list_pending_decisions", () => {
+  it("asks the one route hooks_server actually serves, and passes the buckets through", async () => {
+    // The whole pathname against the real dispatch table: `toContain` on a
+    // substring would also accept a typo'd `/decisions/pendingg`.
+    expect(servedRoutes().exact).toContain("/decisions/pending");
 
-  it("fans out to all six pending routes and resolves display fields", async () => {
+    const payload = {
+      guard: [{ id: "g1", sessionId: "s1", workspaceName: "resolved-ws", aiTitle: "t" }],
+      elicitation: [],
+      fleetAsk: [{ id: "f1", sessionId: "s1", workspaceName: "resolved-ws", aiTitle: "t" }],
+      a2uiRender: [],
+      planApproval: [],
+      permissionPrompt: [],
+    };
     const seen: string[] = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const path = new URL(String(input), "http://localhost").pathname;
-      seen.push(path);
-      return new Response(JSON.stringify(bucketFor(path)), {
+      seen.push(new URL(String(input), "http://localhost").pathname);
+      return new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }) as typeof fetch;
     try {
-      const composite = LIVE_COMPOSITES.list_pending_decisions;
-      expect(composite, "list_pending_decisions must be a composite").toBeTypeOf("function");
-      const out = (await composite({})) as Record<string, Array<Record<string, unknown>>>;
-
-      // All six buckets, under the camelCase names the hook destructures.
-      for (const k of [
-        "guard",
-        "elicitation",
-        "fleetAsk",
-        "a2uiRender",
-        "planApproval",
-        "permissionPrompt",
-      ]) {
-        expect(out[k], `bucket ${k}`).toHaveLength(1);
-      }
-      expect(seen.some((p) => p.endsWith("/elicitation/pending"))).toBe(true);
-      expect(seen.some((p) => p.endsWith("/permission-prompt/pending"))).toBe(true);
-
-      // `resolve_pending_display`: fill an empty workspaceName / missing aiTitle
-      // from the session, and leave a value that is already set alone.
-      expect(out.elicitation[0].workspaceName).toBe("resolved-ws");
-      expect(out.elicitation[0].aiTitle).toBe("resolved-title");
-      expect(out.guard[0].workspaceName).toBe("guard-ws");
+      const { liveInvoke } = await import("./liveProxy");
+      const res = await liveInvoke("list_pending_decisions", {});
+      expect(res.handled).toBe(true);
+      expect(res.value).toEqual(payload);
     } finally {
       globalThis.fetch = realFetch;
     }
+
+    // One round trip, not seven — this runs on a timer now.
+    expect(seen).toHaveLength(1);
+    expect(seen[0].replace(/^\/__live/, "")).toBe("/decisions/pending");
   });
 
-  it("is no longer mapped as a single route", () => {
-    expect(LIVE_ROUTES.list_pending_decisions).toBeUndefined();
+  it("degrades to an empty snapshot rather than a non-object the hook would read fields off", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("null", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+    try {
+      const { liveInvoke } = await import("./liveProxy");
+      const res = await liveInvoke("list_pending_decisions", {});
+      expect(res.value).toEqual({});
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });
 

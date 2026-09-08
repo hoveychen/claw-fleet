@@ -1448,6 +1448,8 @@ fn handle_request(
 
             crate::routes::ELICITATION_RESPOND => route_elicitation_respond(ctx, request, &query, json_header, path),
 
+            crate::routes::DECISIONS_PENDING => route_decisions_pending(ctx, request, &query, json_header, path),
+
             crate::routes::FLEET_ASK_PENDING => route_fleet_ask_pending(ctx, request, &query, json_header, path),
 
             crate::routes::FLEET_ASK_RESPOND => route_fleet_ask_respond(ctx, request, &query, json_header, path),

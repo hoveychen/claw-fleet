@@ -1575,21 +1575,6 @@ export const LIVE_COMPOSITES: Record<
    * hint either way.
    */
   /**
-   * `gui::list_pending_decisions` — the frontend's mount catch-up, and the only
-   * way a card raised *before* the page loaded is ever seen (Tauri events are
-   * not buffered for listeners that attach later).
-   *
-   * `RemoteBackend` fans out to all six `/…/pending` endpoints and then fills in
-   * each request's display fields from the session list; it is not one route.
-   * Mapping it to `/guard/pending` alone left five buckets permanently empty and
-   * returned a bare array where the hook reads `p.elicitation` / `p.fleetAsk` /
-   * …. Because the hook guards with `p.guard?.forEach`, that failed silently —
-   * no error, just no catch-up.
-   *
-   * Per-bucket failures degrade to `[]`, mirroring the Rust's `unwrap_or_default`
-   * on each call: one dead endpoint must not lose the other five.
-   */
-  /**
    * `gui::get_messages_since` — one step of a live follow, mirroring
    * `RemoteBackend::get_messages_since`. Two endpoints, not one, which is why
    * it cannot be a plain route: `offset: null` asks only where the transcript
@@ -1613,47 +1598,25 @@ export const LIVE_COMPOSITES: Record<
     return { messages: delta?.lines ?? [], offset: delta?.newOffset ?? Number(a.offset) };
   },
 
+  /**
+   * `gui::list_pending_decisions` — the card set the page reconciles against.
+   * Not just a mount catch-up any more: `useDecisionEvents` re-asks on a timer,
+   * on SSE reconnect and when the tab becomes visible, because a card that only
+   * ever arrives as a one-shot push is a card that vanishes for good the first
+   * time the stream hiccups.
+   *
+   * One route, `/decisions/pending`, answered by the same
+   * `pending_decisions::collect` the desktop's Tauri command calls. It used to
+   * fan out to all six `/…/pending` endpoints and stitch the buckets (plus the
+   * display-field resolution) back together here — three copies of that union
+   * meant a new channel could be forgotten in one of them, and the hook's
+   * `p.guard?.forEach` guards turn a missing bucket into silence rather than an
+   * error. Server-side there is exactly one copy, and the poll costs one round
+   * trip instead of seven.
+   */
   list_pending_decisions: async () => {
-    const buckets: Array<[string, string]> = [
-      ["guard", "/guard/pending"],
-      ["elicitation", "/elicitation/pending"],
-      ["fleetAsk", "/fleet-ask/pending"],
-      ["a2uiRender", "/a2ui-render/pending"],
-      ["planApproval", "/plan-approval/pending"],
-      ["permissionPrompt", "/permission-prompt/pending"],
-    ];
-    const one = async (path: string) => {
-      try {
-        const v = await callProbe({ method: "GET", path });
-        return Array.isArray(v) ? (v as Array<Record<string, unknown>>) : [];
-      } catch {
-        return [];
-      }
-    };
-    const [lists, sessions] = await Promise.all([
-      Promise.all(buckets.map(([, path]) => one(path))),
-      one("/sessions"),
-    ]);
-
-    // `backend::resolve_pending_display`: fill an empty workspaceName / absent
-    // aiTitle from the session, preferring its title override. Values already
-    // set by the producer are left alone.
-    const byId = new Map<string, Record<string, unknown>>();
-    for (const s of sessions) {
-      if (typeof s?.id === "string") byId.set(s.id, s);
-    }
-    const out: Record<string, Array<Record<string, unknown>>> = {};
-    buckets.forEach(([key], i) => {
-      out[key] = lists[i].map((req) => {
-        const s = byId.get(String(req?.sessionId ?? ""));
-        if (!s) return req;
-        const next = { ...req };
-        if (!next.workspaceName) next.workspaceName = s.workspaceName;
-        if (next.aiTitle == null) next.aiTitle = s.titleOverride ?? s.aiTitle ?? null;
-        return next;
-      });
-    });
-    return out;
+    const v = await callProbe({ method: "GET", path: "/decisions/pending" });
+    return v && typeof v === "object" ? v : {};
   },
 
   get_guard_context: async (a) => {
