@@ -54,7 +54,7 @@ def build(lang, c):
     catalogue_toggle = '展开全部' if lang == 'zh' else 'Expand all'
     catalogue_collapse = '收起全部' if lang == 'zh' else 'Collapse all'
     capabilities = f'<section class="capabilities wrap" id="capabilities"><div class="capabilities-heading"><div><h2>{catalogue_title}</h2><p>{catalogue_copy}</p></div><button class="catalogue-toggle" data-expand="{catalogue_toggle}" data-collapse="{catalogue_collapse}" aria-expanded="false">{catalogue_toggle}</button></div><div class="capability-list">{capability_rows}</div></section>'
-    shots=[f'work-{lang}.png',f'review-{lang}.png',f'results-{lang}.png']
+    shots=[f'work-{lang}.png',f'review-{lang}.png',f'relay-{lang}.png',f'results-{lang}.png']
     def dimensions(name):
         return struct.unpack('>II', (ROOT / 'docs/screenshots/current' / name).read_bytes()[16:24])
     mobile_w, mobile_h = dimensions(f'mobile-{lang}.png')

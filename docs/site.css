@@ -697,11 +697,16 @@ html[lang="zh-CN"] .hero-copy .intro {
     gap: 2px;
     justify-content: space-between;
   }
+  /* Four steps do not fit on one phone-width row — wrap into 2x2 rather than
+     letting the last tab push the page into a horizontal scroll. */
+  .tabs {
+    flex-wrap: wrap;
+  }
   .tab {
     padding: 9px 12px;
     font-size: 12px;
     text-align: center;
-    flex: 1;
+    flex: 1 1 calc(50% - 5px);
   }
   .overview {
     padding-block: 74px 64px;
@@ -929,6 +934,9 @@ html[lang="zh-CN"] .hero-copy .intro {
 }
 .stage-2 {
   background: #ecebe5;
+}
+.stage-3 {
+  background: #e6ecea;
 }
 .stage-2 .product-window {
   min-height: 430px;

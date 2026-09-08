@@ -17,17 +17,20 @@
   "tabs": [
     "Brief the task",
     "Review the proposal",
+    "Hand it to the next one",
     "Take the result"
   ],
   "sample": "Current interface · Illustrative data",
   "panelTitles": [
     "Start with a task. Or just a conversation.",
     "The material belongs beside the decision.",
+    "Halfway through, a different agent can take over.",
     "A result you can open, keep and share."
   ],
   "panelCopy": [
     "Pick a project and an AI tool, attach the material, say what you want done. Whatever you think of later stays in the same workspace.",
     "A proposal, an image, a document — see it clearly, then decide the next step. Every question stays attached to the work it came from.",
+    "A handoff carries the plan, the step it stopped on, and what the last session left behind. Whoever picks it up starts at P3 instead of asking again.",
     "Browse deliverables by project, with documents and media previewed in place. Leave a note, star one, or export the file and take it with you."
   ],
   "sectionHeading": "Keep the whole<br>piece of work together.",
@@ -47,8 +50,8 @@
     ]
   ],
   "navHarness": "Multiple agents",
-  "harnessHeading": "One piece of work.<br>More than one agent.",
-  "harnessCopy": "Planning, implementation and review don’t have to run on the same tool. You decide who takes which step.",
+  "harnessHeading": "Three agent tools,<br>one workspace.",
+  "harnessCopy": "Planning, implementation and review can go to different tools. You decide who takes which step.",
   "relayNodes": [
     [
       "Claude Code",

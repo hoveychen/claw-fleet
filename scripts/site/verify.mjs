@@ -9,7 +9,7 @@ try {for(const lang of ['en','zh']) for(const width of [1440,390]) {
  const failed=[];p.on('response',r=>{if(r.status()>=400)failed.push(r.url());});
  await p.goto(`http://127.0.0.1:5290/${lang==='zh'?'zh/':''}?lang=${lang}`);
  await p.locator('.phone').scrollIntoViewIfNeeded();
- for(const n of [0,1,2]) {
+ for(const n of [0,1,2,3]) {
   await p.locator(`#tab-${n}`).click();
   await p.locator(`#panel-${n}`).scrollIntoViewIfNeeded();
   await p.waitForFunction(n=>{const i=document.querySelector(`#panel-${n} img`);return i.complete&&i.naturalWidth>0;},n);
