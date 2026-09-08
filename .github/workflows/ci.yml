@@ -106,6 +106,145 @@ jobs:
         run: pnpm exec vitest run
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # Tag push (or manual dispatch) only — the distributable Android APK.
+  #
+  # Deliberately NOT run on every branch push: a Gradle release build is minutes
+  # of Actions time, and the non-tag lane above is kept to the fastest gate.
+  # Use `workflow_dispatch` when you want an APK off a branch.
+  #
+  # The whole job hinges on a signing key that CANNOT live in the repo: the
+  # APK's SHA-256 is what the relay's /.well-known/assetlinks.json names, so an
+  # APK signed with any other key installs fine and can then NEVER be paired
+  # (see scripts/build-android-apk.sh). The keystore therefore comes from
+  # secrets, restored to a temp dir the script is pointed at via
+  # FLEET_SIGNING_DIR.
+  #
+  # When the secret is absent the job SKIPS its build steps and stays green
+  # rather than failing. That is on purpose: this job landed before the secrets
+  # were provisioned, and a tag-gated job that hard-fails on a missing secret
+  # would have broken the next release for a reason unrelated to the release.
+  # It starts producing APKs the moment ANDROID_KEYSTORE_B64 exists.
+  # ═══════════════════════════════════════════════════════════════════════════
+  android-apk:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+    name: Android APK
+    runs-on: ubuntu-22.04
+    steps:
+      # fetch-depth: 0 — build-android-apk.sh derives versionCode from
+      # `git rev-list --count HEAD`, which a shallow clone truncates. A too-low
+      # versionCode is not a build error; it is an "app not installed" on every
+      # phone that already has a newer build.
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Secrets are unavailable in a job-level `if`, so the gate is an output
+      # every later step tests.
+      - name: Check for signing key
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ANDROID_KEYSTORE_B64 is not set — skipping the APK build. Add the repo secrets to enable it."
+          fi
+
+      - name: Setup JDK
+        if: steps.signing.outputs.present == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Node
+        if: steps.signing.outputs.present == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        if: steps.signing.outputs.present == 'true'
+        run: corepack enable
+
+      # The runner image ships an Android SDK, but not necessarily the API level
+      # android/variables.gradle compiles against (36). Installing it explicitly
+      # keeps the build pinned to the project's own numbers instead of to
+      # whatever the image happens to carry this month.
+      - name: Setup Android SDK
+        if: steps.signing.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          # The image's cmdline-tools live under a versioned dir that may or may
+          # not have a `latest` symlink, so find sdkmanager rather than assume.
+          sdkmanager="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | sort | tail -1)"
+          [ -n "$sdkmanager" ] || { echo "no sdkmanager under $ANDROID_HOME/cmdline-tools" >&2; exit 1; }
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Install web deps
+        if: steps.signing.outputs.present == 'true'
+        working-directory: mobile-web
+        run: pnpm install --frozen-lockfile
+
+      # RUNNER_TEMP, not the workspace: anything under the checkout would show
+      # up in the script's own `git status --porcelain` dirty check and get the
+      # APK tagged '-dirty'.
+      - name: Restore keystore
+        if: steps.signing.outputs.present == 'true'
+        id: keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/fleet-signing"
+          mkdir -p "$dir"
+          chmod 700 "$dir"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$dir/fleet-release.jks"
+          printf '%s' "$KEYSTORE_PASSWORD" > "$dir/keystore-password.txt"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      # The script does its own preflight and, crucially, verifies the finished
+      # APK's certificate fingerprint against the keystore — so a build that
+      # silently went unsigned fails here rather than on someone's phone.
+      - name: Build signed release APK
+        if: steps.signing.outputs.present == 'true'
+        working-directory: mobile-web
+        env:
+          # JAVA_HOME / ANDROID_HOME come from setup-java and the runner image;
+          # the script's macOS defaults only apply when they are unset.
+          FLEET_SIGNING_DIR: ${{ steps.keystore.outputs.dir }}
+        run: ./scripts/build-android-apk.sh
+
+      - name: Shred keystore
+        if: always() && steps.keystore.outputs.dir != ''
+        run: rm -rf "${{ steps.keystore.outputs.dir }}"
+
+      # The script names the file after the version so a hand-out is
+      # identifiable, but a release asset needs a URL that does not move between
+      # releases — release_notes.md links it by name. The version is still
+      # readable from inside the app (More tab) and via `aapt2 dump badging`.
+      - name: Rename to a stable release asset name
+        if: steps.signing.outputs.present == 'true'
+        working-directory: mobile-web/dist-apk
+        run: mv ./*.apk claw-fleet-android.apk
+
+      # Named `fleet-*` on purpose: release.yml's publish job downloads that
+      # pattern with merge-multiple, so the APK joins the release with no
+      # further wiring.
+      - name: Upload APK
+        if: steps.signing.outputs.present == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fleet-android-apk
+          path: mobile-web/dist-apk/claw-fleet-android.apk
+          if-no-files-found: error
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Lint every tracked shell script. shellcheck ships pre-installed on the
   # ubuntu runner, so this is a seconds-long, Rust-free job. Discovering scripts
   # via `git ls-files '*.sh'` auto-covers new scripts without editing this list.

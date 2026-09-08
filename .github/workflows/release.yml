@@ -321,6 +321,26 @@ jobs:
           | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux ARM64 | [fleet-linux-arm64](${DL}/fleet-linux-arm64) |
 
           The two Linux binaries are the same CLI as the table above — they carry the web UI, which is why they are larger than the macOS/Windows ones.
+          EOF
+
+          # Only advertise the phone app when CI actually produced one. The
+          # android-apk job skips itself when the signing secret is absent, and
+          # a release-notes link to an asset that was never uploaded is a 404
+          # every reader hits.
+          if [ -f all-artifacts/claw-fleet-android.apk ]; then
+            cat >> release_notes.md << EOF
+
+          ### Android — companion app
+
+          Answer decision cards and watch sessions from your phone. Install the APK (you will have to allow "install unknown apps" for whatever opens the file), then pair by scanning the QR in the desktop app under Settings → Mobile.
+
+          | Asset | Download |
+          |---|---|
+          | Android APK | [claw-fleet-android.apk](${DL}/claw-fleet-android.apk) |
+          EOF
+          fi
+
+          cat >> release_notes.md << EOF
 
           ## What's Changed
 
