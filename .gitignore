@@ -65,3 +65,6 @@ TASKS.md
 # out-of-band: losing the keystore means already-installed builds can no
 # longer be upgraded in place.
 .signing/
+
+# Vite dependency pre-bundle cache (any subdirectory).
+.vite/
