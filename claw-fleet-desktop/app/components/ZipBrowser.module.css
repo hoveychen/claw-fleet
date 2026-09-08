@@ -1,0 +1,182 @@
+/* The zip browser fills the preview stage, so it lays itself out top-down
+   (crumb bar, then a scrolling body) rather than being centred like an image.
+   The stage centres its child; `.root` overrides that by taking the whole box. */
+.root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  align-self: stretch;
+  background: var(--color-bg-card);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Breadcrumbs, count, and the member actions. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-soft);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  flex-wrap: wrap;
+}
+
+.crumb_group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: none;
+  background: none;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-xs);
+  font: inherit;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.crumb:hover:not(:disabled) {
+  background: var(--color-accent-soft);
+}
+
+.crumb:disabled {
+  color: var(--color-text-dim);
+  cursor: default;
+}
+
+.crumb_current {
+  color: var(--color-text);
+  font-weight: var(--font-weight-medium);
+  padding: 2px var(--space-1);
+}
+
+.sep {
+  color: var(--color-text-dim);
+  flex: none;
+}
+
+.bar_spacer {
+  flex: 1;
+}
+
+.bar_size {
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+}
+
+.bar_action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-field);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-xs);
+  font: inherit;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.bar_action:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+}
+
+/* A member preview is rendered by the page's own dispatch, which produces a
+   `.stage`-shaped element; let it take the whole body. */
+.body > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rows {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.row_icon {
+  flex: none;
+  color: var(--color-text-dim);
+}
+
+.row_name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row_meta {
+  flex: none;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.centered {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  color: var(--color-text-dim);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.centered_title {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  max-width: 380px;
+}
+
+.centered_hint {
+  font-size: var(--font-size-xs);
+  max-width: 380px;
+}

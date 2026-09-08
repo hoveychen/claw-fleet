@@ -2580,6 +2580,20 @@
       "archive": "压缩包",
       "text": "文本",
       "other": "其它"
+    },
+    "zip": {
+      "root": "压缩包",
+      "back": "返回",
+      "count": "{{count}} 项",
+      "empty": "这个文件夹是空的。",
+      "export_member": "导出这一项",
+      "too_big": "这一项太大了，不在这里展开。",
+      "too_big_hint": "把整个压缩包导出到本地再打开它。",
+      "err_not_zip": "这个文件不是有效的 zip，或者已损坏。",
+      "err_encrypted": "这一项有密码保护，没法在这里打开。",
+      "err_method": "这一项用了不支持的压缩算法。",
+      "err_no_inflate": "当前环境不支持解压，只能导出。",
+      "err_read": "读取压缩包失败。"
     }
   },
   "markdown": {

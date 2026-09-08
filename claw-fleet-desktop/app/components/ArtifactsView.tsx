@@ -34,11 +34,14 @@ import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
 import { canRevealPath } from "../canReveal";
+import { formatBytes } from "../formatBytes";
 import { isWebBuild } from "../hostEnv";
 import { getItem, setItem } from "../storage";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
 import { downloadArtifact } from "../mock/liveProxy";
+import { isBrowsableArchive } from "../../../shared-ts/zipDir";
 import { PageShell } from "./PageShell";
+import { ZipBrowser } from "./ZipBrowser";
 import { EmptyState } from "./EmptyState";
 import { TextBlock } from "./blocks/TextBlock";
 import styles from "./ArtifactsView.module.css";
@@ -169,19 +172,7 @@ const OfficePreview = lazy(() => import("./OfficePreview"));
 /** Same libraries, same reason to defer them — see `ArtifactThumb`. */
 const ArtifactThumb = lazy(() => import("./ArtifactThumb"));
 
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  // One decimal below 10 so "1.4 MB" doesn't round to a useless "1 MB", none
-  // above it where the extra digit is noise.
-  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
-}
+export { formatBytes };
 
 /**
  * Order artifacts.
@@ -1616,6 +1607,23 @@ export function ArtifactDetail({
 }
 
 /**
+ * Anything the stage can render: an artifact, or one member of a zip.
+ *
+ * The stage used to take an `Artifact` and reach for `artifactBlobUrl` itself.
+ * It takes this instead so a zip member — which has no id, and whose bytes
+ * live behind a `blob:` URL — goes through the *same* dispatch. A `report.md`
+ * must look identical whether it arrived loose or inside an archive, and one
+ * renderer is the only way to keep that true.
+ */
+export interface StageItem {
+  url: string;
+  mime: string;
+  /** The store's coarse bucket (`artifacts::kind_for`). */
+  kind: string;
+  title: string;
+}
+
+/**
  * Share links for one artifact.
  *
  * A link is served by the local `fleet serve` / `fleet webui` port, so it
@@ -1905,23 +1913,16 @@ function ArtifactVersions({
  * than re-downloading. The webview has no Office viewer of its own — an
  * `<iframe>` at a .docx renders a blank frame — so the OOXML three get one in
  * JavaScript, lazily (see `OfficePreview`). Everything left over (legacy .doc /
- * .xls / .ppt, ODF, archives) still gets the typed placeholder with 导出 / 打开
- * one click away in the bar above.
+ * .xls / .ppt, ODF, non-zip archives) still gets the typed placeholder with
+ * 导出 / 打开 one click away in the bar above.
  */
-function ArtifactStage({
-  artifact,
-  version,
-}: {
-  artifact: Artifact;
-  /** Preview this version instead of the current one. */
-  version?: string;
-}) {
+function PreviewStage({ item }: { item: StageItem }) {
   const { t } = useTranslation();
   const [text, setText] = useState<string | null>(null);
-  const url = artifactBlobUrl(artifact.id, artifact.name, version);
+  const url = item.url;
   // html goes to the frame by URL, so only the two rendered-from-source modes
   // pull the bytes into React.
-  const textMode = artifact.kind === "text" ? textPreviewMode(artifact.mime) : null;
+  const textMode = item.kind === "text" ? textPreviewMode(item.mime) : null;
   const needsBody = textMode === "markdown" || textMode === "plain";
 
   useEffect(() => {
@@ -1941,33 +1942,33 @@ function ArtifactStage({
     return () => {
       alive = false;
     };
-  }, [artifact.id, needsBody, url]);
+  }, [needsBody, url]);
 
-  if (artifact.kind === "image") {
+  if (item.kind === "image") {
     return (
       <div className={styles.stage}>
-        <img src={url} alt={artifact.title} />
+        <img src={url} alt={item.title} />
       </div>
     );
   }
-  if (artifact.kind === "video") {
+  if (item.kind === "video") {
     return (
       <div className={styles.stage}>
         <video src={url} controls preload="metadata" />
       </div>
     );
   }
-  if (artifact.kind === "audio") {
+  if (item.kind === "audio") {
     return (
       <div className={styles.stage}>
         <audio src={url} controls />
       </div>
     );
   }
-  if (artifact.kind === "pdf") {
+  if (item.kind === "pdf") {
     return (
       <div className={styles.stage}>
-        <iframe className={styles.doc_frame} src={url} title={artifact.title} />
+        <iframe className={styles.doc_frame} src={url} title={item.title} />
       </div>
     );
   }
@@ -1981,7 +1982,7 @@ function ArtifactStage({
           className={styles.doc_frame}
           sandbox="allow-scripts"
           src={url}
-          title={artifact.title}
+          title={item.title}
         />
       </div>
     );
@@ -2002,17 +2003,17 @@ function ArtifactStage({
       </div>
     );
   }
-  const office = officeMode(artifact.mime);
+  const office = officeMode(item.mime);
   if (office) {
     return (
       <div className={`${styles.stage} ${styles.stage_office}`}>
         <Suspense fallback={<div className={styles.no_preview_hint}>{t("artifacts.loading", "加载中…")}</div>}>
-          <OfficePreview mode={office} url={url} title={artifact.title} />
+          <OfficePreview mode={office} url={url} title={item.title} />
         </Suspense>
       </div>
     );
   }
-  const Icon = KIND_ICON[artifact.kind] ?? FileText;
+  const Icon = KIND_ICON[item.kind] ?? FileText;
   return (
     <div className={styles.stage}>
       <div className={styles.no_preview}>
@@ -2021,11 +2022,86 @@ function ArtifactStage({
           {t("artifacts.no_preview_title", "这个格式没法在这里预览")}
         </div>
         <div className={styles.no_preview_hint}>
-          {/* docx/xlsx/pptx now render above; what lands here is the legacy
-              binary Office formats, ODF, archives and unknown blobs. */}
+          {/* docx/xlsx/pptx render above and a .zip is browsable; what lands
+              here is the legacy binary Office formats, ODF, tar/gz/7z and
+              unknown blobs. */}
           {t("artifacts.no_preview_hint", "这个格式只能导出，或者用系统应用打开。")}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Byte length of the version being previewed.
+ *
+ * The zip browser is told the archive's size up front so it can read the
+ * central directory at the tail without a probe request — and when an older
+ * version is pinned in the stage, `artifact.sizeBytes` describes the *current*
+ * one. Reading a stale length would put the tail scan in the wrong place.
+ */
+function versionSize(artifact: Artifact, version?: string): number {
+  if (!version) return artifact.sizeBytes;
+  return artifact.versions.find((v) => v.id === version)?.sizeBytes ?? artifact.sizeBytes;
+}
+
+/**
+ * Save one zip member to disk.
+ *
+ * A member's bytes live only in the webview — the store knows nothing about
+ * what is inside an artifact — so this cannot go through `export_artifact`,
+ * which streams by id. In a tab there is no save dialog to ask (`save()`
+ * answers null there and the button would silently do nothing, the same trap
+ * `doExport` documents), so the browser gets a download instead.
+ */
+async function exportMemberBytes(name: string, bytes: Uint8Array) {
+  if (isWebBuild()) {
+    const href = URL.createObjectURL(new Blob([bytes as BlobPart]));
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(href);
+    return;
+  }
+  const dest = await save({ defaultPath: name });
+  if (!dest) return;
+  await invoke("export_bytes", { dest, bytes: Array.from(bytes) });
+}
+
+/**
+ * What the detail pane shows for one artifact.
+ *
+ * A .zip gets a folder browser instead of a preview — it is the one archive
+ * format with a directory at the tail, so listing it costs a couple of KB
+ * rather than a download (see `shared-ts/zipDir.ts`). Its members render
+ * through the very same `PreviewStage`, handed down as `renderPreview`, so a
+ * member never grows a second, drifting renderer.
+ */
+function ArtifactStage({
+  artifact,
+  version,
+}: {
+  artifact: Artifact;
+  /** Preview this version instead of the current one. */
+  version?: string;
+}) {
+  const url = artifactBlobUrl(artifact.id, artifact.name, version);
+  if (artifact.kind === "archive" && isBrowsableArchive(artifact.mime)) {
+    return (
+      <div className={`${styles.stage} ${styles.stage_office}`}>
+        <ZipBrowser
+          url={url}
+          size={versionSize(artifact, version)}
+          renderPreview={(member) => <PreviewStage item={member} />}
+          onExportMember={exportMemberBytes}
+        />
+      </div>
+    );
+  }
+  return (
+    <PreviewStage
+      item={{ url, mime: artifact.mime, kind: artifact.kind, title: artifact.title }}
+    />
   );
 }

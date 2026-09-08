@@ -6,7 +6,7 @@
 // 还要多占三分之一——一段成片没有诚实的办法推过来。所以超过 MAX_RELAY_BYTES
 // 的产出这里只列卡片、显示元信息，并明说去桌面端导出，而不是假装能取。
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
   FileSpreadsheet,
@@ -19,31 +19,23 @@ import {
   Presentation,
   TriangleAlert,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import { useHistoryLayer } from "../useNavStack";
-import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
-import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import type { FleetTransport } from "../transport";
 import type { Artifact } from "../types";
 import {
   fetchArtifact,
   formatBytes,
   isFetchable,
-  isOfficePreview,
   isTextPreview,
   listArtifacts,
   previewKind,
 } from "../artifacts";
 import styles from "./ArtifactsView.module.css";
-import mdStyles from "./markdownBody.module.css";
 import { AppHeader } from "./AppHeader";
-
-// 三个 Office 渲染器合计约 1.6 MB（pptx-preview 自带 echarts 占 1.25 MB）。
-// 手机网络下这必须推迟到真的要看某份文档时——模块内部还会对每个库再动态
-// import 一次，所以看 .docx 不会碰 pptx 那份。
-const OfficePreview = lazy(() => import("./OfficePreview"));
+import { PreviewBody, type PreviewSource } from "./ArtifactPreviewBody";
+import { ZipBrowser } from "./ZipBrowser";
 
 interface Props {
   client: FleetTransport | null;
@@ -158,6 +150,8 @@ function ArtifactDetail({
   // <iframe> 的 URL —— 所以这一路和 blobUrl 分开存。
   const [blob, setBlob] = useState<Blob | null>(null);
   const [text, setText] = useState<string | null>(null);
+  // 一份 .zip 是整包取过来之后在本地解析的（见 ZipBrowser 顶部的注释）。
+  const [zipBytes, setZipBytes] = useState<Uint8Array | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const kind = previewKind(artifact);
@@ -177,7 +171,11 @@ function ArtifactDetail({
           setText(new TextDecoder().decode(bytes));
           return;
         }
-        if (isOfficePreview(kind)) {
+        if (kind === "zip") {
+          setZipBytes(bytes);
+          return;
+        }
+        if (kind === "docx" || kind === "xlsx" || kind === "pptx") {
           setBlob(new Blob([bytes as BlobPart], { type: mime }));
           return;
         }
@@ -197,36 +195,56 @@ function ArtifactDetail({
 
   // Prefer the native share sheet (the OS can save / AirDrop / send it), fall
   // back to <a download>. Same shape as the wiki doc export.
+  /** 把一份文件交给系统分享面板，退化到 <a download>。整份产出与 zip 里的
+   *  单个成员走同一条路——两者都只是「一个文件名 + 一串字节」。 */
+  const shareFile = useCallback(
+    async (file: File, title: string) => {
+      try {
+        const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+        if (typeof navigator.share === "function" && nav.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file], title });
+        } else {
+          const url = URL.createObjectURL(file);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = file.name;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        }
+      } catch (e) {
+        // AbortError = the user dismissed the share sheet; not a failure.
+        if (!(e instanceof DOMException && e.name === "AbortError")) {
+          setErr(e instanceof Error ? e.message : String(e));
+        }
+      }
+    },
+    [],
+  );
+
+  const shareBytes = useCallback(
+    (name: string, bytes: Uint8Array) => {
+      void shareFile(new File([bytes as BlobPart], name), name);
+    },
+    [shareFile],
+  );
+
   const share = useCallback(async () => {
     if (!client || busy) return;
     setBusy(true);
     try {
       const { filename, mime, bytes } = await fetchArtifact(client, artifact.id);
-      const file = new File([bytes as BlobPart], filename, { type: mime });
-      const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
-      if (typeof navigator.share === "function" && nav.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: artifact.title });
-      } else {
-        const url = URL.createObjectURL(file);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      }
+      await shareFile(new File([bytes as BlobPart], filename, { type: mime }), artifact.title);
     } catch (e) {
-      // AbortError = the user dismissed the share sheet; not a failure.
-      if (!(e instanceof DOMException && e.name === "AbortError")) {
-        setErr(e instanceof Error ? e.message : String(e));
-      }
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [client, artifact.id, artifact.title, busy]);
+  }, [client, artifact.id, artifact.title, busy, shareFile]);
 
   const Icon = KIND_ICON[artifact.kind] ?? FileText;
+  const source: PreviewSource = { kind, title: artifact.title, blobUrl, blob, text };
 
   return (
     <div className={styles.detail}>
@@ -239,42 +257,18 @@ function ArtifactDetail({
             <div className={styles.noPreviewTitle}>{t("加载失败")}</div>
             <div className={styles.noPreviewHint}>{err}</div>
           </div>
-        ) : kind === "image" && blobUrl ? (
-          <img src={blobUrl} alt={artifact.title} />
-        ) : kind === "pdf" && blobUrl ? (
-          <iframe className={styles.docFrame} src={blobUrl} title={artifact.title} />
-        ) : kind === "markdown" && text !== null ? (
-          <div className={`${styles.markdownWrap} ${mdStyles.markdown}`}>
-            <ReactMarkdown
-              remarkPlugins={mdRemarkPlugins}
-              rehypePlugins={mdRehypePlugins}
-              // Shared so a ```mermaid fence renders as a diagram here too —
-              // see mermaidComponents for why every surface spreads this one.
-              components={mermaidMarkdownComponents}
-            >
-              {text}
-            </ReactMarkdown>
-          </div>
-        ) : kind === "html" && text !== null ? (
-          // Same policy as the wiki reader: an opaque-origin sandbox, so an
-          // agent-produced page can run its own JS without reaching the PWA's
-          // origin (where the pairing secret lives).
-          <iframe
-            className={styles.docFrame}
-            title={artifact.title}
-            sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-            srcDoc={text}
-          />
-        ) : kind === "text" && text !== null ? (
-          <pre className={styles.textPre}>{text}</pre>
-        ) : isOfficePreview(kind) && blob !== null ? (
-          <Suspense fallback={<div className={styles.noPreviewHint}>{t("加载中…")}</div>}>
-            <OfficePreview kind={kind} blob={blob} />
-          </Suspense>
+        ) : kind === "zip" && zipBytes ? (
+          <ZipBrowser bytes={zipBytes} onShareMember={shareBytes} />
         ) : kind !== "none" ? (
-          <div className={styles.noPreview}>
-            <div className={styles.noPreviewHint}>{t("加载中…")}</div>
-          </div>
+          // 每一类怎么画,与 zip 里点开的成员共用同一个分派(ArtifactPreviewBody)。
+          <PreviewBody
+            src={source}
+            fallback={
+              <div className={styles.noPreview}>
+                <div className={styles.noPreviewHint}>{t("加载中…")}</div>
+              </div>
+            }
+          />
         ) : (
           <div className={styles.noPreview}>
             <Icon size={34} strokeWidth={1.1} />

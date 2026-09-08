@@ -2583,6 +2583,21 @@
       "archive": "Archive",
       "text": "Text",
       "other": "Other"
+    },
+    "zip": {
+      "root": "Archive",
+      "back": "Back",
+      "empty": "This folder is empty.",
+      "export_member": "Export this item",
+      "too_big": "This item is too large to open here.",
+      "too_big_hint": "Export the whole archive and open it locally.",
+      "err_not_zip": "This file is not a valid zip, or it is damaged.",
+      "err_encrypted": "This item is password-protected and cannot be opened here.",
+      "err_method": "This item uses a compression method we cannot read.",
+      "err_no_inflate": "This environment cannot decompress; export it instead.",
+      "err_read": "Could not read the archive.",
+      "count": "{{count}} items",
+      "count_one": "1 item"
     }
   },
   "markdown": {

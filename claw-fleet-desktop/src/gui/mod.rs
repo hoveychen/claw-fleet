@@ -1689,6 +1689,7 @@ pub fn run() {
             delete_artifact_folder,
             rename_artifact_folder,
             export_artifact,
+            export_bytes,
             reveal_artifact,
             open_artifact_external,
             list_wiki_docs,

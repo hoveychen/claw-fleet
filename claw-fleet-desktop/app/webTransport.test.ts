@@ -212,6 +212,10 @@ const KNOWN_WEB_GAPS = [
   // Same shape: writes to a path the user picks on the caller's filesystem.
   // The browser build downloads the blob instead (`downloadArtifact`).
   "export_artifact",
+  // Saves one member of a zip artifact, whose bytes the webview already holds.
+  // Same gap and same escape hatch: `exportMemberBytes` hands the tab an
+  // <a download> instead of asking for a path it cannot write to.
+  "export_bytes",
   // Act on the host shell — open the blob with its default application, show
   // it in the file manager. Never reached in a tab: both buttons sit behind
   // `canRevealPath()`, which is false in the browser build, so it offers the

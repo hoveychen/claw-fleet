@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_RELAY_BYTES, formatBytes, isFetchable, previewKind } from "./artifacts";
+import {
+  MAX_RELAY_BYTES,
+  formatBytes,
+  isFetchable,
+  previewKind,
+  previewKindFor,
+} from "./artifacts";
 import type { Artifact } from "./types";
 
 function make(over: Partial<Artifact>): Artifact {
@@ -129,6 +135,39 @@ describe("previewKind", () => {
     expect(
       previewKind(make({ kind: "text", mime: "text/html", sizeBytes: MAX_RELAY_BYTES + 1 })),
     ).toBe("none");
+  });
+
+  it("browses a .zip but not the archives with no directory", () => {
+    // A zip carries a central directory, so it can be walked as a folder
+    // (shared-ts/zipDir.ts). tar/gz/7z share the store's `archive` kind and
+    // cannot be, so they stay on the placeholder.
+    expect(previewKind(make({ kind: "archive", mime: "application/zip", sizeBytes: 1000 }))).toBe(
+      "zip",
+    );
+    expect(previewKind(make({ kind: "archive", mime: "application/gzip", sizeBytes: 1000 }))).toBe(
+      "none",
+    );
+    expect(previewKind(make({ kind: "archive", mime: "application/x-tar", sizeBytes: 1000 }))).toBe(
+      "none",
+    );
+  });
+
+  it("keeps the relay ceiling ahead of the zip browser", () => {
+    // The phone has no ranged read: an archive it cannot fetch whole is one it
+    // cannot browse either, and must keep saying so.
+    expect(
+      previewKind(
+        make({ kind: "archive", mime: "application/zip", sizeBytes: MAX_RELAY_BYTES + 1 }),
+      ),
+    ).toBe("none");
+  });
+
+  it("types a zip member the same way it types an artifact", () => {
+    // `previewKindFor` is what the zip browser calls for each member; a
+    // report.md must land on the same renderer either way.
+    expect(previewKindFor("text", "text/markdown; charset=utf-8")).toBe("markdown");
+    expect(previewKindFor("image", "image/png")).toBe("image");
+    expect(previewKindFor("other", "application/octet-stream")).toBe("none");
   });
 
   /** Video and audio are listed but never played here — see the module docs. */
