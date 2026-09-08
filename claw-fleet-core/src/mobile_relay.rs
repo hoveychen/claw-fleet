@@ -2102,6 +2102,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "wiki_search" => serve_wiki_search(params),
         "wiki_export" => serve_wiki_export(params),
         "artifact_list" => serve_artifact_list(params),
+        "artifact_folders" => serve_artifact_folders(params),
         "artifact_blob" => serve_artifact_blob(params),
         "chat_workspace" => serve_chat_workspace(params),
         "sources_config" => serve_sources_config(params),
@@ -2667,6 +2668,16 @@ pub const MAX_ARTIFACT_FRAME_BYTES: u64 = 16 * 1024 * 1024;
 // the client decide *before* asking whether a blob is fetchable at all).
 fn serve_artifact_list(_params: &Value) -> Result<Value, String> {
     serde_json::to_value(crate::artifacts::list()).map_err(|e| e.to_string())
+}
+
+/// The user's folders, so the phone can group by the same tree the desktop
+/// shows — including a folder that is still empty, which no artifact reveals.
+///
+/// Read-only on purpose: filing and folder管理 are desk work (the phone's
+/// 产出 tab has never had an edit affordance at all), and a write arm nothing
+/// calls is a surface to keep in sync for nothing.
+fn serve_artifact_folders(_params: &Value) -> Result<Value, String> {
+    serde_json::to_value(crate::artifacts::list_folders()).map_err(|e| e.to_string())
 }
 
 /// One artifact's bytes, base64-framed — but only for artifacts small enough

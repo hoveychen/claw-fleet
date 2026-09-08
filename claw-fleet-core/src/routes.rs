@@ -32,6 +32,12 @@ pub const ARTIFACT_BLOB: &str = "/artifact_blob";
 pub const ARTIFACT_DELETE: &str = "/artifact_delete";
 pub const ARTIFACT_UPDATE: &str = "/artifact_update";
 pub const ARTIFACT_USAGE: &str = "/artifact_usage";
+/// The user's own folders. Separate records from the artifacts because an
+/// empty folder has no artifact to hang off — see `artifacts::Folder`.
+pub const ARTIFACT_FOLDERS: &str = "/artifact_folders";
+pub const ARTIFACT_FOLDER_CREATE: &str = "/artifact_folder_create";
+pub const ARTIFACT_FOLDER_DELETE: &str = "/artifact_folder_delete";
+pub const ARTIFACT_FOLDER_RENAME: &str = "/artifact_folder_rename";
 pub const AUDIT: &str = "/audit";
 /// The three host-settings pairs the Settings panel reads and writes: GET
 /// returns the current config, POST saves it and answers with the stored value.

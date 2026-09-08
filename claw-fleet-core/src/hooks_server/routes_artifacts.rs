@@ -169,6 +169,114 @@ pub(crate) fn route_artifact_delete(
     }
 }
 
+// ── Folders ──────────────────────────────────────────────────────────────────
+
+/// `GET /artifact_folders` — every folder the user made, empty ones included.
+pub(crate) fn route_artifact_folders(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let body = serde_json::to_string(&crate::artifacts::list_folders()).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
+/// `POST /artifact_folder_create` — register a folder (and its ancestors).
+pub(crate) fn route_artifact_folder_create(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        workspace_path: String,
+        path: String,
+    }
+    let created = read_body(&mut request)
+        .and_then(|b| {
+            serde_json::from_slice::<Req>(&b)
+                .map_err(|e| format!("bad /artifact_folder_create body: {e}"))
+        })
+        .and_then(|r| {
+            crate::artifacts::create_folder(std::path::Path::new(&r.workspace_path), &r.path)
+        });
+    respond_json_result(request, json_header, created);
+}
+
+/// `POST /artifact_folder_delete` — forget an *empty* folder. Core refuses one
+/// that still holds anything, so this can never orphan a deliverable.
+pub(crate) fn route_artifact_folder_delete(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        workspace_path: String,
+        path: String,
+    }
+    let deleted = read_body(&mut request)
+        .and_then(|b| {
+            serde_json::from_slice::<Req>(&b)
+                .map_err(|e| format!("bad /artifact_folder_delete body: {e}"))
+        })
+        .and_then(|r| {
+            crate::artifacts::delete_folder(std::path::Path::new(&r.workspace_path), &r.path)
+        });
+    // Same `{}`-or-400 shape as `/artifact_delete`, whose client code path this
+    // shares.
+    match deleted {
+        Ok(()) => {
+            let _ =
+                request.respond(tiny_http::Response::from_string("{}").with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
+/// `POST /artifact_folder_rename` — rename or re-nest a folder, carrying its
+/// subfolders and everything filed under it. Answers the re-filed count.
+pub(crate) fn route_artifact_folder_rename(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        workspace_path: String,
+        from: String,
+        to: String,
+    }
+    let moved = read_body(&mut request)
+        .and_then(|b| {
+            serde_json::from_slice::<Req>(&b)
+                .map_err(|e| format!("bad /artifact_folder_rename body: {e}"))
+        })
+        .and_then(|r| {
+            crate::artifacts::rename_folder(
+                std::path::Path::new(&r.workspace_path),
+                &r.from,
+                &r.to,
+            )
+        });
+    respond_json_result(request, json_header, moved);
+}
+
 /// `GET /artifact_blob?id=…` — the bytes, whole or ranged.
 ///
 /// With no `Range` header this is a plain `200` carrying the whole blob, plus

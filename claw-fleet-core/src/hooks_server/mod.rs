@@ -1178,6 +1178,14 @@ fn handle_request(
 
             crate::routes::ARTIFACT_DELETE if request.method() == &tiny_http::Method::Post => route_artifact_delete(ctx, request, &query, json_header, path),
 
+            crate::routes::ARTIFACT_FOLDERS => route_artifact_folders(ctx, request, &query, json_header, path),
+
+            crate::routes::ARTIFACT_FOLDER_CREATE if request.method() == &tiny_http::Method::Post => route_artifact_folder_create(ctx, request, &query, json_header, path),
+
+            crate::routes::ARTIFACT_FOLDER_DELETE if request.method() == &tiny_http::Method::Post => route_artifact_folder_delete(ctx, request, &query, json_header, path),
+
+            crate::routes::ARTIFACT_FOLDER_RENAME if request.method() == &tiny_http::Method::Post => route_artifact_folder_rename(ctx, request, &query, json_header, path),
+
             crate::routes::WIKI_DOCS => route_wiki_docs(ctx, request, &query, json_header, path),
 
             crate::routes::WIKI_DOC => route_wiki_doc(ctx, request, &query, json_header, path),
