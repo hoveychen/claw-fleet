@@ -44,6 +44,7 @@ import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { effortChipLabel, effortTitle, formatModel } from "./SessionCard";
 import { inlineCodexFleetAsk, withCodexDecisionHistory } from "./codexDecision";
+import { useChromeYield } from "../hooks/useChromeYield";
 import { useDocCardWidth } from "../hooks/useDocCardWidth";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -156,8 +157,15 @@ export function SessionDetail({
   sessionInfo = null,
   searchQuery: standaloneSearchQuery = null,
   paused = false,
+  chromeAdaptive = true,
 }: {
   inline?: boolean;
+  /** May this pane fold the window's chrome away when a doc reader leaves the
+   *  transcript too narrow (see useChromeYield)? True for the two hosts that
+   *  ARE the page — the standalone pane and 任务's detail column. False for the
+   *  DecisionPanel, an overlay that has no business rearranging the page it is
+   *  floating over. */
+  chromeAdaptive?: boolean;
   /** When set, the component runs in standalone mode: its own local
    *  session/messages state, independent from the global useDetailStore.
    *  Used by DecisionPanel's inline detail column and HistoryView so they
@@ -1164,7 +1172,17 @@ export function SessionDetail({
      holds a band of exactly this width clear (`--rail-band` below), which is
      what stops the card from covering the prose it was opened from. */
   const docExpanded = railOpen && aux.expanded != null;
-  const { width: docCardW, onGripDown } = useDocCardWidth(messagesPaneRef, docExpanded);
+  const uiViewMode = useUIStore((s) => s.viewMode);
+  const { width: docCardW, paneW, onGripDown } = useDocCardWidth(messagesPaneRef, docExpanded);
+  /* When the pane cannot hold both the reader and a readable transcript, the
+     window's own chrome yields instead — nav sidebar first, session list after
+     — and comes back when the reader closes. See useChromeYield. */
+  useChromeYield({
+    active: docExpanded,
+    view: uiViewMode,
+    proseW: paneW > 0 ? paneW - docCardW - 26 : 0,
+    enabled: chromeAdaptive,
+  });
   const toggleRail = useCallback(() => {
     setRailOverride((prev) => !(prev ?? railCards > 0));
   }, [railCards]);
@@ -1177,6 +1195,14 @@ export function SessionDetail({
       <WebLinkProvider value={openWebInAux}>
       <div
         className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railOpen ? styles.rail_open : ""}`}
+        /* Standalone only: the pane grows by what the reader needs, so the room
+           the auto-collapsed chrome gave up lands here rather than in the list
+           beside it. Inline hosts own their own width. */
+        style={
+          !inline && docCardW > 0
+            ? ({ "--reader-grow": `${docCardW + 26}px` } as React.CSSProperties)
+            : undefined
+        }
       >
         {liveSession && (
           <>

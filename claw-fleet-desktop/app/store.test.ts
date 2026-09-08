@@ -641,3 +641,66 @@ describe("日报自动弹出", () => {
     expect(useReportStore.getState().reportPopupDate).toBeNull();
   });
 });
+
+/**
+ * Auto-collapse: what the layout folds away on its own to make room for a wide
+ * doc reader in a narrow pane, and puts back afterwards.
+ *
+ * The contract worth pinning down is the asymmetry — it restores exactly what
+ * it took. A panel the user had already collapsed by hand must not spring open
+ * when the reader closes, and nothing here may reach the settings store: an
+ * auto-collapse is the layout coping, not a preference.
+ */
+describe("auto-collapse for a wide reader", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("collapses, then restores exactly what it collapsed", async () => {
+    const { useUIStore } = await import("./store");
+    const s = () => useUIStore.getState();
+
+    s().autoCollapse("sidebar");
+    s().autoCollapse("list");
+    expect(s().sidebarCollapsed).toBe(true);
+    expect(s().secondarySidebarCollapsed.list).toBe(true);
+
+    s().autoRestore();
+    expect(s().sidebarCollapsed).toBe(false);
+    expect(s().secondarySidebarCollapsed.list).toBe(false);
+  });
+
+  it("leaves a panel the user collapsed by hand alone", async () => {
+    const { useUIStore } = await import("./store");
+    const s = () => useUIStore.getState();
+
+    s().setSidebarCollapsed(true);
+    s().autoCollapse("sidebar");
+    s().autoRestore();
+
+    expect(s().sidebarCollapsed).toBe(true);
+  });
+
+  it("stops owning a panel the user toggles mid-read", async () => {
+    const { useUIStore } = await import("./store");
+    const s = () => useUIStore.getState();
+
+    s().autoCollapse("sidebar");
+    s().setSidebarCollapsed(false);
+    s().autoCollapse("list");
+    s().setSecondarySidebar("list", false);
+    s().autoRestore();
+
+    expect(s().sidebarCollapsed).toBe(false);
+    expect(s().secondarySidebarCollapsed.list).toBe(false);
+    expect(s().autoCollapsed).toEqual({ sidebar: false, secondary: null });
+  });
+
+  it("never writes an auto-collapse to the settings store", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+
+    useUIStore.getState().autoCollapse("sidebar");
+    expect(getItem("sidebar-collapsed")).not.toBe("true");
+  });
+});

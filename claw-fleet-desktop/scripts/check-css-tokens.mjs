@@ -48,7 +48,9 @@ function collectCss(dir, out = []) {
 // Custom properties injected at runtime via inline style (element.style), so
 // they are intentionally never defined in CSS. Not a bug — exempt from the check.
 //   --drift: Onboarding.tsx sets it per confetti particle for the fall animation.
-const RUNTIME_INJECTED = new Set(["--drift"]);
+//   --reader-grow: SessionDetail widens the pane by an expanded doc card's
+//     measured width, so the space the auto-collapsed chrome frees lands there.
+const RUNTIME_INJECTED = new Set(["--drift", "--reader-grow"]);
 
 // Retired token names — tombstones. App.css no longer defines them, so the
 // undefined-var check below would already catch a reference; this map is kept so

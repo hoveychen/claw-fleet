@@ -93,5 +93,5 @@ export function useDocCardWidth(paneRef: RefObject<HTMLElement | null>, enabled:
     ? Math.round(Math.min(avail, Math.max(Math.min(CARD_MIN_PX, avail), ratio * paneW)))
     : 0;
 
-  return { width, onGripDown };
+  return { width, paneW, onGripDown };
 }

@@ -13,9 +13,16 @@
 }
 
 .root.open {
-  width: 50vw;
+  /* Half the window, plus whatever an expanded doc reader needs on top of it
+     (`--reader-grow`, set inline by SessionDetail; 0 the rest of the time).
+     Standing at a fixed 50vw meant the space the auto-collapsed nav gave up
+     went to the session list beside this pane instead of to the reader that
+     asked for it — the chrome folded away and the transcript was no wider.
+     The cap keeps a usable list column on the other side. */
+  width: min(calc(50vw + var(--reader-grow, 0px)), calc(100vw - 340px));
   min-width: 360px;
   border-left: 1px solid var(--color-border);
+  transition: width 0.25s ease, min-width 0.25s ease;
 }
 
 /* Inline variant: used when SessionDetail is embedded inside another panel
