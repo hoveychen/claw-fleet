@@ -1297,9 +1297,8 @@ export function SessionDetailView({
     <AgentNavProvider nav={nav}>
     <div className={styles.page}>
       <header className={styles.header}>
-        <button className={styles.backButton} onClick={onBack}>
-          <ChevronLeft size={18} />
-          {t("返回")}
+        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
+          <ChevronLeft size={20} />
         </button>
         <div className={styles.headerText}>
           <div className={styles.headerTitle}>

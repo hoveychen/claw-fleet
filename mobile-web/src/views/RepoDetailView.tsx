@@ -65,8 +65,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
     <div className={styles.page}>
       <div className={styles.header}>
         <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={22} />
-          {t("仓库")}
+          <ChevronLeft size={20} />
         </button>
         <div className={styles.headerText}>
           <div className={styles.headerTitle}>{repo.label}</div>

@@ -179,9 +179,8 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
     return (
       <div className={styles.page}>
         <div className={styles.header}>
-          <button className={styles.backButton} onClick={onBack}>
+          <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
             <ChevronLeft size={20} />
-            {t("返回")}
           </button>
           <div className={styles.headerTitle}>{t("终端")}</div>
         </div>
