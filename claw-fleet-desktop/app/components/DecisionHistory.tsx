@@ -257,7 +257,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
               // point of copying images into a durable store.
               <AutoHeightFrame
                 title={`fleet-ask-history-${rec.id}-${qi}`}
-                src={decisionAssetUrl(rec.id, `q${qi}`)}
+                src={decisionAssetUrl(rec.id, `q${qi}`, "index.html", theme)}
                 minHeight={160}
                 style={{
                   width: "100%",

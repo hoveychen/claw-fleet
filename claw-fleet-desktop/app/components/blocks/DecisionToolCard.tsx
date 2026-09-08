@@ -25,6 +25,7 @@ import type {
   ToolUseBlock as ToolUseBlockType,
 } from "../../types";
 import { decisionAssetUrl } from "../../decisionAssets";
+import { useDocumentTheme } from "../../hooks/useDocumentTheme";
 import { AutoHeightFrame } from "../AutoHeightFrame";
 import { AttachmentRow } from "./AttachmentRow";
 import styles from "./DecisionToolCard.module.css";
@@ -170,6 +171,9 @@ interface Props {
 export function DecisionToolCard({ block, result, meta, records, isPartial }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // Cross-origin preview iframe: the theme travels as a value on the URL, not
+  // as a CSS variable (same as DecisionPanel / DecisionHistory).
+  const theme = useDocumentTheme();
 
   const questions = useMemo(() => readInputQuestions(block.input), [block.input]);
   const record = useMemo(() => matchRecord(questions, records ?? []), [questions, records]);
@@ -264,7 +268,8 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
                   <AutoHeightFrame
                     title={`decision-${record.id}-${qi}`}
                     className={styles.preview_frame}
-                    src={decisionAssetUrl(record.id, `q${qi}`)}
+                    src={decisionAssetUrl(record.id, `q${qi}`, "index.html", theme)}
+                    style={{ colorScheme: theme }}
                     minHeight={160}
                   />
                 ) : (

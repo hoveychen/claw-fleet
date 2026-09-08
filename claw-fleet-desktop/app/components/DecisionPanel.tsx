@@ -1619,7 +1619,7 @@ export function FleetAskCard({
           // resolves to the copied files — no base64 in the tool call.
           <AutoHeightFrame
             title={`fleet-ask-html-${decision.id}-${step}`}
-            src={decisionAssetUrl(decision.id, `q${step}`)}
+            src={decisionAssetUrl(decision.id, `q${step}`, "index.html", theme)}
             minHeight={200}
             style={fleetAskFrameStyle(theme)}
           />

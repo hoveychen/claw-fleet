@@ -175,10 +175,15 @@
   min-height: 160px;
   border: 1px solid var(--color-border);
   border-radius: 5px;
-  /* Hosts arbitrary fleet__ask HTML previews that assume a light background, so
-     it must stay a fixed light canvas (not var(--color-bg-card), which goes dark
-     in dark mode); warm off-white to sit better under the paper light theme. */
-  background: var(--canvas-fixed-light);
+  /* Deliberately NOT opaque — same rule as the live card's frame
+     (DecisionPanel's fleetAskFrameStyle). This used to be pinned to
+     var(--canvas-fixed-light) on the theory that agent previews assume a light
+     background; the previews that assume anything assume the *card* they were
+     authored against, which is dark in the dark theme, so the fixed light
+     canvas turned every light-on-transparent preview into an unreadable
+     light-on-white one. Transparent lets the card's themed surface through;
+     the theme itself travels into the document on the URL. */
+  background: transparent;
   margin-bottom: 8px;
 }
 

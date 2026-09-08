@@ -53,4 +53,30 @@ describe("decisionAssetUrl in the browser build", () => {
       `${window.location.origin}/decision_asset/card-7/q2/sub/chart.png`,
     );
   });
+
+  /**
+   * The served document cannot be restyled from the cross-origin parent, so the
+   * theme has to reach it as data: core's prelude
+   * (`mcp_ipc::THEME_PRELUDE`) reads `?theme=` and pins the used colour scheme.
+   * Without it an image-only card follows the OS scheme — a white rectangle
+   * inside the dark card. The parameter is a query, never a path segment: both
+   * servers split it off before resolving the relpath, and the relative
+   * `<img src="chart.png">` refs still resolve against the same directory.
+   */
+  it("carries the theme as a query parameter on both hosts", async () => {
+    const desktop = await loadFor("desktop");
+    expect(desktop.decisionAssetUrl("card-7", "q0", "index.html", "dark")).toBe(
+      "fleet-decision://localhost/card-7/q0/index.html?theme=dark",
+    );
+
+    const web = await loadFor("web");
+    expect(web.decisionAssetUrl("card-7", "q0", "index.html", "light")).toBe(
+      `${window.location.origin}/decision_asset/card-7/q0/index.html?theme=light`,
+    );
+    // Omitted stays byte-identical to the pre-theme URL, so nothing that only
+    // needs the bytes (images) grows a parameter.
+    expect(web.decisionAssetUrl("card-7", "q0")).toBe(
+      `${window.location.origin}/decision_asset/card-7/q0/index.html`,
+    );
+  });
 });
