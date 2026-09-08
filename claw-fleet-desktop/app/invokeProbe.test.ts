@@ -92,4 +92,17 @@ describe("invoke probe", () => {
     installInvokeProbe();
     expect(h.internals.invoke).toBe(wrapped);
   });
+
+  it("does not crash startup when Tauri exposes invoke as readonly", async () => {
+    const raw = vi.fn(() => Promise.resolve("ok"));
+    const internals: Record<string, unknown> = {};
+    // Tauri 2.11 installs this property with Object.defineProperty({ value }),
+    // whose omitted writable/configurable flags both default to false.
+    Object.defineProperty(internals, "invoke", { value: raw });
+    (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = internals;
+
+    expect(() => installInvokeProbe()).not.toThrow();
+    await (internals.invoke as typeof raw)("list_sessions");
+    expect(raw).toHaveBeenCalledWith("list_sessions");
+  });
 });
