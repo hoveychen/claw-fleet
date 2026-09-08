@@ -3,8 +3,9 @@
 from pathlib import Path
 from html import escape
 import json
-import struct
 import hashlib
+
+import seo
 
 ROOT = Path(__file__).resolve().parents[2]
 GITHUB = 'https://github.com/hoveychen/claw-fleet'
@@ -56,7 +57,13 @@ def build(lang, c):
     capabilities = f'<section class="capabilities wrap" id="capabilities"><div class="capabilities-heading"><div><h2>{catalogue_title}</h2><p>{catalogue_copy}</p></div><button class="catalogue-toggle" data-expand="{catalogue_toggle}" data-collapse="{catalogue_collapse}" aria-expanded="false">{catalogue_toggle}</button></div><div class="capability-list">{capability_rows}</div></section>'
     shots=[f'work-{lang}.png',f'review-{lang}.png',f'relay-{lang}.png',f'results-{lang}.png']
     def dimensions(name):
-        return struct.unpack('>II', (ROOT / 'docs/screenshots/current' / name).read_bytes()[16:24])
+        return seo.png_size(ROOT / 'docs/screenshots/current' / name)
+    social_shot = f'screenshots/current/work-{lang}.png'
+    social_head = seo.head(
+        lang=lang, en_path='', zh_path='zh/',
+        title=c['title'], description=c['description'],
+        image=social_shot, image_size=dimensions(f'work-{lang}.png'),
+        image_alt=c['panelTitles'][0])
     mobile_w, mobile_h = dimensions(f'mobile-{lang}.png')
     agents_w, agents_h = dimensions(f'agents-{lang}.png')
     agents_src = asset(f'screenshots/current/agents-{lang}.png')
@@ -75,8 +82,7 @@ def build(lang, c):
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{c['title']}</title><meta name="description" content="{escape(c['description'],quote=True)}">
-<meta name="color-scheme" content="light"><meta property="og:title" content="{c['title']}"><meta property="og:description" content="{escape(c['description'],quote=True)}"><meta property="og:type" content="website"><meta property="og:image" content="https://hoveychen.github.io/claw-fleet/screenshots/current/work-{lang}.png"><meta name="twitter:card" content="summary_large_image">
-<link rel="alternate" hreflang="en" href="{base}index.html"><link rel="alternate" hreflang="zh-CN" href="{base}zh/index.html"><link rel="alternate" hreflang="x-default" href="{base}index.html">
+{social_head}
 <script src="{asset('locale.js')}"></script><link rel="icon" href="{base}icon.png"><link rel="stylesheet" href="{asset('site.css')}"><script src="{asset('site.js')}" defer></script>
 </head>
 <body data-locale="{lang}">
