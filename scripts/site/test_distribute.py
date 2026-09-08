@@ -114,6 +114,10 @@ class DistributionTests(unittest.TestCase):
         # agents-* and relay-* screenshots were on both pages and not in it.
         names = d.site_files(d.ROOT / 'docs')
         self.assertEqual(names[:2], ['index.html', 'zh/index.html'])
+        # Sub-pages are followed transitively, with their own stylesheets.
+        self.assertIn('benchmark.html', names)
+        self.assertIn('zh/benchmark.html', names)
+        self.assertIn('benchmark.css', names)
         for name in names:
             with self.subTest(name=name):
                 self.assertTrue((d.ROOT / 'docs' / name).is_file(), name)
@@ -121,7 +125,8 @@ class DistributionTests(unittest.TestCase):
                          'screenshots/current/agents-en.png', 'screenshots/current/relay-zh.png'):
             self.assertIn(required, names)
         self.assertEqual(len(names), len(set(names)))
-        self.assertFalse([n for n in names[2:] if n.endswith('.html')])
+        pages=[n for n in names if n.endswith('.html')]
+        self.assertEqual(names[:len(pages)], pages)  # pages first, then assets
 
     def test_site_reference_cannot_escape_the_root(self):
         with tempfile.TemporaryDirectory() as tmp:

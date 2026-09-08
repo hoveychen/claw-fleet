@@ -1,0 +1,140 @@
+{
+ "zh": {
+  "title": "实测报告：一台机器，30 天 — Claw Fleet",
+  "description": "一台开发机上 30.4 天的完整用量记录：并行度、单位人类注意力的产出、以及每个数字的口径。全部由本地 transcript 重算。",
+  "eyebrow": "实测报告",
+  "headline": "一台机器，30 天，<br>1,660 个会话。",
+  "lede": "这不是跑分，是一台开发机上 30.4 天的完整用量记录。每一条数字都从本地 transcript 重算——没有估算，没有挑样本。Fleet 卖的不是更快的模型，是把同一份人类注意力摊到更多条并行的活上；这页把它摊到了什么程度量出来。",
+  "heroCaption": "每一次人类介入，换来 81.6 次模型往返。382,874 次 API 调用，只对应 4,693 次人类输入。",
+  "tiles": [
+   ["同时在跑的会话（时间加权均值）", "6.98", "峰值 26。裸命令行的上限是 1——一个终端一个会话。"],
+   ["至少两条会话并行的时间占比", "99.4%", "30 天里几乎没有「只有一条活在跑」的时刻。"],
+   ["跨上下文窗口的接力续跑", "524", "窗口写满不等于任务结束：后继会话带着交接便条接着干。"],
+   ["等价 API 用量（list price 重算）", "$108,981", "按官方单价对每条 usage 记录重算，非实付账单——账号在订阅制上。"]
+  ],
+  "throughputHeading": "并行度，是唯一能买到的吞吐。",
+  "throughputCopy": "一个人能推进多少条工程线，取决于他能同时看住几条。下面两张图是 30.4 天里的实际分布与逐日曲线——不是峰值截图。",
+  "concTitle": "忙时里同时活跃的会话数",
+  "concSub": "占 729.8 小时活跃挂钟的比例；只统计人类真的输入过、且长于 60 秒的会话",
+  "concKey": "≥ {n} 条并行",
+  "concCaption": "裸命令行在这张图上没有条形，因为它的上限是结构性的而非分布：一个终端一个会话，切走就停——所以它 100% 的时间都是 1 条。口径：把每个会话的首末时间戳当作一个区间做扫描线，按挂钟时长加权。排除了 Claude Code 自身的秒级辅助运行（生成标题、摘要），算进来会把并发数虚高到 199。",
+  "concTable": ["并行会话数", "占活跃挂钟", "累计小时"],
+  "dailyTitle": "逐日的模型往返次数",
+  "dailySub": "Fleet 拉起的会话，按调用自身的时间戳归日；31 天共 380,284 次",
+  "dailyCaption": "8 月中旬那一段低谷是真实的：那几天只有两条长会话在跑。之后的高原不是某一天的冲刺，而是持续三周的日常负载——日均 1.2 万次调用，峰值 2.7 万。",
+  "dailyTable": ["日期", "API 调用", "活跃会话"],
+  "unitsTitle": "一次人类介入换来的机器工作量",
+  "unitsSub": "每一个方块是一次调用；橙色的那一个是人类那次输入",
+  "unitsLegend": ["人类输入 1 次", "模型往返 81.6 次"],
+  "unitsNote": ["<b>382,874</b> 次 API 调用", "<b>4,693</b> 次人类输入", "<b>4,215</b> 张决策卡"],
+  "unitsCaption": "决策卡数量与人类输入次数几乎相等——Fleet 把「需要人」的时刻收敛成一张带选项的卡，而不是散落在满屏输出里等人自己发现。这些卡的中位响应等待是 147 秒。",
+  "unitsTable": ["计数", "30.4 天总量", "相对人类输入"],
+  "capHeading": "这些吞吐买到了什么。",
+  "capCopy": "每一项都配一个本机实测数字，以及裸命令行在同一位置的行为。没有实测数字的能力不在这张表上。",
+  "caps": [
+   ["6.98", "并行工程线", "时间加权的同时活跃会话数，峰值 26。每条有自己的 worktree、自己的计划、自己的验证。", "裸命令行：<b>1 条</b>，且切走就停。"],
+   ["524", "上下文窗口不再是终点", "窗口将满时登记一次交接，Fleet 拉起后继会话，把便条与计划一起递过去。30 天内发生 524 次。", "裸命令行：<b>压缩后自己找线索</b>，或人工重开。"],
+   ["45", "无人值守的活", "定时与循环触发的会话，键盘前没有人。廉价探测先跑，条件不满足就不起 LLM。", "裸命令行：<b>0</b>，终端关掉就没了。"],
+   ["4,215", "决策收敛成卡", "需要判断的时刻变成一张带选项的卡，中位 147 秒得到回答；手机上也能回。", "裸命令行：<b>混在输出里</b>，靠人自己发现。"],
+   ["382,874", "每次调用都在账上", "全部调用带 usage 落盘，可按会话、模型、时段重算成本——这页的数字就是这么来的。", "裸命令行：<b>同样有 transcript</b>，但没有聚合视图。"],
+   ["97.9%", "长上下文靠缓存兜住", "输入里 97.9% 命中提示缓存，这是让 19 万 token 的单次调用在经济上可行的前提。", "这是 Claude Code 的能力，<b>不是 Fleet 的功劳</b>。"]
+  ],
+  "methodHeading": "口径与方法。",
+  "methodCopy": "一份不肯说自己怎么测的对比没有意义。这一节把每个数字的来源、以及这份数据不能支撑什么，都写清楚。",
+  "methodTitle": "怎么测的",
+  "methodSteps": [
+   "<b>用量与成本</b>：遍历 <code>~/.claude/projects/*/*.jsonl</code> 的每一条 usage 记录，按当前官方单价重算，缓存写入按 5 分钟 / 1 小时 TTL 分别计价。不采信任何现成账本。",
+   "<b>并发度</b>：会话首末时间戳当区间做扫描线，按挂钟加权；排除 Claude Code 自身的秒级辅助运行。",
+   "<b>逐日曲线</b>：每次 API 调用按它自己的时间戳归入本地日期，不按会话开始时间归属。",
+   "<b>等待时间</b>：决策卡的 <code>tool_use</code> 与配对 <code>tool_result</code> 的时间戳差。",
+   "<b>会话来源</b>：每份 transcript 首条 user 记录的 <code>entrypoint</code> 字段，Fleet 拉起的会话带自己的标记。"
+  ],
+  "caveatTitle": "这份数据不能支撑的三件事。",
+  "caveats": [
+   "<b>一，这不是对照实验。</b>这台机器上裸终端会话只有 2 个，无法做同任务 A/B。并行度、接力、无人值守的对照值来自裸命令行的结构性上限（一个终端一个会话、窗口满即止、关掉即停），不是实测样本。",
+   "<b>二，n = 1。</b>一个使用者、一台机器、30.4 天。这是一份真实用量快照，不是 benchmark。多样本的对照实验还没做。",
+   "<b>三，$108,981 不是账单。</b>它是按 API 官方单价对本地 usage 记录重算出的等价用量；该账号在订阅制上，实际支付与此不同。"
+  ],
+  "footnote": "另：30.4 天是本机 transcript 的保留窗口，不是使用总史。Fleet 的纪律注入与记账往返让每次调用的输入约多 23%、输出约多 9%，机器侧挂钟增量 4–6%——这是上面那些吞吐的代价，明码标着。",
+  "faqHeading": "常见问题",
+  "faqs": [
+   ["Fleet 会不会更费 token？", "会。它往每次调用里注入纪律与计划上下文，也多产生记账、交接、出卡的往返：输入约 +23%、输出约 +9%、调用次数 +7%。换来的是这一页量出的并行度与无人值守——省 token 从来不是它的卖点。"],
+   ["这些数字能在我自己的机器上复算吗？", "能。全部来自 <code>~/.claude/projects</code> 下的本地 transcript，采集与核算脚本随本页发布，读的是你自己的 usage 记录。"],
+   ["机器会不会因为 hook 变慢？", "实测可以忽略：每轮的计划注入约 10 毫秒，计划记账中位 0.0 秒，交接与 worktree 操作中位 1.4 秒。真正的等待来自决策卡等人回答——那是人的响应时间。"],
+  ["为什么不直接做同任务 A/B？", "因为这台机器上没有对照组——裸终端会话只有 2 个，事后合成一个比没有对照更糟。真做同任务 A/B 需要一套固定任务集、两种模式各跑一遍，还要控住模型版本与操作者自己的学习效应，那是另一项还没做的工作。这一页站得住的部分是差分测量：把 Fleet 注入的文本从同一次调用里减掉，误差来自分词而不是任务差异。并行度、接力与无人值守对照的是裸命令行的结构性上限，口径区已明说那不是实测样本。"]
+  ],
+  "backHome": "回到首页",
+  "footer": "数据窗口 2026-08-08 → 2026-09-07（30.4 天）· 1,660 个会话 · 382,874 次 API 调用 · 全部数字由本地 transcript 重算。",
+  "tableToggle": "表格视图",
+  "skip": "跳到正文"
+ },
+ "en": {
+  "title": "Field report: one machine, 30 days — Claw Fleet",
+  "description": "A complete 30.4-day usage record from one development machine: concurrency, output per unit of human attention, and the provenance of every number. All recomputed from local transcripts.",
+  "eyebrow": "Field report",
+  "headline": "One machine, 30 days,<br>1,660 sessions.",
+  "lede": "This is not a benchmark run. It is the complete usage record of one development machine over 30.4 days, every number recomputed from local transcripts — nothing estimated, no samples cherry-picked. Fleet does not sell you a faster model; it spreads one person's attention across more parallel work. This page measures how far.",
+  "heroCaption": "Each human intervention buys 81.6 model round trips. 382,874 API calls answer to just 4,693 human inputs.",
+  "tiles": [
+   ["Sessions live at once (time-weighted mean)", "6.98", "Peak 26. A bare terminal caps at 1 — one terminal, one session."],
+   ["Share of busy time with 2+ sessions live", "99.4%", "Across 30 days there was almost never only one thing running."],
+   ["Relay handoffs across context windows", "524", "A full context window is not the end of the task: a successor session picks it up with the briefing."],
+   ["List-price-equivalent usage", "$108,981", "Recomputed per usage record at published prices — not a bill; the account is on a subscription."]
+  ],
+  "throughputHeading": "Concurrency is the only throughput you can buy.",
+  "throughputCopy": "How many engineering threads one person can push depends on how many they can watch at once. These two charts are the actual distribution and the day-by-day curve over 30.4 days — not a peak screenshot.",
+  "concTitle": "Sessions live simultaneously during busy time",
+  "concSub": "Share of 729.8 active wall-clock hours; only sessions a human actually typed into and that ran longer than 60s",
+  "concKey": "{n}+ in parallel",
+  "concCaption": "The bare terminal has no bar here because its ceiling is structural, not distributional: one terminal, one session, and it stops when you look away — so it is 1 session 100% of the time. Method: each session's first and last timestamps form an interval; a sweep line weights them by wall clock. Claude Code's own seconds-long helper runs are excluded — including them inflates the peak to 199.",
+  "concTable": ["Sessions in parallel", "Share of active wall clock", "Cumulative hours"],
+  "dailyTitle": "Model round trips per day",
+  "dailySub": "Fleet-spawned sessions, each call binned by its own timestamp; 380,284 across 31 days",
+  "dailyCaption": "The mid-August trough is real: for those days only two long sessions were running. What follows is not a one-day sprint but three weeks of steady load — 12k calls a day on average, peaking at 27k.",
+  "dailyTable": ["Date", "API calls", "Sessions live"],
+  "unitsTitle": "Machine work bought by one human intervention",
+  "unitsSub": "Every square is one call; the orange one is the human input",
+  "unitsLegend": ["1 human input", "81.6 model round trips"],
+  "unitsNote": ["<b>382,874</b> API calls", "<b>4,693</b> human inputs", "<b>4,215</b> decision cards"],
+  "unitsCaption": "Decision cards and human inputs come out nearly equal — Fleet collapses every \"needs a person\" moment into one card with options instead of leaving it buried in scrolling output. Median time to an answer: 147 seconds.",
+  "unitsTable": ["Count", "Total over 30.4 days", "Relative to human input"],
+  "capHeading": "What that throughput buys.",
+  "capCopy": "Every entry carries a measured number from this machine and what a bare terminal does in the same spot. Capabilities without a measurement are not on this list.",
+  "caps": [
+   ["6.98", "Parallel engineering threads", "Time-weighted sessions live at once, peaking at 26. Each has its own worktree, its own plan, its own verification.", "Bare terminal: <b>1</b>, and it stops when you switch away."],
+   ["524", "The context window stops being the end", "As a window fills, the session registers a handoff and Fleet spawns a successor with the briefing and the plan. 524 times in 30 days.", "Bare terminal: <b>dig through the compaction</b>, or restart by hand."],
+   ["45", "Work that ran unattended", "Sessions started by schedules and loops with nobody at the keyboard. A cheap probe runs first; no LLM starts unless it passes.", "Bare terminal: <b>0</b> — close the terminal and it is gone."],
+   ["4,215", "Decisions collapsed into cards", "Every judgement call becomes one card with options, answered in a median of 147 seconds — from the phone too.", "Bare terminal: <b>mixed into the output</b>, for you to spot."],
+   ["382,874", "Every call is on the books", "All calls land with their usage record, so cost can be recomputed per session, model or period — that is where this page comes from.", "Bare terminal: <b>transcripts too</b>, but no aggregate view."],
+   ["97.9%", "Long context held up by caching", "97.9% of input tokens hit the prompt cache — the reason a 190k-token call is economically viable at all.", "This is Claude Code's doing, <b>not Fleet's</b>."]
+  ],
+  "methodHeading": "Method and provenance.",
+  "methodCopy": "A comparison that will not say how it was measured is worth nothing. This section states where each number comes from — and what this data cannot support.",
+  "methodTitle": "How it was measured",
+  "methodSteps": [
+   "<b>Usage and cost</b>: every usage record under <code>~/.claude/projects/*/*.jsonl</code>, recomputed at current published prices, with cache writes priced separately for the 5-minute and 1-hour TTLs. No pre-existing ledger is trusted.",
+   "<b>Concurrency</b>: each session's first and last timestamps form an interval; a sweep line weights the result by wall clock, excluding Claude Code's own seconds-long helper runs.",
+   "<b>Daily curve</b>: each API call is binned by its own timestamp in local time, not by when its session started.",
+   "<b>Wait time</b>: the delta between a decision card's <code>tool_use</code> and its matching <code>tool_result</code>.",
+   "<b>Session provenance</b>: the <code>entrypoint</code> field on each transcript's first user record; Fleet-spawned sessions carry their own marker."
+  ],
+  "caveatTitle": "Three things this data cannot support.",
+  "caveats": [
+   "<b>One: this is not a controlled experiment.</b> Only 2 bare-terminal sessions exist on this machine, so a same-task A/B is impossible. The bare-terminal figures for concurrency, relay and unattended work come from its structural ceiling (one terminal one session, stop at a full window, gone when closed), not from measured samples.",
+   "<b>Two: n = 1.</b> One person, one machine, 30.4 days. This is a real usage snapshot, not a benchmark. The multi-sample controlled study has not been run.",
+   "<b>Three: $108,981 is not a bill.</b> It is list-price-equivalent usage recomputed from local records; the account is on a subscription and paid a different amount."
+  ],
+  "footnote": "Also: 30.4 days is this machine's transcript retention window, not the total history of use. Fleet's injected discipline and its bookkeeping round trips add roughly 23% to input tokens, 9% to output and 4–6% to machine wall clock — the price of the throughput above, stated plainly.",
+  "faqHeading": "Questions",
+  "faqs": [
+   ["Does Fleet burn more tokens?", "Yes. It injects discipline and plan context into every call and adds round trips for bookkeeping, handoffs and cards: about +23% input, +9% output, +7% calls. What you get back is the concurrency and unattended work measured on this page — saving tokens was never the pitch."],
+   ["Can I recompute these numbers on my own machine?", "Yes. They all come from local transcripts under <code>~/.claude/projects</code>; the collection and accounting scripts ship with this page and read your own usage records."],
+   ["Do the hooks slow the machine down?", "Not measurably: the per-turn plan injection takes about 10 ms, plan bookkeeping a median 0.0s, handoff and worktree operations a median 1.4s. The real waiting is a decision card waiting on a person."],
+  ["Why not run a same-task A/B against a bare terminal?", "Because the control group does not exist on this machine — only 2 bare-terminal sessions — and manufacturing one after the fact would be worse than having none. A real A/B needs a fixed task set, both modes run over it, and control for model version and the operator's own learning; that is separate work and it has not been done. What this page can stand behind is the differential measurement: Fleet's injected text subtracted from the same call, so the error comes from tokenization rather than task variance. The concurrency, relay and unattended figures compare against a bare terminal's structural ceiling, and the method section says plainly that those are not measured samples."]
+  ],
+  "backHome": "Back to home",
+  "footer": "Window 2026-08-08 → 2026-09-07 (30.4 days) · 1,660 sessions · 382,874 API calls · every number recomputed from local transcripts.",
+  "tableToggle": "Table view",
+  "skip": "Skip to content"
+ }
+}

@@ -61,18 +61,23 @@ def verify(path, asset):
 
 
 def site_files(root):
-    """The two pages plus every local asset they reference, in copy order.
+    """Every page reachable from the two entry documents, plus their assets.
 
-    Derived rather than hand-listed. The old hard-coded tuple silently went
-    stale every time the site gained an image: `screenshots/current/agents-*`
-    and `relay-*` were added to both pages and never added here, so an
-    unattended mirror sync would have published pages whose new screenshots
-    404. Reading the references out of the HTML that is being copied keeps the
-    two in step by construction.
+    Derived rather than hand-listed, because a hand-listed tuple goes stale
+    silently every time the site grows. It already had: the
+    `screenshots/current/agents-*` and `relay-*` images were on both pages and
+    in nobody's list, and `benchmark.html` arrived later with its own
+    stylesheet. An unattended mirror sync copies only what this returns, so
+    anything it misses is a 404 on the mirror while the origin site looks fine.
+
+    Pages are followed transitively so a new sub-page joins the mirror the
+    moment it is linked. Returns pages first, then assets.
     """
     pages = ['index.html', 'zh/index.html']
-    names = list(pages) + ['site.css', 'site.js', 'locale.js']
-    for page in pages:
+    assets = ['site.css', 'site.js', 'locale.js']
+    pending = list(pages)
+    while pending:
+        page = pending.pop(0)
         source = root / page
         if not source.is_file():
             continue
@@ -92,10 +97,13 @@ def site_files(root):
             # Refuse anything that would escape the site root.
             if '..' in candidate.split('/') or candidate.startswith('/'):
                 raise ValueError('Unsafe site reference: ' + reference)
-            if candidate.endswith('.html') or candidate in names:
-                continue
-            names.append(candidate)
-    return names
+            if candidate.endswith('.html'):
+                if candidate not in pages:
+                    pages.append(candidate)
+                    pending.append(candidate)
+            elif candidate not in assets:
+                assets.append(candidate)
+    return pages + assets
 
 
 def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cloud COS'):
@@ -165,10 +173,11 @@ def publish(output, manifest, public_url):
             if int(response.headers.get('Content-Length', '-1')) != path.stat().st_size:
                 raise ValueError('Public download size verification failed: ' + path.name)
     # Upload dependencies first, both HTML documents next, manifest last.
-    # Same derived list prepare copied, but dependencies before the two pages:
-    # a visitor must never load an HTML document whose assets are not up yet.
+    # Same derived list prepare copied, but assets before pages: a visitor must
+    # never load an HTML document whose stylesheet or images are not up yet.
     names = site_files(output)
-    site_paths = [output/p for p in names[2:] + names[:2]]
+    ordered = [n for n in names if not n.endswith('.html')] + [n for n in names if n.endswith('.html')]
+    site_paths = [output/p for p in ordered]
     for path in site_paths:
         if not path.is_file():
             continue
