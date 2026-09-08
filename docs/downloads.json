@@ -1,48 +1,48 @@
 {
   "schema": 1,
-  "version": "v2.6.3",
+  "version": "v2.7.0",
   "china": {
     "provider": "Eternized Lab \u00b7 Shenzhen",
     "assets": {
       "claw-fleet-android.apk": {
-        "url": "https://fleet.eternizedlab.com/releases/v2.6.3/claw-fleet-android.apk",
-        "sha256": "0489daa0f69f7c8e3c519dda77b4b8e2a6a7dcc23b65e16cac89b9064daa5203",
-        "size": 6373090
+        "url": "https://fleet.eternizedlab.com/releases/v2.7.0/claw-fleet-android.apk",
+        "sha256": "8abaf431aa91e075ade9cc52b2fb2163806b15a083c84145fc1451ebcbfcbfe4",
+        "size": 6374214
       },
       "claw-fleet-macos.pkg": {
-        "url": "https://fleet.eternizedlab.com/releases/v2.6.3/claw-fleet-macos.pkg",
-        "sha256": "9fbe8068172d779327728ed3c2a71f08428b9c9d96427c3d9c65ca22054f0f4c",
-        "size": 70862071
+        "url": "https://fleet.eternizedlab.com/releases/v2.7.0/claw-fleet-macos.pkg",
+        "sha256": "dff051147241877ded1e21b4505c8a50800ab1dc4b02e64077f342f23f8fdcd6",
+        "size": 70921438
       },
       "claw-fleet-webui.tar.gz": {
-        "url": "https://fleet.eternizedlab.com/releases/v2.6.3/claw-fleet-webui.tar.gz",
-        "sha256": "103b2b742715cb67a6256929c823d54f6eec14db05281ce0fe1b93e99c8ec760",
-        "size": 9636578
+        "url": "https://fleet.eternizedlab.com/releases/v2.7.0/claw-fleet-webui.tar.gz",
+        "sha256": "f0eea63b9694570dfbcb12852b95fde4b3b1e6f47edcd6b09debe6acd6c763bb",
+        "size": 9640954
       },
       "claw-fleet-windows-x64-setup.exe": {
-        "url": "https://fleet.eternizedlab.com/releases/v2.6.3/claw-fleet-windows-x64-setup.exe",
-        "sha256": "ebe59bc192e7a2cdd9ec4c4686bde1a242716085610a1fd264f143905ea21c83",
-        "size": 32476094
+        "url": "https://fleet.eternizedlab.com/releases/v2.7.0/claw-fleet-windows-x64-setup.exe",
+        "sha256": "e2d9f17e655ef64c1029773cb70367d19187c775036bda92490eec659f8924da",
+        "size": 32548925
       },
       "fleet-linux-arm64": {
-        "url": "https://fleet.eternizedlab.com/releases/v2.6.3/fleet-linux-arm64",
-        "sha256": "0f30b44ed66e4c39edb65370cad6adacf25ae996155ce44e5d83db0295aab408",
-        "size": 25692640
+        "url": "https://fleet.eternizedlab.com/releases/v2.7.0/fleet-linux-arm64",
+        "sha256": "b583515aa4270bced60888615afc16de99464f5f1270e69f0413f139fc7301d6",
+        "size": 25725472
       },
       "fleet-linux-x64": {
-        "url": "https://fleet.eternizedlab.com/releases/v2.6.3/fleet-linux-x64",
-        "sha256": "fe4695ef44d855e928e6d1976ea04391be5bc72f3ee10cdb08fde608e96030a8",
-        "size": 28167984
+        "url": "https://fleet.eternizedlab.com/releases/v2.7.0/fleet-linux-x64",
+        "sha256": "65c5b58fce41d0cd9edf502fa2c8105653bbe45ed288b4b7973289353fc8aa43",
+        "size": 28170288
       },
       "fleet-macos": {
-        "url": "https://fleet.eternizedlab.com/releases/v2.6.3/fleet-macos",
-        "sha256": "80779a14c5f45dbc532322eb1c36560eebdcd4cbb2b658826cfa553dd9a12b98",
-        "size": 33900368
+        "url": "https://fleet.eternizedlab.com/releases/v2.7.0/fleet-macos",
+        "sha256": "21d5fc37823313784c44eab11ce1ee0f2cabad0150000af8391d38746461578d",
+        "size": 33900512
       },
       "fleet-windows-x64.exe": {
-        "url": "https://fleet.eternizedlab.com/releases/v2.6.3/fleet-windows-x64.exe",
-        "sha256": "c97bf696e3ad754d2585ff206e2581b90378497c267da08268a508bd570b4d99",
-        "size": 23001088
+        "url": "https://fleet.eternizedlab.com/releases/v2.7.0/fleet-windows-x64.exe",
+        "sha256": "147a71035308a122728d0d4609ba41d2cb153243fde3e8c406b8b1f33eeb8bff",
+        "size": 23078912
       }
     }
   }
