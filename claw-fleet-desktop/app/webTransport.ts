@@ -68,21 +68,6 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
   // desktop's — it is whatever address the viewer actually used to get here,
   // so a phone that loaded the UI over the LAN gets the LAN address, and there
   // is no dependency on `~/.fleet/port` being readable from this process.
-  if (cmd === "artifact_share_url") {
-    const token = String(args.token ?? "");
-    // `reachableOffMachine` is decided by the origin the viewer actually used:
-    // a page loaded over the LAN can hand out that address, one loaded at
-    // localhost cannot promise anything beyond this machine.
-    const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
-    return {
-      handled: true,
-      value: {
-        url: `${window.location.origin}/shared?t=${encodeURIComponent(token)}`,
-        reachableOffMachine: !local,
-      },
-    };
-  }
-
   // ── plugin:window ────────────────────────────────────────────────────────
   // The custom titlebar and the theme sync drive `getCurrentWindow()`. A tab
   // has no window of its own to move, size or decorate, and nothing here is

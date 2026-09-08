@@ -308,14 +308,6 @@ pub fn serve(opts: ServeOptions) {
         let _ = std::fs::write(&pp, actual_port.to_string());
         let _ = std::fs::write(&tp, &token);
     }
-    // The bound host, for anything that has to build a URL someone else will
-    // open — see `launchd::host_file_path`.
-    if let Some(hp) = crate::launchd::host_file_path() {
-        if let Some(dir) = hp.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = std::fs::write(&hp, &host);
-    }
     {
         use std::io::Write as _;
         println!("FLEET_PROBE_PORT={}", actual_port);
@@ -1025,17 +1017,6 @@ fn handle_request(
             return;
         }
 
-        // Share links answer before the auth gate, because the recipient has
-        // no Fleet token by definition — the share token in the URL is the
-        // whole capability (see `routes::SHARED`). Placed here rather than in
-        // the dispatch table below so it cannot be reached with a Fleet token
-        // *instead* of a share token, and so a bad share token cannot fall
-        // through to anything else: `route_shared` always responds.
-        if path == crate::routes::SHARED {
-            route_shared(request, &query);
-            return;
-        }
-
         // Auth check — support both the `Authorization: Bearer <t>` header and
         // the `?token=<t>` query param (the latter for SSE EventSource, which
         // cannot set headers). The bare token is compared; see auth::authorize
@@ -1198,12 +1179,6 @@ fn handle_request(
             crate::routes::ARTIFACT_DELETE if request.method() == &tiny_http::Method::Post => route_artifact_delete(ctx, request, &query, json_header, path),
 
             crate::routes::ARTIFACT_ROLLBACK if request.method() == &tiny_http::Method::Post => route_artifact_rollback(ctx, request, &query, json_header, path),
-
-            crate::routes::ARTIFACT_SHARES => route_artifact_shares(ctx, request, &query, json_header, path),
-
-            crate::routes::ARTIFACT_SHARE_CREATE if request.method() == &tiny_http::Method::Post => route_artifact_share_create(ctx, request, &query, json_header, path),
-
-            crate::routes::ARTIFACT_SHARE_REVOKE if request.method() == &tiny_http::Method::Post => route_artifact_share_revoke(ctx, request, &query, json_header, path),
 
             crate::routes::ARTIFACT_FOLDERS => route_artifact_folders(ctx, request, &query, json_header, path),
 
