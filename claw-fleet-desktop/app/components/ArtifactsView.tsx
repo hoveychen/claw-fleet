@@ -19,6 +19,7 @@ import {
   History,
   Image as ImageIcon,
   LayoutGrid,
+  Link2,
   Music,
   Package,
   Pencil,
@@ -71,6 +72,19 @@ export interface Artifact {
   currentVersion: string;
   /** Every ingest of this deliverable, newest first — always at least one. */
   versions: ArtifactVersion[];
+}
+
+/** Mirrors `claw_fleet_core::artifact_share::ShareLink`. */
+export interface ShareLink {
+  token: string;
+  artifactId: string;
+  version: string;
+  name: string;
+  createdMs: number;
+  /** 0 means no expiry. */
+  expiresMs: number;
+  hits: number;
+  lastHitMs: number;
 }
 
 /** Mirrors `claw_fleet_core::artifacts::ArtifactVersion`. */
@@ -1565,6 +1579,7 @@ function ArtifactDetail({
             if (note !== artifact.note) onPatch(artifact.id, { note });
           }}
         />
+        <ArtifactShares artifact={artifact} onError={onError} />
         {artifact.versions.length > 1 && (
           <ArtifactVersions
             artifact={artifact}
@@ -1575,6 +1590,163 @@ function ArtifactDetail({
           />
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Share links for one artifact.
+ *
+ * A link is served by the local `fleet serve` / `fleet webui` port, so it
+ * reaches this LAN and no further — that was the explicit choice over hosting
+ * the bytes somewhere public. The URL is fetched from the backend rather than
+ * assembled here because only the host knows whether a server is even
+ * listening, and "no link yet, start the server" is a real state the UI has to
+ * be able to show.
+ *
+ * Every link is pinned to the version that was current when it was made, so
+ * regenerating the deliverable cannot change what the recipient downloads.
+ */
+function ArtifactShares({
+  artifact,
+  onError,
+}: {
+  artifact: Artifact;
+  onError: (msg: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [links, setLinks] = useState<ShareLink[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [ttlDays, setTtlDays] = useState("7");
+
+  const load = useCallback(async () => {
+    const list = (await invoke<ShareLink[]>("list_artifact_shares", { id: artifact.id }).catch(
+      () => [],
+    )) ?? [];
+    setLinks(list);
+    // One URL per token: the host resolves each, and a missing local server is
+    // reported once rather than per row.
+    const next: Record<string, string> = {};
+    let failure: string | null = null;
+    for (const link of list) {
+      try {
+        next[link.token] = await invoke<string>("artifact_share_url", { token: link.token });
+      } catch (e) {
+        failure = String(e);
+      }
+    }
+    setUrls(next);
+    setUrlError(failure);
+  }, [artifact.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const ttl = Number.parseInt(ttlDays, 10);
+      await invoke<ShareLink>("create_artifact_share", {
+        id: artifact.id,
+        // Pinned explicitly to what is current now, so the link keeps serving
+        // these bytes even after the next version lands.
+        version: artifact.currentVersion,
+        ttlDays: Number.isFinite(ttl) && ttl > 0 ? ttl : null,
+      });
+      onError(null);
+      await load();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async (token: string) => {
+    setBusy(true);
+    try {
+      await invoke("revoke_artifact_share", { token });
+      onError(null);
+      await load();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const now = Date.now();
+
+  return (
+    <div className={styles.versions}>
+      <div className={styles.versions_head}>
+        <Link2 size={13} strokeWidth={1.5} />
+        <span>{t("artifacts.share", "分享链接（仅本机/局域网）")}</span>
+      </div>
+      <div className={styles.share_new}>
+        <label className={styles.share_ttl}>
+          {t("artifacts.share_ttl", "有效期（天，0＝永久）")}
+          <input
+            className={styles.share_ttl_input}
+            type="number"
+            min={0}
+            max={365}
+            value={ttlDays}
+            onChange={(e) => setTtlDays(e.target.value)}
+          />
+        </label>
+        <button type="button" className={styles.chip} disabled={busy} onClick={create}>
+          {t("artifacts.share_create", "生成链接")}
+        </button>
+      </div>
+      {urlError && <div className={styles.share_warn}>{urlError}</div>}
+      {links.map((link) => {
+        const expired = link.expiresMs !== 0 && now >= link.expiresMs;
+        const url = urls[link.token];
+        return (
+          <div key={link.token} className={styles.version_row}>
+            <span className={styles.share_meta}>
+              <span className={styles.version_id}>{link.version}</span>
+              <span className={styles.version_time}>
+                {expired
+                  ? t("artifacts.share_expired", "已过期")
+                  : link.expiresMs === 0
+                    ? t("artifacts.share_forever", "永久有效")
+                    : t("artifacts.share_until", "有效至 {{when}}", {
+                        when: new Date(link.expiresMs).toLocaleString(),
+                      })}
+              </span>
+              <span className={styles.version_size}>
+                {t("artifacts.share_hits", "{{count}} 次访问", { count: link.hits })}
+              </span>
+            </span>
+            {url && !expired && (
+              <button
+                type="button"
+                className={styles.version_restore}
+                onClick={() => {
+                  void navigator.clipboard?.writeText(url);
+                  onError(null);
+                }}
+                title={url}
+              >
+                {t("artifacts.share_copy", "复制")}
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.version_restore}
+              disabled={busy}
+              onClick={() => revoke(link.token)}
+            >
+              {t("artifacts.share_revoke", "吊销")}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

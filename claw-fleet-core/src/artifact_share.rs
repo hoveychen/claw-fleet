@@ -280,6 +280,38 @@ pub fn record_hit_in(path: &Path, token: &str, now: u64) {
     }
 }
 
+// ── The URL you actually send someone ────────────────────────────────────────
+
+/// Build the URL for `token`, or say why there isn't one yet.
+///
+/// The desktop app does **not** listen on HTTP — it talks to the relay, not to
+/// a port of its own — so the thing that serves `/shared` is a running
+/// `fleet serve` / `fleet webui`. Both write their live port to
+/// `~/.fleet/port` on startup, so its absence is the honest signal that a link
+/// would not resolve for anyone, and the UI says so instead of handing over a
+/// URL that refuses to connect.
+///
+/// The host is this machine's LAN IPv4 rather than `127.0.0.1`, because the
+/// point of a share link is to open it somewhere else — a phone, a colleague's
+/// laptop. `localhost` is the fallback when the machine has no LAN address at
+/// all, which at least still works in the browser sitting right here.
+pub fn share_url(token: &str) -> Result<String, String> {
+    let port = live_serve_port().ok_or_else(|| {
+        "no local Fleet server is running — start `fleet webui` and the link will resolve"
+            .to_string()
+    })?;
+    let host = crate::lan_access::lan_ipv4()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "localhost".to_string());
+    Ok(format!("http://{host}:{port}{}?t={token}", crate::routes::SHARED))
+}
+
+/// The port a `fleet serve` / `fleet webui` last recorded, if any.
+pub fn live_serve_port() -> Option<u16> {
+    let path = crate::launchd::port_file_path()?;
+    fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
