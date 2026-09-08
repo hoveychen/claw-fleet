@@ -98,8 +98,9 @@ pub(crate) fn route_artifact_add(
     respond_json_result(request, json_header, added);
 }
 
-/// `POST /artifact_update` — patch title / note / starred. An absent field
-/// means "leave it alone", which is why every one is an `Option`.
+/// `POST /artifact_update` — patch title / note / starred / path. An absent
+/// field means "leave it alone", which is why every one is an `Option`;
+/// `path: ""` is therefore a real move (to the workspace root), not a no-op.
 pub(crate) fn route_artifact_update(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,
@@ -116,6 +117,8 @@ pub(crate) fn route_artifact_update(
         note: Option<String>,
         #[serde(default)]
         starred: Option<bool>,
+        #[serde(default)]
+        path: Option<String>,
     }
     let updated = read_body(&mut request)
         .and_then(|b| {
@@ -127,6 +130,7 @@ pub(crate) fn route_artifact_update(
                 r.title.as_deref(),
                 r.note.as_deref(),
                 r.starred,
+                r.path.as_deref(),
             )
         });
     respond_json_result(request, json_header, updated);

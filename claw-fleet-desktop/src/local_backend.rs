@@ -2529,12 +2529,38 @@ impl LocalBackend {
         title: Option<&str>,
         note: Option<&str>,
         starred: Option<bool>,
+        path: Option<&str>,
     ) -> Result<crate::artifacts::Artifact, String> {
-        crate::artifacts::update(id, title, note, starred)
+        crate::artifacts::update(id, title, note, starred, path)
     }
 
     pub fn delete_artifact(&self, id: &str) -> Result<(), String> {
         crate::artifacts::delete(id)
+    }
+
+    pub fn list_artifact_folders(&self) -> Vec<crate::artifacts::Folder> {
+        crate::artifacts::list_folders()
+    }
+
+    pub fn create_artifact_folder(
+        &self,
+        workspace_path: &str,
+        path: &str,
+    ) -> Result<crate::artifacts::Folder, String> {
+        crate::artifacts::create_folder(std::path::Path::new(workspace_path), path)
+    }
+
+    pub fn delete_artifact_folder(&self, workspace_path: &str, path: &str) -> Result<(), String> {
+        crate::artifacts::delete_folder(std::path::Path::new(workspace_path), path)
+    }
+
+    pub fn rename_artifact_folder(
+        &self,
+        workspace_path: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<usize, String> {
+        crate::artifacts::rename_folder(std::path::Path::new(workspace_path), from, to)
     }
 
     pub fn read_artifact_bytes(
