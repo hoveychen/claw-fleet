@@ -101,6 +101,15 @@ github.io 侧由 push 后的 Pages 工作流发布；镜像侧走了一次手动
 - 标题与描述覆盖真实搜索意图：英文面向 Google（Claude Code GUI / desktop app），中文面向百度（桌面图形界面 / 客户端），平台与「免费开源」写进描述。
 - `docs/` 里的设计稿、产品调研、站点评审、镜像的 systemd 单元与 nginx 配置**不再随官网发布**（此前 33 个文件是公开的）。
 
+## 第二轮做了什么（2026-09-08）
+
+- **双语 404 页**（`docs/404.html`）：Pages 自动接管任意缺失路径，镜像靠 nginx `error_page`（conf 已改，**服务器上要 reload 才生效**）。刻意不加载 `locale.js`——它会把偏好另一语言的访客 redirect 到首页，把断链变成静默跳转。
+- **sitemap 的 lastmod**：见上一节，发布时盖真实提交日期。
+- **截图 WebP**：`<picture>` + PNG 回退，`scripts/site/encode_webp.py` 重新编码（重拍截图后要跑一次）。2.6MB → 758KB。`distribute.site_files()` 现在也扫 `srcset`，否则 WebP 源在镜像上 404 而源站看着好。
+- **四个内容页**（中英共 8 份）：`claude-code-gui`、`codex-gui`、`deepseek-harness-gui`、`supported-tools`。正文在 `content/{en,zh}.json` 的 `pages` 下，排版在 `content_page.py`。加一页 = 加一个内容块 + 往 `build.CONTENT_SLUGS` 加一行（自动进 PAGE_PAIRS / sitemap / hreflang / lastmod）。
+- **门户页守门测试**：四页只差一个产品名就是 Google 明文的 doorway pages，罚整站。`test_seo.test_content_pages_do_not_repeat_one_another` 两两比对长段落，共用即红。**新增内容页时不要为了省事复制段落。**
+- 每个内容页都从首页 FAQ 内链过去（只进 sitemap 的孤页传不到权重）。zh 那些链接用裸文件名——从 `/zh/` 出发写 `zh/...` 会解析成 `/zh/zh/`。
+
 ## 还没做、需要单独定夺的
 
 - **自定义顶级域**。github.io 子路径站点的权重天花板明显低于独立域名，而且 robots.txt 也拿不到。真要往上做，绑一个自己的域是最大的一步。
