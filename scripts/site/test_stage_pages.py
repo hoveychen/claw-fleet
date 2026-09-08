@@ -2,6 +2,7 @@
 """Tests for what GitHub Pages is allowed to publish."""
 from pathlib import Path
 import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -81,6 +82,34 @@ class StageTests(unittest.TestCase):
             site_origin.assert_no_token(out)
             # Binary assets are copied, not rewritten.
             self.assertEqual((out / 'icon.png').read_bytes(), (DOCS / 'icon.png').read_bytes())
+
+    def test_the_published_version_comes_from_the_manifest_pages_just_built(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'pages'
+            expected = json.loads((DOCS / 'downloads.json').read_text())['version'].lstrip('v')
+            stage_pages.stage(DOCS, out, ORIGIN)
+            html = (out / 'index.html').read_text()
+            self.assertIn(f'"softwareVersion":"{expected}"', html)
+            self.assertNotIn(site_origin.VERSION_TOKEN, html)
+
+    def test_an_explicit_version_overrides_the_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'pages'
+            stage_pages.stage(DOCS, out, ORIGIN, 'v9.9.9')
+            self.assertIn('"softwareVersion":"9.9.9"', (out / 'index.html').read_text())
+
+    def test_staging_without_a_manifest_fails_instead_of_publishing_a_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'site'
+            shutil.copytree(DOCS, root, ignore=shutil.ignore_patterns('releases'))
+            (root / 'downloads.json').unlink()
+            with self.assertRaises(FileNotFoundError):
+                stage_pages.stage(root, Path(tmp) / 'out', ORIGIN)
+
+    def test_the_committed_pages_carry_a_token_not_a_frozen_version(self):
+        # A version written at build time is wrong on every later release.
+        self.assertIn(site_origin.VERSION_TOKEN, (DOCS / 'index.html').read_text())
 
     def test_the_workflow_uploads_the_staging_directory(self):
         # A whitelist nobody uploads is decoration.

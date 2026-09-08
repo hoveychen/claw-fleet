@@ -23,6 +23,49 @@ class ValidateTests(unittest.TestCase):
                 so.validate_origin(value)
 
 
+class VersionTests(unittest.TestCase):
+    def test_accepts_a_tag_with_or_without_the_v(self):
+        self.assertEqual(so.validate_version('v2.7.0'), '2.7.0')
+        self.assertEqual(so.validate_version('2.7.0'), '2.7.0')
+
+    def test_rejects_anything_that_is_not_a_release_version(self):
+        for value in ('latest', '2.7', 'v2.7.0-rc1', '', None, ' 2.7.0'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                so.validate_version(value)
+
+    def test_an_already_resolved_version_is_retargeted(self):
+        # The mirror re-publishes a site built for an older release.
+        published = '<script>{"softwareVersion":"2.5.0","name":"Claw Fleet"}</script>'
+        self.assertIn('"softwareVersion":"2.6.0"',
+                      so.apply(published, 'https://example.com', 'v2.6.0'))
+
+    def test_a_version_nobody_supplied_is_left_as_a_token_to_be_caught(self):
+        out = so.apply(f'<x>{so.VERSION_TOKEN}</x>', 'https://example.com')
+        self.assertIn(so.VERSION_TOKEN, out)
+
+    def test_both_tokens_are_caught_by_the_publish_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'a.html').write_text(f'<x>{so.VERSION_TOKEN}</x>')
+            with self.assertRaises(ValueError) as caught:
+                so.assert_no_token(root)
+            self.assertIn(so.VERSION_TOKEN, str(caught.exception))
+
+    def test_a_page_stating_the_wrong_version_is_an_error(self):
+        # Guards the retarget regex: a markup change that made it silently
+        # no-op would otherwise restore the stale number unnoticed.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'a.html').write_text('{"softwareVersion":"2.5.0"}')
+            with self.assertRaises(ValueError):
+                so.assert_version(root, 'v2.6.0')
+            (root / 'a.html').write_text('{"softwareVersion":"2.6.0"}')
+            so.assert_version(root, 'v2.6.0')
+            # A page that states no version at all is not a violation.
+            (root / 'b.html').write_text('<p>no version here</p>')
+            so.assert_version(root, 'v2.6.0')
+
+
 class ApplyTests(unittest.TestCase):
     def test_every_occurrence_in_a_document_is_replaced(self):
         text = f'<link rel="canonical" href="{so.TOKEN}/index.html"><meta content="{so.TOKEN}/icon.png">'

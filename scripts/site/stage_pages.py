@@ -12,6 +12,7 @@ links to but the site still needs.
 """
 from pathlib import Path
 import argparse
+import json
 import shutil
 
 import distribute
@@ -57,19 +58,34 @@ def payload(root):
     return names
 
 
-def stage(root, output, origin):
+def manifest_version(root):
+    """The release version Pages is publishing, per the manifest it just built.
+
+    pages.yml runs pages_manifest.py (which reads the latest release from the
+    GitHub API) before staging, so the number is already on disk and does not
+    need to be passed in by hand -- one less place for the workflow and the
+    site to disagree about what is being published.
+    """
+    manifest = json.loads((root / 'downloads.json').read_text())
+    return site_origin.validate_version(manifest['version'])
+
+
+def stage(root, output, origin, version=None):
     output.mkdir(parents=True, exist_ok=True)
+    version = version or manifest_version(root)
     published = payload(root)
     for name in published:
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         source = root / name
         if site_origin.is_text(source):
-            target.write_text(site_origin.apply(source.read_text(encoding='utf-8'), origin),
-                              encoding='utf-8')
+            target.write_text(
+                site_origin.apply(source.read_text(encoding='utf-8'), origin, version),
+                encoding='utf-8')
         else:
             shutil.copy2(source, target)
     site_origin.assert_no_token(output)
+    site_origin.assert_version(output, version)
     return published
 
 
@@ -84,10 +100,11 @@ if __name__ == '__main__':
     parser.add_argument('--root', type=Path, default=distribute.ROOT / 'docs')
     parser.add_argument('--output', type=Path, required=True, help='Staging directory to upload')
     parser.add_argument('--origin', required=True, help='https origin this deployment is served from')
+    parser.add_argument('--version', help='Release version being published; defaults to docs/downloads.json')
     args = parser.parse_args()
     if args.output.is_relative_to(args.root):
         parser.error('Staging directory must sit outside the site root')
-    published = stage(args.root, args.output, site_origin.validate_origin(args.origin))
+    published = stage(args.root, args.output, site_origin.validate_origin(args.origin), args.version)
     print(f'Publishing {len(published)} files from {args.root} to {args.output}')
     for name in published:
         print(f'  + {name}')

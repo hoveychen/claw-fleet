@@ -16,10 +16,17 @@ copies files for the mirror. The committed files in docs/ therefore carry no
 domain at all, and adding a third origin costs one flag.
 """
 from pathlib import Path
+import re
 import urllib.parse
 
 TOKEN = '__SITE_ORIGIN__'
-# Only text formats that can carry the token. A .png containing the byte
+# The released version is the same kind of problem as the origin, one step
+# later: build.py generates the HTML locally and commits it, but the version
+# only exists at publish time. Baking it in at build time would freeze a
+# version number that every later release makes wrong, and a stale
+# softwareVersion in structured data is worse than none.
+VERSION_TOKEN = '__SITE_VERSION__'
+# Only text formats that can carry a token. A .png containing the byte
 # sequence is not a URL, and rewriting binaries would corrupt them.
 TEXT_SUFFIXES = ('.html', '.xml', '.txt', '.json', '.js', '.css')
 
@@ -39,42 +46,85 @@ def validate_origin(value):
     return value.rstrip('/')
 
 
-def apply(text, origin):
-    """Substitute the token in one document."""
-    return text.replace(TOKEN, validate_origin(origin))
+def validate_version(value):
+    """Accept a release version, with or without the leading v, no whitespace."""
+    if not re.fullmatch(r'v?\d+\.\d+\.\d+', value or ''):
+        raise ValueError(f'Site version must look like 1.2.3 or v1.2.3, got {value!r}')
+    return value.lstrip('v')
+
+
+def apply(text, origin, version=None):
+    """Substitute the publish-time tokens in one document.
+
+    `version` is optional so a caller that has no release in hand (a local
+    preview) can still resolve the origin; assert_no_token() is what stops such
+    a tree from being published half-resolved.
+    """
+    text = text.replace(TOKEN, validate_origin(origin))
+    if version is not None:
+        resolved = validate_version(version)
+        text = text.replace(VERSION_TOKEN, resolved)
+        # A tree published earlier carries an already-resolved version. The
+        # mirror's updater re-publishes exactly that HTML against a newer
+        # release (selfhost.sync passes site_root=<live deployment>), so
+        # leaving the old number there would have the structured data claim a
+        # version that is not what the page now downloads.
+        text = re.sub(r'("softwareVersion":\s*")v?\d+\.\d+\.\d+(")',
+                      lambda m: m.group(1) + resolved + m.group(2), text)
+    return text
 
 
 def is_text(path):
     return path.suffix.lower() in TEXT_SUFFIXES
 
 
-def apply_tree(root, origin):
+def apply_tree(root, origin, version=None):
     """Rewrite every text file under `root` in place. Returns the paths changed."""
-    origin = validate_origin(origin)
     changed = []
     for path in sorted(Path(root).rglob('*')):
         if not path.is_file() or not is_text(path):
             continue
         original = path.read_text(encoding='utf-8')
-        if TOKEN not in original:
+        if TOKEN not in original and VERSION_TOKEN not in original:
             continue
-        path.write_text(original.replace(TOKEN, origin), encoding='utf-8')
+        path.write_text(apply(original, origin, version), encoding='utf-8')
         changed.append(path)
     return changed
 
 
 def assert_no_token(root):
-    """Fail loudly if a published tree still carries the token.
+    """Fail loudly if a published tree still carries either token.
 
-    A leftover `__SITE_ORIGIN__` is not a visible break -- the page renders and
-    only the machine-readable half is wrong -- so it has to be an error, not
-    something to notice later in Search Console.
+    A leftover `__SITE_ORIGIN__` or `__SITE_VERSION__` is not a visible break --
+    the page renders and only the machine-readable half is wrong -- so it has to
+    be an error, not something to notice later in Search Console.
     """
-    stragglers = [p for p in sorted(Path(root).rglob('*'))
-                  if p.is_file() and is_text(p) and TOKEN in p.read_text(encoding='utf-8')]
+    stragglers = []
+    for path in sorted(Path(root).rglob('*')):
+        if not path.is_file() or not is_text(path):
+            continue
+        body = path.read_text(encoding='utf-8')
+        for token in (TOKEN, VERSION_TOKEN):
+            if token in body:
+                stragglers.append(f'{path} ({token})')
     if stragglers:
-        raise ValueError('Site origin token left unsubstituted in: '
-                         + ', '.join(str(p) for p in stragglers))
+        raise ValueError('Publish-time token left unsubstituted in: ' + ', '.join(stragglers))
+
+
+def assert_version(root, version):
+    """Every page that states a software version must state this one.
+
+    The re-target above is a regex over published HTML, so a markup change
+    could make it silently no-op and quietly restore the stale number. This
+    turns that back into a failure.
+    """
+    expected = f'"softwareVersion":"{validate_version(version)}"'
+    wrong = [str(path) for path in sorted(Path(root).rglob('*'))
+             if path.is_file() and is_text(path)
+             and 'softwareVersion' in (body := path.read_text(encoding='utf-8'))
+             and expected not in body]
+    if wrong:
+        raise ValueError(f'Published version is not {version} in: ' + ', '.join(wrong))
 
 
 def contains_token(reference):
@@ -83,7 +133,7 @@ def contains_token(reference):
     distribute.site_files() crawls src/href to decide what to mirror; a
     token URL is not a relative path and must not be looked for on disk.
     """
-    return TOKEN in reference
+    return TOKEN in reference or VERSION_TOKEN in reference
 
 
 if __name__ == '__main__':
@@ -91,7 +141,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, required=True, help='Directory to rewrite in place')
     parser.add_argument('--origin', required=True, help='https origin (optionally with path prefix) this tree is served from')
+    parser.add_argument('--version', help='release version this deployment publishes, e.g. v2.7.0')
     args = parser.parse_args()
-    for path in apply_tree(args.root, args.origin):
+    for path in apply_tree(args.root, args.origin, args.version):
         print(path)
     assert_no_token(args.root)

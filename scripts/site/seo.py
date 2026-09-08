@@ -103,6 +103,9 @@ def software_node(lang, description, screenshots, page_path):
         'description': plain(description),
         'applicationCategory': 'DeveloperApplication',
         'operatingSystem': 'macOS, Windows, Linux, Android',
+        # Resolved at publish time from the release being published; see
+        # site_origin.VERSION_TOKEN for why it is not written at build time.
+        'softwareVersion': site_origin.VERSION_TOKEN,
         'inLanguage': LANG_TAG[lang],
         'isAccessibleForFree': True,
         'license': f'{GITHUB}/blob/main/LICENSE',

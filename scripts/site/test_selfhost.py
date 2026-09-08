@@ -51,8 +51,17 @@ class SelfhostTests(unittest.TestCase):
         manifest = json.loads((live / 'downloads.json').read_text())
         self.assertEqual(manifest['version'], 'v2.6.0')
         self.assertEqual(manifest['china']['provider'], 'Shenzhen')
+        # The site is carried over from the previous deployment as-is, with one
+        # exception: the version its structured data claims is retargeted to the
+        # release now being served. Otherwise the mirror would keep advertising
+        # 2.5.0 while handing out 2.6.0 downloads.
         for page in ['index.html', 'zh/index.html', 'locale.js']:
-            self.assertEqual((live / page).read_bytes(), (self.old / page).read_bytes())
+            carried = (live / page).read_text()
+            previous = (self.old / page).read_text()
+            self.assertEqual(carried.replace('"softwareVersion":"2.6.0"', '"softwareVersion":"2.5.0"'),
+                             previous)
+        self.assertIn('"softwareVersion":"2.6.0"', (live / 'index.html').read_text())
+        self.assertIn('"softwareVersion":"2.6.0"', (live / 'zh/index.html').read_text())
         for name in distribute.REQUIRED:
             old = self.old / 'releases/v2.5.0' / name
             retained = live / 'releases/v2.5.0' / name
