@@ -16,6 +16,7 @@ import {
   FolderOpen,
   FolderInput,
   FolderPlus,
+  History,
   Image as ImageIcon,
   LayoutGrid,
   Music,
@@ -66,6 +67,19 @@ export interface Artifact {
   starred: boolean;
   hardlinked: boolean;
   drifted: boolean;
+  /** Which entry of `versions` the fields above describe. */
+  currentVersion: string;
+  /** Every ingest of this deliverable, newest first — always at least one. */
+  versions: ArtifactVersion[];
+}
+
+/** Mirrors `claw_fleet_core::artifacts::ArtifactVersion`. */
+export interface ArtifactVersion {
+  id: string;
+  addedMs: number;
+  sizeBytes: number;
+  sourcePath: string;
+  hardlinked: boolean;
 }
 
 /** Mirrors `claw_fleet_core::artifacts::Folder`. */
@@ -877,6 +891,10 @@ export function ArtifactsView() {
             setSelectedId(null);
             await load();
           }}
+          // A rollback rewrites the artifact's current version, size and
+          // source, so the list has to be refetched — but the detail pane
+          // stays open on the same card.
+          onReloaded={load}
           onError={setError}
         />
       ) : items === null ? (
@@ -1349,6 +1367,7 @@ function ArtifactDetail({
   onBack,
   onPatch,
   onDeleted,
+  onReloaded,
   onError,
 }: {
   artifact: Artifact;
@@ -1359,6 +1378,7 @@ function ArtifactDetail({
     fields: { title?: string; note?: string; starred?: boolean; path?: string },
   ) => void;
   onDeleted: () => void;
+  onReloaded: () => Promise<void> | void;
   onError: (msg: string | null) => void;
 }) {
   const { t } = useTranslation();
@@ -1369,9 +1389,18 @@ function ArtifactDetail({
   // folder and creates a new one by typing it, which is how a path field in a
   // file manager already behaves.
   const [folder, setFolder] = useState(artifact.path);
+  /**
+   * Which version the stage is previewing; null means the current one.
+   *
+   * Reset whenever the artifact changes — and whenever its current version
+   * does, so that a rollback lands you on what is now current rather than
+   * leaving you pinned to a version that just stopped being history.
+   */
+  const [previewVersion, setPreviewVersion] = useState<string | null>(null);
 
   useEffect(() => setNote(artifact.note), [artifact.id, artifact.note]);
   useEffect(() => setFolder(artifact.path), [artifact.id, artifact.path]);
+  useEffect(() => setPreviewVersion(null), [artifact.id, artifact.currentVersion]);
 
   // Null for a remote workspace — the two OS-level actions are hidden rather
   // than pointed at a path on the other machine.
@@ -1482,7 +1511,7 @@ function ArtifactDetail({
         </div>
       </div>
 
-      <ArtifactStage artifact={artifact} />
+      <ArtifactStage artifact={artifact} version={previewVersion ?? undefined} />
 
       <div className={styles.detail_meta}>
         {artifact.drifted && (
@@ -1536,7 +1565,117 @@ function ArtifactDetail({
             if (note !== artifact.note) onPatch(artifact.id, { note });
           }}
         />
+        {artifact.versions.length > 1 && (
+          <ArtifactVersions
+            artifact={artifact}
+            previewVersion={previewVersion}
+            onPreview={setPreviewVersion}
+            onReloaded={onReloaded}
+            onError={onError}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * An artifact's history.
+ *
+ * Only rendered when there is more than one version — a card with a single
+ * ingest has no history worth a section, and showing "v1" alone would imply
+ * the feature is doing something it is not.
+ *
+ * Selecting a row previews *that* version in the stage above without changing
+ * what is stored; 恢复 is the separate, explicit act. That split matters:
+ * looking at an old version is how you decide whether you want it back.
+ */
+function ArtifactVersions({
+  artifact,
+  previewVersion,
+  onPreview,
+  onReloaded,
+  onError,
+}: {
+  artifact: Artifact;
+  previewVersion: string | null;
+  onPreview: (version: string | null) => void;
+  onReloaded: () => Promise<void> | void;
+  onError: (msg: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const shown = previewVersion ?? artifact.currentVersion;
+
+  const rollback = async (version: string) => {
+    setBusy(true);
+    try {
+      await invoke("rollback_artifact", { id: artifact.id, version });
+      onError(null);
+      await onReloaded();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.versions}>
+      <div className={styles.versions_head}>
+        <History size={13} strokeWidth={1.5} />
+        <span>
+          {t("artifacts.versions", "版本历史（{{count}} 个）", {
+            count: artifact.versions.length,
+          })}
+        </span>
+      </div>
+      {artifact.versions.map((v) => {
+        const isCurrent = v.id === artifact.currentVersion;
+        return (
+          <div
+            key={v.id}
+            className={`${styles.version_row} ${shown === v.id ? styles.version_row_on : ""}`}
+          >
+            <button
+              type="button"
+              className={styles.version_target}
+              onClick={() => onPreview(isCurrent ? null : v.id)}
+              title={v.sourcePath}
+            >
+              <span className={styles.version_id}>{v.id}</span>
+              <span className={styles.version_time}>
+                {new Date(v.addedMs).toLocaleString()}
+              </span>
+              <span className={styles.version_size}>{formatBytes(v.sizeBytes)}</span>
+              {isCurrent && (
+                <span className={styles.version_current}>
+                  {t("artifacts.version_current", "当前")}
+                </span>
+              )}
+            </button>
+            {!isCurrent && (
+              <button
+                type="button"
+                className={styles.version_restore}
+                disabled={busy}
+                onClick={() => rollback(v.id)}
+              >
+                {t("artifacts.version_restore", "恢复")}
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {previewVersion && (
+        <div className={styles.version_hint}>
+          {t(
+            "artifacts.version_previewing",
+            "正在预览 {{version}}，存储的仍是 {{current}}。",
+            { version: previewVersion, current: artifact.currentVersion },
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1555,10 +1694,17 @@ function ArtifactDetail({
  * .xls / .ppt, ODF, archives) still gets the typed placeholder with 导出 / 打开
  * one click away in the bar above.
  */
-function ArtifactStage({ artifact }: { artifact: Artifact }) {
+function ArtifactStage({
+  artifact,
+  version,
+}: {
+  artifact: Artifact;
+  /** Preview this version instead of the current one. */
+  version?: string;
+}) {
   const { t } = useTranslation();
   const [text, setText] = useState<string | null>(null);
-  const url = artifactBlobUrl(artifact.id, artifact.name);
+  const url = artifactBlobUrl(artifact.id, artifact.name, version);
   // html goes to the frame by URL, so only the two rendered-from-source modes
   // pull the bytes into React.
   const textMode = artifact.kind === "text" ? textPreviewMode(artifact.mime) : null;
