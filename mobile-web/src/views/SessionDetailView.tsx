@@ -16,7 +16,6 @@ import {
 import {
   Bot,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   CircleCheck,
   CircleHelp,
@@ -83,6 +82,7 @@ import { AgentNavProvider, useAgentNav } from "./AgentNavContext";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { buildInfoRows } from "./sessionInfoRows";
 import styles from "./SessionDetailView.module.css";
+import { AppHeader } from "./AppHeader";
 
 const TAIL_POLL_MS = 2500;
 const TAIL_INITIAL = 120;
@@ -1296,11 +1296,14 @@ export function SessionDetailView({
   return (
     <AgentNavProvider nav={nav}>
     <div className={styles.page}>
-      <header className={styles.header}>
-        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={20} />
-        </button>
-        <div className={styles.headerText}>
+      {/* `seamless`: everything that can follow this header — the info panel,
+          the ↑来自 breadcrumb, the tab strip — shares --color-bg-secondary, so a
+          hairline here would slice one panel into stacked slabs. This page is
+          why AppHeader exists: it is the one that drifted. */}
+      <AppHeader
+        onBack={onBack}
+        seamless
+        title={
           <div className={styles.headerTitle}>
             {/* Subagent identity only. The scope *switcher* that used to sit
                 here is gone — its full family list lives in the ☰ menu, and on a
@@ -1333,16 +1336,20 @@ export function SessionDetailView({
               <ChevronDown size={13} className={styles.titleChevron} data-open={infoOpen} />
             </button>
           </div>
-        </div>
-        <span className={styles.statusDot} data-working={working} />
-        <SessionHeaderMenu
-          session={session}
-          family={family}
-          onOpenSession={(s) => onOpenSessionId(s.id)}
-          infoOpen={infoOpen}
-          onToggleInfo={() => setInfoOpen((v) => !v)}
-        />
-      </header>
+        }
+        actions={
+          <>
+            <span className={styles.statusDot} data-working={working} />
+            <SessionHeaderMenu
+              session={session}
+              family={family}
+              onOpenSession={(s) => onOpenSessionId(s.id)}
+              infoOpen={infoOpen}
+              onToggleInfo={() => setInfoOpen((v) => !v)}
+            />
+          </>
+        }
+      />
 
       {infoOpen && <SessionInfoPanel session={session} />}
 
