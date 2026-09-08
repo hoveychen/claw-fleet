@@ -28,7 +28,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
@@ -36,6 +36,7 @@ import { canRevealPath } from "../canReveal";
 import { formatBytes } from "../formatBytes";
 import { isWebBuild } from "../hostEnv";
 import { getItem, setItem } from "../storage";
+import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
 import { downloadArtifact } from "../mock/liveProxy";
 import { isBrowsableArchive } from "../../../shared-ts/zipDir";
@@ -254,6 +255,46 @@ export function uniqueExportNames(names: string[]): string[] {
 export function joinExportPath(dir: string, name: string): string {
   const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
   return `${dir.replace(/[/\\]+$/, "")}${sep}${name}`;
+}
+
+/**
+ * A folder row's drop-zone key, and how to read one back.
+ *
+ * The key carries the workspace as well as the path because a folder only
+ * exists *within* a workspace — the tree's top level is the workspace, and
+ * "交付" under repo A is a different place from "交付" under repo B. Dropping
+ * across workspaces is refused (see `dropTargetFolder`) rather than silently
+ * re-homing a deliverable to a repo it did not come from.
+ *
+ * Same `data-` attribute mechanism the wiki's folder rail uses: `dropTargetAt`
+ * hit-tests for the nearest ancestor carrying it, so a nested row naturally
+ * wins over the workspace row it sits inside.
+ */
+export const DROP_ATTR = "data-artifact-drop";
+
+export function dropKey(workspacePath: string, directory: string): string {
+  return `${workspacePath}\u0000${directory}`;
+}
+
+/**
+ * Where a drop landed, or `null` when it landed nowhere it may go.
+ *
+ * `null` for: outside any folder row, and — deliberately — a row belonging to
+ * a different workspace than the dragged artifacts. Mixed selections spanning
+ * two workspaces therefore cannot be dropped at all, which is the honest
+ * outcome: there is no single destination that means the same thing for both.
+ */
+export function dropTargetFolder(
+  key: string | null,
+  dragging: { workspacePath: string }[],
+): { workspacePath: string; directory: string } | null {
+  if (key === null || dragging.length === 0) return null;
+  const cut = key.indexOf("\u0000");
+  if (cut < 0) return null;
+  const workspacePath = key.slice(0, cut);
+  const directory = key.slice(cut + "\u0000".length);
+  if (dragging.some((a) => a.workspacePath !== workspacePath)) return null;
+  return { workspacePath, directory };
 }
 
 /**
@@ -543,16 +584,7 @@ export function ArtifactsView() {
   }, []);
 
   const checkedItems = useMemo(() => shown.filter((a) => checked.has(a.id)), [shown, checked]);
-  const [busy, setBusy] = useState(false);
 
-  /**
-   * Run `step` for every checked artifact, collecting failures instead of
-   * stopping at the first one.
-   *
-   * Aborting halfway through a batch of 20 leaves the user with no idea which
-   * ones landed. Every item is attempted; the ones that failed are named in one
-   * error line at the end, and the successes stand.
-   */
   const runBatch = useCallback(
     async (items: Artifact[], step: (artifact: Artifact, index: number) => Promise<void>) => {
       setBusy(true);
@@ -691,6 +723,95 @@ export function ArtifactsView() {
   );
 
   /** Folder paths offered when filing an artifact, for one workspace. */
+  // ── Drag to file into a folder ──────────────────────────────────────────
+  //
+  // Pointer-based, not HTML5 DnD — the latter is inert in this webview (see
+  // `usePointerDrag`). One hook for the whole view; which card was pressed
+  // travels in a ref that each card's pointerdown stamps.
+  const pressedId = useRef<string | null>(null);
+  const [dragging, setDragging] = useState<Artifact[]>([]);
+  const [dropAt, setDropAt] = useState<string | null>(null);
+  const [dragPoint, setDragPoint] = useState<{ x: number; y: number } | null>(null);
+
+  /**
+   * What a press on `id` drags.
+   *
+   * A press on something already checked drags the whole selection — that is
+   * what makes "tick five, drag them together" work. A press on anything else
+   * drags just that one and leaves the selection alone, so an accidental drag
+   * can never move files the user forgot were ticked.
+   */
+  const dragSetFor = useCallback(
+    (id: string): Artifact[] => {
+      if (checked.has(id)) return shown.filter((a) => checked.has(a.id));
+      const one = shown.find((a) => a.id === id);
+      return one ? [one] : [];
+    },
+    [checked, shown],
+  );
+
+  const endDrag = useCallback(() => {
+    pressedId.current = null;
+    setDragging([]);
+    setDropAt(null);
+    setDragPoint(null);
+  }, []);
+
+  const fileInto = useCallback(
+    async (items: Artifact[], directory: string) => {
+      const moved = items.filter((a) => a.path !== directory);
+      if (moved.length === 0) return;
+      await runBatch(moved, async (a) => {
+        await invoke<Artifact>("update_artifact", { id: a.id, path: directory });
+      });
+      clearChecked();
+      await load();
+    },
+    [runBatch, clearChecked, load],
+  );
+
+  const cardDrag = usePointerDrag({
+    onStart: (p) => {
+      const id = pressedId.current;
+      if (!id) return false;
+      const set = dragSetFor(id);
+      if (set.length === 0) return false;
+      setDragging(set);
+      setDragPoint({ x: p.x, y: p.y });
+    },
+    onMove: (p) => {
+      setDragPoint({ x: p.x, y: p.y });
+      setDropAt(dropTargetAt(p.over, DROP_ATTR));
+    },
+    onDrop: (p) => {
+      const items = dragging.length > 0 ? dragging : dragSetFor(pressedId.current ?? "");
+      const target = dropTargetFolder(dropTargetAt(p.over, DROP_ATTR), items);
+      endDrag();
+      if (target) void fileInto(items, target.directory);
+    },
+    onCancel: endDrag,
+  });
+
+  /** Props every draggable row/card spreads. */
+  const dragProps = useCallback(
+    (id: string) => ({
+      onPointerDown: (e: React.PointerEvent) => {
+        pressedId.current = id;
+        cardDrag.onPointerDown(e);
+      },
+    }),
+    [cardDrag],
+  );
+  const [busy, setBusy] = useState(false);
+
+  /**
+   * Run `step` for every checked artifact, collecting failures instead of
+   * stopping at the first one.
+   *
+   * Aborting halfway through a batch of 20 leaves the user with no idea which
+   * ones landed. Every item is attempted; the ones that failed are named in one
+   * error line at the end, and the successes stand.
+   */
   const folderOptions = useCallback(
     (workspacePath: string): string[] => {
       const out = new Set<string>();
@@ -858,6 +979,7 @@ export function ArtifactsView() {
       secondary={
         <ArtifactDirectoryTree
           nodes={directoryTree}
+          dropKeyActive={dropAt}
           selectedKey={workspace ? `${workspace}\u0000${directory}` : ""}
           totalCount={items?.length ?? 0}
           onSelect={(nextWorkspace, nextDirectory) => {
@@ -872,6 +994,18 @@ export function ArtifactsView() {
       }
     >
       {error && <div className={styles.error_line}>{error}</div>}
+      {/* What the pointer is carrying. `pointer-events: none` in CSS, or it
+          would hit-test as the drop target under itself. */}
+      {dragging.length > 0 && dragPoint && (
+        <div
+          className={styles.drag_ghost}
+          style={{ left: dragPoint.x + 12, top: dragPoint.y + 12 }}
+        >
+          {dragging.length === 1
+            ? dragging[0].title
+            : t("artifacts.drag_n", "{{count}} 份产出", { count: dragging.length })}
+        </div>
+      )}
       {selected ? (
         <ArtifactDetail
           artifact={selected}
@@ -907,8 +1041,13 @@ export function ArtifactsView() {
           sortKey={sortKey}
           sortDir={sortDir}
           checked={checked}
+          draggingIds={dragging.map((d) => d.id)}
+          dragProps={dragProps}
           onSort={chooseSort}
-          onOpen={setSelectedId}
+          onOpen={(id) => {
+            if (cardDrag.didDrag()) return;
+            setSelectedId(id);
+          }}
           onToggleChecked={toggleChecked}
           onToggleStar={(a) => patch(a.id, { starred: !a.starred })}
         />
@@ -919,7 +1058,14 @@ export function ArtifactsView() {
               key={a.id}
               artifact={a}
               checked={checked.has(a.id)}
-              onOpen={() => setSelectedId(a.id)}
+              dragging={dragging.some((d) => d.id === a.id)}
+              dragProps={dragProps(a.id)}
+              // A completed drag ends in a click on the card it started from;
+              // without this guard every drop would also open the detail pane.
+              onOpen={() => {
+                if (cardDrag.didDrag()) return;
+                setSelectedId(a.id);
+              }}
               onToggleChecked={(shift) => toggleChecked(a.id, shift)}
               onToggleStar={() => patch(a.id, { starred: !a.starred })}
             />
@@ -944,6 +1090,8 @@ function ArtifactTable({
   sortKey,
   sortDir,
   checked,
+  draggingIds,
+  dragProps,
   onSort,
   onOpen,
   onToggleChecked,
@@ -953,6 +1101,8 @@ function ArtifactTable({
   sortKey: SortKey;
   sortDir: SortDir;
   checked: ReadonlySet<string>;
+  draggingIds: string[];
+  dragProps: (id: string) => { onPointerDown: (e: React.PointerEvent) => void };
   onSort: (key: SortKey) => void;
   onOpen: (id: string) => void;
   onToggleChecked: (id: string, shift: boolean) => void;
@@ -994,7 +1144,10 @@ function ArtifactTable({
               <tr
                 key={a.id}
                 onClick={() => onOpen(a.id)}
-                className={`${styles.row} ${checked.has(a.id) ? styles.row_checked : ""}`}
+                className={`${styles.row} ${checked.has(a.id) ? styles.row_checked : ""} ${
+                  draggingIds.includes(a.id) ? styles.row_dragging : ""
+                }`}
+                {...dragProps(a.id)}
               >
                 <td className={styles.col_check}>
                   <input
@@ -1070,6 +1223,7 @@ function ArtifactTable({
 function ArtifactDirectoryTree({
   nodes,
   selectedKey,
+  dropKeyActive,
   totalCount,
   onSelect,
   onCreateFolder,
@@ -1078,6 +1232,8 @@ function ArtifactDirectoryTree({
 }: {
   nodes: ArtifactDirectoryNode[];
   selectedKey: string;
+  /** Drop zone the pointer is currently over, or null. */
+  dropKeyActive: string | null;
   totalCount: number;
   onSelect: (workspacePath: string, directory: string) => void;
   onCreateFolder: (workspacePath: string, path: string) => void;
@@ -1103,6 +1259,7 @@ function ArtifactDirectoryTree({
           node={node}
           depth={0}
           selectedKey={selectedKey}
+          dropKeyActive={dropKeyActive}
           onSelect={onSelect}
           onCreateFolder={onCreateFolder}
           onRenameFolder={onRenameFolder}
@@ -1117,6 +1274,7 @@ function ArtifactDirectoryBranch({
   node,
   depth,
   selectedKey,
+  dropKeyActive,
   onSelect,
   onCreateFolder,
   onRenameFolder,
@@ -1125,6 +1283,7 @@ function ArtifactDirectoryBranch({
   node: ArtifactDirectoryNode;
   depth: number;
   selectedKey: string;
+  dropKeyActive: string | null;
   onSelect: (workspacePath: string, directory: string) => void;
   onCreateFolder: (workspacePath: string, path: string) => void;
   onRenameFolder: (workspacePath: string, from: string, to: string) => void;
@@ -1140,6 +1299,7 @@ function ArtifactDirectoryBranch({
    * desktop is moving away from.
    */
   const [editing, setEditing] = useState<null | "create" | "rename">(null);
+  const myDropKey = dropKey(node.workspacePath, node.directory);
   const hasChildren = node.children.length > 0;
   const selected = selectedKey === `${node.workspacePath}\u0000${node.directory}`;
   // The workspace row is the drive, not a folder: it can hold new folders but
@@ -1164,7 +1324,15 @@ function ArtifactDirectoryBranch({
 
   return (
     <div>
-      <div className={`${styles.tree_row} ${selected ? styles.tree_row_active : ""}`} style={{ paddingLeft: 12 + depth * 15 }}>
+      <div
+        className={`${styles.tree_row} ${selected ? styles.tree_row_active : ""} ${
+          dropKeyActive === myDropKey ? styles.tree_row_drop : ""
+        }`}
+        style={{ paddingLeft: 12 + depth * 15 }}
+        // The drop zone is the whole row, including the workspace row — where
+        // dropping means "out of any folder", the gesture for unfiling.
+        {...{ [DROP_ATTR]: myDropKey }}
+      >
         <button
           type="button"
           className={styles.tree_twisty}
@@ -1242,6 +1410,7 @@ function ArtifactDirectoryBranch({
           node={child}
           depth={depth + 1}
           selectedKey={selectedKey}
+          dropKeyActive={dropKeyActive}
           onSelect={onSelect}
           onCreateFolder={onCreateFolder}
           onRenameFolder={onRenameFolder}
@@ -1255,12 +1424,18 @@ function ArtifactDirectoryBranch({
 function ArtifactCard({
   artifact,
   checked,
+  dragging,
+  dragProps,
   onOpen,
   onToggleChecked,
   onToggleStar,
 }: {
   artifact: Artifact;
   checked: boolean;
+  /** Part of the set currently being dragged — dimmed so the pointer's cargo
+   *  is visible in the grid it came from. */
+  dragging: boolean;
+  dragProps: { onPointerDown: (e: React.PointerEvent) => void };
   onOpen: () => void;
   onToggleChecked: (shift: boolean) => void;
   onToggleStar: () => void;
@@ -1273,7 +1448,12 @@ function ArtifactCard({
   const thumb = thumbFailed ? null : thumbMode(artifact.mime, artifact.sizeBytes);
   const onThumbFail = useCallback(() => setThumbFailed(true), []);
   return (
-    <div className={`${styles.card} ${checked ? styles.card_checked : ""}`} onClick={onOpen} role="button" tabIndex={0}
+    <div
+      className={`${styles.card} ${checked ? styles.card_checked : ""} ${dragging ? styles.card_dragging : ""}`}
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      {...dragProps}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();

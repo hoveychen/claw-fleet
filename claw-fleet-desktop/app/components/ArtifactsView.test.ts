@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_SORT_DIR,
+  dropKey,
+  dropTargetFolder,
   joinExportPath,
   nextSelection,
   uniqueExportNames,
@@ -347,5 +349,47 @@ describe("joinExportPath", () => {
   it("does not double the separator on a trailing slash", () => {
     expect(joinExportPath("/out/", "a.pdf")).toBe("/out/a.pdf");
     expect(joinExportPath("C:\\out\\", "a.pdf")).toBe("C:\\out\\a.pdf");
+  });
+});
+
+describe("dropTargetFolder", () => {
+  const inA = [{ workspacePath: "/w/a" }];
+
+  it("reads back the workspace and folder a row encodes", () => {
+    expect(dropTargetFolder(dropKey("/w/a", "交付/2026Q3"), inA)).toEqual({
+      workspacePath: "/w/a",
+      directory: "交付/2026Q3",
+    });
+    // The workspace row encodes the empty directory — dropping there unfiles.
+    expect(dropTargetFolder(dropKey("/w/a", ""), inA)).toEqual({
+      workspacePath: "/w/a",
+      directory: "",
+    });
+  });
+
+  it("refuses a drop onto another workspace's folder", () => {
+    // "交付" under repo A is not the same place as "交付" under repo B, and
+    // silently re-homing a deliverable to a repo it never came from would be
+    // the worst possible reading of the gesture.
+    expect(dropTargetFolder(dropKey("/w/b", "交付"), inA)).toBeNull();
+  });
+
+  it("refuses a mixed selection that spans two workspaces", () => {
+    const mixed = [{ workspacePath: "/w/a" }, { workspacePath: "/w/b" }];
+    // No single destination means the same thing for both, so nowhere is a
+    // legal target — including each of their own folders.
+    expect(dropTargetFolder(dropKey("/w/a", "交付"), mixed)).toBeNull();
+    expect(dropTargetFolder(dropKey("/w/b", "交付"), mixed)).toBeNull();
+  });
+
+  it("is null when the drop landed nowhere, or on nothing", () => {
+    expect(dropTargetFolder(null, inA)).toBeNull();
+    expect(dropTargetFolder(dropKey("/w/a", "交付"), [])).toBeNull();
+    // A key without the separator is not a folder row.
+    expect(dropTargetFolder("garbage", inA)).toBeNull();
+  });
+
+  it("keeps a folder path containing the separator-free slashes intact", () => {
+    expect(dropTargetFolder(dropKey("/w/a", "a/b/c"), inA)?.directory).toBe("a/b/c");
   });
 });
