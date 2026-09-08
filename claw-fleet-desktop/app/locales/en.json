@@ -2527,6 +2527,7 @@
     "version_current": "current",
     "version_restore": "Restore",
     "version_previewing": "Previewing {{version}}; {{current}} is still what is stored.",
+    "drag_n": "{{count}} artifacts",
     "filter_all": "All",
     "filter_starred": "Starred",
     "sort_by": "Sort by",

@@ -47,8 +47,9 @@ type RawInvoke = (cmd: string, args?: unknown, options?: unknown) => Promise<unk
 
 interface Internals {
   invoke?: RawInvoke;
-  __fleetInvokeProbed?: boolean;
 }
+
+const probedInternals = new WeakSet<object>();
 
 /**
  * Install the wrapper. Idempotent, and a no-op when there are no internals to
@@ -56,15 +57,21 @@ interface Internals {
  *
  * Must run *after* whatever installs the internals — `installMocks()` or
  * `installWebTransport()` both replace the whole object, which would drop the
- * wrapper if it went first.
+ * wrapper if it went first. Current Tauri hosts expose `invoke` as a readonly,
+ * non-configurable property; those hosts cannot be wrapped and must remain a
+ * no-op instead of aborting the whole app boot.
  */
 export function installInvokeProbe(): void {
   if (typeof window === "undefined") return;
   const internals = (window as unknown as { __TAURI_INTERNALS__?: Internals })
     .__TAURI_INTERNALS__;
   const raw = internals?.invoke;
-  if (!internals || typeof raw !== "function" || internals.__fleetInvokeProbed) return;
-  internals.__fleetInvokeProbed = true;
+  if (!internals || typeof raw !== "function" || probedInternals.has(internals)) return;
+
+  const descriptor = Object.getOwnPropertyDescriptor(internals, "invoke");
+  if (descriptor && descriptor.writable === false && typeof descriptor.set !== "function") {
+    return;
+  }
 
   let windowStart = 0;
   let linesInWindow = 0;
@@ -83,7 +90,7 @@ export function installInvokeProbe(): void {
     });
   };
 
-  internals.invoke = (cmd: string, args?: unknown, options?: unknown) => {
+  const wrapped: RawInvoke = (cmd: string, args?: unknown, options?: unknown) => {
     if (cmd === LOG_CMD) return raw.call(internals, cmd, args, options);
     const started = Date.now();
     let settled = false;
@@ -109,4 +116,13 @@ export function installInvokeProbe(): void {
       },
     );
   };
+
+  // A host Proxy may reject assignment even if its descriptor looked writable.
+  // Instrumentation is optional; startup is not, so degrade safely.
+  try {
+    internals.invoke = wrapped;
+  } catch {
+    return;
+  }
+  if (internals.invoke === wrapped) probedInternals.add(internals);
 }
