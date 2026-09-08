@@ -15,7 +15,7 @@ import type { SourceInfo } from "./useSourcesConfig";
 export const AGENT_TOOL_CHOICES: Array<[string, string]> = [
   ["claude", "Claude"],
   ["codex", "Codex"],
-  ["dsh", "dsh"],
+  ["dsh", "DeepSeek Harness"],
 ];
 
 /** 源注册名 → launcher 的 tool 值。 */
