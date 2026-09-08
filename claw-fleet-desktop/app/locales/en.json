@@ -2522,6 +2522,7 @@
     "batch_delete": "Delete",
     "batch_delete_confirm": "Delete the {{count}} selected artifacts? This cannot be undone.",
     "batch_failed": "{{count}} failed: {{detail}}",
+    "selected_n_short": "{{count}} selected · {{size}}",
     "filter_all": "All",
     "filter_starred": "Starred",
     "sort_by": "Sort by",

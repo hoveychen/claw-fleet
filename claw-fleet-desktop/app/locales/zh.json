@@ -2519,6 +2519,7 @@
     "batch_delete": "删除",
     "batch_delete_confirm": "删除选中的 {{count}} 份产出？此操作不可撤销。",
     "batch_failed": "{{count}} 份失败：{{detail}}",
+    "selected_n_short": "{{count}} 份 · {{size}}",
     "filter_all": "全部",
     "filter_starred": "已收藏",
     "sort_by": "排序方式",

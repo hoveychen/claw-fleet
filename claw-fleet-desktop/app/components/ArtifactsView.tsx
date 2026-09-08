@@ -6,12 +6,15 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  CheckCheck,
+  Download,
   FileSpreadsheet,
   FileText,
   FileType,
   Film,
   Folder,
   FolderOpen,
+  FolderInput,
   FolderPlus,
   Image as ImageIcon,
   LayoutGrid,
@@ -23,6 +26,7 @@ import {
   Star,
   Trash2,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -708,38 +712,70 @@ export function ArtifactsView() {
    * it invites changing the visible set with a delete button already aimed.
    */
   const selectionBar = (
-    <div className={styles.filters}>
+    /* One row, icon verbs.
+     *
+     * This sub-bar lives in the ~260px middle column, where five labelled
+     * chips wrapped onto three lines. Icons with a `title` keep the whole
+     * batch vocabulary on one line and leave the count — the thing you check
+     * before pressing 删除 — as the only text. */
+    <div className={styles.selection_bar}>
       <span className={styles.selection_count}>
-        {t("artifacts.selected_n", "已选 {{count}} 份 · 共 {{size}}", {
+        {t("artifacts.selected_n_short", "{{count}} 份 · {{size}}", {
           count: checkedItems.length,
           size: formatBytes(checkedItems.reduce((sum, a) => sum + a.sizeBytes, 0)),
         })}
       </span>
-      <button
-        className={styles.chip}
-        onClick={() => {
-          setChecked(new Set(shownIds));
-          setAnchorId(shownIds[shownIds.length - 1] ?? null);
-        }}
-      >
-        {t("artifacts.select_all", "全选当前")}
-      </button>
-      <button className={styles.chip} onClick={clearChecked}>
-        {t("artifacts.select_none", "清空选择")}
-      </button>
       <span className={styles.selection_actions}>
-        <button className={styles.chip} disabled={busy} onClick={batchMove}>
-          {t("artifacts.batch_move", "移动到…")}
-        </button>
-        <button className={styles.chip} disabled={busy} onClick={batchExport}>
-          {t("artifacts.batch_export", "导出到…")}
+        <button
+          type="button"
+          className={styles.selection_action}
+          title={t("artifacts.select_all", "全选当前")}
+          aria-label={t("artifacts.select_all", "全选当前")}
+          onClick={() => {
+            setChecked(new Set(shownIds));
+            setAnchorId(shownIds[shownIds.length - 1] ?? null);
+          }}
+        >
+          <CheckCheck size={14} strokeWidth={1.5} />
         </button>
         <button
-          className={`${styles.chip} ${styles.chip_danger}`}
+          type="button"
+          className={styles.selection_action}
+          title={t("artifacts.batch_move", "移动到…")}
+          aria-label={t("artifacts.batch_move", "移动到…")}
+          disabled={busy}
+          onClick={batchMove}
+        >
+          <FolderInput size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          className={styles.selection_action}
+          title={t("artifacts.batch_export", "导出到…")}
+          aria-label={t("artifacts.batch_export", "导出到…")}
+          disabled={busy}
+          onClick={batchExport}
+        >
+          <Download size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          className={`${styles.selection_action} ${styles.selection_action_danger}`}
+          title={t("artifacts.batch_delete", "删除")}
+          aria-label={t("artifacts.batch_delete", "删除")}
           disabled={busy}
           onClick={batchDelete}
         >
-          {t("artifacts.batch_delete", "删除")}
+          <Trash2 size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          className={styles.selection_action}
+          title={t("artifacts.select_none", "清空选择")}
+          aria-label={t("artifacts.select_none", "清空选择")}
+          onClick={clearChecked}
+        >
+          <X size={14} strokeWidth={1.5} />
         </button>
       </span>
     </div>
