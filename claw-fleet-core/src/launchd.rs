@@ -15,6 +15,20 @@ pub fn port_file_path() -> Option<PathBuf> {
     real_home_dir().map(|h| h.join(".fleet").join("port"))
 }
 
+/// `~/.fleet/host` — the address `fleet serve` / `fleet webui` actually bound.
+///
+/// Its own file beside `port` rather than a new format for `port`, so nothing
+/// that already reads `port` has to change. Written on every startup.
+///
+/// Load-bearing for share links: the port alone does not say whether another
+/// device can reach this server. A server bound to `127.0.0.1` is unreachable
+/// at the machine's LAN address — verified, the connection is simply refused —
+/// so a share URL built from the LAN IP would be dead on arrival while looking
+/// perfectly fine. Whoever builds such a URL has to know what was bound.
+pub fn host_file_path() -> Option<PathBuf> {
+    real_home_dir().map(|h| h.join(".fleet").join("host"))
+}
+
 /// `~/.fleet/token` — written by `fleet serve` on startup.
 pub fn token_file_path() -> Option<PathBuf> {
     real_home_dir().map(|h| h.join(".fleet").join("token"))
@@ -103,6 +117,22 @@ fn remove_legacy_serve_launchagent_at(launch_agents_dir: &std::path::Path) -> st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The three discovery files sit together, so anything that reads one can
+    /// read the others without a second convention to remember.
+    #[test]
+    fn the_discovery_files_are_siblings_under_the_fleet_dir() {
+        let (port, host, token) = (
+            port_file_path().unwrap(),
+            host_file_path().unwrap(),
+            token_file_path().unwrap(),
+        );
+        assert_eq!(port.parent(), host.parent());
+        assert_eq!(port.parent(), token.parent());
+        assert_eq!(port.file_name().unwrap(), "port");
+        assert_eq!(host.file_name().unwrap(), "host");
+        assert!(host.parent().unwrap().ends_with(".fleet"));
+    }
 
     #[test]
     fn removes_legacy_dir_and_is_noop_when_absent() {

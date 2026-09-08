@@ -308,6 +308,14 @@ pub fn serve(opts: ServeOptions) {
         let _ = std::fs::write(&pp, actual_port.to_string());
         let _ = std::fs::write(&tp, &token);
     }
+    // The bound host, for anything that has to build a URL someone else will
+    // open — see `launchd::host_file_path`.
+    if let Some(hp) = crate::launchd::host_file_path() {
+        if let Some(dir) = hp.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&hp, &host);
+    }
     {
         use std::io::Write as _;
         println!("FLEET_PROBE_PORT={}", actual_port);
