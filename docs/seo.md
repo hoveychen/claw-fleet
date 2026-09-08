@@ -41,6 +41,18 @@ ssh own-api-sz 'sudo systemctl start fleet-site-update.service && journalctl -u 
 - 镜像（裸域）：`/robots.txt` 正常生效，里面声明了 sitemap。
 - Pages：靠在 Search Console 里直接提交 sitemap URL。
 
+## sitemap 的 lastmod 是发布时盖的
+
+`docs/sitemap.xml` 提交进仓库时**不带** `lastmod`。日期由 `scripts/site/sitemap_lastmod.py` 在发布前盖上，取每个页面**自己最后一次提交**的日期。
+
+为什么不能在 `build.py` 里写：build 生成页面，那一刻改动它们的提交还不存在，所有日期都会晚一个提交——而晚的恰好是刚改过的那个页面，也就是唯一值得爬虫关心的页面。
+
+两个陷阱都已挡住：
+- **shallow clone**：`actions/checkout` 默认 depth 1，那种仓库里每个文件的「最后提交」都是 HEAD，盖上去等于宣称四个页面刚刚全改了。所以 `pages.yml` 里加了 `fetch-depth: 0`，脚本自己也拒绝在 shallow 仓库上盖（宁可不带 lastmod）。
+- **没有 git / 页面查不到提交**：同样是整条不带 `lastmod`，而不是编一个。Google 抓到 lastmod 与内容不符会直接不再信这个字段。
+
+镜像手动发布时也要先跑一次这个脚本（它改的是仓库里的 `docs/sitemap.xml`，然后再生成镜像站点树）。
+
 ## 站长验证怎么放
 
 两种都已支持，任选其一：
