@@ -34,15 +34,28 @@
   flex-shrink: 0;
 }
 
+/* Icon-only back button — one shape across all nine detail headers.
+   It used to come in three flavours: an accent-coral text label reading
+   "返回" (会话详情 / 知识库文档 / 终端), the same label reading the
+   *destination's* name instead (计划 / 仓库 / 仓库详情 / 用量 wrote "‹ 更多",
+   "‹ 仓库"), and this icon-only form (产出详情 / 知识库列表) — with the chevron
+   at 18, 20 or 22px depending on the page. The coral text made the loudest
+   thing in every header the way *out* of the page rather than the title of it,
+   and the destination-name variant was never available to 会话详情 anyway,
+   which is reachable from four different entry points.
+   The negative margin pulls the 32px hit target's optical left edge back onto
+   the header's 12px gutter, so the chevron lines up with the content below. */
 .backButton {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: -6px;
   border: none;
-  background: none;
-  color: var(--color-accent);
-  font-size: var(--t-body, 16px);
-  padding: 4px 8px 4px 0;
+  background: transparent;
+  color: var(--color-text);
+  border-radius: 8px;
   flex-shrink: 0;
 }
 

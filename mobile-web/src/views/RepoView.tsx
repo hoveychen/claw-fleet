@@ -41,8 +41,7 @@ export function RepoView({ client, onBack, onOpenRepo }: Props) {
     <div className={styles.page}>
       <div className={styles.header}>
         <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={22} />
-          {t("更多")}
+          <ChevronLeft size={20} />
         </button>
         <div className={styles.headerText}>
           <div className={styles.headerTitle}>{t("仓库")}</div>
