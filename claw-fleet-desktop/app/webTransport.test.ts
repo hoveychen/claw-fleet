@@ -268,6 +268,10 @@ const SIDE_EFFECT_ONLY = ["restart_app", "print_webview"];
 function invokedCommands(dir: string, out = new Set<string>()): Set<string> {
   for (const entry of readdirSync(dir)) {
     if (entry === "node_modules" || entry === "generated") continue;
+    // Tests are not call sites. A test that names a command — including one
+    // that has since been deleted, as a fixture for what used to go wrong —
+    // must not be read as the browser build needing a route for it.
+    if (/\.test\.tsx?$/.test(entry)) continue;
     const p = join(dir, entry);
     if (statSync(p).isDirectory()) {
       invokedCommands(p, out);

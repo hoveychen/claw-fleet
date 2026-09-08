@@ -34,6 +34,9 @@ const DYNAMICALLY_DISPATCHED = [
 function collectInvokedCommands(dir: string, out = new Set<string>()): Set<string> {
   for (const entry of readdirSync(dir)) {
     if (entry === "node_modules" || entry === "generated") continue;
+    // Tests are not call sites — counting them would let a stale LIVE_ROUTES
+    // key stay "pinned" by nothing but a test fixture that mentions it.
+    if (/\.test\.tsx?$/.test(entry)) continue;
     const p = join(dir, entry);
     if (statSync(p).isDirectory()) {
       collectInvokedCommands(p, out);
