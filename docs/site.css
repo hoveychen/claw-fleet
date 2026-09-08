@@ -1249,3 +1249,39 @@ html[lang="zh-CN"] .hero-copy .intro {
     font-size: 13px;
   }
 }
+.harness-stage {
+  background: #e8eee8;
+  padding: 26px 32px;
+  margin-top: 34px;
+}
+.harness-stage .product-window {
+  border-radius: 12px;
+  max-height: none;
+}
+.product-stage.harness-stage .product-window img {
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0;
+}
+.harness-sample {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+@media (max-width: 740px) {
+  .harness-stage {
+    margin-top: 24px;
+    padding: 14px;
+  }
+  /* At phone width the board's per-card model names are the point and they go
+     unreadable when the shot is squeezed to 350px. Keep it legible and let the
+     stage scroll sideways instead. */
+  .harness-stage .product-window {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .product-stage.harness-stage .product-window img {
+    width: 640px;
+    max-width: none;
+  }
+}

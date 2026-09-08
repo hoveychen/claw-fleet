@@ -93,7 +93,7 @@ try {
         if (!shown.includes(model)) throw new Error('Agent board missing ' + model);
       }
       const rects = cards.map(el => el.getBoundingClientRect());
-      const tops = [...new Set(rects.map(r => Math.round(r.top)))].sort((a, b) => a - b).slice(0, 4);
+      const tops = [...new Set(rects.map(r => Math.round(r.top)))].sort((a, b) => a - b).slice(0, 3);
       const last = tops[tops.length - 1];
       const bottom = Math.max(...rects.filter(r => Math.round(r.top) === last).map(r => r.bottom));
       return {x: 74, y: 0, width: 926, height: Math.round(bottom) + 14};

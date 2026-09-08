@@ -78,6 +78,7 @@
       "计划、项目知识库、产出和笔记都存放在 Fleet 这一层。Claude Code 写下的结论，Codex 和 dsh 也读得回来。"
     ]
   ],
+  "agentsAlt": "Fleet 会话看板：Claude Code、Codex 和 dsh 的任务同时在跑，每张卡片标出自己用的工具与模型",
   "mobileHeading": "人离开电脑。<br>依然接得上。",
   "mobileCopy": "想法冒出来时，不用等回到电脑前。用手机就能派活，选好项目和跑任务的那台机器；轮到你拿主意时，再回来接手。",
   "mobilePoints": [

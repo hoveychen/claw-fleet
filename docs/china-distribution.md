@@ -68,9 +68,17 @@ python3 scripts/site/distribute.py \
 
 ### 更新官网双语截图
 
-示例数据在 `scripts/site/fixtures/scenes.json`，两种语言使用独立文案。`generate.py` 生成真实 PDF、XLSX、PPTX、DOCX、HTML 与 Markdown 文件，`render-assets.mjs` 渲染包装 PNG 和 MP4，并记录实际文件大小；`capture.mjs` 使用真实桌面和手机组件生成八张截图，取景在生成阶段完成，官网不再二次偏移裁剪。
+示例数据在 `scripts/site/fixtures/scenes.json`，两种语言使用独立文案。`generate.py` 生成真实 PDF、XLSX、PPTX、DOCX、HTML 与 Markdown 文件，`render-assets.mjs` 渲染包装 PNG 和 MP4，并记录实际文件大小；`capture.mjs` 使用真实桌面和手机组件生成十张截图（每种语言 5 张：work / review / results / agents / mobile），取景在生成阶段完成，官网不再二次偏移裁剪。
+其中 `agents` 是首页「多个 AI 协作」区块用的会话看板，必须同屏出现 claude-code / codex / dsh 三种来源——`capture.mjs` 会断言三个模型名都在前 8 张卡片里，示例数据在 `claw-fleet-desktop/app/mock/website.ts`。
 
-分别启动 `claw-fleet-desktop` 的 Vite（端口 5299）与 `mobile-web` 的 Vite（端口 5288），从仓库根执行：
+两个 Vite 都不需要 Tauri 后端（`?mock` 是纯浏览器的），但仓库里没有固定这两个端口，必须在命令行覆盖：
+
+```sh
+(cd claw-fleet-desktop && pnpm dev --port 5299 --strictPort)   # 终端 A
+(cd mobile-web && pnpm dev --port 5288 --strictPort)           # 终端 B
+```
+
+两个服务起好后，从仓库根执行：
 
 ```sh
 python3 -m venv /tmp/fleet-site-fixtures

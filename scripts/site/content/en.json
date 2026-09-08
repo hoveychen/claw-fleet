@@ -78,6 +78,7 @@
       "Plans, the project wiki, deliverables and notes live in Fleet, not inside one tool. What Claude Code writes down, Codex and dsh can read back."
     ]
   ],
+  "agentsAlt": "Fleet session board with Claude Code, Codex and dsh tasks running side by side, each card labelled with its tool and model",
   "mobileHeading": "Away from your desk.<br>Still part of the work.",
   "mobileCopy": "An idea doesn’t have to wait until you get home. Start a task from your phone, choose the project and device, and come back when a decision needs you.",
   "mobilePoints": [
