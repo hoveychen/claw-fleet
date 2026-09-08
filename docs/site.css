@@ -426,12 +426,19 @@ main[id],
 .release-link {
   margin-top: 27px;
 }
-.linux-help {
+.linux-help,
+.android-help {
   margin-top: 25px;
   border-top: 1px solid var(--line);
   padding-top: 18px;
   max-width: 750px;
   font-size: 13px;
+}
+/* Second collapsible in the same stack — one rule already drew the divider. */
+.android-help {
+  margin-top: 12px;
+  border-top: none;
+  padding-top: 0;
 }
 .linux-help pre {
   overflow-x: auto;
@@ -443,7 +450,8 @@ main[id],
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.linux-help p {
+.linux-help p,
+.android-help p {
   color: var(--muted);
   font-size: 13px;
 }

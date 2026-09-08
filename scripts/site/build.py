@@ -8,7 +8,15 @@ import hashlib
 
 ROOT = Path(__file__).resolve().parents[2]
 GITHUB = 'https://github.com/hoveychen/claw-fleet'
-ASSETS = [('claw-fleet-macos.pkg','macOS'),('claw-fleet-windows-x64-setup.exe','Windows'),('fleet-linux-x64','x64'),('fleet-linux-arm64','ARM64')]
+# One entry per download row, positionally matched to content['platforms'].
+# Each row names its icon and the buttons it carries, so a row with two builds
+# (Linux) or a new platform (Android) is a data change, not an index trick.
+ROWS = [
+    ('apple', [('claw-fleet-macos.pkg', 'macOS')]),
+    ('windows', [('claw-fleet-windows-x64-setup.exe', 'Windows')]),
+    ('linux', [('fleet-linux-x64', 'x64'), ('fleet-linux-arm64', 'ARM64')]),
+    ('android', [('claw-fleet-android.apk', 'APK')]),
+]
 
 
 def build(lang, c):
@@ -21,9 +29,11 @@ def build(lang, c):
         url=f'{GITHUB}/releases/latest/download/{name}'
         return f'<div class="download-link"><a class="button" data-asset="{name}" href="{url}">{label}<span aria-hidden="true">↓</span></a><a class="fallback" href="{url}" hidden>{c["fallback"]}</a></div>'
     rows=''
-    for i,(name,arch,desc) in enumerate(c['platforms']):
-        links=dl(*ASSETS[i]) if i<2 else dl(*ASSETS[2])+dl(*ASSETS[3])
-        rows+=f'<div class="download-row"><div class="platform"><img src="{base}icon-{["apple","windows","linux"][i]}.svg" width="28" height="28" alt=""><h3>{name}</h3></div><div class="architecture"><strong>{arch}</strong><span>{desc}</span></div><div class="download-actions">{links}</div></div>'
+    if len(c['platforms']) != len(ROWS):
+        raise ValueError(f'platforms/ROWS mismatch: {len(c["platforms"])} vs {len(ROWS)}')
+    for (icon,buttons),(name,arch,desc) in zip(ROWS,c['platforms']):
+        links=''.join(dl(*button) for button in buttons)
+        rows+=f'<div class="download-row"><div class="platform"><img src="{base}icon-{icon}.svg" width="28" height="28" alt=""><h3>{name}</h3></div><div class="architecture"><strong>{arch}</strong><span>{desc}</span></div><div class="download-actions">{links}</div></div>'
     features=''.join(f'<article><h3>{h}</h3><p>{p}</p></article>' for h,p in c['features'])
     relay=('<span class="relay-arrow" aria-hidden="true">→</span>').join(
         f'<div class="relay-node"><strong>{escape(name)}</strong><span>{escape(role)}</span></div>'
@@ -77,7 +87,7 @@ def build(lang, c):
 <section class="mobile-section wrap" id="mobile"><div class="mobile-art"><div class="phone"><img src="{asset(f'screenshots/current/mobile-{lang}.png')}" width="{mobile_w}" height="{mobile_h}" loading="lazy" alt="{c['mobileAlt']}"></div><p>{c['mobileCaption']}</p></div><div class="mobile-copy"><h2>{c['mobileHeading']}</h2><p>{c['mobileCopy']}</p><ul>{''.join(f'<li>{p}</li>' for p in c['mobilePoints'])}</ul><a class="text-link" href="#getting-started">{c['mobileCta']} <span aria-hidden="true">↗</span></a></div></section>
 <section class="work-depth wrap"><div class="section-heading"><h2>{c['moreHeading']}</h2><p>{c['moreCopy']}</p></div><div class="depth-list">{more}</div><div class="source-strip"><p>{c['sourceNames']}</p><span>{c['sourceBlurb']}</span></div></section>
 {capabilities}
-<section class="download-section" id="download"><div class="wrap"><div class="section-heading"><h2>{c['downloadHeading']}</h2><p>{c['downloadCopy']}</p></div><p class="version-note">{c['versionNote']}</p><div class="download-source"><label for="download-source">{c['source']}</label><select id="download-source"><option value="github">{c['globalSource']}</option></select><p id="source-note" data-ready="{c['sourceReady']}" data-china="{c['chinaSource']}">{c['sourceNote']}</p></div><div class="downloads">{rows}</div><a class="text-link release-link" href="{GITHUB}/releases">{c['allReleases']} <span aria-hidden="true">↗</span></a><details class="linux-help"><summary>{c['linuxHelp']}<span aria-hidden="true">+</span></summary><pre><code>chmod +x fleet-linux-x64\n./fleet-linux-x64 webui</code></pre><p>{c['linuxAfter']}</p></details></div></section>
+<section class="download-section" id="download"><div class="wrap"><div class="section-heading"><h2>{c['downloadHeading']}</h2><p>{c['downloadCopy']}</p></div><p class="version-note">{c['versionNote']}</p><div class="download-source"><label for="download-source">{c['source']}</label><select id="download-source"><option value="github">{c['globalSource']}</option></select><p id="source-note" data-ready="{c['sourceReady']}" data-china="{c['chinaSource']}">{c['sourceNote']}</p></div><div class="downloads">{rows}</div><a class="text-link release-link" href="{GITHUB}/releases">{c['allReleases']} <span aria-hidden="true">↗</span></a><details class="linux-help"><summary>{c['linuxHelp']}<span aria-hidden="true">+</span></summary><pre><code>chmod +x fleet-linux-x64\n./fleet-linux-x64 webui</code></pre><p>{c['linuxAfter']}</p></details><details class="android-help"><summary>{c['androidHelp']}<span aria-hidden="true">+</span></summary><p>{c['androidAfter']}</p></details></div></section>
 <section id="getting-started" class="getting-started wrap"><h2>{c['startHeading']}</h2><ol>{steps}</ol></section>
 <section class="faq wrap"><h2>{c['faqHeading']}</h2><div>{faq}</div></section>
 <section class="closing wrap"><h2>{c['closing']}</h2><a class="button primary" href="#download">{c['cta']}<span aria-hidden="true">↓</span></a></section>
