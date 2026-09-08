@@ -126,6 +126,13 @@ def build(lang, c, d, asset, home, other, github):
         title=c['title'], description=c['description'],
         image=social_shot, image_size=seo.png_size(ROOT / 'docs' / social_shot),
         image_alt=c['headline'], page_type='article')
+    page_path = 'zh/benchmark.html' if lang == 'zh' else 'benchmark.html'
+    structured = seo.graph([
+        seo.publisher_node(),
+        seo.breadcrumb_node([(seo.SITE_NAME, 'zh/' if lang == 'zh' else ''),
+                             (c['title'], page_path)], page_path),
+        seo.faq_node(c['faqs'], page_path),
+    ])
     tiles = ''.join(
         f'<div class="bm-tile"><p class="label">{label}</p><p class="value">{value}</p>'
         f'<p class="note">{note}</p></div>' for label, value, note in c['tiles'])
@@ -142,6 +149,7 @@ def build(lang, c, d, asset, home, other, github):
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{c['title']}</title><meta name="description" content="{escape(c['description'], quote=True)}">
 {social_head}
+{structured}
 <link rel="icon" href="{home}icon.png">
 <link rel="stylesheet" href="{asset('site.css')}"><link rel="stylesheet" href="{asset('benchmark.css')}">
 </head>

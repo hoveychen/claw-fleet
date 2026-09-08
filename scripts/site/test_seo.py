@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the machine-readable half of the pages: head block, sitemap, robots."""
 from pathlib import Path
+import json
 import re
 import sys
 import unittest
@@ -107,6 +108,51 @@ class RobotsTests(unittest.TestCase):
         self.assertFalse(re.search(r'^Disallow: /\s*$', out, re.M))
 
 
+class JsonLdTests(unittest.TestCase):
+    def parse(self, block):
+        raw = re.fullmatch(r'<script type="application/ld\+json">(.*)</script>', block, re.S).group(1)
+        self.assertNotIn('</', raw)  # would close the script element early
+        return json.loads(raw.replace('<\\/', '</'))
+
+    def test_the_graph_is_valid_json_and_escapes_closing_tags(self):
+        doc = self.parse(resolved(seo.graph([seo.publisher_node(),
+                                             seo.faq_node([('q</b>', 'a')], '')])))
+        self.assertEqual(doc['@context'], 'https://schema.org')
+        self.assertEqual([n['@type'] for n in doc['@graph']], ['Organization', 'FAQPage'])
+
+    def test_nodes_cross_reference_by_id_and_resolve_to_absolute_urls(self):
+        doc = self.parse(resolved(seo.graph([
+            seo.publisher_node(),
+            seo.website_node('en', 'D'),
+            seo.software_node('en', 'D', ['screenshots/current/work-en.png'], ''),
+        ])))
+        nodes = {n['@type']: n for n in doc['@graph']}
+        self.assertEqual(nodes['SoftwareApplication']['publisher']['@id'], nodes['Organization']['@id'])
+        self.assertTrue(nodes['Organization']['@id'].startswith(ORIGIN))
+        self.assertEqual(nodes['SoftwareApplication']['screenshot'],
+                         [f'{ORIGIN}/screenshots/current/work-en.png'])
+
+    def test_the_app_is_declared_free_without_inventing_a_rating(self):
+        app = self.parse(resolved(seo.graph([seo.software_node('en', 'D', [], '')])))['@graph'][0]
+        self.assertEqual(app['offers']['price'], '0')
+        self.assertTrue(app['isAccessibleForFree'])
+        for invented in ('aggregateRating', 'ratingValue', 'reviewCount'):
+            self.assertNotIn(invented, app)
+
+    def test_faq_entries_mirror_the_rendered_pairs_as_plain_text(self):
+        faq = self.parse(resolved(seo.graph([seo.faq_node([('Q?', 'one<br>two')], 'zh/')])))['@graph'][0]
+        self.assertEqual(faq['mainEntity'][0]['name'], 'Q?')
+        self.assertEqual(faq['mainEntity'][0]['acceptedAnswer']['text'], 'one two')
+        self.assertEqual(faq['@id'], f'{ORIGIN}/zh/#faq')
+
+    def test_breadcrumb_positions_start_at_one(self):
+        crumb = self.parse(resolved(seo.graph([
+            seo.breadcrumb_node([('Home', ''), ('Report', 'benchmark.html')], 'benchmark.html'),
+        ])))['@graph'][0]
+        self.assertEqual([(i['position'], i['name'], i['item']) for i in crumb['itemListElement']],
+                         [(1, 'Home', f'{ORIGIN}/'), (2, 'Report', f'{ORIGIN}/benchmark.html')])
+
+
 class GeneratedSiteTests(unittest.TestCase):
     """The committed docs/ tree is what gets published; check it, not just the helpers."""
 
@@ -124,6 +170,35 @@ class GeneratedSiteTests(unittest.TestCase):
                               if 'benchmark' not in name
                               else f'hreflang="x-default" href="{token}/benchmark.html">', html)
                 self.assertIn(f'href="{token}{canonical}"', html)
+
+    def test_every_page_ships_a_parseable_graph_with_the_right_node_types(self):
+        expected = {
+            'index.html': ['Organization', 'WebSite', 'SoftwareApplication', 'FAQPage'],
+            'zh/index.html': ['Organization', 'WebSite', 'SoftwareApplication', 'FAQPage'],
+            'benchmark.html': ['Organization', 'BreadcrumbList', 'FAQPage'],
+            'zh/benchmark.html': ['Organization', 'BreadcrumbList', 'FAQPage'],
+        }
+        for name, types in expected.items():
+            with self.subTest(page=name):
+                html = (self.DOCS / name).read_text()
+                raw = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.S).group(1)
+                doc = json.loads(raw.replace('<\\/', '</'))
+                self.assertEqual([n['@type'] for n in doc['@graph']], types)
+
+    def test_the_faq_markup_matches_the_faq_the_page_renders(self):
+        # Structured data that contradicts the visible page is a manual action,
+        # not an optimisation.
+        for name in ('index.html', 'zh/index.html'):
+            with self.subTest(page=name):
+                html = (self.DOCS / name).read_text()
+                rendered = [seo.plain(q) for q in re.findall(r'<summary>(.*?)<span', html)]
+                raw = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.S).group(1)
+                doc = json.loads(raw.replace('<\\/', '</'))
+                faq = next(n for n in doc['@graph'] if n['@type'] == 'FAQPage')
+                marked = [q['name'] for q in faq['mainEntity']]
+                self.assertTrue(marked, 'no questions in the FAQ markup')
+                for question in marked:
+                    self.assertIn(question, rendered)
 
     def test_the_sitemap_and_robots_are_generated_not_stale(self):
         from build import PAGE_PAIRS

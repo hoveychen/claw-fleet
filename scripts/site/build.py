@@ -63,6 +63,14 @@ def build(lang, c):
     def dimensions(name):
         return seo.png_size(ROOT / 'docs/screenshots/current' / name)
     social_shot = f'screenshots/current/work-{lang}.png'
+    page_path = 'zh/' if lang == 'zh' else ''
+    structured = seo.graph([
+        seo.publisher_node(),
+        seo.website_node(lang, c['description']),
+        seo.software_node(lang, c['description'],
+                          [f'screenshots/current/{name}' for name in shots], page_path),
+        seo.faq_node(c['faqs'], page_path),
+    ])
     social_head = seo.head(
         lang=lang, en_path='', zh_path='zh/',
         title=c['title'], description=c['description'],
@@ -87,6 +95,7 @@ def build(lang, c):
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{c['title']}</title><meta name="description" content="{escape(c['description'],quote=True)}">
 {social_head}
+{structured}
 <script src="{asset('locale.js')}"></script><link rel="icon" href="{base}icon.png"><link rel="stylesheet" href="{asset('site.css')}"><script src="{asset('site.js')}" defer></script>
 </head>
 <body data-locale="{lang}">

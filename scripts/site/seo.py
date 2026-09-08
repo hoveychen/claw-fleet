@@ -10,6 +10,7 @@ Absolute URLs are written with site_origin.TOKEN and resolved per deployment;
 see site_origin.py for why they cannot be baked in.
 """
 from html import escape
+import json
 import re
 import struct
 
@@ -18,6 +19,8 @@ import site_origin
 TOKEN = site_origin.TOKEN
 SITE_NAME = 'Claw Fleet'
 OG_LOCALE = {'en': 'en_US', 'zh': 'zh_CN'}
+LANG_TAG = {'en': 'en', 'zh': 'zh-CN'}
+GITHUB = 'https://github.com/hoveychen/claw-fleet'
 THEME_COLOR = '#ffffff'
 
 
@@ -41,6 +44,94 @@ def url(path=''):
     if path.startswith('/'):
         raise ValueError('Site paths are relative to the site root, without a leading slash')
     return f'{TOKEN}/{path}'
+
+
+def graph(nodes):
+    """Wrap JSON-LD nodes into one script tag.
+
+    One `@graph` rather than several scripts, so the nodes can reference each
+    other by `@id` (the app's publisher is the same node the site declares).
+    """
+    payload = json.dumps({'@context': 'https://schema.org', '@graph': nodes},
+                         ensure_ascii=False, separators=(',', ':'))
+    # A literal "</" inside a script element would end it early.
+    return '<script type="application/ld+json">' + payload.replace('</', '<\\/') + '</script>'
+
+
+def publisher_node():
+    return {
+        '@type': 'Organization',
+        '@id': url('#publisher'),
+        'name': SITE_NAME,
+        'url': url(),
+        'logo': url('icon.png'),
+        'sameAs': [GITHUB],
+    }
+
+
+def website_node(lang, description):
+    return {
+        '@type': 'WebSite',
+        '@id': url('#website'),
+        'name': SITE_NAME,
+        'url': url(),
+        'description': plain(description),
+        'inLanguage': LANG_TAG[lang],
+        'publisher': {'@id': url('#publisher')},
+    }
+
+
+def software_node(lang, description, screenshots, page_path):
+    """The download page as a SoftwareApplication.
+
+    Deliberately without aggregateRating or a review count: there is no rating
+    to report, and an invented one is the kind of markup that gets a site's
+    structured data ignored wholesale.
+    """
+    return {
+        '@type': 'SoftwareApplication',
+        '@id': url('#app'),
+        'name': SITE_NAME,
+        'url': url(page_path),
+        'description': plain(description),
+        'applicationCategory': 'DeveloperApplication',
+        'operatingSystem': 'macOS, Windows, Linux, Android',
+        'inLanguage': LANG_TAG[lang],
+        'isAccessibleForFree': True,
+        'license': f'{GITHUB}/blob/main/LICENSE',
+        'downloadUrl': f'{GITHUB}/releases/latest',
+        'softwareHelp': f'{GITHUB}/blob/main/README.md',
+        'screenshot': [url(path) for path in screenshots],
+        'offers': {'@type': 'Offer', 'price': '0', 'priceCurrency': 'USD'},
+        'publisher': {'@id': url('#publisher')},
+    }
+
+
+def faq_node(faqs, page_path):
+    """FAQPage built from the same pairs the page renders, so the two cannot drift."""
+    return {
+        '@type': 'FAQPage',
+        '@id': url(page_path + '#faq'),
+        'mainEntity': [{
+            '@type': 'Question',
+            'name': plain(question),
+            'acceptedAnswer': {'@type': 'Answer', 'text': plain(answer)},
+        } for question, answer in faqs],
+    }
+
+
+def breadcrumb_node(items, page_path):
+    """items is [(name, site-relative path), ...] ending with the current page."""
+    return {
+        '@type': 'BreadcrumbList',
+        '@id': url(page_path + '#breadcrumb'),
+        'itemListElement': [{
+            '@type': 'ListItem',
+            'position': i,
+            'name': plain(name),
+            'item': url(path),
+        } for i, (name, path) in enumerate(items, start=1)],
+    }
 
 
 def sitemap(page_pairs):
