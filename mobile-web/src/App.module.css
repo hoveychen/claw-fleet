@@ -4,11 +4,25 @@
   min-height: 100dvh;
 }
 
+/* 12px side gutter, not 16px: that is the app's content grid. Every tab body
+   under this bar lays out at 12px (decision cards, task rows, the 更多 nav
+   rows all start at x=12) and so does every detail header, so a 16px bar put
+   its own title 4px to the right of everything it sits above — visible as the
+   title's left edge jumping when you go from a tab into a detail page.
+
+   The glass here stays glass, unlike the detail headers' solid fill: this bar
+   really is `position: sticky` over a scrolling document (measured: the 任务
+   and 更多 tabs scroll 200px with the bar held at top=0), so content does pass
+   beneath it. A detail header is `static` above an independently-scrolling
+   container whose content starts *below* it — nothing ever passes under one, so
+   a translucent fill there would render as flat haze and bill a
+   backdrop-filter composite on ten pages for it. The two treatments differ
+   because the two layouts differ. */
 .header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: calc(10px + var(--safe-top)) 16px 10px;
+  padding: calc(10px + var(--safe-top)) 12px 10px;
   border-bottom: 1px solid var(--color-border);
   position: sticky;
   top: 0;
