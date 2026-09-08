@@ -1,0 +1,17 @@
+[Unit]
+Description=fectun FEC-over-UDP tunnel client for the Claw Fleet download fast path (127.0.0.1:18080 -> KO tinyproxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 只监听 127.0.0.1：唯一使用者是本机的 fleet-site-update.service，通过
+# HTTPS_PROXY 指向它。对端 tinyproxy 只放行 GitHub 发布链路域名、CONNECT 只
+# 允许 443，所以这里不暴露通用出网能力。k/m 必须与出口侧 own-api-ko 一致 ——
+# 接收侧对 k 不匹配的分片直接丢弃。
+ExecStart=/usr/local/bin/fectun -mode client -listen 127.0.0.1:18080 -peer 43.108.41.6 -uport 55702 -k 40 -m 40 -rate 50
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

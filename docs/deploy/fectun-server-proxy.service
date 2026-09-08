@@ -1,0 +1,20 @@
+[Unit]
+Description=fectun FEC-over-UDP tunnel server for the Claw Fleet download fast path (-> 127.0.0.1:18080 tinyproxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 目标是本机 tinyproxy，它只放行 GitHub 发布链路的域名且 CONNECT 只允许 443，
+# 所以这条隧道不构成通用跳板。k/m 必须与入口侧 own-api-sz 完全一致 ——
+# 接收侧对 k 不匹配的分片直接丢弃。
+ExecStart=/usr/local/bin/fectun -mode server -target 127.0.0.1:18080 -peer 47.106.173.51 -uport 55702 -k 40 -m 40 -rate 50
+Restart=always
+RestartSec=3
+# ko 仅 3.5G RAM，且这条隧道只在发版时突发使用。宁可被杀重启（下一轮 timer
+# 会重试，且 selfhost 直连 GitHub 仍是可用回落路径）也不能拖死业务容器。
+MemoryMax=300M
+MemoryHigh=250M
+
+[Install]
+WantedBy=multi-user.target

@@ -123,6 +123,39 @@ ssh own-api-sz 'systemctl enable --now fleet-site-update.timer'
 源码：`scripts/site/selfhost.py`（原子更新与锁）、`scripts/site/distribute.py`（来源/摘要验证）、`docs/deploy/fleet-site-update.{service,timer}`（服务器服务）。部署这些文件后执行 `systemctl daemon-reload`。`--rebuild-current` 仅用于实际验证已发布版本的完整校验和切换路径，不绕过摘要校验、不替换相同 URL 的内容。
 
 
+## 下载快路：经 own-api-ko 的 fectun 隧道
+
+深圳直连 GitHub Releases 实测只有 **10–40 KB/s**，230 MB 要数小时、跨多轮 timer；同一批产物在境外的 `own-api-ko` 上只需 27 秒。所以下载改走 ko，**而 `selfhost.py` / `distribute.py` 一行未改**。
+
+链路：`fleet-site-update.service` 的 `https_proxy` → `127.0.0.1:18080`（sz 侧 fectun 客户端）→ FEC-over-UDP `uport 55702` → ko 侧 fectun 服务端 → ko 本机 `127.0.0.1:18080` 的 tinyproxy → GitHub。
+
+之所以不需要改代码：`urllib` 自己认 `https_proxy`，对 GitHub 的 302 会再发一次 `CONNECT`，所以连重定向目标 `release-assets.githubusercontent.com` 也一并走隧道。`validate_release()` 里对 `github.com` 精确来源的断言因此**完全不受影响**——URL 没被改写，只是走了另一条传输路径；SHA-256 与字节数仍逐个校验。
+
+**安全边界**（不是通用跳板，这几条是有意为之）：
+
+- tinyproxy `Listen 127.0.0.1`，只有 ko 本机可连；唯一入口是那条 fectun 隧道。
+- `FilterDefaultDeny Yes` + 白名单 `docs/deploy/tinyproxy-fleet-allow.txt`：只放行 `github.com`、`api.github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`、`codeload.github.com`。已实测 `example.com` / `pypi.org` 被拒。
+- `ConnectPort 443`：只允许 443 的 CONNECT，已实测 `github.com:22` 被拒。
+- sz 侧 fectun 客户端也 `Listen 127.0.0.1`，不对外暴露。
+- `fleet-site` 仍是 `nologin`、无家目录、`ProtectSystem=strict`，**没有拿到任何 SSH 密钥**——这是选代理而非「让 selfhost ssh 去 ko 中转」的原因。
+
+**回落**：隧道或 tinyproxy 挂掉时下载变为连不上，该轮失败、下一轮 timer 重试；暂存目录跨轮保留所以进度不丢。要临时禁用快路，删掉 `fleet-site-update.service.d/fastpath.conf` 后 `daemon-reload`，即回到直连（慢但可用）。
+
+两端 fectun 的 `k` / `m` 必须一致（本条为 `-k 40 -m 40 -rate 50`）——接收侧对 `k` 不匹配的分片直接丢弃。
+
+配置：`docs/deploy/fectun-server-proxy.service`（ko）、`docs/deploy/fectun-client-proxy.service`（sz）、`docs/deploy/tinyproxy-fleet-fastpath.conf` 与 `docs/deploy/tinyproxy-fleet-allow.txt`（ko 的 `/etc/tinyproxy/`）、`docs/deploy/fleet-site-update.service.d/fastpath.conf`（sz）。
+
+### 快路验收（2026-09-08）
+
+在与 `fleet-site-update.service` **完全相同的沙箱属性**下（`systemd-run` 带同样的 `User` / `ProtectSystem=strict` / `ProtectHome` / `PrivateTmp` / `NoNewPrivileges` / `RestrictAddressFamilies`），用生产的 `distribute.download()` + `verify()` 拉 v2.7.0 全部 8 个产物：
+
+```
+TOTAL 230360715 bytes in 85.2s = 2640 KB/s
+```
+
+逐个 SHA-256 校验通过，最慢一项 2267 KB/s、最快 2808 KB/s。同日直连实测 10–29 KB/s，**约 90–260 倍**。探针目录用后即删，线上 `current` 全程指向 `auto-v2.7.0-5556095eac6b` 未受影响。
+
+
 ### 自动同步验收（2026-09-07）
 
 12 项本地测试通过，包括完整升级时下载全部完成前入口不变、缺包/损坏/同版本内容变更拒绝发布、无更新不下载、保留历史包与双语站点、重建和禁止降级。
