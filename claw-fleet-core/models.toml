@@ -28,9 +28,21 @@
 
 # ── Claude ──────────────────────────────────────────────────────────────────
 # 整个家族共用一条 `--effort` 梯子；default_effort 由 CLI 自己定，不在这里断言。
+#
+# 这里列的 id 与两个模型选择器（桌面 `CLAUDE_MODEL_CHOICES`、移动端
+# `MODEL_CHOICES`）逐条对齐，前代一并列全，好让 tier 换算对每一个可选项都成立。
+# 末尾四条是裸别名：`--model opus` 是合法写法，也该问得出档位。
+# Fleet 自己的 `[1m]` 上下文后缀不是模型 id 的一部分，查表前会被剥掉，所以
+# `claude-opus-5[1m]` 命中的就是 `claude-opus-5` 这一行。
 
 [[model]]
 id = "claude-fable-5-1"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "claude-fable-5"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
@@ -42,13 +54,57 @@ tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
 
 [[model]]
+id = "claude-opus-4-8"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
 id = "claude-sonnet-5"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
 
 [[model]]
+id = "claude-sonnet-4-6"
+family = "claude-code"
+tier = "standard"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+# 选择器里 Haiku 用的是带日期的 id，`fleet-model-guidance.md` 与手打的
+# `--model haiku-4-5` 用的是不带日期的。两个都列，省得靠模糊匹配去猜。
+[[model]]
+id = "claude-haiku-4-5-20251001"
+family = "claude-code"
+tier = "fast"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
 id = "claude-haiku-4-5"
+family = "claude-code"
+tier = "fast"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "fable"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "opus"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "sonnet"
+family = "claude-code"
+tier = "standard"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "haiku"
 family = "claude-code"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]

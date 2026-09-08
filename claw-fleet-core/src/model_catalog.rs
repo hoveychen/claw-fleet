@@ -320,6 +320,52 @@ mod tests {
         assert_eq!(map_effort("ultra", "gpt-7-whatever"), Some("max"));
     }
 
+    /// Every id either picker can hand us must be catalogued with a tier.
+    ///
+    /// The ladder would survive an omission (the family fallback covers it), but
+    /// `tier` would not — an uncatalogued id silently drops out of any
+    /// cross-harness tier mapping. This list is the two hand-written pickers,
+    /// `claw-fleet-desktop/app/modelChoices.ts` (`CLAUDE_MODEL_CHOICES` +
+    /// `CODEX_MODEL_CHOICES`) and `mobile-web/src/views/Composer.tsx`, which
+    /// hold the same ids. When those grow an entry, this test is what fails.
+    #[test]
+    fn every_selectable_model_has_a_tier() {
+        for id in [
+            "claude-fable-5-1",
+            "claude-fable-5",
+            "claude-opus-5",
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+            "gpt-6-astra",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+        ] {
+            assert!(tier(id).is_some(), "{id} is selectable but has no tier");
+            assert!(effort_ladder(id).is_some(), "{id} has no ladder");
+        }
+    }
+
+    /// The bare aliases are legal `--model` values, so they resolve too.
+    #[test]
+    fn bare_claude_aliases_resolve() {
+        assert_eq!(tier("opus"), Some("premium"));
+        assert_eq!(tier("sonnet"), Some("standard"));
+        assert_eq!(tier("haiku"), Some("fast"));
+        assert_eq!(tier("fable"), Some("premium"));
+    }
+
+    /// Fleet's `[1m]` suffix is not part of any model id and must not stop a
+    /// lookup from finding the row.
+    #[test]
+    fn context_suffix_is_stripped_before_lookup() {
+        assert_eq!(tier("claude-opus-5[1m]"), tier("claude-opus-5"));
+        assert_eq!(tier("  Claude-Opus-5  "), Some("premium"));
+    }
+
     /// A user entry that names one field overrides that field only. Blanking
     /// `tier` here would break the cross-harness tier mapping as a side effect
     /// of someone pinning a ladder.
