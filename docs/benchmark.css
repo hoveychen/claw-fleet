@@ -93,6 +93,10 @@
   font-size: 13px;
   color: var(--muted);
   margin-bottom: 12px;
+  /* Reserve two lines so the four big values share one baseline even when the
+     English label wraps and the Chinese one does not. */
+  min-height: 2.7em;
+  line-height: 1.35;
 }
 .bm-tile .value {
   font-size: 38px;
