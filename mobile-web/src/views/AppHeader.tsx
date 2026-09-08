@@ -20,6 +20,7 @@ import styles from "./AppHeader.module.css";
 export function AppHeader({
   onBack,
   title,
+  titleAfter,
   sub,
   actions,
   seamless,
@@ -29,6 +30,10 @@ export function AppHeader({
    *  because its title row also carries a subagent badge and is itself a tap
    *  target that unfolds the info panel. */
   title: ReactNode;
+  /** A small badge riding immediately after a string title — 知识库's entry
+   *  count. Only meaningful with a string title; a node title lays out its own
+   *  row and puts whatever it needs in there. */
+  titleAfter?: ReactNode;
   /** Second line, dim and small — 仓库详情's repo path, 知识库文档's slug. */
   sub?: ReactNode;
   /** Trailing controls: refresh, export, version select, the ☰ menu. */
@@ -43,7 +48,14 @@ export function AppHeader({
         <ChevronLeft size={20} />
       </button>
       <div className={styles.text}>
-        {typeof title === "string" ? <div className={styles.title}>{title}</div> : title}
+        {typeof title === "string" ? (
+          <div className={styles.titleRow}>
+            <div className={styles.title}>{title}</div>
+            {titleAfter}
+          </div>
+        ) : (
+          title
+        )}
         {sub !== undefined && <div className={styles.sub}>{sub}</div>}
       </div>
       {actions !== undefined && <div className={styles.actions}>{actions}</div>}

@@ -41,6 +41,16 @@ describe("AppHeader", () => {
     );
   });
 
+  it("titleAfter 与字符串标题同行，且标题才是那个会收缩的", () => {
+    // 知识库的条目数紧贴标题；标题长了应该是标题被截断，而不是把计数挤走。
+    const html = renderToStaticMarkup(
+      <AppHeader onBack={noop} title="知识库" titleAfter={<span id="n">42</span>} />,
+    );
+    expect(html).toMatch(/class="[^"]*titleRow[^"]*"/);
+    // 计数是 titleRow 的直接子节点，不在 .title 内部（否则会跟着一起被 ellipsis 吃掉）。
+    expect(html).toMatch(/class="[^"]*title[^"]*">知识库<\/div><span id="n">/);
+  });
+
   it("返回键始终带 aria-label —— 它没有可见文字了", () => {
     const html = renderToStaticMarkup(<AppHeader onBack={noop} title="用量" />);
     expect(html).toMatch(/<button[^>]*aria-label="[^"]+"/);

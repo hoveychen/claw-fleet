@@ -6,13 +6,14 @@
 // 时才开新的；否则每次打开面板都会多一个孤儿 shell。
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, Folder, Plus, Square, Trash2 } from "lucide-react";
+import { Folder, Plus, Square, Trash2 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import { clearProc, killProc, listProcs, runProc, type ProcRecord } from "../terminal";
 import { isDefaultShellCommand } from "../../../shared-ts/procShell";
 import styles from "./TerminalView.module.css";
+import { AppHeader } from "./AppHeader";
 
 // xterm 及其 CSS 只在真的开了终端时才下载 —— 见 TerminalPane 顶部的说明。
 const TerminalPane = lazy(() => import("./TerminalPane"));
@@ -178,12 +179,7 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
   if (!ws) {
     return (
       <div className={styles.page}>
-        <div className={styles.header}>
-          <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-            <ChevronLeft size={20} />
-          </button>
-          <div className={styles.headerTitle}>{t("终端")}</div>
-        </div>
+        <AppHeader onBack={onBack} title={t("终端")} />
         {workspaces.length === 0 ? (
           <EmptyState icon={Folder} title={t("还没有可用的工作目录")} />
         ) : (
@@ -209,38 +205,41 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
 
   return (
     <div className={styles.page} style={{ bottom: keyboardInset }}>
-      <div className={styles.header}>
-        <button className={styles.backButton} onClick={onBack}>
-          <ChevronLeft size={20} />
-          {t("返回")}
-        </button>
-        <button
-          className={styles.headerTitle}
-          onClick={() => setWs(null)}
-          title={ws.path}
-        >
-          {ws.name}
-        </button>
-        {exited ? (
-          <button className={styles.iconButton} onClick={() => void handleClear()}>
-            <Trash2 size={16} />
+      {/* The title doubles as the way back to the workspace picker, so it stays a
+          node rather than a plain string. `seamless` tracks the tab strip below:
+          with more than one process this header and .tabs are one panel. */}
+      <AppHeader
+        onBack={onBack}
+        seamless={procs.length > 1}
+        title={
+          <button className={styles.headerTitle} onClick={() => setWs(null)} title={ws.path}>
+            {ws.name}
           </button>
-        ) : (
-          active && (
-            <button className={styles.iconButton} onClick={() => void handleKill()}>
-              <Square size={14} />
+        }
+        actions={
+          <>
+            {exited ? (
+              <button className={styles.iconButton} onClick={() => void handleClear()}>
+                <Trash2 size={16} />
+              </button>
+            ) : (
+              active && (
+                <button className={styles.iconButton} onClick={() => void handleKill()}>
+                  <Square size={14} />
+                </button>
+              )
+            )}
+            <button
+              className={styles.iconButton}
+              onClick={() => void spawn()}
+              disabled={busy}
+              aria-label={t("新终端")}
+            >
+              <Plus size={18} />
             </button>
-          )
-        )}
-        <button
-          className={styles.iconButton}
-          onClick={() => void spawn()}
-          disabled={busy}
-          aria-label={t("新终端")}
-        >
-          <Plus size={18} />
-        </button>
-      </div>
+          </>
+        }
+      />
 
       {procs.length > 1 && (
         <div className={styles.tabs}>

@@ -43,7 +43,17 @@
   min-width: 0;
 }
 
+/* Holds a string title plus its optional trailing badge on one line. The title
+   is the only thing here allowed to shrink, so the badge stays whole. */
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .title {
+  min-width: 0;
   font-size: var(--t-body, 16px);
   font-weight: 600;
   white-space: nowrap;
