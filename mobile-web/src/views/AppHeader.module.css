@@ -22,9 +22,10 @@
 /* Icon-only back button. The text label it replaced came in three flavours
    (accent-coral "返回", the destination's name, and icon-only) at three chevron
    sizes; the coral text made the loudest thing in every header the way *out* of
-   the page rather than the title of it. The negative margin pulls the 32px hit
-   target's optical left edge back onto the header's 12px gutter. */
+   the page rather than the title of it. The negative margin pulls the 32px box's
+   optical left edge back onto the header's 12px gutter. */
 .backButton {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -36,6 +37,27 @@
   color: var(--color-text);
   border-radius: 8px;
   flex-shrink: 0;
+}
+
+/* 44×44 hit target without a 44×44 box. Apple's HIG and Android's touch
+   guidance both want ~44/48dp; the visible button is 32px because a chevron
+   drawn any heavier competes with the title, and growing the box itself costs
+   12px of header height on every one of the ten (measured: 53px → 65px) — the
+   whole point of the first round was that this chrome is already as tall as the
+   transcript can afford.
+   An absolutely-positioned pseudo-element takes pointer events for its own
+   box while contributing nothing to layout, so the tap area grows and the
+   header's height does not. It overflows the button by 6px on each side, which
+   stays inside the header's 10px vertical padding and inside the 8px flex gap
+   to its right, so it never steals a tap from the title. */
+.backButton::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
 }
 
 .text {
