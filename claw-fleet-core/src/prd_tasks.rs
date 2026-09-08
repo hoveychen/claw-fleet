@@ -949,21 +949,44 @@ fn resolve_backtrack_in(
 /// A lone legacy anonymous block (no `id`) is still returned verbatim: those
 /// predate the checkbox convention and may use the body as a free-form PRD
 /// document, so compacting could drop content that has no `## Plan:` header.
+///
+/// At most [`UNATTRIBUTED_PLAN_CAP`] plans are listed; the rest become a single
+/// counted line. Two lines per plan is cheap until a workspace has dozens of
+/// them — this repo was at 22 active plans (7.2 KB per injection) and an
+/// unattributed session in a busier workspace produced 24–27 KB blocks, over
+/// Claude Code's inline ceiling, so the whole reminder was swapped for a
+/// `<persisted-output>` pointer and the model saw no plans at all.
 pub fn render_with_sources(blocks: &[SourcedBlock], main_root: Option<&Path>) -> String {
     if blocks.len() == 1 && blocks[0].id.is_none() {
         return blocks[0].body.trim().to_string();
     }
     let primary: Option<PathBuf> = main_root.map(|r| r.join("TASKS.md"));
+    let shown = blocks.len().min(UNATTRIBUTED_PLAN_CAP);
     let mut out = String::new();
-    for (i, b) in blocks.iter().enumerate() {
+    for (i, b) in blocks.iter().take(shown).enumerate() {
         if i > 0 {
             out.push_str("\n\n");
         }
         let tag = display_source(&b.source, main_root, primary.as_deref());
         out.push_str(&render_compact_block(b, tag));
     }
+    let hidden = blocks.len() - shown;
+    if hidden > 0 {
+        let plan_word = if hidden == 1 { "plan" } else { "plans" };
+        out.push_str(&format!(
+            "\n\n… and {hidden} more active {plan_word} not expanded here — \
+             `fleet plan list` shows them all.",
+        ));
+    }
     out
 }
+
+/// How many plans an unattributed session sees expanded. A session with no
+/// focus is not supposed to pick from this menu (it claims one with
+/// `fleet plan resume`, and the injection then narrows to that plan), so the
+/// list is a reminder that work is in flight, not a work queue — eight is
+/// enough for that and keeps this section near 2.5 KB.
+const UNATTRIBUTED_PLAN_CAP: usize = 8;
 
 /// One plan compacted to its heading (`## Plan: <id>[ — <title>] (<done>/<total>)`
 /// with an optional `— source: <s>` suffix) plus its first still-pending task
@@ -1509,7 +1532,8 @@ Discipline mode) holds {n} active {plan_word} below — merged across the main \
 checkout and any sibling worktrees. This file is the durable macro plan — \
 defer to it over your in-context memory of which P-tasks are done. This \
 session is not attributed to any of them, so each is compacted to its title, \
-progress, and next pending task; read the source file shown for the full \
+progress, and next pending task (at most {UNATTRIBUTED_PLAN_CAP} are listed; \
+`fleet plan list` shows the rest); read the source file shown for the full \
 checklist and per-task notes. Once you start one, claim it with `fleet plan \
 resume <id>` (or `fleet plan create`) — the injection then narrows to just \
 that plan and its ancestors. After each P-task, update the checkbox in the \
@@ -1524,9 +1548,67 @@ modified file wins — keep a given `id` in exactly one file."
 \n\
 Sources scanned:\n{sources_list}\n\
 \n\
-{rendered}{warn_block}{backtrack_block}\n\
+{}{warn_block}{backtrack_block}\n\
 </system-reminder>",
+        cap_body(&rendered),
     ))
+}
+
+/// Ceiling for the plans section, in bytes.
+///
+/// Claude Code stores an oversized hook `additionalContext` out of line and
+/// injects a `<persisted-output>` pointer instead, which costs the model the
+/// entire macro plan. Measured across 2336 real injections on this machine:
+/// every inline copy was ≤ 16.5 KB and every externalised one was ≥ 24.2 KB,
+/// so the ceiling sits between those. 12 KB is comfortably under the lower
+/// bound with room for the header and the sources list.
+const BODY_CAP_BYTES: usize = 12 * 1024;
+
+/// Truncate an oversized plans section at a plan boundary.
+///
+/// [`UNATTRIBUTED_PLAN_CAP`] bounds the *count* of plans, not their size: one
+/// focused plan with a long checklist, or eight plans with long titles and
+/// per-task notes, can still run past [`BODY_CAP_BYTES`]. Cutting between
+/// plans keeps every plan that survives intact and readable, and the note says
+/// what was dropped so the omission never looks like the plan finishing.
+fn cap_body(body: &str) -> String {
+    if body.len() <= BODY_CAP_BYTES {
+        return body.to_string();
+    }
+    let mut kept = String::new();
+    let mut dropped = 0usize;
+    for (i, chunk) in body.split("\n\n## ").enumerate() {
+        // `split` ate the separator; only the first chunk keeps its own prefix.
+        let piece = if i == 0 {
+            chunk.to_string()
+        } else {
+            format!("\n\n## {chunk}")
+        };
+        if !kept.is_empty() && kept.len() + piece.len() > BODY_CAP_BYTES {
+            dropped += 1;
+            continue;
+        }
+        kept.push_str(&piece);
+    }
+    // A single chunk over the cap (one plan with a huge checklist) has nothing
+    // to cut between, so fall back to a byte cut on a char boundary.
+    if kept.len() > BODY_CAP_BYTES {
+        let mut end = BODY_CAP_BYTES;
+        while end > 0 && !kept.is_char_boundary(end) {
+            end -= 1;
+        }
+        kept.truncate(end);
+        kept.push_str("\n…(truncated)");
+    }
+    if dropped > 0 {
+        let section_word = if dropped == 1 { "section" } else { "sections" };
+        kept.push_str(&format!(
+            "\n\n…({dropped} more {section_word} omitted to keep this reminder \
+             under {} KB — read the source TASKS.md shown above)",
+            BODY_CAP_BYTES / 1024
+        ));
+    }
+    kept
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1849,6 +1931,97 @@ trailing notes outside\n";
         assert!(out.contains("## Plan: demo"));
         assert!(out.contains("**P1** — first task"));
         assert!(out.contains("Sources scanned:"));
+    }
+
+    /// Write `n` active plans, each with a body of `filler_lines` note lines,
+    /// and render the reminder an unattributed session would get.
+    fn reminder_for_plans(n: usize, filler_lines: usize) -> String {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut md = String::from("# TASKS\n\n");
+        for i in 0..n {
+            md.push_str(&format!(
+                "<!-- fleet:prd:begin id=\"plan-{i}\" v=\"2\" -->\n\n\
+                 **Plan:** 计划 {i}\n\n- [ ] **P1** — 第一个任务\n"
+            ));
+            for j in 0..filler_lines {
+                md.push_str(&format!("  - 备注 {j}:一条足够长的验收说明,用来把这个块撑大\n"));
+            }
+            md.push_str(&format!("\n<!-- fleet:prd:end id=\"plan-{i}\" -->\n\n"));
+        }
+        std::fs::write(tmp.path().join("TASKS.md"), md).unwrap();
+        render_active_plans_reminder(tmp.path(), None).expect("active plans → Some")
+    }
+
+    /// Two lines per plan is cheap at three plans and 24 KB at seventy — past
+    /// Claude Code's inline ceiling, where the whole reminder is replaced by a
+    /// `<persisted-output>` pointer. Only the first few are listed.
+    #[test]
+    fn unattributed_listing_is_capped_and_says_how_many_it_hid() {
+        let out = reminder_for_plans(UNATTRIBUTED_PLAN_CAP + 5, 0);
+        assert!(
+            out.contains(&format!("## Plan: plan-{}", UNATTRIBUTED_PLAN_CAP - 1)),
+            "the last plan inside the cap must be listed"
+        );
+        assert!(
+            !out.contains(&format!("## Plan: plan-{UNATTRIBUTED_PLAN_CAP}")),
+            "plans past the cap must not be listed:\n{out}"
+        );
+        assert!(
+            out.contains("and 5 more active plans not expanded here"),
+            "the hidden count must be stated:\n{out}"
+        );
+        // The count in the header still describes the whole workspace.
+        assert!(out.contains(&format!("holds {} active plans", UNATTRIBUTED_PLAN_CAP + 5)));
+    }
+
+    #[test]
+    fn a_short_list_is_untouched_by_the_cap() {
+        let out = reminder_for_plans(3, 0);
+        for i in 0..3 {
+            assert!(out.contains(&format!("## Plan: plan-{i}")));
+        }
+        assert!(!out.contains("not expanded here"));
+    }
+
+    /// The count cap alone does not bound the size — a focused plan is rendered
+    /// whole, checklist and per-task notes included, so one plan can exceed the
+    /// ceiling by itself. `cap_body` is the backstop for that.
+    #[test]
+    fn oversized_body_is_cut_at_a_plan_boundary() {
+        let section = |i: usize| format!("## Plan: plan-{i}\n{}", "note line 备注\n".repeat(200));
+        let body = (0..8).map(section).collect::<Vec<_>>().join("\n\n");
+        assert!(body.len() > BODY_CAP_BYTES, "fixture must exceed the cap");
+
+        let out = cap_body(&body);
+        assert!(
+            out.len() < 16 * 1024,
+            "must stay under Claude Code's inline ceiling, got {} bytes",
+            out.len()
+        );
+        assert!(
+            out.contains("omitted to keep this reminder under 12 KB"),
+            "the omission must be stated:\n{}",
+            &out[..out.len().min(400)]
+        );
+        // What survives are whole sections, not a section cut mid-line.
+        assert!(out.contains("## Plan: plan-0"));
+        assert!(!out.contains("…(truncated)"));
+    }
+
+    #[test]
+    fn a_short_body_is_untouched_by_the_byte_cap() {
+        let body = "## Plan: plan-0\n- [ ] **P1** — 任务";
+        assert_eq!(cap_body(body), body);
+    }
+
+    #[test]
+    fn cap_body_cuts_a_single_huge_section_on_a_char_boundary() {
+        // One section with no `\n\n## ` boundary to cut at — CJK, so a naive
+        // byte truncation would split a character and panic.
+        let body = format!("## Plan: solo\n{}", "备注一二三四五".repeat(4000));
+        let out = cap_body(&body);
+        assert!(out.len() <= BODY_CAP_BYTES + 32);
+        assert!(out.ends_with("…(truncated)"));
     }
 
     #[test]
