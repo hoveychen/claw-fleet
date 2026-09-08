@@ -1,5 +1,49 @@
 import type { PendingDecision, PendingDecisions } from "./types";
 
+/**
+ * How long a card this client removed is kept from coming back.
+ *
+ * The reconcile poll and the answer round trip race, and the reconcile is the
+ * faster of the two. Answering removes the card immediately and posts the
+ * response in the background (see `fireDecisionResponse`) — the request file
+ * stays on disk until the blocked `fleet mcp` picks the response up on its own
+ * 200ms poll and cleans up. A reconcile landing in that gap sees the card still
+ * pending and would put it straight back on screen, answered.
+ *
+ * So a removal is remembered for a while, and only for a while: if the card is
+ * *still* pending after the grace, that is no longer a race — the answer was
+ * genuinely lost (a dropped write, a wedged producer) and the honest thing is to
+ * show the question again rather than leave an agent blocked on a card the user
+ * can no longer see. 30s matches the phone's `ANSWER_GRACE_MS`, which balances
+ * the same two failure modes.
+ */
+export const REMOVED_GRACE_MS = 30_000;
+
+/** id → when this client removed it. Pruned on read. */
+const removedLocallyAt = new Map<string, number>();
+
+/**
+ * Remember that this client removed a card — answered, declined, dismissed, or
+ * pruned. Called from the store's single removal funnel, so every path is
+ * covered without each one having to remember to.
+ */
+export function noteRemovedLocally(id: string, now: number = Date.now()): void {
+  removedLocallyAt.set(id, now);
+}
+
+/** Ids the reconcile must not re-add yet. Prunes entries past the grace. */
+export function suppressedIds(now: number = Date.now()): Set<string> {
+  for (const [id, at] of removedLocallyAt) {
+    if (now - at > REMOVED_GRACE_MS) removedLocallyAt.delete(id);
+  }
+  return new Set(removedLocallyAt.keys());
+}
+
+/** Test seam — module state would otherwise leak between cases. */
+export function clearRemovedLocally(): void {
+  removedLocallyAt.clear();
+}
+
 /** Every request in a pending snapshot, flattened across the six channels. */
 export function flattenPending(p: PendingDecisions): Map<string, { parked?: boolean }> {
   const out = new Map<string, { parked?: boolean }>();

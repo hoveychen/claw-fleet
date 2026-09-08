@@ -1,5 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { flattenPending, reconcilePlan } from "./decisionReconcile";
+import { describe, it, expect, beforeEach } from "vitest";
+import {
+  REMOVED_GRACE_MS,
+  clearRemovedLocally,
+  flattenPending,
+  noteRemovedLocally,
+  reconcilePlan,
+  suppressedIds,
+} from "./decisionReconcile";
 import type { PendingDecision, PendingDecisions } from "./types";
 
 function card(id: string, parked = false): PendingDecision {
@@ -107,5 +114,47 @@ describe("reconcilePlan", () => {
       flattenPending(snapshot({ fleetAsk: [{ id: "f1", parked: true }] })),
     );
     expect(plan.drop).toEqual([]);
+  });
+});
+
+/**
+ * The regression the grace window exists for: the reconcile poll is faster
+ * than the answer round trip. Answering removes the card and posts the
+ * response in the background; the request file survives on disk until the
+ * blocked producer notices it on its own 200ms poll. A reconcile in that gap
+ * sees the card as still pending, and re-adding it would put an
+ * already-answered question back in front of the user.
+ */
+describe("locally removed cards", () => {
+  beforeEach(() => clearRemovedLocally());
+
+  it("suppresses a card this client just removed", () => {
+    const now = 1_000_000;
+    noteRemovedLocally("f1", now);
+    expect(suppressedIds(now)).toEqual(new Set(["f1"]));
+  });
+
+  it("stops suppressing once the grace has passed, so a genuinely lost answer resurfaces", () => {
+    const now = 1_000_000;
+    noteRemovedLocally("f1", now);
+    expect(suppressedIds(now + REMOVED_GRACE_MS)).toEqual(new Set(["f1"]));
+    expect(suppressedIds(now + REMOVED_GRACE_MS + 1)).toEqual(new Set());
+  });
+
+  it("does not suppress cards it never saw removed", () => {
+    expect(suppressedIds(1_000_000)).toEqual(new Set());
+  });
+
+  // Suppression is about *adding*; a suppressed id is not in the store, so
+  // there is nothing for the plan to drop or park either way.
+  it("does not interfere with the drop/park plan", () => {
+    const now = 1_000_000;
+    noteRemovedLocally("f1", now);
+    const plan = reconcilePlan(
+      [card("f2")],
+      new Set(["f2"]),
+      flattenPending(snapshot({ fleetAsk: [{ id: "f1" }] })),
+    );
+    expect(plan.drop).toEqual(["f2"]);
   });
 });

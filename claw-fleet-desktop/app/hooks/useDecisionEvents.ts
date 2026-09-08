@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef } from "react";
 import { playDecisionAlert } from "../audio";
-import { flattenPending, reconcilePlan } from "../decisionReconcile";
+import { flattenPending, reconcilePlan, suppressedIds } from "../decisionReconcile";
 import { normalizeForSpeech } from "../decisionText";
 import { useDecisionStore } from "../store";
 import type {
@@ -95,12 +95,19 @@ export function useDecisionEvents() {
       invoke<PendingDecisions>("list_pending_decisions")
         .then((p) => {
           if (cancelled || !p) return;
-          p.guard?.forEach((r) => addGuardRequest(r));
-          p.elicitation?.forEach((r) => addElicitationRequest(r));
-          p.fleetAsk?.forEach((r) => addFleetAskRequest(r));
-          p.a2uiRender?.forEach((r) => addA2uiRenderRequest(r));
-          p.planApproval?.forEach((r) => addPlanApprovalRequest(r));
-          p.permissionPrompt?.forEach((r) => addPermissionPromptRequest(r));
+          // Cards this client just dealt with. The poll is faster than the
+          // answer round trip, so without this a just-answered card comes
+          // straight back on screen.
+          const skip = suppressedIds();
+          const add = <T extends { id: string }>(r: T, action: (r: T) => void) => {
+            if (!skip.has(r.id)) action(r);
+          };
+          p.guard?.forEach((r) => add(r, addGuardRequest));
+          p.elicitation?.forEach((r) => add(r, addElicitationRequest));
+          p.fleetAsk?.forEach((r) => add(r, addFleetAskRequest));
+          p.a2uiRender?.forEach((r) => add(r, addA2uiRenderRequest));
+          p.planApproval?.forEach((r) => add(r, addPlanApprovalRequest));
+          p.permissionPrompt?.forEach((r) => add(r, addPermissionPromptRequest));
 
           // The other two directions, both just as losable as a `*-request`
           // emit: a missed `*-dismissed` strands a card the backend already
