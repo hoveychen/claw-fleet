@@ -2,6 +2,17 @@ use super::*;
 
 // ── Workspace command runner (文件 page) ─────────────────────────────────────
 
+/// Which optional surfaces this host exposes — read once at boot by `App.tsx`.
+///
+/// Not routed through `LocalBackend`: the flags are a property of *this*
+/// process's launch environment (`FLEET_TERMINAL`), not of a data store the
+/// backend owns, and the browser build asks the same question of whichever
+/// `fleet serve` served it (`GET /host_features`).
+#[tauri::command(async)]
+pub(crate) fn host_features() -> claw_fleet_core::feature_flags::HostFeatures {
+    claw_fleet_core::feature_flags::host_features()
+}
+
 #[tauri::command(async)]
 pub(crate) fn list_workspace_procs(
     state: tauri::State<'_, AppState>,

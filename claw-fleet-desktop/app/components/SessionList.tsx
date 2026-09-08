@@ -61,6 +61,9 @@ export function SessionList() {
     toggleSecondarySidebar,
     mascotVisible,
   } = useUIStore();
+  // 终端页只有在后端启动时带了 FLEET_TERMINAL 才存在（见 core 的 feature_flags）。
+  // 关着的时候连导航项都不出，而不是让用户点进去、开 shell 时才被后端拒绝。
+  const terminalEnabled = useUIStore((s) => s.hostFeatures.terminal);
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
   // Views that own a secondary sidebar (二级侧边栏). Re-clicking the nav item of
@@ -343,13 +346,15 @@ export function SessionList() {
           </span>
         )}
       </button>
-      <button
-        className={`${styles.nav_item} ${viewMode === "terminal" ? styles.nav_active : ""}`}
-        onClick={() => navTo("terminal")}
-      >
-        <span className={styles.nav_icon}><SquareTerminal size={14} strokeWidth={1.5} /></span>
-        <span className={styles.nav_label}>{t("view_terminal", "终端")}</span>
-      </button>
+      {terminalEnabled && (
+        <button
+          className={`${styles.nav_item} ${viewMode === "terminal" ? styles.nav_active : ""}`}
+          onClick={() => navTo("terminal")}
+        >
+          <span className={styles.nav_icon}><SquareTerminal size={14} strokeWidth={1.5} /></span>
+          <span className={styles.nav_label}>{t("view_terminal", "终端")}</span>
+        </button>
+      )}
       <button
         className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
         onClick={() => navTo("wiki")}
@@ -632,7 +637,10 @@ export function SessionList() {
       ) : viewMode === "files" ? (
         <FilesView />
       ) : viewMode === "terminal" ? (
-        <TerminalView />
+        // `loadHostFeatures` navigates a restored `terminal` viewMode back home
+        // when the flag is off; this guard covers the frame before that answer
+        // lands, so the page never flashes a shell the backend would refuse.
+        terminalEnabled ? <TerminalView /> : null
       ) : viewMode === "plugins" ? (
         <PluginsView />
       ) : viewMode === "mobile" ? (

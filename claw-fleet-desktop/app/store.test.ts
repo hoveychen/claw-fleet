@@ -734,3 +734,73 @@ describe("精简模式", () => {
     expect(useUIStore.getState().viewMode).toBe(view === "artifacts" ? "artifacts" : "history");
   });
 });
+
+/**
+ * 终端页由后端启动时的 FLEET_TERMINAL 决定（core 的 feature_flags），前端只是
+ * 照着后端的答案决定这一页在不在。这里盯住三件事：默认必须是关（拿不到答案时
+ * 也是关），已经停在终端页的会话要被送回首页，以及关着时任何跳终端页的请求都
+ * 不生效——否则用户会落在一个既没有导航项、又开不出 shell 的空白页上。
+ */
+describe("终端功能开关（host_features）", () => {
+  beforeEach(() => vi.resetModules());
+
+  it("defaults to off and stays off when the backend call fails", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("backend not ready"));
+
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().hostFeatures.terminal).toBe(false);
+
+    await useUIStore.getState().loadHostFeatures();
+    expect(useUIStore.getState().hostFeatures.terminal).toBe(false);
+  });
+
+  it("adopts the backend's answer when the flag is on", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValueOnce({ terminal: true });
+
+    const { useUIStore } = await import("./store");
+    await useUIStore.getState().loadHostFeatures();
+
+    expect(useUIStore.getState().hostFeatures.terminal).toBe(true);
+  });
+
+  it("sends a restored terminal page back to the 工作 home when the flag is off", async () => {
+    const { setItem } = await import("./storage");
+    setItem("viewMode", "terminal");
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValueOnce({ terminal: false });
+
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().viewMode).toBe("terminal");
+
+    await useUIStore.getState().loadHostFeatures();
+    expect(useUIStore.getState().viewMode).toBe("history");
+  });
+
+  it("leaves a restored terminal page alone when the flag is on", async () => {
+    const { setItem } = await import("./storage");
+    setItem("viewMode", "terminal");
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValueOnce({ terminal: true });
+
+    const { useUIStore } = await import("./store");
+    await useUIStore.getState().loadHostFeatures();
+
+    expect(useUIStore.getState().viewMode).toBe("terminal");
+  });
+
+  it("ignores an 在终端打开 request while the flag is off, and honours it when on", async () => {
+    const { useUIStore } = await import("./store");
+    useUIStore.getState().setViewMode("files");
+
+    useUIStore.getState().requestTerminalNav("/repo");
+    expect(useUIStore.getState().viewMode).toBe("files");
+    expect(useUIStore.getState().terminalNav).toBeNull();
+
+    useUIStore.setState({ hostFeatures: { terminal: true } });
+    useUIStore.getState().requestTerminalNav("/repo");
+    expect(useUIStore.getState().viewMode).toBe("terminal");
+    expect(useUIStore.getState().terminalNav?.workspacePath).toBe("/repo");
+  });
+});

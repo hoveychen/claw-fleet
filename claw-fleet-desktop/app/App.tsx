@@ -82,6 +82,13 @@ function App() {
   // backend confirmation of the OS to apply macOS-only window tweaks
   // (clearing the title, setting [data-platform="macos"] for legacy
   // module-CSS selectors).
+  // Which optional surfaces this backend allows (currently: the 终端 page,
+  // gated by FLEET_TERMINAL). Read once — it is a launch property of the
+  // backend process, so polling it would only ever get the same answer.
+  useEffect(() => {
+    void useUIStore.getState().loadHostFeatures();
+  }, []);
+
   useEffect(() => {
     invoke<string>("get_platform").then((p) => {
       if (p === "macos") {
