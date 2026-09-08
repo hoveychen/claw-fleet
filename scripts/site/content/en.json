@@ -46,6 +46,7 @@
       "Open a deliverable, export it, and return to it later. Keep reusable conclusions in a versioned project wiki."
     ]
   ],
+  "navHarness": "Multi-agent",
   "harnessHeading": "One piece of work.<br>More than one agent.",
   "harnessCopy": "Planning, implementation and review don’t have to run on the same tool. You decide who takes which step.",
   "relayNodes": [

@@ -645,6 +645,7 @@ html[lang="zh-CN"] .hero-copy .intro {
     font-size: 13px;
   }
   .nav-explore,
+  .nav-harness,
   .nav-mobile {
     display: none;
   }
