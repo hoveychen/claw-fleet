@@ -26,6 +26,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: main
+          # sitemap_lastmod.py dates each page from its own last commit, and a
+          # shallow clone reports HEAD for every file -- which would stamp
+          # "changed just now" onto all four pages.
+          fetch-depth: 0
       - name: Build latest stable download manifest
         env:
           GH_TOKEN: ${{ github.token }}
@@ -33,6 +37,8 @@ jobs:
           python3 scripts/site/pages_manifest.py
           --mirror-url https://fleet.eternizedlab.com/downloads.json
           --output docs/downloads.json
+      - name: Stamp real lastmod dates into the sitemap
+        run: python3 scripts/site/sitemap_lastmod.py
       # docs/ also holds design notes, product research and the mirror's
       # systemd units. Staging picks only the files that are part of the site
       # and resolves __SITE_ORIGIN__ to this deployment's own origin, so the

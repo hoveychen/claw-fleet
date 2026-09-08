@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Page not found — Claw Fleet / 页面不存在 — Claw Fleet</title>
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light"><meta name="theme-color" content="#ffffff">
+<link rel="icon" href="./icon.png"><link rel="stylesheet" href="./site.css?v=e43c09b70a00">
+<script>
+// No redirect, no framework: read the language the visitor already chose on
+// this site, fall back to the browser, and reveal that half of the page.
+(() => {
+  let saved; try { saved = localStorage.getItem('claw-fleet-site-language'); } catch {}
+  const preferred = navigator.languages?.[0] || navigator.language || 'en';
+  const lang = saved === 'zh' || saved === 'en' ? saved : (/^zh(?:-|$)/i.test(preferred) ? 'zh' : 'en');
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  document.addEventListener('DOMContentLoaded', () => document.body.dataset.locale = lang);
+})();
+</script>
+</head>
+<body data-locale="en" class="nf-page">
+<header class="header"><a class="brand" href="./"><img src="./icon.png" width="32" height="32" alt="">Claw Fleet</a></header>
+<main id="main"><div class="nf" lang="en" data-nf="en"><h1>That page isn’t here.</h1><p>The link may be out of date, or the page moved. The workspace is still where you left it.</p><a class="button primary" href="./">Back to the home page</a><a class="text-link" href="./#download">Download Claw Fleet</a><a class="text-link" href="./benchmark.html">Read the field report</a></div><div class="nf" lang="zh-CN" data-nf="zh"><h1>这个页面不在这里。</h1><p>链接可能过期了，或者页面搬走了。工作台还在原处。</p><a class="button primary" href="./zh/">回到首页</a><a class="text-link" href="./zh/#download">下载 Claw Fleet</a><a class="text-link" href="./zh/benchmark.html">看实测报告</a></div></main>
+</body></html>

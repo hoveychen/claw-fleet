@@ -167,7 +167,19 @@
   "faqs": [
     [
       "Which AI tools can I use?",
-      "Fleet connects to Claude Code, Codex and DeepSeek Harness (the @deepseek-ai/dsh CLI). Install and configure the tools you want to use. DeepSeek Harness can select models from configured providers; availability depends on those providers and your credentials."
+      "Fleet connects to Claude Code, Codex and DeepSeek Harness (the @deepseek-ai/dsh CLI). Install and configure the tools you want to use. DeepSeek Harness can select models from configured providers; availability depends on those providers and your credentials. <a href=\"supported-tools.html\">Which agent tools Fleet works with</a> keeps the tool list and the model list apart."
+    ],
+    [
+      "I already use the Claude Code CLI. What does Fleet add?",
+      "A place for everything around a session: several tasks on one board, decisions with the proposal or image attached, plans that survive a handoff, and the files that came out. It starts the CLI you already have and reads the sessions it writes. <a href=\"claude-code-gui.html\">A desktop workspace for Claude Code</a> walks through it."
+    ],
+    [
+      "I use Codex, not Claude Code. Does that work?",
+      "Yes — a task picks its tool when you brief it, and Codex tasks get its own model catalogue, its own reasoning ladder and the ChatGPT-plan windows it reports. <a href=\"codex-gui.html\">A desktop workspace for Codex</a> goes through it."
+    ],
+    [
+      "Can I use my own provider keys instead of a subscription?",
+      "That is what DeepSeek Harness is for: you configure the providers, and the models you can reach are whatever those keys open. <a href=\"deepseek-harness-gui.html\">A desktop workspace for DeepSeek Harness</a> covers how spend and effort work there."
     ],
     [
       "Is it free?",
@@ -195,7 +207,7 @@
     ],
     [
       "How do I download in China?",
-      "When a China mirror is enabled, select it above. GitHub Releases remains the alternative. The Android APK is served from GitHub Releases; whether the mirror carries it depends on the release you are downloading. There is no iOS or HarmonyOS package yet \u2014 on those, open the pairing link in the browser."
+      "When a China mirror is enabled, select it above. GitHub Releases remains the alternative. The Android APK is served from GitHub Releases; whether the mirror carries it depends on the release you are downloading. There is no iOS or HarmonyOS package yet — on those, open the pairing link in the browser."
     ]
   ],
   "closing": "A thought to start with.<br>A result to come back to.",
@@ -204,5 +216,346 @@
   "license": "License",
   "screenshotAlt": "Current Fleet project workspace, with tasks and the new-session composer",
   "mobileAlt": "Fleet mobile review with a launch decision and two concrete options",
-  "guide": "Project guide"
+  "guide": "Project guide",
+  "notFound": {
+    "title": "Page not found — Claw Fleet",
+    "heading": "That page isn’t here.",
+    "copy": "The link may be out of date, or the page moved. The workspace is still where you left it.",
+    "home": "Back to the home page",
+    "download": "Download Claw Fleet",
+    "report": "Read the field report"
+  },
+  "pages": {
+    "claude-code-gui": {
+      "title": "A desktop workspace for Claude Code — Claw Fleet",
+      "description": "You already run the Claude Code CLI. Claw Fleet is the desktop workspace around it: several sessions on one board, decisions with the material attached, plans that survive a handoff, and the results kept where you can find them.",
+      "skip": "Skip to content",
+      "backHome": "Home",
+      "navDownload": "Download",
+      "eyebrow": "For people already running Claude Code",
+      "h1": "You have the CLI.<br>This is the room around it.",
+      "lede": "Claude Code runs in a terminal, one session at a time, and every session forgets the room it was in. Claw Fleet is a desktop app that keeps the room: the project a task belongs to, the decision it is waiting on, the plan it is working through, and the file it produced. The CLI still does the work — Fleet is what you look at while it does.",
+      "sections": [
+        {
+          "h2": "When three of them are running",
+          "body": [
+            "Two terminals is fine. Four, and looking after them becomes the job — you are tabbing between panes to see which one finished, which one is stuck, and which one is waiting on you.",
+            "Fleet puts them on one board. Each task sits under the project it belongs to, with its tool and model on the card, and you can tell at a glance which sessions are thinking, which are running a command, and which stopped to ask something. Start a task from one place, add a follow-up instruction while it is still running, and keep talking to it after it stops.",
+            "The board is a view of your real sessions, not a copy of them: Fleet reads the transcripts Claude Code already writes, so a session you started in a terminal shows up too."
+          ],
+          "shot": "screenshots/current/agents-en.png",
+          "shotAlt": "Fleet session board with Claude Code, Codex and DeepSeek Harness tasks running side by side, each card labelled with its tool and model",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "The moment it asks whether to continue",
+          "body": [
+            "In a terminal, a question arrives as a prompt with no context: it wants an answer about a plan you would have to scroll back to read.",
+            "Fleet collects those moments into one queue and attaches the material to them. A proposed plan you can edit before approving. An image the agent made. An HTML report it wrote. A risky command, with the risk analysis, before it runs. You read the thing you are deciding about, then answer with an option, a form field or plain text, and the answer goes back to the task that asked.",
+            "Every question, the choice you made and anything you typed stays with the work, so a decision from last week is still readable next to what came out of it."
+          ],
+          "shot": "screenshots/current/review-en.png",
+          "shotAlt": "A Fleet decision card with a proposal preview on the left and two concrete options on the right",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Pick the model, and how hard it thinks",
+          "body": [
+            "You choose the model when you brief a task, from Claude Code's own catalogue — Fable 5.1 and Fable 5, Opus 5 and Opus 4.8, Sonnet 5 and Sonnet 4.6, Haiku 4.5 — and the reasoning effort along with it, across the five levels the CLI accepts: low, medium, high, xhigh and max. Permission mode is on the same composer, so a task you want to run unattended and one you want to approve step by step are two different picks, not two different setups.",
+            "Model subscriptions and API usage stay on your own Anthropic account, exactly as they are now. Fleet reads what your sessions consumed and shows tokens, estimated cost, output speed and your quota windows, so the numbers you see are your own usage rather than a bill from us.",
+            "Commands your agents run are recorded and grouped by risk category, which is a different thing from approving them one by one — it is the record you read afterwards."
+          ]
+        },
+        {
+          "h2": "Where the work ends up",
+          "body": [
+            "A long session produces things: a document, a spreadsheet, a rendered image, a report worth reading twice. In a terminal those end up as paths you have to remember.",
+            "Fleet keeps a deliverables view per project, where PDFs, Office files, images, video and web documents preview in place. Star one, leave yourself a note, export the file, come back to it a month later. Conclusions worth reusing go into a versioned project wiki that later sessions can search and cite — including sessions on a different tool.",
+            "What lands there is what an agent added or what the artifact command captured, not a sweep of everything you touched."
+          ],
+          "shot": "screenshots/current/results-en.png",
+          "shotAlt": "Fleet deliverables view with documents and media previewed in place, filtered by project",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Long jobs, and handing one over",
+          "body": [
+            "Work that takes a day does not fit in one session. Fleet gives that shape somewhere to live: a plan with its steps checked off as they finish, a handoff that starts a fresh session from a brief and carries the plan, the step it stopped on and the notes the previous session left behind, and a chain you can trace back through afterwards.",
+            "Recurring work goes on a schedule. Work that is waiting on something — a build, a deploy, a queue — waits for the condition and starts the agent when it is met, instead of holding a session open.",
+            "A handoff can name another tool's model, so the next session runs there. The plan, the wiki and the deliverables belong to the work rather than to whichever CLI produced them."
+          ]
+        },
+        {
+          "h2": "Your Claude Code setup stays yours",
+          "body": [
+            "Fleet does not replace your configuration. It reads the same directories the CLI does, so your CLAUDE.md files, skills, plugins and memory rules are what your sessions still run on — Fleet just gives you somewhere to browse them, see a rule's revision history, and sync skills across the tools that support them.",
+            "It runs on your machine, next to the CLI. The machine running a task has to be online for that task to move, which is also what makes the phone useful rather than a second place to configure things: pair a phone to the desktop and you can brief a task, add an instruction, answer a decision and preview a deliverable from wherever you are, while the work still happens on your own computer.",
+            "Fleet is free and open source under AGPL-3.0. It brings no model account of its own and no hosted subscription — you connect the tools and accounts you already have."
+          ]
+        }
+      ],
+      "faqHeading": "Questions people ask first",
+      "faqs": [
+        [
+          "Does this replace the Claude Code CLI?",
+          "No. Fleet starts the same CLI you have installed and reads the session data it writes. Sessions you start in a terminal show up in Fleet, and anything Fleet starts is an ordinary Claude Code session you can also resume from the terminal."
+        ],
+        [
+          "Do I need an API key, or a separate subscription?",
+          "Neither from us. You sign in to Claude Code the way you already do, and model usage stays on that account. Fleet itself is free and open source; the costs it shows are estimated from your usage, for reference."
+        ],
+        [
+          "Will it work with my existing CLAUDE.md, skills and plugins?",
+          "Yes — those live in your own configuration directories and Fleet reads them rather than replacing them. It also gives you a place to inspect skills, plugin sources and memory rules, including which scope a rule came from."
+        ],
+        [
+          "Which other agent tools does it support?",
+          "Claude Code, Codex and DeepSeek Harness, each with its own models and accounts. A task picks its tool when you brief it, and a handoff can move the work from one to another."
+        ]
+      ],
+      "closingHeading": "Point it at the next task.",
+      "closing": "Install the desktop app, connect the CLI you already use, and give the next piece of work a place to live.",
+      "cta": "Download Claw Fleet",
+      "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
+    },
+    "codex-gui": {
+      "title": "A desktop workspace for Codex — Claw Fleet",
+      "description": "Run Codex from a desktop app instead of a terminal: its own model catalogue and reasoning ladder on the composer, the ChatGPT-plan windows it reports, decision cards that reach a headless run, and work that can hand off to a different tool mid-plan.",
+      "skip": "Skip to content",
+      "backHome": "Home",
+      "navDownload": "Download",
+      "eyebrow": "For people already running Codex",
+      "h1": "Codex, with somewhere<br>to put the work.",
+      "lede": "Codex is good at long unattended stretches, which is exactly when a terminal tells you least. Claw Fleet is a desktop app that starts your Codex CLI, follows what it is doing, and gives the run a place to report back to — with the plan, the questions and the finished files where you can find them.",
+      "sections": [
+        {
+          "h2": "Its own models, its own effort ladder",
+          "body": [
+            "The composer offers Codex's catalogue, not a generic list: GPT-6 Astra, the GPT-5.6 trio of Sol, Terra and Luna, and GPT-5.5. Reasoning effort follows Codex's own scale — minimal, low, medium and high — except on Astra, which declines minimal and adds the deeper xhigh and max instead. Fleet shows the ladder that model actually accepts, so a picker cannot hand Codex a level it will reject.",
+            "Effort is passed per task rather than stored in your config, so a profile you already keep in Codex still applies and one task can run deeper than the next without you editing anything.",
+            "Codex has no permission-mode concept of Claude's, and Fleet does not pretend otherwise: that pill is simply absent for a Codex task."
+          ]
+        },
+        {
+          "h2": "The quota windows it reports, on a chart",
+          "body": [
+            "Codex bills against your ChatGPT plan, and it reports its own rate-limit windows. Fleet records each report and draws them over time, so a week of heavy use is something you can look at rather than something you discover when a run stops.",
+            "Different plans report different shapes — a Team plan sends a single seven-day window where others send two — and the chart follows what your account actually reports instead of assuming a layout.",
+            "Alongside it: tokens per session, estimated cost, live output speed. Estimates for orientation, not an invoice; the plan itself stays between you and OpenAI."
+          ]
+        },
+        {
+          "h2": "A headless run can still ask you something",
+          "body": [
+            "The hard part of unattended work is the moment it needs a human. A `codex exec` run has no interactive channel to reach you through, so historically it either stopped or guessed.",
+            "Fleet registers itself as a tool the run can call, which turns \"ask the operator\" into a decision card on your desk and on your phone: a question, real options, a form when the answer has fields, and the material — a plan, an image, an HTML report — attached to it. The answer travels back into the same run.",
+            "You get the same queue as every other tool's questions, so a Codex run waiting on you looks like everything else waiting on you."
+          ],
+          "shot": "screenshots/current/review-en.png",
+          "shotAlt": "A Fleet decision card showing a proposal preview beside two concrete options",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Asking Codex for a picture",
+          "body": [
+            "Codex ships an image-generation skill backed by gpt-image-2, billed against the same ChatGPT plan. Fleet borrows it: a task can ask for an illustration, a mockup or a hero image and get a file back into the project, which is the one thing the Claude side cannot do at all.",
+            "Images go the other way too. Attach reference pictures to a brief and they reach the run as real files rather than as a description of a picture."
+          ]
+        },
+        {
+          "h2": "Mid-plan, a different tool can take over",
+          "body": [
+            "Plans and handoffs are not per-tool. A plan written during a Codex session is the same plan a Claude Code session picks up, and a handoff carries the step it stopped on plus the notes left behind.",
+            "So the split can follow what each tool is good at — one drafts, another implements, a third reviews — and you decide the split per task instead of committing your whole workflow to one vendor. The project wiki and the deliverables sit with the work, readable by whichever tool comes next.",
+            "Scheduled and condition-based runs work the same way: a nightly check or a job waiting on a build can be a Codex task without becoming a Codex-only setup."
+          ],
+          "shot": "screenshots/current/agents-en.png",
+          "shotAlt": "Fleet session board with Codex, Claude Code and DeepSeek Harness tasks side by side, each card labelled with its tool and model",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Where it runs, and what it costs",
+          "body": [
+            "Fleet starts the Codex CLI on your own machine and reads the session files it writes, so a run you started in a terminal appears in Fleet too, and a run Fleet started stays an ordinary Codex session. The machine has to be online for its tasks to move; that is also what the phone connects back to.",
+            "Fleet is free and open source under AGPL-3.0. It carries no model account and no hosted subscription of its own — Codex usage stays on the ChatGPT plan you already pay for."
+          ]
+        }
+      ],
+      "faqHeading": "Questions people ask first",
+      "faqs": [
+        [
+          "Does Fleet need an OpenAI API key?",
+          "No. It starts the Codex CLI, which authenticates the way you already set it up — for most people that is a ChatGPT plan rather than an API key. Fleet adds no account of its own."
+        ],
+        [
+          "Can I still use my Codex profiles and config?",
+          "Yes. Fleet reads the same Codex home directory the CLI uses. A model or effort you pick for one task is passed for that task; anything you have not overridden comes from your own config."
+        ],
+        [
+          "Can a Codex task hand work to Claude Code?",
+          "Yes — a handoff can name another tool's model, and the plan, notes and deliverables travel with it. That is the point of keeping them in Fleet rather than inside one CLI."
+        ],
+        [
+          "Which Codex models can it drive?",
+          "Whatever your account can reach, from Codex's own catalogue: GPT-6 Astra, GPT-5.6 Sol, Terra and Luna, and GPT-5.5. Availability depends on your plan, not on Fleet."
+        ]
+      ],
+      "closingHeading": "Give the next long run somewhere to report.",
+      "closing": "Install the desktop app, point it at the Codex CLI you already use, and stop reading a terminal to find out what happened.",
+      "cta": "Download Claw Fleet",
+      "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
+    },
+    "deepseek-harness-gui": {
+      "title": "A desktop workspace for DeepSeek Harness — Claw Fleet",
+      "description": "Drive the dsh CLI from a desktop app: models from the providers you configured, each with its own reasoning ladder, spend read from the provider's own API, and one local dsh server behind every session.",
+      "skip": "Skip to content",
+      "backHome": "Home",
+      "navDownload": "Download",
+      "eyebrow": "For people running the dsh CLI",
+      "h1": "Bring your own keys.<br>Keep the workspace.",
+      "lede": "DeepSeek Harness is a bring-your-own-key harness: you configure the providers, and the models you can reach are whatever those keys open. Claw Fleet is a desktop app that puts a workspace around it — the provider catalogue in the model picker, the spend read from the provider that actually bills you, and the tasks, decisions and deliverables kept the same way they are for every other tool.",
+      "sections": [
+        {
+          "h2": "The models are your providers' models",
+          "body": [
+            "dsh publishes what your configuration can reach, so the picker is built from your catalogue rather than a fixed list. Ids are provider-scoped — the vendor prefix in front of the model name — and Fleet groups them by vendor so a catalogue with dozens of entries is still something you can pick from.",
+            "Reasoning effort is per model here, not per tool: each model carries the ladder it accepts, and dsh's own default is named on the menu so the un-chosen state tells you what will happen rather than leaving you guessing. Some models expose no reasoning control at all, and then there is no ladder to show.",
+            "Fleet only offers dsh at all when the binary is actually installed. Unlike the other two sources, this one reaches its sessions through a server it has to start, so a machine without dsh gets no half-working entry in the menu."
+          ]
+        },
+        {
+          "h2": "What it costs comes from the provider, not from us",
+          "body": [
+            "dsh has no account, quota or rate-limit surface — that is not an omission, it follows from what the harness is. The quota belongs to whichever provider your key is for.",
+            "So Fleet reads the spend where it exists: the provider's own API. For a key you configured, that means the balance and generation cost that provider reports, which is the only number that corresponds to a real bill. There are no plan windows to draw, because dsh does not have a plan.",
+            "Per-session token accounting is a different question, and that one dsh does answer — Fleet reads the per-session token projections it publishes, so you still get tokens and a cost estimate for a specific task."
+          ]
+        },
+        {
+          "h2": "One local server behind every session",
+          "body": [
+            "Fleet talks to all dsh sessions through a single local dsh server, and treats it as a machine-level service rather than a child process that dies with a window. Close the app, open it again, and it adopts the running server instead of starting a second one.",
+            "That is the part you would otherwise have to run by hand, and the part that would go wrong quietly: two servers, two ports, sessions split between them. The lease is recorded with the port and launch token, readable only by you, so a later health failure can restart the same service rather than orphaning it."
+          ]
+        },
+        {
+          "h2": "Same board, same decisions, same deliverables",
+          "body": [
+            "Everything the workspace does around a session applies here unchanged. dsh tasks sit on the same board with their provider and model on the card, take follow-up instructions while running, raise decision cards with the material attached, and drop their finished files into the project's deliverables.",
+            "Images work in both directions: attach reference pictures to a brief and they reach the session as real files.",
+            "A plan written in a dsh session is the same plan another tool picks up, and a handoff can name a Claude Code or Codex model to continue in. The point of a bring-your-own-key harness is not having to commit — keeping the plan, the wiki and the results outside the CLI is what makes that true in practice."
+          ],
+          "shot": "screenshots/current/agents-en.png",
+          "shotAlt": "Fleet session board with DeepSeek Harness, Claude Code and Codex tasks side by side, each card labelled with its tool and model",
+          "shotCaption": "Current interface · Illustrative data"
+        },
+        {
+          "h2": "Where the keys live",
+          "body": [
+            "Provider credentials stay in your own dsh configuration. Fleet can tell you whether a credential a session needs is present, because that is what dsh reports — presence, not the key itself and not a balance attached to it.",
+            "Fleet runs on your machine next to dsh, is free and open source under AGPL-3.0, and adds no account of its own. The machine has to be online for its tasks to move; the phone connects back to it rather than replacing it."
+          ]
+        }
+      ],
+      "faqHeading": "Questions people ask first",
+      "faqs": [
+        [
+          "Which models can I actually use?",
+          "Whatever your configured providers expose — dsh publishes that catalogue and Fleet builds the picker from it. On a typical setup that is a couple of active providers out of the many dsh declares; the inactive ones stay out of your way."
+        ],
+        [
+          "Does Fleet need my provider keys?",
+          "No. They stay in your dsh configuration. Fleet asks dsh whether the credentials a session needs are set, which is presence rather than the key, and reads spend from the provider's API using the access you already granted."
+        ],
+        [
+          "Why does the effort menu look different from the Claude Code one?",
+          "Because it is per model here. Each dsh model carries the reasoning ladder it accepts and dsh's own default, and a model with no reasoning control shows no ladder at all."
+        ],
+        [
+          "Do I have to run the dsh server myself?",
+          "No. Fleet starts one local server and adopts it again the next time it opens, so sessions do not end up split across two of them."
+        ]
+      ],
+      "closingHeading": "Your keys, your models, one workspace.",
+      "closing": "Install the desktop app, keep the providers you configured, and give the work somewhere to live.",
+      "cta": "Download Claw Fleet",
+      "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
+    },
+    "supported-tools": {
+      "title": "Which agent tools Claw Fleet works with — Claw Fleet",
+      "description": "Fleet drives three CLI agent tools today — Claude Code, Codex and DeepSeek Harness — and reaches a much wider set of models through the providers you configure. What is on the list, how a tool gets on it, and where models and tools differ.",
+      "skip": "Skip to content",
+      "backHome": "Home",
+      "navDownload": "Download",
+      "eyebrow": "Tools, models and the difference",
+      "h1": "What Fleet drives,<br>and what it doesn’t.",
+      "lede": "Two questions get mixed together: which agent tool Fleet can start, and which model that tool can reach. Fleet drives three tools. Through them — particularly through a bring-your-own-key harness — you can reach a great many models. This page keeps the two apart, so you can tell in a minute whether your setup fits.",
+      "sections": [
+        {
+          "h2": "The three it drives today",
+          "body": [
+            "<strong>Claude Code.</strong> Fleet starts your installed CLI and reads the session files it writes, offers Claude's own model catalogue and its five-level effort scale, and shows the account quota windows it reports. <a href=\"claude-code-gui.html\">More about Claude Code in Fleet</a>.",
+            "<strong>Codex.</strong> Same shape, with Codex's own catalogue and a different effort ladder, billed against your ChatGPT plan. A headless run can raise a decision card, and it can generate images through Codex's own image skill. <a href=\"codex-gui.html\">More about Codex in Fleet</a>.",
+            "<strong>DeepSeek Harness (the dsh CLI).</strong> A bring-your-own-key harness: the models are whatever your configured providers expose, effort is per model, and spend is read from the provider that bills you. <a href=\"deepseek-harness-gui.html\">More about DeepSeek Harness in Fleet</a>."
+          ]
+        },
+        {
+          "h2": "What a tool needs for Fleet to drive it",
+          "body": [
+            "The three are not an arbitrary shortlist — they share a shape. Each is a command-line agent that runs on your machine, records its sessions as files Fleet can read, and can be started and resumed from a command. That shape is what lets Fleet follow a session it did not start, resume one after a restart, attach a decision to the run that asked, and hand a plan from one tool to another.",
+            "A tool built the other way round — its own cloud, its own editor, its sessions inside its own service — is a different integration, not a missing line in a list. That is why the list is short and why each addition takes real work rather than a config entry."
+          ]
+        },
+        {
+          "h2": "Models are a separate question",
+          "body": [
+            "The tool decides how the work runs; the provider decides which models the work can use. Through dsh, the second list is wide: you configure the providers you have keys for, and the catalogue Fleet shows is built from what they expose — models from many vendors, grouped by vendor, each with the reasoning ladder it accepts.",
+            "So \"can I use a particular model\" and \"can I use a particular tool\" usually have different answers, and the model question is the one that is easier to say yes to. If a model you want is reachable through a provider you can get a key for, dsh is the route.",
+            "The same is true of accounts: each tool keeps its own sign-in and its own bill. Fleet brings no model account and no hosted subscription of its own, so what you can reach through Fleet is exactly what you can already reach."
+          ]
+        },
+        {
+          "h2": "Not on the list right now",
+          "body": [
+            "Tools people ask about — Cursor, opencode, the ChatGPT web app, Kimi Code and others — are not currently among the three Fleet drives. That is a statement about Fleet's integration surface, not a judgement about them; several are good tools built around a different shape than the CLI-plus-session-files one above.",
+            "If your work lives in one of those, the honest answer today is that Fleet will not run it. What Fleet can still do for you is reach that vendor's models through a provider key in dsh, if the provider you use carries them — the model travels, the tool does not.",
+            "The list is expected to grow, and a fourth tool is being scoped. We would rather name it here when it works than promise a date, so this page is the one to check."
+          ]
+        },
+        {
+          "h2": "Mixing them on purpose",
+          "body": [
+            "Because the plan, the project wiki and the deliverables belong to the work rather than to a CLI, a single piece of work can move between the three. One tool drafts a plan, another implements the steps, a third reviews the diff — and a handoff carries the plan, the current step and the notes the previous session left behind.",
+            "When several are running, each card on the board says which tool and model it is on, so a mixed board stays readable. Which tool takes which step is a per-task choice, not a setting you commit to once."
+          ],
+          "shot": "screenshots/current/agents-en.png",
+          "shotAlt": "Fleet session board with Claude Code, Codex and DeepSeek Harness tasks running side by side, each card labelled with its tool and model",
+          "shotCaption": "Current interface · Illustrative data"
+        }
+      ],
+      "faqHeading": "The questions this page exists for",
+      "faqs": [
+        [
+          "Does Fleet work with Cursor?",
+          "Not today. Fleet drives command-line agents that keep their sessions as local files it can read and resume; Cursor is built around its own editor and service, which is a different integration rather than a setting to switch on."
+        ],
+        [
+          "Can I use it with ChatGPT?",
+          "Not the ChatGPT app itself. Codex is the command-line agent that bills against a ChatGPT plan, and that one Fleet does drive — so if what you have is a ChatGPT subscription, Codex is the route in."
+        ],
+        [
+          "Can I use DeepSeek, Qwen, Kimi or another vendor's models?",
+          "Usually yes, as models rather than as tools: configure a provider key in DeepSeek Harness and Fleet builds the picker from whatever that provider exposes. Whether a specific model is there depends on the provider, not on Fleet."
+        ],
+        [
+          "Will you add opencode, Kimi Code or something else?",
+          "The list is meant to grow and a fourth tool is being scoped. Rather than commit to a date, we will list it here once it actually runs."
+        ]
+      ],
+      "closingHeading": "If it is one of the three, it works today.",
+      "closing": "Install the desktop app, connect the tool you already use, and give the next piece of work a place to live.",
+      "cta": "Download Claw Fleet",
+      "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
+    }
+  }
 }

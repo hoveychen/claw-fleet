@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the machine-readable half of the pages: head block, sitemap, robots."""
 from pathlib import Path
+import itertools
 import json
 import re
 import sys
@@ -214,6 +215,94 @@ class GeneratedSiteTests(unittest.TestCase):
                 self.assertTrue(marked, 'no questions in the FAQ markup')
                 for question in marked:
                     self.assertIn(question, rendered)
+
+    def test_each_content_page_is_reachable_and_marked_up(self):
+        from build import CONTENT_SLUGS
+        self.assertTrue(CONTENT_SLUGS)
+        for slug in CONTENT_SLUGS:
+            for name, canonical in ((f'{slug}.html', f'/{slug}.html'),
+                                    (f'zh/{slug}.html', f'/zh/{slug}.html')):
+                with self.subTest(page=name):
+                    html = (self.DOCS / name).read_text()
+                    token = site_origin.TOKEN
+                    self.assertIn(f'<link rel="canonical" href="{token}{canonical}">', html)
+                    doc = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>',
+                                               html, re.S).group(1).replace('<\\/', '</'))
+                    self.assertEqual([n['@type'] for n in doc['@graph']],
+                                     ['Organization', 'BreadcrumbList', 'FAQPage'])
+                    # An orphan page is a page nothing passes authority to, so
+                    # the sitemap entry alone is not enough.
+                    self.assertIn(f'{slug}.html', (self.DOCS / 'sitemap.xml').read_text())
+
+    def test_the_home_faq_links_to_each_content_page_from_the_right_directory(self):
+        from build import CONTENT_SLUGS
+        for slug in CONTENT_SLUGS:
+            with self.subTest(slug=slug):
+                # Both index pages link with a bare filename: the zh index sits
+                # in /zh/, so "zh/<slug>.html" from there resolves to /zh/zh/.
+                self.assertIn(f'href="{slug}.html"', (self.DOCS / 'index.html').read_text())
+                self.assertIn(f'href="{slug}.html"', (self.DOCS / 'zh/index.html').read_text())
+                self.assertNotIn(f'href="zh/{slug}.html"', (self.DOCS / 'zh/index.html').read_text())
+
+    def test_content_pages_do_not_repeat_one_another(self):
+        """Four pages differing by a product name are doorway pages."""
+        from build import CONTENT_SLUGS
+        bodies = {}
+        for slug in CONTENT_SLUGS:
+            html = (self.DOCS / f'{slug}.html').read_text()
+            paragraphs = set(re.findall(r'<p>(.*?)</p>', html, re.S))
+            bodies[slug] = {p for p in paragraphs if len(p) > 120}
+        for a, b in itertools.combinations(bodies, 2):
+            shared = bodies[a] & bodies[b]
+            with self.subTest(pair=(a, b)):
+                self.assertFalse(shared, f'{a} and {b} share body copy: {list(shared)[:1]}')
+
+    def test_every_screenshot_ships_webp_with_a_png_fallback(self):
+        for name in ('index.html', 'zh/index.html'):
+            with self.subTest(page=name):
+                html = (self.DOCS / name).read_text()
+                pictures = re.findall(r'<picture>(.*?)</picture>', html, re.S)
+                self.assertEqual(len(pictures), 6)  # 4 panels + agents + mobile
+                for markup in pictures:
+                    self.assertRegex(markup, r'<source type="image/webp" srcset="[^"]+\.webp')
+                    # The PNG stays the src: a browser without WebP still shows
+                    # the screenshot, and "open full-size" hands out a PNG.
+                    self.assertRegex(markup, r'<img src="[^"]+\.png')
+                    self.assertIn('alt="', markup)
+                # Width and height stay on the img, so the box is reserved
+                # before either format loads.
+                self.assertEqual(len(re.findall(r'<img [^>]*width="\d+" height="\d+"', html)),
+                                 html.count('<img '))
+
+    def test_a_webp_exists_for_every_published_screenshot(self):
+        shots = sorted((self.DOCS / 'screenshots/current').glob('*.png'))
+        self.assertEqual(len(shots), 12)
+        for png in shots:
+            with self.subTest(shot=png.name):
+                webp = png.with_suffix('.webp')
+                self.assertTrue(webp.is_file(), f'{webp.name} missing: run scripts/site/encode_webp.py')
+                self.assertLess(webp.stat().st_size, png.stat().st_size)
+
+    def test_picture_is_not_left_inline(self):
+        # An inline wrapper reports a zero-width box to everything measuring
+        # the image's parent, including verify.mjs.
+        self.assertRegex((self.DOCS / 'site.css').read_text(), r'picture\s*\{[^}]*display:\s*block')
+
+    def test_the_404_page_serves_both_languages_and_stays_out_of_the_index(self):
+        html = (self.DOCS / '404.html').read_text()
+        self.assertIn('<meta name="robots" content="noindex">', html)
+        # Both languages must be in the markup: the page is served for any
+        # missing path, so there is no per-language URL to send anyone to.
+        self.assertIn('data-nf="en"', html)
+        self.assertIn('data-nf="zh"', html)
+        # locale.js would redirect a preferred-language visitor to an index
+        # page, turning a broken link into a silent bounce to the home page.
+        self.assertNotIn('locale.js', html)
+        # No canonical either: a 404 is not a page with a preferred URL.
+        self.assertNotIn('rel="canonical"', html)
+
+    def test_the_404_page_is_not_in_the_sitemap(self):
+        self.assertNotIn('404', (self.DOCS / 'sitemap.xml').read_text())
 
     def test_the_sitemap_and_robots_are_generated_not_stale(self):
         from build import PAGE_PAIRS

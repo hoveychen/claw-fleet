@@ -250,7 +250,7 @@ class DistributionTests(unittest.TestCase):
         for name in names:
             with self.subTest(name=name):
                 self.assertTrue((d.ROOT / 'docs' / name).is_file(), name)
-        for required in ('site.css', 'site.js', 'locale.js', 'sitemap.xml', 'robots.txt',
+        for required in ('site.css', 'site.js', 'locale.js', 'sitemap.xml', 'robots.txt', '404.html',
                          'icon-android.svg',
                          'screenshots/current/agents-en.png', 'screenshots/current/relay-zh.png'):
             self.assertIn(required, names)
@@ -296,6 +296,20 @@ class DistributionTests(unittest.TestCase):
             self.assertNotIn(f'{d.site_origin.TOKEN}/zh/index.html', names)
             self.assertFalse(any(d.site_origin.TOKEN in name for name in names))
             self.assertIn('icon.png', names)
+
+    def test_srcset_sources_are_mirrored_too(self):
+        # `src="` does not match `srcset="`, so a <picture>'s WebP sources were
+        # invisible to this list: 404 on the mirror, fine on the origin.
+        names = d.site_files(d.ROOT / 'docs')
+        self.assertIn('screenshots/current/work-en.webp', names)
+        self.assertEqual(sum(1 for n in names if n.endswith('.webp')), 12)
+        for name in names:
+            with self.subTest(name=name):
+                self.assertTrue((d.ROOT / 'docs' / name).is_file())
+
+    def test_srcset_candidates_are_split_off_their_descriptors(self):
+        markup = '<source srcset="a.webp 1x, b.webp 2x"><img src="c.png">'
+        self.assertEqual(list(d._references(markup)), ['c.png', 'a.webp', 'b.webp'])
 
     def test_site_reference_cannot_escape_the_root(self):
         with tempfile.TemporaryDirectory() as tmp:

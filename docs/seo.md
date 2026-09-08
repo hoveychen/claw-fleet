@@ -41,6 +41,18 @@ ssh own-api-sz 'sudo systemctl start fleet-site-update.service && journalctl -u 
 - 镜像（裸域）：`/robots.txt` 正常生效，里面声明了 sitemap。
 - Pages：靠在 Search Console 里直接提交 sitemap URL。
 
+## sitemap 的 lastmod 是发布时盖的
+
+`docs/sitemap.xml` 提交进仓库时**不带** `lastmod`。日期由 `scripts/site/sitemap_lastmod.py` 在发布前盖上，取每个页面**自己最后一次提交**的日期。
+
+为什么不能在 `build.py` 里写：build 生成页面，那一刻改动它们的提交还不存在，所有日期都会晚一个提交——而晚的恰好是刚改过的那个页面，也就是唯一值得爬虫关心的页面。
+
+两个陷阱都已挡住：
+- **shallow clone**：`actions/checkout` 默认 depth 1，那种仓库里每个文件的「最后提交」都是 HEAD，盖上去等于宣称四个页面刚刚全改了。所以 `pages.yml` 里加了 `fetch-depth: 0`，脚本自己也拒绝在 shallow 仓库上盖（宁可不带 lastmod）。
+- **没有 git / 页面查不到提交**：同样是整条不带 `lastmod`，而不是编一个。Google 抓到 lastmod 与内容不符会直接不再信这个字段。
+
+镜像手动发布时也要先跑一次这个脚本（它改的是仓库里的 `docs/sitemap.xml`，然后再生成镜像站点树）。
+
 ## 站长验证怎么放
 
 两种都已支持，任选其一：
@@ -88,6 +100,15 @@ github.io 侧由 push 后的 Pages 工作流发布；镜像侧走了一次手动
 - `softwareVersion` 由发布路径回填真实 tag，构建产物里只有 token——不会出现「结构化数据说 2.5.0、下载按钮给 2.7.0」。
 - 标题与描述覆盖真实搜索意图：英文面向 Google（Claude Code GUI / desktop app），中文面向百度（桌面图形界面 / 客户端），平台与「免费开源」写进描述。
 - `docs/` 里的设计稿、产品调研、站点评审、镜像的 systemd 单元与 nginx 配置**不再随官网发布**（此前 33 个文件是公开的）。
+
+## 第二轮做了什么（2026-09-08）
+
+- **双语 404 页**（`docs/404.html`）：Pages 自动接管任意缺失路径，镜像靠 nginx `error_page`（conf 已改，**服务器上要 reload 才生效**）。刻意不加载 `locale.js`——它会把偏好另一语言的访客 redirect 到首页，把断链变成静默跳转。
+- **sitemap 的 lastmod**：见上一节，发布时盖真实提交日期。
+- **截图 WebP**：`<picture>` + PNG 回退，`scripts/site/encode_webp.py` 重新编码（重拍截图后要跑一次）。2.6MB → 758KB。`distribute.site_files()` 现在也扫 `srcset`，否则 WebP 源在镜像上 404 而源站看着好。
+- **四个内容页**（中英共 8 份）：`claude-code-gui`、`codex-gui`、`deepseek-harness-gui`、`supported-tools`。正文在 `content/{en,zh}.json` 的 `pages` 下，排版在 `content_page.py`。加一页 = 加一个内容块 + 往 `build.CONTENT_SLUGS` 加一行（自动进 PAGE_PAIRS / sitemap / hreflang / lastmod）。
+- **门户页守门测试**：四页只差一个产品名就是 Google 明文的 doorway pages，罚整站。`test_seo.test_content_pages_do_not_repeat_one_another` 两两比对长段落，共用即红。**新增内容页时不要为了省事复制段落。**
+- 每个内容页都从首页 FAQ 内链过去（只进 sitemap 的孤页传不到权重）。zh 那些链接用裸文件名——从 `/zh/` 出发写 `zh/...` 会解析成 `/zh/zh/`。
 
 ## 还没做、需要单独定夺的
 

@@ -13,8 +13,12 @@ try {for(const lang of ['en','zh']) for(const width of [1440,390]) {
   await p.locator(`#tab-${n}`).click();
   await p.locator(`#panel-${n}`).scrollIntoViewIfNeeded();
   await p.waitForFunction(n=>{const i=document.querySelector(`#panel-${n} img`);return i.complete&&i.naturalWidth>0;},n);
-  const box=await p.locator(`#panel-${n} img`).evaluate(i=>({w:i.clientWidth,h:i.clientHeight,pw:i.parentElement.clientWidth,ph:i.parentElement.clientHeight,src:i.getAttribute('src')}));
-  if(box.w===0||box.w>box.pw+2||box.h>box.ph+2||!new URL(box.src,'http://localhost').pathname.endsWith(`-${lang}.png`))throw Error(JSON.stringify(box));
+  // currentSrc, not the src attribute: the screenshots are <picture> now, so the
+  // attribute is the PNG fallback while the browser actually paints the WebP --
+  // checking only the attribute would stop catching a wrong-language image.
+  const box=await p.locator(`#panel-${n} img`).evaluate(i=>({w:i.clientWidth,h:i.clientHeight,pw:i.parentElement.clientWidth,ph:i.parentElement.clientHeight,src:i.getAttribute('src'),shown:i.currentSrc}));
+  const shownPath=new URL(box.shown,'http://localhost').pathname;
+  if(box.w===0||box.w>box.pw+2||box.h>box.ph+2||!new URL(box.src,'http://localhost').pathname.endsWith(`-${lang}.png`)||!new RegExp(`-${lang}\\.(webp|png)$`).test(shownPath))throw Error(JSON.stringify(box));
   await p.locator(`#panel-${n}`).screenshot({path:`.playwright-cli/site-${lang}-${width}-${n}.png`});
  }
  await p.locator('.phone').scrollIntoViewIfNeeded();

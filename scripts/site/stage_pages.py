@@ -24,10 +24,11 @@ import site_origin
 #   sitemap.xml / robots.txt -- crawler entry points by definition (they are
 #                     already in distribute's list; named here so this file
 #                     reads as the full contract).
+#   404.html -- GitHub Pages serves it for any missing path; nothing links to it.
 #   player/ -- the promo player, published at /player/ and shared as a link
 #              even though the landing page does not link to it. Dropping it
 #              would 404 a URL that is already out in the world.
-EXTRA_FILES = ('downloads.json', 'sitemap.xml', 'robots.txt')
+EXTRA_FILES = ('downloads.json', 'sitemap.xml', 'robots.txt', '404.html')
 EXTRA_TREES = ('player',)
 # Search-console ownership proofs have to sit at the site root under a name the
 # console picks, so they cannot be listed one by one ahead of time. Dropping the

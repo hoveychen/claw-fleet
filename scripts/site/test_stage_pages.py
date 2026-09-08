@@ -27,6 +27,11 @@ class PayloadTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, self.names)
 
+    def test_the_404_page_is_published(self):
+        # Nothing links to it; GitHub Pages serves it for any missing path and
+        # the mirror's nginx through error_page.
+        self.assertIn('404.html', self.names)
+
     def test_the_promo_player_stays_published(self):
         # Nothing on the landing page links to /player/, but the URL is already
         # shared; dropping it from the payload would 404 it.
