@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "version": "v2.7.0",
+  "mirror_manifest_url": "https://fleet.eternizedlab.com/downloads.json",
   "china": {
     "provider": "Eternized Lab \u00b7 Shenzhen",
     "assets": {
