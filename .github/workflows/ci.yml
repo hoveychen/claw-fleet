@@ -245,6 +245,211 @@ jobs:
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # HarmonyOS `.app` — the AppGallery submission artifact (NOT the .hap that
+  # goes on a phone; see mobile-harmony/scripts/build-app.sh for why those are
+  # two different products).
+  #
+  # This job cannot use a self-hosted runner even though the maintainer's Mac
+  # already has DevEco Studio installed: this repository is PUBLIC, so a
+  # self-hosted runner would execute any stranger's pull request on that
+  # machine. It therefore needs Huawei's Linux `command-line-tools` bundle,
+  # which is only downloadable behind a developer login — so the URL comes from
+  # a secret pointing at our own copy, and the job SKIPS (green) when that
+  # secret is absent, the same way android-apk does.
+  #
+  # Two tiers, because release signing material is a separate ask from the
+  # toolchain:
+  #   HARMONY_CLI_TOOLS_URL alone   → compile gate, unsigned .app, no upload.
+  #   + HARMONY_SIGNING_* secrets   → signed .app uploaded as a release asset.
+  # ═══════════════════════════════════════════════════════════════════════════
+  harmony-app:
+    name: HarmonyOS .app
+    runs-on: ubuntu-22.04
+    env:
+      # Bump this to force a re-download after replacing the hosted bundle at
+      # the same URL. The URL itself is a secret and must not appear in a cache
+      # key (keys are visible in the Actions UI).
+      TOOLS_CACHE_KEY: harmony-cli-tools-v1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # A 2 GB toolchain restore plus an ArkTS build is too expensive to run on
+      # every push, but a gate that only fires at tag time would let mobile-harmony
+      # break for a whole release cycle. So: always at tags / dispatch, and on
+      # ordinary pushes and PRs only when the Harmony app's own inputs moved.
+      - name: Did the Harmony app's inputs change
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            harmony:
+              - 'mobile-harmony/**'
+              - 'mobile-web/**'
+              - '.github/workflows/ci.yml'
+
+      # Secrets are unavailable in a job-level `if`, so both gates are outputs
+      # every later step tests.
+      - name: Resolve gates
+        id: gate
+        env:
+          TOOLS_URL: ${{ secrets.HARMONY_CLI_TOOLS_URL }}
+          SIGN_P12: ${{ secrets.HARMONY_SIGNING_P12_B64 }}
+        run: |
+          set -euo pipefail
+          wanted=false
+          if [ "${{ github.event_name }}" = 'workflow_dispatch' ] \
+            || [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = 'true' ] \
+            || [ "${{ steps.changes.outputs.harmony }}" = 'true' ]; then
+            wanted=true
+          fi
+          if [ "$wanted" != 'true' ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No mobile-harmony/mobile-web changes — skipping the HarmonyOS build."
+            exit 0
+          fi
+          if [ -z "$TOOLS_URL" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::HARMONY_CLI_TOOLS_URL is not set — skipping the HarmonyOS build. Host Huawei's Linux command-line-tools and add the secret to enable it."
+            exit 0
+          fi
+          echo "build=true" >> "$GITHUB_OUTPUT"
+          if [ -n "$SIGN_P12" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::HARMONY_SIGNING_P12_B64 is not set — building an UNSIGNED .app as a compile gate only. It cannot be uploaded to AppGallery."
+          fi
+
+      - name: Setup JDK
+        if: steps.gate.outputs.build == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # For the web bundle only. The Harmony build uses the Node inside
+      # command-line-tools (build-app.sh keeps the two PATHs apart, because
+      # that Node is too old for pnpm).
+      - name: Setup Node
+        if: steps.gate.outputs.build == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        if: steps.gate.outputs.build == 'true'
+        run: corepack enable
+
+      - name: Install web deps
+        if: steps.gate.outputs.build == 'true'
+        working-directory: mobile-web
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache command-line-tools
+        if: steps.gate.outputs.build == 'true'
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/harmony-tools
+          key: ${{ runner.os }}-${{ env.TOOLS_CACHE_KEY }}
+
+      - name: Download command-line-tools
+        if: steps.gate.outputs.build == 'true' && steps.tools-cache.outputs.cache-hit != 'true'
+        env:
+          TOOLS_URL: ${{ secrets.HARMONY_CLI_TOOLS_URL }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/harmony-tools"
+          mkdir -p "$dir"
+          # --fail so an HTML error page from an expired link is not silently
+          # unzipped into an empty toolchain; -sS keeps the (secret) URL out of
+          # the log while still printing real errors.
+          curl -fsSL "$TOOLS_URL" -o "$RUNNER_TEMP/cli-tools.zip"
+          unzip -q "$RUNNER_TEMP/cli-tools.zip" -d "$dir"
+          rm -f "$RUNNER_TEMP/cli-tools.zip"
+
+      # The bundle unzips to a nested `command-line-tools/` dir, but which
+      # level depends on how it was repacked — so locate bin/hvigorw instead of
+      # assuming. build-app.sh's own preflight names this exact failure.
+      - name: Locate toolchain root
+        if: steps.gate.outputs.build == 'true'
+        id: tools
+        run: |
+          set -euo pipefail
+          hvigorw="$(find "$RUNNER_TEMP/harmony-tools" -maxdepth 3 -type f -name hvigorw | head -1)"
+          [ -n "$hvigorw" ] || { echo "no bin/hvigorw under $RUNNER_TEMP/harmony-tools — is the hosted bundle Huawei's Linux command-line-tools?" >&2; exit 1; }
+          root="$(dirname "$(dirname "$hvigorw")")"
+          chmod +x "$root/bin/"* || true
+          echo "root=$root" >> "$GITHUB_OUTPUT"
+
+      - name: Restore release signing material
+        if: steps.gate.outputs.signed == 'true'
+        id: signing
+        env:
+          P12_B64: ${{ secrets.HARMONY_SIGNING_P12_B64 }}
+          CER_B64: ${{ secrets.HARMONY_SIGNING_CER_B64 }}
+          P7B_B64: ${{ secrets.HARMONY_SIGNING_P7B_B64 }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/harmony-signing"
+          mkdir -p "$dir"
+          chmod 700 "$dir"
+          printf '%s' "$P12_B64" | base64 -d > "$dir/release.p12"
+          printf '%s' "$CER_B64" | base64 -d > "$dir/release.cer"
+          printf '%s' "$P7B_B64" | base64 -d > "$dir/release.p7b"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      # The script verifies by artifact NAME (-signed vs -unsigned) that signing
+      # actually took effect, because hvigor's response to a missing signing
+      # config is an unsigned package and a successful exit code.
+      - name: Build signed .app
+        if: steps.gate.outputs.signed == 'true'
+        working-directory: mobile-harmony
+        env:
+          HARMONY_CLI_TOOLS: ${{ steps.tools.outputs.root }}
+          FLEET_OHOS_STORE_FILE: ${{ steps.signing.outputs.dir }}/release.p12
+          FLEET_OHOS_CERT_PATH: ${{ steps.signing.outputs.dir }}/release.cer
+          FLEET_OHOS_PROFILE_PATH: ${{ steps.signing.outputs.dir }}/release.p7b
+          FLEET_OHOS_KEY_ALIAS: ${{ secrets.HARMONY_SIGNING_KEY_ALIAS }}
+          FLEET_OHOS_STORE_PASSWORD: ${{ secrets.HARMONY_SIGNING_STORE_PASSWORD }}
+          FLEET_OHOS_KEY_PASSWORD: ${{ secrets.HARMONY_SIGNING_KEY_PASSWORD }}
+        run: bash scripts/build-app.sh
+
+      - name: Build unsigned .app (compile gate)
+        if: steps.gate.outputs.build == 'true' && steps.gate.outputs.signed != 'true'
+        working-directory: mobile-harmony
+        env:
+          HARMONY_CLI_TOOLS: ${{ steps.tools.outputs.root }}
+        run: bash scripts/build-app.sh --allow-unsigned
+
+      - name: Shred signing material
+        if: always() && steps.signing.outputs.dir != ''
+        run: rm -rf "${{ steps.signing.outputs.dir }}"
+
+      # Only the signed package is worth keeping — an unsigned .app cannot be
+      # uploaded to AppGallery, so publishing one would just be a trap.
+      - name: Rename to a stable release asset name
+        if: steps.gate.outputs.signed == 'true'
+        working-directory: mobile-harmony/build/outputs/default
+        run: mv ./*-signed.app claw-fleet-harmony.app
+
+      # The name deliberately does NOT start with `fleet-`: release.yml collects
+      # `fleet-*` with merge-multiple and publishes `all-artifacts/*` as public
+      # release assets. A release-signed .app is the AppGallery submission
+      # package — nobody can install it off a download page — so it must stay a
+      # workflow artifact you fetch and upload to AGC by hand.
+      - name: Upload .app
+        if: steps.gate.outputs.signed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: harmony-appgallery-app
+          path: mobile-harmony/build/outputs/default/claw-fleet-harmony.app
+          if-no-files-found: error
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Lint every tracked shell script. shellcheck ships pre-installed on the
   # ubuntu runner, so this is a seconds-long, Rust-free job. Discovering scripts
   # via `git ls-files '*.sh'` auto-covers new scripts without editing this list.

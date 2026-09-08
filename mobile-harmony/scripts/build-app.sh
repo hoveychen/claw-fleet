@@ -39,13 +39,38 @@ fail() { echo "✗ $*" >&2; exit 1; }
 # DevEco 自带 Node 18,而 pnpm 要 22+ —— 和 install.sh 同一个坑:先留一份系统
 # PATH 给 web 构建,否则 sync-web 会以 "pnpm requires Node.js v22" 挂掉。
 SYSTEM_PATH="$PATH"
-DEVECO="${DEVECO_TOOLS:-/Applications/DevEco-Studio.app/Contents/tools}"
-export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk}"
-export JAVA_HOME="${JAVA_HOME:-/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home}"
-export PATH="$DEVECO/node/bin:$DEVECO/ohpm/bin:$JAVA_HOME/bin:$PATH"
 
-HVIGORW="$DEVECO/hvigor/bin/hvigorw.js"
-[ -f "$HVIGORW" ] || fail "找不到 hvigorw ($HVIGORW) —— 装 DevEco Studio,或用 DEVECO_TOOLS 指向 command-line-tools"
+# 两种工具链布局二选一。CI 上不可能装 DevEco Studio(它是带 GUI 的 IDE,而且
+# macOS 那份 sdk 有 5.1G、也不是 Linux 的构建工具),所以 Linux runner 走华为的
+# command-line-tools 包 —— 它自带 hvigorw / ohpm / sdk / node,布局却和 DevEco
+# 里的 tools 目录不一样,这里必须分开认:
+#
+#   command-line-tools/          DevEco-Studio.app/Contents/
+#     bin/hvigorw   (可执行)       tools/hvigor/bin/hvigorw.js  (要 node 跑)
+#     bin/ohpm                    tools/ohpm/bin/ohpm
+#     sdk/                        sdk/
+#     tool/node/bin/node          tools/node/bin/node
+#
+# 用 HARMONY_CLI_TOOLS 指向 command-line-tools 解压后的根目录即可。
+HVIGOR_CMD=()
+if [ -n "${HARMONY_CLI_TOOLS:-}" ]; then
+  CLI="$HARMONY_CLI_TOOLS"
+  [ -x "$CLI/bin/hvigorw" ] || fail "HARMONY_CLI_TOOLS=$CLI 下没有可执行的 bin/hvigorw —— 解压路径是否多了一层?"
+  export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-$CLI/sdk}"
+  # command-line-tools 不带 JDK,CI 里由 setup-java 提供。缺了不能像 DevEco 那样
+  # 回落到自带 jbr,所以在这儿就要求它。
+  [ -n "${JAVA_HOME:-}" ] || fail "用 HARMONY_CLI_TOOLS 时必须自己给 JAVA_HOME(command-line-tools 不含 JDK)"
+  export PATH="$CLI/tool/node/bin:$CLI/bin:$JAVA_HOME/bin:$PATH"
+  HVIGOR_CMD=("$CLI/bin/hvigorw")
+else
+  DEVECO="${DEVECO_TOOLS:-/Applications/DevEco-Studio.app/Contents/tools}"
+  export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk}"
+  export JAVA_HOME="${JAVA_HOME:-/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home}"
+  export PATH="$DEVECO/node/bin:$DEVECO/ohpm/bin:$JAVA_HOME/bin:$PATH"
+  HVIGORW_JS="$DEVECO/hvigor/bin/hvigorw.js"
+  [ -f "$HVIGORW_JS" ] || fail "找不到 hvigorw ($HVIGORW_JS) —— 装 DevEco Studio,或用 HARMONY_CLI_TOOLS 指向 command-line-tools"
+  HVIGOR_CMD=(node "$HVIGORW_JS")
+fi
 [ -d "$DEVECO_SDK_HOME" ] || fail "找不到 HarmonyOS SDK ($DEVECO_SDK_HOME)"
 
 # ------------------------------------------------------------------ 预检 --
@@ -73,8 +98,14 @@ fi
 
 # 换签名后不清 cache 会让 hvigor 报 UP-TO-DATE 直接跳过签名任务,产物仍带旧签名
 # (2026-08-18 实测)。这个脚本每次都换签名来源,所以无条件清。
+OUT=build/outputs/default
+
 echo "→ 清 .hvigor/cache(不清会跳过签名任务,产物带旧签名)"
 rm -rf .hvigor/cache
+# 也清产物目录:下面判"签名有没有生效"靠的是产物文件名,而上一次跑剩下的
+# -signed.app 会让一次没真产出任何东西的构建看起来成功。hvigor 的 clean 任务
+# 通常会带走它,但那前提是 clean 真的跑了 —— 正是不该假设的那件事。
+rm -rf "$OUT"
 
 echo "→ 构建 assembleApp (release) …"
 LOG=/tmp/hvigor-assembleapp.log
@@ -84,7 +115,7 @@ set +e
 # 不能带 install.sh 那句的 `--mode module`:assembleApp 是工程级任务,加了
 # module 模式它会被静默忽略 —— 只有 clean 真的跑了,hvigor 仍报 BUILD
 # SUCCESSFUL,而 build/ 目录根本没生成。
-node "$HVIGORW" clean assembleApp -p product=default -p buildMode=release --no-daemon \
+"${HVIGOR_CMD[@]}" clean assembleApp -p product=default -p buildMode=release --no-daemon \
   > "$LOG" 2>&1
 BUILD_EXIT=$?
 set -e
@@ -95,7 +126,6 @@ grep -iE "Error Message|ArkTS:ERROR|BUILD FAILED|No signingConfig" "$LOG" | tail
 # 产物名里带 -signed / -unsigned,这是判断签名有没有真生效的唯一可靠信号 ——
 # 不能只看 hvigor 的退出码。签名成功时两个文件**并存**(unsigned 是中间产物,
 # clean 不会带走它),所以先找 signed,找不到才回落到 unsigned。
-OUT=build/outputs/default
 shopt -s nullglob
 SIGNED=("$OUT"/*-signed.app)
 UNSIGNED=("$OUT"/*-unsigned.app)
