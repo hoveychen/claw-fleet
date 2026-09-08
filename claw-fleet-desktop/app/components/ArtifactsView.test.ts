@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_SORT_DIR,
+  dragSet,
   dropKey,
   dropTargetFolder,
   joinExportPath,
@@ -391,5 +392,34 @@ describe("dropTargetFolder", () => {
 
   it("keeps a folder path containing the separator-free slashes intact", () => {
     expect(dropTargetFolder(dropKey("/w/a", "a/b/c"), inA)?.directory).toBe("a/b/c");
+  });
+});
+
+describe("dragSet", () => {
+  const shown = [make({ id: "a" }), make({ id: "b" }), make({ id: "c" })];
+
+  it("drags the whole selection when the press lands on a checked item", () => {
+    // The gesture behind "tick five, drag them together".
+    const got = dragSet(shown, new Set(["a", "c"]), "a");
+    expect(got.map((x) => x.id)).toEqual(["a", "c"]);
+    // Pressing the *other* checked one drags the same set, not a reordering.
+    expect(dragSet(shown, new Set(["a", "c"]), "c").map((x) => x.id)).toEqual(["a", "c"]);
+  });
+
+  it("drags only the pressed item when it is not checked", () => {
+    // The important half: an accidental drag must never move files the user
+    // had forgotten were ticked.
+    expect(dragSet(shown, new Set(["a", "c"]), "b").map((x) => x.id)).toEqual(["b"]);
+    expect(dragSet(shown, new Set(), "b").map((x) => x.id)).toEqual(["b"]);
+  });
+
+  it("ignores checked ids that are not on screen", () => {
+    // The selection is pruned against the visible set elsewhere; if a stale id
+    // survives, it must not ride along on a drag.
+    expect(dragSet(shown, new Set(["a", "gone"]), "a").map((x) => x.id)).toEqual(["a"]);
+  });
+
+  it("is empty when the pressed id is not on screen at all", () => {
+    expect(dragSet(shown, new Set(), "nope")).toEqual([]);
   });
 });

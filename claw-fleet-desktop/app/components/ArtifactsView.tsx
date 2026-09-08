@@ -258,6 +258,28 @@ export function joinExportPath(dir: string, name: string): string {
 }
 
 /**
+ * What a press on `id` drags.
+ *
+ * A press on something already checked drags the whole selection — that is
+ * what makes "tick five, drag them together" work. A press on anything else
+ * drags just that one and leaves the selection alone, so an accidental drag
+ * can never move files the user had forgotten were ticked.
+ *
+ * Its own pure function because this is the rule worth pinning: the two
+ * branches differ in how many files a single gesture moves, and getting it
+ * backwards would move things silently.
+ */
+export function dragSet(
+  shown: Artifact[],
+  checked: ReadonlySet<string>,
+  id: string,
+): Artifact[] {
+  if (checked.has(id)) return shown.filter((a) => checked.has(a.id));
+  const one = shown.find((a) => a.id === id);
+  return one ? [one] : [];
+}
+
+/**
  * A folder row's drop-zone key, and how to read one back.
  *
  * The key carries the workspace as well as the path because a folder only
@@ -733,20 +755,8 @@ export function ArtifactsView() {
   const [dropAt, setDropAt] = useState<string | null>(null);
   const [dragPoint, setDragPoint] = useState<{ x: number; y: number } | null>(null);
 
-  /**
-   * What a press on `id` drags.
-   *
-   * A press on something already checked drags the whole selection — that is
-   * what makes "tick five, drag them together" work. A press on anything else
-   * drags just that one and leaves the selection alone, so an accidental drag
-   * can never move files the user forgot were ticked.
-   */
   const dragSetFor = useCallback(
-    (id: string): Artifact[] => {
-      if (checked.has(id)) return shown.filter((a) => checked.has(a.id));
-      const one = shown.find((a) => a.id === id);
-      return one ? [one] : [];
-    },
+    (id: string): Artifact[] => dragSet(shown, checked, id),
     [checked, shown],
   );
 
