@@ -30,6 +30,16 @@ const artifact: Artifact = {
   starred: false,
   hardlinked: true,
   drifted: false,
+  currentVersion: "v1",
+  versions: [
+    {
+      id: "v1",
+      addedMs: 1_788_890_137_853,
+      sizeBytes: 143_617_218,
+      sourcePath: "/tmp/h3-768p-vs-480p.zip",
+      hardlinked: true,
+    },
+  ],
 };
 
 const render = () =>
@@ -40,6 +50,7 @@ const render = () =>
       onBack={() => {}}
       onPatch={() => {}}
       onDeleted={() => {}}
+      onReloaded={() => {}}
       onError={() => {}}
     />,
   );

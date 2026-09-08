@@ -111,6 +111,59 @@ pub(crate) fn update_artifact(
     )
 }
 
+/// Make an older version current again. Nothing is discarded, so this is
+/// itself undoable — see `artifacts::rollback`.
+#[tauri::command(async)]
+pub(crate) fn rollback_artifact(
+    id: String,
+    version: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::artifacts::Artifact, String> {
+    state.backend.rollback_artifact(&id, &version)
+}
+
+// ── Share links ──────────────────────────────────────────────────────────────
+//
+// Management only. The recipient-facing download is a `fleet serve` /
+// `fleet webui` route (`/shared`), not a Tauri command — the whole point is
+// that it answers a browser with no Fleet credentials at all.
+
+#[tauri::command(async)]
+pub(crate) fn list_artifact_shares(
+    id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Vec<claw_fleet_core::artifact_share::ShareLink> {
+    state.backend.list_artifact_shares(id.as_deref())
+}
+
+#[tauri::command(async)]
+pub(crate) fn create_artifact_share(
+    id: String,
+    version: Option<String>,
+    ttl_days: Option<u64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::artifact_share::ShareLink, String> {
+    state.backend.create_artifact_share(&id, version.as_deref(), ttl_days)
+}
+
+#[tauri::command(async)]
+pub(crate) fn revoke_artifact_share(
+    token: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.revoke_artifact_share(&token)
+}
+
+/// The shareable URL for a token — errors when no local server is listening,
+/// which is the honest answer rather than a link that refuses to connect.
+#[tauri::command(async)]
+pub(crate) fn artifact_share_url(
+    token: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    state.backend.artifact_share_url(&token)
+}
+
 // ── Folders ──────────────────────────────────────────────────────────────────
 //
 // Folders are records of their own so that "新建文件夹, then drag things in"

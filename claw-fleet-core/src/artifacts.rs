@@ -13,12 +13,34 @@
 //!
 //! ```text
 //! ~/.fleet/artifacts/<id>/
-//!   meta.json          # Artifact metadata
-//!   blob/<name>        # the file itself, under its original name
+//!   meta.json                    # Artifact metadata
+//!   blob/<name>                  # the CURRENT version, under its original name
+//!   versions/<version-id>/<name> # superseded versions ("v1", "v2", …)
 //! ```
 //!
 //! The `blob/` level exists so a deliverable that happens to be called
 //! `meta.json` cannot collide with the metadata beside it.
+//!
+//! ## Versions
+//!
+//! Re-adding the *same* deliverable — same workspace, same source path, same
+//! filename — does not create a second artifact; it becomes a new version of
+//! the existing one, and the superseded bytes move aside into
+//! `versions/<id>/`. That is the shape a regenerated report actually has: the
+//! pipeline writes `out/report.pdf` again, and what the user wants is one card
+//! whose history they can walk back, not eleven cards called "report.pdf".
+//!
+//! Two *different* deliverables that merely share a filename (`report.pdf` in
+//! two folders of one repo) keep their own artifacts, which is why the source
+//! path is part of the key and not just the name.
+//!
+//! The current version deliberately stays at `blob/<name>` rather than moving
+//! under `versions/`: every existing reader — the desktop's
+//! `fleet-artifact://` protocol handler, export, "open with system app" —
+//! addresses it through [`blob_path`], and a store written before versions
+//! existed is already in exactly this shape. So there is no migration, and a
+//! rollback is a pair of same-directory renames rather than a copy of a
+//! several-hundred-megabyte render.
 //!
 //! ## Ingest is hard-link-first
 //!
@@ -36,6 +58,16 @@
 //! [`list_in`] and [`get_in`] re-stat the blob and set [`Artifact::drifted`]
 //! when they no longer match, so a mutated archive is visible instead of
 //! silent. Copied artifacts can never drift.
+//!
+//! Superseded versions are the one place this is not tolerable — a history
+//! that changes under you looks authoritative and is wrong — so archiving a
+//! hard-linked version detaches it into a real copy first
+//! ([`archive_current_blob`]). Only the current version can drift.
+//!
+//! Note the limit of that guarantee: it protects bytes the store has already
+//! archived. A pipeline that rewrites its output *in place* destroys the
+//! previous content before `add` is ever called, and nothing here can recover
+//! what the filesystem no longer holds.
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -114,6 +146,36 @@ pub struct Artifact {
     /// hard-linked blob no longer matches what was ingested.
     #[serde(default)]
     pub drifted: bool,
+    /// Which entry of [`Self::versions`] the fields above describe, and whose
+    /// bytes are the ones at `blob/<name>`.
+    #[serde(default)]
+    pub current_version: String,
+    /// Every version, newest first — always at least one.
+    ///
+    /// A store written before versions existed has no such array on disk;
+    /// [`read_meta`] synthesizes the single `v1` entry from the artifact's own
+    /// fields, so no caller ever has to handle the empty case.
+    #[serde(default)]
+    pub versions: Vec<ArtifactVersion>,
+}
+
+/// One ingest of an artifact.
+///
+/// `sizeBytes` and `sourcePath` are per version because that is what changes
+/// between them: the same deliverable regenerated is a different length, and a
+/// version whose source has since been deleted still records where it came
+/// from.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactVersion {
+    /// `v1`, `v2`, … — per artifact, so it reads plainly on disk and in the UI.
+    pub id: String,
+    pub added_ms: u64,
+    pub size_bytes: u64,
+    pub source_path: String,
+    /// Whether *this* version's bytes were hard-linked at ingest.
+    #[serde(default)]
+    pub hardlinked: bool,
 }
 
 /// Coarse type bucket. The frontend picks its icon and its preview component
@@ -167,11 +229,16 @@ pub struct Folder {
 #[serde(rename_all = "camelCase")]
 pub struct StoreUsage {
     pub count: usize,
-    /// Sum of every artifact's size.
+    /// Sum of every artifact's size, superseded versions included — the store
+    /// occupies that too, and a cleanup UI that hid it would under-report.
     pub total_bytes: u64,
     /// The part of `total_bytes` held by hard links, which share their blocks
     /// with the still-present original and so are not all "new" disk.
     pub hardlinked_bytes: u64,
+    /// The part of `total_bytes` held by superseded versions, which is the
+    /// part a "清理历史版本" action could actually reclaim.
+    #[serde(default)]
+    pub version_bytes: u64,
 }
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -408,6 +475,15 @@ pub fn add_in(
 
     fs::create_dir_all(root).map_err(|e| format!("create artifact store: {e}"))?;
     let now = now_ms();
+    let workspace_path = crate::wiki::resolve_workspace_path(workspace);
+    let source_path = source.display().to_string();
+
+    // The same deliverable produced again becomes a new version of the card it
+    // already has, rather than a second card with the same name.
+    if let Some(existing) = find_same_deliverable(root, &workspace_path, &source_path, &name) {
+        return add_version_in(root, &existing.id, source, size, now, title, note, session_id);
+    }
+
     let id = next_id(root, now);
     let dir = root.join(&id);
     let blob_dir = dir.join("blob");
@@ -422,7 +498,6 @@ pub fn add_in(
 
     let blob_meta = fs::metadata(&dest).map_err(|e| format!("stat stored blob: {e}"))?;
     let mime = crate::wiki::mime_for_path(&dest).to_string();
-    let workspace_path = crate::wiki::resolve_workspace_path(workspace);
     let artifact = Artifact {
         id,
         title: title
@@ -442,14 +517,187 @@ pub fn add_in(
         // files it somewhere, so a fresh ingest lands where it always did.
         path: String::new(),
         session_id: session_id.map(str::to_string),
-        source_path: source.display().to_string(),
         starred: false,
         hardlinked,
         ingest_len: blob_meta.len(),
         ingest_mtime_ms: mtime_ms(&blob_meta),
         drifted: false,
+        current_version: FIRST_VERSION.to_string(),
+        versions: vec![ArtifactVersion {
+            id: FIRST_VERSION.to_string(),
+            added_ms: now,
+            size_bytes: size,
+            source_path: source_path.clone(),
+            hardlinked,
+        }],
+        source_path,
     };
     write_meta(&dir, &artifact)?;
+    Ok(artifact)
+}
+
+/// The id every artifact's first version carries, including the ones stored
+/// before versions existed (see [`read_meta`]).
+pub const FIRST_VERSION: &str = "v1";
+
+/// The artifact this exact deliverable already has, if any.
+///
+/// Keyed on workspace + source path + filename. The source path is what keeps
+/// two same-named-but-different deliverables (`docs/report.pdf` and
+/// `out/report.pdf` in one repo) as separate artifacts instead of silently
+/// folding the second into the first's history.
+fn find_same_deliverable(
+    root: &Path,
+    workspace_path: &str,
+    source_path: &str,
+    name: &str,
+) -> Option<Artifact> {
+    list_in(root).into_iter().find(|a| {
+        a.workspace_path == workspace_path && a.source_path == source_path && a.name == name
+    })
+}
+
+fn versions_dir(dir: &Path) -> PathBuf {
+    dir.join("versions")
+}
+
+/// Next per-artifact version id: one past the highest `v<n>` on record.
+///
+/// Derived from the recorded ids rather than from `versions.len()`, so a future
+/// "delete this old version" cannot hand out an id that a surviving directory
+/// already uses.
+fn next_version_id(artifact: &Artifact) -> String {
+    let highest = artifact
+        .versions
+        .iter()
+        .filter_map(|v| v.id.strip_prefix('v'))
+        .filter_map(|n| n.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("v{}", highest + 1)
+}
+
+/// Move the current bytes aside into `archived`, breaking a hard link first.
+///
+/// A hard-linked blob is the *same inode* as the file the producing pipeline
+/// wrote. A pipeline that rewrites its output in place (truncate-and-write
+/// rather than write-temp-then-rename) would therefore rewrite the archived
+/// version too — and a history that changes under you is worse than no
+/// history, because it looks authoritative. So a hard-linked version is
+/// copied on the way into the archive and then unlinked from `blob/`, which
+/// makes it a standalone snapshot that nothing can touch again.
+///
+/// That is one real copy at archive time, only for hard-linked versions, and
+/// only when a *new* version arrives. `drifted` is cleared on that version's
+/// record for the same reason: a detached copy can no longer drift.
+fn archive_current_blob(
+    blob: &Path,
+    archived: &Path,
+    artifact: &mut Artifact,
+) -> Result<(), String> {
+    let was_hardlinked = artifact
+        .versions
+        .iter()
+        .find(|v| v.id == artifact.current_version)
+        .map(|v| v.hardlinked)
+        .unwrap_or(artifact.hardlinked);
+
+    if !was_hardlinked {
+        return fs::rename(blob, archived)
+            .map_err(|e| format!("archive '{}': {e}", artifact.name));
+    }
+
+    fs::copy(blob, archived).map_err(|e| {
+        let _ = fs::remove_file(archived);
+        format!("snapshot '{}' before superseding it: {e}", artifact.name)
+    })?;
+    fs::remove_file(blob).map_err(|e| {
+        let _ = fs::remove_file(archived);
+        format!("unlink superseded '{}': {e}", artifact.name)
+    })?;
+    let current = artifact.current_version.clone();
+    if let Some(v) = artifact.versions.iter_mut().find(|v| v.id == current) {
+        v.hardlinked = false;
+    }
+    Ok(())
+}
+
+/// Archive the current bytes and make `source` the new current version.
+///
+/// The order matters: the superseded blob is *renamed* aside before the new
+/// one is ingested, because both live at `blob/<name>` and `ingest_blob` must
+/// not be pointed at an occupied path (see its docs — a `fs::copy` onto a hard
+/// link of the source truncates the source).
+#[allow(clippy::too_many_arguments)]
+fn add_version_in(
+    root: &Path,
+    id: &str,
+    source: &Path,
+    size: u64,
+    now: u64,
+    title: Option<&str>,
+    note: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<Artifact, String> {
+    let dir = artifact_dir(root, id)?;
+    let mut artifact = read_meta(&dir)?;
+    let version_id = next_version_id(&artifact);
+
+    let blob = dir.join("blob").join(&artifact.name);
+    let archive_dir = versions_dir(&dir).join(&artifact.current_version);
+    fs::create_dir_all(&archive_dir)
+        .map_err(|e| format!("create '{}': {e}", archive_dir.display()))?;
+    let archived = archive_dir.join(&artifact.name);
+    if blob.exists() {
+        archive_current_blob(&blob, &archived, &mut artifact)?;
+    }
+
+    let hardlinked = match ingest_blob(source, &blob) {
+        Ok(linked) => linked,
+        Err(e) => {
+            // Put the previous version back: a failed ingest must not leave the
+            // artifact with no current bytes at all. (A copy, because the
+            // archived snapshot has to stay intact either way.)
+            let _ = fs::copy(&archived, &blob);
+            return Err(e);
+        }
+    };
+
+    let blob_meta = fs::metadata(&blob).map_err(|e| format!("stat stored blob: {e}"))?;
+    let source_path = source.display().to_string();
+    artifact.versions.insert(
+        0,
+        ArtifactVersion {
+            id: version_id.clone(),
+            added_ms: now,
+            size_bytes: size,
+            source_path: source_path.clone(),
+            hardlinked,
+        },
+    );
+    artifact.current_version = version_id;
+    artifact.size_bytes = size;
+    // `created_ms` tracks the *current* version, so a regenerated deliverable
+    // rises back to the top of 最近加入 — the original ingest time is still on
+    // record as the oldest entry of `versions`.
+    artifact.created_ms = now;
+    artifact.source_path = source_path;
+    artifact.hardlinked = hardlinked;
+    artifact.ingest_len = blob_meta.len();
+    artifact.ingest_mtime_ms = mtime_ms(&blob_meta);
+    // Colour from this ingest is optional; an omitted title must not blank the
+    // one the user may have edited by hand.
+    if let Some(t) = title.map(str::trim).filter(|s| !s.is_empty()) {
+        artifact.title = t.to_string();
+    }
+    if let Some(n) = note.map(str::trim).filter(|s| !s.is_empty()) {
+        artifact.note = n.to_string();
+    }
+    if let Some(s) = session_id {
+        artifact.session_id = Some(s.to_string());
+    }
+    write_meta(&dir, &artifact)?;
+    artifact.drifted = has_drifted(root, &artifact);
     Ok(artifact)
 }
 
@@ -498,6 +746,33 @@ pub fn blob_path(root: &Path, artifact: &Artifact) -> PathBuf {
     root.join(&artifact.id).join("blob").join(&artifact.name)
 }
 
+/// Where one version's bytes live: `blob/<name>` for the current version,
+/// `versions/<id>/<name>` for a superseded one.
+///
+/// `None` resolves to the current version. An unknown id is an error rather
+/// than a silent fall back to current — a shared link pinned to a version that
+/// has since been removed must fail loudly, not quietly serve different bytes
+/// than the one who shared it saw.
+pub fn version_blob_path(
+    root: &Path,
+    artifact: &Artifact,
+    version: Option<&str>,
+) -> Result<PathBuf, String> {
+    let Some(version) = version.filter(|v| !v.is_empty()) else {
+        return Ok(blob_path(root, artifact));
+    };
+    if version == artifact.current_version {
+        return Ok(blob_path(root, artifact));
+    }
+    if !artifact.versions.iter().any(|v| v.id == version) {
+        return Err(format!("artifact '{}' has no version '{version}'", artifact.id));
+    }
+    if !valid_id(version) {
+        return Err(format!("invalid version id '{version}'"));
+    }
+    Ok(versions_dir(&root.join(&artifact.id)).join(version).join(&artifact.name))
+}
+
 /// A hard-linked blob whose length or mtime no longer matches ingest has been
 /// rewritten in place through the source path. Copies can't drift, so they
 /// skip the stat entirely.
@@ -527,8 +802,31 @@ pub fn read_bytes_in(
     id: &str,
     range: Option<(u64, u64)>,
 ) -> Result<ArtifactBytes, String> {
+    read_version_bytes_in(root, id, None, range)
+}
+
+/// Read a specific version's bytes; `None` means the current one.
+///
+/// Same range semantics as [`read_bytes`] — it *is* that function with the
+/// version resolved, which is what keeps a shared link pinned to an old
+/// version seekable rather than a special-cased whole-file download.
+pub fn read_version_bytes(
+    id: &str,
+    version: Option<&str>,
+    range: Option<(u64, u64)>,
+) -> Result<ArtifactBytes, String> {
+    let root = artifacts_dir_or_err()?;
+    read_version_bytes_in(&root, id, version, range)
+}
+
+pub fn read_version_bytes_in(
+    root: &Path,
+    id: &str,
+    version: Option<&str>,
+    range: Option<(u64, u64)>,
+) -> Result<ArtifactBytes, String> {
     let artifact = get_in(root, id)?;
-    let path = blob_path(root, &artifact);
+    let path = version_blob_path(root, &artifact, version)?;
     let meta = fs::metadata(&path).map_err(|e| format!("stat '{}': {e}", artifact.name))?;
     let total = meta.len();
 
@@ -608,9 +906,73 @@ pub fn update_in(
     Ok(artifact)
 }
 
+/// Make `version` current again, swapping the bytes back into `blob/`.
+///
+/// Two same-directory renames rather than a copy, so rolling back a 400 MB
+/// render costs the same as rolling back a text file. Nothing is discarded:
+/// the version being replaced becomes just another entry in the history, so a
+/// rollback is itself undoable.
+pub fn rollback(id: &str, version: &str) -> Result<Artifact, String> {
+    let root = artifacts_dir_or_err()?;
+    rollback_in(&root, id, version)
+}
+
+pub fn rollback_in(root: &Path, id: &str, version: &str) -> Result<Artifact, String> {
+    let dir = artifact_dir(root, id)?;
+    let mut artifact = read_meta(&dir)?;
+    if version == artifact.current_version {
+        return Ok(artifact);
+    }
+    let target = artifact
+        .versions
+        .iter()
+        .find(|v| v.id == version)
+        .cloned()
+        .ok_or_else(|| format!("artifact '{id}' has no version '{version}'"))?;
+
+    let blob = dir.join("blob").join(&artifact.name);
+    let outgoing_dir = versions_dir(&dir).join(&artifact.current_version);
+    let incoming = versions_dir(&dir).join(&target.id).join(&artifact.name);
+    if !incoming.exists() {
+        return Err(format!("version '{version}' of '{}' has no stored bytes", artifact.name));
+    }
+    fs::create_dir_all(&outgoing_dir)
+        .map_err(|e| format!("create '{}': {e}", outgoing_dir.display()))?;
+    if blob.exists() {
+        fs::rename(&blob, outgoing_dir.join(&artifact.name))
+            .map_err(|e| format!("archive current version: {e}"))?;
+    }
+    fs::rename(&incoming, &blob).map_err(|e| {
+        // Leaving the artifact with no current bytes would be worse than the
+        // failed rollback, so put the outgoing version back.
+        let _ = fs::rename(outgoing_dir.join(&artifact.name), &blob);
+        format!("restore version '{version}': {e}")
+    })?;
+
+    let blob_meta = fs::metadata(&blob).map_err(|e| format!("stat restored blob: {e}"))?;
+    artifact.current_version = target.id;
+    artifact.size_bytes = target.size_bytes;
+    artifact.source_path = target.source_path;
+    artifact.hardlinked = target.hardlinked;
+    artifact.ingest_len = blob_meta.len();
+    artifact.ingest_mtime_ms = mtime_ms(&blob_meta);
+    // `created_ms` follows the current version everywhere else, so it does here
+    // too: a rolled-back artifact reads as "changed just now" in 最近加入,
+    // which is what actually happened to it.
+    artifact.created_ms = now_ms();
+    write_meta(&dir, &artifact)?;
+    artifact.drifted = has_drifted(root, &artifact);
+    Ok(artifact)
+}
+
 pub fn delete(id: &str) -> Result<(), String> {
     let root = artifacts_dir_or_err()?;
-    delete_in(&root, id)
+    delete_in(&root, id)?;
+    // A share link outliving its artifact is a URL that 404s for whoever you
+    // sent it to. Best-effort: the artifact is already gone, and failing the
+    // delete over bookkeeping would be worse.
+    let _ = crate::artifact_share::revoke_for_artifact(id);
+    Ok(())
 }
 
 pub fn delete_in(root: &Path, id: &str) -> Result<(), String> {
@@ -815,9 +1177,17 @@ pub fn usage_in(root: &Path) -> StoreUsage {
     let mut usage = StoreUsage::default();
     for a in list_in(root) {
         usage.count += 1;
-        usage.total_bytes += a.size_bytes;
-        if a.hardlinked {
-            usage.hardlinked_bytes += a.size_bytes;
+        // Every version occupies disk, so every version is counted — but
+        // `count` stays the number of *artifacts*, which is what the card
+        // count in the UI means.
+        for v in &a.versions {
+            usage.total_bytes += v.size_bytes;
+            if v.hardlinked {
+                usage.hardlinked_bytes += v.size_bytes;
+            }
+            if v.id != a.current_version {
+                usage.version_bytes += v.size_bytes;
+            }
         }
     }
     usage
@@ -857,10 +1227,35 @@ pub fn parse_range_header(value: &str) -> Option<(u64, u64)> {
 
 // ── meta.json io ─────────────────────────────────────────────────────────────
 
+/// Read one artifact's metadata, normalizing a pre-versions store.
+///
+/// A `meta.json` written before versions existed has neither field, and every
+/// caller downstream assumes `versions` is non-empty and `current_version`
+/// names one of them. Synthesizing the single `v1` entry here — from the
+/// artifact's own size/time/source, which *are* that version — is what makes
+/// the whole feature migration-free.
 fn read_meta(dir: &Path) -> Result<Artifact, String> {
     let path = dir.join("meta.json");
     let raw = fs::read_to_string(&path).map_err(|e| format!("read '{}': {e}", path.display()))?;
-    serde_json::from_str(&raw).map_err(|e| format!("parse '{}': {e}", path.display()))
+    let mut artifact: Artifact =
+        serde_json::from_str(&raw).map_err(|e| format!("parse '{}': {e}", path.display()))?;
+    if artifact.versions.is_empty() {
+        artifact.versions.push(ArtifactVersion {
+            id: FIRST_VERSION.to_string(),
+            added_ms: artifact.created_ms,
+            size_bytes: artifact.size_bytes,
+            source_path: artifact.source_path.clone(),
+            hardlinked: artifact.hardlinked,
+        });
+    }
+    if artifact.current_version.is_empty()
+        || !artifact.versions.iter().any(|v| v.id == artifact.current_version)
+    {
+        // Newest first, so the head is the current one. Also heals a meta.json
+        // whose `current_version` names a version that no longer exists.
+        artifact.current_version = artifact.versions[0].id.clone();
+    }
+    Ok(artifact)
 }
 
 /// Write-tmp-then-rename so a concurrent reader never sees a torn meta.json.
@@ -886,6 +1281,21 @@ mod tests {
 
     fn store() -> TempDir {
         TempDir::new().unwrap()
+    }
+
+    /// Rewrite `path` the way a real pipeline does: new file, then rename over
+    /// the old one.
+    ///
+    /// This matters for versions. `fs::write` truncates in place, and since
+    /// ingest hard-links, that same inode *is* the stored blob — so an
+    /// in-place rewrite destroys the previous version's bytes before the store
+    /// ever hears about it. Write-temp-then-rename gives the new content a new
+    /// inode and leaves the archived one alone, which is what tools that emit
+    /// deliverables actually do.
+    fn rewrite_atomically(path: &Path, body: &[u8]) {
+        let tmp = path.with_extension("tmp-rewrite");
+        fs::write(&tmp, body).unwrap();
+        fs::rename(&tmp, path).unwrap();
     }
 
     fn write_file(dir: &Path, name: &str, body: &[u8]) -> PathBuf {
@@ -1256,6 +1666,174 @@ mod tests {
 
         assert_eq!(list_in(root.path()).len(), 1, "folders.json must not read as an artifact");
         assert_eq!(usage_in(root.path()).count, 1);
+    }
+
+    #[test]
+    fn re_adding_the_same_deliverable_becomes_a_new_version() {
+        let root = store();
+        let ws = store();
+        let src = write_file(ws.path(), "report.pdf", b"%PDF v1");
+        let first = add_in(root.path(), &src, Some("\u{62a5}\u{544a}"), None, ws.path(), None).unwrap();
+        assert_eq!(first.current_version, "v1");
+        assert_eq!(first.versions.len(), 1);
+
+        // Same workspace, same source path, same name — the pipeline ran again.
+        rewrite_atomically(&src, b"%PDF version two, longer");
+        let second = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+        assert_eq!(second.id, first.id, "must not become a second artifact");
+        assert_eq!(second.current_version, "v2");
+        assert_eq!(
+            second.versions.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+            vec!["v2", "v1"],
+            "newest first"
+        );
+        assert_eq!(second.size_bytes, b"%PDF version two, longer".len() as u64);
+        // A title the user may have edited survives an ingest that omits one.
+        assert_eq!(second.title, "\u{62a5}\u{544a}");
+        assert_eq!(list_in(root.path()).len(), 1, "the list shows one card, not two");
+
+        // Current bytes are at blob/, the superseded ones under versions/.
+        assert_eq!(
+            read_bytes_in(root.path(), &first.id, None).unwrap().bytes,
+            b"%PDF version two, longer"
+        );
+        assert_eq!(
+            read_version_bytes_in(root.path(), &first.id, Some("v1"), None).unwrap().bytes,
+            b"%PDF v1"
+        );
+    }
+
+    #[test]
+    fn an_archived_version_is_detached_from_the_source_that_produced_it() {
+        let root = store();
+        let ws = store();
+        let src = write_file(ws.path(), "report.pdf", b"first");
+        let a = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+        assert!(a.hardlinked, "the premise: ingest shares the source's inode");
+
+        rewrite_atomically(&src, b"second");
+        add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+
+        // v1 was hard-linked to `src`. Superseding it copies the bytes aside
+        // and unlinks them, so a *later* in-place rewrite of the source — the
+        // one thing that could still corrupt history — cannot reach it.
+        fs::write(&src, b"third-in-place").unwrap();
+        assert_eq!(
+            read_version_bytes_in(root.path(), &a.id, Some("v1"), None).unwrap().bytes,
+            b"first",
+            "an archived version must not change under us"
+        );
+        let stored = get_in(root.path(), &a.id).unwrap();
+        assert!(
+            !stored.versions.iter().find(|v| v.id == "v1").unwrap().hardlinked,
+            "and it is recorded as a standalone copy, which cannot drift"
+        );
+        // The current version is still the live hard link, so it *does* see
+        // the in-place rewrite — that is what `drifted` is for.
+        assert!(stored.drifted);
+    }
+
+    #[test]
+    fn two_deliverables_that_merely_share_a_filename_stay_separate() {
+        let root = store();
+        let ws = store();
+        fs::create_dir_all(ws.path().join("docs")).unwrap();
+        fs::create_dir_all(ws.path().join("out")).unwrap();
+        let a = write_file(&ws.path().join("docs"), "report.pdf", b"%PDF a");
+        let b = write_file(&ws.path().join("out"), "report.pdf", b"%PDF b");
+
+        let one = add_in(root.path(), &a, None, None, ws.path(), None).unwrap();
+        let two = add_in(root.path(), &b, None, None, ws.path(), None).unwrap();
+        assert_ne!(one.id, two.id, "the source path is part of the key");
+        assert_eq!(list_in(root.path()).len(), 2);
+    }
+
+    #[test]
+    fn rollback_swaps_the_bytes_back_and_stays_undoable() {
+        let root = store();
+        let ws = store();
+        let src = write_file(ws.path(), "deck.pptx", b"one");
+        let a = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+        rewrite_atomically(&src, b"two!!");
+        add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+
+        let rolled = rollback_in(root.path(), &a.id, "v1").unwrap();
+        assert_eq!(rolled.current_version, "v1");
+        assert_eq!(rolled.size_bytes, 3);
+        assert_eq!(read_bytes_in(root.path(), &a.id, None).unwrap().bytes, b"one");
+        // Nothing was discarded, so the rollback itself can be undone.
+        assert_eq!(
+            read_version_bytes_in(root.path(), &a.id, Some("v2"), None).unwrap().bytes,
+            b"two!!"
+        );
+        let back = rollback_in(root.path(), &a.id, "v2").unwrap();
+        assert_eq!(back.current_version, "v2");
+        assert_eq!(read_bytes_in(root.path(), &a.id, None).unwrap().bytes, b"two!!");
+
+        // Rolling back to where we already are is a no-op, not an error.
+        assert_eq!(rollback_in(root.path(), &a.id, "v2").unwrap().current_version, "v2");
+        assert!(rollback_in(root.path(), &a.id, "v9").unwrap_err().contains("no version"));
+    }
+
+    #[test]
+    fn a_pre_versions_store_reads_as_a_single_v1() {
+        let root = store();
+        let ws = store();
+        let src = write_file(ws.path(), "a.pdf", b"%PDF");
+        let a = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+
+        // Rewrite meta.json without the two version fields, exactly as a store
+        // written before this feature has it on disk.
+        let path = root.path().join(&a.id).join("meta.json");
+        let mut raw: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let obj = raw.as_object_mut().unwrap();
+        obj.remove("versions");
+        obj.remove("currentVersion");
+        fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+
+        let read = get_in(root.path(), &a.id).unwrap();
+        assert_eq!(read.current_version, "v1");
+        assert_eq!(read.versions.len(), 1);
+        assert_eq!(read.versions[0].size_bytes, a.size_bytes);
+        assert_eq!(read.versions[0].added_ms, a.created_ms);
+        // And the bytes are still reachable both ways.
+        assert_eq!(read_bytes_in(root.path(), &a.id, None).unwrap().bytes, b"%PDF");
+        assert_eq!(
+            read_version_bytes_in(root.path(), &a.id, Some("v1"), None).unwrap().bytes,
+            b"%PDF"
+        );
+    }
+
+    #[test]
+    fn usage_counts_superseded_versions_and_names_their_share() {
+        let root = store();
+        let ws = store();
+        let src = write_file(ws.path(), "r.pdf", b"1234567890");
+        let a = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+        rewrite_atomically(&src, b"12345");
+        add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+
+        let usage = usage_in(root.path());
+        assert_eq!(usage.count, 1, "one artifact, whatever its history");
+        assert_eq!(usage.total_bytes, 15, "both versions occupy disk");
+        assert_eq!(usage.version_bytes, 10, "the reclaimable part is the old one");
+        let _ = a;
+    }
+
+    #[test]
+    fn an_unknown_version_is_refused_rather_than_served_as_current() {
+        let root = store();
+        let ws = store();
+        let src = write_file(ws.path(), "a.pdf", b"%PDF");
+        let a = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
+
+        // A share link pinned to a version that no longer exists must fail
+        // loudly instead of quietly serving different bytes.
+        let err = read_version_bytes_in(root.path(), &a.id, Some("v7"), None).unwrap_err();
+        assert!(err.contains("no version 'v7'"), "{err}");
+        // Traversal through the version id cannot escape the store.
+        assert!(read_version_bytes_in(root.path(), &a.id, Some("../.."), None).is_err());
     }
 
     #[test]

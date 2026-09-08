@@ -15,8 +15,10 @@ import {
   FolderOpen,
   FolderInput,
   FolderPlus,
+  History,
   Image as ImageIcon,
   LayoutGrid,
+  Link2,
   Music,
   Package,
   Pencil,
@@ -66,6 +68,32 @@ export interface Artifact {
   starred: boolean;
   hardlinked: boolean;
   drifted: boolean;
+  /** Which entry of `versions` the fields above describe. */
+  currentVersion: string;
+  /** Every ingest of this deliverable, newest first — always at least one. */
+  versions: ArtifactVersion[];
+}
+
+/** Mirrors `claw_fleet_core::artifact_share::ShareLink`. */
+export interface ShareLink {
+  token: string;
+  artifactId: string;
+  version: string;
+  name: string;
+  createdMs: number;
+  /** 0 means no expiry. */
+  expiresMs: number;
+  hits: number;
+  lastHitMs: number;
+}
+
+/** Mirrors `claw_fleet_core::artifacts::ArtifactVersion`. */
+export interface ArtifactVersion {
+  id: string;
+  addedMs: number;
+  sizeBytes: number;
+  sourcePath: string;
+  hardlinked: boolean;
 }
 
 /** Mirrors `claw_fleet_core::artifacts::Folder`. */
@@ -877,6 +905,10 @@ export function ArtifactsView() {
             setSelectedId(null);
             await load();
           }}
+          // A rollback rewrites the artifact's current version, size and
+          // source, so the list has to be refetched — but the detail pane
+          // stays open on the same card.
+          onReloaded={load}
           onError={setError}
         />
       ) : items === null ? (
@@ -1351,6 +1383,7 @@ export function ArtifactDetail({
   onBack,
   onPatch,
   onDeleted,
+  onReloaded,
   onError,
 }: {
   artifact: Artifact;
@@ -1361,6 +1394,7 @@ export function ArtifactDetail({
     fields: { title?: string; note?: string; starred?: boolean; path?: string },
   ) => void;
   onDeleted: () => void;
+  onReloaded: () => Promise<void> | void;
   onError: (msg: string | null) => void;
 }) {
   const { t } = useTranslation();
@@ -1371,9 +1405,18 @@ export function ArtifactDetail({
   // folder and creates a new one by typing it, which is how a path field in a
   // file manager already behaves.
   const [folder, setFolder] = useState(artifact.path);
+  /**
+   * Which version the stage is previewing; null means the current one.
+   *
+   * Reset whenever the artifact changes — and whenever its current version
+   * does, so that a rollback lands you on what is now current rather than
+   * leaving you pinned to a version that just stopped being history.
+   */
+  const [previewVersion, setPreviewVersion] = useState<string | null>(null);
 
   useEffect(() => setNote(artifact.note), [artifact.id, artifact.note]);
   useEffect(() => setFolder(artifact.path), [artifact.id, artifact.path]);
+  useEffect(() => setPreviewVersion(null), [artifact.id, artifact.currentVersion]);
 
   // Whether the two OS-level actions can do anything here. Deliberately a
   // synchronous host predicate and NOT the answer of an `invoke`: they used to
@@ -1496,7 +1539,7 @@ export function ArtifactDetail({
         </div>
       </div>
 
-      <ArtifactStage artifact={artifact} />
+      <ArtifactStage artifact={artifact} version={previewVersion ?? undefined} />
 
       <div className={styles.detail_meta}>
         {artifact.drifted && (
@@ -1550,7 +1593,275 @@ export function ArtifactDetail({
             if (note !== artifact.note) onPatch(artifact.id, { note });
           }}
         />
+        <ArtifactShares artifact={artifact} onError={onError} />
+        {artifact.versions.length > 1 && (
+          <ArtifactVersions
+            artifact={artifact}
+            previewVersion={previewVersion}
+            onPreview={setPreviewVersion}
+            onReloaded={onReloaded}
+            onError={onError}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Share links for one artifact.
+ *
+ * A link is served by the local `fleet serve` / `fleet webui` port, so it
+ * reaches this LAN and no further — that was the explicit choice over hosting
+ * the bytes somewhere public. The URL is fetched from the backend rather than
+ * assembled here because only the host knows whether a server is even
+ * listening, and "no link yet, start the server" is a real state the UI has to
+ * be able to show.
+ *
+ * Every link is pinned to the version that was current when it was made, so
+ * regenerating the deliverable cannot change what the recipient downloads.
+ */
+function ArtifactShares({
+  artifact,
+  onError,
+}: {
+  artifact: Artifact;
+  onError: (msg: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [links, setLinks] = useState<ShareLink[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [ttlDays, setTtlDays] = useState("7");
+
+  const load = useCallback(async () => {
+    const list = (await invoke<ShareLink[]>("list_artifact_shares", { id: artifact.id }).catch(
+      () => [],
+    )) ?? [];
+    setLinks(list);
+    // One URL per token: the host resolves each, and a missing local server is
+    // reported once rather than per row.
+    const next: Record<string, string> = {};
+    let failure: string | null = null;
+    for (const link of list) {
+      try {
+        next[link.token] = await invoke<string>("artifact_share_url", { token: link.token });
+      } catch (e) {
+        failure = String(e);
+      }
+    }
+    setUrls(next);
+    setUrlError(failure);
+  }, [artifact.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const ttl = Number.parseInt(ttlDays, 10);
+      await invoke<ShareLink>("create_artifact_share", {
+        id: artifact.id,
+        // Pinned explicitly to what is current now, so the link keeps serving
+        // these bytes even after the next version lands.
+        version: artifact.currentVersion,
+        ttlDays: Number.isFinite(ttl) && ttl > 0 ? ttl : null,
+      });
+      onError(null);
+      await load();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async (token: string) => {
+    setBusy(true);
+    try {
+      await invoke("revoke_artifact_share", { token });
+      onError(null);
+      await load();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const now = Date.now();
+
+  return (
+    <div className={styles.versions}>
+      <div className={styles.versions_head}>
+        <Link2 size={13} strokeWidth={1.5} />
+        <span>{t("artifacts.share", "分享链接（仅本机/局域网）")}</span>
+      </div>
+      <div className={styles.share_new}>
+        <label className={styles.share_ttl}>
+          {t("artifacts.share_ttl", "有效期（天，0＝永久）")}
+          <input
+            className={styles.share_ttl_input}
+            type="number"
+            min={0}
+            max={365}
+            value={ttlDays}
+            onChange={(e) => setTtlDays(e.target.value)}
+          />
+        </label>
+        <button type="button" className={styles.chip} disabled={busy} onClick={create}>
+          {t("artifacts.share_create", "生成链接")}
+        </button>
+      </div>
+      {urlError && <div className={styles.share_warn}>{urlError}</div>}
+      {links.map((link) => {
+        const expired = link.expiresMs !== 0 && now >= link.expiresMs;
+        const url = urls[link.token];
+        return (
+          <div key={link.token} className={styles.version_row}>
+            <span className={styles.share_meta}>
+              <span className={styles.version_id}>{link.version}</span>
+              <span className={styles.version_time}>
+                {expired
+                  ? t("artifacts.share_expired", "已过期")
+                  : link.expiresMs === 0
+                    ? t("artifacts.share_forever", "永久有效")
+                    : t("artifacts.share_until", "有效至 {{when}}", {
+                        when: new Date(link.expiresMs).toLocaleString(),
+                      })}
+              </span>
+              <span className={styles.version_size}>
+                {t("artifacts.share_hits", "{{count}} 次访问", { count: link.hits })}
+              </span>
+            </span>
+            {url && !expired && (
+              <button
+                type="button"
+                className={styles.version_restore}
+                onClick={() => {
+                  void navigator.clipboard?.writeText(url);
+                  onError(null);
+                }}
+                title={url}
+              >
+                {t("artifacts.share_copy", "复制")}
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.version_restore}
+              disabled={busy}
+              onClick={() => revoke(link.token)}
+            >
+              {t("artifacts.share_revoke", "吊销")}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * An artifact's history.
+ *
+ * Only rendered when there is more than one version — a card with a single
+ * ingest has no history worth a section, and showing "v1" alone would imply
+ * the feature is doing something it is not.
+ *
+ * Selecting a row previews *that* version in the stage above without changing
+ * what is stored; 恢复 is the separate, explicit act. That split matters:
+ * looking at an old version is how you decide whether you want it back.
+ */
+function ArtifactVersions({
+  artifact,
+  previewVersion,
+  onPreview,
+  onReloaded,
+  onError,
+}: {
+  artifact: Artifact;
+  previewVersion: string | null;
+  onPreview: (version: string | null) => void;
+  onReloaded: () => Promise<void> | void;
+  onError: (msg: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const shown = previewVersion ?? artifact.currentVersion;
+
+  const rollback = async (version: string) => {
+    setBusy(true);
+    try {
+      await invoke("rollback_artifact", { id: artifact.id, version });
+      onError(null);
+      await onReloaded();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.versions}>
+      <div className={styles.versions_head}>
+        <History size={13} strokeWidth={1.5} />
+        <span>
+          {t("artifacts.versions", "版本历史（{{count}} 个）", {
+            count: artifact.versions.length,
+          })}
+        </span>
+      </div>
+      {artifact.versions.map((v) => {
+        const isCurrent = v.id === artifact.currentVersion;
+        return (
+          <div
+            key={v.id}
+            className={`${styles.version_row} ${shown === v.id ? styles.version_row_on : ""}`}
+          >
+            <button
+              type="button"
+              className={styles.version_target}
+              onClick={() => onPreview(isCurrent ? null : v.id)}
+              title={v.sourcePath}
+            >
+              <span className={styles.version_id}>{v.id}</span>
+              <span className={styles.version_time}>
+                {new Date(v.addedMs).toLocaleString()}
+              </span>
+              <span className={styles.version_size}>{formatBytes(v.sizeBytes)}</span>
+              {isCurrent && (
+                <span className={styles.version_current}>
+                  {t("artifacts.version_current", "当前")}
+                </span>
+              )}
+            </button>
+            {!isCurrent && (
+              <button
+                type="button"
+                className={styles.version_restore}
+                disabled={busy}
+                onClick={() => rollback(v.id)}
+              >
+                {t("artifacts.version_restore", "恢复")}
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {previewVersion && (
+        <div className={styles.version_hint}>
+          {t(
+            "artifacts.version_previewing",
+            "正在预览 {{version}}，存储的仍是 {{current}}。",
+            { version: previewVersion, current: artifact.currentVersion },
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1569,10 +1880,17 @@ export function ArtifactDetail({
  * .xls / .ppt, ODF, archives) still gets the typed placeholder with 导出 / 打开
  * one click away in the bar above.
  */
-function ArtifactStage({ artifact }: { artifact: Artifact }) {
+function ArtifactStage({
+  artifact,
+  version,
+}: {
+  artifact: Artifact;
+  /** Preview this version instead of the current one. */
+  version?: string;
+}) {
   const { t } = useTranslation();
   const [text, setText] = useState<string | null>(null);
-  const url = artifactBlobUrl(artifact.id, artifact.name);
+  const url = artifactBlobUrl(artifact.id, artifact.name, version);
   // html goes to the frame by URL, so only the two rendered-from-source modes
   // pull the bytes into React.
   const textMode = artifact.kind === "text" ? textPreviewMode(artifact.mime) : null;

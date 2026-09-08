@@ -2701,15 +2701,28 @@ fn serve_artifact_folders(_params: &Value) -> Result<Value, String> {
 fn serve_artifact_blob(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
     let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    // Optional `version`; absent means the current one. The phone browses
+    // history read-only, so this is the whole of its version support.
+    let version = params.get("version").and_then(Value::as_str).filter(|v| !v.is_empty());
     let artifact = crate::artifacts::get(id)?;
-    if artifact.size_bytes > MAX_ARTIFACT_FRAME_BYTES {
+    // The size gate has to name the version actually being fetched: an old
+    // version can be far bigger (or smaller) than what is current.
+    let size = match version {
+        Some(v) => artifact
+            .versions
+            .iter()
+            .find(|entry| entry.id == v)
+            .map(|entry| entry.size_bytes)
+            .ok_or_else(|| format!("artifact '{id}' has no version '{v}'"))?,
+        None => artifact.size_bytes,
+    };
+    if size > MAX_ARTIFACT_FRAME_BYTES {
         return Err(format!(
-            "artifact is {} bytes, over the {MAX_ARTIFACT_FRAME_BYTES}-byte relay limit — \
-             export it from the desktop instead",
-            artifact.size_bytes
+            "artifact is {size} bytes, over the {MAX_ARTIFACT_FRAME_BYTES}-byte relay limit — \
+             export it from the desktop instead"
         ));
     }
-    let blob = crate::artifacts::read_bytes(id, None)?;
+    let blob = crate::artifacts::read_version_bytes(id, version, None)?;
     Ok(json!({
         "filename": artifact.name,
         "mime": blob.mime,

@@ -241,6 +241,49 @@ mod tests {
         }
     }
 
+    /// A share token is not a Fleet token, and `/shared` is not a public path.
+    ///
+    /// `/shared` is served *before* this function runs (see
+    /// `handle_request`), and its own handler is the boundary. Two things must
+    /// therefore stay true, or that bypass turns into a hole:
+    ///
+    /// 1. `/shared` must not be on the scoped whitelist. If it were, a
+    ///    customer's scoped token would reach it through the normal gate as
+    ///    well, and the "one artifact, one version" confinement of the share
+    ///    handler would no longer be the only way in.
+    /// 2. Presenting a share token as a Fleet token must be denied — it is
+    ///    just an unknown string here.
+    #[test]
+    fn a_share_token_grants_nothing_through_the_normal_gate() {
+        assert!(
+            !routes::is_public(routes::SHARED),
+            "/shared must not be on the scoped whitelist — its own handler is the boundary"
+        );
+        // A 64-hex share token presented as a Fleet token is simply unknown.
+        let share_token = "a".repeat(64);
+        for p in [routes::ARTIFACTS, routes::ARTIFACT_BLOB, routes::PROC_RUN, routes::SHARED] {
+            assert_eq!(
+                authorize(p, Some(&share_token), ADMIN, Some(PUBLIC), false),
+                AuthOutcome::Denied,
+                "a share token must not authorize {p}"
+            );
+        }
+        // And the management side of sharing is admin-only, like every other
+        // artifact route.
+        for p in [
+            routes::ARTIFACT_SHARES,
+            routes::ARTIFACT_SHARE_CREATE,
+            routes::ARTIFACT_SHARE_REVOKE,
+        ] {
+            assert!(!routes::is_public(p), "share management must not be public: {p}");
+            assert_eq!(
+                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC), false),
+                AuthOutcome::Denied
+            );
+            assert_eq!(authorize(p, Some(ADMIN), ADMIN, Some(PUBLIC), false), AuthOutcome::Admin);
+        }
+    }
+
     /// The gateway-fronted deployment: no token presented at all, yet every
     /// route answers. This is what lets the browser UI talk to `fleet serve`
     /// without a credential in the page.

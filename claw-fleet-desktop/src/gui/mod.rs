@@ -1051,6 +1051,16 @@ pub fn run() {
                 };
                 let path = request.uri().path().trim_start_matches('/').to_string();
                 let id = dec(path.split('/').next().unwrap_or(""));
+                // `?version=v2` pins the response to one version of the
+                // artifact, which is what lets the detail pane preview an old
+                // version — including seeking inside it, since this is the
+                // only surface that answers 206.
+                let version = request.uri().query().and_then(|q| {
+                    q.split('&')
+                        .filter_map(|kv| kv.split_once('='))
+                        .find(|(k, _)| *k == "version")
+                        .map(|(_, v)| dec(v))
+                });
                 let range = request
                     .headers()
                     .get("Range")
@@ -1060,7 +1070,7 @@ pub fn run() {
                 let result = {
                     let state = app.state::<AppState>();
                     let backend = &state.backend;
-                    backend.read_artifact_bytes(&id, range)
+                    backend.read_artifact_version_bytes(&id, version.as_deref(), range)
                 };
                 let response = artifact_response(result, range.is_some());
                 responder.respond(response);
@@ -1631,6 +1641,11 @@ pub fn run() {
             update_artifact,
             delete_artifact,
             artifact_usage,
+            rollback_artifact,
+            list_artifact_shares,
+            create_artifact_share,
+            revoke_artifact_share,
+            artifact_share_url,
             list_artifact_folders,
             create_artifact_folder,
             delete_artifact_folder,

@@ -62,6 +62,20 @@ const STORE_PREFIX = "fleet-web:";
 export function localCommand(cmd: string, args: Record<string, unknown>): { handled: boolean; value?: unknown } {
   const key = () => `${STORE_PREFIX}${String(args.key ?? "")}`;
 
+  // A share link's URL is "where do I reach the server that will serve this",
+  // and in a tab that question is already answered: this page came from that
+  // server. So the origin *is* the answer, and it is a better one than the
+  // desktop's — it is whatever address the viewer actually used to get here,
+  // so a phone that loaded the UI over the LAN gets the LAN address, and there
+  // is no dependency on `~/.fleet/port` being readable from this process.
+  if (cmd === "artifact_share_url") {
+    const token = String(args.token ?? "");
+    return {
+      handled: true,
+      value: `${window.location.origin}/shared?t=${encodeURIComponent(token)}`,
+    };
+  }
+
   // ── plugin:window ────────────────────────────────────────────────────────
   // The custom titlebar and the theme sync drive `getCurrentWindow()`. A tab
   // has no window of its own to move, size or decorate, and nothing here is
