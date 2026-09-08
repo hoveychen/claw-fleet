@@ -2133,6 +2133,10 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "repo_push" => serve_repo_push(params),
         "repo_pull" => serve_repo_pull(params),
         // ── Terminal 「终端」 surface ──────────────────────────────────────
+        // Asked first, at connect: the whole surface below is off unless this
+        // host was started with FLEET_TERMINAL, and the phone hides its 终端
+        // entries rather than opening a panel whose first spawn is refused.
+        "host_features" => serve_host_features(params),
         "procs" => serve_procs(params),
         "proc_run" => serve_proc_run(params),
         "proc_output" => serve_proc_output(params),
@@ -3173,6 +3177,10 @@ fn serve_repo_pull(params: &Value) -> Result<Value, String> {
 // already exposes `spawn_session`, which starts an agent that can run any
 // command it likes. A terminal is that existing authority made visible, not a
 // new one — so gating the cwd here would only stop the honest use of it.
+
+fn serve_host_features(_params: &Value) -> Result<Value, String> {
+    serde_json::to_value(crate::feature_flags::host_features()).map_err(|e| e.to_string())
+}
 
 fn serve_proc_run(params: &Value) -> Result<Value, String> {
     let req: crate::proc_runner::SpawnProcRequest = serde_json::from_value(params.clone())
@@ -7368,7 +7376,7 @@ mod tests {
     }
 
     /// The terminal panel is only as reachable as this table: `proc_runner` has
-    /// been a complete pty host for months, but until these seven names existed
+    /// been a complete pty host for months, but until these names existed
     /// here the phone and the browser build could not say any of them — both
     /// transports go through `serve_request` and nothing else.
     #[test]
@@ -7378,6 +7386,7 @@ mod tests {
             // handler without spawning anything: a missing/!malformed body is
             // rejected before `proc_runner` ever re-execs a host.
             for method in [
+                "host_features",
                 "procs",
                 "proc_run",
                 "proc_output",
@@ -7397,6 +7406,24 @@ mod tests {
             // assertion above cannot pass vacuously.
             let err = serve_request("proc_nonsense", &json!({})).unwrap_err();
             assert!(err.contains("unknown method"), "unexpected error: {err}");
+        });
+    }
+
+    /// What the phone hides its 终端 entries on. The payload must carry the
+    /// `terminal` key under exactly that (camelCase) name and as a boolean —
+    /// a missing key reads as `undefined` on the client, which is falsy and
+    /// would hide the surface on a host that actually has it enabled.
+    #[test]
+    fn host_features_reports_the_terminal_flag_as_a_boolean() {
+        with_temp_home(|| {
+            let data = serve_request("host_features", &json!({})).expect("host_features");
+            let terminal = data.get("terminal").expect("terminal key present");
+            assert!(terminal.is_boolean(), "terminal must be a bool: {data}");
+            assert_eq!(
+                terminal.as_bool(),
+                Some(crate::feature_flags::terminal_enabled()),
+                "the wire answer must be the same flag proc_runner enforces"
+            );
         });
     }
 

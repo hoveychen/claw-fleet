@@ -1569,6 +1569,7 @@ pub fn run() {
             set_auto_resume_config,
             set_session_mark,
             set_session_title,
+            host_features,
             list_workspace_procs,
             run_workspace_proc,
             kill_workspace_proc,

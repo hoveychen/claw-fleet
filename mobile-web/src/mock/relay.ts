@@ -282,6 +282,10 @@ export class MockRelayClient extends RelayClient {
       // 一个假 pty:第一次 proc_output 吐出一屏提示符,之后就没有新字节。够
       // 截图,也够看出布局(键位条、标签、退出条)对不对。真的按键什么都不会
       // 发生 —— mock 后面没有主机。
+      // 开着:mock 背后没有主机(下面那个 pty 是脚本),关掉只会让 ?mock 少一页
+      // 可截图的界面,换不来任何安全性。
+      case "host_features":
+        return { terminal: true };
       case "procs":
         return this.mockProc ? [this.mockProc] : [];
       case "proc_run": {

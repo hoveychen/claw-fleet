@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
 import { isFleetOwnedTask } from "./types";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
@@ -313,6 +313,14 @@ interface UIState {
   terminalNav: TerminalNavRequest | null;
   requestTerminalNav: (workspacePath: string) => void;
   clearTerminalNav: () => void;
+  /** Which optional surfaces the backend actually allows — read once at boot
+   *  (`host_features`; the browser build gets the same answer over
+   *  `GET /host_features`). Starts all-off and stays that way if the call
+   *  fails: offering a 终端 page whose first spawn comes back "disabled" is
+   *  worse than not showing it, and the flag is a launch property of the
+   *  backend process, so there is nothing to retry mid-run. */
+  hostFeatures: HostFeatures;
+  loadHostFeatures: () => Promise<void>;
   /** Absolute paths the 仓库 page was asked to open and could not resolve to
    *  any file. The path chips in agent prose read this to mark themselves as
    *  broken *after* a click — deliberately not before, since knowing in advance
@@ -580,13 +588,39 @@ export const useUIStore = create<UIState>((set) => ({
   clearFileNav: () => set({ fileNav: null }),
   terminalNav: null,
   requestTerminalNav: (workspacePath) =>
-    set((s) => ({
-      // Same bookkeeping as requestFileNav — see the note there on why a nav
-      // that skipped viewModePatch leaves the 工作 tab's memory stale.
-      ...viewModePatch(s, "terminal"),
-      terminalNav: { workspacePath, nonce: (s.terminalNav?.nonce ?? 0) + 1 },
-    })),
+    set((s) =>
+      // The 命令 panel hides its 在终端打开 button while the surface is off, so
+      // this is the belt to that braces: a nav raised by anything else (a
+      // keyboard path, a future caller) must not land on a hidden page.
+      !s.hostFeatures.terminal
+        ? {}
+        : {
+            // Same bookkeeping as requestFileNav — see the note there on why a
+            // nav that skipped viewModePatch leaves the 工作 tab's memory stale.
+            ...viewModePatch(s, "terminal"),
+            terminalNav: { workspacePath, nonce: (s.terminalNav?.nonce ?? 0) + 1 },
+          },
+    ),
   clearTerminalNav: () => set({ terminalNav: null }),
+  hostFeatures: { terminal: false },
+  loadHostFeatures: async () => {
+    let features: HostFeatures = { terminal: false };
+    try {
+      features = (await invoke<HostFeatures | null>("host_features")) ?? features;
+    } catch {
+      // Fail closed — see the field's doc comment.
+    }
+    set((s) => ({
+      hostFeatures: features,
+      // The last-used page is restored from storage, so a host that used to
+      // have the terminal enabled (or a fresh `fleet serve` without the flag)
+      // can boot straight onto a page that no longer exists. Send it home
+      // instead of rendering an empty main area with no nav item to leave by.
+      ...(!features.terminal && s.viewMode === "terminal"
+        ? viewModePatch(s, NAV_GROUP_HOME.work)
+        : {}),
+    }));
+  },
   unresolvedPaths: [],
   markPathUnresolved: (absPath) =>
     set((s) =>
