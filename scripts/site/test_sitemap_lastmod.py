@@ -9,6 +9,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import seo
+import site_origin
 import sitemap_lastmod as sl
 
 REPO = Path(__file__).resolve().parents[2]
@@ -48,6 +49,18 @@ class StampTests(unittest.TestCase):
             body = path.read_text()
             self.assertEqual(body.count('<lastmod>'), 1)
             self.assertIn('<lastmod>2026-09-05</lastmod>', body)
+
+    def test_it_can_stamp_a_sitemap_whose_origin_is_already_resolved(self):
+        # The mirror substitutes the origin while copying, so by the time it
+        # stamps there is no token left to split on.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_sitemap(Path(tmp))
+            origin = 'https://fleet.eternizedlab.com'
+            path.write_text(site_origin.apply(path.read_text(), origin))
+            self.assertEqual(sl.sitemap_paths(path, origin_token=origin)[:2], ['/', '/zh/'])
+            count = sl.stamp(path, {'/': '2026-09-01', '/zh/': '2026-09-02'}, origin=origin)
+            self.assertEqual(count, 2)
+            self.assertIn(f'<loc>{origin}/</loc><lastmod>2026-09-01</lastmod>', path.read_text())
 
     def test_the_stamped_sitemap_is_still_well_formed_and_ordered(self):
         # sitemaps.org requires lastmod to follow loc inside <url>.
