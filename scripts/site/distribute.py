@@ -19,6 +19,10 @@ REQUIRED = {'claw-fleet-macos.pkg', 'claw-fleet-windows-x64-setup.exe', 'fleet-l
 # `--tag latest` refuse to refresh the China website until the next release.
 # The site degrades per link (docs/site.js), so a mirror without it is fine.
 ALLOWED = REQUIRED | {'fleet-macos', 'fleet-windows-x64.exe', 'claw-fleet-webui.tar.gz', 'claw-fleet-android.apk'}
+# Static site files that must exist in the source tree. Everything else in the
+# copy list below is best-effort, because selfhost.py reads it against a
+# previously published deployment (see prepare).
+REQUIRED_SITE_FILES = {'index.html', 'zh/index.html', 'site.css', 'site.js', 'locale.js'}
 
 
 def validate_base_url(value):
@@ -66,9 +70,17 @@ def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cl
                  'screenshots/current/review-en.png', 'screenshots/current/review-zh.png',
                  'screenshots/current/results-en.png', 'screenshots/current/results-zh.png', 'screenshots/current/mobile-en.png',
                  'screenshots/current/mobile-zh.png'):
+        source = (site_root or ROOT / 'docs') / name
+        # selfhost.py passes site_root=<the live deployment>, so this list is
+        # also read against a site published before the file existed. A newly
+        # added asset must therefore be allowed to be absent there, or adding
+        # one to this list wedges the mirror's unattended updater on a
+        # FileNotFoundError until someone redeploys the pages by hand.
+        if not source.exists() and name not in REQUIRED_SITE_FILES:
+            continue
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2((site_root or ROOT / 'docs') / name, target)
+        shutil.copy2(source, target)
     manifest = {'schema': 1, 'version': tag, 'china': {'provider': provider, 'assets': {}}}
     checksum_lines = []
     for name, asset in sorted(assets.items()):
