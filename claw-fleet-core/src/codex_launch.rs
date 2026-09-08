@@ -1030,6 +1030,11 @@ pub fn parse_thread_started(line: &str) -> Option<String> {
 /// concern): static (AGENTS.md PRD block) and dynamic (this) injection move
 /// together with the PRD toggle. No PRD block / no active plan → returns the
 /// prompt unchanged (AC3 graceful degradation).
+///
+/// A resume whose previous turn already carried byte-identical text prepends
+/// nothing — that copy is still in the thread's history. See
+/// [`crate::prd_context_dedup`] for the policy and [`prepend_reminder`] for
+/// this function's evidence-free fallbacks.
 fn maybe_prepend_active_plans(
     workspace_path: &str,
     session_id: Option<&str>,
@@ -1038,10 +1043,28 @@ fn maybe_prepend_active_plans(
     if !crate::codex_guidance::is_codex_prd_installed() {
         return prompt.to_string();
     }
-    match crate::prd_tasks::render_active_plans_reminder(Path::new(workspace_path), session_id) {
-        Some(reminder) => format!("{reminder}\n\n{prompt}"),
-        None => prompt.to_string(),
+    let reminder =
+        crate::prd_tasks::render_active_plans_reminder(Path::new(workspace_path), session_id);
+    let rollout = session_id.and_then(crate::codex_source::find_codex_rollout);
+    prepend_reminder(reminder.as_deref(), rollout.as_deref(), prompt)
+}
+
+/// Decide the final prompt from the rendered reminder and the thread's rollout.
+///
+/// Split out from [`maybe_prepend_active_plans`] so the fallbacks are testable
+/// without a real `$CODEX_HOME`: no reminder (no active plan), no rollout (a
+/// fresh spawn has no thread yet; a `.zst`-compressed or missing rollout is no
+/// evidence either) and a rollout that disagrees all prepend as before.
+fn prepend_reminder(reminder: Option<&str>, rollout: Option<&Path>, prompt: &str) -> String {
+    let Some(reminder) = reminder else {
+        return prompt.to_string();
+    };
+    if let Some(rollout) = rollout {
+        if !crate::prd_context_dedup::codex_needs_injection(rollout, reminder) {
+            return prompt.to_string();
+        }
     }
+    format!("{reminder}\n\n{prompt}")
 }
 
 /// Start a brand-new headless Codex session: spawns
@@ -1499,6 +1522,49 @@ pub fn resume_codex_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reminder rides at the head of the prompt, and only a rollout that
+    /// already holds identical text may hold it back — every evidence-free case
+    /// keeps the pre-dedupe behaviour of prepending unconditionally.
+    #[test]
+    fn prepend_reminder_skips_only_on_an_identical_previous_turn() {
+        let reminder = format!(
+            "<system-reminder>\nThe workspace `TASKS.md` \
+             (re-injected on every prompt by Fleet PRD Discipline mode) holds 1 active plan\n\
+             </system-reminder>"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let rollout = dir.path().join("rollout.jsonl");
+        let line = serde_json::json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": format!("{reminder}\n\nprevious prompt")}],
+            },
+        });
+        std::fs::write(&rollout, format!("{line}\n")).unwrap();
+
+        // Resume of a thread whose last turn carried the same text.
+        assert_eq!(
+            prepend_reminder(Some(&reminder), Some(&rollout), "next prompt"),
+            "next prompt"
+        );
+        // Same thread, but the plans moved.
+        let moved = reminder.replace("1 active plan", "2 active plans");
+        assert!(
+            prepend_reminder(Some(&moved), Some(&rollout), "next prompt").starts_with(&moved),
+            "a changed reminder must re-enter"
+        );
+        // Fresh spawn (no thread yet) and a rollout that cannot be read.
+        assert!(prepend_reminder(Some(&reminder), None, "p").starts_with(&reminder));
+        assert!(
+            prepend_reminder(Some(&reminder), Some(&dir.path().join("absent.jsonl")), "p")
+                .starts_with(&reminder)
+        );
+        // No active plan → the prompt is untouched.
+        assert_eq!(prepend_reminder(None, Some(&rollout), "p"), "p");
+    }
 
     /// Pin `FLEET_HOME` to a temp dir so the token store writes there, not the
     /// real `~/.fleet`. Mirrors `launch_spec`'s test harness.
