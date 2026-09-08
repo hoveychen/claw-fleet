@@ -61,15 +61,24 @@
   text-overflow: ellipsis;
 }
 
-/* Only rendered when a view passes `sub`. Its own overflow rules stay here;
-   a view that needs different truncation (仓库详情's long paths keep their
-   *tail*) passes an already-styled node instead of a bare string. */
+/* Only rendered when a view passes `sub`. */
 .sub {
   font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Truncate from the *start* instead, keeping the tail visible — for a long
+   filesystem path, "…/claude-fleet/mobile-web" identifies the repo and
+   "/Users/hoveychen/workspace/cl…" does not. This has to live on the element
+   that does the truncating, which is why it is an attribute here rather than
+   something the caller styles onto a node it passes in: an inner span's
+   direction cannot affect the ellipsis its parent applies. */
+.sub[data-keeps-tail="true"] {
+  direction: rtl;
+  text-align: left;
 }
 
 /* Trailing controls (refresh / export / version select / ☰). Laid out by the

@@ -22,6 +22,7 @@ export function AppHeader({
   title,
   titleAfter,
   sub,
+  subKeepsTail,
   actions,
   seamless,
 }: {
@@ -36,6 +37,10 @@ export function AppHeader({
   titleAfter?: ReactNode;
   /** Second line, dim and small — 仓库详情's repo path, 知识库文档's slug. */
   sub?: ReactNode;
+  /** Ellipsize `sub` from the start so its tail stays readable. For paths:
+   *  "…/claude-fleet/mobile-web" says which one, "/Users/hoveychen/wor…" does
+   *  not. */
+  subKeepsTail?: boolean;
   /** Trailing controls: refresh, export, version select, the ☰ menu. */
   actions?: ReactNode;
   /** Drop the bottom hairline. For a header with a tab strip directly under it,
@@ -56,7 +61,11 @@ export function AppHeader({
         ) : (
           title
         )}
-        {sub !== undefined && <div className={styles.sub}>{sub}</div>}
+        {sub !== undefined && (
+          <div className={styles.sub} data-keeps-tail={subKeepsTail ? "true" : undefined}>
+            {sub}
+          </div>
+        )}
       </div>
       {actions !== undefined && <div className={styles.actions}>{actions}</div>}
     </header>

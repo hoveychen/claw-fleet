@@ -5,7 +5,7 @@
 // 没有 parent 关系、没有 done/total、没有接力链。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, GitBranch, ListTree, TriangleAlert, X } from "lucide-react";
+import { ChevronRight, GitBranch, ListTree, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import { useHistoryLayer } from "../useNavStack";
@@ -21,6 +21,7 @@ import {
   subtreeHasPending,
 } from "./planMatrix";
 import styles from "./PlansView.module.css";
+import { AppHeader } from "./AppHeader";
 
 interface Props {
   sessions: SessionInfo[];
@@ -152,17 +153,15 @@ export function PlansView({ sessions, client, onBack }: Props) {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={20} />
-        </button>
-        <div className={styles.headerText}>
-          <div className={styles.headerTitle}>{t("计划")}</div>
-        </div>
-        <button className={styles.refresh} onClick={() => void load()} aria-label={t("刷新")}>
-          ⟳
-        </button>
-      </div>
+      <AppHeader
+        onBack={onBack}
+        title={t("计划")}
+        actions={
+          <button className={styles.refresh} onClick={() => void load()} aria-label={t("刷新")}>
+            ⟳
+          </button>
+        }
+      />
 
       {repos.length > 1 && (
         <div className={styles.repoRow}>
