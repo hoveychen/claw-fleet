@@ -1,6 +1,6 @@
 {
-  "title": "Claw Fleet — Your personal AI workspace",
-  "description": "Give AI the work, review the decisions, and take the results. A personal workspace for Claude Code, Codex and DeepSeek Harness, with projects, deliverables and mobile access.",
+  "title": "Claw Fleet — a desktop GUI for Claude Code, Codex & DeepSeek",
+  "description": "A free, open-source desktop app for macOS, Windows and Linux that runs Claude Code, Codex and DeepSeek Harness in one personal AI workspace. Brief tasks by project, review each decision with the material in front of you, and take the results — from your desk or your phone.",
   "nav": [
     "The workspace",
     "On your phone",
