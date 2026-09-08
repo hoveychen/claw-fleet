@@ -56,63 +56,100 @@
   const selector = document.querySelector("#download-source");
   const links = [...document.querySelectorAll("[data-asset]")];
   const originals = new Map(links.map((link) => [link, link.href]));
-  // No third-party API call. An absent, incomplete or invalid manifest leaves
-  // the original working GitHub links in place.
-  fetch(manifestURL, { signal: AbortSignal.timeout(5000) })
-    .then((response) => {
-      if (!response.ok) throw new Error("manifest unavailable");
-      return response.json();
-    })
-    .then((manifest) => {
-      if (
-        manifest.schema !== 1 ||
-        typeof manifest.version !== "string" ||
-        !manifest.china
-      )
-        return;
-      // Per link, not all-or-nothing. An asset the mirror does not carry (the
-      // Android APK only exists in releases cut after it was wired up) used to
-      // make this `return`, which silently removed the China mirror option for
-      // every platform. A missing or malformed entry now just leaves that one
-      // link pointing at GitHub.
-      const urls = new Map();
-      for (const link of links) {
-        const asset = manifest.china.assets?.[link.dataset.asset];
-        if (!asset || !/^[a-f0-9]{64}$/.test(asset.sha256)) continue;
-        let url;
-        try {
-          url = new URL(asset.url);
-        } catch {
-          continue;
-        }
-        if (url.protocol !== "https:" || url.username || url.password) continue;
-        urls.set(link, url.href);
+  const note = document.querySelector("#source-note");
+  let mirrorURLs = new Map();
+  let sourceChosen = false;
+  const changeSource = () =>
+    links.forEach((link) => {
+      const mirrored = selector.value === "china" && mirrorURLs.has(link);
+      link.href = mirrored ? mirrorURLs.get(link) : originals.get(link);
+      link.parentElement.querySelector(".fallback").hidden = !mirrored;
+    });
+  selector.addEventListener("change", changeSource);
+
+  const enableMirror = (manifest, expectedVersion, expectedManifestURL) => {
+    if (
+      manifest.schema !== 1 ||
+      manifest.version !== expectedVersion ||
+      !manifest.china
+    )
+      return false;
+    const urls = new Map();
+    for (const link of links) {
+      const asset = manifest.china.assets?.[link.dataset.asset];
+      if (!asset || !/^[a-f0-9]{64}$/.test(asset.sha256)) continue;
+      let url;
+      try {
+        url = new URL(asset.url);
+      } catch {
+        continue;
       }
-      // Nothing resolved — offering a "China mirror" that changes no link would
-      // be a lie, so leave the selector as it was.
-      if (urls.size === 0) return;
-      const note = document.querySelector("#source-note");
-      selector.add(new Option(note.dataset.china, "china"));
-      note.textContent = note.dataset.ready.replace(
-        "{version}",
-        manifest.version,
+      if (url.protocol !== "https:" || url.username || url.password) continue;
+      const expectedURL = new URL(
+        `releases/${expectedVersion}/${link.dataset.asset}`,
+        expectedManifestURL,
       );
-      const changeSource = () =>
-        links.forEach((link) => {
-          const mirrored = selector.value === "china" && urls.has(link);
-          link.href = mirrored ? urls.get(link) : originals.get(link);
-          // The fallback is the "mirror not reachable? use GitHub" escape
-          // hatch, so it only makes sense on a link the mirror actually serves.
-          link.parentElement.querySelector(".fallback").hidden = !mirrored;
-        });
-      selector.addEventListener("change", changeSource);
+      if (url.href !== expectedURL.href) continue;
+      urls.set(link, url.href);
+    }
+    if (urls.size === 0) return false;
+    mirrorURLs = urls;
+    if (![...selector.options].some((option) => option.value === "china")) {
+      selector.add(new Option(note.dataset.china, "china"));
+    }
+    note.textContent = note.dataset.ready.replace("{version}", expectedVersion);
+    if (!sourceChosen) {
       const requestedSource = new URL(location.href).searchParams.get("source");
       if (requestedSource === "china" || requestedSource === "github") {
         selector.value = requestedSource;
       } else if (document.body.dataset.locale === "zh") {
         selector.value = "china";
       }
-      changeSource();
+      sourceChosen = true;
+    }
+    changeSource();
+    return true;
+  };
+
+  // The local Pages manifest supplies the GitHub release version. It may point
+  // at our first-party Shenzhen manifest so that the mirror appears as soon as
+  // it catches up, without another Pages deployment. Any unavailable, stale or
+  // malformed mirror leaves the immutable GitHub /releases/latest/ links alone.
+  fetch(manifestURL, { signal: AbortSignal.timeout(5000) })
+    .then((response) => {
+      if (!response.ok) throw new Error("manifest unavailable");
+      return response.json();
+    })
+    .then(async (manifest) => {
+      if (manifest.schema !== 1 || typeof manifest.version !== "string") return;
+      note.textContent = note.dataset.version.replace(
+        "{version}",
+        manifest.version,
+      );
+
+      if (typeof manifest.mirror_manifest_url !== "string") {
+        enableMirror(manifest, manifest.version, manifestURL);
+        return;
+      }
+      let liveURL;
+      try {
+        liveURL = new URL(manifest.mirror_manifest_url);
+      } catch {
+        return;
+      }
+      if (liveURL.protocol !== "https:" || liveURL.username || liveURL.password)
+        return;
+      enableMirror(manifest, manifest.version, liveURL);
+      try {
+        const response = await fetch(liveURL, {
+          mode: "cors",
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!response.ok) return;
+        enableMirror(await response.json(), manifest.version, liveURL);
+      } catch {
+        /* The GitHub links and version are already ready. */
+      }
     })
     .catch(() => {
       /* GitHub remains available. */

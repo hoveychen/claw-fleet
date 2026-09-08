@@ -7,6 +7,7 @@ when it has caught up to the exact same immutable release.
 import argparse
 import copy
 import json
+import os
 from pathlib import Path
 import re
 import urllib.request
@@ -47,7 +48,11 @@ def build_manifest(release, mirror, public_url):
     """Combine the latest stable release with an optional caught-up mirror."""
     tag, release_assets = distribute.validate_release(release)
     public_url = distribute.validate_base_url(public_url)
-    result = {"schema": 1, "version": tag}
+    result = {
+        "schema": 1,
+        "version": tag,
+        "mirror_manifest_url": public_url + "/downloads.json",
+    }
     china = _validated_china(release_assets, mirror, public_url, tag)
     if china is not None:
         result["china"] = china
@@ -55,10 +60,10 @@ def build_manifest(release, mirror, public_url):
 
 
 def fetch_json(url):
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": "Claw-Fleet-Pages", "Accept": "application/vnd.github+json"},
-    )
+    headers = {"User-Agent": "Claw-Fleet-Pages", "Accept": "application/vnd.github+json"}
+    if os.environ.get("GH_TOKEN") and url.startswith("https://api.github.com/"):
+        headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
+    request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)
 

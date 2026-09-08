@@ -118,6 +118,7 @@
   "globalSource": "GitHub 官方发布",
   "chinaSource": "国内镜像",
   "sourceNote": "目前可从 GitHub 下载。国内镜像开通后会在这里提供。",
+  "sourceVersion": "{version} · GitHub 官方稳定版。",
   "sourceReady": "{version} · 国内镜像已开通，也可使用下方 GitHub 备用下载。",
   "fallback": "GitHub 备用下载",
   "platforms": [

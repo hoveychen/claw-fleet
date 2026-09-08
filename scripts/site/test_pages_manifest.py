@@ -6,6 +6,9 @@ import pages_manifest as p
 from test_distribute import fixture
 
 
+ROOT = p.distribute.ROOT
+
+
 class PagesManifestTests(unittest.TestCase):
     def setUp(self):
         self.release, _ = fixture()
@@ -44,6 +47,10 @@ class PagesManifestTests(unittest.TestCase):
         )
 
         self.assertEqual(manifest["version"], "v2.7.0")
+        self.assertEqual(
+            manifest["mirror_manifest_url"],
+            "https://fleet.eternizedlab.com/downloads.json",
+        )
         self.assertNotIn("china", manifest)
 
     def test_matching_complete_mirror_is_exposed_without_rewriting_it(self):
@@ -65,7 +72,8 @@ class PagesManifestTests(unittest.TestCase):
             self.release, incomplete, "https://fleet.eternizedlab.com"
         )
 
-        self.assertEqual(manifest, {"schema": 1, "version": "v2.7.0"})
+        self.assertEqual(manifest["version"], "v2.7.0")
+        self.assertNotIn("china", manifest)
 
     def test_mirror_asset_must_stay_under_its_versioned_public_origin(self):
         unsafe = copy.deepcopy(self.mirror)
@@ -76,8 +84,40 @@ class PagesManifestTests(unittest.TestCase):
             self.release, unsafe, "https://fleet.eternizedlab.com"
         )
 
-        self.assertEqual(manifest, {"schema": 1, "version": "v2.7.0"})
+        self.assertEqual(manifest["version"], "v2.7.0")
+        self.assertNotIn("china", manifest)
 
+
+class PublicationContractTests(unittest.TestCase):
+    def test_release_calls_reusable_pages_workflow_after_publish(self):
+        pages = (ROOT / ".github/workflows/pages.yml").read_text()
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+
+        self.assertIn("workflow_call:", pages)
+        self.assertIn("python3 scripts/site/pages_manifest.py", pages)
+        self.assertIn("needs: [resolve, publish, china-distribution]", release)
+        self.assertIn("uses: ./.github/workflows/pages.yml", release)
+
+    def test_site_requires_live_mirror_to_match_the_github_version(self):
+        script = (ROOT / "docs/site.js").read_text()
+        self.assertIn("manifest.version !== expectedVersion", script)
+        self.assertIn("url.href !== expectedURL.href", script)
+        self.assertIn("fetch(liveURL", script)
+        self.assertIn("note.dataset.version.replace(", script)
+
+    def test_generated_pages_have_distinct_github_and_mirror_messages(self):
+        for name in ("index.html", "zh/index.html"):
+            with self.subTest(name=name):
+                page = (ROOT / "docs" / name).read_text()
+                self.assertIn('id="source-note" data-version=', page)
+                self.assertIn('data-ready=', page)
+
+    def test_shenzhen_manifest_allows_only_the_pages_origin(self):
+        nginx = (ROOT / "docs/deploy/fleet-selfhost.nginx.conf").read_text()
+        self.assertIn(
+            'add_header Access-Control-Allow-Origin "https://hoveychen.github.io" always;',
+            nginx,
+        )
 
 if __name__ == "__main__":
     unittest.main()

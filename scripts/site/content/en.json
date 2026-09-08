@@ -118,6 +118,7 @@
   "globalSource": "GitHub Releases",
   "chinaSource": "China mirror",
   "sourceNote": "GitHub downloads are available now. A China mirror will appear here when it is enabled.",
+  "sourceVersion": "Version {version} · GitHub Releases.",
   "sourceReady": "Version {version} · China mirror available. GitHub is also available below.",
   "fallback": "GitHub alternative",
   "platforms": [
