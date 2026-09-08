@@ -81,7 +81,10 @@ LOG=/tmp/hvigor-assembleapp.log
 # 日志走文件而不是管道:`hvigorw | grep` 会把退出码换成 grep 的,构建失败也
 # 看起来成功,然后把上一次的旧产物当成新的交出去。
 set +e
-node "$HVIGORW" clean assembleApp --mode module -p product=default -p buildMode=release --no-daemon \
+# 不能带 install.sh 那句的 `--mode module`:assembleApp 是工程级任务,加了
+# module 模式它会被静默忽略 —— 只有 clean 真的跑了,hvigor 仍报 BUILD
+# SUCCESSFUL,而 build/ 目录根本没生成。
+node "$HVIGORW" clean assembleApp -p product=default -p buildMode=release --no-daemon \
   > "$LOG" 2>&1
 BUILD_EXIT=$?
 set -e
@@ -90,20 +93,27 @@ grep -iE "Error Message|ArkTS:ERROR|BUILD FAILED|No signingConfig" "$LOG" | tail
 
 # ------------------------------------------------------------------ 产物 --
 # 产物名里带 -signed / -unsigned,这是判断签名有没有真生效的唯一可靠信号 ——
-# 不能只看 hvigor 的退出码。
+# 不能只看 hvigor 的退出码。签名成功时两个文件**并存**(unsigned 是中间产物,
+# clean 不会带走它),所以先找 signed,找不到才回落到 unsigned。
+OUT=build/outputs/default
 shopt -s nullglob
-APPS=(build/outputs/default/*.app)
+SIGNED=("$OUT"/*-signed.app)
+UNSIGNED=("$OUT"/*-unsigned.app)
 shopt -u nullglob
-(( ${#APPS[@]} > 0 )) || fail "构建报告成功但 build/outputs/default/ 下没有 .app,日志 $LOG"
-(( ${#APPS[@]} == 1 )) || fail "build/outputs/default/ 下有 ${#APPS[@]} 个 .app,不确定该交哪个: ${APPS[*]}"
-APP="${APPS[0]}"
 
-if [[ "$(basename "$APP")" == *unsigned* ]]; then
+if (( ${#SIGNED[@]} == 1 )); then
+  APP="${SIGNED[0]}"
+elif (( ${#SIGNED[@]} > 1 )); then
+  fail "$OUT 下有多个已签名 .app,不确定该交哪个: ${SIGNED[*]}"
+elif (( ${#UNSIGNED[@]} > 0 )); then
   if (( ALLOW_UNSIGNED )); then
+    APP="${UNSIGNED[0]}"
     echo "⚠ 产物未签名(--allow-unsigned):$APP —— 不能上传 AGC"
   else
-    fail "产物是未签名的 $APP —— 签名环境变量没被 hvigorfile.ts 认到(搜日志里的 '[fleet] 已用环境变量覆盖签名配置'),别拿它去上传"
+    fail "只产出了未签名的 ${UNSIGNED[0]} —— 签名环境变量没被 hvigorfile.ts 认到(日志里应有 '[fleet] 已用环境变量覆盖签名配置',且不该有 'No signingConfig found'),别拿它去上传"
   fi
+else
+  fail "构建报告成功但 $OUT 下没有 .app,日志 $LOG"
 fi
 
 VERSION_NAME=$(sed -n 's/.*"versionName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' AppScope/app.json5 | head -1)
