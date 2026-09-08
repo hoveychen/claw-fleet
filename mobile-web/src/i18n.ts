@@ -83,6 +83,20 @@ export function t(zh: string, ...args: Array<string | number>): string {
 }
 
 const DICT: Record<string, string> = {
+  // ── 压缩包浏览（产出页的 zip 当文件夹开）──
+  "压缩包": "Archive",
+  // 「返回」「分享」已在别处登记过,不重复。
+  "分享": "Share",
+  "{0} 项": "{0} items",
+  "这个文件夹是空的。": "This folder is empty.",
+  "在包里搜索…": "Search in archive…",
+  "包里没有匹配的文件。": "No file in this archive matches.",
+  "这个文件不是有效的 zip，或者已损坏。": "This file is not a valid zip, or it is damaged.",
+  "这一项有密码保护，没法在这里打开。":
+    "This item is password-protected and cannot be opened here.",
+  "这一项用了不支持的压缩算法。": "This item uses a compression method we cannot read.",
+  "当前环境不支持解压。": "This environment cannot decompress.",
+  "读取压缩包失败。": "Could not read the archive.",
   "其他": "Other",
   // ── 设备簿（多设备配对）──
   "设备": "Device",
