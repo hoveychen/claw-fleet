@@ -682,6 +682,52 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
     })
 }
 
+/// Bring **one** session's recorded spend up to date, and patch it into `infos`.
+///
+/// Pricing a session means walking its whole history, so the roster cannot do it
+/// for everyone on every poll. It does it for one session per poll instead — the
+/// most recently active of those whose `updatedAt` has moved past the figure we
+/// hold — which converges the whole roster in as many polls as there are stale
+/// sessions, and keeps an actively-running session at most one poll behind.
+///
+/// Deliberately silent on failure: a card showing a slightly stale figure is a
+/// far better outcome than a scan that errors because one session's history was
+/// briefly unreadable.
+fn refresh_one_stale_spend(
+    infos: &mut [SessionInfo],
+    roster_updated: &[i64],
+    spend: &std::collections::BTreeMap<String, crate::dsh_cost::SessionSpend>,
+) {
+    let Some(idx) = pick_stale_spend(infos, roster_updated, spend) else {
+        return;
+    };
+    let updated = roster_updated[idx];
+    let info = &mut infos[idx];
+    match crate::dsh_cost::refresh_session_spend(&info.jsonl_path, updated) {
+        Ok(fresh) => info.total_cost_usd = fresh.usd.unwrap_or(0.0),
+        Err(e) => crate::log_debug(&format!("dsh spend refresh {}: {e}", info.id)),
+    }
+}
+
+/// Which session to re-price this poll, if any: the most recently persisted one
+/// whose recorded spend predates its current `updatedAt`. Pure, so the choice is
+/// testable without a server.
+fn pick_stale_spend(
+    infos: &[SessionInfo],
+    roster_updated: &[i64],
+    spend: &std::collections::BTreeMap<String, crate::dsh_cost::SessionSpend>,
+) -> Option<usize> {
+    infos
+        .iter()
+        .enumerate()
+        .filter(|(i, info)| {
+            let updated = roster_updated.get(*i).copied().unwrap_or_default();
+            !crate::dsh_cost::spend_is_current(spend.get(&info.id), updated)
+        })
+        .max_by_key(|(i, _)| roster_updated.get(*i).copied().unwrap_or_default())
+        .map(|(idx, _)| idx)
+}
+
 /// Fold the mux's event clock into a polled session's activity timestamps.
 ///
 /// **`session/list`'s `updatedAt` is a persistence timestamp, not a
@@ -750,23 +796,40 @@ impl AgentSource for DshSource {
                 .get("items")
                 .and_then(Value::as_array)
                 .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(session_info_from_list_item)
-                        .map(|mut info| {
-                            // The poll only knows running/not-running; the
-                            // downlinks know which phase of the turn it is in.
-                            if let Some(phase) = self.live_phase(&info.id) {
-                                info.status = phase;
-                            }
-                            // …and the poll's `updatedAt` is only a persistence
-                            // timestamp, so the socket's event clock is what
-                            // keeps a mid-turn session's "last activity" alive.
-                            let live_ms = self.live_activity_ms(&info.id);
-                            overlay_activity(&mut info, live_ms);
-                            info
-                        })
-                        .collect()
+                    // One cheap read for the whole roster: the recorded spend
+                    // of every session Fleet has ever priced. No RPC, and no
+                    // file read at all when nothing has been priced since the
+                    // last poll — see `dsh_cost::all_session_spend`.
+                    let spend = crate::dsh_cost::all_session_spend();
+                    let mut infos: Vec<SessionInfo> = Vec::with_capacity(items.len());
+                    // The roster's own `updatedAt`, kept before the socket clock
+                    // is overlaid on top of it. That is the clock the spend cache
+                    // is keyed on: it moves once per persisted turn, whereas the
+                    // overlaid activity clock ticks continuously through a turn
+                    // and would mark a running session stale on every poll.
+                    let mut roster_updated: Vec<i64> = Vec::with_capacity(items.len());
+                    for item in items {
+                        let Some(mut info) = session_info_from_list_item(item) else {
+                            continue;
+                        };
+                        roster_updated.push(info.last_activity_ms as i64);
+                        // The poll only knows running/not-running; the downlinks
+                        // know which phase of the turn it is in.
+                        if let Some(phase) = self.live_phase(&info.id) {
+                            info.status = phase;
+                        }
+                        // …and the poll's `updatedAt` is only a persistence
+                        // timestamp, so the socket's event clock is what keeps a
+                        // mid-turn session's "last activity" alive.
+                        let live_ms = self.live_activity_ms(&info.id);
+                        overlay_activity(&mut info, live_ms);
+                        if let Some(s) = spend.get(&info.id) {
+                            info.total_cost_usd = s.usd.unwrap_or(0.0);
+                        }
+                        infos.push(info);
+                    }
+                    refresh_one_stale_spend(&mut infos, &roster_updated, &spend);
+                    infos
                 })
                 .unwrap_or_default(),
             Err(e) => {
@@ -1095,9 +1158,63 @@ pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
 pub fn session_events(uri: &str) -> Result<Vec<Value>, String> {
     let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
     let source = DshSource::new();
-    history_with(id, None, |before, max| {
-        source.fetch_history(id, before, max)
-    })
+    raw_history_with(|before, max| source.fetch_history(id, before, max))
+}
+
+/// Walk `session/page` backwards and keep the **durable events themselves**.
+///
+/// Deliberately *not* [`history_with`]. That walk exists to serve transcripts,
+/// so it folds every page through [`crate::dsh_messages::normalize`] and returns
+/// Claude-Code-vocabulary messages — `{type: "user" | "assistant", message, …}`.
+/// The typed metadata dsh hangs off each record (`data.message.source`, the
+/// per-call `data.usage`, the event's own `seq` and `time`) does not survive that
+/// translation, and it is exactly what [`crate::dsh_cost`] reads.
+///
+/// This is not hypothetical. `session_events` used to POST a standalone
+/// `session.history`, which returned raw events; when 0.1.2 replaced that
+/// endpoint the call was rewired onto `history_with`, whose *shape* nothing
+/// checked. Measured against the live server on 2026-09-07: four real sessions
+/// answered 220 / 19 / 371 / 176 records, all of them `user` or `assistant` and
+/// none carrying a `source` — so `generation_refs` and `metered_calls` found
+/// zero model calls in **every** session on the machine, and every dsh session
+/// reported "no model calls in this session yet" instead of a price. Hence
+/// [`crate::dsh_source::tests::raw_history_keeps_the_durable_event_shape`],
+/// which pins the shape rather than trusting the walk to preserve it.
+///
+/// Order-preserving front to back, and deduplicated on `seq`: pages overlap at
+/// their boundary, and a repeated event would be a repeated charge.
+fn raw_history_with<F>(fetch: F) -> Result<Vec<Value>, String>
+where
+    F: Fn(Option<i64>, Option<usize>) -> Result<Value, String>,
+{
+    let mut all: Vec<Value> = Vec::new();
+    let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut before: Option<i64> = None;
+    loop {
+        let page = fetch(before, Some(BACKFILL_MESSAGES))?;
+        let events = history_events(&page);
+        if events.is_empty() {
+            break;
+        }
+        let oldest = min_seq(&events);
+        let fresh: Vec<Value> = events
+            .into_iter()
+            .filter(|e| seq_of(e).is_none_or(|seq| seen.insert(seq)))
+            .collect();
+        // Pages arrive newest-first, so each one goes in front of what we have.
+        all.splice(0..0, fresh);
+        if !has_more(&page) {
+            break;
+        }
+        // No page reached further back: nothing older exists, and asking again
+        // would spin on the same request forever.
+        let Some(oldest) = oldest else { break };
+        if before == Some(oldest) {
+            break;
+        }
+        before = Some(oldest);
+    }
+    Ok(all)
 }
 
 /// Pull the raw `SessionEvent`s out of a `session.history` answer.
@@ -1853,6 +1970,79 @@ pub fn dsh_models() -> Result<DshModelCatalog, String> {
     let value = DshSource::new()
         .with_client(|client| client.call("session/modelCatalog", json!({})).map_err(Into::into))?;
     Ok(parse_model_catalog(&value))
+}
+
+#[cfg(test)]
+mod spend_refresh_tests {
+    use super::*;
+    use crate::dsh_cost::SessionSpend;
+    use std::collections::BTreeMap;
+
+    fn info(id: &str) -> SessionInfo {
+        SessionInfo {
+            id: id.to_string(),
+            jsonl_path: format!("{DSH_URI_PREFIX}{id}"),
+            agent_source: "dsh".into(),
+            ..Default::default()
+        }
+    }
+
+    fn spend(at: i64) -> SessionSpend {
+        SessionSpend {
+            usd: Some(0.5),
+            priced_calls: 1,
+            unpriced_calls: 0,
+            priced_at_updated_ms: at,
+        }
+    }
+
+    /// A session nobody has ever priced is stale, and one priced at its current
+    /// `updatedAt` is not — that pair is the whole convergence rule.
+    #[test]
+    fn a_never_priced_session_is_stale_and_a_current_one_is_not() {
+        let infos = [info("a"), info("b")];
+        let updated = [100, 200];
+        let mut cache = BTreeMap::new();
+        cache.insert("b".to_string(), spend(200));
+        assert_eq!(pick_stale_spend(&infos, &updated, &cache), Some(0));
+
+        cache.insert("a".to_string(), spend(100));
+        assert_eq!(
+            pick_stale_spend(&infos, &updated, &cache),
+            None,
+            "nothing to do once every session is priced at its current updatedAt"
+        );
+    }
+
+    /// A session that ran again since it was priced comes back into the queue,
+    /// and the most recently persisted stale session goes first — so the session
+    /// a user is most likely looking at converges soonest.
+    #[test]
+    fn the_most_recently_persisted_stale_session_goes_first() {
+        let infos = [info("old"), info("new")];
+        let updated = [100, 300];
+        let cache = BTreeMap::from([
+            ("old".to_string(), spend(50)),
+            ("new".to_string(), spend(200)),
+        ]);
+        assert_eq!(pick_stale_spend(&infos, &updated, &cache), Some(1));
+    }
+
+    /// The staleness clock must be the roster's `updatedAt`, not the overlaid
+    /// activity clock. A running session's activity ticks every event, so keying
+    /// on it would re-walk that session's whole history on every 3-second poll —
+    /// which is precisely the cost the recorded total exists to avoid.
+    #[test]
+    fn a_mid_turn_activity_bump_does_not_make_a_priced_session_stale() {
+        let mut running = info("live");
+        // What `overlay_activity` does during a turn: the activity clock runs far
+        // ahead of the last persist.
+        running.last_activity_ms = 999_999;
+        let infos = [running];
+        let updated = [200];
+        let cache = BTreeMap::from([("live".to_string(), spend(200))]);
+        assert_eq!(pick_stale_spend(&infos, &updated, &cache), None);
+    }
 }
 
 #[cfg(test)]
@@ -2705,6 +2895,54 @@ mod tests {
         assert_eq!(events_before(2, &events).len(), 1);
         assert_eq!(min_seq(&events), Some(1));
         assert_eq!(max_seq(&events), Some(3));
+    }
+
+    /// The cost module's input must be the **durable events**, not the
+    /// transcript's normalized messages.
+    ///
+    /// This is the regression that made every dsh session report "no model calls
+    /// in this session yet": `session_events` was rewired onto the transcript
+    /// walk, which folds each page through `dsh_messages::normalize`, and the
+    /// typed `source` / `usage` / `seq` / `time` that pricing reads do not
+    /// survive that. Nothing checked the shape, so it failed silently for every
+    /// session on the machine.
+    #[test]
+    fn raw_history_keeps_the_durable_event_shape() {
+        let page = |before: Option<i64>, _max: Option<usize>| {
+            Ok(match before {
+                None => json!({
+                    "records": [
+                        { "event": { "type": "assistant/message", "seq": 20, "time": 5,
+                                     "data": { "usage": { "inputTokens": 7 },
+                                               "message": { "source": { "kind": "model",
+                                                                        "provider": "deepseek-official",
+                                                                        "model": "deepseek-v4-flash" } } } } },
+                    ],
+                    "hasMore": true
+                }),
+                Some(20) => json!({
+                    "records": [
+                        { "event": { "type": "user/message", "seq": 10, "time": 1 } },
+                        // Pages overlap at the boundary; the repeat must not be
+                        // kept, or the session is charged for it twice.
+                        { "event": { "type": "assistant/message", "seq": 20, "time": 5 } },
+                    ],
+                    "hasMore": false
+                }),
+                other => panic!("unexpected beforeSeq {other:?}"),
+            })
+        };
+        let events = raw_history_with(page).expect("walk");
+        assert_eq!(events.len(), 2, "the boundary repeat is dropped: {events:?}");
+        assert_eq!(events[0]["seq"], 10, "oldest first");
+        assert_eq!(events[1]["type"], "assistant/message");
+        assert_eq!(
+            events[1].pointer("/data/message/source/provider"),
+            Some(&json!("deepseek-official")),
+            "the typed source must survive — it is the whole reason this walk exists"
+        );
+        // …and the cost module must actually find the call in it.
+        assert_eq!(crate::dsh_cost::metered_calls(&events).len(), 1);
     }
 
     #[test]

@@ -295,17 +295,6 @@ fn rate_price(call: &MeteredCall) -> Option<MeteredPrice> {
     Some(MeteredPrice { usd, peak })
 }
 
-/// The accounting a metered session produces: the panel's four numbers, plus
-/// whatever prices were computed for the first time and are owed to the cache.
-#[derive(Debug, Default, PartialEq)]
-pub(crate) struct MeteredTally {
-    pub total: f64,
-    pub peak: u32,
-    pub off_peak: u32,
-    pub unknown: u32,
-    fresh: BTreeMap<String, MeteredPrice>,
-}
-
 /// The cache key for one call: its session and its position within it.
 ///
 /// DeepSeek issues no id of its own for these calls — that absence is why they
@@ -313,57 +302,6 @@ pub(crate) struct MeteredTally {
 /// durable log does guarantee.
 fn metered_key(session_id: &str, seq: i64) -> String {
     format!("{session_id}:{seq}")
-}
-
-/// Sum what a fixed-price route charged, tier chosen per call.
-///
-/// A call already in `cached` keeps the price it was first given; only calls
-/// absent from it are priced against today's table, and those come back in
-/// [`MeteredTally::fresh`] to be written down. This is what makes the figure an
-/// account of what a session cost rather than a running revaluation of it: the
-/// rates and the peak schedule both move, and without this the panel silently
-/// rewrote every past session each time they did.
-///
-/// Unknown models are deliberately *not* frozen. Nothing was priced, so there is
-/// nothing to hold still — when a later build learns the model, that is a first
-/// pricing, not a repricing.
-pub(crate) fn price_metered(
-    session_id: &str,
-    calls: &[MeteredCall],
-    cached: &BTreeMap<String, MeteredPrice>,
-) -> MeteredTally {
-    let mut tally = MeteredTally::default();
-    for call in calls {
-        // No session id and no seq are the same fact: this call has no stable
-        // address, so it is priced live and never written down. An empty id
-        // would pool unrelated sessions into one keyspace.
-        let key = (!session_id.is_empty())
-            .then(|| call.seq.map(|seq| metered_key(session_id, seq)))
-            .flatten();
-        // The frozen price wins outright: it is what this call was charged, and
-        // no amount of movement in today's table changes that. Only when this
-        // call has never been priced does the table get consulted at all.
-        let price = match key.as_ref().and_then(|k| cached.get(k)) {
-            Some(frozen) => *frozen,
-            None => {
-                let Some(price) = rate_price(call) else {
-                    tally.unknown += 1;
-                    continue;
-                };
-                if let Some(key) = key {
-                    tally.fresh.insert(key, price);
-                }
-                price
-            }
-        };
-        tally.total += price.usd;
-        if price.peak {
-            tally.peak += 1;
-        } else {
-            tally.off_peak += 1;
-        }
-    }
-    tally
 }
 
 /// Pull the calls that a published table can price out of a session's events.
@@ -375,6 +313,64 @@ pub(crate) fn price_metered(
 /// nothing to ask for. Its price list, unlike OpenRouter's open model space, is
 /// fixed and public, so tokens × rate is exact rather than a guess.
 pub fn metered_calls(events: &[Value]) -> Vec<MeteredCall> {
+    raw_calls(events)
+        .into_iter()
+        .filter(|c| c.provider == DEEPSEEK_OFFICIAL)
+        .map(|c| MeteredCall {
+            provider: c.provider,
+            model: c.model,
+            seq: c.seq,
+            at_ms: c.at_ms,
+            input_tokens: c.input_tokens,
+            cache_read_tokens: c.cache_read_tokens,
+            output_tokens: c.output_tokens,
+        })
+        .collect()
+}
+
+// ── The ledger ───────────────────────────────────────────────────────────────
+//
+// Everything above prices a *session*. That was the original shape and it is the
+// wrong one: a session is not a unit of time, a unit of model, or a unit of
+// billing. Its calls can straddle midnight, switch model mid-way, and be priced
+// by two different mechanisms — and every consumer downstream (the daily
+// receipt's per-day trend, the daily report, the session card) needs the call,
+// not the session.
+//
+// So the extraction below produces one row per model call, and the session
+// figure becomes a fold over those rows rather than a thing computed on its own.
+
+/// One model call exactly as its durable `assistant/message` records it, before
+/// anything has tried to put a price on it.
+///
+/// This is the single reading of the event stream. [`metered_calls`] and
+/// [`generation_refs`] are both projections of it, so the three cannot drift
+/// apart on which events count as a call.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RawCall {
+    pub seq: Option<i64>,
+    pub at_ms: i64,
+    pub provider: String,
+    pub model: String,
+    /// The provider's receipt id, when the adapter records one. `deepseek-official`
+    /// never does — that absence is why it is table-priced.
+    pub generation_id: Option<String>,
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    /// dsh's per-call meter carries no cache-write bucket on the DeepSeek route
+    /// (measured: `totalTokens == inputTokens + cacheReadTokens + outputTokens`
+    /// on all 44 calls of a real session), so this is 0 there. Read anyway, for
+    /// adapters that do report it.
+    pub cache_write_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// Read every successful model call out of a session's durable events.
+///
+/// Order-preserving, and — unlike [`generation_refs`] — **not** deduplicated:
+/// dedup is a pricing concern (paying twice for one generation), not a fact
+/// about what the session did, and the ledger's consumers count calls.
+pub(crate) fn raw_calls(events: &[Value]) -> Vec<RawCall> {
     let mut out = Vec::new();
     for event in events {
         if event.get("type").and_then(Value::as_str) != Some("assistant/message") {
@@ -386,13 +382,6 @@ pub fn metered_calls(events: &[Value]) -> Vec<MeteredCall> {
         if source.get("kind").and_then(Value::as_str) != Some("model") {
             continue;
         }
-        let provider = source
-            .get("provider")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if provider != DEEPSEEK_OFFICIAL {
-            continue;
-        }
         let usage = event.pointer("/data/usage");
         let tokens = |name: &str| -> u64 {
             usage
@@ -400,21 +389,136 @@ pub fn metered_calls(events: &[Value]) -> Vec<MeteredCall> {
                 .and_then(Value::as_u64)
                 .unwrap_or(0)
         };
-        out.push(MeteredCall {
-            provider: provider.to_string(),
+        // Two shapes, both live on one machine — see [`generation_refs`].
+        let generation_id = source
+            .pointer("/replayState/response/responseId")
+            .or_else(|| source.pointer("/replayState/responseId"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        out.push(RawCall {
+            seq: event.get("seq").and_then(Value::as_i64),
+            at_ms: event.get("time").and_then(Value::as_i64).unwrap_or(0),
+            provider: source
+                .get("provider")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
             model: source
                 .get("model")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
-            seq: event.get("seq").and_then(Value::as_i64),
-            at_ms: event.get("time").and_then(Value::as_i64).unwrap_or(0),
+            generation_id,
             input_tokens: tokens("inputTokens"),
             cache_read_tokens: tokens("cacheReadTokens"),
+            cache_write_tokens: tokens("cacheWriteTokens"),
             output_tokens: tokens("outputTokens"),
         });
     }
     out
+}
+
+/// How one call's price was established — the two disjoint paths this module
+/// has always had, now recorded per call instead of counted per session.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum PriceBasis {
+    /// The provider's own invoice for this generation (OpenRouter).
+    Receipt,
+    /// A published rate applied to counted tokens (`deepseek-official`).
+    Table,
+}
+
+/// One model call, with whatever price could be established for it.
+///
+/// `usd: None` is a first-class state and must survive all the way to the UI:
+/// "we could not price this" and "this was free" are different facts, and
+/// collapsing the first into `0.0` is exactly how a receipt starts lying.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct PricedCall {
+    /// When the call happened, ms since the epoch — what decides its day.
+    pub at_ms: i64,
+    pub provider: String,
+    /// The model *this* call used, not the session's latest route.
+    pub model: String,
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub output_tokens: u64,
+    pub usd: Option<f64>,
+    pub basis: Option<PriceBasis>,
+    /// DeepSeek's peak tier. Only meaningful for [`PriceBasis::Table`].
+    pub peak: Option<bool>,
+}
+
+impl PricedCall {
+    /// Was this call priced at all?
+    pub fn is_priced(&self) -> bool {
+        self.usd.is_some()
+    }
+}
+
+/// Fold a ledger back into the per-session figure the token panel shows.
+///
+/// The session total is now *derived* from the calls rather than computed
+/// alongside them, so the panel and the receipt can no longer disagree.
+pub fn fold_session_cost(calls: &[PricedCall]) -> DshSessionCost {
+    if calls.is_empty() {
+        return DshSessionCost {
+            note: "no model calls in this session yet".to_string(),
+            ..Default::default()
+        };
+    }
+    let mut total = 0.0f64;
+    let (mut priced, mut table_priced, mut peak_n, mut off_peak_n) = (0u32, 0u32, 0u32, 0u32);
+    let (mut unpriced, mut unpriceable) = (0u32, 0u32);
+    for call in calls {
+        match (call.usd, call.basis) {
+            (Some(usd), basis) => {
+                total += usd;
+                priced += 1;
+                if basis == Some(PriceBasis::Table) {
+                    table_priced += 1;
+                    match call.peak {
+                        Some(true) => peak_n += 1,
+                        _ => off_peak_n += 1,
+                    }
+                }
+            }
+            // An OpenRouter call the API would not price yet is *unpriced* — a
+            // later visit re-asks. A call through a route with no cost API at all
+            // is *unpriceable* and never will be.
+            (None, _) if call.provider == OPENROUTER => unpriced += 1,
+            (None, _) => unpriceable += 1,
+        }
+    }
+    let mut notes = Vec::new();
+    if unpriceable > 0 {
+        notes.push(format!(
+            "{unpriceable} call(s) went through a provider with no cost API and are not included"
+        ));
+    }
+    if unpriced > 0 {
+        notes.push(format!("{unpriced} call(s) could not be priced"));
+    }
+    if table_priced > 0 {
+        notes.push(format!(
+            "{table_priced} call(s) priced from DeepSeek's published rates \
+             ({peak_n} peak / {off_peak_n} off-peak)"
+        ));
+    }
+    DshSessionCost {
+        total_usd: (priced > 0).then_some(total),
+        priced_calls: priced,
+        table_priced_calls: table_priced,
+        unpriced_calls: unpriced,
+        unpriceable_calls: unpriceable,
+        note: notes.join("; "),
+    }
 }
 
 // ── Extraction ───────────────────────────────────────────────────────────────
@@ -426,50 +530,19 @@ pub fn metered_calls(events: &[Value]) -> Vec<MeteredCall> {
 /// repeat across a retried step, so duplicates collapse to the first sighting —
 /// paying twice for one generation would inflate the total.
 pub fn generation_refs(events: &[Value]) -> Vec<GenerationRef> {
+    // Two shapes of the id, both live on one machine — [`raw_calls`] reads both.
     let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    for event in events {
-        if event.get("type").and_then(Value::as_str) != Some("assistant/message") {
-            continue;
-        }
-        let Some(source) = event.pointer("/data/message/source") else {
-            continue;
-        };
-        if source.get("kind").and_then(Value::as_str) != Some("model") {
-            continue;
-        }
-        // Two shapes, both live on one machine. dsh wrapped the adapter's
-        // response record in a replay envelope — `{response, blocks?}`, typed in
-        // `@deepseek-ai/dsh-llm`'s `ReplayEnvelope` — so what used to sit
-        // directly on `replayState` now sits one level in. Sessions written
-        // before the change keep the flat shape and must keep pricing, so both
-        // are read; the envelope first, because that is what dsh writes now.
-        let Some(id) = source
-            .pointer("/replayState/response/responseId")
-            .or_else(|| source.pointer("/replayState/responseId"))
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-        else {
-            continue;
-        };
-        if !seen.insert(id.to_string()) {
-            continue;
-        }
-        out.push(GenerationRef {
-            id: id.to_string(),
-            provider: source
-                .get("provider")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            model: source
-                .get("model")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-        });
-    }
-    out
+    raw_calls(events)
+        .into_iter()
+        .filter_map(|c| {
+            let id = c.generation_id?;
+            seen.insert(id.clone()).then_some(GenerationRef {
+                id,
+                provider: c.provider,
+                model: c.model,
+            })
+        })
+        .collect()
 }
 
 // ── Credentials ──────────────────────────────────────────────────────────────
@@ -630,6 +703,35 @@ struct CostCache {
     /// collide. `serde(default)` so a cache written before this existed loads.
     #[serde(default)]
     metered: BTreeMap<String, MeteredPrice>,
+    /// session id → what that whole session has cost so far.
+    ///
+    /// A **derived** map: everything in it can be recomputed by re-walking the
+    /// session's history. It exists because the session roster is polled every
+    /// few seconds for every session, and a history walk per session per poll is
+    /// not a thing the session list can afford. Written whenever the ledger is
+    /// computed for any other reason; read by the roster with no RPC at all.
+    #[serde(default)]
+    sessions: BTreeMap<String, SessionSpend>,
+}
+
+/// What one dsh session has cost, cheap enough for the session roster to read.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSpend {
+    /// USD over every call that could be priced. `None` when none could be —
+    /// never `0.0`, which would read as "this session was free".
+    pub usd: Option<f64>,
+    pub priced_calls: u32,
+    pub unpriced_calls: u32,
+    /// The roster's `updatedAt` at the moment this was computed.
+    ///
+    /// This is the staleness marker, and it has to come from the roster rather
+    /// than from the ledger: the roster is the only clock the *scan* can read
+    /// without an RPC, so comparing like with like is what makes "has this
+    /// session moved since we priced it?" answerable for free. Comparing against
+    /// the last call's own timestamp would mark every session stale forever,
+    /// since a session is always persisted after its last call.
+    pub priced_at_updated_ms: i64,
 }
 
 fn load_cache() -> CostCache {
@@ -649,8 +751,12 @@ fn load_cache() -> CostCache {
 /// Receipts and metered prices are written together under one lock: a session
 /// that mixes routes produces both, and two separate locked writes would leave
 /// a window where only half of it had been recorded.
-fn store_cache(fresh: &BTreeMap<String, f64>, fresh_metered: &BTreeMap<String, MeteredPrice>) {
-    if fresh.is_empty() && fresh_metered.is_empty() {
+fn store_cache(
+    fresh: &BTreeMap<String, f64>,
+    fresh_metered: &BTreeMap<String, MeteredPrice>,
+    fresh_session: Option<(&str, SessionSpend)>,
+) {
+    if fresh.is_empty() && fresh_metered.is_empty() && fresh_session.is_none() {
         return;
     }
     let Some(path) = cache_path() else { return };
@@ -664,6 +770,12 @@ fn store_cache(fresh: &BTreeMap<String, f64>, fresh_metered: &BTreeMap<String, M
         cache
             .metered
             .extend(fresh_metered.iter().map(|(k, v)| (k.clone(), *v)));
+        if let Some((id, spend)) = fresh_session {
+            // Unlike the two maps above this is an overwrite, not a merge: a
+            // session's total is a fact about the whole session, and the newer
+            // reading supersedes the older one.
+            cache.sessions.insert(id.to_string(), spend);
+        }
         if let Ok(bytes) = serde_json::to_vec_pretty(&cache) {
             if let Err(e) = crate::atomic_json::write_atomic(&path, &bytes) {
                 crate::log_debug(&format!("dsh cost cache: write: {e}"));
@@ -711,187 +823,238 @@ fn fetch_generation_cost(key: &str, id: &str) -> Result<f64, String> {
 
 // ── Public entry point ───────────────────────────────────────────────────────
 
-/// Price a session's model calls, given the refs already extracted from its log.
+/// The priced ledger for a `dsh://` session URI — one row per model call.
 ///
-/// Split from [`dsh_session_cost`] so the accounting — which calls are priced,
-/// cached, skipped, or failed — is testable without any network. `price` stands
-/// in for the OpenRouter call.
-fn tally(
-    refs: &[GenerationRef],
-    cached: &BTreeMap<String, f64>,
-    mut price: impl FnMut(&str) -> Result<f64, String>,
-) -> (DshSessionCost, BTreeMap<String, f64>) {
-    let mut fresh = BTreeMap::new();
-    let mut total = 0.0f64;
-    let mut priced = 0u32;
-    let mut unpriced = 0u32;
-    let mut unpriceable = 0u32;
-    let mut first_error: Option<String> = None;
-
-    for r in refs {
-        if r.provider != OPENROUTER {
-            unpriceable += 1;
-            continue;
-        }
-        if let Some(cost) = cached.get(&r.id) {
-            total += cost;
-            priced += 1;
-            continue;
-        }
-        match price(&r.id) {
-            Ok(cost) => {
-                fresh.insert(r.id.clone(), cost);
-                total += cost;
-                priced += 1;
-            }
-            Err(e) => {
-                unpriced += 1;
-                first_error.get_or_insert(e);
-            }
-        }
-    }
-
-    let mut notes = Vec::new();
-    if unpriceable > 0 {
-        notes.push(format!(
-            "{unpriceable} call(s) went through a provider with no cost API and are not included"
-        ));
-    }
-    if unpriced > 0 {
-        let detail = first_error.unwrap_or_default();
-        notes.push(format!("{unpriced} call(s) could not be priced: {detail}"));
-    }
-
-    (
-        DshSessionCost {
-            total_usd: (priced > 0).then_some(total),
-            priced_calls: priced,
-            // Everything `tally` prices came from a receipt lookup by definition.
-            table_priced_calls: 0,
-            unpriced_calls: unpriced,
-            unpriceable_calls: unpriceable,
-            note: notes.join("; "),
-        },
-        fresh,
-    )
-}
-
-/// Real spend for a `dsh://` session URI.
+/// This is the module's real entry point now. Every consumer that used to ask
+/// for a session scalar (the token panel, the daily receipt, the daily report,
+/// the session card) is asking a question about calls, and answering them from
+/// one ledger is what keeps them agreeing.
 ///
-/// Unlike [`crate::dsh_source::dsh_token_breakdown`] this needs the full
-/// `session.history` — the generation ids live in the events, not in the
-/// `session/list` projections — and it may go to the network, so the panel
-/// fetches it separately from the (cheap, local) token counts rather than
-/// making the token view wait on it.
-pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
+/// Needs the full `session.history` — the generation ids and per-call timestamps
+/// live in the events, not in the `session/list` projections — and it may go to
+/// the network, so callers fetch it separately from the (cheap, local) token
+/// counts rather than making the token view wait on it.
+pub fn dsh_session_calls(uri: &str) -> Result<Vec<PricedCall>, String> {
     let events = crate::dsh_source::session_events(uri)?;
-    let refs = generation_refs(&events);
-    // Calls a published table can price. Disjoint from `refs` by construction —
-    // one is keyed on a receipt id the fixed-price routes never emit, the other
-    // on the provider name — so a session that mixes both is summed, not
-    // double-charged.
-    let metered = metered_calls(&events);
-    if refs.is_empty() && metered.is_empty() {
-        return Ok(DshSessionCost {
-            note: "no model calls in this session yet".to_string(),
-            ..Default::default()
-        });
-    }
-
     // The session's own id namespaces the metered keys, so two sessions cannot
     // collide on a `seq` they both happen to use. Absent (a URI shape this
     // module does not recognise) means nothing is cacheable — an empty id would
     // pool every such session into one keyspace.
     let session_id = crate::dsh_source::DshSource::session_id_of(uri).unwrap_or_default();
-    let cache = load_cache();
-    let table = price_metered(session_id, &metered, &cache.metered);
-    // Freeze before either branch below can return. The no-OpenRouter-key path
-    // exits early, and a user with no key is exactly the DeepSeek-only case this
-    // cache exists for — writing only on the way past it would leave the most
-    // common metered session revaluing itself forever.
-    store_cache(&BTreeMap::new(), &table.fresh);
-    let (table_total, peak_n, off_peak_n, unknown_model_n) =
-        (table.total, table.peak, table.off_peak, table.unknown);
-
-    let needs_openrouter = refs.iter().any(|r| r.provider == OPENROUTER);
-    let key = openrouter_api_key();
-    if needs_openrouter && key.is_none() {
-        return Ok(DshSessionCost {
-            unpriced_calls: refs.iter().filter(|r| r.provider == OPENROUTER).count() as u32,
-            unpriceable_calls: refs.iter().filter(|r| r.provider != OPENROUTER).count() as u32,
-            // The table-priced calls still count: a missing OpenRouter key says
-            // nothing about a route that needs no key at all.
-            total_usd: (peak_n + off_peak_n > 0).then_some(table_total),
-            priced_calls: peak_n + off_peak_n,
-            table_priced_calls: peak_n + off_peak_n,
-            // Names the exact line to write. A desktop-launched dsh inherits the
-            // app's environment, which has no shell profile in it, so the file is
-            // the option that actually works there — and it is keyed by the
-            // env-var name, not by "openrouter".
-            note: "no OpenRouter API key configured — add a line \
-                   `OPENROUTER_API_KEY: <key>` to ~/.dsh/.credentials.yaml \
-                   (or export that variable before launching)"
-                .to_string(),
-        });
-    }
-
-    let (cost, fresh) = tally(&refs, &cache.costs, |id| match key.as_deref() {
-        Some(key) => fetch_generation_cost(key, id),
-        None => Err("no OpenRouter API key configured".to_string()),
-    });
-    store_cache(&fresh, &BTreeMap::new());
-    Ok(merge_metered(cost, table_total, peak_n, off_peak_n, unknown_model_n))
+    Ok(price_ledger(session_id, &raw_calls(&events)))
 }
 
-/// Fold the table-priced calls into the receipt-priced result.
+/// Put a price on every call in `raw`, consulting the frozen-price cache first
+/// and writing back only what it priced for the first time.
 ///
-/// Kept separate from [`dsh_session_cost`] so the composition is unit-testable
-/// without a live dsh or a network round trip.
-fn merge_metered(
-    receipts: DshSessionCost,
-    table_total: f64,
-    peak_n: u32,
-    off_peak_n: u32,
-    unknown_model_n: u32,
-) -> DshSessionCost {
-    let table_priced = peak_n + off_peak_n;
-    if table_priced == 0 && unknown_model_n == 0 {
-        return receipts;
+/// Split from [`dsh_session_calls`] so the network and the dsh server are the
+/// only things a caller has to stand up; the accounting itself is exercised by
+/// [`price_ledger_with`].
+fn price_ledger(session_id: &str, raw: &[RawCall]) -> Vec<PricedCall> {
+    let cache = load_cache();
+    let key = openrouter_api_key();
+    let (calls, fresh_receipts, fresh_metered) =
+        price_ledger_with(session_id, raw, &cache, |id| match key.as_deref() {
+            Some(key) => fetch_generation_cost(key, id),
+            None => Err("no OpenRouter API key configured".to_string()),
+        });
+    // Both kinds of fresh entry go down under one lock: a session that mixes
+    // routes produces both, and two separate locked writes would leave a window
+    // where only half of it had been recorded.
+    store_cache(&fresh_receipts, &fresh_metered, None);
+    calls
+}
+
+/// Pure core of [`price_ledger`]: the pricing decision for each call, with the
+/// receipt lookup injected so the accounting is testable without a network.
+///
+/// Two rules carried over from the session-scalar era, both load-bearing:
+///
+/// * **A repeated generation id is one call, not two.** dsh re-emits the same
+///   `responseId` across a retried step; paying twice for one generation would
+///   inflate the total, so a duplicate is dropped from the ledger outright
+///   rather than priced at zero (which would misreport it as free).
+/// * **A price is recorded, not recomputed.** A call already in the cache keeps
+///   the figure it was first given, whatever today's table says — see the module
+///   docs on why the past must not be revalued.
+fn price_ledger_with(
+    session_id: &str,
+    raw: &[RawCall],
+    cache: &CostCache,
+    mut receipt: impl FnMut(&str) -> Result<f64, String>,
+) -> (
+    Vec<PricedCall>,
+    BTreeMap<String, f64>,
+    BTreeMap<String, MeteredPrice>,
+) {
+    let mut fresh_receipts = BTreeMap::new();
+    let mut fresh_metered = BTreeMap::new();
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(raw.len());
+
+    for call in raw {
+        if let Some(id) = &call.generation_id {
+            if !seen_ids.insert(id.clone()) {
+                continue;
+            }
+        }
+        let (usd, basis, peak) = if call.provider == DEEPSEEK_OFFICIAL {
+            // No session id and no seq are the same fact: this call has no
+            // stable address, so it is priced live and never written down.
+            let cache_key = (!session_id.is_empty())
+                .then(|| call.seq.map(|seq| metered_key(session_id, seq)))
+                .flatten();
+            let frozen = cache_key.as_ref().and_then(|k| cache.metered.get(k)).copied();
+            let price = frozen.or_else(|| {
+                let price = rate_price(&MeteredCall {
+                    provider: call.provider.clone(),
+                    model: call.model.clone(),
+                    seq: call.seq,
+                    at_ms: call.at_ms,
+                    input_tokens: call.input_tokens,
+                    cache_read_tokens: call.cache_read_tokens,
+                    output_tokens: call.output_tokens,
+                })?;
+                // Unknown models are deliberately not frozen: nothing was
+                // priced, so there is nothing to hold still.
+                if let Some(k) = cache_key {
+                    fresh_metered.insert(k, price);
+                }
+                Some(price)
+            });
+            match price {
+                Some(p) => (Some(p.usd), Some(PriceBasis::Table), Some(p.peak)),
+                None => (None, None, None),
+            }
+        } else if call.provider == OPENROUTER {
+            match call.generation_id.as_deref() {
+                Some(id) => match cache.costs.get(id) {
+                    Some(usd) => (Some(*usd), Some(PriceBasis::Receipt), None),
+                    None => match receipt(id) {
+                        Ok(usd) => {
+                            fresh_receipts.insert(id.to_string(), usd);
+                            (Some(usd), Some(PriceBasis::Receipt), None)
+                        }
+                        // A fresh generation 404s for some minutes before the
+                        // record exists; only successes are cached, so a later
+                        // visit re-asks and fills the gap in.
+                        Err(_) => (None, None, None),
+                    },
+                },
+                None => (None, None, None),
+            }
+        } else {
+            // A route with no cost API and no published list. Counted, never
+            // guessed at.
+            (None, None, None)
+        };
+
+        out.push(PricedCall {
+            at_ms: call.at_ms,
+            provider: call.provider.clone(),
+            model: call.model.clone(),
+            input_tokens: call.input_tokens,
+            cache_read_tokens: call.cache_read_tokens,
+            cache_write_tokens: call.cache_write_tokens,
+            output_tokens: call.output_tokens,
+            usd,
+            basis,
+            peak,
+        });
     }
-    let mut notes: Vec<String> = receipts
-        .note
-        .split("; ")
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect();
-    if table_priced > 0 {
-        // Says where the figure came from, because it is a different kind of
-        // number than the receipt total next to it: a published rate applied to
-        // counted tokens, not what an invoice reported.
-        notes.push(format!(
-            "{table_priced} call(s) priced from DeepSeek's published rates \
-             ({peak_n} peak / {off_peak_n} off-peak)"
-        ));
-    }
-    if unknown_model_n > 0 {
-        notes.push(format!(
-            "{unknown_model_n} call(s) on a model with no published rate in this \
-             build are not included"
-        ));
-    }
-    let total = match receipts.total_usd {
-        Some(receipt_total) => Some(receipt_total + table_total),
-        None if table_priced > 0 => Some(table_total),
-        None => None,
+    (out, fresh_receipts, fresh_metered)
+}
+
+// ── Per-session spend, for the roster ────────────────────────────────────────
+//
+// The session list polls every few seconds and asks nothing of the network. So
+// the card's cost figure cannot be computed on demand — it is *looked up*, from
+// a total the ledger wrote down the last time anything else had reason to price
+// the session. The trade is explicit: the number on a card is what the session
+// had cost as of the last pricing, and a session that just ran a turn shows its
+// previous figure until one refresh catches up.
+
+/// Process-local memo of the `sessions` map, reloaded only when the cache file
+/// changes on disk.
+///
+/// Without this the roster reads (and parses) the whole cost cache — receipts,
+/// frozen metered prices and all — every few seconds, to use a few dozen bytes
+/// of it. The mtime gate makes a poll free when nothing has been priced since
+/// the last one, which is the overwhelmingly common case.
+static SPEND_MEMO: std::sync::Mutex<Option<(std::time::SystemTime, BTreeMap<String, SessionSpend>)>> =
+    std::sync::Mutex::new(None);
+
+/// Every session's recorded spend. No RPC, no network, usually no file read.
+pub fn all_session_spend() -> BTreeMap<String, SessionSpend> {
+    let Some(path) = cache_path() else {
+        return BTreeMap::new();
     };
-    DshSessionCost {
-        total_usd: total,
-        priced_calls: receipts.priced_calls + table_priced,
-        table_priced_calls: receipts.table_priced_calls + table_priced,
-        unpriced_calls: receipts.unpriced_calls,
-        unpriceable_calls: receipts.unpriceable_calls + unknown_model_n,
-        note: notes.join("; "),
+    let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+    let mut memo = SPEND_MEMO
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let (Some(mtime), Some((seen, map))) = (mtime, memo.as_ref()) {
+        if *seen == mtime {
+            return map.clone();
+        }
     }
+    let map = load_cache().sessions;
+    if let Some(mtime) = mtime {
+        *memo = Some((mtime, map.clone()));
+    }
+    map
+}
+
+/// Re-price one session and write its total down.
+///
+/// This is the expensive half — a full history walk, and possibly receipt
+/// lookups — so callers are expected to invoke it for **one** session at a time
+/// and only when [`SessionSpend::priced_at_updated_ms`] says the session has
+/// moved since it was last priced.
+pub fn refresh_session_spend(uri: &str, updated_ms: i64) -> Result<SessionSpend, String> {
+    let calls = dsh_session_calls(uri)?;
+    let cost = fold_session_cost(&calls);
+    let spend = SessionSpend {
+        usd: cost.total_usd,
+        priced_calls: cost.priced_calls,
+        // Both kinds of gap are "money we know is missing from this figure";
+        // the card has one line to say so, and the panel has the detail.
+        unpriced_calls: cost.unpriced_calls + cost.unpriceable_calls,
+        priced_at_updated_ms: updated_ms,
+    };
+    if let Some(id) = crate::dsh_source::DshSource::session_id_of(uri) {
+        store_cache(&BTreeMap::new(), &BTreeMap::new(), Some((id, spend)));
+    }
+    Ok(spend)
+}
+
+/// Is `spend` still current for a session the roster reports at `updated_ms`?
+///
+/// Absent means never priced, which is stale by definition.
+pub fn spend_is_current(spend: Option<&SessionSpend>, updated_ms: i64) -> bool {
+    spend.is_some_and(|s| s.priced_at_updated_ms >= updated_ms)
+}
+
+/// Real spend for a `dsh://` session URI — the ledger, folded.
+pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
+    let calls = dsh_session_calls(uri)?;
+    let mut cost = fold_session_cost(&calls);
+    // Name the exact line to write when the only thing standing between the user
+    // and a number is an unconfigured key. A desktop-launched dsh inherits the
+    // app's environment, which has no shell profile in it, so the file is the
+    // option that actually works there — and it is keyed by the env-var name,
+    // not by "openrouter".
+    if cost.unpriced_calls > 0 && openrouter_api_key().is_none() {
+        let hint = "no OpenRouter API key configured — add a line \
+                    `OPENROUTER_API_KEY: <key>` to ~/.dsh/.credentials.yaml \
+                    (or export that variable before launching)";
+        cost.note = if cost.note.is_empty() {
+            hint.to_string()
+        } else {
+            format!("{}; {hint}", cost.note)
+        };
+    }
+    Ok(cost)
 }
 
 #[cfg(test)]
@@ -1076,11 +1239,51 @@ mod tests {
     /// namespaced the same way the real entry point namespaces them.
     const TEST_SESSION: &str = "session-test";
 
-    /// Price with a cold cache — what most of these tests want, since they are
-    /// checking the published-rate arithmetic rather than the freeze.
+    /// A [`MeteredCall`] as the ledger sees it, so the published-rate tests can
+    /// keep expressing themselves in the rate table's own vocabulary.
+    fn raw_of(c: &MeteredCall) -> RawCall {
+        RawCall {
+            seq: c.seq,
+            at_ms: c.at_ms,
+            provider: c.provider.clone(),
+            model: c.model.clone(),
+            // The absence of a receipt id is what makes these table-priced.
+            generation_id: None,
+            input_tokens: c.input_tokens,
+            cache_read_tokens: c.cache_read_tokens,
+            cache_write_tokens: 0,
+            output_tokens: c.output_tokens,
+        }
+    }
+
+    /// Price against `cache` with no network available: the table path never
+    /// needs one, and a test that quietly reached for it would not be measuring
+    /// what it claims to.
+    fn ledger(
+        session: &str,
+        cache: &CostCache,
+        calls: &[MeteredCall],
+    ) -> (Vec<PricedCall>, BTreeMap<String, MeteredPrice>) {
+        let raw: Vec<RawCall> = calls.iter().map(raw_of).collect();
+        let (out, _, fresh) = price_ledger_with(session, &raw, cache, |id| {
+            panic!("the table path must not reach for a receipt: {id}")
+        });
+        (out, fresh)
+    }
+
+    /// `(total, peak calls, off-peak calls, unpriced calls)` with a cold cache —
+    /// what most of these tests want, since they are checking the published-rate
+    /// arithmetic rather than the freeze.
     fn priced(calls: &[MeteredCall]) -> (f64, u32, u32, u32) {
-        let t = price_metered(TEST_SESSION, calls, &BTreeMap::new());
-        (t.total, t.peak, t.off_peak, t.unknown)
+        let (out, _) = ledger(TEST_SESSION, &CostCache::default(), calls);
+        let total: f64 = out.iter().filter_map(|c| c.usd).sum();
+        let count = |f: fn(&PricedCall) -> bool| out.iter().filter(|c| f(c)).count() as u32;
+        (
+            total,
+            count(|c| c.peak == Some(true)),
+            count(|c| c.peak == Some(false)),
+            count(|c| c.usd.is_none()),
+        )
     }
 
     /// 2026-08-18 19:47:32 UTC, a Tuesday — the probe call's real timestamp.
@@ -1295,28 +1498,29 @@ mod tests {
     /// this way (an invoice does not change); this is the table half catching up.
     #[test]
     fn a_priced_call_keeps_the_price_it_was_first_given() {
-        let cached = BTreeMap::from([(
+        let mut cache = CostCache::default();
+        cache.metered.insert(
             metered_key(TEST_SESSION, 20),
             MeteredPrice {
                 usd: 1.76,
                 peak: true,
             },
-        )]);
-        let t = price_metered(TEST_SESSION, &[weekend_call(Some(20))], &cached);
+        );
+        let (out, fresh) = ledger(TEST_SESSION, &cache, &[weekend_call(Some(20))]);
+        let usd = out[0].usd.expect("frozen price");
         assert!(
-            (t.total - 1.76).abs() < 1e-9,
+            (usd - 1.76).abs() < 1e-9,
             "the frozen price must survive a rule change: expected $1.76, got \
-             {} (today's table would say $0.88)",
-            t.total
+             {usd} (today's table would say $0.88)"
         );
         assert_eq!(
-            (t.peak, t.off_peak),
-            (1, 0),
+            out[0].peak,
+            Some(true),
             "the tier freezes with the money — recomputing it would let the \
              panel's peak/off-peak line contradict the total beside it"
         );
         assert!(
-            t.fresh.is_empty(),
+            fresh.is_empty(),
             "nothing was priced anew, so nothing is owed to the cache"
         );
     }
@@ -1325,10 +1529,13 @@ mod tests {
     /// never takes hold and every visit re-prices from scratch.
     #[test]
     fn a_first_pricing_is_handed_back_to_be_written_down() {
-        let t = price_metered(TEST_SESSION, &[weekend_call(Some(20))], &BTreeMap::new());
-        assert!((t.total - 0.88).abs() < 1e-9, "priced at today's table");
+        let (out, fresh) = ledger(TEST_SESSION, &CostCache::default(), &[weekend_call(Some(20))]);
+        assert!(
+            (out[0].usd.expect("priced") - 0.88).abs() < 1e-9,
+            "priced at today's table"
+        );
         assert_eq!(
-            t.fresh.get(&metered_key(TEST_SESSION, 20)),
+            fresh.get(&metered_key(TEST_SESSION, 20)),
             Some(&MeteredPrice {
                 usd: 0.88,
                 peak: false
@@ -1342,19 +1549,19 @@ mod tests {
     /// worse than none, since the next session's `seq` would collide with it.
     #[test]
     fn a_call_with_no_seq_is_priced_but_not_cached() {
-        let t = price_metered(TEST_SESSION, &[weekend_call(None)], &BTreeMap::new());
-        assert!((t.total - 0.88).abs() < 1e-9);
-        assert_eq!(t.off_peak, 1);
-        assert!(t.fresh.is_empty(), "unaddressable, so uncacheable");
+        let (out, fresh) = ledger(TEST_SESSION, &CostCache::default(), &[weekend_call(None)]);
+        assert!((out[0].usd.expect("priced") - 0.88).abs() < 1e-9);
+        assert_eq!(out[0].peak, Some(false));
+        assert!(fresh.is_empty(), "unaddressable, so uncacheable");
     }
 
     /// The same guard for the other half of the key: an unrecognised URI yields
     /// no session id, and an empty one would pool unrelated sessions together.
     #[test]
     fn an_empty_session_id_caches_nothing() {
-        let t = price_metered("", &[weekend_call(Some(20))], &BTreeMap::new());
-        assert!((t.total - 0.88).abs() < 1e-9);
-        assert!(t.fresh.is_empty(), "no session id, no keyspace");
+        let (out, fresh) = ledger("", &CostCache::default(), &[weekend_call(Some(20))]);
+        assert!((out[0].usd.expect("priced") - 0.88).abs() < 1e-9);
+        assert!(fresh.is_empty(), "no session id, no keyspace");
     }
 
     /// A weekend call must be charged the off-peak half, not just counted as
@@ -1378,27 +1585,43 @@ mod tests {
         assert_eq!((peak_n, off_n), (0, 1));
     }
 
+    /// A priced ledger row, for the fold's arithmetic.
+    fn row(provider: &str, usd: Option<f64>, basis: Option<PriceBasis>, peak: Option<bool>) -> PricedCall {
+        PricedCall {
+            at_ms: OFF_PEAK_MS,
+            provider: provider.into(),
+            model: "m".into(),
+            input_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            output_tokens: 0,
+            usd,
+            basis,
+            peak,
+        }
+    }
+
     /// A session that used both routes must have its two totals added, each
     /// counted once — the failure this guards is a double charge or a lost half.
     #[test]
-    fn merges_receipt_and_table_totals_without_double_counting() {
-        let receipts = DshSessionCost {
-            total_usd: Some(0.05),
-            priced_calls: 2,
-            table_priced_calls: 0,
-            unpriced_calls: 1,
-            unpriceable_calls: 0,
-            note: "1 call(s) could not be priced: 404".to_string(),
-        };
-        let merged = merge_metered(receipts, 0.25, 1, 2, 0);
-        assert_eq!(merged.total_usd, Some(0.30), "0.05 receipt + 0.25 table");
-        assert_eq!(merged.priced_calls, 5, "2 by receipt + 3 by table");
-        assert_eq!(merged.unpriced_calls, 1, "the receipt gap is untouched");
+    fn folding_sums_both_routes_without_double_counting() {
+        let cost = fold_session_cost(&[
+            row(OPENROUTER, Some(0.02), Some(PriceBasis::Receipt), None),
+            row(OPENROUTER, Some(0.03), Some(PriceBasis::Receipt), None),
+            row(OPENROUTER, None, None, None),
+            row(DEEPSEEK_OFFICIAL, Some(0.10), Some(PriceBasis::Table), Some(true)),
+            row(DEEPSEEK_OFFICIAL, Some(0.09), Some(PriceBasis::Table), Some(false)),
+            row(DEEPSEEK_OFFICIAL, Some(0.06), Some(PriceBasis::Table), Some(false)),
+        ]);
+        let total = cost.total_usd.expect("both routes priced something");
+        assert!((total - 0.30).abs() < 1e-9, "0.05 receipt + 0.25 table, got {total}");
+        assert_eq!(cost.priced_calls, 5, "2 by receipt + 3 by table");
+        assert_eq!(cost.table_priced_calls, 3);
+        assert_eq!(cost.unpriced_calls, 1, "the receipt gap is untouched");
         assert!(
-            merged.note.contains("could not be priced")
-                && merged.note.contains("1 peak / 2 off-peak"),
-            "both stories must survive the merge: {}",
-            merged.note
+            cost.note.contains("could not be priced") && cost.note.contains("1 peak / 2 off-peak"),
+            "both stories must survive the fold: {}",
+            cost.note
         );
     }
 
@@ -1407,25 +1630,40 @@ mod tests {
     /// dropped next to a `None`.
     #[test]
     fn a_table_only_session_gets_a_total() {
-        let merged = merge_metered(DshSessionCost::default(), 0.017, 0, 1, 0);
-        assert_eq!(merged.total_usd, Some(0.017));
-        assert_eq!(merged.priced_calls, 1);
-        assert!(merged.note.contains("published rates"), "{}", merged.note);
+        let cost = fold_session_cost(&[row(
+            DEEPSEEK_OFFICIAL,
+            Some(0.017),
+            Some(PriceBasis::Table),
+            Some(false),
+        )]);
+        assert_eq!(cost.total_usd, Some(0.017));
+        assert_eq!(cost.priced_calls, 1);
+        assert!(cost.note.contains("published rates"), "{}", cost.note);
     }
 
-    /// Nothing to fold in must leave the receipt result byte-identical, so the
-    /// OpenRouter-only path cannot be perturbed by this feature.
+    /// A receipt-only session must not acquire a table story it does not have.
     #[test]
-    fn merging_nothing_leaves_the_receipt_result_alone() {
-        let receipts = DshSessionCost {
-            total_usd: Some(0.05),
-            priced_calls: 2,
-            table_priced_calls: 0,
-            unpriced_calls: 0,
-            unpriceable_calls: 1,
-            note: "1 call(s) went through a provider with no cost API".to_string(),
-        };
-        assert_eq!(merge_metered(receipts.clone(), 0.0, 0, 0, 0), receipts);
+    fn a_receipt_only_session_says_nothing_about_the_table() {
+        let cost = fold_session_cost(&[
+            row(OPENROUTER, Some(0.05), Some(PriceBasis::Receipt), None),
+            row("some-other-route", None, None, None),
+        ]);
+        assert_eq!(cost.total_usd, Some(0.05));
+        assert_eq!(cost.table_priced_calls, 0);
+        assert_eq!(
+            cost.unpriceable_calls, 1,
+            "a route with no cost API is unpriceable, not merely unpriced"
+        );
+        assert!(!cost.note.contains("published rates"), "{}", cost.note);
+    }
+
+    /// Nothing priced means no total — never `$0.00`, which would read as "this
+    /// session was free" and is the whole failure this module exists to avoid.
+    #[test]
+    fn nothing_priced_yields_no_total_rather_than_zero() {
+        let cost = fold_session_cost(&[row(OPENROUTER, None, None, None)]);
+        assert_eq!(cost.total_usd, None);
+        assert_eq!(cost.unpriced_calls, 1);
     }
 
     #[test]
@@ -1456,15 +1694,20 @@ mod tests {
     }
 
     #[test]
-    fn tally_sums_priced_calls_and_reports_the_rest() {
-        let refs = generation_refs(&recorded_events());
-        let (cost, fresh) = tally(&refs, &BTreeMap::new(), |id| {
+    fn the_ledger_prices_the_receipt_call_and_counts_the_rest() {
+        let raw = raw_calls(&recorded_events());
+        let (out, fresh, _) = price_ledger_with(TEST_SESSION, &raw, &CostCache::default(), |id| {
             assert_eq!(id, "gen-1", "only the openrouter call is priced");
             Ok(0.25)
         });
+        assert_eq!(out.len(), 2, "the repeated gen-1 is one call, not two");
+        let cost = fold_session_cost(&out);
         assert_eq!(cost.total_usd, Some(0.25));
         assert_eq!(cost.priced_calls, 1);
-        assert_eq!(cost.unpriceable_calls, 1, "the deepseek call is counted, not guessed");
+        assert_eq!(
+            cost.unpriceable_calls, 1,
+            "the deepseek call is on no published table — counted, not guessed"
+        );
         assert_eq!(cost.unpriced_calls, 0);
         assert!(
             cost.note.contains("no cost API"),
@@ -1475,28 +1718,40 @@ mod tests {
     }
 
     #[test]
-    fn tally_reuses_the_cache_and_never_refetches() {
-        let refs = generation_refs(&recorded_events());
-        let cached = BTreeMap::from([("gen-1".to_string(), 0.5)]);
-        let (cost, fresh) = tally(&refs, &cached, |id| {
+    fn the_ledger_reuses_a_cached_receipt_and_never_refetches() {
+        let raw = raw_calls(&recorded_events());
+        let mut cache = CostCache::default();
+        cache.costs.insert("gen-1".to_string(), 0.5);
+        let (out, fresh, _) = price_ledger_with(TEST_SESSION, &raw, &cache, |id| {
             panic!("must not fetch a cached id: {id}");
         });
-        assert_eq!(cost.total_usd, Some(0.5));
+        assert_eq!(fold_session_cost(&out).total_usd, Some(0.5));
         assert!(fresh.is_empty(), "nothing new to write back");
     }
 
+    /// A `/generation` lookup that fails leaves the call **unpriced**, not free:
+    /// a fresh id 404s for some minutes, so only successes are cached and a later
+    /// visit fills the gap in.
     #[test]
-    fn tally_surfaces_a_failed_lookup_instead_of_dropping_it() {
-        let refs = vec![GenerationRef {
-            id: "gen-x".into(),
-            provider: "openrouter".into(),
+    fn a_failed_receipt_lookup_leaves_the_call_unpriced_not_zero() {
+        let raw = vec![RawCall {
+            seq: Some(1),
+            at_ms: OFF_PEAK_MS,
+            provider: OPENROUTER.into(),
             model: "m".into(),
+            generation_id: Some("gen-x".into()),
+            input_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            output_tokens: 0,
         }];
-        let (cost, fresh) = tally(&refs, &BTreeMap::new(), |_| Err("HTTP 404".into()));
-        assert_eq!(cost.total_usd, None, "nothing priced → no total, not $0");
+        let (out, fresh, _) =
+            price_ledger_with(TEST_SESSION, &raw, &CostCache::default(), |_| Err("HTTP 404".into()));
+        assert_eq!(out[0].usd, None, "nothing priced → no number, not $0");
+        let cost = fold_session_cost(&out);
+        assert_eq!(cost.total_usd, None);
         assert_eq!(cost.unpriced_calls, 1);
-        assert!(cost.note.contains("HTTP 404"), "note: {}", cost.note);
-        assert!(fresh.is_empty());
+        assert!(fresh.is_empty(), "only successful lookups are cached");
     }
 
     // --- key resolution, against a temp DSH_HOME ---

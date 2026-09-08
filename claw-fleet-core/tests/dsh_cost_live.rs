@@ -158,3 +158,108 @@ fn live_session_cost_comes_back_from_the_provider() {
     );
     assert_eq!(again.priced_calls, cost.priced_calls);
 }
+
+/// Real-data proof of the attribution fix: a session that ran on more than one
+/// local day must have its spend split across those days.
+///
+/// This is the failure 老板 reported, and it is not reachable from a fixture:
+/// the bug was that a session's whole cumulative figure was booked to its
+/// last-activity day, which only shows up on a real install that has actually
+/// been used across midnight. Measured on this host at the time of writing: 256
+/// sessions with model calls, 4 of them spanning 2026-09-06 → 2026-09-07.
+///
+/// Needs no OpenRouter key — the `deepseek-official` route is table-priced, and
+/// it is the route that produces multi-day sessions here. **Skips** when the
+/// install has no multi-day session, so a fresh checkout stays runnable.
+#[test]
+#[ignore = "reads the real ~/.dsh install; run manually with --ignored"]
+fn a_real_multi_day_session_is_split_across_its_days() {
+    let _homes = Homes::new();
+    let _guard = ServerGuard;
+    let source = DshSource::new();
+    let sessions = source.scan_sessions();
+    assert!(!sessions.is_empty(), "the real dsh home has no sessions");
+
+    // Newest first: a multi-day session is by definition one that ran recently
+    // enough to still be around, and the walk below is expensive enough that the
+    // order decides whether the deadline is reached before a candidate is.
+    let mut sessions = sessions;
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.last_activity_ms));
+
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let mut scanned = 0usize;
+    let mut walked = 0usize;
+    let mut errors = 0usize;
+    for s in sessions.iter() {
+        if Instant::now() > deadline {
+            eprintln!("deadline reached after {walked} session(s)");
+            break;
+        }
+        walked += 1;
+        let calls = match claw_fleet_core::dsh_cost::dsh_session_calls(&s.jsonl_path) {
+            Ok(c) => c,
+            Err(e) => {
+                errors += 1;
+                if errors <= 3 {
+                    eprintln!("{}: {e}", s.jsonl_path);
+                }
+                continue;
+            }
+        };
+        if calls.len() < 2 {
+            continue;
+        }
+        scanned += 1;
+        // The day boundary is the *local* one, the same one the receipt draws.
+        let days: std::collections::BTreeSet<String> = calls
+            .iter()
+            .map(|c| {
+                chrono::DateTime::from_timestamp_millis(c.at_ms)
+                    .map(|dt| {
+                        dt.with_timezone(&chrono::Local)
+                            .format("%Y-%m-%d")
+                            .to_string()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
+        if days.len() < 2 {
+            continue;
+        }
+
+        println!("{} spans {days:?} over {} call(s)", s.jsonl_path, calls.len());
+        let priced: f64 = calls.iter().filter_map(|c| c.usd).sum();
+        assert!(
+            priced > 0.0,
+            "this install's multi-day sessions are on the table-priced route, so \
+             they must price without any key: {:?}",
+            calls.iter().map(|c| (&c.model, c.usd)).take(3).collect::<Vec<_>>()
+        );
+
+        // Each day must carry its own money, and the days must sum to the whole —
+        // the old behaviour put all of it on one day and none on the others.
+        let mut per_day: std::collections::BTreeMap<String, f64> = Default::default();
+        for c in &calls {
+            let day = chrono::DateTime::from_timestamp_millis(c.at_ms)
+                .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
+            *per_day.entry(day).or_default() += c.usd.unwrap_or(0.0);
+        }
+        println!("per-day: {per_day:?}");
+        assert_eq!(per_day.len(), days.len(), "every day the session ran gets a bucket");
+        assert!(
+            per_day.values().filter(|v| **v > 0.0).count() >= 2,
+            "at least two days must carry real money, else the split is cosmetic: {per_day:?}"
+        );
+        let summed: f64 = per_day.values().sum();
+        assert!(
+            (summed - priced).abs() < 1e-9,
+            "splitting must conserve the total: {summed} vs {priced}"
+        );
+        return;
+    }
+    eprintln!(
+        "SKIP: walked {walked} session(s), {errors} unreadable, {scanned} with 2+ calls, \
+         none spanning two local days"
+    );
+}

@@ -23,7 +23,7 @@ import type {
 import { useAgentNav } from "./AgentNavContext";
 import { DecisionQa, Md } from "./DecisionQa";
 import { tokenRequestFor, toolForAgentSource } from "../agentSource";
-import type { DshTokenBreakdown } from "../generated/types";
+import type { DshSessionCost, DshTokenBreakdown } from "../generated/types";
 import styles from "./SessionDetailTabs.module.css";
 
 /** One-shot fetch helper: "loading" → data | "error". */
@@ -342,8 +342,15 @@ function fmtTokens(n?: number): string {
 }
 
 /** dsh 会话的用量面板。字段和 Claude 那套不通用:dsh 按「未命中缓存的输入」
- *  记账,还额外报了上下文窗口占用。刻意不显示成本 —— Fleet 的价格表只认 Claude
- *  和 GPT 档位,给 dsh 的模型算钱会静默按 Opus 兜底,错的数字比没有更糟。 */
+ *  记账,还额外报了上下文窗口占用。
+ *
+ *  成本单独一次 RPC:token 数是本地即时的,花费可能要走一遍 session history、
+ *  再问一次 provider,让前者等后者会把整个面板拖慢。
+ *
+ *  这里的数字**不是** Fleet 的 $/M 参考价乘 token —— dsh 走的是开放模型空间,
+ *  同一个模型经不同 provider 价格不同,拿参考价一乘会得出一个自信的错数。它是
+ *  provider 的发票(OpenRouter)或官方标价(deepseek-official)算出来的,而且
+ *  算不出价的调用只报个数、绝不折成 $0。 */
 function DshTokenTab({
   session,
   client,
@@ -353,9 +360,15 @@ function DshTokenTab({
 }) {
   const req = tokenRequestFor(session);
   const data = useRelayData<DshTokenBreakdown>(client, req.method, req.params);
+  const cost = useRelayData<DshSessionCost>(client, "dsh_session_cost", {
+    uri: session.jsonlPath,
+  });
 
   if (data === "loading") return <Hint>{t("分析 token 用量…")}</Hint>;
   if (data === "error") return <Hint>{t("分析失败（桌面端可能离线）")}</Hint>;
+
+  const unpriced =
+    typeof cost === "object" ? cost.unpricedCalls + cost.unpriceableCalls : 0;
 
   const rows: Array<[string, string]> = [
     [t("输入 tokens"), fmtTokens(data.uncachedInputTokens)],
@@ -373,6 +386,19 @@ function DshTokenTab({
           </div>
         ))}
       </div>
+      {typeof cost === "object" && (
+        <div className={styles.costLine}>
+          {t("花费")}{" "}
+          <strong>
+            {cost.totalUsd != null ? `$${cost.totalUsd.toFixed(4)}` : t("暂不可用")}
+          </strong>
+          {unpriced > 0 && (
+            <span className={styles.dimNote}>
+              {t("（另有 {0} 次调用未能定价，token 已计入、金额未计入）", unpriced)}
+            </span>
+          )}
+        </div>
+      )}
       {data.contextPercent != null && (
         <div className={styles.costLine}>
           {t("上下文占用")} <strong>{data.contextPercent.toFixed(1)}%</strong>

@@ -128,6 +128,34 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     totalCostUsd: 0,
   },
   {
+    // dsh session. Its `jsonlPath` is a `dsh://` URI, not a file — dsh keeps no
+    // transcript on disk, so every panel that reads one has to go through RPC
+    // instead. That difference is the whole reason this fixture exists: without
+    // a dsh session in the roster the dsh Token tab (and its 花费 line) had no
+    // way to be seen outside a live relay.
+    id: "session-dsh-ledger",
+    workspacePath: "/Users/demo/workspace/claude-fleet",
+    workspaceName: "claude-fleet",
+    aiTitle: "把 dsh 计价改成逐次调用账本",
+    slug: null,
+    status: "waitingInput",
+    isSubagent: false,
+    lastMessagePreview: "跨天会话的花费现在分到两天了。",
+    lastActivityMs: NOW - 14 * MIN,
+    createdAtMs: NOW - 3 * 60 * MIN,
+    jsonlPath: "dsh://session-dsh-ledger",
+    model: "deepseek-v4-flash-vision-exp",
+    agentSource: "dsh",
+    entrypoint: "claw-fleet-newsession",
+    pid: 4407,
+    pidPrecise: true,
+    procAlive: false,
+    contextPercent: 0.27,
+    // Provider-priced, not tokens × Fleet's reference table — the same figure
+    // the session card now reads off the recorded per-session spend.
+    totalCostUsd: 0.7195,
+  },
+  {
     id: "sess-billing-3",
     workspacePath: "/Users/demo/workspace/billing-service",
     workspaceName: "billing-service",
@@ -480,6 +508,42 @@ export const MOCK_TODAY_USAGE: TodayUsage = {
 };
 
 /** Transcript for the chat session — what `tail` serves for its detail view. */
+/** dsh's own token vocabulary, as `dsh_token_breakdown` answers it.
+ *
+ *  Not interchangeable with Claude's: dsh meters "input that missed the cache"
+ *  separately from cache reads, and additionally reports how full the context
+ *  window is right now. The two must never be added together — the first four
+ *  fields are cumulative over the session, the context ones are a snapshot. */
+export const MOCK_DSH_TOKEN_BREAKDOWN = {
+  uncachedInputTokens: 67_007,
+  cacheReadTokens: 2_241_920,
+  cacheWriteTokens: 0,
+  outputTokens: 37_443,
+  totalTokens: 67_007 + 2_241_920 + 37_443,
+  systemTokens: 4_820,
+  toolsTokens: 11_460,
+  messageTokens: 52_300,
+  projectedTokens: 68_580,
+  contextWindow: 256_000,
+  contextPercent: 0.27,
+};
+
+/** What that session cost, shaped like `dsh_session_cost`.
+ *
+ *  Deliberately a *partial* result: 165 calls priced from DeepSeek's published
+ *  rates plus 3 that could not be priced at all. That is the interesting state
+ *  to look at, because it is the one where a naive panel would show a confident
+ *  total and hide the gap — `totalUsd` covers the priced calls only, and the
+ *  unpriced ones are reported as a count rather than folded in as $0. */
+export const MOCK_DSH_SESSION_COST = {
+  totalUsd: 0.7195,
+  pricedCalls: 165,
+  tablePricedCalls: 165,
+  unpricedCalls: 0,
+  unpriceableCalls: 3,
+  note: "3 call(s) went through a provider with no cost API and are not included; 165 call(s) priced from DeepSeek's published rates (0 peak / 165 off-peak)",
+};
+
 export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
   // Work-run fixtures: a finished band (thinking + tools ×2 records) between
   // prose, then a live tail run — the session is `waitingInput`... the tail run
