@@ -71,6 +71,16 @@ async function boot() {
     }
   }
 
+  // Time every invoke from here on. After the transport/mock branch above,
+  // because both of those install `__TAURI_INTERNALS__` wholesale and would
+  // drop the wrapper; before `initStorage()`, which is itself an invoke.
+  // Desktop only: the log it writes to is a host file, and the round trip it
+  // watches for is the desktop event loop's.
+  if (isTauriBuild) {
+    const { installInvokeProbe } = await import("./invokeProbe");
+    installInvokeProbe();
+  }
+
   const { initStorage, migrateSessionViewDefault, migrateFeatureTristate } =
     await import("./storage");
 
