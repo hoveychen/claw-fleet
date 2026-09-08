@@ -29,6 +29,8 @@ import {
   MOCK_PERMISSION_PROMPT,
   MOCK_REPO_DETAIL,
   MOCK_REPOS,
+  MOCK_DSH_SESSION_COST,
+  MOCK_DSH_TOKEN_BREAKDOWN,
   MOCK_SESSIONS,
   MOCK_PLAN_FOREST,
   MOCK_TERMINAL_SCREEN,
@@ -143,6 +145,18 @@ export class MockRelayClient extends RelayClient {
         return MOCK_DECISION_HISTORY;
       case "today_usage":
         return MOCK_TODAY_USAGE;
+      // dsh has no transcript file, so both of these are RPC-only — which is
+      // exactly why they needed mocking: without them the dsh Token tab was
+      // blank everywhere except against a live relay.
+      case "dsh_token_breakdown":
+        return MOCK_DSH_TOKEN_BREAKDOWN;
+      // Slower than the token counts on purpose: the real one may walk the
+      // session's history and ask a provider, and the panel is built to render
+      // the counts without waiting for the money.
+      case "dsh_session_cost":
+        return new Promise((resolve) =>
+          setTimeout(() => resolve(MOCK_DSH_SESSION_COST), 900),
+        );
       case "tail":
         return MOCK_MESSAGES[String(params?.path ?? "")] ?? [];
       case "tail_delta":
