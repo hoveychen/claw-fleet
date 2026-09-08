@@ -399,6 +399,60 @@ mod tests {
     }
 
     #[test]
+    fn a_loopback_binding_yields_a_loopback_url_and_says_it_is_local_only() {
+        // Measured: a server bound to 127.0.0.1 refuses a connection to the
+        // machine's own LAN address. Building the URL from the LAN IP anyway
+        // would hand the user a link that is dead everywhere, including here.
+        let u = build_share_url("tok", 4571, Some("127.0.0.1"), Some("192.168.1.9".into()));
+        assert_eq!(u.url, "http://127.0.0.1:4571/shared?t=tok");
+        assert!(!u.reachable_off_machine);
+
+        for host in ["localhost", "::1", "[::1]"] {
+            assert!(!build_share_url("t", 1, Some(host), Some("192.168.1.9".into()))
+                .reachable_off_machine);
+        }
+    }
+
+    #[test]
+    fn a_wildcard_binding_yields_the_lan_address() {
+        for host in ["0.0.0.0", "::", "[::]"] {
+            let u = build_share_url("tok", 4571, Some(host), Some("192.168.1.9".into()));
+            assert_eq!(u.url, "http://192.168.1.9:4571/shared?t=tok", "for bind {host}");
+            assert!(u.reachable_off_machine);
+        }
+    }
+
+    #[test]
+    fn a_wildcard_binding_with_no_lan_address_is_still_only_local() {
+        // Bound to every interface on a machine that has no non-loopback
+        // address (offline). There is no address to send anyone.
+        let u = build_share_url("tok", 4571, Some("0.0.0.0"), None);
+        assert_eq!(u.url, "http://127.0.0.1:4571/shared?t=tok");
+        assert!(!u.reachable_off_machine);
+    }
+
+    #[test]
+    fn an_explicitly_named_host_is_taken_at_its_word() {
+        // `--host 192.168.1.9` binds exactly that interface, so it is already
+        // the address to hand out — no LAN lookup involved.
+        let u = build_share_url("tok", 4571, Some("192.168.1.9"), Some("10.0.0.2".into()));
+        assert_eq!(u.url, "http://192.168.1.9:4571/shared?t=tok");
+        assert!(u.reachable_off_machine);
+    }
+
+    #[test]
+    fn an_unrecorded_host_is_assumed_local() {
+        // A server started before the host file existed. Claiming reach we
+        // cannot verify is the failure that produces a dead link, so the
+        // conservative answer is the honest one.
+        for bound in [None, Some("")] {
+            let u = build_share_url("tok", 4571, bound, Some("192.168.1.9".into()));
+            assert_eq!(u.url, "http://127.0.0.1:4571/shared?t=tok");
+            assert!(!u.reachable_off_machine);
+        }
+    }
+
+    #[test]
     fn a_new_link_pins_the_current_version_and_the_filename() {
         let (root, ws, id) = store_with_artifact();
         let link =

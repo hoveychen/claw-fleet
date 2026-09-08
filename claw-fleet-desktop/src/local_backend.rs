@@ -2561,8 +2561,12 @@ impl LocalBackend {
         crate::artifact_share::revoke(token)
     }
 
-    /// The URL to hand someone, or why there isn't one (no local server up).
-    pub fn artifact_share_url(&self, token: &str) -> Result<String, String> {
+    /// The URL to hand someone, plus whether it opens anywhere but here — or
+    /// why there isn't one (no local server up).
+    pub fn artifact_share_url(
+        &self,
+        token: &str,
+    ) -> Result<crate::artifact_share::ShareUrl, String> {
         crate::artifact_share::share_url(token)
     }
 
