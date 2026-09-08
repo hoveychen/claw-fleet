@@ -16,6 +16,17 @@
 //
 // Content comes from `fleet dsh-context`, not from logic here, so the injected
 // text has one renderer shared with the Claude hook and the codex path.
+//
+// When a section may enter is decided here, and the plan section is
+// turn-scoped: it re-enters only on a step that starts with a user prompt (see
+// `startsTurn`). The Claude hook that renders the same text fires on
+// UserPromptSubmit and nothing else, so a Claude session sees its TASKS.md once
+// per prompt. Re-checking it on every step instead made every checkbox anyone
+// ticked in the workspace — twenty active plans, several sessions — append a
+// fresh 4.5-6.6 KB copy mid-turn: measured 21 copies (~95 KB) inside one turn
+// of one session. Appends never break the provider's prefix cache (verified on
+// 57 such steps), so the cost was context, not cache; the fix is still to stop
+// paying it.
 
 import { execFile } from 'node:child_process'
 
@@ -27,6 +38,34 @@ export const inject = ['agents']
 
 /** Default ceiling for one `fleet dsh-context` call, in milliseconds. */
 const DEFAULT_TIMEOUT_MS = 5000
+
+/**
+ * Sections whose changes wait for the next user prompt instead of entering on
+ * the step they are noticed. Everything else (the static guidance, the session
+ * id) still enters as soon as it differs — those only change when Fleet itself
+ * is updated, so there is nothing to throttle.
+ */
+export const TURN_SCOPED_SECTIONS = new Set(['fleet-prd'])
+
+/**
+ * Whether this step opens a turn, i.e. carries a user prompt into the model.
+ *
+ * dsh numbers steps from 1 within each turn, so `step === 1` is the turn's
+ * first request. The batch is checked as well: a message the user typed while
+ * the agent was running is spliced into a later step's inbox with
+ * `source.kind === 'user'`, and that intervention deserves a fresh plan
+ * reading just as a new prompt does. Either signal alone suffices, which also
+ * keeps this correct on a dsh build that stops passing `step`.
+ *
+ * @param {{step?: unknown, messages?: unknown}} position - the pre-step payload
+ * @returns {boolean}
+ */
+export function startsTurn(position) {
+  if (position?.step === 1) return true
+  const messages = position?.messages
+  if (!Array.isArray(messages)) return false
+  return messages.some((m) => m?.source?.kind === 'user')
+}
 
 /**
  * Deep-freeze in place, matching how dsh publishes its own messages.
@@ -238,7 +277,7 @@ export function apply(ctx, config) {
 
   ctx.on(
     'agent/pre-step',
-    async ({ agent, signal }, next) => {
+    async ({ agent, signal, step, messages }, next) => {
       const decision = await next()
       if (decision.kind === 'reject' || signal.aborted) return decision
 
@@ -258,7 +297,16 @@ export function apply(ctx, config) {
       // context window on the same few kilobytes. dsh keeps the message in
       // derived history until compaction shadows it, so an identical latest
       // reading is still in front of the model and this step needs nothing.
-      const fresh = sections.filter((s) => latestInjectedText(agent, s.name) !== s.text)
+      //
+      // A changed turn-scoped section waits for the next prompt: the step that
+      // notices it mid-turn returns without it, and the next `startsTurn` step
+      // re-reads the CLI and finds it still differs from the log.
+      const turnStart = startsTurn({ step, messages })
+      const fresh = sections.filter(
+        (s) =>
+          latestInjectedText(agent, s.name) !== s.text &&
+          (turnStart || !TURN_SCOPED_SECTIONS.has(s.name)),
+      )
       if (fresh.length === 0) return decision
 
       return {

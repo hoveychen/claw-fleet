@@ -9,8 +9,9 @@
 //! Contract with `dsh-plugin/index.js`: stdout is one JSON object
 //! `{"sections":[{"name":"<id>","text":"<body>"}]}`. The plugin de-dups per
 //! section name against the session log, so a static guidance section enters a
-//! session once while the dynamic plan section re-enters whenever it changes. An
-//! empty array means "nothing to inject this step".
+//! session once while the dynamic plan section re-enters when it has changed —
+//! and, like the Claude hook, only on a step that opens a turn with a user
+//! prompt, never mid-turn. An empty array means "nothing to inject this step".
 //!
 //! Two kinds of section come out of here:
 //!
