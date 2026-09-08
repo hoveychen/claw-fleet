@@ -14,7 +14,11 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 REPO = 'hoveychen/claw-fleet'
 REQUIRED = {'claw-fleet-macos.pkg', 'claw-fleet-windows-x64-setup.exe', 'fleet-linux-x64', 'fleet-linux-arm64'}
-ALLOWED = REQUIRED | {'fleet-macos', 'fleet-windows-x64.exe', 'claw-fleet-webui.tar.gz'}
+# The Android APK is ALLOWED but deliberately not REQUIRED: releases cut before
+# the APK job existed carry no such asset, and putting it in REQUIRED would make
+# `--tag latest` refuse to refresh the China website until the next release.
+# The site degrades per link (docs/site.js), so a mirror without it is fine.
+ALLOWED = REQUIRED | {'fleet-macos', 'fleet-windows-x64.exe', 'claw-fleet-webui.tar.gz', 'claw-fleet-android.apk'}
 
 
 def validate_base_url(value):
