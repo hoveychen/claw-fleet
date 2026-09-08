@@ -97,6 +97,9 @@
   min-height: 0;
   display: flex;
   overflow: auto;
+  /* So `.row_time` can drop out by the *pane's* width rather than the window's
+     — the detail pane is one column of a three-pane page. */
+  container-type: inline-size;
 }
 
 /* A member preview is rendered by the page's own dispatch, which produces a
@@ -150,8 +153,26 @@
   white-space: nowrap;
 }
 
+/* Between the name and the size. Hidden on a narrow detail pane — the name is
+   what a person scans by, and truncating it to keep a timestamp is the wrong
+   trade. */
+.row_time {
+  flex: none;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+@container (max-width: 460px) {
+  .row_time {
+    display: none;
+  }
+}
+
 .row_meta {
   flex: none;
+  min-width: 56px;
+  text-align: right;
   font-size: var(--font-size-2xs);
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;

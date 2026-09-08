@@ -129,6 +129,24 @@ describe("ZipBrowser", () => {
     expect(fetched).toBeLessThan(zip.length / 100);
   });
 
+  it("shows each member's own timestamp, not the archive's", async () => {
+    // The fixture stamps 2025-01-01 12:00 (DOS date 0x5a21 / time 0x6000).
+    // Locale formatting varies by machine, so assert the parts rather than a
+    // rendered string — what must not happen is a blank column or an epoch.
+    const zip = ARCHIVE();
+    serve(zip);
+    await mount(<ZipBrowser url="fleet-artifact://x" size={zip.length} renderPreview={renderPreview} />);
+
+    const row = [...container.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes("readme.md"),
+    );
+    const stamped = new Date(2025, 0, 1, 12, 0, 0).toLocaleString(undefined, {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+    expect(row?.textContent).toContain(stamped);
+  });
+
   it("walks into a folder and back out through the breadcrumb", async () => {
     const zip = ARCHIVE();
     serve(zip);

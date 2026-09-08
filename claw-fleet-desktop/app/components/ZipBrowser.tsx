@@ -92,6 +92,16 @@ interface Failure {
   detail: string;
 }
 
+/** A member's timestamp, compact enough to sit in a row.
+ *
+ *  Zip stores DOS date/time in *local* time with no zone and 2-second
+ *  resolution, so anything more precise than minutes would be inventing
+ *  accuracy. Absent for archives whose writer emitted no timestamp. */
+function rowTime(ms: number | null): string {
+  if (ms === null) return "";
+  return new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
 function failure(e: unknown): Failure {
   if (e instanceof ZipError) return { code: e.code, detail: e.message };
   return { code: "other", detail: e instanceof Error ? e.message : String(e) };
@@ -340,6 +350,7 @@ export function ZipBrowser({
                       <Icon size={15} className={styles.row_icon} />
                     )}
                     <span className={styles.row_name}>{f.name}</span>
+                    <span className={styles.row_time}>{rowTime(f.modifiedMs)}</span>
                     <span className={styles.row_meta}>{formatBytes(f.size)}</span>
                   </button>
                 </li>
