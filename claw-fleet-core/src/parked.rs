@@ -730,6 +730,64 @@ fn value_text(v: &Value) -> String {
 }
 
 #[cfg(test)]
+mod fold_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn set(ids: &[&str]) -> HashSet<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The union is the whole point: without it the caller's dismissal step
+    /// (`known - pending`) reads a parked card as resolved and drops it.
+    #[test]
+    fn parked_ids_stay_pending_so_the_card_is_not_dismissed() {
+        let mut pending = set(&["live"]);
+        let known = set(&["live", "gone-quiet"]);
+        let mut announced = HashSet::new();
+        fold_into_pending(
+            &["gone-quiet".to_string()],
+            &mut pending,
+            &known,
+            &mut announced,
+        );
+        assert!(pending.contains("gone-quiet"), "parked id must rejoin pending");
+        let dismissed: Vec<&String> = known.iter().filter(|id| !pending.contains(*id)).collect();
+        assert!(dismissed.is_empty(), "nothing may be dismissed: {dismissed:?}");
+    }
+
+    #[test]
+    fn a_card_already_on_screen_is_announced_exactly_once() {
+        let known = set(&["a"]);
+        let mut announced = HashSet::new();
+        let mut pending = HashSet::new();
+        let first =
+            fold_into_pending(&["a".to_string()], &mut pending, &known, &mut announced);
+        assert_eq!(first, vec!["a".to_string()]);
+        let mut pending = HashSet::new();
+        let second =
+            fold_into_pending(&["a".to_string()], &mut pending, &known, &mut announced);
+        assert!(second.is_empty(), "second tick must stay quiet: {second:?}");
+    }
+
+    /// A card that parked before this client ever saw it needs no flip event —
+    /// it arrives as a brand-new request that already carries `parked: true`.
+    #[test]
+    fn a_card_the_client_never_saw_is_not_announced_as_parked() {
+        let mut pending = HashSet::new();
+        let mut announced = HashSet::new();
+        let out = fold_into_pending(
+            &["never-seen".to_string()],
+            &mut pending,
+            &HashSet::new(),
+            &mut announced,
+        );
+        assert!(out.is_empty(), "{out:?}");
+        assert!(pending.contains("never-seen"), "but it must still be pending");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
