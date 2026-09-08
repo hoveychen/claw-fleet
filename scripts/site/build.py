@@ -16,7 +16,7 @@ PAGE_PAIRS = [('', 'zh/'), ('benchmark.html', 'zh/benchmark.html')]
 # Prose pages generated from content['pages'], one entry per slug. Listed here
 # so a new page joins PAGE_PAIRS (and therefore the sitemap, the hreflang set
 # and the lastmod map) by adding its content block and one line.
-CONTENT_SLUGS = ['claude-code-gui', 'codex-gui', 'deepseek-harness-gui']
+CONTENT_SLUGS = ['claude-code-gui', 'codex-gui', 'deepseek-harness-gui', 'supported-tools']
 PAGE_PAIRS += [(f'{slug}.html', f'zh/{slug}.html') for slug in CONTENT_SLUGS]
 # One entry per download row, positionally matched to content['platforms'].
 # Each row names its icon and the buttons it carries, so a row with two builds

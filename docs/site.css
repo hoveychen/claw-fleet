@@ -1341,6 +1341,19 @@ html[lang="zh-CN"] .hero-copy .intro {
   font-size: 17px;
   line-height: 1.62;
 }
+/* Prose links need to look like links: body copy here is var(--muted) and an
+   inherited link is invisible as one. */
+.doc section p a,
+.doc-faq p a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.doc section p a:hover,
+.doc-faq p a:hover {
+  color: var(--action);
+}
 .doc-shot {
   margin-top: 30px;
 }

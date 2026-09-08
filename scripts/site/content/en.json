@@ -167,7 +167,7 @@
   "faqs": [
     [
       "Which AI tools can I use?",
-      "Fleet connects to Claude Code, Codex and DeepSeek Harness (the @deepseek-ai/dsh CLI). Install and configure the tools you want to use. DeepSeek Harness can select models from configured providers; availability depends on those providers and your credentials."
+      "Fleet connects to Claude Code, Codex and DeepSeek Harness (the @deepseek-ai/dsh CLI). Install and configure the tools you want to use. DeepSeek Harness can select models from configured providers; availability depends on those providers and your credentials. <a href=\"supported-tools.html\">Which agent tools Fleet works with</a> keeps the tool list and the model list apart."
     ],
     [
       "I already use the Claude Code CLI. What does Fleet add?",
@@ -478,6 +478,82 @@
       ],
       "closingHeading": "Your keys, your models, one workspace.",
       "closing": "Install the desktop app, keep the providers you configured, and give the work somewhere to live.",
+      "cta": "Download Claw Fleet",
+      "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
+    },
+    "supported-tools": {
+      "title": "Which agent tools Claw Fleet works with — Claw Fleet",
+      "description": "Fleet drives three CLI agent tools today — Claude Code, Codex and DeepSeek Harness — and reaches a much wider set of models through the providers you configure. What is on the list, how a tool gets on it, and where models and tools differ.",
+      "skip": "Skip to content",
+      "backHome": "Home",
+      "navDownload": "Download",
+      "eyebrow": "Tools, models and the difference",
+      "h1": "What Fleet drives,<br>and what it doesn’t.",
+      "lede": "Two questions get mixed together: which agent tool Fleet can start, and which model that tool can reach. Fleet drives three tools. Through them — particularly through a bring-your-own-key harness — you can reach a great many models. This page keeps the two apart, so you can tell in a minute whether your setup fits.",
+      "sections": [
+        {
+          "h2": "The three it drives today",
+          "body": [
+            "<strong>Claude Code.</strong> Fleet starts your installed CLI and reads the session files it writes, offers Claude's own model catalogue and its five-level effort scale, and shows the account quota windows it reports. <a href=\"claude-code-gui.html\">More about Claude Code in Fleet</a>.",
+            "<strong>Codex.</strong> Same shape, with Codex's own catalogue and a different effort ladder, billed against your ChatGPT plan. A headless run can raise a decision card, and it can generate images through Codex's own image skill. <a href=\"codex-gui.html\">More about Codex in Fleet</a>.",
+            "<strong>DeepSeek Harness (the dsh CLI).</strong> A bring-your-own-key harness: the models are whatever your configured providers expose, effort is per model, and spend is read from the provider that bills you. <a href=\"deepseek-harness-gui.html\">More about DeepSeek Harness in Fleet</a>."
+          ]
+        },
+        {
+          "h2": "What a tool needs for Fleet to drive it",
+          "body": [
+            "The three are not an arbitrary shortlist — they share a shape. Each is a command-line agent that runs on your machine, records its sessions as files Fleet can read, and can be started and resumed from a command. That shape is what lets Fleet follow a session it did not start, resume one after a restart, attach a decision to the run that asked, and hand a plan from one tool to another.",
+            "A tool built the other way round — its own cloud, its own editor, its sessions inside its own service — is a different integration, not a missing line in a list. That is why the list is short and why each addition takes real work rather than a config entry."
+          ]
+        },
+        {
+          "h2": "Models are a separate question",
+          "body": [
+            "The tool decides how the work runs; the provider decides which models the work can use. Through dsh, the second list is wide: you configure the providers you have keys for, and the catalogue Fleet shows is built from what they expose — models from many vendors, grouped by vendor, each with the reasoning ladder it accepts.",
+            "So \"can I use a particular model\" and \"can I use a particular tool\" usually have different answers, and the model question is the one that is easier to say yes to. If a model you want is reachable through a provider you can get a key for, dsh is the route.",
+            "The same is true of accounts: each tool keeps its own sign-in and its own bill. Fleet brings no model account and no hosted subscription of its own, so what you can reach through Fleet is exactly what you can already reach."
+          ]
+        },
+        {
+          "h2": "Not on the list right now",
+          "body": [
+            "Tools people ask about — Cursor, opencode, the ChatGPT web app, Kimi Code and others — are not currently among the three Fleet drives. That is a statement about Fleet's integration surface, not a judgement about them; several are good tools built around a different shape than the CLI-plus-session-files one above.",
+            "If your work lives in one of those, the honest answer today is that Fleet will not run it. What Fleet can still do for you is reach that vendor's models through a provider key in dsh, if the provider you use carries them — the model travels, the tool does not.",
+            "The list is expected to grow, and a fourth tool is being scoped. We would rather name it here when it works than promise a date, so this page is the one to check."
+          ]
+        },
+        {
+          "h2": "Mixing them on purpose",
+          "body": [
+            "Because the plan, the project wiki and the deliverables belong to the work rather than to a CLI, a single piece of work can move between the three. One tool drafts a plan, another implements the steps, a third reviews the diff — and a handoff carries the plan, the current step and the notes the previous session left behind.",
+            "When several are running, each card on the board says which tool and model it is on, so a mixed board stays readable. Which tool takes which step is a per-task choice, not a setting you commit to once."
+          ],
+          "shot": "screenshots/current/agents-en.png",
+          "shotAlt": "Fleet session board with Claude Code, Codex and DeepSeek Harness tasks running side by side, each card labelled with its tool and model",
+          "shotCaption": "Current interface · Illustrative data"
+        }
+      ],
+      "faqHeading": "The questions this page exists for",
+      "faqs": [
+        [
+          "Does Fleet work with Cursor?",
+          "Not today. Fleet drives command-line agents that keep their sessions as local files it can read and resume; Cursor is built around its own editor and service, which is a different integration rather than a setting to switch on."
+        ],
+        [
+          "Can I use it with ChatGPT?",
+          "Not the ChatGPT app itself. Codex is the command-line agent that bills against a ChatGPT plan, and that one Fleet does drive — so if what you have is a ChatGPT subscription, Codex is the route in."
+        ],
+        [
+          "Can I use DeepSeek, Qwen, Kimi or another vendor's models?",
+          "Usually yes, as models rather than as tools: configure a provider key in DeepSeek Harness and Fleet builds the picker from whatever that provider exposes. Whether a specific model is there depends on the provider, not on Fleet."
+        ],
+        [
+          "Will you add opencode, Kimi Code or something else?",
+          "The list is meant to grow and a fourth tool is being scoped. Rather than commit to a date, we will list it here once it actually runs."
+        ]
+      ],
+      "closingHeading": "If it is one of the three, it works today.",
+      "closing": "Install the desktop app, connect the tool you already use, and give the next piece of work a place to live.",
       "cta": "Download Claw Fleet",
       "footer": "An independent, open-source project. Not affiliated with OpenAI or Anthropic."
     }
