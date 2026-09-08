@@ -21,6 +21,7 @@ const cache = new Map<string, string>();
 const ALL_KEYS = [
   "theme",
   "viewMode",
+  "simplified-mode",
   // Which session sub-view (list vs gallery) the unified "Sessions" nav returns to.
   "lastSessionViewMode",
   // Last page visited under each sidebar tab (舰队 / 工作), as a JSON blob. The

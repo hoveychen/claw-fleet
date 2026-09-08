@@ -109,6 +109,9 @@ function optimisticToMessage(o: OptimisticSend): RawMessage {
 // DecisionPanel already embeds SessionDetail for its history sidecar. Keep the
 // reverse dependency lazy so projecting a pending Codex card into the dialogue
 // does not create an eager ESM cycle between the two modules.
+const InlineDecisionCard = lazy(() =>
+  import("./DecisionPanel").then(({ DecisionCard }) => ({ default: DecisionCard })),
+);
 const InlineFleetAskCard = lazy(() =>
   import("./DecisionPanel").then(({ FleetAskCard }) => ({ default: FleetAskCard })),
 );
@@ -423,6 +426,7 @@ export function SessionDetail({
     return sessions.find((s) => s.id === session.id) ?? session;
   }, [session, sessions]);
   const preferredTitle = liveSession ? preferredSessionTitle(liveSession) : null;
+  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
   const pendingDecisions = useDecisionStore((s) => s.decisions);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const timelineMessages = useMemo(
@@ -1454,7 +1458,14 @@ export function SessionDetail({
                       // can be absent for sessions opened from a partial shape.
                       jsonlPath={liveSession?.jsonlPath ?? session?.jsonlPath}
                     />
-                    {inlineFleetAsk && (
+                    {simplifiedMode && pendingDecisions.filter((d) => d.request.sessionId === liveSession?.id).map((decision) => (
+                      <div key={decision.id} className={styles.inline_fleet_ask} data-testid="inline-task-decision">
+                        <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
+                          <InlineDecisionCard decision={decision} compact />
+                        </Suspense>
+                      </div>
+                    ))}
+                    {!simplifiedMode && inlineFleetAsk && (
                       <div className={styles.inline_fleet_ask} data-testid="inline-codex-fleet-ask">
                         <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
                           <InlineFleetAskCard decision={inlineFleetAsk} compact />

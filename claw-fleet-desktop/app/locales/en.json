@@ -2068,7 +2068,9 @@
     "remote_host_add_desc": "Pick an SSH target and Fleet installs rca on it. Once installed, choose the host in the new-session composer and browse its directories.",
     "remote_host_install_btn": "Install rca",
     "remote_host_remove_blocked": "This host still has {{count}} workspace(s) ({{paths}}) — remove them first, or they would point at a host that no longer exists.",
-    "remote_ws_unattached_title": "Workspaces not attached to a host (legacy entries)"
+    "remote_ws_unattached_title": "Workspaces not attached to a host (legacy entries)",
+    "simplified_mode": "Simplified mode",
+    "simplified_mode_desc": "Show only Tasks and Artifacts. Answer decisions inside each task."
   },
   "usage": {
     "total_tokens": "Tokens",
@@ -2298,7 +2300,8 @@
     "task_review_underclaimed_hint": "The agent did not judge the task complete, yet you finished it — it may have under-reported its progress.",
     "task_review_hops": "{{count}} hops",
     "popup_title": "Your daily report is ready",
-    "popup_open_full": "Open full report"  },
+    "popup_open_full": "Open full report"
+  },
   "command": {
     "nested": {
       "bash": "embedded bash -c",
@@ -2654,5 +2657,6 @@
     "select_workspace": "Pick a repository to open a terminal in.",
     "no_workspaces": "No repositories yet"
   },
-  "view_terminal": "Terminal"
+  "view_terminal": "Terminal",
+  "simple_navigation": "Tasks and artifacts"
 }
