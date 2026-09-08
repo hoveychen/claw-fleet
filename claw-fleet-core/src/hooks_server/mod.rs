@@ -1385,6 +1385,8 @@ fn handle_request(
             // ── Session read (batch mark-read; unread is derived) ─────────────
 
             // ── Workspace command runner (proc_runner) ───────────────────────
+            crate::routes::HOST_FEATURES => route_host_features(ctx, request, &query, json_header, path),
+
             crate::routes::PROCS => route_procs(ctx, request, &query, json_header, path),
 
             crate::routes::PROC_RUN if request.method() == &tiny_http::Method::Post => route_proc_run(ctx, request, &query, json_header, path),

@@ -192,6 +192,11 @@ pub const PROC_OUTPUT: &str = "/proc_output";
 pub const PROC_RESIZE: &str = "/proc_resize";
 pub const PROC_RUN: &str = "/proc_run";
 pub const PROCS: &str = "/procs";
+/// `GET /host_features` — which optional surfaces this host exposes
+/// ([`crate::feature_flags::HostFeatures`]). Read once at boot by the browser
+/// build so its nav matches what this backend will allow, rather than offering
+/// a 终端 page whose first spawn is refused.
+pub const HOST_FEATURES: &str = "/host_features";
 /// The ssh host book (`remote_host::SshHost`): list / upsert / remove.
 ///
 /// On the backend host, not this desktop. The book is spawn-time state —

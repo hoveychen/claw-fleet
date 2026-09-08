@@ -21,7 +21,29 @@
 //! `~/.zshrc` does **not** reach it. `launchctl setenv FLEET_TERMINAL 1` (or
 //! launching the app from a shell that has it) does.
 
+use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
+
+/// Which optional surfaces this host exposes — the payload every client fetches
+/// once at boot so its UI matches what the backend will actually allow.
+///
+/// Deliberately a struct with named fields rather than a bare bool: the next
+/// flag added here reaches all three clients without a second round trip and
+/// without any of them growing a new endpoint.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct HostFeatures {
+    /// The 终端 page / phone terminal — interactive shells on this machine.
+    pub terminal: bool,
+}
+
+/// This host's feature set, as served to every client.
+pub fn host_features() -> HostFeatures {
+    HostFeatures {
+        terminal: terminal_enabled(),
+    }
+}
 
 /// Env var that enables the 终端 surface.
 pub const TERMINAL_ENV: &str = "FLEET_TERMINAL";
