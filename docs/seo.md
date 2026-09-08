@@ -18,12 +18,19 @@
 
 `site_origin.assert_no_token()` 在两条路径上都会兜底：残留一个未替换的 token 页面照样能渲染、只有机器可读的那一半是错的，所以它必须是硬错误。
 
-> **改了 `scripts/site/` 记得同步服务器副本。** 镜像跑的是 `/opt/fleet-site-updater/` 下的副本，改仓库不等于改它。本次新增了 `site_origin.py`，`distribute.py` 会 `import` 它——**没 scp 过去，镜像更新器会 ImportError 停在原地。**
-> ```
-> scp scripts/site/{distribute,selfhost,site_origin}.py own-api-sz:/tmp/
-> ssh own-api-sz 'sudo install -o fleet-site -g fleet-site -m 644 /tmp/{distribute,selfhost,site_origin}.py /opt/fleet-site-updater/'
-> ssh own-api-sz 'sudo systemctl start fleet-site-update.service && journalctl -u fleet-site-update.service -n 40'
-> ```
+### 镜像上的 HTML 不会自动更新
+
+服务器上的 `fleet-site-update.timer` 调 `selfhost.sync()`，而它是用 `site_root=current`（**上一次已发布的部署**）来跑 `distribute.prepare()` 的。也就是说：定时器只推进 release 产物和 `downloads.json`，**站点 HTML 从来不会自己从仓库刷新**。
+
+所以本次 SEO 改动要落到镜像上，必须按 `china-selfhost.md` 那条手动发布路径走一次（仓库里跑 `build.py` + `distribute.py --public-url https://fleet.eternizedlab.com --output <新目录>`，上传后切软链接）。这条路径用的是**仓库里的** `scripts/site/`，所以能直接拿到 `site_origin.py`，不需要提前 scp。
+
+反过来：`/opt/fleet-site-updater/` 下的服务器副本是独立的一份。哪天要更新那份的 `distribute.py`，**必须连 `site_origin.py` 一起 scp**（前者 `import` 后者，缺了就是 ImportError，更新器会停在原地）：
+
+```
+scp scripts/site/{distribute,selfhost,site_origin}.py own-api-sz:/tmp/
+ssh own-api-sz 'sudo install -o fleet-site -g fleet-site -m 644 /tmp/{distribute,selfhost,site_origin}.py /opt/fleet-site-updater/'
+ssh own-api-sz 'sudo systemctl start fleet-site-update.service && journalctl -u fleet-site-update.service -n 40'
+```
 
 ## robots.txt 只在镜像上生效
 
