@@ -301,10 +301,156 @@
   font-size: var(--font-size-xs);
 }
 
+.layout_switch {
+  display: inline-flex;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.layout_button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: var(--color-bg-field);
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.layout_button_on {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
 .usage {
   margin-left: auto;
   font-size: var(--font-size-2xs);
   color: var(--color-text-dim);
+}
+
+/* ── List view ───────────────────────────────────────────────────────────── */
+
+/* Same flex/min-height/overflow trio as `.grid` — PageShell's `.main` clips,
+ * so the scroller has to be here and not on the table. */
+.table_pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 var(--space-7) var(--space-7);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* Opaque, not transparent: rows scroll *under* this and a translucent header
+   * would show them through the column labels. */
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border-soft);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+}
+
+.col_button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.col_button:hover {
+  color: var(--color-text);
+}
+
+.table tbody td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-soft);
+  color: var(--color-text-secondary);
+  vertical-align: middle;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:hover td {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.col_star {
+  width: 30px;
+}
+
+.col_size,
+.col_added {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.col_source {
+  max-width: 220px;
+}
+
+.row_star {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.row_star_on {
+  color: var(--color-accent);
+}
+
+.row_name,
+.row_source {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.row_title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.row_folder,
+.row_source {
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row_drift {
+  flex: 0 0 auto;
+  color: var(--color-warning);
 }
 
 /* ── Detail ──────────────────────────────────────────────────────────────── */

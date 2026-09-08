@@ -5,6 +5,7 @@ import {
   Archive,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   FileSpreadsheet,
   FileText,
   FileType,
@@ -13,10 +14,12 @@ import {
   FolderOpen,
   FolderPlus,
   Image as ImageIcon,
+  LayoutGrid,
   Music,
   Package,
   Pencil,
   Presentation,
+  Rows3,
   Star,
   Trash2,
   TriangleAlert,
@@ -26,6 +29,7 @@ import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
 import { isWebBuild } from "../hostEnv";
+import { getItem, setItem } from "../storage";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
 import { downloadArtifact } from "../mock/liveProxy";
 import { PageShell } from "./PageShell";
@@ -72,7 +76,25 @@ interface StoreUsage {
   hardlinkedBytes: number;
 }
 
-type SortKey = "recent" | "size" | "name";
+export type SortKey = "recent" | "size" | "name" | "workspace";
+export type SortDir = "asc" | "desc";
+
+/**
+ * Which way each key reads first.
+ *
+ * Times and sizes want the big end first ("what did I just make", "what is
+ * eating the disk"); names and workspaces want A→Z. A single global default
+ * would make one of the two groups useless on the first click.
+ */
+export const DEFAULT_SORT_DIR: Record<SortKey, SortDir> = {
+  recent: "desc",
+  size: "desc",
+  name: "asc",
+  workspace: "asc",
+};
+
+/** Grid of thumbnails, or a dense sortable table. */
+export type ArtifactLayout = "grid" | "list";
 
 export interface ArtifactDirectoryNode {
   key: string;
@@ -123,25 +145,46 @@ export function formatBytes(n: number): string {
 }
 
 /**
- * Order artifacts for the grid.
+ * Order artifacts.
  *
  * Its own exported function because the ordering is the part worth testing:
  * "newest first" has to survive same-millisecond ids (two `fleet artifact add`
  * calls in one script), and the name sort has to be locale-aware or a CJK
  * title lands in a random position.
+ *
+ * `dir` exists for the list view's column headers, where clicking the same
+ * column again has to reverse it. Omitted, every key keeps the direction the
+ * sub-bar's dropdown has always implied — newest and biggest first, names
+ * A→Z — so the grid is unaffected.
  */
-export function sortArtifacts(list: Artifact[], key: SortKey): Artifact[] {
+export function sortArtifacts(list: Artifact[], key: SortKey, dir?: SortDir): Artifact[] {
   const out = [...list];
+  const flip = dir && dir !== DEFAULT_SORT_DIR[key] ? -1 : 1;
   switch (key) {
     case "size":
-      return out.sort((a, b) => b.sizeBytes - a.sizeBytes || a.id.localeCompare(b.id));
+      return out.sort((a, b) => flip * (b.sizeBytes - a.sizeBytes || a.id.localeCompare(b.id)));
     case "name":
-      return out.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+      return out.sort(
+        (a, b) => flip * a.title.localeCompare(b.title, undefined, { numeric: true }),
+      );
+    case "workspace":
+      return out.sort(
+        (a, b) =>
+          flip *
+          (a.workspaceName.localeCompare(b.workspaceName, undefined, { numeric: true }) ||
+            // Within one workspace, the folder is the next meaningful level.
+            (artifactRelativeDirectory(a) ?? "").localeCompare(
+              artifactRelativeDirectory(b) ?? "",
+              undefined,
+              { numeric: true },
+            ) ||
+            b.createdMs - a.createdMs),
+      );
     case "recent":
     default:
       // Ids are timestamps with a collision suffix, so they break a createdMs
       // tie in the same direction the store's own listing does.
-      return out.sort((a, b) => b.createdMs - a.createdMs || b.id.localeCompare(a.id));
+      return out.sort((a, b) => flip * (b.createdMs - a.createdMs || b.id.localeCompare(a.id)));
   }
 }
 
@@ -302,9 +345,49 @@ export function ArtifactsView() {
   const [workspace, setWorkspace] = useState("");
   const [directory, setDirectory] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>("recent");
+  // Layout and ordering come off the persisted store, so the page opens the way
+  // it was left. `getItem` is a synchronous read of the cache `initStorage()`
+  // filled before render, so this is safe as a `useState` initializer.
+  const [layout, setLayout] = useState<ArtifactLayout>(
+    () => (getItem("artifacts-layout") === "list" ? "list" : "grid"),
+  );
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    const stored = getItem("artifacts-sort-key");
+    return stored && stored in DEFAULT_SORT_DIR ? (stored as SortKey) : "recent";
+  });
+  const [sortDir, setSortDir] = useState<SortDir>(() =>
+    getItem("artifacts-sort-dir") === "asc" ? "asc" : "desc",
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const chooseLayout = useCallback((next: ArtifactLayout) => {
+    setLayout(next);
+    setItem("artifacts-layout", next);
+  }, []);
+
+  /**
+   * Sort by `key`; clicking the column already sorted reverses it.
+   *
+   * The first click on a *new* column uses that key's natural direction rather
+   * than inheriting the previous column's — sorting by name and getting Z→A
+   * because you were last on "newest first" reads as a bug.
+   */
+  const chooseSort = useCallback(
+    (key: SortKey) => {
+      const next: SortDir =
+        key === sortKey
+          ? sortDir === "asc"
+            ? "desc"
+            : "asc"
+          : DEFAULT_SORT_DIR[key];
+      setSortKey(key);
+      setSortDir(next);
+      setItem("artifacts-sort-key", key);
+      setItem("artifacts-sort-dir", next);
+    },
+    [sortKey, sortDir],
+  );
 
   const load = useCallback(async () => {
     // `?? []` rather than the raw result: the mock's `default:` branch answers
@@ -326,8 +409,13 @@ export function ArtifactsView() {
   );
 
   const shown = useMemo(
-    () => sortArtifacts(filterArtifacts(items ?? [], { query, workspace, directory, starredOnly }), sortKey),
-    [items, query, workspace, directory, starredOnly, sortKey],
+    () =>
+      sortArtifacts(
+        filterArtifacts(items ?? [], { query, workspace, directory, starredOnly }),
+        sortKey,
+        sortDir,
+      ),
+    [items, query, workspace, directory, starredOnly, sortKey, sortDir],
   );
 
   const selected = useMemo(
@@ -431,13 +519,36 @@ export function ArtifactsView() {
       <select
         className={styles.select}
         value={sortKey}
-        onChange={(e) => setSortKey(e.target.value as SortKey)}
+        onChange={(e) => chooseSort(e.target.value as SortKey)}
         aria-label={t("artifacts.sort_by", "排序方式")}
       >
         <option value="recent">{t("artifacts.sort_recent", "最近加入")}</option>
         <option value="size">{t("artifacts.sort_size", "大小")}</option>
         <option value="name">{t("artifacts.sort_name", "名称")}</option>
+        <option value="workspace">{t("artifacts.sort_workspace", "来源")}</option>
       </select>
+      <span className={styles.layout_switch}>
+        <button
+          type="button"
+          className={`${styles.layout_button} ${layout === "grid" ? styles.layout_button_on : ""}`}
+          title={t("artifacts.layout_grid", "网格视图")}
+          aria-label={t("artifacts.layout_grid", "网格视图")}
+          aria-pressed={layout === "grid"}
+          onClick={() => chooseLayout("grid")}
+        >
+          <LayoutGrid size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          className={`${styles.layout_button} ${layout === "list" ? styles.layout_button_on : ""}`}
+          title={t("artifacts.layout_list", "列表视图")}
+          aria-label={t("artifacts.layout_list", "列表视图")}
+          aria-pressed={layout === "list"}
+          onClick={() => chooseLayout("list")}
+        >
+          <Rows3 size={14} strokeWidth={1.5} />
+        </button>
+      </span>
       {usage && usage.count > 0 && (
         <span className={styles.usage}>
           {t("artifacts.usage", "{{count}} 份 · 共 {{size}}", {
@@ -502,6 +613,15 @@ export function ArtifactsView() {
             "Agent 用 `fleet artifact add <path>` 把交付物存进来。",
           )}
         />
+      ) : layout === "list" ? (
+        <ArtifactTable
+          items={shown}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          onSort={chooseSort}
+          onOpen={setSelectedId}
+          onToggleStar={(a) => patch(a.id, { starred: !a.starred })}
+        />
       ) : (
         <div className={styles.grid}>
           {shown.map((a) => (
@@ -515,6 +635,117 @@ export function ArtifactsView() {
         </div>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * The dense view: one row per artifact, sortable columns.
+ *
+ * A real table rather than a flex grid of rows, so a screen reader announces
+ * "row 3 of 40, 大小 1.4 MB" and the column headers carry `aria-sort`. The
+ * thumbnail grid is for recognising a deliverable by sight; this is for the
+ * jobs where you are comparing across many of them (what is biggest, what came
+ * from which repo) and a 280px card per item shows five at a time.
+ */
+function ArtifactTable({
+  items,
+  sortKey,
+  sortDir,
+  onSort,
+  onOpen,
+  onToggleStar,
+}: {
+  items: Artifact[];
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+  onOpen: (id: string) => void;
+  onToggleStar: (artifact: Artifact) => void;
+}) {
+  const { t } = useTranslation();
+
+  const header = (key: SortKey, label: string, className?: string) => (
+    <th
+      className={className}
+      aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button type="button" className={styles.col_button} onClick={() => onSort(key)}>
+        <span>{label}</span>
+        {sortKey === key &&
+          (sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+      </button>
+    </th>
+  );
+
+  return (
+    <div className={styles.table_pane}>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th className={styles.col_star} />
+            {header("name", t("artifacts.col_name", "名称"))}
+            {header("workspace", t("artifacts.col_source", "来源"), styles.col_source)}
+            {header("size", t("artifacts.col_size", "大小"), styles.col_size)}
+            {header("recent", t("artifacts.col_added", "加入时间"), styles.col_added)}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((a) => {
+            const Icon = KIND_ICON[a.kind] ?? FileText;
+            const folder = artifactRelativeDirectory(a);
+            return (
+              <tr key={a.id} onClick={() => onOpen(a.id)} className={styles.row}>
+                <td className={styles.col_star}>
+                  <button
+                    type="button"
+                    className={styles.row_star}
+                    aria-label={
+                      a.starred ? t("artifacts.unstar", "取消收藏") : t("artifacts.star", "收藏")
+                    }
+                    aria-pressed={a.starred}
+                    // Or the click also opens the detail pane behind it.
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleStar(a);
+                    }}
+                  >
+                    <Star
+                      size={13}
+                      strokeWidth={1.5}
+                      fill={a.starred ? "currentColor" : "none"}
+                      className={a.starred ? styles.row_star_on : ""}
+                    />
+                  </button>
+                </td>
+                <td>
+                  <span className={styles.row_name}>
+                    <Icon size={14} strokeWidth={1.4} />
+                    <span className={styles.row_title} title={a.name}>
+                      {a.title}
+                    </span>
+                    {a.drifted && (
+                      <TriangleAlert
+                        size={12}
+                        className={styles.row_drift}
+                        aria-label={t("artifacts.drifted", "源文件已被改写")}
+                      />
+                    )}
+                  </span>
+                </td>
+                <td className={styles.col_source}>
+                  <span className={styles.row_source} title={a.workspacePath}>
+                    {a.workspaceName}
+                    {folder ? <span className={styles.row_folder}>/{folder}</span> : null}
+                  </span>
+                </td>
+                <td className={styles.col_size}>{formatBytes(a.sizeBytes)}</td>
+                <td className={styles.col_added}>{new Date(a.createdMs).toLocaleString()}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

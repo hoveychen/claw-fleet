@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_SORT_DIR,
   buildArtifactDirectoryTree,
   filterArtifacts,
   formatBytes,
@@ -214,5 +215,46 @@ describe("buildArtifactDirectoryTree", () => {
     // /w/two has no artifact to carry a display name, so it falls back to the
     // path rather than rendering "undefined".
     expect(tree.map((node) => node.label)).toEqual(["/w/two", "one"]);
+  });
+});
+
+describe("sortArtifacts direction", () => {
+  it("keeps today's order when no direction is given", () => {
+    const list = [
+      make({ id: "1", sizeBytes: 10 }),
+      make({ id: "2", sizeBytes: 3000 }),
+    ];
+    // The grid never passes a direction, so biggest-first must be unchanged.
+    expect(sortArtifacts(list, "size").map((a) => a.id)).toEqual(["2", "1"]);
+    expect(sortArtifacts(list, "size", DEFAULT_SORT_DIR.size).map((a) => a.id)).toEqual(["2", "1"]);
+  });
+
+  it("reverses a key when asked for its non-default direction", () => {
+    const list = [
+      make({ id: "1", sizeBytes: 10, createdMs: 100, title: "a" }),
+      make({ id: "2", sizeBytes: 3000, createdMs: 900, title: "b" }),
+    ];
+    expect(sortArtifacts(list, "size", "asc").map((a) => a.id)).toEqual(["1", "2"]);
+    expect(sortArtifacts(list, "recent", "asc").map((a) => a.id)).toEqual(["1", "2"]);
+    // name defaults to A→Z, so "desc" is the flipped one here — the direction
+    // is per key, not one global "descending".
+    expect(sortArtifacts(list, "name", "desc").map((a) => a.id)).toEqual(["2", "1"]);
+    expect(sortArtifacts(list, "name", "asc").map((a) => a.id)).toEqual(["1", "2"]);
+  });
+
+  it("groups by workspace, then folder, for the 来源 column", () => {
+    const list = [
+      make({ id: "1", workspaceName: "two", path: "a" }),
+      make({ id: "2", workspaceName: "one", path: "b" }),
+      make({ id: "3", workspaceName: "one", path: "a" }),
+    ];
+    expect(sortArtifacts(list, "workspace", "asc").map((a) => a.id)).toEqual(["3", "2", "1"]);
+    expect(sortArtifacts(list, "workspace", "desc").map((a) => a.id)).toEqual(["1", "2", "3"]);
+  });
+
+  it("does not mutate the input", () => {
+    const list = [make({ id: "1", sizeBytes: 1 }), make({ id: "2", sizeBytes: 2 })];
+    sortArtifacts(list, "size", "asc");
+    expect(list.map((a) => a.id)).toEqual(["1", "2"]);
   });
 });
