@@ -160,7 +160,7 @@ pub(crate) fn revoke_artifact_share(
 pub(crate) fn artifact_share_url(
     token: String,
     state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<claw_fleet_core::artifact_share::ShareUrl, String> {
     state.backend.artifact_share_url(&token)
 }
 

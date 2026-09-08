@@ -282,34 +282,87 @@ pub fn record_hit_in(path: &Path, token: &str, now: u64) {
 
 // ── The URL you actually send someone ────────────────────────────────────────
 
+/// A share URL plus what is true about it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareUrl {
+    pub url: String,
+    /// False when the serving process is bound to loopback, so the URL only
+    /// opens on this machine. The UI has to say so — a link that looks
+    /// sendable but is refused everywhere else is worse than no link.
+    pub reachable_off_machine: bool,
+}
+
 /// Build the URL for `token`, or say why there isn't one yet.
 ///
 /// The desktop app does **not** listen on HTTP — it talks to the relay, not to
 /// a port of its own — so the thing that serves `/shared` is a running
-/// `fleet serve` / `fleet webui`. Both write their live port to
-/// `~/.fleet/port` on startup, so its absence is the honest signal that a link
-/// would not resolve for anyone, and the UI says so instead of handing over a
-/// URL that refuses to connect.
+/// `fleet serve` / `fleet webui`. Both write their live port and bound host to
+/// `~/.fleet/`, so the absence of those files is the honest signal that a link
+/// would not resolve for anyone.
 ///
-/// The host is this machine's LAN IPv4 rather than `127.0.0.1`, because the
-/// point of a share link is to open it somewhere else — a phone, a colleague's
-/// laptop. `localhost` is the fallback when the machine has no LAN address at
-/// all, which at least still works in the browser sitting right here.
-pub fn share_url(token: &str) -> Result<String, String> {
+/// The host is chosen from what was *actually bound*, not from what would be
+/// nice: `fleet webui` binds `127.0.0.1` unless told otherwise, and a URL
+/// built from the machine's LAN IP against a loopback-bound server is refused
+/// (measured — `curl` to the LAN address returns nothing at all while
+/// loopback answers 200). So a loopback binding yields a loopback URL and
+/// `reachable_off_machine: false`; only a wildcard binding gets the LAN
+/// address that another device can use.
+pub fn share_url(token: &str) -> Result<ShareUrl, String> {
     let port = live_serve_port().ok_or_else(|| {
         "no local Fleet server is running — start `fleet webui` and the link will resolve"
             .to_string()
     })?;
-    let host = crate::lan_access::lan_ipv4()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "localhost".to_string());
-    Ok(format!("http://{host}:{port}{}?t={token}", crate::routes::SHARED))
+    Ok(build_share_url(token, port, live_serve_host().as_deref(), lan_ip()))
+}
+
+/// Pure form, for the tests: `bound` is what the server recorded, `lan` this
+/// machine's LAN address.
+pub fn build_share_url(
+    token: &str,
+    port: u16,
+    bound: Option<&str>,
+    lan: Option<String>,
+) -> ShareUrl {
+    let wildcard = matches!(bound, Some("0.0.0.0") | Some("::") | Some("[::]"));
+    // An unrecorded host is treated as loopback: `fleet serve`'s own default,
+    // and the conservative guess — claiming reachability we cannot verify is
+    // the failure mode that hands someone a dead link.
+    let (host, off_machine) = match (wildcard, lan) {
+        (true, Some(ip)) => (ip, true),
+        // Bound to every interface but no LAN address exists (offline).
+        (true, None) => ("127.0.0.1".to_string(), false),
+        (false, _) => match bound {
+            // An explicitly named non-loopback host is already the answer.
+            Some(h) if !is_loopback(h) && !h.is_empty() => (h.to_string(), true),
+            _ => ("127.0.0.1".to_string(), false),
+        },
+    };
+    ShareUrl {
+        url: format!("http://{host}:{port}{}?t={token}", crate::routes::SHARED),
+        reachable_off_machine: off_machine,
+    }
+}
+
+fn is_loopback(host: &str) -> bool {
+    host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "[::1]"
 }
 
 /// The port a `fleet serve` / `fleet webui` last recorded, if any.
 pub fn live_serve_port() -> Option<u16> {
     let path = crate::launchd::port_file_path()?;
     fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+/// The host it bound. `None` on a server that predates the host file.
+pub fn live_serve_host() -> Option<String> {
+    let path = crate::launchd::host_file_path()?;
+    let host = fs::read_to_string(path).ok()?.trim().to_string();
+    (!host.is_empty()).then_some(host)
+}
+
+fn lan_ip() -> Option<String> {
+    crate::lan_access::lan_ipv4().map(|ip| ip.to_string())
 }
 
 fn now_ms() -> u64 {
@@ -343,6 +396,60 @@ mod tests {
 
     fn shares(dir: &TempDir) -> PathBuf {
         dir.path().join("artifact-shares.json")
+    }
+
+    #[test]
+    fn a_loopback_binding_yields_a_loopback_url_and_says_it_is_local_only() {
+        // Measured: a server bound to 127.0.0.1 refuses a connection to the
+        // machine's own LAN address. Building the URL from the LAN IP anyway
+        // would hand the user a link that is dead everywhere, including here.
+        let u = build_share_url("tok", 4571, Some("127.0.0.1"), Some("192.168.1.9".into()));
+        assert_eq!(u.url, "http://127.0.0.1:4571/shared?t=tok");
+        assert!(!u.reachable_off_machine);
+
+        for host in ["localhost", "::1", "[::1]"] {
+            assert!(!build_share_url("t", 1, Some(host), Some("192.168.1.9".into()))
+                .reachable_off_machine);
+        }
+    }
+
+    #[test]
+    fn a_wildcard_binding_yields_the_lan_address() {
+        for host in ["0.0.0.0", "::", "[::]"] {
+            let u = build_share_url("tok", 4571, Some(host), Some("192.168.1.9".into()));
+            assert_eq!(u.url, "http://192.168.1.9:4571/shared?t=tok", "for bind {host}");
+            assert!(u.reachable_off_machine);
+        }
+    }
+
+    #[test]
+    fn a_wildcard_binding_with_no_lan_address_is_still_only_local() {
+        // Bound to every interface on a machine that has no non-loopback
+        // address (offline). There is no address to send anyone.
+        let u = build_share_url("tok", 4571, Some("0.0.0.0"), None);
+        assert_eq!(u.url, "http://127.0.0.1:4571/shared?t=tok");
+        assert!(!u.reachable_off_machine);
+    }
+
+    #[test]
+    fn an_explicitly_named_host_is_taken_at_its_word() {
+        // `--host 192.168.1.9` binds exactly that interface, so it is already
+        // the address to hand out — no LAN lookup involved.
+        let u = build_share_url("tok", 4571, Some("192.168.1.9"), Some("10.0.0.2".into()));
+        assert_eq!(u.url, "http://192.168.1.9:4571/shared?t=tok");
+        assert!(u.reachable_off_machine);
+    }
+
+    #[test]
+    fn an_unrecorded_host_is_assumed_local() {
+        // A server started before the host file existed. Claiming reach we
+        // cannot verify is the failure that produces a dead link, so the
+        // conservative answer is the honest one.
+        for bound in [None, Some("")] {
+            let u = build_share_url("tok", 4571, bound, Some("192.168.1.9".into()));
+            assert_eq!(u.url, "http://127.0.0.1:4571/shared?t=tok");
+            assert!(!u.reachable_off_machine);
+        }
     }
 
     #[test]

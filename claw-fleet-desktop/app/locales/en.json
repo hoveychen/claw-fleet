@@ -2536,6 +2536,7 @@
     "share_forever": "never expires",
     "share_until": "valid until {{when}}",
     "share_hits": "{{count}} opens",
+    "share_local_only": "These links only open on this machine. Run `fleet webui --lan` to reach them from another device.",
     "filter_all": "All",
     "filter_starred": "Starred",
     "sort_by": "Sort by",

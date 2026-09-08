@@ -74,6 +74,13 @@ export interface Artifact {
   versions: ArtifactVersion[];
 }
 
+/** Mirrors `claw_fleet_core::artifact_share::ShareUrl`. */
+interface ShareUrlInfo {
+  url: string;
+  /** False when the serving process is bound to loopback. */
+  reachableOffMachine: boolean;
+}
+
 /** Mirrors `claw_fleet_core::artifact_share::ShareLink`. */
 export interface ShareLink {
   token: string;
@@ -1632,6 +1639,15 @@ function ArtifactShares({
   const [links, setLinks] = useState<ShareLink[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [urlError, setUrlError] = useState<string | null>(null);
+  /**
+   * True when every URL we have only opens on this machine.
+   *
+   * The whole point of a share link is to open it somewhere else, and
+   * `fleet webui` binds loopback unless told otherwise — so the common case is
+   * a link that looks sendable and is refused everywhere. Saying so, with the
+   * flag that fixes it, is the difference between a feature and a trap.
+   */
+  const [localOnly, setLocalOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ttlDays, setTtlDays] = useState("7");
 
@@ -1644,15 +1660,19 @@ function ArtifactShares({
     // reported once rather than per row.
     const next: Record<string, string> = {};
     let failure: string | null = null;
+    let anyOffMachine = false;
     for (const link of list) {
       try {
-        next[link.token] = await invoke<string>("artifact_share_url", { token: link.token });
+        const info = await invoke<ShareUrlInfo>("artifact_share_url", { token: link.token });
+        next[link.token] = info.url;
+        if (info.reachableOffMachine) anyOffMachine = true;
       } catch (e) {
         failure = String(e);
       }
     }
     setUrls(next);
     setUrlError(failure);
+    setLocalOnly(list.length > 0 && Object.keys(next).length > 0 && !anyOffMachine);
   }, [artifact.id]);
 
   useEffect(() => {
@@ -1717,6 +1737,14 @@ function ArtifactShares({
         </button>
       </div>
       {urlError && <div className={styles.share_warn}>{urlError}</div>}
+      {localOnly && (
+        <div className={styles.share_warn}>
+          {t(
+            "artifacts.share_local_only",
+            "这些链接只能在这台机器上打开。要给别的设备用，请跑 `fleet webui --lan`。",
+          )}
+        </div>
+      )}
       {links.map((link) => {
         const expired = link.expiresMs !== 0 && now >= link.expiresMs;
         const url = urls[link.token];
