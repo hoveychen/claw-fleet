@@ -192,15 +192,21 @@ def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cl
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         # Text files carry `__SITE_ORIGIN__` wherever SEO needs an absolute URL
-        # (canonical, hreflang, og:url, JSON-LD, sitemap). The mirror serves a
-        # different origin than Pages, so substituting here is what keeps the
-        # mirror pointing at itself instead of declaring github.io canonical.
+        # (canonical, hreflang, og:url, JSON-LD, sitemap) and for the version
+        # this release publishes. The mirror serves a different origin than
+        # Pages, so substituting here is what keeps the mirror pointing at
+        # itself instead of declaring github.io canonical.
         if site_origin.is_text(source):
-            target.write_text(site_origin.apply(source.read_text(encoding='utf-8'), public_url),
-                              encoding='utf-8')
+            target.write_text(
+                site_origin.apply(source.read_text(encoding='utf-8'), public_url, tag),
+                encoding='utf-8')
             shutil.copystat(source, target)
         else:
             shutil.copy2(source, target)
+    # The mirror re-publishes a previously published site against a newer
+    # release, so the version in its structured data is retargeted rather than
+    # substituted from a token. Prove it landed instead of trusting the regex.
+    site_origin.assert_version(output, tag)
     manifest = {'schema': 1, 'version': tag, 'china': {'provider': provider, 'assets': {}}}
     checksum_lines = []
     for name, asset in sorted(assets.items()):

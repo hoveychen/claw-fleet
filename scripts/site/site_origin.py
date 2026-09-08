@@ -62,7 +62,15 @@ def apply(text, origin, version=None):
     """
     text = text.replace(TOKEN, validate_origin(origin))
     if version is not None:
-        text = text.replace(VERSION_TOKEN, validate_version(version))
+        resolved = validate_version(version)
+        text = text.replace(VERSION_TOKEN, resolved)
+        # A tree published earlier carries an already-resolved version. The
+        # mirror's updater re-publishes exactly that HTML against a newer
+        # release (selfhost.sync passes site_root=<live deployment>), so
+        # leaving the old number there would have the structured data claim a
+        # version that is not what the page now downloads.
+        text = re.sub(r'("softwareVersion":\s*")v?\d+\.\d+\.\d+(")',
+                      lambda m: m.group(1) + resolved + m.group(2), text)
     return text
 
 
@@ -101,6 +109,22 @@ def assert_no_token(root):
                 stragglers.append(f'{path} ({token})')
     if stragglers:
         raise ValueError('Publish-time token left unsubstituted in: ' + ', '.join(stragglers))
+
+
+def assert_version(root, version):
+    """Every page that states a software version must state this one.
+
+    The re-target above is a regex over published HTML, so a markup change
+    could make it silently no-op and quietly restore the stale number. This
+    turns that back into a failure.
+    """
+    expected = f'"softwareVersion":"{validate_version(version)}"'
+    wrong = [str(path) for path in sorted(Path(root).rglob('*'))
+             if path.is_file() and is_text(path)
+             and 'softwareVersion' in (body := path.read_text(encoding='utf-8'))
+             and expected not in body]
+    if wrong:
+        raise ValueError(f'Published version is not {version} in: ' + ', '.join(wrong))
 
 
 def contains_token(reference):

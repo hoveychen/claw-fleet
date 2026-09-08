@@ -16,6 +16,8 @@
 - Pages：`stage_pages.py --origin https://hoveychen.github.io/claw-fleet`
 - 镜像：`distribute.prepare()` 用它已有的 `public_url` 参数替换
 
+同一套机制还带一个 `__SITE_VERSION__`：JSON-LD 的 `softwareVersion` 也是发布时才填的。Pages 侧直接读 `pages_manifest.py` 刚生成的 `docs/downloads.json`（不用往工作流里再传一个参数）；镜像侧用 `distribute.py` 已经在校验的那个 release tag。镜像还多一步：它 re-publish 的是**上一次发布过的 HTML**，里面版本号已经是解析过的值，所以会被重定向到当前 tag，并由 `assert_version()` 断言真落地了（regex 静默 no-op 会把陈旧版本号悄悄放回去）。
+
 `site_origin.assert_no_token()` 在两条路径上都会兜底：残留一个未替换的 token 页面照样能渲染、只有机器可读的那一半是错的，所以它必须是硬错误。
 
 ### 镜像上的 HTML 不会自动更新
@@ -72,6 +74,7 @@ ssh own-api-sz 'sudo systemctl start fleet-site-update.service && journalctl -u 
 - `sitemap.xml` 用 Google 的 sitemap-hreflang 形式；不写 `lastmod`/`changefreq`/`priority`——守不住的字段比没有更糟。
 - JSON-LD：首页 `Organization` + `WebSite` + `SoftwareApplication`（免费、四平台、AGPL）+ `FAQPage`；实测报告页 `Organization` + `BreadcrumbList` + `FAQPage`。**没有 `aggregateRating`**：没有真实评分，编一个会让整站结构化数据被忽略。
 - FAQ 的结构化数据由页面渲染的同一份 pairs 生成，markup 与可见内容不可能漂移（`test_seo.py` 有守门测试）。
+- `softwareVersion` 由发布路径回填真实 tag，构建产物里只有 token——不会出现「结构化数据说 2.5.0、下载按钮给 2.7.0」。
 - 标题与描述覆盖真实搜索意图：英文面向 Google（Claude Code GUI / desktop app），中文面向百度（桌面图形界面 / 客户端），平台与「免费开源」写进描述。
 - `docs/` 里的设计稿、产品调研、站点评审、镜像的 systemd 单元与 nginx 配置**不再随官网发布**（此前 33 个文件是公开的）。
 
