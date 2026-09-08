@@ -58,6 +58,12 @@ def build(lang, c):
     def dimensions(name):
         return struct.unpack('>II', (ROOT / 'docs/screenshots/current' / name).read_bytes()[16:24])
     mobile_w, mobile_h = dimensions(f'mobile-{lang}.png')
+    agents_w, agents_h = dimensions(f'agents-{lang}.png')
+    agents_src = asset(f'screenshots/current/agents-{lang}.png')
+    harness_shot = (f'<div class="product-stage harness-stage"><div class="product-window">'
+        f'<a class="screenshot-open" href="{agents_src}" target="_blank" aria-label="' + ('查看完整截图' if lang=='zh' else 'Open full-size screenshot') + '">'
+        f'<img src="{agents_src}" width="{agents_w}" height="{agents_h}" loading="lazy" alt="{c["agentsAlt"]}"></a>'
+        f'</div></div><p class="harness-sample">{c["sample"]}</p>')
     panels=''
     for i,shot in enumerate(shots):
         w,h=dimensions(shot)
@@ -83,7 +89,7 @@ def build(lang, c):
 {panels}<p class="mobile-sample">{c['sample']}</p>
 </section>
 <section class="overview wrap"><div class="section-heading"><h2>{c['sectionHeading']}</h2><p>{c['sectionText']}</p></div><div class="feature-columns">{features}</div></section>
-<section class="harness wrap" id="harness"><div class="section-heading"><h2>{c['harnessHeading']}</h2><p>{c['harnessCopy']}</p></div><div class="relay"><div class="relay-lane">{relay}</div><p class="relay-note">{c['relayNote']}</p></div><div class="feature-columns">{harness_points}</div></section>
+<section class="harness wrap" id="harness"><div class="section-heading"><h2>{c['harnessHeading']}</h2><p>{c['harnessCopy']}</p></div><div class="relay"><div class="relay-lane">{relay}</div><p class="relay-note">{c['relayNote']}</p></div>{harness_shot}<div class="feature-columns">{harness_points}</div></section>
 <section class="mobile-section wrap" id="mobile"><div class="mobile-art"><div class="phone"><img src="{asset(f'screenshots/current/mobile-{lang}.png')}" width="{mobile_w}" height="{mobile_h}" loading="lazy" alt="{c['mobileAlt']}"></div><p>{c['mobileCaption']}</p></div><div class="mobile-copy"><h2>{c['mobileHeading']}</h2><p>{c['mobileCopy']}</p><ul>{''.join(f'<li>{p}</li>' for p in c['mobilePoints'])}</ul><a class="text-link" href="#getting-started">{c['mobileCta']} <span aria-hidden="true">↗</span></a></div></section>
 <section class="work-depth wrap"><div class="section-heading"><h2>{c['moreHeading']}</h2><p>{c['moreCopy']}</p></div><div class="depth-list">{more}</div><div class="source-strip"><p>{c['sourceNames']}</p><span>{c['sourceBlurb']}</span></div></section>
 {capabilities}

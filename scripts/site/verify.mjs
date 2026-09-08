@@ -19,8 +19,14 @@ try {for(const lang of ['en','zh']) for(const width of [1440,390]) {
  }
  await p.locator('.phone').scrollIntoViewIfNeeded();
  await p.waitForFunction(()=>{const i=document.querySelector('.phone img');return i.complete&&i.naturalWidth>0;});
- const dimensions=await p.locator('.product-window img,.phone img').evaluateAll(imgs=>imgs.map(i=>({src:i.getAttribute('src'),width:i.clientWidth,height:i.clientHeight,parentWidth:i.parentElement.clientWidth,parentHeight:i.parentElement.clientHeight})));
+ // The multi-agent board is the one deliberate exception: at phone width it is
+ // upscaled past its frame so the per-card model names stay readable, and the
+ // stage scrolls sideways instead. Assert that scroll exists rather than fit.
+ const dimensions=await p.locator('.product-window img,.phone img').evaluateAll(imgs=>imgs.filter(i=>!i.closest('.harness-stage')).map(i=>({src:i.getAttribute('src'),width:i.clientWidth,height:i.clientHeight,parentWidth:i.parentElement.clientWidth,parentHeight:i.parentElement.clientHeight})));
  if(dimensions.some(i=>i.width>i.parentWidth+2||i.height>i.parentHeight+2))throw Error(JSON.stringify(dimensions));
+ const board=await p.locator('.harness-stage .product-window').evaluate(el=>({scrollW:el.scrollWidth,clientW:el.clientWidth,overflowX:getComputedStyle(el).overflowX,imgW:el.querySelector('img').clientWidth}));
+ if(board.imgW<200||board.scrollW<board.imgW-2)throw Error('Agent board clipped: '+JSON.stringify(board));
+ if(board.imgW>board.clientW+2&&board.overflowX!=='auto')throw Error('Agent board overflows without scroll: '+JSON.stringify(board));
  if(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth)) throw Error('Horizontal overflow');
 
  if(await p.locator('.capability-group li').count()!==54)throw Error('Incomplete feature catalogue');

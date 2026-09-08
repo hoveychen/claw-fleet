@@ -10,9 +10,9 @@
   "skip": "Skip to content",
   "headline": "Give it the work.<br>Make the calls.<br>Take the results.",
   "intro": "Your personal AI workspace.",
-  "lede": "Bring Claude Code, Codex and dsh (DeepSeek Harness) together. Move work forward by project, review what needs your judgment, and keep the results within reach.",
+  "lede": "One workspace for Claude Code, Codex and dsh (DeepSeek Harness). Work moves by project, the material is in front of you when a call is yours to make, and what gets made stays where you can find it.",
   "cta": "Download Claw Fleet",
-  "secondary": "See the workflow",
+  "secondary": "See how it runs",
   "meta": "Free & open source. Bring your own AI tools and accounts.",
   "tabs": [
     "Brief the task",
@@ -26,24 +26,24 @@
     "A result you can open, keep and share."
   ],
   "panelCopy": [
-    "Choose a project and an AI tool. Add the context, give it a direction, and come back to the same workspace to continue.",
-    "Look at a proposal, image or document, then give the task its next direction. Questions and answers stay connected to the work.",
-    "Browse deliverables by project. Preview documents and media, add a note, save a favorite, or export the file."
+    "Pick a project and an AI tool, attach the material, say what you want done. Whatever you think of later stays in the same workspace.",
+    "A proposal, an image, a document — see it clearly, then decide the next step. Every question stays attached to the work it came from.",
+    "Browse deliverables by project, with documents and media previewed in place. Leave a note, star one, or export the file and take it with you."
   ],
   "sectionHeading": "Keep the whole<br>piece of work together.",
   "sectionText": "The project, the conversation, the next decision, and what came out of it.",
   "features": [
     [
       "Add a thought. Keep moving.",
-      "Send a follow-up while a Fleet task runs, or continue the conversation once it stops. Your work stays with the project."
+      "Queue a follow-up while a task is still running, and keep talking once it stops. The whole thread of a job stays in its project."
     ],
     [
       "Make an informed call.",
-      "Review the material an agent brings back: a proposal, an image, a document. Choose a direction without reconstructing the whole conversation."
+      "The proposal, image or document an agent brings back sits on the card that asks for your call. No digging through the transcript first."
     ],
     [
       "Put the result to use.",
-      "Open a deliverable, export it, and return to it later. Keep reusable conclusions in a versioned project wiki."
+      "Open a deliverable, export it, come back to it weeks later. Conclusions worth reusing go into a versioned project wiki."
     ]
   ],
   "navHarness": "Multiple agents",
@@ -78,35 +78,36 @@
       "Plans, the project wiki, deliverables and notes live in Fleet, not inside one tool. What Claude Code writes down, Codex and dsh can read back."
     ]
   ],
+  "agentsAlt": "Fleet session board with Claude Code, Codex and dsh tasks running side by side, each card labelled with its tool and model",
   "mobileHeading": "Away from your desk.<br>Still part of the work.",
-  "mobileCopy": "An idea doesn’t have to wait until you get home. Start a task from your phone, choose the project and device, and come back when a decision needs you.",
+  "mobileCopy": "An idea doesn’t have to wait until you’re back at your desk. Hand out work from your phone — pick the project and the machine that runs it — and come back when a call is yours to make.",
   "mobilePoints": [
-    "Type a brief, or edit a voice transcription.",
-    "See tasks and decisions from paired devices together.",
-    "Preview, download or share supported deliverables."
+    "Type the brief, or speak it and edit the transcription.",
+    "Tasks and pending decisions from every paired device, in one place.",
+    "Supported deliverables can be previewed, downloaded or shared."
   ],
   "mobileCta": "How to connect your phone",
   "mobileCaption": "Current mobile interface · Illustrative data",
   "moreHeading": "Give the next step<br>somewhere to go.",
-  "moreCopy": "For the work that takes more than a conversation.",
+  "moreCopy": "When there is more of it, and it runs longer, the workspace keeps up.",
   "moreItems": [
     [
       "Projects, not loose threads",
-      "Keep tasks with their workspace. Reach project files, Git and a terminal when you need to look closer."
+      "Tasks sit with their workspace. The file tree, Git and a terminal are right there when you need a closer look."
     ],
     [
       "Knowledge you can reuse",
-      "Find a previous report, check its version and reference it in the next task."
+      "Pull up an earlier report, compare versions, and cite its conclusions straight into the next task."
     ],
     [
       "Work that can continue",
-      "Use plans and handoff briefs for longer tasks. Schedule recurring work, or wait for a condition before continuing."
+      "Long tasks run as plans, and a handoff brief lets someone else pick them up. Recurring work goes on a schedule, or waits for a condition to be met."
     ]
   ],
   "sourceNames": "Claude Code, Codex, and dsh (DeepSeek Harness)",
-  "sourceBlurb": "Choose the tools and models you already use. dsh can connect to configured model providers. Each tool keeps its own account and access requirements.",
+  "sourceBlurb": "Use the tools and models you already have. dsh connects to the model providers you configure; all three keep their own accounts and quotas.",
   "downloadHeading": "Your next project<br>starts here.",
-  "downloadCopy": "Install the desktop app, connect your AI tools, and give your next piece of work a home.",
+  "downloadCopy": "Install the desktop app, connect your AI tools, and give the next piece of work somewhere to live.",
   "versionNote": "Screens show the current development interface. Downloads below are the latest stable release; mobile layout may differ.",
   "downloadLabel": "Download",
   "source": "Download source",
@@ -146,15 +147,15 @@
   "steps": [
     [
       "Connect your AI tools",
-      "Use Settings to check or install supported tools, then sign in or configure their provider credentials. Model subscriptions and API usage are separate."
+      "Check or install the tools from Settings, then sign in or fill in provider credentials. Model subscriptions and API usage stay on each vendor’s own bill."
     ],
     [
       "Give it the first brief",
-      "Choose a project, or start in chat mode. Add context, pick your tool and model, and describe the work."
+      "Pick a project, or open a plain chat to start. Attach the material, choose a tool and model, and say what you want done."
     ],
     [
       "Take it with you",
-      "Enable Mobile and pair your phone. Keep the machine running Fleet online so you can reach its tasks and decisions."
+      "Turn on Mobile and pair your phone. As long as the machine running Fleet stays online, you can follow tasks and answer decisions from anywhere."
     ]
   ],
   "faqHeading": "A few things to know.",
@@ -165,11 +166,11 @@
     ],
     [
       "Is it free?",
-      "Claw Fleet is free and open source under AGPL-3.0. Your AI tools, model subscriptions and API usage are separate. Usage costs shown in Fleet are estimates."
+      "Claw Fleet itself is free and open source under AGPL-3.0. AI tools, model subscriptions and API usage stay on each vendor’s own bill. Costs shown in Fleet are estimated from usage, for reference only."
     ],
     [
       "Does my computer have to stay on?",
-      "The machine running the task must stay online. If your phone is paired with Fleet on your computer, keep that computer and Fleet running. You can also deploy fleet webui on another machine that stays online."
+      "The machine running the task has to stay online. If your phone is paired to Fleet on your computer, that computer and Fleet both need to be up. You can also deploy fleet webui on a machine that stays on."
     ],
     [
       "Can I speak to it from my phone?",
@@ -181,7 +182,7 @@
     ],
     [
       "What happens on a long task?",
-      "Fleet supports plans, handoff briefs, schedules and condition-based waits. Handoffs start a fresh session with a brief; they do not provide unlimited context. These workflows depend on setup and agent support."
+      "Fleet gives you four things: plans, handoffs, schedules and condition-based waits. A handoff starts a fresh session from a brief — and it can hand over to a different AI tool — but it is not unlimited context. Which of these you can use depends on your setup and the tool’s support."
     ],
     [
       "Where does my data go?",

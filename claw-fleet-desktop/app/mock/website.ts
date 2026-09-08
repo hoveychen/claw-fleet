@@ -18,10 +18,11 @@ export function installWebsiteFixtures() {
     workspaceName: c.projects[i % 6], workspacePath: `/Users/demo/workspace/${projects[i % 6]}`,
     status: (['waitingInput', 'thinking', 'executing', 'idle'] as const)[i % 4],
     isSubagent: false, parentSessionId: null, runningSubagentCount: 0, watches: [],
-    agentSource: (['claude-code', 'codex', 'dsh'] as const)[i % 3], model: ['claude-opus-4-8', 'gpt-5.6-sol', 'gpt-5.6-sol'][i % 3],
+    agentSource: (['claude-code', 'codex', 'dsh'] as const)[i % 3], model: ['claude-opus-4-8', 'gpt-5.6-sol', 'deepseek/deepseek-v4-pro'][i % 3],
     entrypoint: 'fleet', fleetSpawned: true, procAlive: i % 4 !== 3,
     lastMessagePreview: preview, lastActivityMs: Date.now() - (i + 1) * 60000,
     jsonlPath: `/Users/demo/website-${i}.jsonl`, tokenSpeed: 24 + i * 3, agentTokenSpeed: 0,
+    totalOutputTokens: 12800 + i * 7350, totalCostUsd: 0.62 + i * 0.37, agentTotalCostUsd: 0, contextPercent: 0.18 + (i % 5) * 0.13,
   })));
   for (const [i, session] of MOCK_SESSIONS.entries()) {
     MOCK_MESSAGES[session.id] = [
