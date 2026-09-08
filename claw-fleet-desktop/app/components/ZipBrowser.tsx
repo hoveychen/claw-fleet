@@ -92,6 +92,16 @@ interface Failure {
   detail: string;
 }
 
+/** A member's timestamp, compact enough to sit in a row.
+ *
+ *  Zip stores DOS date/time in *local* time with no zone and 2-second
+ *  resolution, so anything more precise than minutes would be inventing
+ *  accuracy. Absent for archives whose writer emitted no timestamp. */
+function rowTime(ms: number | null): string {
+  if (ms === null) return "";
+  return new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
 function failure(e: unknown): Failure {
   if (e instanceof ZipError) return { code: e.code, detail: e.message };
   return { code: "other", detail: e instanceof Error ? e.message : String(e) };
@@ -116,6 +126,7 @@ export function ZipBrowser({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [listError, setListError] = useState<Failure | null>(null);
   const [cwd, setCwd] = useState("");
+  const [query, setQuery] = useState("");
   const [open, setOpen] = useState<ZipEntry | null>(null);
   const [member, setMember] = useState<ZipMemberPreview | null>(null);
   const [memberError, setMemberError] = useState<Failure | null>(null);
@@ -153,6 +164,7 @@ export function ZipBrowser({
     setLoaded(null);
     setListError(null);
     setCwd("");
+    setQuery("");
     setOpen(null);
     const reader = rangeReader(url, size);
     readZipEntries(reader)
@@ -215,6 +227,24 @@ export function ZipBrowser({
     () => (loaded ? zipDirAt(loaded.root, cwd) : null),
     [loaded, cwd],
   );
+
+  /**
+   * Search runs over the *whole* archive, not the folder you happen to be in.
+   *
+   * That is the point of it: a build output with three hundred files nested six
+   * deep is exactly the archive nobody wants to walk, and a filter that only
+   * looked at the current level would make you walk it first. Hits are files
+   * only — a folder is a place to go, and the way to go there is the tree.
+   * Each hit shows its full path, since a bare `index.html` out of context
+   * names nothing.
+   */
+  const hits = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle || !loaded) return null;
+    return loaded.entries
+      .filter((e) => !e.isDir && e.path.toLowerCase().includes(needle))
+      .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
+  }, [loaded, query]);
 
   if (listError) {
     return (
@@ -303,14 +333,49 @@ export function ZipBrowser({
           </span>
         ))}
         <span className={styles.bar_spacer} />
+        <input
+          className={styles.search}
+          type="search"
+          value={query}
+          placeholder={t("artifacts.zip.search", "在包里搜索…")}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <span className={styles.bar_size}>
           {t("artifacts.zip.count", "{{count}} 项", {
-            count: dir.dirs.length + dir.files.length,
+            count: hits ? hits.length : dir.dirs.length + dir.files.length,
           })}
         </span>
       </div>
       <div className={styles.body}>
-        {dir.dirs.length === 0 && dir.files.length === 0 ? (
+        {hits ? (
+          hits.length === 0 ? (
+            <div className={styles.centered}>
+              {t("artifacts.zip.no_hits", "包里没有匹配的文件。")}
+            </div>
+          ) : (
+            <ul className={styles.rows}>
+              {hits.map((f) => {
+                const Icon = KIND_ICON[zipEntryKind(zipEntryMime(f.name), f.name)] ?? FileIcon;
+                return (
+                  <li key={`h:${f.path}`}>
+                    <button className={styles.row} onClick={() => setOpen(f)}>
+                      {f.encrypted ? (
+                        <Lock size={15} className={styles.row_icon} />
+                      ) : (
+                        <Icon size={15} className={styles.row_icon} />
+                      )}
+                      <span className={styles.row_name} title={f.path}>
+                        {f.path}
+                      </span>
+                      <span className={styles.row_time}>{rowTime(f.modifiedMs)}</span>
+                      <span className={styles.row_meta}>{formatBytes(f.size)}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        ) : dir.dirs.length === 0 && dir.files.length === 0 ? (
           <div className={styles.centered}>
             {t("artifacts.zip.empty", "这个文件夹是空的。")}
           </div>
@@ -340,6 +405,7 @@ export function ZipBrowser({
                       <Icon size={15} className={styles.row_icon} />
                     )}
                     <span className={styles.row_name}>{f.name}</span>
+                    <span className={styles.row_time}>{rowTime(f.modifiedMs)}</span>
                     <span className={styles.row_meta}>{formatBytes(f.size)}</span>
                   </button>
                 </li>

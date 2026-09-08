@@ -21,6 +21,7 @@ import {
   Lock,
   Music,
   Package,
+  Search,
   Share2,
 } from "lucide-react";
 
@@ -63,6 +64,13 @@ const EMPTY_SOURCE: PreviewSource = {
   text: null,
 };
 
+/** 成员的时间戳，短到能塞进一行。zip 存的是本地时区的 DOS 时间、精度 2 秒，
+ *  所以只到分钟；有的写入方压根不写时间戳，那就没有。 */
+function rowTime(ms: number | null): string {
+  if (ms === null) return "";
+  return new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
 function describe(e: unknown): string {
   if (e instanceof ZipError) {
     switch (e.code) {
@@ -81,6 +89,35 @@ function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** 一行文件。手机上宽度不够摆「名字 | 时间 | 大小」三列，所以时间和大小挪到
+ *  名字下面那行——这是手机的读法，不是把桌面端那排硬塞进来。 */
+function FileRow({
+  entry,
+  label,
+  onOpen,
+}: {
+  entry: ZipEntry;
+  /** 目录浏览时是文件名，搜索命中时是完整路径。 */
+  label: string;
+  onOpen: (e: ZipEntry) => void;
+}) {
+  const Icon = KIND_ICON[zipEntryKind(zipEntryMime(entry.name), entry.name)] ?? FileText;
+  const sub = [rowTime(entry.modifiedMs), formatBytes(entry.size)].filter(Boolean).join(" · ");
+  return (
+    <button className={styles.row} onClick={() => onOpen(entry)}>
+      {entry.encrypted ? (
+        <Lock size={16} className={styles.rowIcon} />
+      ) : (
+        <Icon size={16} className={styles.rowIcon} />
+      )}
+      <span className={styles.rowText}>
+        <span className={styles.rowName}>{label}</span>
+        <span className={styles.rowSub}>{sub}</span>
+      </span>
+    </button>
+  );
+}
+
 export function ZipBrowser({
   bytes,
   onShareMember,
@@ -93,6 +130,7 @@ export function ZipBrowser({
   const [entries, setEntries] = useState<ZipEntry[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [cwd, setCwd] = useState("");
+  const [query, setQuery] = useState("");
   const [open, setOpen] = useState<ZipEntry | null>(null);
   const [memberBytes, setMemberBytes] = useState<Uint8Array | null>(null);
   const [memberError, setMemberError] = useState<string | null>(null);
@@ -105,6 +143,7 @@ export function ZipBrowser({
     setEntries(null);
     setListError(null);
     setCwd("");
+    setQuery("");
     setOpen(null);
     readZipEntries(reader)
       .then((list) => {
@@ -122,6 +161,16 @@ export function ZipBrowser({
     () => (entries ? buildZipTree(entries) : null),
     [entries],
   );
+
+  /** 搜的是整个包而不是当前这层——理由与桌面端同一条：值得搜的正是那个懒得
+   *  走过去的深层文件。命中只给文件，并显示完整路径。 */
+  const hits = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle || !entries) return null;
+    return entries
+      .filter((e) => !e.isDir && e.path.toLowerCase().includes(needle))
+      .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
+  }, [entries, query]);
 
   useEffect(() => {
     setMemberBytes(null);
@@ -251,8 +300,32 @@ export function ZipBrowser({
           </span>
         ))}
       </div>
+      <div className={styles.searchRow}>
+        <Search size={14} className={styles.searchIcon} />
+        <input
+          className={styles.search}
+          type="search"
+          value={query}
+          placeholder={t("在包里搜索…")}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
       <div className={styles.body}>
-        {dir.dirs.length === 0 && dir.files.length === 0 ? (
+        {hits ? (
+          hits.length === 0 ? (
+            <div className={artifactStyles.noPreview}>
+              <div className={artifactStyles.noPreviewHint}>{t("包里没有匹配的文件。")}</div>
+            </div>
+          ) : (
+            <ul className={styles.rows}>
+              {hits.map((f) => (
+                <li key={`h:${f.path}`}>
+                  <FileRow entry={f} onOpen={setOpen} label={f.path} />
+                </li>
+              ))}
+            </ul>
+          )
+        ) : dir.dirs.length === 0 && dir.files.length === 0 ? (
           <div className={artifactStyles.noPreview}>
             <div className={artifactStyles.noPreviewHint}>{t("这个文件夹是空的。")}</div>
           </div>
@@ -262,27 +335,20 @@ export function ZipBrowser({
               <li key={`d:${d.path}`}>
                 <button className={styles.row} onClick={() => setCwd(d.path)}>
                   <Folder size={16} className={styles.rowIcon} />
-                  <span className={styles.rowName}>{d.name}</span>
-                  <span className={styles.rowMeta}>{d.dirs.length + d.files.length}</span>
+                  <span className={styles.rowText}>
+                    <span className={styles.rowName}>{d.name}</span>
+                    <span className={styles.rowSub}>
+                      {t("{0} 项", d.dirs.length + d.files.length)}
+                    </span>
+                  </span>
                 </button>
               </li>
             ))}
-            {dir.files.map((f) => {
-              const Icon = KIND_ICON[zipEntryKind(zipEntryMime(f.name), f.name)] ?? FileText;
-              return (
-                <li key={`f:${f.path}`}>
-                  <button className={styles.row} onClick={() => setOpen(f)}>
-                    {f.encrypted ? (
-                      <Lock size={16} className={styles.rowIcon} />
-                    ) : (
-                      <Icon size={16} className={styles.rowIcon} />
-                    )}
-                    <span className={styles.rowName}>{f.name}</span>
-                    <span className={styles.rowMeta}>{formatBytes(f.size)}</span>
-                  </button>
-                </li>
-              );
-            })}
+            {dir.files.map((f) => (
+              <li key={`f:${f.path}`}>
+                <FileRow entry={f} onOpen={setOpen} label={f.name} />
+              </li>
+            ))}
           </ul>
         )}
       </div>
