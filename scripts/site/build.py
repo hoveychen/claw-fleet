@@ -62,6 +62,18 @@ def build(lang, c):
     shots=[f'work-{lang}.png',f'review-{lang}.png',f'relay-{lang}.png',f'results-{lang}.png']
     def dimensions(name):
         return seo.png_size(ROOT / 'docs/screenshots/current' / name)
+    def picture(name, w, h, alt, *, eager=False):
+        """A screenshot as WebP with the PNG kept as the fallback <img>.
+
+        WebP costs 71% fewer bytes on these flat UI shots (2.6 MB -> 758 KB
+        across the set), which matters most to the visitors coming through the
+        China mirror. The PNG stays the `src` so a browser that cannot decode
+        WebP still shows the screenshot, and it stays what "open full-size"
+        hands out -- a file anyone can save and paste anywhere.
+        """
+        loading = 'fetchpriority="high"' if eager else 'loading="lazy"'
+        return (f'<picture><source type="image/webp" srcset="{asset(name.replace(".png", ".webp"))}">'
+                f'<img src="{asset(name)}" width="{w}" height="{h}" {loading} alt="{alt}"></picture>')
     social_shot = f'screenshots/current/work-{lang}.png'
     page_path = 'zh/' if lang == 'zh' else ''
     structured = seo.graph([
@@ -81,13 +93,13 @@ def build(lang, c):
     agents_src = asset(f'screenshots/current/agents-{lang}.png')
     harness_shot = (f'<div class="product-stage harness-stage"><div class="product-window">'
         f'<a class="screenshot-open" href="{agents_src}" target="_blank" aria-label="' + ('查看完整截图' if lang=='zh' else 'Open full-size screenshot') + '">'
-        f'<img src="{agents_src}" width="{agents_w}" height="{agents_h}" loading="lazy" alt="{c["agentsAlt"]}"></a>'
+        + picture(f'screenshots/current/agents-{lang}.png', agents_w, agents_h, c['agentsAlt']) + '</a>'
         f'</div></div><p class="harness-sample">{c["sample"]}</p>')
     panels=''
     for i,shot in enumerate(shots):
         w,h=dimensions(shot)
         panels+=f'''<div id="panel-{i}" class="demo-panel">
-<div class="product-stage stage-{i}"><div class="product-window"><a class="screenshot-open" href="{asset("screenshots/current/" + shot)}" target="_blank" aria-label="{'查看完整截图' if lang=='zh' else 'Open full-size screenshot'}"><img src="{asset("screenshots/current/" + shot)}" width="{w}" height="{h}" {'fetchpriority="high"' if i==0 else 'loading="lazy"'} alt="{c['panelTitles'][i]}"></a></div></div>
+<div class="product-stage stage-{i}"><div class="product-window"><a class="screenshot-open" href="{asset("screenshots/current/" + shot)}" target="_blank" aria-label="{'查看完整截图' if lang=='zh' else 'Open full-size screenshot'}">{picture("screenshots/current/" + shot, w, h, c['panelTitles'][i], eager=i==0)}</a></div></div>
 <div class="panel-caption"><h3>{c['panelTitles'][i]}</h3><p>{c['panelCopy'][i]}</p></div></div>'''
     return f'''<!doctype html>
 <html lang="{'zh-CN' if lang=='zh' else 'en'}">
@@ -109,7 +121,7 @@ def build(lang, c):
 </section>
 <section class="overview wrap"><div class="section-heading"><h2>{c['sectionHeading']}</h2><p>{c['sectionText']}</p></div><div class="feature-columns">{features}</div></section>
 <section class="harness wrap" id="harness"><div class="section-heading"><h2>{c['harnessHeading']}</h2><p>{c['harnessCopy']}</p></div><div class="relay"><div class="relay-lane">{relay}</div><p class="relay-note">{c['relayNote']}</p></div>{harness_shot}<div class="feature-columns">{harness_points}</div></section>
-<section class="mobile-section wrap" id="mobile"><div class="mobile-art"><div class="phone"><img src="{asset(f'screenshots/current/mobile-{lang}.png')}" width="{mobile_w}" height="{mobile_h}" loading="lazy" alt="{c['mobileAlt']}"></div><p>{c['mobileCaption']}</p></div><div class="mobile-copy"><h2>{c['mobileHeading']}</h2><p>{c['mobileCopy']}</p><ul>{''.join(f'<li>{p}</li>' for p in c['mobilePoints'])}</ul><a class="text-link" href="#getting-started">{c['mobileCta']} <span aria-hidden="true">↗</span></a></div></section>
+<section class="mobile-section wrap" id="mobile"><div class="mobile-art"><div class="phone">{picture(f'screenshots/current/mobile-{lang}.png', mobile_w, mobile_h, c['mobileAlt'])}</div><p>{c['mobileCaption']}</p></div><div class="mobile-copy"><h2>{c['mobileHeading']}</h2><p>{c['mobileCopy']}</p><ul>{''.join(f'<li>{p}</li>' for p in c['mobilePoints'])}</ul><a class="text-link" href="#getting-started">{c['mobileCta']} <span aria-hidden="true">↗</span></a></div></section>
 <section class="work-depth wrap"><div class="section-heading"><h2>{c['moreHeading']}</h2><p>{c['moreCopy']}</p></div><div class="depth-list">{more}</div><div class="source-strip"><p>{c['sourceNames']}</p><span>{c['sourceBlurb']}</span></div></section>
 {capabilities}
 <section class="download-section" id="download"><div class="wrap"><div class="section-heading"><h2>{c['downloadHeading']}</h2><p>{c['downloadCopy']}</p></div><p class="version-note">{c['versionNote']}</p><div class="download-source"><label for="download-source">{c['source']}</label><select id="download-source"><option value="github">{c['globalSource']}</option></select><p id="source-note" data-version="{c['sourceVersion']}" data-ready="{c['sourceReady']}" data-china="{c['chinaSource']}">{c['sourceNote']}</p></div><div class="downloads">{rows}</div><a class="text-link release-link" href="{GITHUB}/releases">{c['allReleases']} <span aria-hidden="true">↗</span></a><details class="linux-help"><summary>{c['linuxHelp']}<span aria-hidden="true">+</span></summary><pre><code>chmod +x fleet-linux-x64\n./fleet-linux-x64 webui</code></pre><p>{c['linuxAfter']}</p></details><details class="android-help"><summary>{c['androidHelp']}<span aria-hidden="true">+</span></summary><p>{c['androidAfter']}</p></details></div></section>

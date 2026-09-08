@@ -215,6 +215,37 @@ class GeneratedSiteTests(unittest.TestCase):
                 for question in marked:
                     self.assertIn(question, rendered)
 
+    def test_every_screenshot_ships_webp_with_a_png_fallback(self):
+        for name in ('index.html', 'zh/index.html'):
+            with self.subTest(page=name):
+                html = (self.DOCS / name).read_text()
+                pictures = re.findall(r'<picture>(.*?)</picture>', html, re.S)
+                self.assertEqual(len(pictures), 6)  # 4 panels + agents + mobile
+                for markup in pictures:
+                    self.assertRegex(markup, r'<source type="image/webp" srcset="[^"]+\.webp')
+                    # The PNG stays the src: a browser without WebP still shows
+                    # the screenshot, and "open full-size" hands out a PNG.
+                    self.assertRegex(markup, r'<img src="[^"]+\.png')
+                    self.assertIn('alt="', markup)
+                # Width and height stay on the img, so the box is reserved
+                # before either format loads.
+                self.assertEqual(len(re.findall(r'<img [^>]*width="\d+" height="\d+"', html)),
+                                 html.count('<img '))
+
+    def test_a_webp_exists_for_every_published_screenshot(self):
+        shots = sorted((self.DOCS / 'screenshots/current').glob('*.png'))
+        self.assertEqual(len(shots), 12)
+        for png in shots:
+            with self.subTest(shot=png.name):
+                webp = png.with_suffix('.webp')
+                self.assertTrue(webp.is_file(), f'{webp.name} missing: run scripts/site/encode_webp.py')
+                self.assertLess(webp.stat().st_size, png.stat().st_size)
+
+    def test_picture_is_not_left_inline(self):
+        # An inline wrapper reports a zero-width box to everything measuring
+        # the image's parent, including verify.mjs.
+        self.assertRegex((self.DOCS / 'site.css').read_text(), r'picture\s*\{[^}]*display:\s*block')
+
     def test_the_404_page_serves_both_languages_and_stays_out_of_the_index(self):
         html = (self.DOCS / '404.html').read_text()
         self.assertIn('<meta name="robots" content="noindex">', html)

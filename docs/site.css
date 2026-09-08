@@ -1302,6 +1302,13 @@ html[lang="zh-CN"] .hero-copy .intro {
   }
 }
 
+/* Screenshots ship as <picture> (WebP with a PNG fallback). An inline wrapper
+   would report a zero-width box to everything measuring the image's parent, so
+   it has to behave like the img it replaced. */
+picture {
+  display: block;
+}
+
 /* The 404 page. Both languages ship in the markup and an inline script reveals
    one, because loading locale.js here would redirect a missing page to the home
    page and hide the broken link. Without JS the English half shows. */

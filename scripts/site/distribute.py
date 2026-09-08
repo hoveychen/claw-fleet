@@ -149,7 +149,7 @@ def site_files(root):
         if not source.is_file():
             continue
         prefix = page.rpartition('/')[0]
-        for reference in re.findall(r'(?:src|href)="([^"]+)"', source.read_text()):
+        for reference in _references(source.read_text()):
             reference = reference.split('?')[0].split('#')[0]
             if not reference or ':' in reference or reference.startswith('//') or reference.endswith('/'):
                 continue
@@ -176,6 +176,23 @@ def site_files(root):
             elif candidate not in assets:
                 assets.append(candidate)
     return pages + assets
+
+
+def _references(markup):
+    """Every file a page points at: src=, href= and each srcset candidate.
+
+    srcset needs its own pass because `src="` does not match `srcset="`, and a
+    <picture>'s WebP sources live only there. Missing them would 404 the
+    screenshots on the mirror while the origin site looked fine -- the exact
+    failure this function was written to prevent.
+    """
+    for reference in re.findall(r'(?:src|href)="([^"]+)"', markup):
+        yield reference
+    for candidates in re.findall(r'srcset="([^"]+)"', markup):
+        for candidate in candidates.split(','):
+            url = candidate.strip().split()[0] if candidate.strip() else ''
+            if url:
+                yield url
 
 
 def prepare(release, output, public_url, *, site_root=None, provider='Tencent Cloud COS'):
