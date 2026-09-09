@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { isWebBuild } from "../hostEnv";
 import { htmlHasTable, htmlTableToMarkdown } from "../clipboardTable";
+import { useAttachmentThumb } from "../attachmentThumb";
 import { ImageLightbox } from "./ImageLightbox";
 import { useAutoFlip } from "./useAutoFlip";
 import { useWikiMentions } from "./useWikiMentions";
@@ -100,6 +101,61 @@ export interface ChatComposerStagedAttachment {
 export interface ChatComposerHandle {
   focus(): void;
   setSelectionAtEnd(): void;
+}
+
+/**
+ * One staged attachment.
+ *
+ * Its own component rather than an inline `map` body because the thumbnail is
+ * resolved by a hook, and a hook cannot be called once per element of a list
+ * whose length changes as the user adds and removes files.
+ */
+function AttachmentChip({
+  attachment: a,
+  disabled,
+  onZoom,
+  onRemove,
+}: {
+  attachment: ChatComposerAttachment;
+  disabled?: boolean;
+  onZoom: (p: { src: string; alt: string }) => void;
+  onRemove: (path: string) => void;
+}) {
+  const { t } = useTranslation();
+  const thumb = useAttachmentThumb(a);
+  const dims = a.width && a.height ? `${a.width}×${a.height}` : null;
+  return (
+    <div className={`${styles.chip} ${thumb ? styles.chip_image : ""}`} title={a.path}>
+      {thumb && (
+        <button
+          type="button"
+          className={styles.thumb_btn}
+          onClick={() => onZoom({ src: thumb, alt: a.name })}
+          title={t("composer.attachment_zoom", "Click to enlarge")}
+          aria-label={t("composer.attachment_zoom", "Click to enlarge")}
+        >
+          <img src={thumb} alt="" className={styles.thumb} draggable={false} />
+        </button>
+      )}
+      <div className={styles.meta}>
+        <span className={styles.name}>{a.name}</span>
+        {dims && <span className={styles.dims}>{dims}</span>}
+      </div>
+      {a.fromClipboard && !thumb && (
+        <span className={styles.badge}>{t("composer.attachment_pasted", "Pasted")}</span>
+      )}
+      <button
+        type="button"
+        className={styles.chip_remove}
+        onClick={() => onRemove(a.path)}
+        title={t("composer.attachment_remove", "Remove attachment")}
+        aria-label={t("composer.attachment_remove", "Remove attachment")}
+        disabled={disabled}
+      >
+        ×
+      </button>
+    </div>
+  );
 }
 
 export interface ChatComposerProps {
@@ -625,55 +681,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       {contextSlot && <div className={styles.context_row}>{contextSlot}</div>}
       {attachments.length > 0 && (
         <div className={styles.chips}>
-          {attachments.map((a) => {
-            const hasThumb = !!a.previewUrl;
-            const dims = a.width && a.height ? `${a.width}×${a.height}` : null;
-            return (
-              <div
-                key={a.path}
-                className={`${styles.chip} ${hasThumb ? styles.chip_image : ""}`}
-                title={a.path}
-              >
-                {hasThumb && (
-                  <button
-                    type="button"
-                    className={styles.thumb_btn}
-                    onClick={() =>
-                      setPreviewing({ src: a.previewUrl as string, alt: a.name })
-                    }
-                    title={t("composer.attachment_zoom", "Click to enlarge")}
-                    aria-label={t("composer.attachment_zoom", "Click to enlarge")}
-                  >
-                    <img
-                      src={a.previewUrl}
-                      alt=""
-                      className={styles.thumb}
-                      draggable={false}
-                    />
-                  </button>
-                )}
-                <div className={styles.meta}>
-                  <span className={styles.name}>{a.name}</span>
-                  {dims && <span className={styles.dims}>{dims}</span>}
-                </div>
-                {a.fromClipboard && !hasThumb && (
-                  <span className={styles.badge}>
-                    {t("composer.attachment_pasted", "Pasted")}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className={styles.chip_remove}
-                  onClick={() => onRemoveAttachment(a.path)}
-                  title={t("composer.attachment_remove", "Remove attachment")}
-                  aria-label={t("composer.attachment_remove", "Remove attachment")}
-                  disabled={disabled}
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
+          {attachments.map((a) => (
+            <AttachmentChip
+              key={a.path}
+              attachment={a}
+              disabled={disabled}
+              onZoom={setPreviewing}
+              onRemove={onRemoveAttachment}
+            />
+          ))}
         </div>
       )}
       {hero ? (
