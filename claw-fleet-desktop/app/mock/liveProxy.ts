@@ -1681,6 +1681,32 @@ export const LIVE_COMPOSITES: Record<
     return out;
   },
 
+  /**
+   * `gui::get_app_version` — on the desktop this is the binary's own
+   * `CARGO_PKG_VERSION`; a tab has no compile-time constant to read, so it asks
+   * the process that served the page. `/health` answers `{version,status}` —
+   * verified against a real `fleet webui`, whose port carries no auth of its
+   * own, so this needs no token that `callProbe` does not send (a token-gated
+   * `fleet serve` denies it exactly as it denies every other data route, so
+   * nothing regresses there). Release CI stamps the tag into
+   * `claw-fleet-core/Cargo.toml` alongside the desktop's, so the number matches
+   * what the app would show.
+   *
+   * `""` on any failure rather than a placeholder: the settings row hides
+   * itself when there is no version, which beats printing something that is not
+   * one where a version belongs.
+   */
+  get_app_version: async () => {
+    try {
+      const health = (await callProbe({ method: "GET", path: "/health" })) as
+        | { version?: unknown }
+        | null;
+      return typeof health?.version === "string" ? health.version : "";
+    } catch {
+      return "";
+    }
+  },
+
   get_guard_context: async (a) => {
     const sessions = (await callProbe({ method: "GET", path: "/sessions" })) as
       | Array<{ id?: string; jsonlPath?: string }>

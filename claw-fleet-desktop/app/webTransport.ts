@@ -185,7 +185,12 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     // itself as such rather than impersonating a platform.
     case "get_platform":
       return { handled: true, value: "web" };
-    case "get_app_version":
+    // `get_app_version` is not here: it is answered live off `/health` by the
+    // composite in `liveProxy`, which runs ahead of this table, so the browser
+    // build shows the serving process's real version instead of a stand-in.
+    // The build commit has no such source — only the desktop crate's build.rs
+    // bakes `FLEET_GIT_COMMIT`, and `fleet serve` never learns it — so this
+    // stays a non-commit the settings row filters out.
     case "desktop_build_commit":
       return { handled: true, value: "web" };
     // Snake_case on purpose — `App.tsx` reads `has_update` off this shape.
