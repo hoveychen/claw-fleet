@@ -252,10 +252,8 @@ fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpc
         )));
     }
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
-    if name == "fleet__plan" {
-        if let Some(refusal) =
-            refuse_if_subagent(name, "moved your PARENT session's plan focus", &args)
-        {
+    if let Some(effect) = crate::mcp_control::parent_scoped_effect(name) {
+        if let Some(refusal) = refuse_if_subagent(name, effect, &args) {
             return Ok(refusal);
         }
     }
