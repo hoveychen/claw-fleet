@@ -286,6 +286,8 @@ export class MockRelayClient extends RelayClient {
       // 可截图的界面,换不来任何安全性。
       case "host_features":
         return { terminal: true };
+      case "host_identity":
+        return { hostname: "Hoveys-MacBook-Pro", platform: "macos", osVersion: "15.2" };
       case "procs":
         return this.mockProc ? [this.mockProc] : [];
       case "proc_run": {

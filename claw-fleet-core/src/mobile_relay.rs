@@ -2126,6 +2126,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         // host was started with FLEET_TERMINAL, and the phone hides its 终端
         // entries rather than opening a panel whose first spawn is refused.
         "host_features" => serve_host_features(params),
+        "host_identity" => serve_host_identity(params),
         "procs" => serve_procs(params),
         "proc_run" => serve_proc_run(params),
         "proc_output" => serve_proc_output(params),
@@ -3188,6 +3189,12 @@ fn serve_repo_pull(params: &Value) -> Result<Value, String> {
 
 fn serve_host_features(_params: &Value) -> Result<Value, String> {
     serde_json::to_value(crate::feature_flags::host_features()).map_err(|e| e.to_string())
+}
+
+/// 这台主机叫什么 —— 手机端给这台设备起名字用(见 `host_identity.rs`)。纯展示,
+/// 不 gate 任何面,所以与上面的能力开关分开一个方法。
+fn serve_host_identity(_params: &Value) -> Result<Value, String> {
+    serde_json::to_value(crate::host_identity::host_identity()).map_err(|e| e.to_string())
 }
 
 fn serve_proc_run(params: &Value) -> Result<Value, String> {
@@ -7486,6 +7493,21 @@ mod tests {
             // assertion above cannot pass vacuously.
             let err = serve_request("proc_nonsense", &json!({})).unwrap_err();
             assert!(err.contains("unknown method"), "unexpected error: {err}");
+        });
+    }
+
+    /// 手机端拿这一份给配对设备起名字。`platform` 必须在、必须是字符串 ——
+    /// 缺了它客户端连「macOS 设备」这种兜底名都编不出来,只能退回「设备 N」。
+    #[test]
+    fn host_identity_always_carries_a_platform_string() {
+        with_temp_home(|| {
+            let data = serve_request("host_identity", &json!({})).expect("host_identity");
+            let platform = data.get("platform").expect("platform key present");
+            assert_eq!(platform.as_str(), Some(std::env::consts::OS));
+            // hostname 允许缺席(容器、取不到名字的系统),但在场就必须是非空字符串
+            if let Some(h) = data.get("hostname") {
+                assert!(h.as_str().is_some_and(|s| !s.is_empty()), "bad hostname: {data}");
+            }
         });
     }
 

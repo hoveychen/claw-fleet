@@ -222,6 +222,10 @@ pub const PROCS: &str = "/procs";
 /// build so its nav matches what this backend will allow, rather than offering
 /// a 终端 page whose first spawn is refused.
 pub const HOST_FEATURES: &str = "/host_features";
+/// `GET /host_identity` — 这台主机叫什么、什么平台
+/// ([`crate::host_identity::HostIdentity`])。纯展示:手机端(和同源部署下的浏览
+/// 器构建)拿它给配对设备起一个认得出来的名字,代替「设备 1」「设备 2」。
+pub const HOST_IDENTITY: &str = "/host_identity";
 /// The ssh host book (`remote_host::SshHost`): list / upsert / remove.
 ///
 /// On the backend host, not this desktop. The book is spawn-time state —

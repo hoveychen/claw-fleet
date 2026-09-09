@@ -12,6 +12,7 @@
 import { useEffect, useRef } from "react";
 import type { TransportFactory } from "./App";
 import type { PairedDevice } from "./devices";
+import type { HostIdentity } from "./generated/types";
 import type { DeviceAction } from "./deviceRuntime";
 import {
   connectDelayMs,
@@ -67,6 +68,8 @@ interface Props {
   pushGranted: boolean;
   /** 用户是否把**这一台**的通知关掉了。 */
   pushMuted: boolean;
+  /** 那台主机自报了身份(主机名 + 平台)。App 拿它给这台设备起个认得出来的名字。 */
+  onHostIdentity: (deviceId: string, identity: HostIdentity) => void;
 }
 
 /** `pending_snapshot` 的六类请求摊平成一串卡。 */
@@ -102,6 +105,7 @@ export function DeviceConnection({
   connected,
   pushGranted,
   pushMuted,
+  onHostIdentity,
 }: Props) {
   const deviceId = device.id;
   const clientRef = useRef<FleetTransport | null>(null);
@@ -207,6 +211,33 @@ export function DeviceConnection({
       cancelled = true;
     };
   }, [deviceId, storageId]);
+
+  // 这台主机叫什么。问一次就够 —— 主机名不会在一次会话里变,而它的用途只是给
+  // 设备簿里那条记录起个名字(devices.ts::applyHostIdentity)。
+  //
+  // 闸门是 `agentOnline` 而不是 `connected`:连上中转只说明这条 socket 通了,答这
+  // 个方法的是桌面端。老桌面端不认这个方法,那就一直叫「设备 N」—— 一个名字不好看
+  // 不值得在界面上报错。
+  const identityAskedRef = useRef(false);
+  useEffect(() => {
+    if (!agentOnline || identityAskedRef.current) return;
+    const client = clientRef.current;
+    if (!client) return;
+    identityAskedRef.current = true;
+    let cancelled = false;
+    void client
+      .request<HostIdentity>("host_identity")
+      .then((identity) => {
+        if (!cancelled && identity) onHostIdentity(deviceId, identity);
+      })
+      .catch(() => {
+        // 老桌面端没有这个方法 —— 下次挂载再试,不重试也不报错
+        identityAskedRef.current = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentOnline, deviceId, onHostIdentity]);
 
   // 今日花费。桌面端在线时才轮询;数字由桌面端算好,手机只负责显示。
   useEffect(() => {

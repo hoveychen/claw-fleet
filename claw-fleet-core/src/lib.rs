@@ -60,6 +60,7 @@ pub mod headless_runtime;
 pub mod hook_timing;
 pub mod hooks;
 pub mod hooks_server;
+pub mod host_identity;
 pub mod idle;
 pub mod injector_watchdog;
 pub mod interaction_mode;
