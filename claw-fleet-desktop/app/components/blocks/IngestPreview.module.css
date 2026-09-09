@@ -4,6 +4,11 @@
 
 .root {
   display: flex;
+  /* Wraps rather than squeezing: the detail pane is often narrow (an open aux
+     rail leaves ~300px), and a fixed-width well beside an un-shrinkable text
+     column turns the title into one character per line. Below ~380px the text
+     block drops under the well instead. */
+  flex-wrap: wrap;
   gap: 10px;
   align-items: stretch;
   width: 100%;
@@ -53,6 +58,9 @@
 
 .body {
   min-width: 0;
+  /* Grows into whatever is left beside the well, and claims a whole row of its
+     own once there is less than ~170px of it. */
+  flex: 1 1 170px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -68,6 +76,9 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  /* A clamped box does not ellipsize horizontally, so a long unbroken word
+     (an English title, a slug) would run out past the card's edge. */
+  overflow-wrap: anywhere;
 }
 
 .note {
