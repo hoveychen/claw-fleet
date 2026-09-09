@@ -365,6 +365,11 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/dsh_models",
   }),
 
+  model_catalog: () => ({
+    method: "GET",
+    path: "/model_catalog",
+  }),
+
   enqueue_session_message: (a) => ({
     method: "POST",
     path: "/enqueue_message",

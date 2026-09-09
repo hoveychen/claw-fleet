@@ -4,17 +4,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   AGENT_TOOL_CHOICES,
-  CLAUDE_EFFORT_CHOICES,
-  CLAUDE_MODEL_CHOICES,
+  effortChoicesFor,
+  modelChoicesFor,
   CLAUDE_PERMISSION_MODE_CHOICES,
-  CODEX_MODEL_CHOICES,
-  codexEffortChoices,
+
   codexProfileChoices,
   dshFindPick,
   dshLadderSpec,
   dshModelMenu,
   type CodexProfile,
 } from "../modelChoices";
+import { useModelCatalog } from "../useModelCatalog";
 import type { DshModelCatalog } from "../generated/types";
 import { PillMenu, type PillMenuItem } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
@@ -69,6 +69,9 @@ export function SessionOptionPills({
   const { t } = useTranslation();
   const isCodex = tool === "codex";
   const isDsh = tool === "dsh";
+  // Fleet's own model catalog (models.toml) — one source for both the model and
+  // the effort menus, replacing the two lists this file used to hardcode.
+  const catalog = useModelCatalog();
   const toolLabel = toolChoices.find((x) => x.value === tool)?.label ?? "Claude";
   // Third-party Codex models are discovered from the host's profile files
   // rather than hardcoded — a `[model_providers.<id>]` block names no models,
@@ -146,9 +149,9 @@ export function SessionOptionPills({
   const modelChoices = useMemo(() => {
     if (isDsh) return [];
     return isCodex
-      ? [...CODEX_MODEL_CHOICES, ...codexProfileChoices(codexProfiles)]
-      : CLAUDE_MODEL_CHOICES;
-  }, [isCodex, isDsh, codexProfiles]);
+      ? [...modelChoicesFor(catalog, "codex"), ...codexProfileChoices(codexProfiles)]
+      : modelChoicesFor(catalog, "claude");
+  }, [isCodex, isDsh, codexProfiles, catalog]);
   // dsh publishes the ladder per model, so the effort menu follows the current
   // pick rather than a fixed table. A model with no reasoning control offers
   // nothing but "default" — the honest rendering of "this model has no effort
@@ -165,14 +168,16 @@ export function SessionOptionPills({
   );
   const effortChoices = isDsh
     ? (dshLadderPick?.efforts ?? [])
-    : isCodex
-      ? codexEffortChoices(model)
-      : CLAUDE_EFFORT_CHOICES;
+    : effortChoicesFor(catalog, isCodex ? "codex" : "claude", model);
+  // A stale effort is cleared when the picked model does not accept it. Only
+  // meaningful once the catalog has loaded: with an empty catalog every level
+  // looks unsupported, and clearing on that would wipe a deliberate choice.
   useEffect(() => {
-    if (isCodex && effort && !codexEffortChoices(model).includes(effort)) {
+    if (!isCodex || !effort || catalog.length === 0) return;
+    if (!effortChoicesFor(catalog, "codex", model).includes(effort)) {
       onEffortChange("");
     }
-  }, [effort, isCodex, model, onEffortChange]);
+  }, [effort, isCodex, model, onEffortChange, catalog]);
   // In the un-chosen ("") state a pill shows only its bare category name
   // ("Model" / "模型"), not a "…: default" value: the prefix+value form made the
   // toolbar too wide to hold one row (English overflowed outright). The menu's

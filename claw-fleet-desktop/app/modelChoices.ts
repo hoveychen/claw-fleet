@@ -1,35 +1,61 @@
-import type { DshModelCatalog } from "./generated/types";
+import type { DshModelCatalog, PickerHarness } from "./generated/types";
 
-// Shared catalog of selectable Claude models. Consumers prepend their own
-// "default" entry, since the default differs per surface (the new-session
-// launcher, for one, follows the CLI's own configured model).
-export const CLAUDE_MODEL_CHOICES: { value: string; label: string }[] = [
-  { value: "claude-fable-5-1", label: "Fable 5.1" },
-  { value: "claude-fable-5", label: "Fable 5" },
-  { value: "claude-opus-5", label: "Opus 5" },
-  { value: "claude-opus-4-8", label: "Opus 4.8" },
-  { value: "claude-sonnet-5", label: "Sonnet 5" },
-  { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-];
-
-// `claude --effort <level>` accepted values (verified against `claude --help`).
-export const CLAUDE_EFFORT_CHOICES: string[] = ["low", "medium", "high", "xhigh", "max"];
-
-// Selectable Codex models (`codex exec -m <model>`), curated from the ids
-// Codex ships (see `~/.codex/models_cache.json`). The "" default follows
-// Codex's own configured model. Kept small on purpose — add ids as needed.
+// The Claude and Codex model lists used to be hardcoded here, and mirrored by
+// hand in `mobile-web/src/views/Composer.tsx`. Both copies had drifted from the
+// facts (they carried a Codex effort ladder that stopped at `high` and offered a
+// `minimal` level that no Codex model has). They now come from
+// `claw-fleet-core/models.toml` through the `model_catalog` command — one source
+// for the pickers, the guidance sheets, and cross-harness effort mapping alike.
 //
-// Third-party models are NOT listed here: they come from the host's Codex
-// profile files at runtime (see `codexProfileChoices`). Hardcoding them would
-// offer models whose provider block may not exist on the machine running Codex.
-export const CODEX_MODEL_CHOICES: { value: string; label: string }[] = [
-  { value: "gpt-6-astra", label: "GPT-6 Astra" },
-  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
-  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
-  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-  { value: "gpt-5.5", label: "GPT-5.5" },
-];
+// Consumers prepend their own "default" entry, since the default differs per
+// surface (the new-session launcher, for one, follows the CLI's own model).
+
+/** Selectable models for one harness, `[]` before the catalog arrives. */
+export function modelChoicesFor(
+  catalog: PickerHarness[],
+  harness: string,
+): { value: string; label: string }[] {
+  return (
+    catalog
+      .find((h) => h.name === harness)
+      ?.models.map((m) => ({ value: m.id, label: m.label })) ?? []
+  );
+}
+
+/** The effort ladder for a specific model, or the harness's common ladder when
+ *  no model is picked yet.
+ *
+ *  Per-model rather than per-harness because the ladders genuinely differ inside
+ *  a harness: `gpt-5.5` stops at `xhigh` while its siblings go to `max` and
+ *  `ultra`. The old code encoded that as one special case for `gpt-6-astra` and
+ *  got the rest wrong.
+ *
+ *  With no model picked, returns the union across the harness — offering the
+ *  levels *some* model accepts is better than offering none, and picking a model
+ *  immediately narrows it. */
+export function effortChoicesFor(
+  catalog: PickerHarness[],
+  harness: string,
+  model: string,
+): string[] {
+  const h = catalog.find((x) => x.name === harness);
+  if (!h) return [];
+  const picked = h.models.find((m) => m.id === model);
+  if (picked) return picked.efforts;
+  const union: string[] = [];
+  for (const m of h.models) {
+    for (const e of m.efforts) if (!union.includes(e)) union.push(e);
+  }
+  return union;
+}
+
+/** Whether a harness is installed / enabled on this host. Unknown (catalog not
+ *  loaded yet) counts as available, so the picker does not flicker into a
+ *  "nothing here" state on first paint. */
+export function harnessAvailable(catalog: PickerHarness[], harness: string): boolean {
+  const h = catalog.find((x) => x.name === harness);
+  return h ? h.available : true;
+}
 
 /** A Codex profile-v2 file as returned by the `list_codex_profiles` command —
  *  one `<CODEX_HOME>/<name>.config.toml` on whichever host runs Codex. */
@@ -68,16 +94,11 @@ export function codexProfileChoices(
   });
 }
 
-// Codex reasoning effort (`-c model_reasoning_effort=<level>`). Distinct from
-// Claude's --effort scale (no "xhigh"/"max"); Codex adds "minimal".
-export const CODEX_EFFORT_CHOICES: string[] = ["minimal", "low", "medium", "high"];
-
-/** GPT-6 Astra rejects `minimal` and adds the deeper xhigh/max levels. */
-export function codexEffortChoices(model: string): string[] {
-  return model === "gpt-6-astra"
-    ? ["low", "medium", "high", "xhigh", "max"]
-    : CODEX_EFFORT_CHOICES;
-}
+// Codex's reasoning-effort ladder now comes from the catalog like every other
+// harness's — see `effortChoicesFor`. The constant that used to live here said
+// `minimal / low / medium / high`, which the Codex model cache contradicts on
+// both ends: no listed model offers `minimal`, and every one of them accepts
+// `xhigh` and `max` (three also accept `ultra`).
 
 // ── dsh model catalogue → menu ───────────────────────────────────────────────
 //
