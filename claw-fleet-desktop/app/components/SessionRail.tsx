@@ -45,6 +45,11 @@ type WorkspaceRailSectionProps = {
   name: string;
   /** 折叠后的组数（一条折叠的接力链算一组），不是会话总数。 */
   count: number;
+  /** Fold state is *controlled* by the caller. Sections are rendered from the
+   *  filtered rows, so one holding its own state would lose it whenever a
+   *  filter change made its workspace briefly empty and unmount. */
+  collapsed: boolean;
+  onToggle: (path: string) => void;
   children: ReactNode;
 };
 
@@ -55,10 +60,11 @@ export function WorkspaceRailSection({
   path,
   name,
   count,
+  collapsed,
+  onToggle,
   children,
 }: WorkspaceRailSectionProps) {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
 
   return (
     <section className={styles.workspace_section}>
@@ -67,7 +73,7 @@ export function WorkspaceRailSection({
         className={styles.workspace_header}
         aria-expanded={!collapsed}
         title={path}
-        onClick={() => setCollapsed((value) => !value)}
+        onClick={() => onToggle(path)}
       >
         <span className={styles.workspace_folder} aria-hidden="true">
           {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
