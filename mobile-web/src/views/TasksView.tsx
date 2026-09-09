@@ -35,7 +35,7 @@ import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isFleetOwnedTask } from "../types";
 import { useDraft } from "../draft";
 import { itemKey, type WithDevice } from "../deviceRuntime";
-import { useChatWorkspace } from "../useChatWorkspace";
+import { useChatWorkspaces } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
 import { repoRootPath } from "../../../shared-ts/repoPath";
@@ -228,12 +228,14 @@ export interface TaskSection {
 export function groupTaskSections(
   rows: Array<WithDevice<SessionInfo>>,
   opts: {
-    chatPath: string | null;
+    /** 某台设备的聊天目录，null = 还不知道。按设备问，因为远端主机的聊天目录是
+     *  它自己 home 下的路径，与本机那一条不同。 */
+    chatPathOf: (deviceId: string) => string | null;
     multiDevice: boolean;
     deviceLabelOf?: (deviceId: string) => string | null | undefined;
   },
 ): TaskSection[] {
-  const { chatPath, multiDevice, deviceLabelOf } = opts;
+  const { chatPathOf, multiDevice, deviceLabelOf } = opts;
   const byKey = new Map<string, TaskSection>();
   for (const s of rows) {
     const path = repoRootPath(s.workspacePath);
@@ -255,10 +257,10 @@ export function groupTaskSections(
   const sections = [...byKey.values()].sort(
     (a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key),
   );
-  if (!chatPath) return sections;
-  const chat = sections.filter((sec) => sec.path === chatPath);
+  const isChat = (sec: TaskSection) => sec.path === chatPathOf(sec.deviceId);
+  const chat = sections.filter(isChat);
   if (chat.length === 0) return sections;
-  return [...chat, ...sections.filter((sec) => sec.path !== chatPath)];
+  return [...chat, ...sections.filter((sec) => !isChat(sec))];
 }
 
 /** 目录筛选项的值。单设备时就是路径本身(与从前一致,老的草稿值继续有效)。 */
@@ -370,7 +372,12 @@ interface Props {
   /** 合并列表:每条会话都带着它属于哪一台设备(deviceRuntime.ts 的 WithDevice)。
    *  id 只在单机内唯一,所以 React key 与「打开这一条」都必须带上 deviceId。 */
   sessions: Array<WithDevice<SessionInfo>>;
-  client: FleetTransport | null;
+  /** 某一条会话所属设备的传输层。任务页**不持有**当前作用域那一台的 client:
+   *  列表是合并的,所以每一次**写**(标记/中断/停止)以及每一次按会话取数(搜索、
+   *  聊天目录)都必须按设备取,否则请求会打到当前选中的那台机器上:标记落在别的
+   *  主机 → 下一次快照推回来 userMark 还是空 → 卡片复活;停止更糟,pid 会被发到
+   *  一台毫不相干的主机上执行。 */
+  clientFor: (deviceId: string) => FleetTransport | null;
   /** WS link phone↔relay. */
   connected: boolean;
   /** Desktop↔relay link — false means nothing is there to push a snapshot. */
@@ -387,7 +394,7 @@ interface Props {
 // 新会话入口由 App 底部导航中间的凸起按钮统一持有，任务页内不再重复放置。
 export function TasksView({
   sessions,
-  client,
+  clientFor,
   deviceLabelOf,
   connected,
   agentOnline,
@@ -408,8 +415,12 @@ export function TasksView({
   // Optimistic mark overrides, dropped once the server snapshot catches up.
   const [markOverride, setMarkOverride] = useState<Record<string, SessionMark | null>>({});
 
-  // Full-text search over the relay — same FTS the desktop launchpad uses.
-  const { searching, ftsMatchPaths, snippetByPath } = useRelaySearch(client, search);
+  /** 列表里出现过的设备。搜索与聊天目录都是**逐台**问的。 */
+  const deviceIds = useMemo(() => [...new Set(sessions.map((s) => s.deviceId))], [sessions]);
+
+  // Full-text search over the relay — same FTS the desktop launchpad uses,
+  // 每台设备各问一次自己的索引。
+  const { searching, ftsMatchKeys, snippetByKey } = useRelaySearch(deviceIds, clientFor, search);
 
   // 滚动期间（及停手后 ORDER_FREEZE_MS 内）冻住的键序，null = 未冻结。
   // 状态用于让下面的 useMemo 重算；ref 是滚动回调里的唯一真相（回调闭包读不到
@@ -428,7 +439,7 @@ export function TasksView({
         sessions
           .filter(isFleetOwnedTask)
           .map((s) => {
-            const o = markOverride[s.id];
+            const o = markOverride[itemKey(s.deviceId, s.id)];
             return o !== undefined && o !== (s.userMark ?? null) ? { ...s, userMark: o } : s;
           })
           .sort((a, b) => b.lastActivityMs - a.lastActivityMs),
@@ -444,7 +455,11 @@ export function TasksView({
   // The desktop host's pure-chat workspace — the same path the new-session sheet
   // pins. Null while it's in flight; the chat section then simply sits where its
   // activity puts it instead of being pinned on a guess.
-  const chatPath = useChatWorkspace(client);
+  const chatPaths = useChatWorkspaces(deviceIds, clientFor);
+  const chatPathOf = useCallback(
+    (deviceId: string) => chatPaths[deviceId] ?? null,
+    [chatPaths],
+  );
 
   // 列表按文件夹分区展示（Chat 置顶），所以任务页不再有目录下拉：要看哪个目录
   // 就折叠掉别的分区。「终端」按钮因此不带初始目录，由终端页自己的目录选择器接手。
@@ -466,11 +481,11 @@ export function TasksView({
           (s.taskPlan?.planId?.toLowerCase().includes(q) ?? false) ||
           (s.taskPlan?.currentPlan?.toLowerCase().includes(q) ?? false) ||
           (s.taskPlan?.currentTask?.toLowerCase().includes(q) ?? false);
-        if (!clientMatch && !ftsMatchPaths.has(s.jsonlPath)) return false;
+        if (!clientMatch && !ftsMatchKeys.has(itemKey(s.deviceId, s.jsonlPath))) return false;
       }
       return true;
     });
-  }, [all, search, ftsMatchPaths]);
+  }, [all, search, ftsMatchKeys]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -488,10 +503,13 @@ export function TasksView({
   );
 
   const setMark = useCallback(
-    (s: SessionInfo, mark: SessionMark | null) => {
-      if (!client) return;
-      setMarkOverride((prev) => ({ ...prev, [s.id]: mark }));
-      client
+    (s: WithDevice<SessionInfo>, mark: SessionMark | null) => {
+      // 会话所属那一台,不是当前作用域那一台 —— 打错主机的标记等于没标记。
+      const transport = clientFor(s.deviceId);
+      if (!transport) return;
+      const key = itemKey(s.deviceId, s.id);
+      setMarkOverride((prev) => ({ ...prev, [key]: mark }));
+      transport
         .request("session_mark", {
           sessionId: s.id,
           workspacePath: s.workspacePath,
@@ -501,12 +519,12 @@ export function TasksView({
           // roll back the optimistic flip on failure
           setMarkOverride((prev) => {
             const next = { ...prev };
-            delete next[s.id];
+            delete next[key];
             return next;
           });
         });
     },
-    [client],
+    [clientFor],
   );
 
   // Full membership of every relay chain, keyed by chainId — over ALL Fleet
@@ -543,7 +561,7 @@ export function TasksView({
     }));
   }, []);
   const setMarkChain = useCallback(
-    (members: SessionInfo[], done: boolean) => {
+    (members: Array<WithDevice<SessionInfo>>, done: boolean) => {
       for (const m of members) setMark(m, done ? "done" : null);
     },
     [setMark],
@@ -553,11 +571,11 @@ export function TasksView({
   // 所以 buildRenderItems 逐分区跑，不会把两个目录的会话串成一条链。
   const sections = useMemo(
     () =>
-      groupTaskSections(visible, { chatPath, multiDevice, deviceLabelOf }).map((sec) => ({
+      groupTaskSections(visible, { chatPathOf, multiDevice, deviceLabelOf }).map((sec) => ({
         ...sec,
         items: buildRenderItems(sec.sessions, groupHandoff),
       })),
-    [visible, chatPath, multiDevice, deviceLabelOf, groupHandoff],
+    [visible, chatPathOf, multiDevice, deviceLabelOf, groupHandoff],
   );
 
   // 折叠起来的分区键。默认全展开——手机上一进来就该看到会话本身。
@@ -572,17 +590,20 @@ export function TasksView({
   }, []);
 
   const handleStop = useCallback(
-    async (s: SessionInfo) => {
-      if (!client || busyOp) return;
+    async (s: WithDevice<SessionInfo>) => {
+      // pid / workspacePath 只在**它自己那台主机**上有意义:发到别的设备上,轻则
+      // 停不掉,重则按 pid 打到一个毫不相干的进程。
+      const transport = clientFor(s.deviceId);
+      if (!transport || busyOp) return;
       const mode = stopMode(s);
       if (mode === "spent") return;
-      setBusyOp(s.id);
+      setBusyOp(itemKey(s.deviceId, s.id));
       try {
         if (mode === "interrupt") {
-          await client.request("interrupt", { pid: s.pid });
+          await transport.request("interrupt", { pid: s.pid });
         } else if (s.pidPrecise) {
           if (!(await confirm(t("确定停止「{0}」的这个会话吗？", s.workspaceName)))) return;
-          await client.request("stop", { pid: s.pid });
+          await transport.request("stop", { pid: s.pid });
         } else {
           if (
             !(await confirm(
@@ -590,7 +611,7 @@ export function TasksView({
             ))
           )
             return;
-          await client.request("stop_workspace", { workspacePath: s.workspacePath });
+          await transport.request("stop_workspace", { workspacePath: s.workspacePath });
         }
       } catch (e) {
         window.alert(e instanceof Error ? e.message : t("操作失败"));
@@ -598,7 +619,7 @@ export function TasksView({
         setBusyOp(null);
       }
     },
-    [client, busyOp, confirm],
+    [clientFor, busyOp, confirm],
   );
 
   // ——— 滚动位置稳定化（详见文件顶部 savedTasksScrollY 的注释）———
@@ -738,7 +759,8 @@ export function TasksView({
       : s.userMark === "done";
     const title =
       s.titleOverride || s.aiTitle || s.slug || s.lastMessagePreview || t("（无标题）");
-    const snippet = search.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined;
+    const snippet =
+      search.trim().length >= 2 ? snippetByKey.get(itemKey(s.deviceId, s.jsonlPath)) : undefined;
     const live = LIVE.includes(s.status);
     return (
       <div
@@ -875,10 +897,10 @@ export function TasksView({
             <button
               className={styles.stopButton}
               data-mode={mode}
-              disabled={busyOp === s.id}
+              disabled={busyOp === itemKey(s.deviceId, s.id)}
               onClick={() => void handleStop(s)}
             >
-              {busyOp === s.id ? (
+              {busyOp === itemKey(s.deviceId, s.id) ? (
                 "…"
               ) : (
                 <>
