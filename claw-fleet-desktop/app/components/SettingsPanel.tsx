@@ -180,6 +180,25 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
+  // ── App version ──────────────────────────────────────────────────────────
+  // A compile-time constant of the running app, not backend data. The browser
+  // build answers `"web"` (see `webTransport.ts`), which is not a version — the
+  // row hides itself rather than printing it.
+  const [appVersion, setAppVersion] = useState("");
+  // The git commit the binary was built from, shown under the version so a bug
+  // report can name the exact build. `"unknown"` (no commit source at build
+  // time) and `"web"` are not commits — both leave the line off.
+  const [buildCommit, setBuildCommit] = useState("");
+
+  useEffect(() => {
+    invoke<string>("get_app_version")
+      .then((v) => setAppVersion(v === "web" ? "" : v))
+      .catch(() => {});
+    invoke<string>("desktop_build_commit")
+      .then((c) => setBuildCommit(c === "unknown" || c === "web" ? "" : c.slice(0, 7)))
+      .catch(() => {});
+  }, []);
+
   // ── Sources state ────────────────────────────────────────────────────────
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [sourcesNeedRestart, setSourcesNeedRestart] = useState(false);
@@ -1163,6 +1182,35 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             {activeTab === "general" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.general")}</div>
+                {appVersion && (
+                  <div className={styles.row}>
+                    <span className={styles.row_label}>{t("settings.app_version")}</span>
+                    <div style={{ textAlign: "right" }}>
+                      <span
+                        className={styles.row_label}
+                        style={{ color: "var(--color-text-dim)", fontVariantNumeric: "tabular-nums" }}
+                        data-testid="settings-app-version"
+                      >
+                        v{appVersion}
+                      </span>
+                      {buildCommit && (
+                        <span
+                          className={styles.row_label}
+                          style={{
+                            fontSize: 11,
+                            color: "var(--color-text-dim)",
+                            display: "block",
+                            marginTop: 2,
+                            fontFamily: "var(--font-mono)",
+                          }}
+                          data-testid="settings-build-commit"
+                        >
+                          {buildCommit}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.language")}</span>
                   <LanguageSwitcher />
