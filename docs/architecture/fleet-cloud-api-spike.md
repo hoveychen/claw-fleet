@@ -1,5 +1,13 @@
 # Fleet Cloud API + Hosted UX Architecture Spike
 
+> **⚠️ 已废弃 · 2026-09-08 接口漂移审计**
+>
+> 本 Spike 所服务的架构（control plane + customer-hosted Runner，见 [[architecture/fleet-cloud-runner-adr|ADR-001]]）已于 2026-07-20 被叫停、2026-08-22 打 tag `archive/fleet-cloud-v1` 封存。生产走的是 `deploy/lean/` 的单容器方案。
+>
+> 另有两处具体的落地承诺**从未实现**：§11.5 说 Spike 门后会创建 `fleet-web/` 与 `packages/fleet-domain-ts/`，这两个目录**从未存在**（`fleet-cloud-api/` 与 `fleet-runner/` 确实建过，末次提交 2026-08-16 后静止）。实际上线的 Cloud 前端是 `mobile-web/src/cloud/CloudApp.tsx`，与 §11.1 设计的 `FleetCloudClient`/`CloudFleetClient`/`RelayFleetClient`/`TauriFleetClient` 分层毫无关系——这些类型名在 `mobile-web/src` 里零命中。
+>
+> 同目录的 `fleet-cloud-v1.openapi.yaml` 仍在，但描述的是同一套已废弃架构。
+
 Status: proposed  
 Timebox: 2 calendar weeks  
 Primary path: customer-hosted Fleet Runner + Fleet Cloud control plane  

@@ -125,8 +125,10 @@ pub const ALWAYS_ON_TOOL_NAMES: [&str; 6] = [
 ];
 
 /// Build the `tools/list` result. The six always-on tools ([`ALWAYS_ON_TOOL_NAMES`]
-/// — the four UI tools plus `fleet__image` / `fleet__image_edit`); the six
-/// control tools (plan / handoff / watch / loop / schedule / wiki) are appended
+/// — the four UI tools plus `fleet__image` / `fleet__image_edit`); the control
+/// tools ([`crate::mcp_control::CONTROL_TOOL_NAMES`] — read the roster there
+/// rather than restating it here, which is how this sentence came to claim six
+/// when there were eleven) are appended
 /// ONLY for Fleet-owned sessions — a user's hand-launched `claude` never sees
 /// them and keeps using the `fleet` CLI. This makes "Fleet sessions go through
 /// MCP, non-Fleet through the CLI" hold at the tool-visibility layer, and is
@@ -1444,8 +1446,8 @@ mod tests {
 
     #[test]
     fn fleet_owned_session_also_sees_the_control_tools() {
-        // Conditional registration: a Fleet-owned session gets the four UI tools
-        // PLUS every control tool; a non-Fleet session (tested above) does not.
+        // Conditional registration: a Fleet-owned session gets the always-on
+        // tools PLUS every control tool; a non-Fleet session (tested above) does not.
         let result = tools_list_result(true);
         let tools = result["tools"].as_array().expect("tools array");
         assert_eq!(

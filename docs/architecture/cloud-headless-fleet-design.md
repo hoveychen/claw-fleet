@@ -1,5 +1,14 @@
 # Cloud Headless Fleet — Control-Plane Bootstrap Design (P1)
 
+> **⚠️ 局部过期 · 2026-09-08 接口漂移审计**
+>
+> 方向性结论与 §4 的「MCP 网关已移除」叙述仍与现状一致，但本文写就时的**具体 `file:line` 引用几乎全部漂移**，且有**一处关键结论已被现状推翻**。已在正文对应位置就地修正，摘要如下：
+>
+> - **`apply_idle_hooks` 不再是死代码**（§2.A 的 "Correction to the plan/handoff" 那一段）。它现在挂在 `control_plane.rs` 的 `Feature::IdleHooks`（`install_all` 与 `heal` 两条路径都会调），并被 `claw-fleet-desktop/src/gui/mod.rs:1319` 直接调用。它**是**活的控制面组成部分，不该 exclude。
+> - **§1 的两个「几行」说法已严重失真**：`entrypoint.sh` 现为 264 行（`exec fleet serve` 在末行，且不再是唯一动作——中间还有 chown、foxy 凭证注入等待、`fleet bootstrap` 调用、按 `FLEET_WEB_ROOT` 分流 `fleet webui`/`fleet serve`）；`serve.rs` 现为 419 行。
+> - **§3/§5 的 MUST 清单已不完整**：控制面现由 `claw-fleet-core/src/control_plane.rs` 的 `Feature` 枚举统一表达，实际有 **11** 个成员——比本文列出的多 `WakeupGuardHook` 与 `SessionTitleGuidance` 两项。
+> - **已确认落地（非漂移，供参考）**：§5 提的 `fleet bootstrap` 子命令实名落地为 `fleet-cli/src/commands/bootstrap.rs::cmd_bootstrap`，并在 `entrypoint.sh` 里以 `fleet bootstrap --locale … --model …` 调用；§6b 提的 `claw_fleet_core::headless_runtime` 也已存在。
+
 Status: design (plan `cloud-headless-fleet`, P1)
 Date: 2026-07-20
 Scope: audit of what the desktop backend does beyond `fleet serve`, categorised
@@ -18,6 +27,8 @@ The lean cloud container (`deploy/lean/Dockerfile` + `entrypoint.sh`) runs exact
 one Fleet action: `exec fleet serve` (`entrypoint.sh:54`). `fleet serve` is a
 7-line wrapper (`fleet-cli/src/commands/serve.rs:5-7`) over
 `claw_fleet_core::hooks_server::serve()`.
+
+> **[2026-09-08 修正]** 两处都已失真。`entrypoint.sh` 现为 **264 行**，`exec fleet serve` 在末行且**不再是唯一动作**（前面还有 chown、等待 foxy 凭证注入、调 `fleet bootstrap`、按 `FLEET_WEB_ROOT` 分流 `fleet webui` 或 `fleet serve`）。`serve.rs` 现为 **419 行**，含 `cmd_serve` / `cmd_webui` / `heal_control_plane` / host-port 解析及测试。下面对 `serve()` 启动动作的分解本身仍成立。
 
 `serve()` (`claw-fleet-core/src/hooks_server/mod.rs:85-200`) performs, at startup:
 
@@ -95,9 +106,9 @@ sentinels). Defaults from the audit:
 
 | Action | Writes | Default | Cloud verdict |
 |---|---|---|---|
-| `apply_guard_hook` (`hooks.rs:297`) | settings.json `hooks.PreToolUse` Bash → `fleet guard` | **ON** | **MUST** (§1.1) |
-| `apply_elicitation_hook` (`hooks.rs:387`) | settings.json | **ON** | **MUST** |
-| `apply_plan_approval_hook` (`hooks.rs:475`) | settings.json | OFF (opt-in) | **MUST** (v2 projects these) |
+| `apply_guard_hook` (`hooks.rs:365`) | settings.json `hooks.PreToolUse` Bash → `fleet guard` | **ON** | **MUST** (§1.1) |
+| `apply_elicitation_hook` (`hooks.rs:458`) | settings.json | **ON** | **MUST** |
+| `apply_plan_approval_hook` (`hooks.rs:549`) | settings.json | OFF (opt-in) | **MUST** (v2 projects these) |
 | `apply_prd_mode` = `apply_prd_discipline` + `apply_prd_context_hook` (`local_backend.rs:2958-2962`) | `fleet-prd-discipline.md` + `@import` in CLAUDE.md; settings.json `UserPromptSubmit` → `fleet prd-context` | OFF | **MUST** (guidance + TASKS.md re-injection) |
 | `apply_interaction_mode` (`interaction_mode.rs`) | `fleet-interaction-mode.md` + `@import` (requires elicitation) | OFF | **MUST** (teaches decision-card behavior) |
 | `apply_wiki_guidance` (`wiki_guidance.rs:177`) | `fleet-wiki-guidance.md` + `@import` | OFF | MUST-ish (cheap; teaches wiki) |
@@ -105,9 +116,13 @@ sentinels). Defaults from the audit:
 | `apply_hook_setup` (`hooks.rs:175`) | settings.json base group on PreToolUse/PostToolUse/PostToolUseFailure/Stop/SubagentStop → append `~/.fleet/hooks.jsonl` | via explicit button | **附加** (observability; cloud scans transcripts) |
 | `set_skill_autosync` (`skill_sync.rs`) | projects *user-created* skills into runtime roots | OFF | **附加** (no bundled content) |
 
-> **Correction to the plan/handoff:** `apply_idle_hooks` (`hooks.rs:663`, Stop →
+> ~~**Correction to the plan/handoff:** `apply_idle_hooks` (`hooks.rs:663`, Stop →
 > `fleet session idle`) is **dead code** — grep finds zero callers in desktop,
-> CLI, or serve. It is NOT part of the live control plane. Exclude it.
+> CLI, or serve. It is NOT part of the live control plane. Exclude it.~~
+>
+> **[2026-09-08 修正 —— 上面这段结论已经反了]** `apply_idle_hooks` 现在**是活的控制面组成部分**，不该 exclude：函数本身已迁到 `hooks.rs:893`，挂在 `claw-fleet-core/src/control_plane.rs:51` 的 `Feature::IdleHooks`（`install_all` 与 `heal` 两条路径都会调用它），并被 `claw-fleet-desktop/src/gui/mod.rs:1319` 直接调用。写本文时的「零调用者」是当时的事实，现已不成立。
+>
+> 同样地，本表列的 Feature 清单已不完整：`control_plane.rs` 的 `Feature` 枚举现有 **11** 个成员，本表之外还有 `WakeupGuardHook` 与 `SessionTitleGuidance`。
 
 Guidance args: `apply_interaction_mode(user_title, locale)` and
 `apply_prd_discipline(user_title, locale)` take a title + locale. On desktop both
@@ -121,6 +136,9 @@ from an env var).
 
 `mcp_injector` is gated to `cfg!(debug_assertions)` at both call sites
 (desktop `gui/mod.rs:1490`, serve `mod.rs:111`). Memory
+
+> **[2026-09-08 修正]** 该 debug gate **已经移除**（§4 本文自己记录为 "RESOLVED (gate removed)"，此处补上现状）。桌面侧的调用点现在约在 `gui/mod.rs:1381`，且不再判 `cfg!(debug_assertions)`，改为读 `mcp_injector::load_config().enabled`。下面这段对当时门控理由的分析仍可作背景读。
+
 `project_v2_fleet_ask_gate.md` records 3 UX gaps as the reason. **Audit finding —
 those gaps are desktop-React-card problems, and one is already fixed:**
 
@@ -318,3 +336,4 @@ runtime after `fleet bootstrap`.
 - All behavioral claims read against `main` @ `21fb021`; corrections to the
   handoff (dead `apply_idle_hooks`; no content-seeding of 三件套; gap 2 already
   fixed) are called out inline so P2 doesn't overbuild.
+  - **[2026-09-08 修正]** 其中「dead `apply_idle_hooks`」这一条**已经不成立**——见 §2.A 的修正块。它现在是活的 `Feature::IdleHooks`。

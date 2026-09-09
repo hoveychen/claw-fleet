@@ -1,5 +1,13 @@
 # Fleet Cloud API + Hosted UX Spike 验收报告
 
+> **⚠️ 结论已被否决 · 2026-09-08 接口漂移审计**
+>
+> 本报告记录的测试确实跑过、G1–G9 也确实通过——但它的「Go to private beta」建议**次日即被否决**：2026-07-20 老板叫停这套重量级方案，2026-08-22 整套架构打 tag `archive/fleet-cloud-v1` 封存。
+>
+> 因此报告末尾建议作为「实现基线」的那几样——当前 adapter、durable spool、PostgreSQL event/outbox、Hosted Cloud mode——**都没有成为任何东西的基线**。生产走的是 `deploy/lean/` 的单容器 + scoped token 方案。
+>
+> 文中的性能数值（p95 等）未在本次审计中复验：原执行环境与分支均已删除，无法复现。
+
 日期：2026-07-19
 结论：**Go to private beta（Spike 范围）**
 

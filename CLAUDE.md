@@ -4,8 +4,8 @@
 Fleet's data plane lives in `claw-fleet-core`. Three clients sit on it and every user-facing capability has to reach all three, or say explicitly why it does not:
 
 1. **Desktop** — Tauri commands in `claw-fleet-desktop/src/gui/*.rs` delegate to `LocalBackend` (`claw-fleet-desktop/src/local_backend.rs`), which in turn calls core functions. `LocalBackend` is a plain struct held in `AppState`; there is no backend trait and no remote implementation any more (the SSH-tunnelled `RemoteBackend` was removed 2026-09-06 — it was rarely used and cost a 193-method trait plus a second hand-maintained dispatch table).
-2. **`fleet serve` / `fleet webui`** — `claw-fleet-core/src/hooks_server/` routes (`routes.rs` holds the path constants) call the same core functions directly. This is what the browser build, the cloud container's `/v1/*` surface and the mobile relay talk to.
-3. **Mobile relay** — `claw-fleet-core/src/mobile_relay.rs` dispatches `client.request("m", …)` method names; `tests/mobile_relay_drift_guard.rs` fails CI when mobile-web calls a method the dispatcher lacks.
+2. **`fleet serve` / `fleet webui`** — the route handlers in `claw-fleet-core/src/hooks_server/` (split per domain: `routes_session_state.rs`, `routes_decision.rs`, …) call the same core functions directly. The path constants they dispatch on live one level up, in `claw-fleet-core/src/routes.rs` — that file is the single source of truth for `fleet serve`'s route paths. This is what the browser build, the cloud container's `/v1/*` surface and the mobile relay talk to.
+3. **Mobile relay** — `claw-fleet-core/src/mobile_relay.rs` dispatches `client.request("m", …)` method names; `claw-fleet-core/tests/mobile_relay_drift_guard.rs` fails CI when mobile-web calls a method the dispatcher lacks.
 
 **Why:** the first version of the Memory feature only worked on the desktop because the Tauri commands called `memory::` directly and nothing else was wired. The fix is not a trait — it is putting the logic in core and adding the thin route/dispatch arm on each client that needs it.
 

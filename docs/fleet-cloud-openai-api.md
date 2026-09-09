@@ -1,5 +1,16 @@
 # Fleet Cloud —— OpenAI Responses 兼容 API（v2）
 
+> **⚠️ 已退役 · 2026-09-08 接口漂移审计**
+>
+> 本文描述的 OpenAI Responses 兼容面**已整体退役**，2026-08-27 commit `ece6d21e`（`refactor(acp): retire /v1/responses, keep the file surface`）改走 ACP（Agent Client Protocol，`claw-fleet-core/src/acp/`）。具体失效项：
+>
+> - `POST /v1/responses`、`GET /v1/responses/{id}`、`POST /v1/responses/{id}/cancel`、`GET /v1/responses/{id}/files` 四条路由全部撤销。真相来源 `responses.rs` 已改名 `public_files.rs` 并从 2834 行砍到 631 行，测试 `only_the_file_routes_remain` 显式断言这四条必须解析成 `NotFound`。
+> - 「决策卡 → `function_call`」整节的六个 function name（`fleet_guard`/`fleet_elicitation`/`fleet_ask`/`fleet_plan_approval`/`fleet_permission`/`fleet_a2ui`）随之删除，全仓已无一处作为 function_call 名存在。
+> - 「流式」整节的 `response.created`/`response.output_text.delta`/`response.completed` SSE 事件同属已删模块。
+> - 「范围外（v2 不做）」说不做 `GET /v1/files` 列表，但它**实际已实现**（`V1Route::ListFiles` → `list_files()`）。
+>
+> 仍然逐字准确的：`/v1/files` 附件家族（`POST`/`GET {id}`/`GET {id}/content`/`DELETE`）、`MAX_ATTACHMENT_BYTES` 50 MiB、`FLEET_PUBLIC_WORKSPACE` 默认 `/workspace`——只是它们现在挂在 ACP 附件面下，不再挂在 `/v1/responses` 下。
+
 - **状态：** v2 精简对外 API（lean-cloud-v2，建设中）
 - **定位：** 外部服务集成 Fleet agent 的**唯一对外面**。兼容 OpenAI Responses API——集成方拿标准 OpenAI SDK 指向 `<host>/v1`、`api_key=$FLEET_PUBLIC_TOKEN` 即可驱动 Fleet 的 claude/codex agent。
 - **真相来源：** `claw-fleet-core/src/hooks_server/responses.rs`。

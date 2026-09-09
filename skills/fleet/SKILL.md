@@ -32,11 +32,14 @@ fleet agents --all
 # Show details for a specific agent (by ID prefix or workspace name)
 fleet agent <id>
 
-# Stop an agent (SIGTERM)
+# Stop an agent and its whole process tree (SIGTERM)
 fleet stop <id>
 
 # Force-stop an agent (SIGKILL)
 fleet stop <id> --force
+
+# Interrupt the in-flight tool call, leaving the session resumable
+fleet interrupt <id>
 
 # Show account info and rate-limit usage
 fleet account
@@ -60,38 +63,37 @@ fleet audit --level high
 fleet audit --filter <workspace-name-or-id>
 ```
 
-## Remote SSH mode
-
-Any command can be run on a remote host by adding `--remote <host>`:
-
-```bash
-# <host> accepts: user@hostname, hostname (uses current user), or SSH config profile name
-fleet agents --remote user@hostname
-fleet agents --remote myserver --all
-fleet account --remote user@hostname
-fleet speed --remote myserver
-fleet stop <id> --remote user@hostname --force
-fleet search "error handling" --remote myserver
-fleet audit --remote user@hostname
-```
-
-Fleet will automatically detect if it is installed on the remote host (checking PATH first,
-then `~/.fleet-probe/fleet`). If missing or outdated, it installs the correct binary before
-running the command. SSH config (`~/.ssh/config`) is respected, so jump hosts, custom ports,
-and identity files work without extra flags.
-
 ## Output fields (fleet agents)
 
 | Field | Description |
 |-------|-------------|
 | ID | Short session ID (8 chars) |
 | WORKSPACE | Project directory name |
-| STATUS | Thinking / Executing / Streaming / Delegating / WaitInput / Active / Idle |
+| STATUS | See the status table below |
 | SPEED | Current token output speed (tok/s) |
 | TOKENS | Total output tokens this session |
-| MODEL | Claude model being used |
+| CTX% | How full the session's context window is |
+| HARNESS | Which agent harness runs the session (`claude` / `codex` / `dsh`) |
+| MODEL | Model being used |
 
 Subagents are indented under their parent with `└` prefix.
+
+### STATUS values
+
+| Shown | Meaning |
+|-------|---------|
+| `Thinking` | Streaming, last partial assistant message has thinking blocks |
+| `Executing` | Streaming, last partial assistant message has tool_use blocks |
+| `Streaming` | Text output written < 2s ago |
+| `Delegating` | Main session with at least one active subagent |
+| `Processing` | Waiting for a tool result (last stop_reason = tool_use) |
+| `WaitInput` | Turn ended, waiting on the user (last stop_reason = end_turn) |
+| `Active` | Activity < 30s ago |
+| `Idle` | No recent activity |
+| `RateLimit` | Hit a rate limit; `fleet agent <id>` shows the reset time |
+| `ServerErr` | Transient server error mid-response; resumes immediately |
+| `RemoteOff` | Ran on a remote workspace whose ssh transport died — terminal, nothing retries it |
+| `Stuck` | Process alive but wedged mid tool-use batch; `fleet interrupt <id>` unblocks it |
 
 ## Search
 
@@ -118,8 +120,9 @@ Use `--level high` to filter out medium-risk noise. Use `--filter` to scope to a
 - **Check if a task is still running**: `fleet agent <workspace-name>`
 - **Monitor overall throughput**: `fleet speed`
 - **Stop a runaway agent**: `fleet stop <id>`
+- **Unwedge a `Stuck` agent without killing it**: `fleet interrupt <id>`
 - **Check rate limits before heavy work**: `fleet account`
 - **Find which session discussed a topic**: `fleet search "database migration"`
 - **Review what risky commands agents ran**: `fleet audit`
 - **Check for critical-only risks**: `fleet audit --level critical`
-- **Get machine-readable output**: append `--json` to any command
+- **Get machine-readable output**: append `--json` to the read commands (`agents`, `agent`, `account`, `speed`, `search`, `audit`). `stop` and `interrupt` have no `--json`.

@@ -1,5 +1,13 @@
 # Fleet Cloud (lean) — 公开 API 契约
 
+> **⚠️ 已过期 · 2026-09-08 接口漂移审计**
+>
+> 本文的核心内容——那张「scoped token 可达的公开端点」表——**已整体失效**。2026-07-20 的 commit `d2abb37d`（`feat(cloud-v2): confine scoped surface to /v1/*`）把公开面收窄了：`claw-fleet-core/src/routes.rs` 的 `is_public()` 现在只放行 `HEALTH`、`ACP`、`/v1/*` 与 `DECISION_ASSET_PREFIX`。正文里的 `/sessions`、`/spawn_session`、`/resume_session`、`/enqueue_message`、`/interrupt`、`/stop`、六类决策卡 `pending`/`respond`、`/user_attachment`、`/cloud_usage` 等**现在全部只对 admin token 开放**，有回归测试 `scoped_token_denied_on_v1_replaced_raw_routes`（`claw-fleet-core/src/hooks_server/auth.rs`）锁死。
+>
+> 因此「快速开始」里用 `$FLEET_PUBLIC_TOKEN` 直接打这些路由的 curl 示例**会得到 403**。对外集成面的继任者是 ACP（`claw-fleet-core/src/acp/`）加 `/v1/files` 附件家族。
+>
+> 仍然准确的部分：部署层面的 `deploy/lean/fleet.compose.yaml`、`FLEET_ADMIN_TOKEN`/`FLEET_PUBLIC_TOKEN`/`HOST_WORKSPACE` 环境变量名，以及 admin token 可达全部路由这一点。
+
 - **状态：** v1 精简版已合并 main（lean-cloud-v1 P1–P5，commit 91cea2d）
 - **定位：** 把现有 `fleet serve` harness 的 agent 能力，以一层 scoped token 开放给外部服务集成。**不是**新服务——就是 `fleet serve` 加了一层默认拒绝的公开白名单。
 - **真相来源：** 路由常量 `claw-fleet-core/src/routes.rs`；白名单函数 `routes::is_public()`；鉴权 `claw-fleet-core/src/hooks_server/auth.rs`。

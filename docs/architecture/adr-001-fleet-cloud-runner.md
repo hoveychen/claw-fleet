@@ -1,5 +1,13 @@
 # ADR-001: Fleet Cloud uses a control plane with customer-hosted Runners
 
+> **⚠️ SUPERSEDED — this decision was never adopted for production (2026-09-08 interface-drift audit)**
+>
+> 老板于 2026-07-20 叫停这套重量级方案，2026-08-22 整套架构打 tag `archive/fleet-cloud-v1` 封存（分支已删除，仅 tag 可回捞）。
+>
+> 生产 Fleet Cloud（`fleet-cloud.muveeai.com`，2026-08-23 上线）走的是完全不同的 **lean 单容器**方案：scoped token 直接架在 `fleet serve` 之上（`deploy/lean/`）。**没有**独立 control plane 服务、**没有** Runner 出站协议、**没有** mTLS，也**没有**事件溯源账本。`fleet-cloud-api/` 与 `fleet-runner/` 两个 crate 建过，但末次提交停在 2026-08-16。
+>
+> 本 ADR 保留作历史记录，不代表当前有效决策。
+
 Status: proposed for Spike  
 Date: 2026-07-18  
 Owners: Fleet cloud/core/frontend
