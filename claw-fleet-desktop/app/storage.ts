@@ -75,6 +75,10 @@ const ALL_KEYS = [
   "history-mark-filter",
   "history-workspace-filter",
   "history-group-handoff",
+  // Task-rail workspace sections the reader has folded shut, as a JSON array of
+  // workspace paths. Must be readable on boot, otherwise every launch reopens
+  // repos the reader deliberately folded away.
+  "history-collapsed-workspaces",
   "onboarding-dismissed",
   "wizard-completed",
   "hooks-banner-dismissed",

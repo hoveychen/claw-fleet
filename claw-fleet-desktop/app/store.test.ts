@@ -80,6 +80,48 @@ describe("启动台 rail filters", () => {
     expect(useUIStore.getState().historyQuery).toBe("scene-items");
     expect(getItem("history-query")).toBeNull();
   });
+
+  /**
+   * 文件夹折叠状态原本是 WorkspaceRailSection 里的 useState。分组是从*筛选后*的
+   * 行算出来的，所以切到「进行中」时，在该 bucket 里没有任何会话的 workspace
+   * 会整段 unmount，切回来重新挂载就恢复展开——折叠白点了。
+   */
+  it("toggles a workspace fold and writes it through", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+
+    useUIStore.getState().toggleHistoryWorkspaceCollapsed("/Users/x/w/chat");
+
+    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual([
+      "/Users/x/w/chat",
+    ]);
+    expect(getItem("history-collapsed-workspaces")).toBe(
+      JSON.stringify(["/Users/x/w/chat"]),
+    );
+
+    // Toggling again unfolds it rather than piling up duplicates.
+    useUIStore.getState().toggleHistoryWorkspaceCollapsed("/Users/x/w/chat");
+    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual([]);
+    expect(getItem("history-collapsed-workspaces")).toBe("[]");
+  });
+
+  it("restores persisted workspace folds on boot", async () => {
+    const { setItem } = await import("./storage");
+    setItem("history-collapsed-workspaces", JSON.stringify(["/a", "/b"]));
+
+    const { useUIStore } = await import("./store");
+
+    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual(["/a", "/b"]);
+  });
+
+  it("ignores a corrupt persisted fold list", async () => {
+    const { setItem } = await import("./storage");
+    setItem("history-collapsed-workspaces", "{not json");
+
+    const { useUIStore } = await import("./store");
+
+    expect(useUIStore.getState().historyCollapsedWorkspaces).toEqual([]);
+  });
 });
 
 describe("主导航页面浏览上下文", () => {

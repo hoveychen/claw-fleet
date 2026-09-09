@@ -198,6 +198,14 @@ export function HistoryView() {
   // Settings). Read from the store so the choice survives HistoryView's frequent
   // unmounts and reacts live when flipped in the settings panel.
   const groupHandoff = useUIStore((s) => s.historyGroupHandoff);
+  // Folded workspace sections. In the store for the same reason: the sections
+  // render off the *filtered* rows, so switching the mark filter unmounts every
+  // workspace that has no row in the target bucket and would otherwise drop its
+  // fold state on the way back.
+  const collapsedWorkspaces = useUIStore((s) => s.historyCollapsedWorkspaces);
+  const toggleWorkspaceCollapsed = useUIStore(
+    (s) => s.toggleHistoryWorkspaceCollapsed,
+  );
   // Inline detail column selection — local to the page, deliberately NOT the
   // global useDetailStore (that one drives the drawer overlaying every view).
   //
@@ -704,6 +712,8 @@ export function HistoryView() {
                 name={workspace.name}
                 // 折叠后的行数：一条接力链折成一组只算 1，与眼下看到的行一致。
                 count={workspace.items.length}
+                collapsed={collapsedWorkspaces.includes(workspace.path)}
+                onToggle={toggleWorkspaceCollapsed}
               >
                 <SessionRail
                   items={workspace.items}

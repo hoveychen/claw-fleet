@@ -259,6 +259,13 @@ interface UIState {
    *  component state) for the same unmount reason as the filters above, and is
    *  written to disk so the choice survives a restart. */
   historyGroupHandoff: boolean;
+  /** Workspace paths whose folder section in the task rail is folded shut.
+   *  Component state would not survive the filter segments: the sections are
+   *  rendered from the *filtered* rows, so a workspace with no match under
+   *  「进行中」 unmounts and comes back expanded when the reader switches back.
+   *  Written to disk so a deliberately folded repo stays folded across a
+   *  restart, same as the filters above. */
+  historyCollapsedWorkspaces: string[];
   mainViewState: MainViewState;
   updateMainViewState: <K extends keyof MainViewState>(
     view: K,
@@ -272,6 +279,7 @@ interface UIState {
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryQuery: (q: string) => void;
   setHistoryGroupHandoff: (on: boolean) => void;
+  toggleHistoryWorkspaceCollapsed: (workspacePath: string) => void;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
   setTheme: (t: Theme) => void;
@@ -435,6 +443,21 @@ function readSecondarySidebarCollapsed(): Record<string, boolean> {
   }
 }
 
+/** Persisted list of folded task-rail workspace sections, tolerating an absent
+ *  / corrupt value. */
+function readCollapsedWorkspaces(): string[] {
+  try {
+    const raw = getItem("history-collapsed-workspaces");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((p): p is string => typeof p === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Persisted mark filter, tolerating an absent / corrupt value. */
 function readMarkFilter(): MarkFilter {
   const raw = getItem("history-mark-filter");
@@ -533,6 +556,7 @@ export const useUIStore = create<UIState>((set) => ({
   // Default on — the empty/absent case yields grouping; only an explicit
   // "false" opts out. Mirrors the `autoUpdateCheck` default-on idiom.
   historyGroupHandoff: getItem("history-group-handoff") !== "false",
+  historyCollapsedWorkspaces: readCollapsedWorkspaces(),
   mainViewState: DEFAULT_MAIN_VIEW_STATE,
   updateMainViewState: (view, patch) =>
     set((state) => ({
@@ -560,6 +584,14 @@ export const useUIStore = create<UIState>((set) => ({
     setItem("history-group-handoff", on ? "true" : "false");
     set({ historyGroupHandoff: on });
   },
+  toggleHistoryWorkspaceCollapsed: (workspacePath) =>
+    set((s) => {
+      const next = s.historyCollapsedWorkspaces.includes(workspacePath)
+        ? s.historyCollapsedWorkspaces.filter((p) => p !== workspacePath)
+        : [...s.historyCollapsedWorkspaces, workspacePath];
+      setItem("history-collapsed-workspaces", JSON.stringify(next));
+      return { historyCollapsedWorkspaces: next };
+    }),
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   setTheme: (t) => {
     setItem("theme", t);
