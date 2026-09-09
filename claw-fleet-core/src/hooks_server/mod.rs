@@ -205,6 +205,13 @@ pub fn serve(opts: ServeOptions) {
     // release() only deregisters the pid; the allowlist stays in settings.json
     // so detached claude sessions survive this process. Un-injecting happens
     // solely via permissions_injector::deactivate() (the settings-panel toggle).
+    // Sweep `~/.fleet/` directories left behind by removed features. Also done
+    // on desktop startup; a headless-only install never runs that path, and the
+    // data is just as dead there.
+    if let Err(e) = crate::launchd::remove_retired_state_dirs() {
+        eprintln!("[fleet serve] remove_retired_state_dirs failed: {e}");
+    }
+
     let serve_pid = std::process::id();
     if crate::permissions_injector::load_config().enabled {
         if let Err(e) = crate::permissions_injector::acquire(serve_pid) {

@@ -1323,6 +1323,13 @@ pub fn run() {
             // One-time migration: port/token/bin and the defunct event log all
             // moved to ~/.fleet, so the old ~/.claude/fleet directory is now
             // pure legacy — remove it. Best-effort; a failure is not fatal.
+            // Same idea one directory over: `~/.fleet/` subdirectories left
+            // behind by features Fleet has removed. Nothing reads them, and
+            // one of them keeps a file per session forever.
+            if let Err(e) = claw_fleet_core::launchd::remove_retired_state_dirs() {
+                claw_fleet_core::log_debug(&format!("remove_retired_state_dirs failed: {e}"));
+            }
+
             if let Err(e) = claw_fleet_core::launchd::remove_legacy_fleet_dir() {
                 claw_fleet_core::log_debug(&format!("remove_legacy_fleet_dir failed: {e}"));
             }
