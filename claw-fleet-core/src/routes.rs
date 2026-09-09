@@ -36,6 +36,12 @@ pub const ARTIFACT_USAGE: &str = "/artifact_usage";
 /// empty folder has no artifact to hang off — see `artifacts::Folder`.
 pub const ARTIFACT_ROLLBACK: &str = "/artifact_rollback";
 pub const ARTIFACT_FOLDERS: &str = "/artifact_folders";
+/// A folder packed as a zip. `ARTIFACT_FOLDER_ZIP` answers the bytes (streamed
+/// — a folder of renders is exactly the case it exists for); the `_PLAN` twin
+/// answers what it would contain, so the UI can name the file and refuse an
+/// empty folder without downloading anything.
+pub const ARTIFACT_FOLDER_ZIP: &str = "/artifact_folder_zip";
+pub const ARTIFACT_FOLDER_ZIP_PLAN: &str = "/artifact_folder_zip_plan";
 pub const ARTIFACT_FOLDER_CREATE: &str = "/artifact_folder_create";
 pub const ARTIFACT_FOLDER_DELETE: &str = "/artifact_folder_delete";
 pub const ARTIFACT_FOLDER_RENAME: &str = "/artifact_folder_rename";

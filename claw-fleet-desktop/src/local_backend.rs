@@ -2538,6 +2538,37 @@ impl LocalBackend {
         crate::artifacts::delete(id)
     }
 
+    /// Stream a folder's artifacts into a zip at `dest` on this machine.
+    pub fn export_artifact_folder(
+        &self,
+        workspace_path: &str,
+        directory: &str,
+        dest: &str,
+    ) -> Result<crate::artifacts::FolderZip, String> {
+        let root = crate::artifacts::artifacts_dir()
+            .ok_or_else(|| "cannot determine home dir".to_string())?;
+        crate::artifacts::export_folder_zip(
+            &root,
+            workspace_path,
+            directory,
+            std::path::Path::new(dest),
+        )
+    }
+
+    /// What such an export would contain, for the save dialog's default name
+    /// and for telling the user an empty folder is empty *before* they pick a
+    /// destination.
+    pub fn artifact_folder_zip_plan(
+        &self,
+        workspace_path: &str,
+        directory: &str,
+    ) -> crate::artifacts::FolderZip {
+        match crate::artifacts::artifacts_dir() {
+            Some(root) => crate::artifacts::folder_zip_plan(&root, workspace_path, directory),
+            None => crate::artifacts::FolderZip::default(),
+        }
+    }
+
     pub fn list_artifact_folders(&self) -> Vec<crate::artifacts::Folder> {
         crate::artifacts::list_folders()
     }

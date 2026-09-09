@@ -122,6 +122,37 @@ pub(crate) fn rollback_artifact(
     state.backend.rollback_artifact(&id, &version)
 }
 
+/// Pack a folder (recursively) into a zip at `dest`.
+///
+/// Slow by nature — it copies every byte in the folder — so it gets the same
+/// `CmdProbe` treatment as the single-artifact export: when a 3 GB pack feels
+/// stuck, the log is the only place that can say it was the copy.
+#[tauri::command(async)]
+pub(crate) fn export_artifact_folder(
+    workspace_path: String,
+    directory: String,
+    dest: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::artifacts::FolderZip, String> {
+    let probe = crate::cmd_probe::CmdProbe::start("export_artifact_folder", &directory);
+    let result = state.backend.export_artifact_folder(&workspace_path, &directory, &dest);
+    probe.done(|| match &result {
+        Ok(r) => format!("{} member(s) → {dest}", r.member_count),
+        Err(e) => e.clone(),
+    });
+    result
+}
+
+/// What that export would contain, without writing anything.
+#[tauri::command(async)]
+pub(crate) fn artifact_folder_zip_plan(
+    workspace_path: String,
+    directory: String,
+    state: tauri::State<'_, AppState>,
+) -> claw_fleet_core::artifacts::FolderZip {
+    state.backend.artifact_folder_zip_plan(&workspace_path, &directory)
+}
+
 // ── Folders ──────────────────────────────────────────────────────────────────
 //
 // Folders are records of their own so that "新建文件夹, then drag things in"

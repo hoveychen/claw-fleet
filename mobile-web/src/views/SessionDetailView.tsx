@@ -83,6 +83,7 @@ import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { buildInfoRows } from "./sessionInfoRows";
 import styles from "./SessionDetailView.module.css";
 import { AppHeader } from "./AppHeader";
+import { FleetEventCard } from "./FleetEventCard";
 
 const TAIL_POLL_MS = 2500;
 const TAIL_INITIAL = 120;
@@ -822,6 +823,16 @@ const MessageRow = memo(function MessageRow({
   jsonlPath,
 }: MessageRowProps) {
   if (msg.type === "user") {
+    // Automation payloads must travel through the harness's user-prompt
+    // channel, but they are Fleet events rather than user-authored turns.
+    if (msg.fleetEvent) {
+      return (
+        <div className={styles.assistantRow}>
+          <FleetEventCard event={msg.fleetEvent} text={userText(msg)} />
+          <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
+        </div>
+      );
+    }
     // The composers staple picked files onto the prompt as a trailing
     // `Context files:` block, which Claude Code freezes into the transcript
     // verbatim. Peel it back off: the paths become thumbnails, and the bubble

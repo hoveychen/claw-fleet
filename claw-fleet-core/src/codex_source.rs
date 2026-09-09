@@ -6058,6 +6058,7 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
         }
     }
 
+    messages.iter_mut().for_each(crate::fleet_event::annotate);
     assign_stable_uuids(&mut messages);
     messages
 }

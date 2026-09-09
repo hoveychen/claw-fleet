@@ -1242,6 +1242,10 @@ fn handle_request(
 
             crate::routes::ARTIFACT_ROLLBACK if request.method() == &tiny_http::Method::Post => route_artifact_rollback(ctx, request, &query, json_header, path),
 
+            crate::routes::ARTIFACT_FOLDER_ZIP_PLAN => route_artifact_folder_zip_plan(ctx, request, &query, json_header, path),
+
+            crate::routes::ARTIFACT_FOLDER_ZIP => route_artifact_folder_zip(ctx, request, &query, json_header, path),
+
             crate::routes::ARTIFACT_FOLDERS => route_artifact_folders(ctx, request, &query, json_header, path),
 
             crate::routes::ARTIFACT_FOLDER_CREATE if request.method() == &tiny_http::Method::Post => route_artifact_folder_create(ctx, request, &query, json_header, path),

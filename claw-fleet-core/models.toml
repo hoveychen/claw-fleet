@@ -1,0 +1,190 @@
+# Fleet 模型目录 —— 内置默认值
+#
+# 这份文件是 Fleet 对「每个模型收哪几档 effort、算哪个档位」的单一真相源。
+# 它被 `include_str!` 编进二进制，所以每次 Fleet 升级都会带上更新过的一份。
+#
+# 想在本机改而不等下一版 Fleet，就写 `~/.fleet/models.toml`：同 id 的条目按
+# **字段级**覆盖这里的值（只写 `efforts` 就只改梯子，其余字段仍取本文件），
+# 本文件没有的 id 则是新增。用户文件写坏了会被忽略并沿用内置值 —— 一份手滑的
+# 覆盖不该让所有会话失去梯子信息。
+#
+# ── 字段 ──
+#   id             模型 id。Claude 与 Codex 用裸 id；dsh 用 `provider/model` 全称。
+#   family         claude-code | codex | dsh。留空则由 id 形状推断
+#                  （见 agent_source::source_for_model）。
+#   tier           fast | standard | premium。跨 harness 换算同档模型时用。
+#   efforts        该模型接受的 effort，**从弱到强**排列。顺序是有意义的：
+#                  把一个档位映射到不支持它的模型时要向下钳位，需要一个全序。
+#   default_effort 不指定 effort 时该模型自己会落到哪一档。仅供展示与推理，
+#                  Fleet 不会替 CLI 填这个值。
+#   context        默认上下文窗口（token）。仅用作**回退**：会话自报了真实窗口
+#                  就以自报为准（Codex 每轮都会自报）。
+#   max_context    该模型能开到的最大窗口。目前只作记录，不参与百分比计算。
+#
+# Claude 各条**故意不写 context**：窗口由家族规则判定（Opus/Sonnet 4.6+、5.x、
+# Fable、Mythos 原生 1M，其余 200K），还要认 Fleet 自己的 `[1m]` 后缀和带日期的
+# 别名——那是一条规则，不是一张能逐 id 列全的表。见 session/stats.rs。
+#
+# ── 事实来源 ──
+# Codex 各条的 efforts / default_effort 读自 `~/.codex/models_cache.json` 的
+# `supported_reasoning_levels`（client 0.153.4，2026-09-08 抓取），不是文档。
+# 这点很重要：树里此前手写的几份副本都声称 Codex 顶到 `high` 且提供 `minimal`，
+# 而缓存显示每个 listed 模型都支持 `xhigh`/`max`，且没有任何一个提供 `minimal`。
+#
+# dsh 是个例外，看文件末尾那一节。
+
+# ── Claude ──────────────────────────────────────────────────────────────────
+# 整个家族共用一条 `--effort` 梯子；default_effort 由 CLI 自己定，不在这里断言。
+#
+# 这里列的 id 与两个模型选择器（桌面 `CLAUDE_MODEL_CHOICES`、移动端
+# `MODEL_CHOICES`）逐条对齐，前代一并列全，好让 tier 换算对每一个可选项都成立。
+# 末尾四条是裸别名：`--model opus` 是合法写法，也该问得出档位。
+# Fleet 自己的 `[1m]` 上下文后缀不是模型 id 的一部分，查表前会被剥掉，所以
+# `claude-opus-5[1m]` 命中的就是 `claude-opus-5` 这一行。
+
+[[model]]
+id = "claude-fable-5-1"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "claude-fable-5"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "claude-opus-5"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "claude-opus-4-8"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "claude-sonnet-5"
+family = "claude-code"
+tier = "standard"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "claude-sonnet-4-6"
+family = "claude-code"
+tier = "standard"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+# 选择器里 Haiku 用的是带日期的 id，`fleet-model-guidance.md` 与手打的
+# `--model haiku-4-5` 用的是不带日期的。两个都列，省得靠模糊匹配去猜。
+[[model]]
+id = "claude-haiku-4-5-20251001"
+family = "claude-code"
+tier = "fast"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "claude-haiku-4-5"
+family = "claude-code"
+tier = "fast"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "fable"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "opus"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "sonnet"
+family = "claude-code"
+tier = "standard"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+[[model]]
+id = "haiku"
+family = "claude-code"
+tier = "fast"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+
+# ── Codex ───────────────────────────────────────────────────────────────────
+# `ultra` = “最高推理强度，并自动委派任务”。只有部分模型有。
+
+[[model]]
+id = "gpt-6-astra"
+family = "codex"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "medium"
+context = 272000
+max_context = 872000
+
+[[model]]
+id = "gpt-5.6-sol"
+family = "codex"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "medium"
+context = 272000
+max_context = 872000
+
+[[model]]
+id = "gpt-5.6-terra"
+family = "codex"
+tier = "standard"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "medium"
+context = 272000
+max_context = 872000
+
+[[model]]
+id = "gpt-5.6-luna"
+family = "codex"
+tier = "fast"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+default_effort = "medium"
+context = 272000
+max_context = 872000
+
+# 唯一一个梯子真的停在 max 以下的 listed 模型，而且它默认就跑在自己的顶档。
+[[model]]
+id = "gpt-5.5"
+family = "codex"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh"]
+default_effort = "xhigh"
+context = 272000
+max_context = 272000
+
+# ── dsh ─────────────────────────────────────────────────────────────────────
+# 这里**不**试图列全 dsh 能跑的模型。dsh 的目录是每个用户 `~/.dsh/settings.yaml`
+# 配出来的（本机是 2 个 DeepSeek 加 270 多个 openrouter 条目），而且 dsh 已经在
+# 运行时把每个模型的真实 `efforts` 与 `defaultEffort` 发过线来。抄一份静态副本
+# 只会过期，还会盖住那份活数据。
+#
+# 所以 dsh 条目只承载 **Fleet 自己的判断**：档位归类（跨 harness 换算要用）。
+#
+# 这两条**故意不写 `efforts`**。省略 `efforts` 的含义是「这个模型的梯子去问
+# dsh，我们不断言」，而不是「它没有梯子」。dsh 的梯子逐模型不同，且用的是它自己
+# 的词汇（`off` 是真实档位，某些模型一路到 `max`）——凭印象抄一份进来，就是把
+# 一个猜测伪装成事实。老板要给某个模型钉死一条梯子，在 `~/.fleet/models.toml`
+# 里给它补 `efforts` 即可，那是一个明确的人为决定，不是 Fleet 编的。
+
+[[model]]
+id = "deepseek-official/deepseek-v4-pro"
+family = "dsh"
+tier = "premium"
+
+[[model]]
+id = "deepseek-official/deepseek-v4-flash-vision-exp"
+family = "dsh"
+tier = "fast"

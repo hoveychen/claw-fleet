@@ -579,10 +579,15 @@ impl LaunchRoute {
 /// that unambiguously names another harness re-points the launch at that
 /// harness instead.
 ///
-/// Effort does not survive a harness switch unless it was named explicitly:
-/// the ladders differ (Claude has `xhigh`/`max`, Codex has `minimal`), so
-/// carrying the old session's value over would hand the new harness a level it
-/// rejects.
+/// Effort survives a harness switch, mapped onto the target model's ladder by
+/// [`crate::model_catalog::map_effort`]. This used to be a flat drop, justified
+/// by "the ladders differ (Claude has `xhigh`/`max`, Codex has `minimal`)" —
+/// which the Codex model cache contradicts: every listed Codex model supports
+/// `xhigh` and `max`, and none offers `minimal`. The drop was therefore
+/// resetting a deliberate `xhigh` session to Codex's `medium` default on every
+/// cross-harness handoff, loop and schedule. Effort is only dropped now when
+/// the target's ladder is genuinely unknown (a dsh provider-scoped id, a Codex
+/// profile marker).
 pub fn route_launch(
     ctx: &crate::session::LaunchContext,
     model_flag: Option<&str>,
@@ -634,10 +639,25 @@ pub fn route_launch_with(
             inherited
         ));
     }
+    // An explicitly named effort is the caller's own call and rides along
+    // verbatim. An *inherited* one is mapped onto the target model's ladder
+    // instead of being dropped: the ladders overlap far more than this code
+    // used to assume (see `model_catalog`), so dropping it silently reset a
+    // deliberate `xhigh` session to the new harness's default.
+    let effort = match effort_flag {
+        Some(e) => Some(e),
+        None => ctx
+            .effort
+            .as_deref()
+            .and_then(|e| {
+                model.as_deref().and_then(|m| crate::model_catalog::map_effort(e, m))
+            })
+            .map(str::to_string),
+    };
     Ok(LaunchRoute {
         agent_source: target.to_string(),
         model,
-        effort: effort_flag,
+        effort,
         switched_from: Some(inherited),
     })
 }
@@ -756,8 +776,42 @@ mod tests {
         assert_eq!(route.agent_source, "codex");
         assert_eq!(route.model.as_deref(), Some("gpt-5.6-sol"));
         assert_eq!(route.switched_from.as_deref(), Some("claude-code"));
-        // Claude's `xhigh` is not on Codex's ladder — carrying it over would
-        // hand the new harness a level it rejects.
+        // `xhigh` *is* on Sol's ladder (verified against the Codex model
+        // cache), so the inherited level rides along. This assertion used to
+        // read `None` on the belief that Codex tops out at `high`; that belief
+        // was demoting every deliberate `xhigh` session to Codex's `medium`
+        // default on the way across.
+        assert_eq!(route.effort.as_deref(), Some("xhigh"));
+    }
+
+    /// Inheriting onto a shorter ladder clamps rather than drops. `gpt-5.5` is
+    /// the one listed Codex model that really does stop below `max`.
+    #[test]
+    fn inherited_effort_clamps_onto_a_shorter_target_ladder() {
+        let route = route_launch_with(
+            &ctx("claude-code", "claude-opus-5", "max"),
+            Some("gpt-5.5"),
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(route.agent_source, "codex");
+        assert_eq!(route.effort.as_deref(), Some("xhigh"));
+    }
+
+    /// A target whose ladder is the host's business (a dsh provider-scoped id)
+    /// still drops the inherited effort — mapping it would mean inventing a
+    /// ladder for someone else's provider block.
+    #[test]
+    fn inherited_effort_is_dropped_for_an_unknown_ladder() {
+        let route = route_launch_with(
+            &ctx("claude-code", "claude-opus-5", "xhigh"),
+            Some("openrouter/anthropic/claude-opus-5"),
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(route.agent_source, "dsh");
         assert_eq!(route.effort, None);
     }
 

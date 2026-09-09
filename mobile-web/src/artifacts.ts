@@ -15,6 +15,11 @@
 // twenty exported files and no undo for a mistaken delete-twenty. The phone's
 // 产出 tab stays what it has always been: browse and open one deliverable.
 // Filing and tidying stay desk work.
+//
+// Folder-as-zip export is absent for the same reason plus a harder one: the
+// relay's one shape for bytes is a base64 payload in a single JSON frame
+// capped at `MAX_RELAY_BYTES`, and a folder of deliverables is the case that
+// cap exists to refuse. A phone also has nowhere useful to put a zip.
 
 import { isBrowsableArchive } from "../../shared-ts/zipDir";
 import { ASSET_REQUEST_TIMEOUT_MS, type FleetTransport } from "./transport";
