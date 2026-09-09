@@ -157,6 +157,11 @@ export function PlansView({ sessions, client, onBack }: Props) {
       <AppHeader
         onBack={onBack}
         title={t("计划")}
+        // repoRow 自己带一条 border-bottom，与 header 的 hairline 叠在一起就是
+        // 两条线把同一块 chrome 切成两片（会话详情页的 tab 条正是因为这个才要
+        // seamless）。**条件**给：仓库只有一个时那一行根本不渲染，此时 header
+        // 的 hairline 就是唯一那条封口线，撤掉它会让页顶和正文糊成一块。
+        seamless={repos.length > 1}
         actions={
           <HeaderAction
             icon={<RefreshCw size={17} />}
