@@ -3478,3 +3478,28 @@ mod tests {
         assert_eq!(parse_model_catalog(&json!({})), DshModelCatalog::default());
     }
 }
+
+#[cfg(test)]
+mod live_probe {
+    /// Ad-hoc probe: dump this machine's real dsh model catalog, including each
+    /// model's published effort ladder. `-- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn dump_dsh_models() {
+        match super::dsh_models() {
+            Ok(c) => {
+                for g in &c.groups {
+                    for m in &g.models {
+                        let efforts: Vec<&str> = m.efforts.iter().map(|e| e.id.as_str()).collect();
+                        println!(
+                            "PROBE\t{}\t{}\tdefault={:?}\tefforts={:?}",
+                            g.id, m.spec, m.default_effort, efforts
+                        );
+                    }
+                }
+                println!("PROBE-FAILURES {:?}", c.failures);
+            }
+            Err(e) => println!("PROBE-ERR {e}"),
+        }
+    }
+}

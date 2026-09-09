@@ -234,11 +234,16 @@ quota_billed = true
 # 生效那版），所以能如实报价。openrouter 那 270 多个不列：同一个模型经不同
 # provider 价格不同，逐用户不同，凭印象报价就是编造。
 #
-# 三条都**故意不写 `efforts`**。省略 `efforts` 的含义是「这个模型的梯子去问
-# dsh，我们不断言」，而不是「它没有梯子」。dsh 的梯子逐模型不同，且用的是它自己
-# 的词汇（`off` 是真实档位，某些模型一路到 `max`）——凭印象抄一份进来，就是把
-# 一个猜测伪装成事实。老板要给某个模型钉死一条梯子，在 `~/.fleet/models.toml`
-# 里给它补 `efforts` 即可，那是一个明确的人为决定，不是 Fleet 编的。
+# 三条的 `efforts` / `default_effort` 是**向本机 dsh 实测**来的，不是抄的：
+# `dsh_source::dsh_models()` 返回的 `session/modelCatalog`（复现见该模块的
+# `live_probe::dump_dsh_models`，2026-09-08 抓取）。三个 deepseek-official 模型
+# 一致是 `off / low / high / max`，默认 `high`——**注意没有 `medium`**，这正是
+# 凭印象绝对写不对的那种事实。
+#
+# 仍然不列 openrouter：实测里它那 270 多个模型的梯子五花八门（有的是
+# `minimal/low/medium/high`，有的带 `off`，有的干脆是空数组），且逐用户配置不同。
+# 没编目的 dsh 模型 `effort_ladder()` 返回 None，速查表显示「见 dsh」——那句话
+# 现在只对它们成立。
 #
 # `context` 只填**实测到的**那两条。本机 dsh 会话里 dsh 自己上报的
 # `contextPressure.contextWindow`：deepseek-v4-flash 与 -flash-vision-exp 各 18 / 8
@@ -256,6 +261,8 @@ id = "deepseek-official/deepseek-v4-pro"
 label = "DeepSeek V4 Pro"
 family = "dsh"
 tier = "premium"
+efforts = ["off", "low", "high", "max"]
+default_effort = "high"
 price_in = 1.32
 price_out = 3.96
 
@@ -264,6 +271,8 @@ id = "deepseek-official/deepseek-v4-flash"
 label = "DeepSeek V4 Flash"
 family = "dsh"
 tier = "fast"
+efforts = ["off", "low", "high", "max"]
+default_effort = "high"
 context = 1000000
 price_in = 0.44
 price_out = 1.32
@@ -273,6 +282,8 @@ id = "deepseek-official/deepseek-v4-flash-vision-exp"
 label = "DeepSeek V4 Flash (vision, exp)"
 family = "dsh"
 tier = "fast"
+efforts = ["off", "low", "high", "max"]
+default_effort = "high"
 context = 1000000
 price_in = 0.44
 price_out = 1.32

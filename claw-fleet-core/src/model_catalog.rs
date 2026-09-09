@@ -528,9 +528,9 @@ dsh 把模型拆成 `provider` + `model` 两段,Fleet 的 spawn 用一个字符�
 `openrouter`,model `anthropic/claude-haiku-4.5`。表里只列 dsh 内置的 \
 `deepseek-official` 路由(有官方公开价目表);经 openrouter 之类第三方 provider \
 的模型不列——同一个模型经不同 provider 价格不同、逐用户不同,要知道本机配了\
-什么就读 `~/.dsh/settings.yaml`,别猜。`effort` 一列写「见 dsh」的,是 dsh 在\
-运行时自己发布每个模型的真实梯子(它有 `off` 这种别家没有的档),Fleet 不替它\
-断言。\n",
+什么就读 `~/.dsh/settings.yaml`,别猜。表里那三行的 effort 梯子是向本机 dsh 实测来的\
+(`off`/`low`/`high`/`max`,**没有 `medium`**,默认 `high`)。没编目的 dsh 模型\
+effort 一列显示「见 dsh」——那些的梯子五花八门,得问 dsh 自己。\n",
             );
         }
         if has("codex") {
@@ -579,10 +579,10 @@ splits on the **first `/`**: `openrouter/anthropic/claude-haiku-4.5` → provide
 `deepseek-official` route, which has a published price table; models reached through a \
 third-party provider such as openrouter are not listed — the same model costs \
 different amounts through different providers and varies per user. Read \
-`~/.dsh/settings.yaml` to see what this machine has; don't guess. Rows whose effort \
-cell says \"ask dsh\" are ones where dsh publishes each model's real ladder at runtime \
-(it has levels such as `off` that no other harness offers), so Fleet does not assert \
-one on its behalf.\n",
+`~/.dsh/settings.yaml` to see what this machine has; don't guess. The effort ladders on \
+those three rows were measured against this machine's dsh (`off`/`low`/`high`/`max`, \
+**no `medium`**, default `high`). Uncatalogued dsh models show \"ask dsh\" instead — \
+their ladders vary widely, so ask dsh itself.\n",
             );
         }
         if has("codex") {
@@ -694,19 +694,35 @@ mod tests {
         assert_eq!(map_effort("off", "claude-opus-5"), Some("low"));
     }
 
-    /// dsh rows carry a tier but deliberately no ladder — dsh publishes the real
-    /// one at runtime — so effort is dropped rather than invented.
+    /// The catalogued dsh rows carry a real, measured ladder; uncatalogued dsh
+    /// ids still get none.
+    ///
+    /// The `deepseek-official` ladder is `off / low / high / max` — note the
+    /// **missing `medium`**, which is exactly the kind of fact nobody guesses
+    /// right, and the reason these came from a live query
+    /// (`dsh_source::live_probe::dump_dsh_models`) rather than from reasoning.
+    /// The openrouter half of dsh's catalog really does vary per model (some
+    /// carry `minimal`, some carry `off`, some publish an empty list), so those
+    /// stay unasserted.
     #[test]
-    fn dsh_rows_have_a_tier_but_no_ladder() {
+    fn catalogued_dsh_rows_carry_the_measured_ladder() {
         assert_eq!(tier("deepseek-official/deepseek-v4-pro"), Some("premium"));
         assert_eq!(
             tier("deepseek-official/deepseek-v4-flash-vision-exp"),
             Some("fast")
         );
-        assert_eq!(effort_ladder("deepseek-official/deepseek-v4-pro"), None);
-        assert_eq!(map_effort("high", "deepseek-official/deepseek-v4-pro"), None);
-        // An uncatalogued dsh id is equally declined rather than guessed at.
+        let ladder = effort_ladder("deepseek-official/deepseek-v4-pro").expect("ladder");
+        assert_eq!(ladder, ["off", "low", "high", "max"]);
+
+        // `medium` is not on that ladder, so carrying one over clamps down to
+        // `low` rather than being dropped or passed through verbatim.
+        assert_eq!(map_effort("medium", "deepseek-official/deepseek-v4-pro"), Some("low"));
+        assert_eq!(map_effort("high", "deepseek-official/deepseek-v4-pro"), Some("high"));
+        assert_eq!(map_effort("ultra", "deepseek-official/deepseek-v4-flash"), Some("max"));
+
+        // An uncatalogued dsh id is still declined rather than guessed at.
         assert_eq!(effort_ladder("openrouter/anthropic/claude-opus-5"), None);
+        assert_eq!(map_effort("high", "openrouter/anthropic/claude-opus-5"), None);
     }
 
     /// Codex profile markers name a model the host's profile file picks, so the
@@ -876,12 +892,13 @@ mod tests {
     /// `deepseek-official` route. The result was a cheat-sheet written *for a dsh
     /// agent* that named no dsh model at all.
     ///
-    /// The window rule is the interesting half. dsh reports
-    /// `contextPressure.contextWindow` per session, so the catalog states a
-    /// window only where a real local session reported one: both Flash rows did
-    /// (1M, consistently), Pro never ran here. Pro is therefore blank — not
-    /// filled in from the family's "probably the same". Ladders stay unasserted
-    /// for all three; those are dsh's to publish.
+    /// Every field on these rows is measured, and the ones that were not
+    /// measured stay blank.
+    ///
+    /// Ladders come from a live `session/modelCatalog` query; windows come from
+    /// `contextPressure.contextWindow` in real local sessions. Both Flash rows
+    /// reported a window (1M, consistently); Pro never ran here, so its window is
+    /// blank rather than inherited from the family's "probably the same".
     #[test]
     fn dsh_route_models_state_only_what_was_measured() {
         let rows = listed_models("dsh");
@@ -896,7 +913,16 @@ mod tests {
         );
         for e in &rows {
             assert!(e.tier.is_some(), "{} has no tier", e.id);
-            assert_eq!(e.efforts, None, "{} must not assert a ladder", e.id);
+            assert_eq!(
+                e.efforts.as_deref(),
+                Some(
+                    ["off".to_string(), "low".to_string(), "high".to_string(), "max".to_string()]
+                        .as_slice()
+                ),
+                "{} should carry the measured deepseek-official ladder",
+                e.id
+            );
+            assert_eq!(e.default_effort.as_deref(), Some("high"), "{}", e.id);
         }
         assert_eq!(context_window("deepseek-official/deepseek-v4-flash"), Some(1_000_000));
         assert_eq!(
