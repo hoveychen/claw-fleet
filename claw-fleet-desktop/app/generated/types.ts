@@ -476,5 +476,6 @@ exitCode?: number | null, startedMs: number, finishedMs?: number | null, cols: n
 export type ProcOutputChunk = { dataB64: string, nextOffset: number, record: ProcRecord, };
 
 export type HostFeatures = { 
-terminal: boolean, };
+terminal: boolean, 
+simplifiedDefault?: boolean | null, };
 

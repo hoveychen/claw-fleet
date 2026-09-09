@@ -7,7 +7,7 @@ import { isFleetOwnedTask } from "./types";
 import { noteRemovedLocally } from "./decisionReconcile";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
-import { getItem, resolveFeature, setItem } from "./storage";
+import { getItem, removeItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
 import i18n from "./i18n";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
@@ -529,9 +529,31 @@ function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
  *  initial values below must come from the same read. */
 const initialHistoryWorkspaceFilter = readHistoryWorkspaceFilter();
 
+/**
+ * 精简模式的初值。三级:这个客户端存过的**显式**选择最高,其次是这台主机上次
+ * 给出的默认值(`FLEET_SIMPLIFIED_MODE`,见 core 的 feature_flags),都没有才是
+ * 关。
+ *
+ * 为什么要缓存主机的答案:`host_features` 是启动后一次异步请求,而
+ * `simplifiedMode` 必须同步给出 —— 只等那次请求的话,每次打开页面都会先画一帧
+ * 全功能界面再跳成精简版。缓存让第二次之后的加载直接就位;主机答案每次启动都
+ * 会刷新这份缓存,所以在 muvee 里把环境变量改掉,下一次加载就跟着变。
+ *
+ * 读一次,因为下面的 `simplifiedMode` 和 `viewMode` 必须看到同一个答案 ——
+ * 两者不一致会让开着精简模式的页面停在一个导航里没有的页上。
+ */
+function readSimplifiedMode(): boolean {
+  const stored = getItem("simplified-mode");
+  if (stored === "true") return true;
+  if (stored === "false") return false;
+  return getItem("simplified-mode-host-default") === "true";
+}
+
+const initialSimplifiedMode = readSimplifiedMode();
+
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
-  simplifiedMode: getItem("simplified-mode") === "true",
+  simplifiedMode: initialSimplifiedMode,
   setSimplifiedMode: (enabled) => set((s) => {
     setItem("simplified-mode", String(enabled));
     return { simplifiedMode: enabled, ...viewModePatch(
@@ -539,7 +561,7 @@ export const useUIStore = create<UIState>((set) => ({
       enabled ? "history" : s.viewMode,
     ) };
   }),
-  viewMode: getItem("simplified-mode") === "true"
+  viewMode: initialSimplifiedMode
     ? (getItem("viewMode") === "artifacts" ? "artifacts" : "history")
     : (getItem("viewMode") as ViewMode) ?? "gallery",
   lastSessionViewMode:
@@ -642,6 +664,12 @@ export const useUIStore = create<UIState>((set) => ({
     } catch {
       // Fail closed — see the field's doc comment.
     }
+    // 这台主机对精简模式的意见(`FLEET_SIMPLIFIED_MODE`)。缓存下来给下一次
+    // 加载同步读;主机改口(或不再表态)时这份缓存跟着改口,所以它永远不会变成
+    // 一个没人能撤销的粘滞开关。
+    const hostDefault = features.simplifiedDefault ?? null;
+    if (hostDefault === null) removeItem("simplified-mode-host-default");
+    else setItem("simplified-mode-host-default", String(hostDefault));
     set((s) => ({
       hostFeatures: features,
       // The last-used page is restored from storage, so a host that used to
@@ -650,6 +678,20 @@ export const useUIStore = create<UIState>((set) => ({
       // instead of rendering an empty main area with no nav item to leave by.
       ...(!features.terminal && s.viewMode === "terminal"
         ? viewModePatch(s, NAV_GROUP_HOME.work)
+        : {}),
+      // 第一次打开这个浏览器时缓存还是空的,所以主机的意见要就地生效,而不是
+      // 等到下一次加载。只在这个客户端**没有**显式选择时才动 —— 用户在设置里
+      // 关掉过的,主机不该替他改回来。
+      ...(hostDefault !== null &&
+      getItem("simplified-mode") === null &&
+      hostDefault !== s.simplifiedMode
+        ? {
+            simplifiedMode: hostDefault,
+            ...viewModePatch(
+              { ...s, simplifiedMode: hostDefault },
+              hostDefault ? "history" : s.viewMode,
+            ),
+          }
         : {}),
     }));
   },

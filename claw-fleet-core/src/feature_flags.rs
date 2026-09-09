@@ -36,12 +36,30 @@ use std::sync::OnceLock;
 pub struct HostFeatures {
     /// The 终端 page / phone terminal — interactive shells on this machine.
     pub terminal: bool,
+    /// Whether this host wants 精简模式 (Tasks + Artifacts only) as the
+    /// *default* for a client that has never been told otherwise. `None` = this
+    /// host has no opinion, so the client keeps its own default (off).
+    ///
+    /// Unlike `terminal` this is a **presentation** default, not a capability:
+    /// nothing is gated by it, and a user who flips the switch in Settings
+    /// overrides it for that browser. It exists because the browser build's
+    /// settings live in that one browser's localStorage (`webTransport.ts`
+    /// bridges `plugin:store` to it), so a deployment that wants the lean
+    /// layout for *everyone who opens it* has no per-browser click that can
+    /// say so — only the host can.
+    ///
+    /// Skipped when absent so an older client (and every `{ terminal: … }`
+    /// literal already in the two frontends) keeps type-checking against the
+    /// generated binding.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub simplified_default: Option<bool>,
 }
 
 /// This host's feature set, as served to every client.
 pub fn host_features() -> HostFeatures {
     HostFeatures {
         terminal: terminal_enabled(),
+        simplified_default: simplified_default(),
     }
 }
 
@@ -69,6 +87,32 @@ pub fn terminal_enabled() -> bool {
     }
     static CACHED: OnceLock<bool> = OnceLock::new();
     *CACHED.get_or_init(|| env_truthy(std::env::var(TERMINAL_ENV).ok().as_deref()))
+}
+
+/// Env var that sets 精简模式's default for every client of this host.
+/// `1/true/yes/on` = on, `0/false/no/off` = off, unset = no opinion.
+pub const SIMPLIFIED_ENV: &str = "FLEET_SIMPLIFIED_MODE";
+
+/// Tri-state read of a boolean env var: `Some(true)` / `Some(false)` for an
+/// explicit value, `None` for unset (and for garbage, which must not be read as
+/// either answer — a typo'd value means "the deployment did not say").
+pub fn env_tristate(raw: Option<&str>) -> Option<bool> {
+    match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("1" | "true" | "yes" | "on") => Some(true),
+        Some("0" | "false" | "no" | "off") => Some(false),
+        _ => None,
+    }
+}
+
+/// 精简模式's host-level default, from [`SIMPLIFIED_ENV`].
+///
+/// Cached like [`terminal_enabled`] and for the same reason: it is a launch
+/// property of the process, and the desktop / browser build / phone reading one
+/// host must not disagree about it mid-run. Changing it means restarting the
+/// process (for the cloud container: setting the env in muvee and redeploying).
+pub fn simplified_default() -> Option<bool> {
+    static CACHED: OnceLock<Option<bool>> = OnceLock::new();
+    *CACHED.get_or_init(|| env_tristate(std::env::var(SIMPLIFIED_ENV).ok().as_deref()))
 }
 
 #[cfg(test)]
@@ -127,5 +171,22 @@ mod tests {
             assert!(!env_truthy(Some(off)), "{off:?} should not enable");
         }
         assert!(!env_truthy(None), "an unset var is off — that is the default");
+    }
+
+    // 精简模式 is tri-state, not truthy: "the deployment said off" and "the
+    // deployment said nothing" are different answers, because only the latter
+    // leaves a browser's own stored choice / default in charge.
+    #[test]
+    fn simplified_env_distinguishes_off_from_unset() {
+        for on in ["1", "true", "TRUE", "yes", "On", " 1 "] {
+            assert_eq!(env_tristate(Some(on)), Some(true), "{on:?} should be on");
+        }
+        for off in ["0", "false", "NO", "off", " 0 "] {
+            assert_eq!(env_tristate(Some(off)), Some(false), "{off:?} should be off");
+        }
+        for silent in ["", " ", "ture", "2", "maybe"] {
+            assert_eq!(env_tristate(Some(silent)), None, "{silent:?} says nothing");
+        }
+        assert_eq!(env_tristate(None), None, "unset says nothing");
     }
 }
