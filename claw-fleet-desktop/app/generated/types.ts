@@ -312,7 +312,7 @@ workspacePath: string, agentSource: string, toolName: string, commandSummary: st
 
 export type AuditSummary = { events: Array<AuditEvent>, totalSessionsScanned: number, };
 
-export type MatchMode = "contains" | "command_start";
+export type MatchMode = "contains" | "command_start" | "contains_word";
 
 export type GuardAllowRule = { id: string, prefix: string, 
 sourceTag: string | null, createdAt: string, 

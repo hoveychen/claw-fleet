@@ -592,6 +592,7 @@
     "suggest_error": "Failed to generate suggestions",
     "match_contains": "Substring",
     "match_command_start": "Command Start",
+    "match_contains_word": "Substring (word boundary)",
     "level_critical": "Critical",
     "level_high": "High",
     "level_medium": "Medium",

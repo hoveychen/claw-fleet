@@ -589,6 +589,7 @@
     "suggest_error": "生成建议失败",
     "match_contains": "子串匹配",
     "match_command_start": "命令起始位置",
+    "match_contains_word": "子串匹配（词边界）",
     "level_critical": "严重",
     "level_high": "高",
     "level_medium": "中",

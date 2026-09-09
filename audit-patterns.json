@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "patterns": [
     {
       "level": "critical",
@@ -10,7 +10,7 @@
     {
       "level": "critical",
       "tag": "eval-exec",
-      "match_mode": "contains",
+      "match_mode": "contains_word",
       "patterns": ["| bash", "| sh", "| zsh", "eval ", "$(curl", "$(wget"]
     },
     {
