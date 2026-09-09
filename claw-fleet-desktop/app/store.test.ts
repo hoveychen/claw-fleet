@@ -767,6 +767,35 @@ describe("精简模式", () => {
     expect(getItem("simplified-mode")).toBe("false");
   });
 
+  // fleet-cloud 上没存过选择时默认开(浏览器各存一份 localStorage,老板在一个
+  // 浏览器上开的开关到不了下一个)。这里盯的是 store 这一侧的接线:默认值要同时
+  // 落到 simplifiedMode 和初始页,否则页面会停在导航里没有的那一页;而显式存过
+  // 的 "false" 必须压过默认值。哪个 origin 算「默认开」由 hostEnv.test 钉住。
+  it("follows the host default when nothing is stored", async () => {
+    vi.doMock("./hostEnv", () => ({
+      isWebBuild: () => true,
+      defaultsToSimplifiedMode: () => true,
+    }));
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+    expect(useUIStore.getState().viewMode).toBe("history");
+    vi.doUnmock("./hostEnv");
+  });
+
+  it("lets a stored opt-out beat the host default", async () => {
+    vi.doMock("./hostEnv", () => ({
+      isWebBuild: () => true,
+      defaultsToSimplifiedMode: () => true,
+    }));
+    const { setItem } = await import("./storage");
+    setItem("simplified-mode", "false");
+    setItem("viewMode", "wiki");
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().simplifiedMode).toBe(false);
+    expect(useUIStore.getState().viewMode).toBe("wiki");
+    vi.doUnmock("./hostEnv");
+  });
+
   it.each(["wiki", "artifacts"])("restores simplified mode on boot from %s", async (view) => {
     const { setItem } = await import("./storage");
     setItem("simplified-mode", "true");

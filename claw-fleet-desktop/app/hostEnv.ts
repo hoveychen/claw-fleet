@@ -64,6 +64,32 @@ export function showsMobilePanel(
   return !isLoopbackHostname(hostname);
 }
 
+/**
+ * 精简模式没有显式选择时该不该默认开。
+ *
+ * 判据和 `showsMobilePanel` 同一条:浏览器构建 + https + 非回环 =「这是
+ * fleet-cloud 这类远端部署」。桌面端默认关(它就是那个全功能客户端),本地
+ * `fleet webui`(回环/明文)也默认关 —— 那是老板在自己机器上开的调试页面,
+ * 不是那个「只看任务和产出」的场景。
+ *
+ * 为什么要有这个默认:浏览器构建的设置存在**这个浏览器自己的 localStorage**
+ * 里(`webTransport.ts` 把 `plugin:store` 桥到 localStorage),所以老板在一个
+ * 浏览器上打开的开关传不到另一个浏览器 —— 每台新设备、每个新浏览器都要重新
+ * 打开一次。默认开就让「常态」不再需要那次点击;显式关过的浏览器仍然记得,
+ * 因为存的是 "false" 而不是空。
+ *
+ * 纯函数(protocol / hostname 由调用方从 `window.location` 取),同样为了可单测。
+ */
+export function defaultsToSimplifiedMode(
+  webBuildHost: boolean,
+  protocol: string,
+  hostname: string,
+): boolean {
+  if (!webBuildHost) return false;
+  if (protocol !== "https:") return false;
+  return !isLoopbackHostname(hostname);
+}
+
 /** 回环主机名。`[::1]` 是 `location.hostname` 给 IPv6 回环的形式。 */
 function isLoopbackHostname(hostname: string): boolean {
   const h = hostname.toLowerCase();

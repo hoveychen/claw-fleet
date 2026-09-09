@@ -8,6 +8,7 @@ import { noteRemovedLocally } from "./decisionReconcile";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
 import { getItem, resolveFeature, setItem } from "./storage";
+import { defaultsToSimplifiedMode, isWebBuild } from "./hostEnv";
 import { appendTailDelta } from "./tailDelta";
 import i18n from "./i18n";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
@@ -529,9 +530,33 @@ function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
  *  initial values below must come from the same read. */
 const initialHistoryWorkspaceFilter = readHistoryWorkspaceFilter();
 
+/** 精简模式的初值:存过的显式选择优先,没存过则跟随 `defaultsToSimplifiedMode`
+ *  (fleet-cloud 这类远端 origin 默认开)。读一次,因为下面的 `simplifiedMode`
+ *  和 `viewMode` 必须看到同一个答案 —— 两者不一致会让开着精简模式的页面停在
+ *  一个导航里没有的页上。
+ *
+ *  `isWebBuild()` 在这里可信:`main.tsx` 在 import ./App(从而 import 本模块)
+ *  之前就调过 `markWebBuild()`。 */
+function readSimplifiedMode(): boolean {
+  const stored = getItem("simplified-mode");
+  if (stored === "true") return true;
+  if (stored === "false") return false;
+  // `location` 是防御性读的:非浏览器环境(以及那些只造了半个 window 的测试)
+  // 里它可能整个不存在,而一个 origin 读不出来只该退回「默认关」,不该让整个
+  // store 的构造抛异常。
+  const loc = typeof window === "undefined" ? undefined : window.location;
+  return defaultsToSimplifiedMode(
+    isWebBuild(),
+    loc?.protocol ?? "",
+    loc?.hostname ?? "",
+  );
+}
+
+const initialSimplifiedMode = readSimplifiedMode();
+
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
-  simplifiedMode: getItem("simplified-mode") === "true",
+  simplifiedMode: initialSimplifiedMode,
   setSimplifiedMode: (enabled) => set((s) => {
     setItem("simplified-mode", String(enabled));
     return { simplifiedMode: enabled, ...viewModePatch(
@@ -539,7 +564,7 @@ export const useUIStore = create<UIState>((set) => ({
       enabled ? "history" : s.viewMode,
     ) };
   }),
-  viewMode: getItem("simplified-mode") === "true"
+  viewMode: initialSimplifiedMode
     ? (getItem("viewMode") === "artifacts" ? "artifacts" : "history")
     : (getItem("viewMode") as ViewMode) ?? "gallery",
   lastSessionViewMode:
