@@ -1034,6 +1034,60 @@ pub fn apply_default_model(model: &str) -> Result<(), String> {
     write_settings(&settings)
 }
 
+// ── Commit attribution (settings.json `attribution`) ────────────────────────
+
+/// Turn off Claude Code's commit/PR bylines in `~/.claude/settings.json`.
+///
+/// Claude Code's own system prompt ends every commit message with
+/// `Co-Authored-By: Claude … <noreply@anthropic.com>` (and a
+/// `🤖 Generated with Claude Code` line in PR bodies), and web / Remote Control
+/// sessions additionally paste a claude.ai session URL. That default is *not*
+/// reachable from guidance text — `attribution` in settings.json is the only
+/// lever, so a Fleet-governed host has to set it here alongside the hooks.
+///
+/// Two keys, both booleans (`includeCoAuthoredBy` is the deprecated older
+/// spelling of `commitTrailers`; writing the new one is enough):
+/// - `commitTrailers` — the `Co-Authored-By` / `Generated with` trailers.
+/// - `sessionUrl` — the claude.ai session link in web/Remote Control commits.
+///
+/// Merges into an existing `attribution` object rather than replacing it, so a
+/// future key someone set by hand survives. Claude Code reads settings.json at
+/// startup, so this only affects sessions spawned after the write.
+pub fn apply_no_commit_attribution() -> Result<(), String> {
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let attribution = obj
+        .entry("attribution".to_string())
+        .or_insert_with(|| json!({}));
+    if !attribution.is_object() {
+        *attribution = json!({});
+    }
+    let attribution = attribution
+        .as_object_mut()
+        .ok_or("attribution is not an object")?;
+    attribution.insert("commitTrailers".to_string(), json!(false));
+    attribution.insert("sessionUrl".to_string(), json!(false));
+    write_settings(&settings)
+}
+
+/// Whether [`apply_no_commit_attribution`] has already been applied.
+///
+/// Exists so `control_plane::heal` can stay silent on a host that is already
+/// whole — it prints the steps it ran, and an unconditional write would put a
+/// line on every `fleet webui` start. Deliberately *not* a
+/// [`HookSetupPlan`] field: that struct is the settings panel's toggle list, and
+/// this is a value with no on/off UI, like the pinned default model.
+pub fn no_commit_attribution_applied() -> bool {
+    let Some(settings) = read_settings() else {
+        return false;
+    };
+    let Some(attribution) = settings.get("attribution") else {
+        return false;
+    };
+    attribution.get("commitTrailers").and_then(|v| v.as_bool()) == Some(false)
+        && attribution.get("sessionUrl").and_then(|v| v.as_bool()) == Some(false)
+}
+
 // ── Read hook events ─────────────────────────────────────────────────────────
 
 /// Everything the session scan derives from one pass over the hook events.
@@ -1889,6 +1943,76 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
 
         outcome.expect("apply_default_model must pin the model without touching siblings");
+    }
+
+    #[test]
+    fn apply_no_commit_attribution_disables_trailers_and_merges() {
+        // Guards the reason this exists: Claude Code's Co-Authored-By trailer is
+        // a system-prompt default that guidance text cannot override, so the
+        // control plane has to write `attribution` — without clobbering the
+        // hooks the other bootstrap steps wrote, without dropping an unrelated
+        // key someone put inside `attribution` by hand, and reporting itself as
+        // applied afterwards so heal stays quiet.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-hooks-attribution-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by the fleet_home_lock.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let outcome = (|| -> Result<(), String> {
+            write_settings(&json!({
+                "hooks": { "PreToolUse": [] },
+                "attribution": { "somethingElse": "keep me" }
+            }))?;
+            if no_commit_attribution_applied() {
+                return Err("must not read as applied before the write".into());
+            }
+
+            apply_no_commit_attribution()?;
+            let after = read_settings().ok_or("settings unreadable after apply")?;
+            let attr = after.get("attribution").ok_or("attribution key missing")?;
+            if attr.get("commitTrailers").and_then(|v| v.as_bool()) != Some(false) {
+                return Err(format!("commitTrailers not disabled: {after}"));
+            }
+            if attr.get("sessionUrl").and_then(|v| v.as_bool()) != Some(false) {
+                return Err(format!("sessionUrl not disabled: {after}"));
+            }
+            if attr.get("somethingElse").and_then(|v| v.as_str()) != Some("keep me") {
+                return Err(format!("apply replaced the attribution object: {after}"));
+            }
+            if after.get("hooks").is_none() {
+                return Err("apply clobbered the hooks key".into());
+            }
+            if !no_commit_attribution_applied() {
+                return Err("probe must see its own write, or heal reruns forever".into());
+            }
+
+            // Idempotent — bootstrap re-runs on every Fleet Cloud start.
+            apply_no_commit_attribution()?;
+            if !no_commit_attribution_applied() {
+                return Err("second apply must leave it applied".into());
+            }
+            Ok(())
+        })();
+
+        // Restore env before asserting so a failure can't leak FLEET_HOME.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = fs::remove_dir_all(&tmp);
+
+        outcome.expect("apply_no_commit_attribution must disable both trailers and merge");
     }
 
     #[test]

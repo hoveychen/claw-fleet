@@ -101,6 +101,10 @@ pub fn install_all(s: &Settings) -> Vec<Step> {
         name: "default_model",
         result: crate::hooks::apply_default_model(&s.model),
     });
+    steps.push(Step {
+        name: "no_commit_attribution",
+        result: crate::hooks::apply_no_commit_attribution(),
+    });
     steps
 }
 
@@ -132,6 +136,17 @@ pub fn heal(s: &Settings) -> Vec<Step> {
         steps.push(Step {
             name: "default_model",
             result: crate::hooks::apply_default_model(&s.model),
+        });
+    }
+
+    // A settings value like default_model, so there is nothing in
+    // control-plane-prefs to consult — but unlike it there *is* something to
+    // probe, and heal has to stay silent on an already-whole host. Writing it
+    // unconditionally would print a step on every `fleet webui` start.
+    if !crate::hooks::no_commit_attribution_applied() {
+        steps.push(Step {
+            name: "no_commit_attribution",
+            result: crate::hooks::apply_no_commit_attribution(),
         });
     }
     steps
@@ -242,10 +257,18 @@ mod tests {
             eprintln!("skipped: no fleet binary on this host");
             return;
         }
+        // Every Feature, plus the one settings value heal probes for
+        // (no_commit_attribution). default_model is absent because the model is
+        // blank here.
         assert_eq!(
             first.len(),
-            Feature::ALL.len(),
-            "a bare host must get the whole control plane"
+            Feature::ALL.len() + 1,
+            "a bare host must get the whole control plane, got {:?}",
+            first.iter().map(|s| s.name).collect::<Vec<_>>()
+        );
+        assert!(
+            first.iter().any(|s| s.name == "no_commit_attribution"),
+            "a bare host must also get the commit-attribution setting turned off"
         );
         for step in &first {
             assert!(step.result.is_ok(), "{} failed: {:?}", step.name, step.result);
