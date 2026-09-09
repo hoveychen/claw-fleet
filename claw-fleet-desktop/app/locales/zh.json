@@ -2415,6 +2415,7 @@
     "reveal_miss_body": "{{path}} 在这个仓库里不存在。写这条路径的 agent 可能是相对某个子目录写的。",
     "reveal_ambiguous_title": "有多个文件符合",
     "reveal_ambiguous_body": "{{path}} 在这个仓库里对应下面几个文件，选一个打开：",
+    "paths_tried": "在这些位置找过：",
     "tree_label": "文件",
     "loading": "加载中…",
     "empty_dir": "目录为空。",
@@ -2478,6 +2479,7 @@
     "open_hint": "打开 {{path}}",
     "open_hint_relative": "打开 {{path}}（在 {{root}} 中查找）",
     "not_found_hint": "{{path}} 找不到对应文件",
+    "tried_hint": "这些位置都没有文件：\n{{paths}}",
     "not_found": "路径不存在"
   },
   "dir_picker": {

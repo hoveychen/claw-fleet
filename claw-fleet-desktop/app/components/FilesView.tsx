@@ -453,6 +453,11 @@ function WorkspaceExplorer({
     relPath: string;
     candidates: string[];
   } | null>(null);
+  // Every reading of the clicked path that the chip stat'ed and found empty.
+  // Carried alongside the miss surfaces rather than inside them because both
+  // of them want it and neither owns it: it is a property of the click, and
+  // without it the page can only name the one guess it happened to open.
+  const [navTried, setNavTried] = useState<string[]>([]);
 
   const procCount = useMemo(
     () => procs.filter((p) => p.workspacePath === workspace).length,
@@ -528,6 +533,7 @@ function WorkspaceExplorer({
   useEffect(() => {
     if (!nav || !roots || !activeRoot) return;
 
+    setNavTried(nav.tried ?? []);
     const owner = pickRoot(roots, nav.absPath);
     if (!owner) {
       // Outside every root of this workspace — an agent naming /tmp/report.md,
@@ -752,12 +758,14 @@ function WorkspaceExplorer({
               {revealMiss ? (
                 <RevealMissNotice
                   miss={revealMiss}
+                  tried={navTried}
                   onPick={revealFile}
                   onClose={() => setRevealMiss(null)}
                 />
               ) : externalPath ? (
                 <ExternalFilePreview
                   path={externalPath}
+                  tried={navTried}
                   onClose={() => setExternalPath(null)}
                 />
               ) : activeFile && activeRoot ? (
@@ -785,10 +793,13 @@ function WorkspaceExplorer({
  */
 function RevealMissNotice({
   miss,
+  tried,
   onPick,
   onClose,
 }: {
   miss: { relPath: string; candidates: string[] };
+  /** Readings of the written path that were stat'ed and came up empty. */
+  tried?: string[];
   onPick: (relPath: string) => void;
   onClose: () => void;
 }) {
@@ -824,6 +835,31 @@ function RevealMissNotice({
           ))}
         </ul>
       )}
+      <PathsTried paths={tried} />
+    </div>
+  );
+}
+
+/**
+ * Where a click actually looked, when it found nothing.
+ *
+ * A path in agent prose has more than one reading (relative to the workspace,
+ * relative to its parent), and until issue #106 the UI committed to one and
+ * reported a bare failure — so the path on screen looked like a fact about the
+ * file rather than one guess among several. Listing the readings is what makes
+ * the failure diagnosable. Renders nothing when there is nothing to disclose.
+ */
+function PathsTried({ paths }: { paths?: string[] }) {
+  const { t } = useTranslation();
+  if (!paths?.length) return null;
+  return (
+    <div className={fileStyles.paths_tried}>
+      <span className={fileStyles.paths_tried_label}>{t("files.paths_tried")}</span>
+      <ul className={fileStyles.paths_tried_list}>
+        {paths.map((p) => (
+          <li key={p}>{p}</li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -847,11 +883,15 @@ export function ExternalFilePreview({
   path,
   onClose,
   label,
+  tried,
 }: {
   path: string;
   onClose: () => void;
   /** Banner text. Defaults to the out-of-workspace notice. */
   label?: string;
+  /** Readings of the written path that were stat'ed and came up empty — set
+   *  when the click resolved to nothing and `path` is only the first guess. */
+  tried?: string[];
 }) {
   const { t } = useTranslation();
   // Same reason as the workspace menu above: no host shell to reveal into.
@@ -921,6 +961,7 @@ export function ExternalFilePreview({
           </button>
         </div>
       </div>
+      <PathsTried paths={tried} />
       <div className={fileStyles.external_body}>
         <FilePreview file={entry} load={load} />
       </div>
