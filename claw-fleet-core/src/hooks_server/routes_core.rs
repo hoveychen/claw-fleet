@@ -54,18 +54,41 @@ pub(crate) fn build_commit() -> String {
     option_env!("FLEET_GIT_COMMIT").unwrap_or("unknown").to_string()
 }
 
-/// `/health`'s body. Hand-formatted rather than serialized because it is three
-/// compile-time strings and no struct.
+/// The version this server reports. Same two-source shape as [`build_commit`]:
+/// runtime `FLEET_VERSION` first, then the crate version.
 ///
-/// `commit` rides along because the browser build has no compile-time constant
-/// of its own to read — it shows whatever the serving process reports, the way
-/// the desktop shows its own `desktop_build_commit()`. `"unknown"` when this
-/// build had no git source (see build.rs); consumers hide the line rather than
-/// print that.
+/// The runtime env exists for builds that are not release artifacts. Only the
+/// release workflow rewrites the crate versions from a tag, so every other
+/// build — the Fleet Cloud image included — compiles as `0.0.0`, and a settings
+/// panel reading `v0.0.0` says nothing about what is running. The cloud image
+/// passes `<nearest tag>-dev` instead, which places the build without claiming
+/// to *be* that release; the commit line next to it is the exact identity.
+///
+/// Rewriting `Cargo.toml` in the image build would do the same job and cost the
+/// whole `cargo build --release` cache on every push, for the same reason the
+/// commit is not stamped there.
+pub(crate) fn server_version() -> String {
+    if let Ok(v) = std::env::var("FLEET_VERSION") {
+        let v = v.trim();
+        if !v.is_empty() {
+            return v.to_string();
+        }
+    }
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// `/health`'s body. Hand-formatted rather than serialized because it is three
+/// short strings and no struct.
+///
+/// `version` and `commit` ride along because the browser build has no
+/// compile-time constants of its own to read — it shows whatever the serving
+/// process reports, the way the desktop shows its own `get_app_version()` /
+/// `desktop_build_commit()`. A commit of `"unknown"` means the build had no git
+/// source; consumers hide the line rather than print that.
 pub(crate) fn health_body() -> String {
     format!(
         r#"{{"version":"{}","commit":"{}","status":"ok"}}"#,
-        env!("CARGO_PKG_VERSION"),
+        server_version(),
         build_commit(),
     )
 }
@@ -1005,6 +1028,10 @@ pub(crate) fn route_search(
 mod tests {
     use super::*;
 
+    /// Both env tests below mutate the process environment, which every other
+    /// test thread shares.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// `/health` is the browser build's only source for the version and commit
     /// it shows in settings, and the body is hand-formatted — a stray quote in
     /// either value would make it unparseable, which the caller sees as "no
@@ -1013,9 +1040,28 @@ mod tests {
     fn health_body_is_json_carrying_version_commit_and_status() {
         let v: serde_json::Value = serde_json::from_str(&health_body())
             .expect("/health must answer parseable JSON");
-        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(v["version"], server_version());
         assert_eq!(v["status"], "ok");
         assert_eq!(v["commit"], build_commit());
+    }
+
+    /// `FLEET_VERSION` wins over the crate version, verbatim — unlike the
+    /// commit it is not truncated, because a version string has no fixed shape
+    /// (`2.6.1-dev`, `2.6.1+de41981`, a plain `2.6.2`). Blank is not an
+    /// override. Shares the env lock with the commit test below: cargo runs
+    /// tests in threads and the env is process-wide.
+    #[test]
+    fn version_runtime_env_overrides_crate_version() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("FLEET_VERSION").ok();
+        std::env::set_var("FLEET_VERSION", "2.6.1-dev");
+        assert_eq!(server_version(), "2.6.1-dev");
+        std::env::set_var("FLEET_VERSION", "   ");
+        assert_eq!(server_version(), env!("CARGO_PKG_VERSION"));
+        match prev {
+            Some(v) => std::env::set_var("FLEET_VERSION", v),
+            None => std::env::remove_var("FLEET_VERSION"),
+        }
     }
 
     /// Either a 7-char short SHA or the literal `"unknown"` — never empty, and
@@ -1040,8 +1086,7 @@ mod tests {
     /// cargo runs tests in threads and the env is process-wide.
     #[test]
     fn runtime_env_overrides_and_truncates() {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _g = LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap();
         let prev = std::env::var("FLEET_GIT_COMMIT").ok();
         std::env::set_var("FLEET_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567");
         assert_eq!(build_commit(), "0123456");

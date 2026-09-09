@@ -142,6 +142,13 @@ ENV HOME=/home/fleet
 ARG FLEET_GIT_COMMIT=""
 ENV FLEET_GIT_COMMIT=$FLEET_GIT_COMMIT
 
+# 这个镜像自称的版本号。同理走运行时 ENV：只有 release 工作流会按 tag 改写各
+# crate 的 version，别的构建（含本镜像）都编译成 `0.0.0`，而设置页显示 `v0.0.0`
+# 什么也说明不了。cloud-image.yml 传的是 `<最近 tag>-dev`——定位到哪一段发版之后
+# 的构建，又不冒充那个发版；精确身份看旁边那行 commit。缺省空 → 回落 CARGO_PKG_VERSION。
+ARG FLEET_VERSION=""
+ENV FLEET_VERSION=$FLEET_VERSION
+
 # One home for everything (`FLEET_HOME` intentionally unset, so Fleet's
 # real_home_dir() falls back to $HOME=/home/fleet). This keeps the control
 # plane, credentials, and Fleet-spawned agents all reading the SAME ~/.claude:
