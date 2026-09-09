@@ -248,6 +248,9 @@ const DICT: Record<string, string> = {
   列出知识库: "List wiki",
   "搜索 {0}": "Search {0}",
   "存入产出 {0}": "Stored artifact {0}",
+  // 入库卡自己带标题，所以步骤行只留动作名（见 IngestCard 的 ingestStepLabel）。
+  存入产出: "Stored a deliverable",
+  发布到知识库: "Published to the wiki",
   列出产出: "List artifacts",
   "查看产出 {0}": "Artifact {0}",
   "删除产出 {0}": "Deleted artifact {0}",

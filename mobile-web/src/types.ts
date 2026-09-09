@@ -255,11 +255,32 @@ export interface ContentBlock {
   _ask?: AskSummary;
   /** Base64 JPEG thumbnails of screenshots embedded in a tool_result body. */
   _thumbs?: string[];
+  /** Gist of an ingest confirmation (`artifact add` / `wiki publish`) on a
+   *  `tool_result` block. Both the id and the title live in text the tail
+   *  strips, so without this the phone can only say 「产出」 (see
+   *  `ingest_summary` in mobile_relay.rs). */
+  _ingest?: IngestSummary;
   /** Image block whose `source` is a server-side JPEG thumbnail, not the
    *  original (the relay never ships original base64 in the skeleton stream). */
   _thumb?: boolean;
   source?: { type?: string; media_type?: string; data?: string };
 }
+
+/**
+ * What a run filed into a store, computed relay-side from the confirmation
+ * sentence. Two shapes, told apart by `kind`.
+ */
+export type IngestSummary =
+  | {
+      kind: "artifact";
+      /** Store id — what `artifact_blob` / the 产出 list is keyed by. */
+      id: string;
+      title: string;
+      /** The store's coarse bucket (`pdf`, `image`, `sheet`, …). */
+      akind: string;
+      bytes: number;
+    }
+  | { kind: "wiki"; slug: string; version: string; title: string };
 
 /** A decision card's gist, computed relay-side from the `tool_use` input. */
 export interface AskSummary {
