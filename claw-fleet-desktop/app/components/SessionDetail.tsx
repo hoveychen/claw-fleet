@@ -42,7 +42,7 @@ import { ResumeComposer } from "./ResumeComposer";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
-import { effortChipLabel, effortTitle, formatModel } from "./SessionCard";
+import { effortChipLabel, effortTitle, formatModel, OutOfCreditsNotice } from "./SessionCard";
 import { inlineCodexFleetAsk, withCodexDecisionHistory } from "./codexDecision";
 import { useChromeYield } from "../hooks/useChromeYield";
 import { useDocCardWidth } from "../hooks/useDocCardWidth";
@@ -1270,6 +1270,13 @@ export function SessionDetail({
                         scoped to. A dropdown (not the old in-row segmented strip) so a
                         growing subagent list never crowds the view tabs. */}
                     <AgentScopeSwitcher tabs={tabs} current={liveSession} onOpen={open} />
+                    {/* An exhausted account leaves no status behind, so the
+                        detail header would otherwise show an ordinary idle
+                        session whose only trace of the failure is one red row
+                        far up the transcript — and this is the page you are on
+                        when you go looking. Same chip and same one-click
+                        continue as the board card. */}
+                    <OutOfCreditsNotice session={liveSession} inline />
                     {liveSession.model && (
                       <span
                         className={styles.meta_chip}

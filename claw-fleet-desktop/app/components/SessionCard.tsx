@@ -305,7 +305,18 @@ export function MirrorWriteNotice({ session }: { session: SessionInfo }) {
  * shape this borrows. Filled rather than outlined for the same reason that chip
  * fills its unstopped variant: this is a state that cannot clear itself.
  */
-export function OutOfCreditsNotice({ session }: { session: SessionInfo }) {
+export function OutOfCreditsNotice({
+  session,
+  inline = false,
+}: {
+  session: SessionInfo;
+  /** Keep the continue button next to the chip instead of letting
+   *  `.resume_btn`'s `margin-left: auto` throw it to the far right. That auto
+   *  margin is right on a card header (the button hugs the card's edge) and
+   *  wrong in the detail header's `meta_row`, where it ends up ~300px from the
+   *  chip it belongs to, next to the metrics/rail tools. */
+  inline?: boolean;
+}) {
   const { t } = useTranslation();
   const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -345,7 +356,7 @@ export function OutOfCreditsNotice({ session }: { session: SessionInfo }) {
       )}
       {canResume && (
         <button
-          className={styles.resume_btn}
+          className={`${styles.resume_btn} ${inline ? styles.resume_btn_inline : ""}`}
           onClick={handleResume}
           disabled={resuming}
           title={t("outOfCredits.resumeNow")}

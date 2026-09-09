@@ -263,6 +263,10 @@
   line-height: 1;
   margin-left: auto;
 }
+/* Detail-header variant: stay beside the chip. See OutOfCreditsNotice's
+   `inline` prop for why the auto margin is right on a card and wrong there. */
+.resume_btn_inline { margin-left: 0; }
+
 .resume_btn:hover:not(:disabled) { background: #fecaca; }
 .resume_btn:disabled { opacity: 0.5; cursor: default; }
 
