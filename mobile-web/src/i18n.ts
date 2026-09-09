@@ -291,6 +291,9 @@ const DICT: Record<string, string> = {
   交接: "Note",
   待触发: "Pending",
   已触发: "Fired",
+  已超时: "Timed out",
+  接力已启动: "Successor started",
+  手动运行: "Manual run",
   "{0} 棒": "{0} hops",
 
   // ── 设置 / 更多 tab ──
