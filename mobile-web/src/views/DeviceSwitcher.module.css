@@ -1,0 +1,181 @@
+/* 只有一台时的标题:与 App.module.css 的 .title 保持同一套字重/字号,这样从一台
+   变成两台(或反过来)时,标题不会跳一下。 */
+.plainTitle {
+  font-weight: 700;
+  font-size: var(--t-h2, 18px);
+  letter-spacing: 0.02em;
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  min-width: 0;
+  max-width: 62vw;
+  padding: 4px 8px 4px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.triggerIcon {
+  display: inline-flex;
+  color: var(--color-text-secondary);
+}
+
+.triggerLabel {
+  font-weight: 700;
+  font-size: var(--t-ui, 14px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  color: var(--color-text-dim);
+  flex: none;
+  transition: transform 0.15s ease;
+}
+
+.chevron[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}
+
+/* 下拉而不是底部抽屉:这个开关挂在头部左上角,面板从它底下落下来才对得上因果。
+   背板铺满全屏是为了「点哪儿都能关掉」,不是为了压暗内容。 */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.sheet {
+  position: absolute;
+  top: calc(var(--safe-top) + 46px);
+  left: 12px;
+  right: 12px;
+  max-width: 340px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+.sheetTitle {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+  padding: 4px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 8px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+}
+
+.row[aria-selected="true"] {
+  background: var(--color-bg-input);
+}
+
+.rowIcon {
+  display: inline-flex;
+  color: var(--color-text-secondary);
+  flex: none;
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.rowLabel {
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+}
+
+/* 状态点。颜色说好坏,文字说是什么 —— 只有颜色的话,色觉障碍用户与截图里都读不
+   出来。 */
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-dim);
+}
+
+.rowStatus[data-kind="online"] .dot {
+  background: var(--color-success);
+}
+
+.rowStatus[data-kind="offline"] .dot {
+  background: var(--color-warning);
+}
+
+.rowStatus[data-kind="down"] .dot {
+  background: var(--color-error);
+}
+
+.check {
+  color: var(--color-accent, var(--color-success));
+  flex: none;
+}
+
+.manage {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 8px;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0 0 10px 10px;
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--t-ui, 14px);
+  text-align: left;
+}

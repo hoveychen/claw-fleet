@@ -81,6 +81,7 @@ import { onDecisionDeepLink } from "./decisionDeepLink";
 import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
+import { DeviceSwitcher } from "./views/DeviceSwitcher";
 import { PlansView } from "./views/PlansView";
 import { ArtifactsView } from "./views/ArtifactsView";
 import { RepoView } from "./views/RepoView";
@@ -425,6 +426,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, []);
 
   const [tab, setTab] = useState<Tab>("decisions");
+  /** 头部设备切换器的下拉开着没有。 */
+  const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
   /// 通知点击要聚焦的决策卡。nonce 让「同一张卡被连点两次」也能触发;deviceId
   /// 是从通知里的来源标记反查出来的(老 relay 不盖标记时为 undefined)。
   const [focusDecision, setFocusDecision] = useState<{
@@ -494,6 +497,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       return runtimeDevices.find((d) => d.id === id)?.label ?? null;
     },
     [runtimeDevices],
+  );
+  /** 设备切换器上每一行的那盏灯。它要的是**这一台**的连通性,与头部那盏「全体
+   *  里最好的那一条」正相反 —— 切换器存在的意义就是让用户看见哪一台掉了。 */
+  const deviceStatusOf = useCallback(
+    (id: string) => {
+      const s = states[id];
+      return s ? { connected: s.connected, agentOnline: s.agentOnline } : undefined;
+    },
+    [states],
   );
   // 头部那三样看的是**全体**:一台离线不该让整个界面显示离线,而用户感觉到的
   // 拥塞是最卡的那条链路。花费是所有设备当日之和。
@@ -945,7 +957,16 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     ))}
     <div className={styles.app}>
       <header className={styles.header}>
-        <span className={styles.title}>Fleet</span>
+        {/* 标题位 = 当前设备。多台在册时它是切换器,一台时退化成那台的名字。 */}
+        <DeviceSwitcher
+          devices={runtimeDevices}
+          activeId={activeDeviceId}
+          statusOf={deviceStatusOf}
+          open={deviceMenuOpen}
+          onOpenChange={setDeviceMenuOpen}
+          onSwitch={switchDevice}
+          onManage={() => setTab("more")}
+        />
         {todayUsage && (
           <span
             className={styles.usage}
