@@ -8,7 +8,10 @@ import {
   classifyResult,
   friendlyToolName,
   isFleetTool,
+  isIngestCall,
+  parseArtifactAdd,
   parseFleetCall,
+  parseWikiPublish,
   parsePlanGet,
   parsePlanList,
   parseWikiList,
@@ -206,9 +209,7 @@ describe("classifyResult for the prose-returning tools", () => {
       text: "ok: write checkpoint.md (120 bytes)",
     });
     expect(classifyResult("artifact", "list", "id  title  [pdf]  10 bytes  ws", false).kind).toBe("raw");
-    expect(classifyResult("artifact", "add", "Stored artifact a1 — Report (pdf, 9 bytes).", false).kind).toBe(
-      "confirm",
-    );
+    expect(classifyResult("artifact", "delete", "Deleted artifact a1.", false).kind).toBe("confirm");
   });
 
   it("renders a note body like a wiki document", () => {
@@ -239,5 +240,105 @@ describe("isFleetTool for the five tools that were missing", () => {
   it("still leaves the non-control tools to the generic card", () => {
     expect(isFleetTool("mcp__fleet__fleet__image")).toBeNull();
     expect(isFleetTool("mcp__fleet__fleet__set_session_title")).toBeNull();
+  });
+});
+
+// ── ingest confirmations (artifact add / wiki publish) ──────────────────────
+//
+// These two mutates are the only ones whose subject the reader wants to *see*.
+// Core returns them as one prose sentence, so the id/slug the card needs to
+// resolve the real thing has to be recovered from that sentence — hence a
+// parser, and hence the format-string drift guard at the bottom of this block.
+
+describe("parseArtifactAdd", () => {
+  it("recovers id, title, kind and size from the confirmation line", () => {
+    const line =
+      "Stored artifact 20260909-080326 — 9/8 对外更新日志 (markdown, 12345 bytes), copied. " +
+      "It is now on the 产出 page.";
+    expect(parseArtifactAdd(line)).toEqual({
+      id: "20260909-080326",
+      title: "9/8 对外更新日志",
+      artifactKind: "markdown",
+      bytes: 12345,
+    });
+  });
+
+  it("keeps a title that itself contains a parenthesis", () => {
+    const line = "Stored artifact a1 — Q3 报表 (最终版) (xlsx, 9 bytes), hard-linked.";
+    expect(parseArtifactAdd(line)?.title).toBe("Q3 报表 (最终版)");
+    expect(parseArtifactAdd(line)?.artifactKind).toBe("xlsx");
+  });
+
+  it("returns null on an unrecognised sentence", () => {
+    expect(parseArtifactAdd("Deleted artifact a1.")).toBeNull();
+  });
+});
+
+describe("parseWikiPublish", () => {
+  it("recovers slug, version and title", () => {
+    expect(parseWikiPublish("Published arch/overview (version v3, 3 total). title: 架构总览")).toEqual({
+      slug: "arch/overview",
+      version: "v3",
+      title: "架构总览",
+    });
+  });
+
+  it("returns null on an unrecognised sentence", () => {
+    expect(parseWikiPublish("Moved arch/overview to arch/v2/overview.")).toBeNull();
+  });
+});
+
+describe("classifyResult routes the two ingests to their own kinds", () => {
+  const stored = "Stored artifact a1 — Report (pdf, 9 bytes), copied. It is now on the 产出 page.";
+
+  it("classifies artifact add and wiki publish structurally", () => {
+    const a = classifyResult("artifact", "add", stored, false);
+    expect(a).toEqual({
+      kind: "artifact-add",
+      artifact: { id: "a1", title: "Report", artifactKind: "pdf", bytes: 9 },
+    });
+    expect(classifyResult("wiki", "publish", "Published s (version v1, 1 total). title: T", false).kind).toBe(
+      "wiki-publish",
+    );
+  });
+
+  it("falls back to the plain confirm line when the wording is unrecognised", () => {
+    expect(classifyResult("artifact", "add", "stored it somewhere", false).kind).toBe("confirm");
+    expect(classifyResult("wiki", "publish", "published it", false).kind).toBe("confirm");
+  });
+
+  it("still surfaces a failed ingest as an error", () => {
+    expect(classifyResult("artifact", "add", "no such file", true).kind).toBe("error");
+  });
+});
+
+describe("isIngestCall", () => {
+  it("matches exactly the two calls that put something in a store", () => {
+    expect(isIngestCall("mcp__fleet__fleet__artifact", { action: "add" })).toBe(true);
+    expect(isIngestCall("fleet__wiki", { action: "publish" })).toBe(true);
+  });
+
+  it("rejects the same tools' read and delete actions, and other tools", () => {
+    expect(isIngestCall("mcp__fleet__fleet__artifact", { action: "list" })).toBe(false);
+    expect(isIngestCall("mcp__fleet__fleet__artifact", { action: "delete" })).toBe(false);
+    expect(isIngestCall("mcp__fleet__fleet__wiki", { action: "cat" })).toBe(false);
+    expect(isIngestCall("mcp__fleet__fleet__plan", { action: "add" })).toBe(false);
+    expect(isIngestCall("Read", { action: "add" })).toBe(false);
+    expect(isIngestCall("mcp__fleet__fleet__artifact", null)).toBe(false);
+  });
+});
+
+describe("ingest wording parity with claw-fleet-core", () => {
+  // The parsers above read a *sentence*, so a reworded format string in core
+  // would not fail any type check — the cards would just quietly go back to
+  // showing one line of gray text. Assert the literals instead.
+  const src = readFileSync(join(CORE_SRC, "mcp_control.rs"), "utf8");
+
+  it("artifact add still returns `Stored artifact {} — {} ({}, {} bytes)`", () => {
+    expect(src).toContain("Stored artifact {} — {} ({}, {} bytes)");
+  });
+
+  it("wiki publish still returns `Published {} (version {}, {} total). title: {}`", () => {
+    expect(src).toContain("Published {} (version {}, {} total). title: {}");
   });
 });

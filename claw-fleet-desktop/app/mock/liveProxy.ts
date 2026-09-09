@@ -809,6 +809,14 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "GET",
     path: "/artifacts",
   }),
+  // One artifact by id — what a transcript's ingest card asks for. Fetching the
+  // whole list to find one entry would work but scales with the store, and the
+  // route already exists.
+  get_artifact: (a) => ({
+    method: "GET",
+    path: "/artifact",
+    query: { id: q(a.id) },
+  }),
   // Bytes for each entry come from `/session_image`, which `sessionImageUrl`
   // addresses directly in the web build rather than through this table.
   list_session_images: (a) => ({

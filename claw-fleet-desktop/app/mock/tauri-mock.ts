@@ -579,6 +579,10 @@ async function handleIPC(
     // then filter the result, so a null blanks the whole app.
     case "list_artifacts":
       return MOCK_ARTIFACTS;
+    // Looked up by the transcript's ingest card, which knows only the id the
+    // `artifact add` confirmation carried.
+    case "get_artifact":
+      return MOCK_ARTIFACTS.find((x) => x.id === args.id) ?? null;
     case "artifact_usage":
       return MOCK_ARTIFACT_USAGE;
     // The two OS-level actions (`reveal_artifact` / `open_artifact_external`)

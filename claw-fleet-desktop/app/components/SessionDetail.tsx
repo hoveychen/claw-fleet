@@ -37,6 +37,7 @@ import type { PathLinkContext } from "../markdown/pathLinks";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
 import { WikiLinksProvider } from "../markdown/wikiLinksContext";
 import { WebLinkProvider } from "../markdown/webLinks";
+import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenContext";
 import { useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
 import type { ExplorerEntry } from "./ExplorerPane";
@@ -733,9 +734,17 @@ export function SessionDetail({
    *  the thing the transcript named opens beside the sentence that named it,
    *  instead of taking over the window (the 仓库 / 知识库 pages) or landing in
    *  the window's tab strip, where reading it cost sight of the conversation. */
-  const openAuxDoc = useCallback((kind: AuxDocKind, ref: string) => {
-    setAux((st) => openDoc(st, kind, ref));
+  const openAuxDoc = useCallback((kind: AuxDocKind, ref: string, label?: string) => {
+    setAux((st) => openDoc(st, kind, ref, label));
   }, []);
+
+  /** What a transcript's ingest card (产出 / 知识库 入库) does when clicked: open
+   *  the thing in the rail, or — when it is already open there — hand it to its
+   *  page. The card reads `expanded` to tell those two apart. */
+  const ingestOpen = useMemo<IngestOpenContext>(
+    () => ({ open: openAuxDoc, expandedId: aux.expanded }),
+    [openAuxDoc, aux.expanded],
+  );
 
   // Paths the agent wrote in backticks become clickable chips. Memoised because
   // MessageRow is memo'd — a fresh object each render would re-render every row.
@@ -1197,6 +1206,7 @@ export function SessionDetail({
     // auxiliary column, which every instance of this component has.
     <WikiLinksProvider value={wikiLinks}>
       <WebLinkProvider value={openWebInAux}>
+      <IngestOpenProvider value={ingestOpen}>
       <div
         className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railOpen ? styles.rail_open : ""}`}
         /* Standalone only: the pane grows by what the reader needs, so the room
@@ -1569,6 +1579,7 @@ export function SessionDetail({
           document.body,
         )}
       </div>
+      </IngestOpenProvider>
       </WebLinkProvider>
     </WikiLinksProvider>
   );

@@ -6,6 +6,7 @@ import {
   collapseDoc,
   docId,
   initialAux,
+  makeAuxDoc,
   MAX_AUX_DOCS,
   openDoc,
   pruneTab,
@@ -152,5 +153,27 @@ describe("auxDocLabel", () => {
   it("names a page by its host, falling back to the raw string", () => {
     expect(auxDocLabel("web", "https://example.com/deep/path")).toBe("example.com");
     expect(auxDocLabel("web", "not a url")).toBe("not a url");
+  });
+});
+
+describe("artifact docs", () => {
+  it("labels an artifact card with the title the caller passes, not its id", () => {
+    // The store id ("20260909-080326") names nothing to a reader, so the ingest
+    // card hands the deliverable's title down with it.
+    const st = openDoc(initialAux, "artifact", "20260909-080326", "9/8 对外更新日志");
+    expect(st.docs).toHaveLength(1);
+    expect(st.docs[0]).toMatchObject({
+      id: "artifact:20260909-080326",
+      kind: "artifact",
+      ref: "20260909-080326",
+      label: "9/8 对外更新日志",
+    });
+    // …and that id is what `expanded` holds, which is how the transcript card
+    // knows its second click should navigate instead of re-opening.
+    expect(st.expanded).toBe("artifact:20260909-080326");
+  });
+
+  it("falls back to the id when no label is given", () => {
+    expect(makeAuxDoc("artifact", "20260909-080326").label).toBe("20260909-080326");
   });
 });

@@ -1,4 +1,4 @@
-import { ChevronDown, FileText, Globe, NotebookText } from "lucide-react";
+import { ChevronDown, FileText, Globe, NotebookText, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AuxDoc, AuxDocKind } from "../detailAux";
@@ -11,6 +11,8 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
   file: FileText,
   wiki: NotebookText,
   web: Globe,
+  // The same glyph the 产出 page uses for itself (its empty state).
+  artifact: Package,
 };
 
 /**

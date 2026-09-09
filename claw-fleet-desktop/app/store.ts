@@ -321,6 +321,16 @@ interface UIState {
   terminalNav: TerminalNavRequest | null;
   requestTerminalNav: (workspacePath: string) => void;
   clearTerminalNav: () => void;
+  /** A pending "open this deliverable" request, raised by a transcript's
+   *  ingest card. Same shape and the same reason as fileNav: ArtifactsView owns
+   *  its selection in component state, so there is no prop to hand it. It
+   *  clears the request once consumed.
+   *
+   *  The wiki needs no equivalent — its selected slug already lives in
+   *  `mainViewState.wiki`, which `revealSlugInWikiPage` writes directly. */
+  artifactNav: ArtifactNavRequest | null;
+  requestArtifactNav: (id: string) => void;
+  clearArtifactNav: () => void;
   /** Which optional surfaces the backend actually allows — read once at boot
    *  (`host_features`; the browser build gets the same answer over
    *  `GET /host_features`). Starts all-off and stays that way if the call
@@ -364,6 +374,13 @@ export interface TerminalNavRequest {
   /** Bumped on every request so asking for the same repo twice re-navigates —
    *  without it, hopping back to 仓库 and clicking 在终端打开 again would set an
    *  identical object and TerminalView's effect would never re-run. */
+  nonce: number;
+}
+
+/** "Open this deliverable on the 产出 page", from a transcript's ingest card. */
+export interface ArtifactNavRequest {
+  id: string;
+  /** Bumped per request, so asking for the same artifact twice re-navigates. */
   nonce: number;
 }
 
@@ -660,6 +677,14 @@ export const useUIStore = create<UIState>((set) => ({
           },
     ),
   clearTerminalNav: () => set({ terminalNav: null }),
+  artifactNav: null,
+  // Same viewModePatch bookkeeping as requestFileNav — see the note there.
+  requestArtifactNav: (id) =>
+    set((s) => ({
+      ...viewModePatch(s, "artifacts"),
+      artifactNav: { id, nonce: (s.artifactNav?.nonce ?? 0) + 1 },
+    })),
+  clearArtifactNav: () => set({ artifactNav: null }),
   hostFeatures: { terminal: false },
   loadHostFeatures: async () => {
     let features: HostFeatures = { terminal: false };

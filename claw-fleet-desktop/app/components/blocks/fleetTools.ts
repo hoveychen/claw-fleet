@@ -107,6 +107,26 @@ export function friendlyToolName(rawId: string, t: (key: string) => string): str
   return id;
 }
 
+/**
+ * Is this call the moment a deliverable entered the 产出 store or a doc entered
+ * the 知识库?
+ *
+ * Both are "the run produced a thing you can hold", which is a different kind
+ * of event from the reads and edits around them — so, like a decision card,
+ * such a record is never swept into a collapsed work band (`isWorkRow`). One
+ * predicate rather than two `endsWith` checks at each site, because the fold
+ * rule and the card renderer must agree on exactly which calls are ingests.
+ */
+export function isIngestCall(name: string, input: unknown): boolean {
+  const tool = isFleetTool(name);
+  if (tool !== "artifact" && tool !== "wiki") return false;
+  const action =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>).action
+      : undefined;
+  return tool === "artifact" ? action === "add" : action === "publish";
+}
+
 // ── Result shapes ────────────────────────────────────────────────────────────
 
 export interface PlanListItem {
@@ -135,12 +155,35 @@ export interface WikiSearchItem {
 }
 
 /**
+ * A deliverable that just landed in the 产出 store, parsed out of `artifact
+ * add`'s confirmation line. The id is the load-bearing field: it is what lets
+ * the card fetch the artifact's metadata and render its actual content, rather
+ * than restating the sentence the tool already returned.
+ */
+export interface ArtifactAdded {
+  id: string;
+  title: string;
+  /** The store's coarse bucket (`pdf`, `image`, `video`, `markdown`, …). */
+  artifactKind: string;
+  bytes: number;
+}
+
+/** A doc that just landed in the 知识库, parsed out of `wiki publish`'s line. */
+export interface WikiPublished {
+  slug: string;
+  version: string;
+  title: string;
+}
+
+/**
  * Classified return text. `confirm` is the `ok: …` line of a mutate; `records`
  * holds the parsed JSON array for handoff/watch/loop/schedule list/get; `raw`
  * is the untouched text when parsing didn't apply or failed (never lose data).
  */
 export type FleetResult =
   | { kind: "confirm"; text: string }
+  | { kind: "artifact-add"; artifact: ArtifactAdded }
+  | { kind: "wiki-publish"; doc: WikiPublished }
   | { kind: "plan-list"; plans: PlanListItem[] }
   | { kind: "plan-get"; items: PlanGetItem[] }
   | { kind: "wiki-list"; docs: WikiListItem[] }
@@ -209,6 +252,27 @@ export function parseWikiSearch(text: string): WikiSearchItem[] {
     out.push({ slug: m[1], field: m[2], matched: m[3] });
   }
   return out;
+}
+
+/**
+ * `artifact add` → `Stored artifact <id> — <title> (<kind>, <n> bytes), copied.
+ * It is now on the 产出 page.` (`mcp_control.rs::handle_artifact`).
+ *
+ * A title is free text and may itself contain " (" or " — ", so the shape is
+ * matched from the tail: the `(<kind>, <n> bytes)` group is the anchor and the
+ * title is whatever lies between the em dash and it.
+ */
+export function parseArtifactAdd(text: string): ArtifactAdded | null {
+  const m = /^Stored artifact (\S+) — (.*) \(([^(),]+), (\d+) bytes\)/.exec(text.trim());
+  if (!m) return null;
+  return { id: m[1], title: m[2], artifactKind: m[3], bytes: Number(m[4]) };
+}
+
+/** `wiki publish` → `Published <slug> (version <v>, <n> total). title: <title>`. */
+export function parseWikiPublish(text: string): WikiPublished | null {
+  const m = /^Published (\S+) \(version (\S+), \d+ total\)\. title: (.*)$/.exec(text.trim());
+  if (!m) return null;
+  return { slug: m[1], version: m[2], title: m[3] };
 }
 
 /** Parse a pretty-JSON return into an array of records (single object → [obj]). */
@@ -288,6 +352,19 @@ export function classifyResult(
   if (tool === "wiki" && action === "search") {
     const hits = parseWikiSearch(text);
     return hits.length ? { kind: "wiki-search", hits } : { kind: "raw", text };
+  }
+  // The two ingest confirmations are the only mutates whose *subject* the
+  // reader wants to see rather than be told about — a deliverable landing in
+  // the 产出 store, a doc landing in the 知识库. Parsed into an identifier the
+  // card can resolve into the real thing; an unrecognised sentence (an older
+  // core, a future wording) falls back to the plain confirm line.
+  if (tool === "artifact" && action === "add") {
+    const artifact = parseArtifactAdd(text);
+    return artifact ? { kind: "artifact-add", artifact } : { kind: "confirm", text };
+  }
+  if (tool === "wiki" && action === "publish") {
+    const doc = parseWikiPublish(text);
+    return doc ? { kind: "wiki-publish", doc } : { kind: "confirm", text };
   }
   if (tool === "wiki" && action === "cat") {
     return { kind: "wiki-cat", body: content };

@@ -1676,6 +1676,7 @@
   "tabs": {
     "file_readonly": "Read-only preview",
     "wiki_missing": "This doc isn't published, or was deleted",
+    "artifact_missing": "This deliverable has been deleted",
     "wiki_open_page": "Open in the wiki page",
     "wiki_open_page_short": "Wiki",
     "web_probing": "Checking whether this site allows embedding…",
@@ -1857,6 +1858,12 @@
       "render_a2ui": "Rendered a rich card",
       "ask": "Raised a decision card",
       "permission_prompt": "Asked for command approval"
+    },
+    "ingest": {
+      "open_artifact": "Open in Artifacts",
+      "open_artifact_short": "Artifacts",
+      "open_wiki": "Open in Wiki",
+      "open_rail": "Open beside"
     }
   },
   "settings": {

@@ -62,8 +62,8 @@ export function isAuxFacet(value: unknown): value is AuxFacet {
 }
 
 /** A document the agent named and the reader opened: a repo file, a wiki doc,
- *  or a web page. */
-export type AuxDocKind = "file" | "wiki" | "web";
+ *  a web page, or a deliverable the run filed into the 产出 store. */
+export type AuxDocKind = "file" | "wiki" | "web" | "artifact";
 
 export interface AuxDoc {
   /** Identity *and* the value stored in `expanded`. Prefixed by kind, so it can
@@ -106,6 +106,10 @@ function basename(p: string): string {
 }
 
 export function auxDocLabel(kind: AuxDocKind, ref: string): string {
+  // An artifact is addressed by its store id (`20260909-080326`), which names
+  // nothing to a reader. Callers pass the deliverable's title instead; this is
+  // only the fallback for one opened without one.
+  if (kind === "artifact") return ref;
   if (kind === "web") {
     try {
       return new URL(ref).host;
@@ -117,8 +121,8 @@ export function auxDocLabel(kind: AuxDocKind, ref: string): string {
   return basename(ref);
 }
 
-export function makeAuxDoc(kind: AuxDocKind, ref: string): AuxDoc {
-  return { id: docId(kind, ref), kind, ref, label: auxDocLabel(kind, ref) };
+export function makeAuxDoc(kind: AuxDocKind, ref: string, label?: string): AuxDoc {
+  return { id: docId(kind, ref), kind, ref, label: label || auxDocLabel(kind, ref) };
 }
 
 /**
@@ -150,8 +154,13 @@ export function showFacet(state: AuxState, facet: AuxFacet): AuxState {
 /** Open a doc: card it if new (never a second copy), then expand that card.
  *  Both halves move, because naming a file in the transcript is both "this is
  *  now part of my context" and "show it to me". The drawer is not involved. */
-export function openDoc(state: AuxState, kind: AuxDocKind, ref: string): AuxState {
-  const doc = makeAuxDoc(kind, ref);
+export function openDoc(
+  state: AuxState,
+  kind: AuxDocKind,
+  ref: string,
+  label?: string,
+): AuxState {
+  const doc = makeAuxDoc(kind, ref, label);
   const known = state.docs.some((d) => d.id === doc.id);
   let docs = known ? state.docs : [...state.docs, doc];
   // The doc we are about to open is last, so trimming from the front can never
