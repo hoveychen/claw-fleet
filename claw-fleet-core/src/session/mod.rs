@@ -316,6 +316,19 @@ pub struct SessionInfo {
     /// `mirror_guard::enrich_sessions` at scan time.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub mirror_write: Option<crate::mirror_guard::MirrorWrite>,
+    /// The provider message of a turn that died because the account has no
+    /// usage left to spend — today only Codex's
+    /// `codex_error_info: "usage_limit_exceeded"` ("Your workspace is out of
+    /// credits…"). `None` for every session whose latest turn ended any other
+    /// way.
+    ///
+    /// Deliberately NOT a `status`, and deliberately not auto-resumed: unlike
+    /// `RateLimited` this failure carries no reset time, because what it waits
+    /// on is a human refilling the account. The field exists so the card can say
+    /// so out loud — otherwise the only trace is one red row inside the
+    /// transcript, and the session looks merely idle from the outside.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub out_of_credits: Option<String>,
 }
 
 
@@ -722,6 +735,7 @@ mod tests {
             watches: Vec::new(),
             remote_disconnect: None,
             mirror_write: None,
+            out_of_credits: None,
         }
     }
 

@@ -614,6 +614,7 @@ const DICT: Record<string, string> = {
   "{0} 断开,agent 未停": "{0} disconnected — agent still running",
   "这些文件留在了本机镜像目录 {0},没同步到远端主机:{1}": "These files stayed in the local mirror directory {0} and were not synced to the remote host: {1}",
   "{0} 个文件留在本机": "{0} file(s) stayed local",
+  额度耗尽: "out of credits",
 
   // ── 语音输入 ──
   语音输入: "Voice input",

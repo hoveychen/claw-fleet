@@ -4235,6 +4235,7 @@ mod tests {
             watches: Vec::new(),
             remote_disconnect: None,
             mirror_write: None,
+            out_of_credits: None,
             task_plan: None,
             handoff: None,
             user_mark: None,

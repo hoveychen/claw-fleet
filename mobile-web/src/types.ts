@@ -152,6 +152,10 @@ export interface SessionInfo {
   /** 会话结束后留在本机镜像目录里的文件——本该写到远端主机上的产物。
    *  会话状态不受影响,所以只有这个字段会说。 */
   mirrorWrite?: MirrorWrite | null;
+  /** 账号额度耗尽时那一轮的原始报错（codex 的 `usage_limit_exceeded`，
+   *  「Your workspace is out of credits…」）。它没有 reset 时刻——等的是有人去充值,
+   *  不是等时钟——所以既不改 `status` 也不进 auto-resume,只有这个字段会说。 */
+  outOfCredits?: string | null;
 }
 
 /** Codex has no `CLAUDE_CODE_ENTRYPOINT`; the Codex scanner surfaces the rollout

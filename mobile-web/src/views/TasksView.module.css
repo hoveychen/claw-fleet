@@ -378,6 +378,24 @@
   white-space: nowrap;
 }
 
+/* 额度耗尽。实心而不是描边,理由和桌面端同一枚徽标一样:限流会按时钟自己恢复,
+   这个不会——它等的是有人去充值,所以它得比一个红字更硬。 */
+.outOfCredits {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #9f1239;
+  color: #fff;
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .runtime[data-tone="working"] {
   color: var(--color-accent);
 }

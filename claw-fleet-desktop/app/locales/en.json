@@ -239,6 +239,11 @@
     "host_fallback": "the remote host",
     "reopen_tip": "Reopen this session (dials {{host}} again). Nothing reconnects on its own: `rca serve` is per-run, so reconnecting starts a NEW remote run rather than restoring the interrupted one — which makes it your call, not a scheduler's."
   },
+  "outOfCredits": {
+    "badge": "out of credits",
+    "tip": "This session's account has no usage left, so the turn stopped mid-work. There is no reset time — what it waits on is somebody refilling the account, not a clock — so Fleet will not retry it automatically. Refill, then press ▶ to continue. Provider said: {{message}}",
+    "resumeNow": "Continue this session (after refilling)"
+  },
   "rateLimit": {
     "resetsIn": "resets in {{time}}",
     "resetsNow": "reset due",

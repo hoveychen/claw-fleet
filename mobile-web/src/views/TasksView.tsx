@@ -17,6 +17,7 @@ import {
   MonitorSmartphone,
   Inbox,
   Loader2,
+  CreditCard,
   Radar,
   Search,
   SearchX,
@@ -808,6 +809,15 @@ export function TasksView({
             >
               <FileWarning size={11} />
               {t("{0} 个文件留在本机", String(s.mirrorWrite.total))}
+            </span>
+          )}
+          {/* 账号额度耗尽 —— 它没有 status(也没有 reset 时刻,等的是有人去充值),
+              所以这行在手机上看起来和正常跑完一模一样,只有这枚标签会说。实心,
+              和上面两枚描边的区分开:这个状态自己不会好。 */}
+          {s.outOfCredits && (
+            <span className={styles.outOfCredits} title={s.outOfCredits}>
+              <CreditCard size={11} />
+              {t("额度耗尽")}
             </span>
           )}
           {s.watches?.map((w) => (

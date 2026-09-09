@@ -821,6 +821,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         watches: Vec::new(),
         remote_disconnect: None,
         mirror_write: None,
+        out_of_credits: None,
     }
 }
 

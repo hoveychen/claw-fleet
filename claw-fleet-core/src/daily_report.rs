@@ -1807,6 +1807,7 @@ fn make_session_info_for_date(
         watches: Vec::new(),
         remote_disconnect: None,
         mirror_write: None,
+        out_of_credits: None,
     })
 }
 
@@ -2592,6 +2593,7 @@ mod tests {
             watches: Vec::new(),
             remote_disconnect: None,
             mirror_write: None,
+            out_of_credits: None,
         };
 
         let s2 = crate::session::SessionInfo {
@@ -2644,6 +2646,7 @@ mod tests {
             watches: Vec::new(),
             remote_disconnect: None,
             mirror_write: None,
+            out_of_credits: None,
         };
 
         let codex_path = dir.join("codex-rollout.jsonl");
