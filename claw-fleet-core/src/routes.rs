@@ -101,6 +101,12 @@ pub const TASK_REVIEWS: &str = "/task_reviews";
 pub const MANAGED_LESSONS: &str = "/managed_lessons";
 pub const MANAGED_LESSON_REMOVE: &str = "/managed_lessons/remove";
 pub const DECISION_ASSET: &str = "/decision_asset";
+/// Every outstanding decision card, all six channels in one payload — the
+/// browser build's reconciliation poll. The per-channel `/…/pending` routes
+/// stay for callers that want a single channel; this one exists so the page can
+/// re-check "what is still waiting" on a timer without paying seven round trips
+/// each time.
+pub const DECISIONS_PENDING: &str = "/decisions/pending";
 /// Images a Codex session generated (`?session=<thread id>`), JSON list.
 pub const SESSION_IMAGES: &str = "/session_images";
 /// Bytes of one of them (`?session=<thread id>&name=<file>`).

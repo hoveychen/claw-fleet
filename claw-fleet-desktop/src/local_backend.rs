@@ -3259,44 +3259,8 @@ impl LocalBackend {
     }
 
     pub fn list_pending_decisions(&self) -> claw_fleet_core::ui_types::PendingDecisions {
-        use claw_fleet_core::parked::{self, ParkedKind};
-        let mut pending = claw_fleet_core::ui_types::PendingDecisions {
-            guard: crate::guard::list_pending_requests()
-                .iter()
-                .filter_map(|id| crate::guard::read_request(id))
-                .collect(),
-            elicitation: crate::elicitation::list_pending_requests()
-                .iter()
-                .filter_map(|id| crate::elicitation::read_request(id))
-                // Cards whose wait timed out live in the parked store, not in the
-                // channel's request dir — the producer that was blocking on them
-                // is long gone. They keep showing up here, flagged `parked`,
-                // until the user actually resolves them.
-                .chain(parked::list_requests(ParkedKind::Elicitation))
-                .collect(),
-            fleet_ask: claw_fleet_core::mcp_ipc::list_pending_requests()
-                .iter()
-                .filter_map(|id| claw_fleet_core::mcp_ipc::read_request(id))
-                .chain(parked::list_requests(ParkedKind::FleetAsk))
-                .collect(),
-            a2ui_render: claw_fleet_core::mcp_a2ui_ipc::list_pending_requests()
-                .iter()
-                .filter_map(|id| claw_fleet_core::mcp_a2ui_ipc::read_request(id))
-                .chain(parked::list_requests(ParkedKind::A2uiRender))
-                .collect(),
-            plan_approval: crate::plan_approval::list_pending_requests()
-                .iter()
-                .filter_map(|id| crate::plan_approval::read_request(id))
-                .chain(parked::list_requests(ParkedKind::PlanApproval))
-                .collect(),
-            permission_prompt: claw_fleet_core::permission_prompt_ipc::list_pending_requests()
-                .iter()
-                .filter_map(|id| claw_fleet_core::permission_prompt_ipc::read_request(id))
-                .collect(),
-        };
         let sessions = self.sessions.lock().unwrap().clone();
-        claw_fleet_core::ui_types::resolve_pending_display(&mut pending, &sessions);
-        pending
+        claw_fleet_core::pending_decisions::collect(&sessions)
     }
 
     pub fn respond_to_plan_approval(

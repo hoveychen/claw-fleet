@@ -12,6 +12,51 @@ pub mod sse;
 
 pub use sse::{handle_sse_upgrade, SseBroadcaster, SseClient};
 
+/// When a decision panel last asked what was outstanding (ms since epoch, 0 =
+/// never).
+///
+/// A second, independent proof that a head is attached, and the sturdier of the
+/// two. SSE presence is `client_count() > 0`, which really means "the last
+/// write to that socket did not fail" — and a socket can stay writable long
+/// after the page behind it is gone or asleep, especially with a tunnel or a
+/// buffering proxy in the middle. This one cannot be faked by a live socket:
+/// only a mounted decision panel polls `/decisions/pending`, and it does so
+/// every 10s for as long as it is watching.
+static LAST_DECISION_POLL_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How stale a poll may be and still count as a head being attached. Three
+/// missed 10s polls — enough slack for a throttled background tab or a slow
+/// round trip, short enough that an agent is not left blocking on a card
+/// nobody can see.
+const DECISION_POLL_PRESENCE_WINDOW_MS: u64 = 30_000;
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Called by the `/decisions/pending` handler.
+pub(crate) fn note_decision_poll() {
+    LAST_DECISION_POLL_MS.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a decision panel has polled recently enough to count as watching.
+fn decision_panel_polling() -> bool {
+    poll_is_fresh(
+        LAST_DECISION_POLL_MS.load(std::sync::atomic::Ordering::Relaxed),
+        now_ms(),
+    )
+}
+
+/// `last == 0` is the "never polled" sentinel, not a poll at the epoch — which
+/// would otherwise be judged as stale-by-56-years and happen to give the same
+/// answer, right up until someone widens the window.
+fn poll_is_fresh(last: u64, now: u64) -> bool {
+    last != 0 && now.saturating_sub(last) <= DECISION_POLL_PRESENCE_WINDOW_MS
+}
+
 mod routes_artifacts;
 mod routes_audit;
 mod routes_core;
@@ -394,8 +439,15 @@ pub fn serve(opts: ServeOptions) {
 
                 // Mobile relay clients count as consumers too: with no SSE
                 // desktop attached but a phone online, the loop must keep
-                // scanning so decisions still reach the mobile web.
-                if sse_bg.client_count() == 0 && !crate::mobile_relay::is_connected() {
+                // scanning so decisions still reach the mobile web. So does a
+                // decision panel that is polling `/decisions/pending` — a page
+                // whose SSE the deployment's proxy will not pass still sees
+                // every card on that poll, and refusing to call it a consumer
+                // would have `fleet__ask` reject the question outright.
+                if sse_bg.client_count() == 0
+                    && !crate::mobile_relay::is_connected()
+                    && !decision_panel_polling()
+                {
                     continue;
                 }
 
@@ -407,9 +459,19 @@ pub fn serve(opts: ServeOptions) {
                     last_ping = std::time::Instant::now();
                 }
 
-                // A SSE client is connected — mark this serve as a live consumer
-                // so `fleet guard`/`fleet elicitation` know the head is reachable.
-                crate::consumer_heartbeat::write_heartbeat();
+                // Something is attached — an SSE client, a phone on the relay, or
+                // a decision panel on its poll — so mark this serve as a live
+                // consumer and let `fleet guard` / `fleet elicitation` /
+                // `fleet__ask` know the head is reachable.
+                //
+                // Written as `Server`, which is what keeps the claim honest: the
+                // loop `continue`s above when nothing is attached, so this line
+                // only runs while a head really is, and the reader must not
+                // rescue a stale timestamp by noticing this daemon's pid is
+                // still alive. Under systemd it always is.
+                crate::consumer_heartbeat::write_heartbeat_as(
+                    crate::consumer_heartbeat::WriterKind::Server,
+                );
 
                 // Broadcast session updates. Reads the same snapshot the routes
                 // read rather than scanning again: this loop and a `/sessions`
@@ -1452,6 +1514,8 @@ fn handle_request(
 
             crate::routes::ELICITATION_RESPOND => route_elicitation_respond(ctx, request, &query, json_header, path),
 
+            crate::routes::DECISIONS_PENDING => route_decisions_pending(ctx, request, &query, json_header, path),
+
             crate::routes::FLEET_ASK_PENDING => route_fleet_ask_pending(ctx, request, &query, json_header, path),
 
             crate::routes::FLEET_ASK_RESPOND => route_fleet_ask_respond(ctx, request, &query, json_header, path),
@@ -1565,4 +1629,41 @@ fn parse_query(query_str: &str) -> std::collections::HashMap<String, String> {
         }
     }
     map
+}
+
+#[cfg(test)]
+mod presence_tests {
+    use super::*;
+
+    /// The regression this guards is a pairing, not a function: the heartbeat
+    /// no longer lets a daemon's own live pid stand in for a head
+    /// (`consumer_heartbeat::WriterKind::Server`), so *some* signal has to say a
+    /// browser is watching. SSE presence alone is not enough — a proxy that will
+    /// not pass `/events` leaves `client_count()` at zero forever while the page
+    /// is perfectly happily polling — and without this second signal every
+    /// `fleet__ask` on such a deployment would be rejected outright.
+    // Judged on the pure form, not the global: two tests sharing one
+    // `AtomicU64` under `cargo test`'s thread pool is a flake, not coverage.
+    #[test]
+    fn a_recent_decision_poll_counts_as_a_head_being_attached() {
+        let now = 1_700_000_000_000;
+        assert!(poll_is_fresh(now, now));
+        assert!(poll_is_fresh(now - DECISION_POLL_PRESENCE_WINDOW_MS, now));
+    }
+
+    #[test]
+    fn a_poll_older_than_the_window_does_not() {
+        let now = 1_700_000_000_000;
+        assert!(!poll_is_fresh(now - DECISION_POLL_PRESENCE_WINDOW_MS - 1, now));
+        // "Never polled" — not a poll at the epoch.
+        assert!(!poll_is_fresh(0, now));
+    }
+
+    /// The global still has to be wired to the pure form, or the route records
+    /// a timestamp nothing reads.
+    #[test]
+    fn noting_a_poll_makes_the_global_read_as_fresh() {
+        note_decision_poll();
+        assert!(decision_panel_polling());
+    }
 }

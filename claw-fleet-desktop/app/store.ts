@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, HostFeatures, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, TaskOutcome, TaskReview } from "./types";
 import { isFleetOwnedTask } from "./types";
+import { noteRemovedLocally } from "./decisionReconcile";
 import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
 import { getItem, resolveFeature, setItem } from "./storage";
@@ -2170,6 +2171,13 @@ function fireDecisionResponse(label: string, run: () => Promise<unknown>): void 
 
 /** When a decision is removed, pick the next active: prefer the one after it, else before, else null. */
 function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
+  // Every removal path funnels through here — answered, declined, dismissed,
+  // reconciled away — which makes it the one place that can tell the reconcile
+  // poll "this client already dealt with that card". Without it the poll
+  // resurrects a just-answered card: removal is immediate and the response is
+  // posted in the background, so the request file is still on disk for the
+  // fraction of a second it takes the blocked producer to notice.
+  noteRemovedLocally(id);
   const idx = s.decisions.findIndex((d) => d.id === id);
   const next = s.decisions.filter((d) => d.id !== id);
   let activeDecisionId = s.activeDecisionId;

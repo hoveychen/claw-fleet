@@ -10,6 +10,8 @@
 //!   line 1: wall-clock timestamp in ms since epoch
 //!   line 2: process id of the writing consumer (optional — older
 //!           desktop builds omit it; readers must tolerate that)
+//!   line 3: writer kind, `desktop` or `server` (optional — absent means
+//!           `desktop`, which is what every build that predates the line was)
 //!
 //! The pid line was added because `Instant`-based heartbeats can't see
 //! whole-process freezes (system sleep / power nap): the writer thread
@@ -18,6 +20,21 @@
 //! Hooks that only check freshness then incorrectly conclude the consumer
 //! is gone. With the pid we can fall back to "is the consumer process
 //! still alive?" for the stale-but-frozen case.
+//!
+//! The kind line exists because that fallback is only sound for the desktop
+//! app, where the writing process *is* the UI: if it is alive, the window
+//! exists and the user can answer, whatever the clock says. For
+//! `fleet serve` / `fleet webui` the writer is a daemon and the UI is a
+//! browser somewhere else, so the loop writes only while
+//! `sse.client_count() > 0` — a stale timestamp there means exactly "no head
+//! has been attached for a while", and the pid says nothing about it.
+//!
+//! Letting the daemon borrow the desktop's fallback made the whole check
+//! vacuous on a server: `systemd` keeps `fleet webui` up forever, so
+//! `consumer_status` answered `Alive` with no UI in sight, and `fleet__ask`
+//! would write a card and block its agent for the full 600s wait with nobody
+//! able to see it. That is how two cards were lost on Boss's box on
+//! 2026-09-08 (21:54 and 21:57, both `outcome: timeout` at exactly 600s).
 
 use std::fs;
 use std::path::PathBuf;
@@ -49,7 +66,49 @@ pub fn scheduling_gap(gap: Duration, write_in_gap: Duration) -> Duration {
     gap.saturating_sub(write_in_gap)
 }
 
+/// Which kind of process is claiming to be the consumer.
+///
+/// Decides one thing: whether a stale timestamp may be rescued by the recorded
+/// pid still being alive. See the module docs — sound for [`Desktop`], vacuous
+/// for [`Server`].
+///
+/// [`Desktop`]: WriterKind::Desktop
+/// [`Server`]: WriterKind::Server
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriterKind {
+    /// The desktop app: the writing process is the UI itself.
+    Desktop,
+    /// `fleet serve` / `fleet webui` / an ACP connection: a daemon that writes
+    /// only while a head (SSE client, phone on the relay, ACP peer) is
+    /// attached, and whose own liveness says nothing about whether one is.
+    Server,
+}
+
+impl WriterKind {
+    fn tag(self) -> &'static str {
+        match self {
+            WriterKind::Desktop => "desktop",
+            WriterKind::Server => "server",
+        }
+    }
+
+    /// Parse the file's third line. Anything unrecognised — including the line
+    /// being absent, which is every build older than this one — reads as
+    /// `Desktop`, preserving the previous behaviour for those writers.
+    fn parse(line: Option<&str>) -> Self {
+        match line.map(str::trim) {
+            Some("server") => WriterKind::Server,
+            _ => WriterKind::Desktop,
+        }
+    }
+}
+
+/// Record the desktop app as the live consumer.
 pub fn write_heartbeat() {
+    write_heartbeat_as(WriterKind::Desktop);
+}
+
+pub fn write_heartbeat_as(kind: WriterKind) {
     let Some(path) = heartbeat_path() else { return };
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -59,7 +118,7 @@ pub fn write_heartbeat() {
         .unwrap_or_default()
         .as_millis();
     let pid = std::process::id();
-    let _ = atomic_write_string(&path, &format!("{}\n{}\n", ts_ms, pid));
+    let _ = atomic_write_string(&path, &format!("{}\n{}\n{}\n", ts_ms, pid, kind.tag()));
 }
 
 /// Write `content` to `path` such that a concurrent reader either sees the
@@ -122,6 +181,10 @@ pub enum ConsumerStatus {
     StalePidUnparseable { age_ms: u128, snippet: String },
     /// Timestamp stale and `kill(pid, 0)` reports the pid is gone.
     StalePidDead { age_ms: u128, pid: u32 },
+    /// Timestamp stale and the writer is a daemon (`fleet serve` / `webui` /
+    /// ACP). No pid check is attempted: that process only writes while a head
+    /// is attached, so a stale timestamp *is* the answer — nothing is watching.
+    StaleServerNoHead { age_ms: u128, pid: u32 },
 }
 
 impl ConsumerStatus {
@@ -154,6 +217,11 @@ impl std::fmt::Display for ConsumerStatus {
             ConsumerStatus::StalePidDead { age_ms, pid } => {
                 write!(f, "stale-pid-dead (age={}ms, pid={})", age_ms, pid)
             }
+            ConsumerStatus::StaleServerNoHead { age_ms, pid } => write!(
+                f,
+                "stale-server-no-head (age={}ms, pid={}) — fleet serve/webui is running but no UI is attached",
+                age_ms, pid
+            ),
         }
     }
 }
@@ -210,6 +278,15 @@ fn classify(content: &str, now_ms: u128, stale_after_ms: u128) -> ConsumerStatus
             snippet: pid_trimmed.chars().take(40).collect(),
         };
     };
+    // …but only for the desktop app, where that process *is* the UI. A daemon
+    // writes this file only while a head is attached, so a stale timestamp
+    // already means "no head attached" and its own liveness is not evidence of
+    // anything. Borrowing the fallback there made the check vacuous: `systemd`
+    // keeps `fleet webui` alive forever, so every `fleet__ask` blocked its
+    // agent for the full wait on a card nobody could see.
+    if WriterKind::parse(lines.next()) == WriterKind::Server {
+        return ConsumerStatus::StaleServerNoHead { age_ms, pid };
+    }
     if process_alive(pid) {
         ConsumerStatus::Alive {
             fresh: false,
@@ -307,6 +384,69 @@ mod tests {
         let s = classify(&content, now, STALE_AFTER_MS);
         assert!(!s.is_alive());
         assert!(matches!(s, ConsumerStatus::StalePidDead { pid: 0, age_ms } if age_ms == 60_000));
+    }
+
+    /// The bug this branch exists for. A daemon's stale heartbeat used to be
+    /// rescued by its own pid — and `systemd`'s `Restart=always` means that pid
+    /// is always alive, so `consumer_status` answered `Alive` on a box with no
+    /// UI attached at all. `fleet__ask` then wrote a card and blocked its agent
+    /// for the full 600s wait with nobody able to see it (twice on 2026-09-08).
+    #[test]
+    fn stale_server_heartbeat_is_not_rescued_by_its_own_live_pid() {
+        let now: u128 = 1_000_000_000;
+        let our_pid = std::process::id();
+        let content = format!("{}\n{}\nserver\n", now - 60_000, our_pid);
+        let s = classify(&content, now, STALE_AFTER_MS);
+        assert!(!s.is_alive(), "a daemon with no head attached must not read as alive: {s}");
+        assert!(
+            matches!(s, ConsumerStatus::StaleServerNoHead { pid, age_ms } if pid == our_pid && age_ms == 60_000),
+            "got {s}",
+        );
+    }
+
+    /// …while the desktop keeps the fallback, which is the case it was written
+    /// for: the writing process *is* the UI, so a frozen (power-napped) app is
+    /// still a reachable head.
+    #[test]
+    fn stale_desktop_heartbeat_still_gets_the_pid_fallback() {
+        let now: u128 = 1_000_000_000;
+        let our_pid = std::process::id();
+        let content = format!("{}\n{}\ndesktop\n", now - 60_000, our_pid);
+        let s = classify(&content, now, STALE_AFTER_MS);
+        assert!(s.is_alive(), "got {s}");
+    }
+
+    /// A heartbeat written by a build that predates the kind line has two lines
+    /// and must keep reading as the desktop — the writer it in fact was.
+    #[test]
+    fn stale_heartbeat_without_a_kind_line_is_treated_as_desktop() {
+        let now: u128 = 1_000_000_000;
+        let our_pid = std::process::id();
+        let content = format!("{}\n{}\n", now - 60_000, our_pid);
+        assert!(classify(&content, now, STALE_AFTER_MS).is_alive());
+    }
+
+    /// A fresh heartbeat is alive whoever wrote it: the kind only gates the
+    /// stale-path fallback.
+    #[test]
+    fn fresh_server_heartbeat_is_alive() {
+        let now: u128 = 1_000_000_000;
+        let content = format!("{}\n{}\nserver\n", now - 1_000, std::process::id());
+        let s = classify(&content, now, STALE_AFTER_MS);
+        assert!(matches!(s, ConsumerStatus::Alive { fresh: true, .. }), "got {s}");
+    }
+
+    /// The writer and the reader have to agree on the tag, and a typo in either
+    /// literal silently reverts the daemon to the desktop's fallback — the exact
+    /// bug, back with no test failing.
+    #[test]
+    fn the_kind_the_server_writes_is_the_kind_the_reader_recognises() {
+        let now: u128 = 1_000_000_000;
+        let content = format!("{}\n{}\n{}\n", now - 60_000, std::process::id(), WriterKind::Server.tag());
+        assert!(matches!(
+            classify(&content, now, STALE_AFTER_MS),
+            ConsumerStatus::StaleServerNoHead { .. }
+        ));
     }
 
     #[test]

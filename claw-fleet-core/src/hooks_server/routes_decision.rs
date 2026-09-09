@@ -8,6 +8,24 @@
 #![allow(unused_variables, unused_mut, clippy::all)]
 use super::*;
 
+/// All six channels at once, so the browser build can reconcile its card set
+/// on a timer instead of trusting that every SSE frame arrived.
+pub(crate) fn route_decisions_pending(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    // Asking this question is proof a decision panel is watching — the only
+    // caller is a mounted one, on its 10s reconcile. Recorded before the answer
+    // is built so a slow scan cannot make a live head look absent.
+    super::note_decision_poll();
+    let pending = crate::pending_decisions::collect(&ctx.snapshot.sessions());
+    let body = serde_json::to_string(&pending).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_fleet_ask_pending(
     ctx: &ServeCtx,
     request: tiny_http::Request,

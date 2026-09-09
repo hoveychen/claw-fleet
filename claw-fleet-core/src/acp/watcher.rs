@@ -60,7 +60,13 @@ pub fn spawn(agent: Arc<AcpAgent>) {
             // rejected at the asking end, before this loop could route them.
             // `fleet serve` writes the same heartbeat for SSE and mobile-relay
             // clients; an ACP connection is a third surface with equal claim.
-            crate::consumer_heartbeat::write_heartbeat();
+            // `Server`, like `fleet serve`'s own write: this loop exits when the
+            // connection closes, so a stale timestamp means the peer is gone —
+            // and the process it ran in is a daemon whose liveness proves
+            // nothing about that.
+            crate::consumer_heartbeat::write_heartbeat_as(
+                crate::consumer_heartbeat::WriterKind::Server,
+            );
 
             for card in pending_cards() {
                 if seen.contains(&card.id) {

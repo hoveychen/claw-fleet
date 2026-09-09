@@ -258,6 +258,19 @@ pub fn check_watcher_heartbeat(status: &ConsumerStatus) -> DiagnosticCheck {
             ),
             fix_action: None,
         },
+        // `fleet serve` / `fleet webui` *is* running — it wrote this file. What
+        // it no longer has is a head: no SSE client, no phone on the relay, no
+        // decision panel polling. Saying "start fleet serve" here would send
+        // the reader after the one thing that is already true.
+        ConsumerStatus::StaleServerNoHead { .. } => DiagnosticCheck {
+            id: id::WATCHER_HEARTBEAT.into(),
+            label: "decision watcher heartbeat".into(),
+            status: CheckStatus::Fail,
+            detail: format!(
+                "`fleet serve`/`fleet webui` is running but nothing is watching it — open the web UI (or pair a phone) so cards have somewhere to appear: {status}"
+            ),
+            fix_action: None,
+        },
         _ => DiagnosticCheck {
             id: id::WATCHER_HEARTBEAT.into(),
             label: "decision watcher heartbeat".into(),
@@ -358,6 +371,17 @@ mod tests {
         let s = ConsumerStatus::StalePidDead { age_ms: 120_000, pid: 9999 };
         let c = check_watcher_heartbeat(&s);
         assert_eq!(c.status, CheckStatus::Fail);
+    }
+
+    /// Fails, and says the useful thing: the server is up, it is the head that
+    /// is missing. The generic arm's advice ("start `fleet serve`") is exactly
+    /// the thing already true in this state.
+    #[test]
+    fn watcher_stale_server_no_head_fails_and_does_not_blame_the_server() {
+        let s = ConsumerStatus::StaleServerNoHead { age_ms: 120_000, pid: 1688 };
+        let c = check_watcher_heartbeat(&s);
+        assert_eq!(c.status, CheckStatus::Fail);
+        assert!(c.detail.contains("nothing is watching"), "detail was {:?}", c.detail);
     }
 
     #[test]
