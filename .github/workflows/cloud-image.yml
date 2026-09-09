@@ -60,7 +60,26 @@ jobs:
       packages: write
     steps:
       - name: Checkout
+        # fetch-depth 0 for the tags: the version this image reports is derived
+        # from the nearest tag (see the step below), and a shallow clone has
+        # none, which would silently degrade every image to "0.0.0-dev".
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # The version string the container reports on /health and shows in the
+      # browser build's settings. Only the release workflow rewrites the crate
+      # versions from a tag, so this image would otherwise compile as 0.0.0 —
+      # `<nearest tag>-dev` places the build without claiming to be that
+      # release. No tag reachable (a fresh fork, a branch cut before any tag) →
+      # `0.0.0-dev`, which is exactly as informative as the tag-less truth.
+      - name: Derive version string
+        id: ver
+        shell: bash
+        run: |
+          TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          TAG="${TAG:-v0.0.0}"
+          echo "version=${TAG#v}-dev" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -103,5 +122,6 @@ jobs:
           build-args: |
             FLEET_GIT_COMMIT=${{ github.sha }}
             APP_COMMIT=${{ github.sha }}
+            FLEET_VERSION=${{ steps.ver.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
