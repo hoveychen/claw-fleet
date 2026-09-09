@@ -193,6 +193,26 @@
 }
 
 
+/* ── Orphan pane: an open id the scan cannot see, carrying a pending card ── */
+
+.orphan {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 24px;
+}
+
+.orphan_note {
+  margin: 0;
+  color: var(--color-text-dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+
 /* ── Starting placeholder (spawned, waiting for the scanner) ─────────────── */
 
 .detail_starting {

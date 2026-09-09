@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -20,11 +22,12 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
+  useDecisionStore,
   useSessionsStore,
   useUIStore,
   type MarkFilter,
 } from "../store";
-import type { SessionInfo } from "../types";
+import type { PendingDecision, SessionInfo } from "../types";
 import { isFleetOwnedTask } from "../types";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useSessionSearch } from "../hooks/useSessionSearch";
@@ -58,6 +61,48 @@ const START_TIMEOUT_MS = 30_000;
 /** Sentinel `openId` for the new-session composer. A real session id is a UUID,
  *  so it can never collide with this. */
 const DRAFT_ID = "new:draft";
+
+/** Same lazy hop `SessionDetail` uses, for the same reason: `DecisionPanel`
+ *  imports `SessionDetail`, so a static import here would close the cycle. */
+const OrphanDecisionCard = lazy(() =>
+  import("./DecisionPanel").then(({ DecisionCard }) => ({ default: DecisionCard })),
+);
+
+/** What the detail column shows. Split out of the component because the one
+ *  thing that went wrong here is unreachable from a render test: the pane used
+ *  to pick its branch inline, and an `openId` naming a session the scan cannot
+ *  see fell past every branch into the resting state — the new-session
+ *  composer. So 「n 张卡等你回复」 landed on 「新建会话」 with nothing on screen
+ *  saying why, which is exactly what Boss hit on fleet-cloud on 2026-09-09. */
+export type PanePlan =
+  | { kind: "session" }
+  /** The card is rendered right here: simplified mode mounts no
+   *  `DecisionPanel`, so this is the card's only surface anywhere. */
+  | { kind: "orphan-card"; sessionId: string; decisions: PendingDecision[] }
+  /** Explain the empty pane but do NOT draw the card — full mode's overlay
+   *  already has it, and drawing it twice is its own bug. */
+  | { kind: "orphan-note"; sessionId: string; hasCard: boolean }
+  | { kind: "draft" }
+  | { kind: "resting" };
+
+export function panePlan(args: {
+  openId: string | null;
+  activeSession: SessionInfo | null;
+  scanReady: boolean;
+  simplifiedMode: boolean;
+  decisions: PendingDecision[];
+}): PanePlan {
+  const { openId, activeSession, scanReady, simplifiedMode, decisions } = args;
+  if (activeSession) return { kind: "session" };
+  if (openId === DRAFT_ID) return { kind: "draft" };
+  // Before the first scan lands every id looks orphaned, so hold the resting
+  // state rather than accusing a session that is simply not loaded yet.
+  if (openId == null || !scanReady) return { kind: "resting" };
+  const mine = decisions.filter((d) => d.request.sessionId === openId);
+  return simplifiedMode && mine.length > 0
+    ? { kind: "orphan-card", sessionId: openId, decisions: mine }
+    : { kind: "orphan-note", sessionId: openId, hasCard: mine.length > 0 };
+}
 
 /** Which session the detail column was showing when the app last closed. */
 const OPEN_PANE_STORAGE_KEY = "launchpad-open";
@@ -614,6 +659,20 @@ export function HistoryView() {
     [openId, sessionById],
   );
 
+  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
+  const pendingDecisions = useDecisionStore((s) => s.decisions);
+  const pane = useMemo(
+    () =>
+      panePlan({
+        openId,
+        activeSession,
+        scanReady,
+        simplifiedMode,
+        decisions: pendingDecisions,
+      }),
+    [openId, activeSession, scanReady, simplifiedMode, pendingDecisions],
+  );
+
   // One session row — shared by standalone rows and the members inside an
   // expanded handoff group, so both stay pixel-identical and pick up the same
   // memoisation.
@@ -769,7 +828,7 @@ export function HistoryView() {
           an empty column is start work. */}
       <div className={styles.detail}>
         <div className={styles.detail_body}>
-          {activeSession ? (
+          {pane.kind === "session" && activeSession ? (
             <div className={styles.pane}>
               <SessionDetail
                 inline
@@ -777,7 +836,7 @@ export function HistoryView() {
                 searchQuery={queryById[activeSession.id] ?? null}
               />
             </div>
-          ) : openId === DRAFT_ID ? (
+          ) : pane.kind === "draft" ? (
             <div className={styles.pane}>
               {pending ? (
                 <div className={styles.detail_starting}>
@@ -809,6 +868,48 @@ export function HistoryView() {
               ) : (
                 <NewSessionForm onCreated={handleCreated} onCancel={cancelDraft} />
               )}
+            </div>
+          ) : pane.kind === "orphan-card" ? (
+            /* Answering a card needs nothing from the transcript, so render it
+               right here — simplified mode mounts no `DecisionPanel`, making
+               this the card's only surface anywhere on screen. */
+            <div className={styles.pane} data-testid="orphan-session-pane">
+              <div className={styles.orphan}>
+                <p className={styles.orphan_note}>
+                  {t(
+                    "history.orphan_with_card",
+                    "这个会话不在扫描范围内（记录可能已删除、已过期，或当前用户读不到），但它的卡还等着回复：",
+                  )}
+                </p>
+                {pane.decisions.map((decision) => (
+                  <Suspense key={decision.id} fallback={<div className={styles.orphan_note}>…</div>}>
+                    <OrphanDecisionCard decision={decision} compact />
+                  </Suspense>
+                ))}
+              </div>
+            </div>
+          ) : pane.kind === "orphan-note" ? (
+            <div className={styles.pane} data-testid="orphan-session-pane">
+              <div className={styles.detail_starting}>
+                <span className={styles.starting_text}>
+                  {pane.hasCard
+                    ? t(
+                        "history.orphan_card_in_panel",
+                        "这个会话不在扫描范围内，它的卡在决策面板里等你回复。",
+                      )
+                    : t(
+                        "history.orphan_not_found",
+                        "找不到这个会话：记录可能已删除、已过期，或当前用户读不到。",
+                      )}
+                </span>
+                <button
+                  type="button"
+                  className={styles.starting_dismiss}
+                  onClick={() => setOpenId(null)}
+                >
+                  {t("history.orphan_back", "关闭")}
+                </button>
+              </div>
             </div>
           ) : (
             <div className={styles.pane}>
