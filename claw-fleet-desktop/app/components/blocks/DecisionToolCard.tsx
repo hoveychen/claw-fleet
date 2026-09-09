@@ -24,9 +24,8 @@ import type {
   ToolResultBlock,
   ToolUseBlock as ToolUseBlockType,
 } from "../../types";
-import { decisionAssetUrl } from "../../decisionAssets";
 import { useDocumentTheme } from "../../hooks/useDocumentTheme";
-import { AutoHeightFrame } from "../AutoHeightFrame";
+import { DecisionAssetFrame } from "../DecisionAssetFrame";
 import { AttachmentRow } from "./AttachmentRow";
 import styles from "./DecisionToolCard.module.css";
 
@@ -261,14 +260,16 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
                 </div>
 
                 {/* Image-bearing fleet__ask cards persist their assets, so the
-                    exact preview can be re-served through fleet-decision://.
-                    Without a matched record there is no asset id, so fall back
-                    to a marker rather than replaying agent-authored HTML. */}
+                    exact preview can be re-served from the store. Without a
+                    matched record there is no asset id, so fall back to a
+                    marker rather than replaying agent-authored HTML. */}
                 {q.images && q.images.length > 0 && record ? (
-                  <AutoHeightFrame
+                  <DecisionAssetFrame
                     title={`decision-${record.id}-${qi}`}
                     className={styles.preview_frame}
-                    src={decisionAssetUrl(record.id, `q${qi}`, "index.html", theme)}
+                    id={record.id}
+                    qidx={`q${qi}`}
+                    theme={theme}
                     style={{ colorScheme: theme }}
                     minHeight={160}
                   />

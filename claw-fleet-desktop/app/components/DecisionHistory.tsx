@@ -16,8 +16,7 @@ import type {
 import { History } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { AttachmentRow } from "./blocks/AttachmentRow";
-import { decisionAssetUrl } from "../decisionAssets";
-import { AutoHeightFrame } from "./AutoHeightFrame";
+import { DecisionAssetFrame } from "./DecisionAssetFrame";
 import styles from "./DecisionHistory.module.css";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
 
@@ -252,12 +251,13 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
             {q.images && q.images.length > 0 ? (
               // Image-bearing cards persist their assets under
               // ~/.fleet/decision-assets/<id>/q<qi>/, so we CAN faithfully
-              // re-render the exact preview through the fleet-decision://
-              // protocol (still sandboxed, opaque origin). This is the whole
-              // point of copying images into a durable store.
-              <AutoHeightFrame
+              // re-render the exact preview (still sandboxed, opaque origin).
+              // This is the whole point of copying images into a durable store.
+              <DecisionAssetFrame
                 title={`fleet-ask-history-${rec.id}-${qi}`}
-                src={decisionAssetUrl(rec.id, `q${qi}`, "index.html", theme)}
+                id={rec.id}
+                qidx={`q${qi}`}
+                theme={theme}
                 minHeight={160}
                 style={{
                   width: "100%",
