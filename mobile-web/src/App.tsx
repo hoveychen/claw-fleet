@@ -1014,7 +1014,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           <TasksView
             sessions={mergedSessions}
             deviceLabelOf={runtimeDevices.length > 1 ? deviceLabelOf : undefined}
-            client={client}
             clientFor={transportFor}
             connected={connected}
             agentOnline={agentOnline}

@@ -372,10 +372,9 @@ interface Props {
   /** 合并列表:每条会话都带着它属于哪一台设备(deviceRuntime.ts 的 WithDevice)。
    *  id 只在单机内唯一,所以 React key 与「打开这一条」都必须带上 deviceId。 */
   sessions: Array<WithDevice<SessionInfo>>;
-  /** 当前作用域那一台的传输层 —— 只给「与某一条会话无关」的读操作用。 */
-  client: FleetTransport | null;
-  /** 某一条会话所属设备的传输层。列表是合并的,所以每一次**写**(标记/中断/停止)
-   *  都必须按 `s.deviceId` 取,否则请求会打到当前选中的那台机器上:标记落在别的
+  /** 某一条会话所属设备的传输层。任务页**不持有**当前作用域那一台的 client:
+   *  列表是合并的,所以每一次**写**(标记/中断/停止)以及每一次按会话取数(搜索、
+   *  聊天目录)都必须按设备取,否则请求会打到当前选中的那台机器上:标记落在别的
    *  主机 → 下一次快照推回来 userMark 还是空 → 卡片复活;停止更糟,pid 会被发到
    *  一台毫不相干的主机上执行。 */
   clientFor: (deviceId: string) => FleetTransport | null;
@@ -395,7 +394,6 @@ interface Props {
 // 新会话入口由 App 底部导航中间的凸起按钮统一持有，任务页内不再重复放置。
 export function TasksView({
   sessions,
-  client,
   clientFor,
   deviceLabelOf,
   connected,
@@ -417,8 +415,12 @@ export function TasksView({
   // Optimistic mark overrides, dropped once the server snapshot catches up.
   const [markOverride, setMarkOverride] = useState<Record<string, SessionMark | null>>({});
 
-  // Full-text search over the relay — same FTS the desktop launchpad uses.
-  const { searching, ftsMatchPaths, snippetByPath } = useRelaySearch(client, search);
+  /** 列表里出现过的设备。搜索与聊天目录都是**逐台**问的。 */
+  const deviceIds = useMemo(() => [...new Set(sessions.map((s) => s.deviceId))], [sessions]);
+
+  // Full-text search over the relay — same FTS the desktop launchpad uses,
+  // 每台设备各问一次自己的索引。
+  const { searching, ftsMatchKeys, snippetByKey } = useRelaySearch(deviceIds, clientFor, search);
 
   // 滚动期间（及停手后 ORDER_FREEZE_MS 内）冻住的键序，null = 未冻结。
   // 状态用于让下面的 useMemo 重算；ref 是滚动回调里的唯一真相（回调闭包读不到
@@ -453,10 +455,6 @@ export function TasksView({
   // The desktop host's pure-chat workspace — the same path the new-session sheet
   // pins. Null while it's in flight; the chat section then simply sits where its
   // activity puts it instead of being pinned on a guess.
-  const deviceIds = useMemo(
-    () => [...new Set(sessions.map((s) => s.deviceId))],
-    [sessions],
-  );
   const chatPaths = useChatWorkspaces(deviceIds, clientFor);
   const chatPathOf = useCallback(
     (deviceId: string) => chatPaths[deviceId] ?? null,
@@ -483,11 +481,11 @@ export function TasksView({
           (s.taskPlan?.planId?.toLowerCase().includes(q) ?? false) ||
           (s.taskPlan?.currentPlan?.toLowerCase().includes(q) ?? false) ||
           (s.taskPlan?.currentTask?.toLowerCase().includes(q) ?? false);
-        if (!clientMatch && !ftsMatchPaths.has(s.jsonlPath)) return false;
+        if (!clientMatch && !ftsMatchKeys.has(itemKey(s.deviceId, s.jsonlPath))) return false;
       }
       return true;
     });
-  }, [all, search, ftsMatchPaths]);
+  }, [all, search, ftsMatchKeys]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -761,7 +759,8 @@ export function TasksView({
       : s.userMark === "done";
     const title =
       s.titleOverride || s.aiTitle || s.slug || s.lastMessagePreview || t("（无标题）");
-    const snippet = search.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined;
+    const snippet =
+      search.trim().length >= 2 ? snippetByKey.get(itemKey(s.deviceId, s.jsonlPath)) : undefined;
     const live = LIVE.includes(s.status);
     return (
       <div
