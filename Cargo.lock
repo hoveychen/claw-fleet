@@ -1050,6 +1050,7 @@ dependencies = [
  "ctrlc",
  "dirs 5.0.1",
  "flate2",
+ "fleet-image",
  "futures",
  "futures-util",
  "git2",

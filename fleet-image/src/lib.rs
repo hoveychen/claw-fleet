@@ -13,8 +13,10 @@
 //! `opt-level = 3` in the dev profile and leaves `[profile.dev]` at 0. See the
 //! comment above `[profile.dev]` in the root `Cargo.toml` for the measurements.
 
-/// Byte budget a squeezed decision-asset image aims for so it survives the
-/// mobile relay hop.
+/// Byte size a re-encoded decision-asset image is squeezed toward. Every image
+/// the mobile client displays is pushed under this so the relay hop stays cheap
+/// regardless of the source size (a full-res 3-5 MiB AI preview can't be assumed
+/// to cross the relay).
 pub const DECISION_ASSET_TARGET_BYTES: usize = 50 * 1024;
 /// Hard ceiling we never want a re-encoded asset to exceed. In practice the
 /// shrink loop reaches [`DECISION_ASSET_TARGET_BYTES`] long before this; it only

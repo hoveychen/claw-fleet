@@ -19,10 +19,10 @@ lto = true
 # dev profile has to stay fast enough to serve the mobile relay — `tail` runs on
 # the phone's 15s request timeout.
 #
-# At the default `opt-level = 0` it isn't. The transcript-thumbnail path
-# (`mobile_relay::downscale_image`) is a per-pixel loop over ~1.3M pixels, and
-# unoptimized it emits real calls for `f32::mul`, `Iter::next`, `u8::to_u8` and
-# the `debug_assertions` bounds checks — they show up as stack *tops* in
+# The thing that timeout hinges on is one per-pixel loop over ~1.3M pixels: the
+# transcript-thumbnail / decision-asset squeeze. Unoptimized it emits real calls
+# for `f32::mul`, `Iter::next`, `u8::to_u8` and the `debug_assertions` bounds
+# checks — they show up as stack *tops* in
 # `~/.fleet/diagnostics/stall-1787969331067-tail.txt`, a live sample of a `tail`
 # that took 44s on the phone and timed it out.
 #
@@ -31,17 +31,34 @@ lto = true
 #
 #   release (opt=3 + lto) ...................   848 ms
 #   dev, own=2, deps=3 ...................... 1,791 ms
-#   dev, own=1, deps=3 ...................... 2,685 ms   <- this profile
+#   dev, own=1, deps=3 ...................... 2,685 ms
 #   dev, own=0, deps=3 ..................... 14,354 ms
 #   dev, all opt=0 (the old default) ....... 31,437 ms
 #
-# `opt-level = 1` buys an 11.7x speedup while keeping everything a debug build is
-# *for*: `debug_assertions`, unstripped symbols, and panic backtraces all stay on.
-# Both sections are needed — `image`'s generic code is monomorphized into
-# claw-fleet-core, so it compiles at *our* opt-level, which is why raising only
-# the dependency profile lands at 14s instead of 2.7s.
+# `own=0, deps=3` lands at 14s rather than 2.7s because `image`'s code is
+# generic: it is monomorphized into whichever crate *calls* it and so compiles
+# at that crate's opt-level, not at the dependency profile's. Raising
+# `[profile.dev.package."*"]` alone can never reach it.
+#
+# For a long time the answer was `[profile.dev] opt-level = 1` — the whole
+# workspace optimized so that one loop would be. That is a bad trade: measured
+# 2026-09-08, it costs 51.2s vs 24.4s to compile claw-fleet-core from scratch
+# and 8.1s vs 3.9s to rebuild it after a one-line edit, on every crate, forever,
+# for the benefit of a single function.
+#
+# So the loop now lives in its own crate, `fleet-image`, and only *it* is pinned
+# to opt-level 3. `[profile.dev]` is back to the cargo default, which is what a
+# debug build should be, and the phone path is faster than it was under
+# `opt-level = 1` because the loop is now compiled at 3 rather than 1.
 [profile.dev]
-opt-level = 1
+opt-level = 0
 
 [profile.dev.package."*"]
+opt-level = 3
+
+# The pixel loop, monomorphized `image` code and all. This is the one workspace
+# member that must not be a debug build — see above. Adding unrelated code to
+# `fleet-image` silently opts it into release-grade optimization on every debug
+# build, so keep that crate to the hot path.
+[profile.dev.package.fleet-image]
 opt-level = 3
