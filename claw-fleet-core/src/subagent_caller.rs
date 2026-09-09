@@ -58,6 +58,18 @@ fleet__plan or fleet__set_session_title either. Return everything you would have
 — the report, the options, the question — as your final text result. Your parent reads it and \
 decides whether it warrants a card.";
 
+/// Shown to a subagent that tried to call one of the parent-scoped tools.
+/// `tool` is the tool name, `effect` one clause naming what it would have done
+/// to the parent.
+pub fn subagent_tool_refusal(tool: &str, effect: &str, agent_type: &str) -> String {
+    format!(
+        "{tool} is not available to subagents (detected agent type: `{agent_type}`). You were \
+         spawned by the Agent/Task tool and share your parent's session id, so this call would \
+         have {effect} — not yours. Do not retry. If your parent needs it done, say so in your \
+         final text result and let the parent make the call."
+    )
+}
+
 /// `Some(agent_type)` when this `fleet__ask` call came from a subagent of
 /// `session_id`, `None` when it came from the session itself (or when the
 /// transcript cannot be read — see the fail-open note on the module).
@@ -65,29 +77,68 @@ decides whether it warrants a card.";
 /// `first_question` is the `question` string of the call's first question, which
 /// is what gets compared against the transcript.
 pub fn detect_ask_caller(session_id: &str, first_question: &str) -> Option<String> {
-    let parent_jsonl = crate::session::find_session_jsonl(session_id)?;
-    let dir = parent_jsonl.with_extension("").join("subagents");
-    detect_in_subagents_dir(&dir, first_question)
+    let question = first_question.to_string();
+    detect_caller(session_id, "fleet__ask", move |input| {
+        input.pointer("/questions/0/question").and_then(|q| q.as_str()) == Some(question.as_str())
+    })
 }
 
-/// Pure core of [`detect_ask_caller`]: scan one `subagents/` directory. Split
-/// out so tests can build a directory instead of a whole `~/.claude` tree.
-pub(crate) fn detect_in_subagents_dir(dir: &Path, first_question: &str) -> Option<String> {
-    detect_in_subagents_dir_within(dir, first_question, MAX_AGE)
+/// `Some(agent_type)` when a subagent of `session_id` just called the tool whose
+/// name ends with `tool_suffix` with exactly these `arguments`.
+///
+/// Used for the parent-scoped tools that carry no long unique payload the way a
+/// card's report body does — `fleet__set_session_title` renames the parent
+/// session, `fleet__plan` moves the parent's plan focus. Their arguments are
+/// short, so this matches the whole input object (order-insensitive: this
+/// workspace's `serde_json` keeps `Map` as a `BTreeMap`). Two identical calls
+/// from parent and subagent inside the same freshness window would collide, and
+/// then the parent's own call is the one refused — recoverable, unlike the
+/// silent cross-session write it replaces. Real data agrees it is not a live
+/// concern: across 03f41a3c's 26 `fleet__plan` and 4 `fleet__set_session_title`
+/// calls, no subagent's arguments equalled any of the parent's, and the parent
+/// never repeated a plan/title payload even once.
+pub fn detect_tool_caller(
+    session_id: &str,
+    tool_suffix: &str,
+    arguments: &serde_json::Value,
+) -> Option<String> {
+    let want = arguments.clone();
+    detect_caller(session_id, tool_suffix, move |input| input == &want)
+}
+
+fn detect_caller(
+    session_id: &str,
+    tool_suffix: &str,
+    matches: impl Fn(&serde_json::Value) -> bool,
+) -> Option<String> {
+    let parent_jsonl = crate::session::find_session_jsonl(session_id)?;
+    let dir = parent_jsonl.with_extension("").join("subagents");
+    detect_in_subagents_dir(&dir, tool_suffix, &matches)
+}
+
+/// Pure core of [`detect_caller`]: scan one `subagents/` directory. Split out so
+/// tests can build a directory instead of a whole `~/.claude` tree.
+pub(crate) fn detect_in_subagents_dir(
+    dir: &Path,
+    tool_suffix: &str,
+    matches: &dyn Fn(&serde_json::Value) -> bool,
+) -> Option<String> {
+    detect_in_subagents_dir_within(dir, tool_suffix, matches, MAX_AGE)
 }
 
 /// [`detect_in_subagents_dir`] with the freshness window injected, so a test can
 /// exercise the prefilter without back-dating a file's mtime.
 pub(crate) fn detect_in_subagents_dir_within(
     dir: &Path,
-    first_question: &str,
+    tool_suffix: &str,
+    matches: &dyn Fn(&serde_json::Value) -> bool,
     max_age: std::time::Duration,
 ) -> Option<String> {
     for transcript in agent_transcripts(dir) {
         if !recently_written(&transcript, max_age) {
             continue;
         }
-        if tail_has_ask(&transcript, first_question) {
+        if tail_has_call(&transcript, tool_suffix, matches, max_age) {
             return Some(agent_type_of(&transcript));
         }
     }
@@ -130,24 +181,38 @@ fn recently_written(path: &Path, max_age: std::time::Duration) -> bool {
         .unwrap_or(false)
 }
 
-/// Does the tail of `path` hold a `fleet__ask` `tool_use` whose first question
-/// is `question`? Matched on the full question string: it carries the card's
-/// whole report body, so an accidental collision between two different calls is
-/// not a realistic concern.
-fn tail_has_ask(path: &Path, question: &str) -> bool {
+/// Does the tail of `path` hold a matching `tool_use` written within `max_age`?
+///
+/// The record's own `timestamp` is checked as well as the file's mtime: an agent
+/// transcript stays fresh for as long as its agent keeps writing anything, so
+/// without this a matching call from ten minutes ago would still count.
+fn tail_has_call(
+    path: &Path,
+    tool_suffix: &str,
+    matches: &dyn Fn(&serde_json::Value) -> bool,
+    max_age: std::time::Duration,
+) -> bool {
     let Some(tail) = read_tail(path, TAIL_BYTES) else {
         return false;
     };
     tail.lines()
         .rev()
         .take(MAX_LINES)
-        .any(|line| line_asks(line, question))
+        .any(|line| line_calls(line, tool_suffix, matches, max_age))
 }
 
-fn line_asks(line: &str, question: &str) -> bool {
+fn line_calls(
+    line: &str,
+    tool_suffix: &str,
+    matches: &dyn Fn(&serde_json::Value) -> bool,
+    max_age: std::time::Duration,
+) -> bool {
     let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
         return false;
     };
+    if !record_is_recent(&record, max_age) {
+        return false;
+    }
     let Some(blocks) = record.pointer("/message/content").and_then(|c| c.as_array()) else {
         return false;
     };
@@ -155,9 +220,22 @@ fn line_asks(line: &str, question: &str) -> bool {
         b.get("type").and_then(|t| t.as_str()) == Some("tool_use")
             && b.get("name")
                 .and_then(|n| n.as_str())
-                .is_some_and(|n| n.ends_with("fleet__ask"))
-            && b.pointer("/input/questions/0/question").and_then(|q| q.as_str()) == Some(question)
+                .is_some_and(|n| n.ends_with(tool_suffix))
+            && b.get("input").is_some_and(|i| matches(i))
     })
+}
+
+/// A record with no parsable `timestamp` counts as recent: the mtime prefilter
+/// already bounded it, and refusing to detect would fail toward the bug.
+fn record_is_recent(record: &serde_json::Value, max_age: std::time::Duration) -> bool {
+    let Some(ts) = record.get("timestamp").and_then(|t| t.as_str()) else {
+        return true;
+    };
+    let Ok(when) = chrono::DateTime::parse_from_rfc3339(ts) else {
+        return true;
+    };
+    let age = chrono::Utc::now().signed_duration_since(when.with_timezone(&chrono::Utc));
+    age <= chrono::Duration::from_std(max_age).unwrap_or(chrono::Duration::MAX)
 }
 
 /// Last `bytes` of the file as UTF-8 (lossy), with any partial leading line
@@ -193,6 +271,12 @@ fn agent_type_of(transcript: &Path) -> String {
 mod tests {
     use super::*;
 
+    fn asked(question: &str) -> impl Fn(&serde_json::Value) -> bool + '_ {
+        move |input: &serde_json::Value| {
+            input.pointer("/questions/0/question").and_then(|q| q.as_str()) == Some(question)
+        }
+    }
+
     fn ask_line(question: &str) -> String {
         serde_json::json!({
             "type": "assistant",
@@ -227,7 +311,7 @@ mod tests {
         let dir = tmp.path().join("subagents");
         write_agent(&dir, "abc", "已合进 main（未 push）", Some("general-purpose"));
         assert_eq!(
-            detect_in_subagents_dir(&dir, "已合进 main（未 push）"),
+            detect_in_subagents_dir(&dir, "fleet__ask", &asked("已合进 main（未 push）")),
             Some("general-purpose".to_string())
         );
     }
@@ -239,7 +323,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         write_agent(&dir.join("workflows").join("wf_run1"), "xyz", "q from a workflow agent", Some("Explore"));
         assert_eq!(
-            detect_in_subagents_dir(&dir, "q from a workflow agent"),
+            detect_in_subagents_dir(&dir, "fleet__ask", &asked("q from a workflow agent")),
             Some("Explore".to_string())
         );
     }
@@ -249,7 +333,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("subagents");
         write_agent(&dir, "abc", "no sidecar here", None);
-        assert_eq!(detect_in_subagents_dir(&dir, "no sidecar here"), Some("subagent".to_string()));
+        assert_eq!(detect_in_subagents_dir(&dir, "fleet__ask", &asked("no sidecar here")), Some("subagent".to_string()));
     }
 
     #[test]
@@ -260,13 +344,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("subagents");
         write_agent(&dir, "abc", "the subagent's card", Some("general-purpose"));
-        assert_eq!(detect_in_subagents_dir(&dir, "the parent's own card"), None);
+        assert_eq!(detect_in_subagents_dir(&dir, "fleet__ask", &asked("the parent's own card")), None);
     }
 
     #[test]
     fn no_subagents_dir_is_not_a_subagent() {
         let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(detect_in_subagents_dir(&tmp.path().join("subagents"), "anything"), None);
+        assert_eq!(detect_in_subagents_dir(&tmp.path().join("subagents"), "fleet__ask", &asked("anything")), None);
     }
 
     #[test]
@@ -276,11 +360,110 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("subagents");
         write_agent(&dir, "old", "stale card text", Some("general-purpose"));
-        assert_eq!(detect_in_subagents_dir(&dir, "stale card text"), Some("general-purpose".into()));
+        assert_eq!(detect_in_subagents_dir(&dir, "fleet__ask", &asked("stale card text")), Some("general-purpose".into()));
         assert_eq!(
-            detect_in_subagents_dir_within(&dir, "stale card text", std::time::Duration::ZERO),
+            detect_in_subagents_dir_within(&dir, "fleet__ask", &asked("stale card text"), std::time::Duration::ZERO),
             None
         );
+    }
+
+    fn tool_line(name: &str, input: serde_json::Value, ts: Option<&str>) -> String {
+        let mut record = serde_json::json!({
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "name": name, "input": input}]}
+        });
+        if let Some(ts) = ts {
+            record["timestamp"] = serde_json::json!(ts);
+        }
+        record.to_string()
+    }
+
+    /// The three parent-scoped calls the 03f41a3c subagents actually made:
+    /// `fleet__set_session_title` (three of the five renamed the parent) and two
+    /// `fleet__plan` calls. Whole-input equality has to catch them.
+    #[test]
+    fn parent_scoped_tool_calls_are_matched_on_whole_input() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        let title = serde_json::json!({"title": "datahub-knowledge-api：knowledge 端点搬进 datahub gateway"});
+        let plan = serde_json::json!({"action": "resume", "plan_id": "datahub-knowledge-api", "task": "P1"});
+        std::fs::write(
+            dir.join("agent-e.jsonl"),
+            format!(
+                "{}\n{}\n",
+                tool_line("mcp__fleet__fleet__set_session_title", title.clone(), None),
+                tool_line("mcp__fleet__fleet__plan", plan.clone(), None)
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("agent-e.meta.json"),
+            serde_json::json!({"agentType": "general-purpose"}).to_string(),
+        )
+        .unwrap();
+
+        let eq = |want: serde_json::Value| move |got: &serde_json::Value| got == &want;
+        assert_eq!(
+            detect_in_subagents_dir(&dir, "fleet__set_session_title", &eq(title)),
+            Some("general-purpose".to_string())
+        );
+        assert_eq!(
+            detect_in_subagents_dir(&dir, "fleet__plan", &eq(plan)),
+            Some("general-purpose".to_string())
+        );
+        // A different plan payload — the parent's own call — must not match.
+        assert_eq!(
+            detect_in_subagents_dir(
+                &dir,
+                "fleet__plan",
+                &eq(serde_json::json!({"action": "check", "plan_id": "other", "task": "P2"}))
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_matching_call_from_an_hour_ago_does_not_count() {
+        // An agent transcript stays mtime-fresh while its agent keeps writing,
+        // so the record's own timestamp is what bounds a low-entropy payload
+        // like `{"action":"list"}` to the call actually in flight.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = serde_json::json!({"action": "list"});
+        let old = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+        let now = chrono::Utc::now().to_rfc3339();
+        let eq = |want: serde_json::Value| move |got: &serde_json::Value| got == &want;
+
+        std::fs::write(
+            dir.join("agent-x.jsonl"),
+            format!("{}\n", tool_line("mcp__fleet__fleet__plan", input.clone(), Some(&old))),
+        )
+        .unwrap();
+        assert_eq!(detect_in_subagents_dir(&dir, "fleet__plan", &eq(input.clone())), None);
+
+        std::fs::write(
+            dir.join("agent-x.jsonl"),
+            format!("{}\n", tool_line("mcp__fleet__fleet__plan", input.clone(), Some(&now))),
+        )
+        .unwrap();
+        assert_eq!(
+            detect_in_subagents_dir(&dir, "fleet__plan", &eq(input)),
+            Some("subagent".to_string())
+        );
+    }
+
+    #[test]
+    fn refusal_names_the_tool_the_effect_and_the_agent_type() {
+        let msg = subagent_tool_refusal(
+            "fleet__set_session_title",
+            "renamed your PARENT session",
+            "general-purpose",
+        );
+        assert!(msg.contains("fleet__set_session_title"));
+        assert!(msg.contains("renamed your PARENT session"));
+        assert!(msg.contains("general-purpose"));
     }
 
     #[test]

@@ -50,6 +50,34 @@ pub fn is_control_tool(name: &str) -> bool {
     CONTROL_TOOL_NAMES.contains(&name)
 }
 
+/// Control tools that write against the **calling session's id**, paired with a
+/// clause naming what such a write does to the parent. A subagent shares its
+/// parent's session id (see [`crate::subagent_caller`]), so for these — and only
+/// these — a sidechain call lands on the parent and must be refused.
+///
+/// The rest are workspace- or content-scoped: `fleet__wiki` / `fleet__artifact`
+/// publish into the workspace's library, `fleet__inspect` / `fleet__history`
+/// read, `fleet__control` drives other sessions explicitly by id, and
+/// `fleet__notes` writes the shared per-session scratchpad a subagent is welcome
+/// to append to. `parent_scoped_control_tools_are_classified` keeps the split
+/// honest when a tool is added.
+pub const PARENT_SCOPED_CONTROL_TOOLS: [(&str, &str); 5] = [
+    ("fleet__plan", "moved your PARENT session's plan focus"),
+    (
+        "fleet__handoff",
+        "registered a relay on your PARENT session — it would be replaced by a fresh session \
+         carrying your note the moment it ends its turn",
+    ),
+    ("fleet__watch", "registered a watch that resumes your PARENT session"),
+    ("fleet__loop", "attached a recurring loop to your PARENT session"),
+    ("fleet__schedule", "attached a scheduled run to your PARENT session"),
+];
+
+/// `Some(effect clause)` when `name` writes against the calling session's id.
+pub fn parent_scoped_effect(name: &str) -> Option<&'static str> {
+    PARENT_SCOPED_CONTROL_TOOLS.iter().find(|(n, _)| *n == name).map(|(_, e)| *e)
+}
+
 /// The control-tool definitions, appended to `tools/list` for Fleet-owned
 /// sessions only.
 pub fn control_tool_defs() -> Vec<Value> {
@@ -1538,5 +1566,34 @@ mod tests {
         assert!(err.contains("require"));
         let err = build_schedule_gate(&json!({"timeout": "1h"})).unwrap_err();
         assert!(err.contains("require"));
+    }
+
+    /// Every control tool must be explicitly classified as parent-scoped (it
+    /// writes against the caller's session id, so a subagent's call would land
+    /// on the parent) or as one of the tools that are safe from a sidechain.
+    /// A new tool added to CONTROL_TOOL_NAMES fails here until someone decides.
+    #[test]
+    fn parent_scoped_control_tools_are_classified() {
+        const SESSION_AGNOSTIC: [&str; 6] = [
+            "fleet__wiki",
+            "fleet__artifact",
+            "fleet__inspect",
+            "fleet__control",
+            "fleet__notes",
+            "fleet__history",
+        ];
+        for name in CONTROL_TOOL_NAMES {
+            let parent_scoped = parent_scoped_effect(name).is_some();
+            let agnostic = SESSION_AGNOSTIC.contains(&name);
+            assert!(
+                parent_scoped != agnostic,
+                "{name} must be in exactly one of PARENT_SCOPED_CONTROL_TOOLS / SESSION_AGNOSTIC"
+            );
+        }
+        assert_eq!(
+            parent_scoped_effect("fleet__handoff"),
+            Some(PARENT_SCOPED_CONTROL_TOOLS[1].1),
+            "handoff must stay parent-scoped: a subagent's handoff replaces the PARENT session"
+        );
     }
 }
