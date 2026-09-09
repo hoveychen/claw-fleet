@@ -256,6 +256,14 @@ footer 会明确标注这是「无人值守」的自动触发——背后没有�
   `<!--HTML-->`；那是一份什么都不渲染的文档，卡片会在问题正文处画出一个空盒子。\
   **要显示图片，不要把它 base64 内联进这个字符串**——那样每次调用都烧输出 token。\
   把文件放进下面的 `images`，用相对路径按名引用，如 `<img src=\"chart.png\">`。\n\
+  **主题：iframe 画布是透明的，底下那张卡跟随老板的主题走，而他多半用深色。**\
+  所以绝不要在 `body` / `table` / `td` 上硬编码前景色——`body{{color:#1a1a1a}}` \
+  却不设 background，是预览到达时不可读的头号原因（暗字压在暗卡上）。文字用 \
+  `CanvasText`，弱化文字用 `color-mix(in srgb,CanvasText 60%,transparent)`，\
+  边框和斑马底用 `rgba(128,128,128,.35)`——这三样都会跟着主题翻转。确实要固定\
+  配色的元素（徽章、callout）必须**同时**设 `background` 和 `color`，绝不只设\
+  一边。状态色挑深浅两底都读得清的中间调（红 #e5484d、琥珀 #d99b0b、绿 #30a46c），\
+  别用 #b91c1c / #15803d。\n\
 - `images`（Image[]）：不经 base64 内联即可显示的本地图片文件。每项是\
   `{{ \"name\": \"chart.png\", \"path\": \"/abs/or/cwd-relative/chart.png\", \"caption\": \"optional\" }}`。\
   Fleet 在入站时把每个文件**复制一次**进它持久的决策资产库\
@@ -671,7 +679,17 @@ optional per-question fields:\n\
   the question body. **To show images, do NOT base64-inline them into this \
   string** — that burns output tokens on every call. Put the files in \
   `images` (below) and reference them by name with a relative path, e.g. \
-  `<img src=\"chart.png\">`.\n\
+  `<img src=\"chart.png\">`. **Theme: the iframe canvas is transparent and the \
+  card underneath follows the user's theme, which is usually dark.** So never \
+  hard-code a foreground colour on `body` / `table` / `td` — \
+  `body{{color:#1a1a1a}}` with no background is the single most common way a \
+  preview arrives unreadable (dark text on the dark card). Use `CanvasText` \
+  for text, `color-mix(in srgb,CanvasText 60%,transparent)` for muted text, \
+  and `rgba(128,128,128,.35)` for borders and zebra fills — all three flip \
+  with the theme. Any element that does need a fixed palette (a badge, a \
+  callout) must set `background` and `color` **together**, never one alone. \
+  For status hues pick mid-tones legible on both canvases (#e5484d red, \
+  #d99b0b amber, #30a46c green), not #b91c1c / #15803d.\n\
 - `images` (Image[]): local image files to display without base64-inlining. \
   Each entry is `{{ \"name\": \"chart.png\", \"path\": \"/abs/or/cwd-relative/chart.png\", \"caption\": \"optional\" }}`. \
   Fleet copies each file **once** into its persistent decision-asset store \
@@ -1033,6 +1051,27 @@ mod tests {
             g.contains("Case A") && g.contains("Case B") && g.contains("Case C"),
             "divider rule must call out that it applies to all three cases"
         );
+    }
+
+    /// The card iframe paints a transparent canvas over a themed (usually dark)
+    /// card, so an agent that writes `body{color:#1a1a1a}` and no background
+    /// ships an unreadable preview. A 2026-09-08 sweep of 678 stored previews
+    /// found 621 doing exactly that, which is why the rule lives in the
+    /// guidance both locales get — and why the example has to survive `format!`
+    /// escaping intact rather than arriving as a doubled brace.
+    #[test]
+    fn render_warns_against_hard_coded_preview_colours() {
+        for locale in ["en", "zh"] {
+            let g = render_guidance("Boss", locale);
+            assert!(
+                g.contains("body{color:#1a1a1a}"),
+                "[{locale}] the concrete failing snippet must render with single braces"
+            );
+            assert!(
+                g.contains("CanvasText"),
+                "[{locale}] must name the theme-following text colour to use instead"
+            );
+        }
     }
 
     #[test]
