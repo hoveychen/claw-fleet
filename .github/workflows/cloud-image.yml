@@ -20,6 +20,15 @@ on:
       # the filter looks like a green push with no image behind it.
       - 'prd/fleet-cloud-**'
       - 'prd/cloud-**'
+    # 发版 tag 也要重建镜像。没有这一条时，链路是：合入 main → 本 workflow 立刻
+    # 跑，此刻 `git describe` 只看得到**上一个** tag → 烧出 `2.6.x-dev`；随后人手
+    # 推 `v2.7.x` tag 只触发 CI/Release，云镜像纹丝不动。结果不是偶发竞态，而是
+    # 只要 tag 打在 main HEAD 上，云端报的版本串就恒定滞后一个 tag（2026-09-09
+    # 实测：线上 commit 已是 main HEAD，version 却还是 `2.7.0-dev`，而 HEAD 上
+    # 挂着 v2.7.1）。tag 推送时 GitHub **不评估 paths 过滤器**，所以这一条落在同
+    # 一个 `push:` 下不会被下面的 paths 吃掉——tag 一律重建。
+    tags:
+      - 'v*'
     paths:
       - 'deploy/lean/**'
       - 'claw-fleet-core/**'
@@ -69,17 +78,29 @@ jobs:
 
       # The version string the container reports on /health and shows in the
       # browser build's settings. Only the release workflow rewrites the crate
-      # versions from a tag, so this image would otherwise compile as 0.0.0 —
-      # `<nearest tag>-dev` places the build without claiming to be that
-      # release. No tag reachable (a fresh fork, a branch cut before any tag) →
+      # versions from a tag, so this image would otherwise compile as 0.0.0.
+      #
+      # Two cases, and the distinction matters:
+      #   - HEAD *is* a tag (the release build, triggered by the tag push above)
+      #     → report the tag verbatim, `2.7.1`. Appending `-dev` here would have
+      #     the released image deny being the release it literally is.
+      #   - HEAD is past the last tag (an ordinary main push) → `2.7.1-dev`,
+      #     which places the build without claiming to be that release.
+      # No tag reachable (a fresh fork, a branch cut before any tag) →
       # `0.0.0-dev`, which is exactly as informative as the tag-less truth.
       - name: Derive version string
         id: ver
         shell: bash
         run: |
-          TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-          TAG="${TAG:-v0.0.0}"
-          echo "version=${TAG#v}-dev" >> "$GITHUB_OUTPUT"
+          EXACT="$(git describe --tags --exact-match 2>/dev/null || true)"
+          if [ -n "$EXACT" ]; then
+            VERSION="${EXACT#v}"
+          else
+            TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+            TAG="${TAG:-v0.0.0}"
+            VERSION="${TAG#v}-dev"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -96,9 +117,16 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
+          # A tag ref must land on `:latest` too — it is the same tree as the
+          # main push that preceded it, only with a correct version string. The
+          # old `enable={{is_default_branch}}` is false for a tag ref, and the
+          # old preview condition (`ref_name != default_branch`) is true for it,
+          # so a tag build would have quietly published itself as `:preview` and
+          # left `:latest` on the `-dev` image forever. Both conditions are now
+          # spelled out against `github.ref` instead of `ref_name`.
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=preview,enable=${{ github.ref_name != github.event.repository.default_branch }}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=preview,enable=${{ startsWith(github.ref, 'refs/heads/prd/') }}
             type=sha,format=long
 
       # Build context is the repo root: deploy/lean/Dockerfile compiles
