@@ -26,6 +26,21 @@ pub(crate) fn route_host_features(
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
+/// `GET /host_identity` —— 这台主机的展示身份(主机名 + 平台)。
+///
+/// 和上面那条一样是「一次性、启动后就不变」的元信息,所以放在一起;但它不 gate
+/// 任何面 —— 客户端拿不到时退回一个平台名,而不是把某个入口藏起来。
+pub(crate) fn route_host_identity(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let body = serde_json::to_string(&crate::host_identity::host_identity()).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_procs(
     ctx: &ServeCtx,
     request: tiny_http::Request,

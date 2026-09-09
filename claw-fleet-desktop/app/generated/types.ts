@@ -479,3 +479,8 @@ export type HostFeatures = {
 terminal: boolean, 
 simplifiedDefault?: boolean | null, };
 
+export type HostIdentity = { 
+hostname?: string | null, 
+platform: string, 
+osVersion?: string | null, };
+
