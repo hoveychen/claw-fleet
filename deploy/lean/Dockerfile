@@ -67,6 +67,12 @@ COPY mobile-web/ ./
 COPY shared-ts/ /src/shared-ts/
 # 同理：mock 模式的官网双语场景文案（见 src/mock/relay.ts）。
 COPY scripts/site/fixtures/*.json /src/scripts/site/fixtures/
+# 这个 bundle 的构建 commit。`.git` 不在构建上下文里（见 .dockerignore），vite 的
+# `git rev-parse` 回落只会得到 "unknown"，所以由构建方传进来（cloud-image.yml 传
+# CI 的 commit）。移动端「关于」页显示它，桌面端也拿它比对手机 bundle 新旧。
+# 缺省空 → "unknown"，「构建」那一行整个不渲染。
+ARG APP_COMMIT=""
+ENV VITE_APP_COMMIT=$APP_COMMIT
 RUN pnpm run build:webui
 
 # ── Build the fleet CLI, with the web UI compiled in ────────────────────────
@@ -125,6 +131,16 @@ RUN chmod +x /usr/local/bin/fleet-entrypoint
 # keeps the environment it was handed, so an unset HOME would leave the agent
 # reading root's home.
 ENV HOME=/home/fleet
+
+# 这个镜像是从哪个 commit 构建的。`/health` 会把它报出来，浏览器端设置页显示在
+# 版本号下面——线上排查时「哪个镜像」比「哪个版本号」精确得多。
+#
+# 放在**运行时**阶段而不是 build 阶段：build.rs 的 `git rev-parse` 在这里没用
+# （.dockerignore 排除了 .git），而把这个每次推送都变的值塞进 `cargo build
+# --release` 那一层的 env，会让那层缓存每次全废——Rust release 重编的代价远大于
+# 这一行 ENV。core 的 build_commit() 因此优先读运行时 env、再回落编译期 stamp。
+ARG FLEET_GIT_COMMIT=""
+ENV FLEET_GIT_COMMIT=$FLEET_GIT_COMMIT
 
 # One home for everything (`FLEET_HOME` intentionally unset, so Fleet's
 # real_home_dir() falls back to $HOME=/home/fleet). This keeps the control

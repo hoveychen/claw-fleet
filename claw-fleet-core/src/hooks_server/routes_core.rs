@@ -29,10 +29,29 @@ pub(crate) fn route_fleet_skill(request: tiny_http::Request) {
     );
 }
 
-/// The git commit this server binary was built from, 7 chars, or `"unknown"`.
-/// Baked by `build.rs`; kept as a function so the tests below can name it.
-pub(crate) fn build_commit() -> &'static str {
-    option_env!("FLEET_GIT_COMMIT").unwrap_or("unknown")
+/// The git commit this server build came from, 7 chars, or `"unknown"`.
+///
+/// Two sources, runtime first:
+///
+/// 1. `FLEET_GIT_COMMIT` in the environment. This is for images built without a
+///    `.git` in the build context — the Fleet Cloud container's `.dockerignore`
+///    excludes it, so `build.rs`'s `git rev-parse` finds nothing there. Setting
+///    it at *build* time instead would work but put a per-commit value into the
+///    env of the `cargo build --release` layer, busting that layer's cache on
+///    every push; the runtime stage's `ENV` is one cheap layer.
+/// 2. The `build.rs` stamp, which covers every ordinary build (local, CI,
+///    release tarballs).
+///
+/// Neither → `"unknown"`, which every consumer treats as "no commit" and hides
+/// rather than displays.
+pub(crate) fn build_commit() -> String {
+    if let Ok(v) = std::env::var("FLEET_GIT_COMMIT") {
+        let v = v.trim();
+        if !v.is_empty() {
+            return v.chars().take(7).collect();
+        }
+    }
+    option_env!("FLEET_GIT_COMMIT").unwrap_or("unknown").to_string()
 }
 
 /// `/health`'s body. Hand-formatted rather than serialized because it is three
@@ -844,8 +863,10 @@ mod tests {
     }
 
     /// Either a 7-char short SHA or the literal `"unknown"` — never empty, and
-    /// never a full 40-char sha (build.rs truncates), because consumers slice
-    /// nothing and print it as-is.
+    /// never a full 40-char sha, because consumers slice nothing and print it
+    /// as-is. build.rs truncates its stamp; the runtime env may carry a full
+    /// sha (the cloud image passes `github.sha`), so `build_commit` truncates
+    /// that one itself.
     #[test]
     fn build_commit_is_short_or_unknown() {
         let c = build_commit();
@@ -854,5 +875,26 @@ mod tests {
             c == "unknown" || (c.len() == 7 && c.chars().all(|ch| ch.is_ascii_hexdigit())),
             "unexpected build commit: {c:?}"
         );
+    }
+
+    /// The runtime env wins over the build stamp, and a 40-char sha is cut to
+    /// 7. This is the path the Fleet Cloud container takes: its build context
+    /// has no `.git`, so the stamp is `"unknown"` and the entrypoint's env is
+    /// the only truth. Serial with the test above by way of a shared lock —
+    /// cargo runs tests in threads and the env is process-wide.
+    #[test]
+    fn runtime_env_overrides_and_truncates() {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = LOCK.lock().unwrap();
+        let prev = std::env::var("FLEET_GIT_COMMIT").ok();
+        std::env::set_var("FLEET_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567");
+        assert_eq!(build_commit(), "0123456");
+        // Blank is not an override — fall through to the stamp.
+        std::env::set_var("FLEET_GIT_COMMIT", "   ");
+        assert_ne!(build_commit(), "");
+        match prev {
+            Some(v) => std::env::set_var("FLEET_GIT_COMMIT", v),
+            None => std::env::remove_var("FLEET_GIT_COMMIT"),
+        }
     }
 }
