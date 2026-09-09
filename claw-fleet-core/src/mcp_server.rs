@@ -221,6 +221,16 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 }
 
+/// `Some(tool_error)` when this call came from a subagent rather than the
+/// session itself. The parent-scoped tools (`fleet__plan`,
+/// `fleet__set_session_title`) write against the session id, which a subagent
+/// shares with its parent — see [`crate::subagent_caller`] for why that id is
+/// the only one available and how the caller is told apart.
+fn refuse_if_subagent(name: &str, effect: &str, args: &Value) -> Option<Value> {
+    let agent_type = crate::subagent_caller::detect_tool_caller(&current_session_id(), name, args)?;
+    Some(tool_error(crate::subagent_caller::subagent_tool_refusal(name, effect, &agent_type)))
+}
+
 /// True when the invoking session was spawned by Fleet — the gate for exposing
 /// and running the control tools. Reads the session id from the same env the UI
 /// tools use ([`current_session_id`]); an unresolvable id is treated as
@@ -242,6 +252,13 @@ fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpc
         )));
     }
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    if name == "fleet__plan" {
+        if let Some(refusal) =
+            refuse_if_subagent(name, "moved your PARENT session's plan focus", &args)
+        {
+            return Ok(refusal);
+        }
+    }
     let sid = current_session_id();
     let session_id = (!sid.is_empty()).then_some(sid.as_str());
     let cwd = resolve_workspace_cwd();
@@ -454,6 +471,13 @@ fn handle_set_session_title_call(params: &Value) -> Result<Value, JsonRpcError> 
             "Fleet could not resolve the current session id; continue without setting a title."
                 .into(),
         ));
+    }
+    if let Some(refusal) = refuse_if_subagent(
+        "fleet__set_session_title",
+        "renamed your PARENT session",
+        &args,
+    ) {
+        return Ok(refusal);
     }
     let workspace_path = std::env::current_dir()
         .map(|path| path.to_string_lossy().into_owned())
