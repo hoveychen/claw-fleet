@@ -649,8 +649,16 @@ knowledge-base material.\n"
 /// Compact codex **model-selection** block body (no sentinel markers). Mirrors
 /// [`crate::model_guidance`]; agent-agnostic, so it keeps both model families.
 pub fn render_codex_model_block(locale: &str) -> String {
+    // Tables from `models.toml` via `model_catalog` — see the note in
+    // `model_guidance::render_guidance`. This sheet lands in a budget-capped
+    // AGENTS.md, so it renders the short `note_*` prose and the merged price
+    // column rather than the roomy Claude-side shape.
+    let codex_rows = crate::model_catalog::render_rows_with("codex", locale, false, false);
+    let claude_rows = crate::model_catalog::render_rows("claude-code", locale, false);
+    let codex_efforts = crate::model_catalog::render_effort_line("codex", locale);
+    let claude_efforts = crate::model_catalog::render_effort_line("claude-code", locale);
     if locale == "zh" {
-        return "# Fleet 模型选择速查 for Codex (managed by Claw Fleet — do not edit this block)\n\
+        return format!("# Fleet 模型选择速查 for Codex (managed by Claw Fleet — do not edit this block)\n\
 \n\
 给 subagent、workflow agent 或新会话选模型时用。**默认继承父/会话模型**——几乎\
 总是对的;只有明确判断某一档更合适才 override。入口:`Agent` 工具的 `model`、\
@@ -659,36 +667,28 @@ pub fn render_codex_model_block(locale: &str) -> String {
 \n\
 ## Codex 家族(codex 工具链;按 ChatGPT 套餐配额计费,无按 token 定价)\n\
 \n\
-| 模型 | ID | 定位 |\n\
-|---|---|---|\n\
-| GPT-6 Astra | `gpt-6-astra` | 最强端到端模型;复杂推理、编码、研究和电脑操作;1.05M 上下文;需账号已开放 |\n\
-| Sol | `gpt-5.6-sol` | 前沿最强 agentic 编码(Fleet 默认);低 effort 也能打——先低后调高 |\n\
-| Terra | `gpt-5.6-terra` | 均衡型日常 agentic 编码 |\n\
-| Luna | `gpt-5.6-luna` | 快且省的 agentic 编码 |\n\
-| GPT-5.5 | `gpt-5.5` | 复杂编码 / 研究前沿,默认 effort 更高 |\n\
+| 模型 | ID | 上下文 | 定位 |\n\
+|---|---|---|---|\n\
+{codex_rows}\
 \n\
-Astra effort:`low`/`medium`/`high`/`xhigh`/`max`;其余 Codex 模型:`minimal`/`low`/`medium`/`high`。\n\
+Codex effort:{codex_efforts}。\n\
 \n\
 ## Claude 家族(claude 工具链)\n\
 \n\
 | 模型 | ID | 上下文 | 输入/输出 $/1M | 何时选 |\n\
 |---|---|---|---|---|\n\
-| Fable 5.1 | `claude-fable-5-1` | 1M | $10 / $50 | 最强推理+超长程;只用在最难任务(前代 `claude-fable-5` 同价仍可选)|\n\
-| Opus 5 | `claude-opus-5` | 1M | $5 / $25 | 默认主力,自主 agentic / 编码 / 长程任务(前代 `claude-opus-4-8` 同价仍可选) |\n\
-| Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15(有优惠)| 近 Opus 编码、成本更低;并行 subagent 首选 |\n\
-| Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | 最快最便宜;分类/抽取/机械活 |\n\
+{claude_rows}\
 \n\
-Claude effort:`low`/`medium`/`high`/`xhigh`/`max`;`xhigh` 是编码/agentic 最佳档。\n\
+Claude effort:{claude_efforts};`xhigh` 是编码/agentic 最佳档。\n\
 \n\
 ## 怎么挑\n\
 \n\
 - 机械、可并行、量大的 subagent → 便宜快档(Luna / Terra;Haiku / Sonnet)+ 低 effort。\n\
 - 最难的端到端工作 → Astra + high/xhigh;普通硬推理、最终把关 → Sol 或 Opus / Fable。\n\
 - 编码 / agentic 主循环 → Codex 侧 Sol 从 medium 起步;Claude 侧 Opus 5 / Sonnet 5 配 xhigh。\n\
-- 拿不准就别 override,继承父/会话模型。\n"
-            .to_string();
+- 拿不准就别 override,继承父/会话模型。\n");
     }
-    "# Fleet model-selection cheat-sheet for Codex (managed by Claw Fleet — do not edit this block)\n\
+    format!("# Fleet model-selection cheat-sheet for Codex (managed by Claw Fleet — do not edit this block)\n\
 \n\
 Use this when picking a model for a subagent, a workflow agent, or a new \
 session. **Default to inheriting the parent/session model** — almost always \
@@ -698,26 +698,19 @@ right; only override with a clear reason. Selection points: the `Agent` tool's \
 \n\
 ## Codex family (codex toolchain; billed against a ChatGPT-plan quota, no per-token price)\n\
 \n\
-| Model | ID | Positioning |\n\
-|---|---|---|\n\
-| GPT-6 Astra | `gpt-6-astra` | Most capable end-to-end model for complex reasoning, coding, research, and computer use; 1.05M context; account access required |\n\
-| Sol | `gpt-5.6-sol` | Frontier, most capable agentic coding (Fleet default); strong even at low effort — start low, turn up |\n\
-| Terra | `gpt-5.6-terra` | Balanced everyday agentic coding |\n\
-| Luna | `gpt-5.6-luna` | Fast and affordable agentic coding |\n\
-| GPT-5.5 | `gpt-5.5` | Frontier for complex coding / research; higher default effort |\n\
+| Model | ID | Context | Positioning |\n\
+|---|---|---|---|\n\
+{codex_rows}\
 \n\
-Astra effort: `low`/`medium`/`high`/`xhigh`/`max`; other Codex models: `minimal`/`low`/`medium`/`high`.\n\
+Codex effort: {codex_efforts}.\n\
 \n\
 ## Claude family (claude toolchain)\n\
 \n\
 | Model | ID | Context | In/Out $/1M | When to pick |\n\
 |---|---|---|---|---|\n\
-| Fable 5.1 | `claude-fable-5-1` | 1M | $10 / $50 | Strongest reasoning + longest-horizon; reserve for the hardest tasks (previous `claude-fable-5` still selectable, same price) |\n\
-| Opus 5 | `claude-opus-5` | 1M | $5 / $25 | Default workhorse: autonomous agentic / coding / long-horizon work (previous `claude-opus-4-8` still selectable, same price) |\n\
-| Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 (intro pricing) | Near-Opus coding at lower cost; value pick for parallel subagents |\n\
-| Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | Fastest / cheapest; classification, extraction, mechanical work |\n\
+{claude_rows}\
 \n\
-Claude effort: `low`/`medium`/`high`/`xhigh`/`max`; `xhigh` is best for coding / agentic work.\n\
+Claude effort: {claude_efforts}; `xhigh` is best for coding / agentic work.\n\
 \n\
 ## How to pick\n\
 \n\
@@ -727,8 +720,7 @@ Claude effort: `low`/`medium`/`high`/`xhigh`/`max`; `xhigh` is best for coding /
 tier (Sol; Opus / Fable) at high/xhigh.\n\
 - Coding / agentic main loop → on Codex, Sol starting at medium; on Claude, \
 Opus 5 or Sonnet 5 at xhigh.\n\
-- When in doubt, don't override — inherit the parent/session model.\n"
-        .to_string()
+- When in doubt, don't override — inherit the parent/session model.\n")
 }
 
 /// Collapse all whitespace runs (incl. newlines) to single spaces so a
@@ -1409,5 +1401,20 @@ mod tests {
             reconcile_codex_agents_md(set(false, false, false, false), "Boss", "en").unwrap();
             assert!(!is_codex_guidance_installed());
         });
+    }
+}
+
+#[cfg(test)]
+mod render_dump {
+    /// Eyeball helper, not an assertion. `-- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn dump_codex_zh() {
+        println!("{}", super::render_codex_model_block("zh"));
+    }
+    #[test]
+    #[ignore]
+    fn dump_codex_en() {
+        println!("{}", super::render_codex_model_block("en"));
     }
 }

@@ -614,8 +614,16 @@ knowledge-base material.\n"
 /// There is deliberately no dsh price table — dsh bills through whichever
 /// provider the user configured, so any number here would be a guess.
 pub fn render_dsh_model_block(locale: &str) -> String {
+    // Tables from `models.toml` via `model_catalog` — see the note in
+    // `model_guidance::render_guidance`. This sheet lists both other harnesses
+    // in one table (a dsh agent hands work to either), so it renders the two
+    // families back to back in the merged-price shape.
+    let claude_rows = crate::model_catalog::render_rows("claude-code", locale, false);
+    let codex_rows = crate::model_catalog::render_rows("codex", locale, false);
+    let claude_efforts = crate::model_catalog::render_effort_line("claude-code", locale);
+    let codex_efforts = crate::model_catalog::render_effort_line("codex", locale);
     if locale == "zh" {
-        return "# Fleet 模型选择速查 for dsh (managed by Claw Fleet — do not edit this block)\n\
+        return format!("# Fleet 模型选择速查 for dsh (managed by Claw Fleet — do not edit this block)\n\
 \n\
 ## dsh 自己怎么点名模型\n\
 \n\
@@ -632,24 +640,18 @@ provider,会话就留在 harness 自身配置的模型上。\n\
 \n\
 | 模型 | ID | 上下文 | 输入/输出 $/1M | 何时选 |\n\
 |---|---|---|---|---|\n\
-| Fable 5.1 | `claude-fable-5-1` | 1M | $10 / $50 | 最强推理+超长程;只用在最难任务(前代 `claude-fable-5` 同价仍可选)|\n\
-| Opus 5 | `claude-opus-5` | 1M | $5 / $25 | 默认主力,自主 agentic / 编码 / 长程任务 |\n\
-| Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 | 近 Opus 编码、成本更低;并行 subagent 首选 |\n\
-| Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | 最快最便宜;分类/抽取/机械活 |\n\
-| GPT-6 Astra | `gpt-6-astra` | 1.05M | ChatGPT 套餐配额 | Codex 最强端到端模型;需账号已开放 |\n\
-| Sol / Terra / Luna | `gpt-5.6-sol` / `-terra` / `-luna` | — | 走 ChatGPT 套餐配额 | Codex 侧强 / 中 / 快三档 |\n\
+{claude_rows}{codex_rows}\
 \n\
-Claude effort:`low`/`medium`/`high`/`xhigh`/`max`,`xhigh` 是编码/agentic 最佳档;\
-Astra effort 是 `low`/`medium`/`high`/`xhigh`/`max`;其余 Codex 模型是 `minimal`/`low`/`medium`/`high`。\n\
+Claude effort:{claude_efforts},`xhigh` 是编码/agentic 最佳档。\n\
+Codex effort:{codex_efforts}。\n\
 \n\
 ## 怎么挑\n\
 \n\
 - 机械、可并行、量大的活 → 便宜快档(Haiku / Sonnet;Luna / Terra)+ 低 effort。\n\
 - 硬推理、最终综合、把关校验 → 最强档(Opus / Fable;Sol)+ high/xhigh。\n\
-- 拿不准就别指定,让它继承默认。\n"
-            .to_string();
+- 拿不准就别指定,让它继承默认。\n");
     }
-    "# Fleet model-selection cheat-sheet for dsh (managed by Claw Fleet — do not edit this block)\n\
+    format!("# Fleet model-selection cheat-sheet for dsh (managed by Claw Fleet — do not edit this block)\n\
 \n\
 ## How dsh names a model\n\
 \n\
@@ -668,16 +670,10 @@ would be inventing one. Read that config when you need to know; don't guess.\n\
 \n\
 | Model | ID | Context | In/Out $/1M | When to pick |\n\
 |---|---|---|---|---|\n\
-| Fable 5.1 | `claude-fable-5-1` | 1M | $10 / $50 | Strongest reasoning + longest horizon; hardest tasks only (previous `claude-fable-5` still selectable, same price) |\n\
-| Opus 5 | `claude-opus-5` | 1M | $5 / $25 | Default workhorse: autonomous agentic / coding / long-horizon |\n\
-| Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 | Near-Opus coding at lower cost; value pick for parallel work |\n\
-| Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | Fastest / cheapest; classification, extraction, mechanical work |\n\
-| GPT-6 Astra | `gpt-6-astra` | 1.05M | ChatGPT-plan quota | Codex's most capable end-to-end model; account access required |\n\
-| Sol / Terra / Luna | `gpt-5.6-sol` / `-terra` / `-luna` | — | ChatGPT-plan quota | Codex's strong / balanced / fast tiers |\n\
+{claude_rows}{codex_rows}\
 \n\
-Claude effort: `low`/`medium`/`high`/`xhigh`/`max` (`xhigh` is best for coding \
-and agentic work). Astra supports `low`/`medium`/`high`/`xhigh`/`max`; other \
-Codex models use `minimal`/`low`/`medium`/`high`.\n\
+Claude effort: {claude_efforts} (`xhigh` is best for coding and agentic work).\n\
+Codex effort: {codex_efforts}.\n\
 \n\
 ## How to pick\n\
 \n\
@@ -685,8 +681,7 @@ Codex models use `minimal`/`low`/`medium`/`high`.\n\
 (Haiku / Sonnet; Luna / Terra) at low effort.\n\
 - Hard reasoning, final synthesis, adversarial verification → the strongest \
 tier (Opus / Fable; Sol) at high/xhigh.\n\
-- When in doubt, don't specify one — let it inherit the default.\n"
-        .to_string()
+- When in doubt, don't specify one — let it inherit the default.\n")
 }
 
 /// Collapse all whitespace runs (incl. newlines) to single spaces so a
@@ -1607,5 +1602,20 @@ mod tests {
             reconcile_dsh_from_claude_state("Boss", "en").unwrap();
             assert!(!home.exists(), "must not create a dsh home out of nowhere");
         });
+    }
+}
+
+#[cfg(test)]
+mod render_dump {
+    /// Eyeball helper, not an assertion. `-- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn dump_dsh_zh() {
+        println!("{}", super::render_dsh_model_block("zh"));
+    }
+    #[test]
+    #[ignore]
+    fn dump_dsh_en() {
+        println!("{}", super::render_dsh_model_block("en"));
     }
 }

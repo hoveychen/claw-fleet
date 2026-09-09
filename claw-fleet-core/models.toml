@@ -1,7 +1,8 @@
 # Fleet 模型目录 —— 内置默认值
 #
-# 这份文件是 Fleet 对「每个模型收哪几档 effort、算哪个档位」的单一真相源。
-# 它被 `include_str!` 编进二进制，所以每次 Fleet 升级都会带上更新过的一份。
+# 这份文件是 Fleet 对「每个模型收哪几档 effort、算哪个档位、怎么跟 agent 描述」
+# 的单一真相源。它被 `include_str!` 编进二进制，所以每次 Fleet 升级都会带上更新
+# 过的一份。
 #
 # 想在本机改而不等下一版 Fleet，就写 `~/.fleet/models.toml`：同 id 的条目按
 # **字段级**覆盖这里的值（只写 `efforts` 就只改梯子，其余字段仍取本文件），
@@ -10,6 +11,7 @@
 #
 # ── 字段 ──
 #   id             模型 id。Claude 与 Codex 用裸 id；dsh 用 `provider/model` 全称。
+#   label          速查表里显示的名字（"Fable 5.1" / "Sol"）。
 #   family         claude-code | codex | dsh。留空则由 id 形状推断
 #                  （见 agent_source::source_for_model）。
 #   tier           fast | standard | premium。跨 harness 换算同档模型时用。
@@ -20,16 +22,28 @@
 #   context        默认上下文窗口（token）。仅用作**回退**：会话自报了真实窗口
 #                  就以自报为准（Codex 每轮都会自报）。
 #   max_context    该模型能开到的最大窗口。目前只作记录，不参与百分比计算。
+#   price_in /
+#   price_out      每 100 万 token 的美元单价。
+#   quota_billed   true = 按套餐配额计费、没有按 token 单价（Codex 全家如此）。
+#   note_zh /
+#   note_en        速查表里那句「何时选」。三份 guidance 共用同一句，所以改一处
+#                  就三处都变——这正是把它们收敛进来的目的。
+#   listed         false = 可解析但不进速查表（裸别名 `opus` 之类）。默认 true。
+#   superseded_by  被哪个 id 取代。这种行不单独占一行，而是折进目标行末尾的
+#                  「前代 X 同价仍可选」——那是三份 guidance 原本就用的体例。
 #
 # Claude 各条**故意不写 context**：窗口由家族规则判定（Opus/Sonnet 4.6+、5.x、
 # Fable、Mythos 原生 1M，其余 200K），还要认 Fleet 自己的 `[1m]` 后缀和带日期的
-# 别名——那是一条规则，不是一张能逐 id 列全的表。见 session/stats.rs。
+# 别名——那是一条规则，不是一张能逐 id 列全的表。见 session/stats.rs。速查表要
+# 显示窗口时就去调那条规则，而不是在这里抄一份可能对不上的副本。
 #
 # ── 事实来源 ──
-# Codex 各条的 efforts / default_effort 读自 `~/.codex/models_cache.json` 的
-# `supported_reasoning_levels`（client 0.153.4，2026-09-08 抓取），不是文档。
-# 这点很重要：树里此前手写的几份副本都声称 Codex 顶到 `high` 且提供 `minimal`，
-# 而缓存显示每个 listed 模型都支持 `xhigh`/`max`，且没有任何一个提供 `minimal`。
+# Codex 各条的 efforts / default_effort / context / max_context 读自
+# `~/.codex/models_cache.json`（`supported_reasoning_levels`、`context_window`、
+# `max_context_window`；client 0.153.4，2026-09-08 抓取），不是文档。这点很重要：
+# 树里此前手写的几份副本都声称 Codex 顶到 `high` 且提供 `minimal`，而缓存显示每
+# 个 listed 模型都支持 `xhigh`/`max`，且没有任何一个提供 `minimal`；它们还把
+# Astra 写成 1.05M 上下文，实测是 272K 默认 / 872K 上限。
 #
 # dsh 是个例外，看文件末尾那一节。
 
@@ -38,132 +52,205 @@
 #
 # 这里列的 id 与两个模型选择器（桌面 `CLAUDE_MODEL_CHOICES`、移动端
 # `MODEL_CHOICES`）逐条对齐，前代一并列全，好让 tier 换算对每一个可选项都成立。
-# 末尾四条是裸别名：`--model opus` 是合法写法，也该问得出档位。
+# 末尾四条是裸别名：`--model opus` 是合法写法，也该问得出档位，但不进速查表。
 # Fleet 自己的 `[1m]` 上下文后缀不是模型 id 的一部分，查表前会被剥掉，所以
 # `claude-opus-5[1m]` 命中的就是 `claude-opus-5` 这一行。
 
 [[model]]
 id = "claude-fable-5-1"
+label = "Fable 5.1"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+price_in = 10.0
+price_out = 50.0
+note_zh = "最强推理 + 超长程；只用在最难的任务"
+note_en = "Strongest reasoning + longest-horizon; reserve for the hardest tasks"
+detail_zh = "当前最强档。最强推理 + 超长程 agentic；thinking 常开、原始思维链不返回；需 30 天数据留存；比 Opus 贵一倍——只用在最难的任务。"
+detail_en = "The current top tier. Strongest reasoning + longest-horizon agentic; thinking always on, raw chain-of-thought never returned; requires 30-day data retention; ~2x the price of Opus — reserve it for the hardest tasks."
 
 [[model]]
 id = "claude-fable-5"
+label = "Fable 5"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+price_in = 10.0
+price_out = 50.0
+superseded_by = "claude-fable-5-1"
+# 折进 5.1 那一行时附带的差异说明。
+legacy_note_zh = "5.1 上强制 tool_choice `any`/`tool` 会 400，5 没这限制"
+legacy_note_en = "forced `tool_choice` `any`/`tool` returns 400 on 5.1; 5 has no such restriction"
 
 [[model]]
 id = "claude-opus-5"
+label = "Opus 5"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+price_in = 5.0
+price_out = 25.0
+note_zh = "默认主力：自主 agentic / 编码 / 长程任务"
+note_en = "Default workhorse: autonomous agentic / coding / long-horizon work"
+detail_zh = "默认主力。当前 Opus 档，自主 agentic / 编码 / 长程任务；thinking 默认开启。"
+detail_en = "The default workhorse. Current Opus tier: autonomous agentic / coding / long-horizon work; thinking on by default."
 
 [[model]]
 id = "claude-opus-4-8"
+label = "Opus 4.8"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+price_in = 5.0
+price_out = 25.0
+superseded_by = "claude-opus-5"
 
 [[model]]
 id = "claude-sonnet-5"
+label = "Sonnet 5"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+price_in = 3.0
+price_out = 15.0
+note_zh = "近 Opus 的编码能力、成本更低；并行 subagent 的性价比之选"
+note_en = "Near-Opus coding at lower cost; value pick for parallel subagents"
+detail_zh = "接近 Opus 的编码 / agentic，成本明显更低；高吞吐生产、并行 subagent 的性价比之选。"
+detail_en = "Near-Opus coding / agentic at noticeably lower cost; the value pick for high-throughput production and parallel subagents."
 
 [[model]]
 id = "claude-sonnet-4-6"
+label = "Sonnet 4.6"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+price_in = 3.0
+price_out = 15.0
+superseded_by = "claude-sonnet-5"
 
 # 选择器里 Haiku 用的是带日期的 id，`fleet-model-guidance.md` 与手打的
-# `--model haiku-4-5` 用的是不带日期的。两个都列，省得靠模糊匹配去猜。
+# `--model haiku-4-5` 用的是不带日期的。两个都列，省得靠模糊匹配去猜；
+# 不带日期的那条不进速查表，免得同一个模型在表里出现两行。
 [[model]]
 id = "claude-haiku-4-5-20251001"
+label = "Haiku 4.5"
 family = "claude-code"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+price_in = 1.0
+price_out = 5.0
+note_zh = "最快最便宜；分类、抽取、机械活"
+note_en = "Fastest / cheapest; classification, extraction, mechanical work"
+detail_zh = "最快最便宜；分类、抽取、简单机械活、延迟敏感任务。"
+detail_en = "Fastest and cheapest; classification, extraction, simple mechanical work, latency-sensitive tasks."
 
 [[model]]
 id = "claude-haiku-4-5"
+label = "Haiku 4.5"
 family = "claude-code"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+price_in = 1.0
+price_out = 5.0
+listed = false
 
 [[model]]
 id = "fable"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+listed = false
 
 [[model]]
 id = "opus"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+listed = false
 
 [[model]]
 id = "sonnet"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+listed = false
 
 [[model]]
 id = "haiku"
 family = "claude-code"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]
+listed = false
 
 # ── Codex ───────────────────────────────────────────────────────────────────
 # `ultra` = “最高推理强度，并自动委派任务”。只有部分模型有。
+# 全家按 ChatGPT 套餐配额计费，没有按 token 的单价。
 
 [[model]]
 id = "gpt-6-astra"
+label = "GPT-6 Astra"
 family = "codex"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
 context = 272000
 max_context = 872000
+quota_billed = true
+note_zh = "最强端到端模型；复杂推理、编码、研究和电脑操作；需账号已开放"
+note_en = "Most capable end-to-end model for complex reasoning, coding, research, and computer use; account access required"
 
 [[model]]
 id = "gpt-5.6-sol"
+label = "Sol"
 family = "codex"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
 context = 272000
 max_context = 872000
+quota_billed = true
+note_zh = "前沿最强 agentic 编码（Fleet 默认）；低 effort 也很能打——先低后按需调高"
+note_en = "Frontier, most capable agentic coding (Fleet default); strong even at low effort — start low, turn up"
 
 [[model]]
 id = "gpt-5.6-terra"
+label = "Terra"
 family = "codex"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
 context = 272000
 max_context = 872000
+quota_billed = true
+note_zh = "均衡型日常 agentic 编码"
+note_en = "Balanced everyday agentic coding"
 
 [[model]]
 id = "gpt-5.6-luna"
+label = "Luna"
 family = "codex"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]
 default_effort = "medium"
 context = 272000
 max_context = 872000
+quota_billed = true
+note_zh = "快且省的 agentic 编码"
+note_en = "Fast and affordable agentic coding"
 
 # 唯一一个梯子真的停在 max 以下的 listed 模型，而且它默认就跑在自己的顶档。
 [[model]]
 id = "gpt-5.5"
+label = "GPT-5.5"
 family = "codex"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh"]
 default_effort = "xhigh"
 context = 272000
 max_context = 272000
+quota_billed = true
+note_zh = "复杂编码 / 研究前沿，默认 effort 更高"
+note_en = "Frontier for complex coding / research; higher default effort"
 
 # ── dsh ─────────────────────────────────────────────────────────────────────
 # 这里**不**试图列全 dsh 能跑的模型。dsh 的目录是每个用户 `~/.dsh/settings.yaml`
@@ -178,13 +265,20 @@ max_context = 272000
 # 的词汇（`off` 是真实档位，某些模型一路到 `max`）——凭印象抄一份进来，就是把
 # 一个猜测伪装成事实。老板要给某个模型钉死一条梯子，在 `~/.fleet/models.toml`
 # 里给它补 `efforts` 即可，那是一个明确的人为决定，不是 Fleet 编的。
+#
+# 同理不写价格：同一个模型经不同 provider 价格不同，凭印象报价就是编造。
+# 它们也不进速查表（dsh 那份 guidance 明确叫 agent 去读 settings.yaml）。
 
 [[model]]
 id = "deepseek-official/deepseek-v4-pro"
+label = "DeepSeek V4 Pro"
 family = "dsh"
 tier = "premium"
+listed = false
 
 [[model]]
 id = "deepseek-official/deepseek-v4-flash-vision-exp"
+label = "DeepSeek V4 Flash (vision, exp)"
 family = "dsh"
 tier = "fast"
+listed = false

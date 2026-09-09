@@ -43,7 +43,8 @@ const EFFORT_ORDER: [&str; 8] = [
 /// `efforts = None` means "we don't assert a ladder for this model" — which for
 /// a dsh entry means "ask dsh" — and is a different statement from an empty
 /// list.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+// No `Eq`: prices are `f64`, and float equality is not an equivalence relation.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct ModelEntry {
     pub id: String,
     #[serde(default)]
@@ -61,9 +62,73 @@ pub struct ModelEntry {
     /// Largest window the model can be opened with. Recorded, not yet consumed.
     #[serde(default)]
     pub max_context: Option<u64>,
+    /// Display name for the cheat-sheets ("Fable 5.1", "Sol").
+    #[serde(default)]
+    pub label: Option<String>,
+    /// USD per million input / output tokens.
+    #[serde(default)]
+    pub price_in: Option<f64>,
+    #[serde(default)]
+    pub price_out: Option<f64>,
+    /// Billed against a plan quota, with no per-token price (all of Codex).
+    #[serde(default)]
+    pub quota_billed: Option<bool>,
+    /// The "when to pick this" sentence, shared by all three cheat-sheets.
+    #[serde(default)]
+    pub note_zh: Option<String>,
+    #[serde(default)]
+    pub note_en: Option<String>,
+    /// The long form of the "when to pick" sentence, with the caveats worth
+    /// stating once (data-retention requirements, API quirks, intro pricing).
+    ///
+    /// Only the Claude-side cheat-sheet prints this: it lands in `CLAUDE.md`,
+    /// which has room. The Codex and dsh sheets land in `AGENTS.md` files with a
+    /// 32 KiB ceiling that the whole Fleet block set shares, so they print
+    /// `note_*` and stay terse. Absent → falls back to `note_*`.
+    #[serde(default)]
+    pub detail_zh: Option<String>,
+    #[serde(default)]
+    pub detail_en: Option<String>,
+    /// `false` = resolvable but kept out of the cheat-sheet tables (bare
+    /// aliases, dsh rows). Absent means listed.
+    #[serde(default)]
+    pub listed: Option<bool>,
+    /// Superseded by this id. Such a row is not printed on its own; it is folded
+    /// into the successor's row as "previous X still selectable, same price" —
+    /// the shape all three cheat-sheets already used by hand.
+    #[serde(default)]
+    pub superseded_by: Option<String>,
+    /// A difference worth keeping when this row folds into its successor's, e.g.
+    /// an API restriction the newer model has and the older one does not.
+    #[serde(default)]
+    pub legacy_note_zh: Option<String>,
+    #[serde(default)]
+    pub legacy_note_en: Option<String>,
 }
 
 impl ModelEntry {
+    /// Whether this row belongs in a cheat-sheet table.
+    pub fn is_listed(&self) -> bool {
+        self.listed.unwrap_or(true) && self.superseded_by.is_none()
+    }
+
+    /// Display name, falling back to the id when none is set.
+    pub fn display(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.id)
+    }
+
+    /// The localized short "when to pick" sentence.
+    pub fn note(&self, locale: &str) -> &str {
+        let picked = if locale == "zh" { &self.note_zh } else { &self.note_en };
+        picked.as_deref().unwrap_or("")
+    }
+
+    /// The localized long form, falling back to [`Self::note`].
+    pub fn detail(&self, locale: &str) -> &str {
+        let picked = if locale == "zh" { &self.detail_zh } else { &self.detail_en };
+        picked.as_deref().unwrap_or_else(|| self.note(locale))
+    }
+
     /// Overlay `other`'s set fields onto `self`, leaving the rest alone. This is
     /// what makes a user entry that sets only `efforts` a ladder override rather
     /// than a wholesale replacement that blanks out `tier`.
@@ -86,6 +151,42 @@ impl ModelEntry {
         if other.max_context.is_some() {
             self.max_context = other.max_context;
         }
+        if other.label.is_some() {
+            self.label = other.label;
+        }
+        if other.price_in.is_some() {
+            self.price_in = other.price_in;
+        }
+        if other.price_out.is_some() {
+            self.price_out = other.price_out;
+        }
+        if other.quota_billed.is_some() {
+            self.quota_billed = other.quota_billed;
+        }
+        if other.note_zh.is_some() {
+            self.note_zh = other.note_zh;
+        }
+        if other.note_en.is_some() {
+            self.note_en = other.note_en;
+        }
+        if other.detail_zh.is_some() {
+            self.detail_zh = other.detail_zh;
+        }
+        if other.detail_en.is_some() {
+            self.detail_en = other.detail_en;
+        }
+        if other.listed.is_some() {
+            self.listed = other.listed;
+        }
+        if other.superseded_by.is_some() {
+            self.superseded_by = other.superseded_by;
+        }
+        if other.legacy_note_zh.is_some() {
+            self.legacy_note_zh = other.legacy_note_zh;
+        }
+        if other.legacy_note_en.is_some() {
+            self.legacy_note_en = other.legacy_note_en;
+        }
     }
 }
 
@@ -100,21 +201,29 @@ fn parse(doc: &str) -> Option<Vec<ModelEntry>> {
     toml::from_str::<CatalogFile>(doc).ok().map(|f| f.model)
 }
 
-/// Merge a user document over a base catalog, keyed by lowercased id.
-fn merge(base: Vec<ModelEntry>, overlay: Vec<ModelEntry>) -> BTreeMap<String, ModelEntry> {
-    let mut out: BTreeMap<String, ModelEntry> = base
-        .into_iter()
-        .map(|e| (e.id.trim().to_ascii_lowercase(), e))
+/// Merge a user document over a base catalog, matching on lowercased id.
+///
+/// **Order is preserved**: the built-in rows keep their file order and new user
+/// rows are appended. The cheat-sheet tables are rendered straight off this
+/// sequence, so ordering here is what puts Fable above Opus above Sonnet in the
+/// generated markdown rather than whatever an id sort would produce.
+fn merge(base: Vec<ModelEntry>, overlay: Vec<ModelEntry>) -> Vec<ModelEntry> {
+    let mut out = base;
+    let mut index: BTreeMap<String, usize> = out
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.id.trim().to_ascii_lowercase(), i))
         .collect();
     for entry in overlay {
         let key = entry.id.trim().to_ascii_lowercase();
         if key.is_empty() {
             continue;
         }
-        match out.get_mut(&key) {
-            Some(existing) => existing.overlay(entry),
+        match index.get(&key) {
+            Some(&i) => out[i].overlay(entry),
             None => {
-                out.insert(key, entry);
+                index.insert(key, out.len());
+                out.push(entry);
             }
         }
     }
@@ -133,8 +242,8 @@ fn user_catalog_path() -> Option<std::path::PathBuf> {
 /// would be silly. The cost is that editing `~/.fleet/models.toml` takes effect
 /// in processes started afterwards, which matches how the rest of Fleet's
 /// `~/.fleet/*` config behaves.
-fn catalog() -> &'static BTreeMap<String, ModelEntry> {
-    static CATALOG: OnceLock<BTreeMap<String, ModelEntry>> = OnceLock::new();
+pub fn catalog() -> &'static [ModelEntry] {
+    static CATALOG: OnceLock<Vec<ModelEntry>> = OnceLock::new();
     CATALOG.get_or_init(|| {
         let base = parse(BUILTIN).unwrap_or_default();
         let overlay = user_catalog_path()
@@ -160,7 +269,8 @@ fn normalize_id(model: &str) -> String {
 /// guessing which catalog row a near-miss id "meant" is how a picker ends up
 /// offering a level the model rejects.
 pub fn entry(model: &str) -> Option<&'static ModelEntry> {
-    catalog().get(&normalize_id(model))
+    let id = normalize_id(model);
+    catalog().iter().find(|e| e.id.trim().eq_ignore_ascii_case(&id))
 }
 
 /// The capability tier (`fast` / `standard` / `premium`) the catalog assigns
@@ -195,7 +305,7 @@ pub fn effort_ladder(model: &str) -> Option<&'static [String]> {
     if id.is_empty() {
         return None;
     }
-    if let Some(efforts) = catalog().get(&id).and_then(|e| e.efforts.as_deref()) {
+    if let Some(efforts) = entry(&id).and_then(|e| e.efforts.as_deref()) {
         return Some(efforts);
     }
     // A Codex profile marker routes to Codex, but the model it selects comes
@@ -220,7 +330,255 @@ pub fn effort_ladder(model: &str) -> Option<&'static [String]> {
 
 /// The ladder of a known representative model, used as a family default.
 fn family_ladder(representative: &str) -> Option<&'static [String]> {
-    catalog().get(representative)?.efforts.as_deref()
+    entry(representative)?.efforts.as_deref()
+}
+
+// ── Cheat-sheet rendering ───────────────────────────────────────────────────
+//
+// The three `*_guidance.rs` cheat-sheets used to hand-write the same model
+// tables, six times over (claude / codex / dsh × zh / en). They drifted: all
+// three claimed Codex tops out at `high` and offers `minimal`, and all three
+// put Astra at 1.05M context. These helpers render the tables from the catalog
+// so a fact is stated once.
+//
+// What stays per-harness is *prose*, not facts: which family leads, how dense
+// the columns are, and dsh's preamble about `provider/model` addressing.
+
+/// Format a token count the way the cheat-sheets write it: `1M`, `272K`.
+fn window_label(tokens: u64) -> String {
+    if tokens >= 1_000_000 && tokens % 1_000_000 == 0 {
+        format!("{}M", tokens / 1_000_000)
+    } else if tokens >= 1_000_000 {
+        format!("{:.2}M", tokens as f64 / 1_000_000.0)
+    } else {
+        format!("{}K", tokens / 1_000)
+    }
+}
+
+/// The context-window cell for a row.
+///
+/// Claude rows carry no `context` on purpose (the window is a family rule), so
+/// this asks that rule — [`crate::session::stats::context_window_for_model`] —
+/// rather than duplicating its answer into the table. Codex rows answer from
+/// their catalogued value.
+fn context_cell(e: &ModelEntry) -> String {
+    let tokens = e
+        .context
+        .or_else(|| crate::session::stats::context_window_for_model(&e.id, 0));
+    tokens.map(window_label).unwrap_or_else(|| "—".to_string())
+}
+
+/// The price cell: a per-Mtok pair, or the quota note.
+fn price_cell(e: &ModelEntry, locale: &str) -> String {
+    if e.quota_billed.unwrap_or(false) {
+        return if locale == "zh" { "ChatGPT 套餐配额" } else { "ChatGPT-plan quota" }.to_string();
+    }
+    match (e.price_in, e.price_out) {
+        (Some(i), Some(o)) => format!("${} / ${}", trim_price(i), trim_price(o)),
+        _ => "—".to_string(),
+    }
+}
+
+/// `10.0` → `10`, `2.5` → `2.5`. Prices read as money, not as floats.
+fn trim_price(v: f64) -> String {
+    if (v.fract()).abs() < f64::EPSILON {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
+/// The "(previous `x` still selectable, same price)" clause for a row, built
+/// from whichever rows name it in `superseded_by`.
+fn legacy_clause(e: &ModelEntry, locale: &str) -> String {
+    let olds: Vec<&ModelEntry> = catalog()
+        .iter()
+        .filter(|o| {
+            o.superseded_by
+                .as_deref()
+                .is_some_and(|s| s.eq_ignore_ascii_case(&e.id))
+        })
+        .collect();
+    if olds.is_empty() {
+        return String::new();
+    }
+    let list = olds
+        .iter()
+        .map(|o| format!("`{}`", o.id))
+        .collect::<Vec<_>>()
+        .join(" / ");
+    // Caveats trail the whole clause rather than interrupting it — "前代 `x`
+    // 同价仍可选（caveat）", not "前代 `x`（caveat） 同价仍可选".
+    let caveats: Vec<&str> = olds
+        .iter()
+        .filter_map(|o| {
+            if locale == "zh" { o.legacy_note_zh.as_deref() } else { o.legacy_note_en.as_deref() }
+        })
+        .collect();
+    if locale == "zh" {
+        let tail = if caveats.is_empty() {
+            String::new()
+        } else {
+            format!("（{}）", caveats.join("；"))
+        };
+        format!("前代 {list} 同价仍可选{tail}")
+    } else {
+        let tail = if caveats.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", caveats.join("; "))
+        };
+        format!("Previous {list} still selectable at the same price{tail}.")
+    }
+}
+
+/// Append the legacy clause to a model's prose with a sentence break.
+///
+/// The two prose fields differ: `detail_*` is written as full sentences and
+/// already ends in a stop, `note_*` is a bare phrase and does not. Concatenating
+/// blindly produced "只用在最难的任务前代 `claude-fable-5` 同价仍可选" — two
+/// sentences fused into a run-on. So supply the stop when the prose lacks one.
+fn join_prose(prose: &str, legacy: &str, locale: &str) -> String {
+    if legacy.is_empty() {
+        return prose.to_string();
+    }
+    if prose.is_empty() {
+        return legacy.to_string();
+    }
+    let ends_sentence = prose.ends_with('。') || prose.ends_with('.') || prose.ends_with('；');
+    if locale == "zh" {
+        if ends_sentence {
+            format!("{prose}{legacy}")
+        } else {
+            format!("{prose}。{legacy}")
+        }
+    } else if ends_sentence {
+        format!("{prose} {legacy}")
+    } else {
+        format!("{prose}. {legacy}")
+    }
+}
+
+/// The listed rows of one family, in catalog order.
+pub fn listed_models(family: &str) -> Vec<&'static ModelEntry> {
+    catalog()
+        .iter()
+        .filter(|e| e.is_listed())
+        .filter(|e| {
+            e.family
+                .as_deref()
+                .or_else(|| crate::agent_source::source_for_model(&e.id))
+                .is_some_and(|f| f == family)
+        })
+        .collect()
+}
+
+/// Render one family's cheat-sheet table as markdown rows (no header).
+///
+/// `split_price` picks the shape the calling cheat-sheet uses: the Claude-side
+/// sheet splits input and output price into their own columns, the Codex and dsh
+/// sheets merge them. It also selects the prose length — the split-column sheet
+/// is the roomy one in `CLAUDE.md`, so it gets [`ModelEntry::detail`]; the
+/// merged-column sheets go into budget-capped `AGENTS.md` files and get the
+/// short [`ModelEntry::note`].
+pub fn render_rows(family: &str, locale: &str, split_price: bool) -> String {
+    render_rows_with(family, locale, split_price, true)
+}
+
+/// [`render_rows`] with the price column suppressed.
+///
+/// A Codex-only table repeats "ChatGPT-plan quota" on every row while the
+/// paragraph above it already says so; the column carries no information there.
+/// The dsh sheet lists both families in one table, so it keeps the column —
+/// there the quota note is a real contrast against dollar amounts.
+pub fn render_rows_with(
+    family: &str,
+    locale: &str,
+    split_price: bool,
+    show_price: bool,
+) -> String {
+    let mut out = String::new();
+    for e in listed_models(family) {
+        let prose = if split_price { e.detail(locale) } else { e.note(locale) };
+        let note = join_prose(prose, &legacy_clause(e, locale), locale);
+        if split_price && !e.quota_billed.unwrap_or(false) {
+            let (pi, po) = (
+                e.price_in.map(trim_price).unwrap_or_else(|| "—".into()),
+                e.price_out.map(trim_price).unwrap_or_else(|| "—".into()),
+            );
+            out.push_str(&format!(
+                "| {} | `{}` | {} | ${} | ${} | {} |\n",
+                e.display(),
+                e.id,
+                context_cell(e),
+                pi,
+                po,
+                note
+            ));
+        } else if show_price {
+            out.push_str(&format!(
+                "| {} | `{}` | {} | {} | {} |\n",
+                e.display(),
+                e.id,
+                context_cell(e),
+                price_cell(e, locale),
+                note
+            ));
+        } else {
+            out.push_str(&format!(
+                "| {} | `{}` | {} | {} |\n",
+                e.display(),
+                e.id,
+                context_cell(e),
+                note
+            ));
+        }
+    }
+    out
+}
+
+/// One sentence describing the effort ladders in `family`, built from the
+/// catalog so it cannot claim a level the models do not accept.
+///
+/// Rows that share a ladder are named together; a row that differs gets its own
+/// clause. That is what surfaces "everything supports xhigh **except** gpt-5.5"
+/// without anyone maintaining the exception by hand.
+pub fn render_effort_line(family: &str, locale: &str) -> String {
+    let mut groups: Vec<(String, Vec<&str>)> = Vec::new();
+    for e in listed_models(family) {
+        let Some(ladder) = e.efforts.as_deref() else { continue };
+        let key = ladder.join("/");
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, names)) => names.push(e.display()),
+            None => groups.push((key, vec![e.display()])),
+        }
+    }
+    if groups.is_empty() {
+        return String::new();
+    }
+    // A family where everything shares one ladder just states the ladder —
+    // naming all four Claude models before an identical list is noise.
+    if groups.len() == 1 {
+        return groups[0]
+            .0
+            .split('/')
+            .map(|l| format!("`{l}`"))
+            .collect::<Vec<_>>()
+            .join("/");
+    }
+    let (colon, sep) = if locale == "zh" { ("：", "；") } else { (": ", "; ") };
+    let clauses: Vec<String> = groups
+        .iter()
+        .map(|(ladder, names)| {
+            let levels = ladder
+                .split('/')
+                .map(|l| format!("`{l}`"))
+                .collect::<Vec<_>>()
+                .join("/");
+            format!("{}{colon}{levels}", names.join(" / "))
+        })
+        .collect();
+    clauses.join(sep)
 }
 
 /// Rank of an effort level in [`EFFORT_ORDER`], or `None` for an unrecognised
@@ -257,6 +615,14 @@ pub fn map_effort(effort: &str, target_model: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Look a row up in a merged catalog by id, panicking when absent.
+    fn find<'a>(catalog: &'a [ModelEntry], id: &str) -> &'a ModelEntry {
+        catalog
+            .iter()
+            .find(|e| e.id == id)
+            .unwrap_or_else(|| panic!("no `{id}` row in the merged catalog"))
+    }
 
     /// The built-in file has to parse — it is compiled in, so a syntax error
     /// here is a silently empty catalog in every build, not a startup failure.
@@ -418,7 +784,7 @@ mod tests {
         let overlay = parse("[[model]]\nid = \"gpt-5.6-sol\"\nefforts = [\"low\", \"medium\"]\n")
             .unwrap();
         let merged = merge(base, overlay);
-        let sol = &merged["gpt-5.6-sol"];
+        let sol = find(&merged, "gpt-5.6-sol");
         assert_eq!(
             sol.efforts.as_deref(),
             Some(["low".to_string(), "medium".to_string()].as_slice())
@@ -434,7 +800,7 @@ mod tests {
             parse("[[model]]\nid = \"gpt-9-future\"\ntier = \"premium\"\nefforts = [\"low\"]\n")
                 .unwrap();
         let merged = merge(parse(BUILTIN).unwrap(), overlay);
-        assert_eq!(merged["gpt-9-future"].tier.as_deref(), Some("premium"));
+        assert_eq!(find(&merged, "gpt-9-future").tier.as_deref(), Some("premium"));
     }
 
     /// A malformed user file is ignored rather than emptying the catalog: one
@@ -443,6 +809,6 @@ mod tests {
     fn malformed_overlay_is_ignored() {
         assert!(parse("this is not toml = = =").is_none());
         let merged = merge(parse(BUILTIN).unwrap(), parse("nope = = =").unwrap_or_default());
-        assert!(merged.contains_key("gpt-5.6-sol"));
+        assert!(merged.iter().any(|e| e.id == "gpt-5.6-sol"));
     }
 }

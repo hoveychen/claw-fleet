@@ -38,8 +38,17 @@ fn claude_md_path() -> Option<PathBuf> {
 /// from `~/.codex/models_cache.json` — Codex bills against a ChatGPT-plan
 /// quota, so it has no per-token price to quote.
 pub fn render_guidance(locale: &str) -> String {
+    // The model tables come from `models.toml` via `model_catalog`. They used to
+    // be hand-written here and in the two AGENTS.md cheat-sheets, and the three
+    // copies drifted: all of them claimed Codex tops out at `high` and offers a
+    // `minimal` level, and all put Astra at 1.05M context. The catalog's numbers
+    // are read from `~/.codex/models_cache.json`.
+    let claude_rows = crate::model_catalog::render_rows("claude-code", locale, true);
+    let codex_rows = crate::model_catalog::render_rows_with("codex", locale, false, false);
+    let claude_efforts = crate::model_catalog::render_effort_line("claude-code", locale);
+    let codex_efforts = crate::model_catalog::render_effort_line("codex", locale);
     if locale == "zh" {
-        return "# Fleet 模型选择速查 (managed by Claw Fleet — do not edit)\n\
+        return format!("# Fleet 模型选择速查 (managed by Claw Fleet — do not edit)\n\
 \n\
 给 subagent、workflow agent 或新会话选模型时用。**默认继承父/会话模型**——它\
 几乎总是对的;只有当你明确判断某一档更合适时才 override。选模型的入口:\
@@ -51,41 +60,22 @@ pub fn render_guidance(locale: &str) -> String {
 \n\
 | 模型 | ID | 上下文 | 输入 $/1M | 输出 $/1M | 何时选 |\n\
 |---|---|---|---|---|---|\n\
-| Fable 5.1 | `claude-fable-5-1` | 1M | $10 | $50 | 当前最强档。最强推理 + \
-超长程 agentic;thinking 常开、原始思维链不返回;需 30 天数据留存;比 Opus \
-贵一倍——只用在最难的任务。前代 `claude-fable-5` 同价仍可选(5.1 上强制 \
-tool_choice `any`/`tool` 会 400,5 没这限制)|\n\
-| Opus 5 | `claude-opus-5` | 1M | $5 | $25 | 默认主力。当前 Opus 档,自主 \
-agentic / 编码 / 长程任务;thinking 默认开启;前代 `claude-opus-4-8` 同价仍\
-可选 |\n\
-| Sonnet 5 | `claude-sonnet-5` | 1M | $3(至 2026-08-31 优惠 $2)| \
-$15(优惠 $10)| 接近 Opus 的编码 / agentic,成本明显更低;高吞吐生产、\
-并行 subagent 的性价比之选 |\n\
-| Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 | $5 | 最快最便宜;分类、抽取、\
-简单机械活、延迟敏感任务 |\n\
+{claude_rows}\
 \n\
-effort(`output_config.effort` / `--effort`):`low` / `medium` / `high` / \
-`xhigh` / `max`。`xhigh` 是编码和 agentic 的最佳档;`high` 是多数智力敏感\
-任务的下限;`low` 给 subagent 和简单任务(更少、更集中的工具调用)。\n\
+effort(`output_config.effort` / `--effort`):{claude_efforts}。`xhigh` 是编码和 \
+agentic 的最佳档;`high` 是多数智力敏感任务的下限;`low` 给 subagent 和简单\
+任务(更少、更集中的工具调用)。\n\
 \n\
 ## Codex 家族(codex 工具链)\n\
 \n\
 Fleet 经 codex CLI 调用,按 **ChatGPT 套餐配额**计费,**没有按 token 的\
 定价**。\n\
 \n\
-| 模型 | ID | 定位 |\n\
-|---|---|---|\n\
-| GPT-6 Astra | `gpt-6-astra` | 最强端到端模型;复杂推理、编码、研究和电脑操作;\
-1.05M 上下文;需账号已开放 |\n\
-| Sol | `gpt-5.6-sol` | 前沿最强 agentic 编码(Fleet 默认);低 effort 也很\
-能打——先低后按需调高 |\n\
-| Terra | `gpt-5.6-terra` | 均衡型日常 agentic 编码 |\n\
-| Luna | `gpt-5.6-luna` | 快且省的 agentic 编码 |\n\
-| GPT-5.5 | `gpt-5.5` | 复杂编码 / 研究前沿,默认 effort 更高(xhigh) |\n\
+| 模型 | ID | 上下文 | 定位 |\n\
+|---|---|---|---|\n\
+{codex_rows}\
 \n\
-Sol / Terra / Luna = 强 / 中 / 快 三档,同属 gpt-5.6。Astra 的 effort 档是 \
-`low` / `medium` / `high` / `xhigh` / `max`;其余 Codex 模型沿用 \
-`minimal` / `low` / `medium` / `high`。\n\
+Sol / Terra / Luna = 强 / 中 / 快 三档,同属 gpt-5.6。effort 梯子:{codex_efforts}。\n\
 \n\
 ## 生图(只有 codex 有)\n\
 \n\
@@ -104,10 +94,9 @@ codex 自带的 imagegen skill:`codex exec -m gpt-5.6-luna \"用内置图像生�
 Opus / Fable 或 Sol。\n\
 - 编码 / agentic 主循环 → Opus 5 或 Sonnet 5 配 xhigh;Codex 侧 Sol 从 \
 medium 起步。\n\
-- 拿不准就别 override,继承父/会话模型。\n"
-            .to_string();
+- 拿不准就别 override,继承父/会话模型。\n");
     }
-    "# Fleet model-selection cheat-sheet (managed by Claw Fleet — do not edit)\n\
+    format!("# Fleet model-selection cheat-sheet (managed by Claw Fleet — do not edit)\n\
 \n\
 Use this when picking a model for a subagent, a workflow agent, or a new \
 session. **Default to inheriting the parent/session model** — it is almost \
@@ -120,46 +109,24 @@ and `cws dispatch`'s `--model`/`--effort`.\n\
 \n\
 | Model | ID | Context | In $/1M | Out $/1M | When to pick |\n\
 |---|---|---|---|---|---|\n\
-| Fable 5.1 | `claude-fable-5-1` | 1M | $10 | $50 | The current top tier. \
-Strongest reasoning + longest-horizon agentic; thinking always on, raw \
-chain-of-thought never returned; requires 30-day data retention; ~2x the price \
-of Opus — reserve it for the hardest tasks. The previous `claude-fable-5` is \
-still selectable at the same price (forced `tool_choice` `any`/`tool` returns \
-400 on 5.1; 5 has no such restriction) |\n\
-| Opus 5 | `claude-opus-5` | 1M | $5 | $25 | The default workhorse. Current \
-Opus tier: autonomous agentic / coding / long-horizon work; thinking on by \
-default; the previous `claude-opus-4-8` is still selectable at the same \
-price |\n\
-| Sonnet 5 | `claude-sonnet-5` | 1M | $3 ($2 intro through 2026-08-31) | \
-$15 ($10 intro) | Near-Opus coding / agentic at noticeably lower cost; the \
-value pick for high-throughput production and parallel subagents |\n\
-| Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 | $5 | Fastest and cheapest; \
-classification, extraction, simple mechanical work, latency-sensitive tasks |\n\
+{claude_rows}\
 \n\
-Effort (`output_config.effort` / `--effort`): `low` / `medium` / `high` / \
-`xhigh` / `max`. `xhigh` is best for coding and agentic work; `high` is the \
-floor for most intelligence-sensitive work; `low` for subagents and simple \
-tasks (fewer, more-consolidated tool calls).\n\
+Effort (`output_config.effort` / `--effort`): {claude_efforts}. `xhigh` is best \
+for coding and agentic work; `high` is the floor for most \
+intelligence-sensitive work; `low` for subagents and simple tasks (fewer, \
+more-consolidated tool calls).\n\
 \n\
 ## Codex family (codex toolchain)\n\
 \n\
 Fleet drives these through the codex CLI. They bill against a **ChatGPT-plan \
 quota** and have **no per-token price**.\n\
 \n\
-| Model | ID | Positioning |\n\
-|---|---|---|\n\
-| GPT-6 Astra | `gpt-6-astra` | Most capable end-to-end model for complex \
-reasoning, coding, research, and computer use; 1.05M context; account access required |\n\
-| Sol | `gpt-5.6-sol` | Frontier, most capable agentic coding (Fleet default); \
-highly capable even at low effort — start low, turn it up as needed |\n\
-| Terra | `gpt-5.6-terra` | Balanced everyday agentic coding |\n\
-| Luna | `gpt-5.6-luna` | Fast and affordable agentic coding |\n\
-| GPT-5.5 | `gpt-5.5` | Frontier for complex coding / research; higher default \
-effort (xhigh) |\n\
+| Model | ID | Context | Positioning |\n\
+|---|---|---|---|\n\
+{codex_rows}\
 \n\
 Sol / Terra / Luna = strong / balanced / fast, all in the gpt-5.6 family. \
-Astra supports `low` / `medium` / `high` / `xhigh` / `max`; other Codex models \
-keep `minimal` / `low` / `medium` / `high`.\n\
+Effort ladders: {codex_efforts}.\n\
 \n\
 ## Image generation (codex only)\n\
 \n\
@@ -181,8 +148,7 @@ transparency limits, token cost) live in the wiki at \
 final verification → Opus / Fable or Sol.\n\
 - Coding / agentic main loop → Opus 5 or Sonnet 5 at xhigh; on the Codex \
 side, Sol starting at medium.\n\
-- When in doubt, don't override — inherit the parent/session model.\n"
-        .to_string()
+- When in doubt, don't override — inherit the parent/session model.\n")
 }
 
 /// Apply model guidance: write the guidance file and inject the `@import`
@@ -376,5 +342,21 @@ mod tests {
         // quota. The guidance must say so explicitly in both locales.
         assert!(render_guidance("zh").contains("配额"), "zh must flag Codex quota billing");
         assert!(render_guidance("en").contains("quota"), "en must flag Codex quota billing");
+    }
+}
+
+#[cfg(test)]
+mod render_dump {
+    /// Not an assertion — a way to eyeball the generated cheat-sheet.
+    /// Run with `cargo test -p claw-fleet-core --lib dump_zh -- --nocapture`.
+    #[test]
+    #[ignore]
+    fn dump_zh() {
+        println!("{}", super::render_guidance("zh"));
+    }
+    #[test]
+    #[ignore]
+    fn dump_en() {
+        println!("{}", super::render_guidance("en"));
     }
 }
