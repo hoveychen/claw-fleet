@@ -39,11 +39,13 @@ import {
 // 会把整棵 relay 依赖树静态拖进同源构建 —— 造它的活儿归 transportRelay.ts。
 import { isMockMode } from "./mockMode";
 import type { RepoSummary, SessionInfo, WikiDoc } from "./types";
+import type { HostIdentity } from "./generated/types";
 import { randomId } from "./clientId";
 import { needsA2hsForDurableStorage } from "./secretStore";
 import {
   activeDevice,
   addPendingUnsub,
+  applyHostIdentity,
   adoptScannedDevice,
   clearBook,
   consumeHashPairing,
@@ -282,6 +284,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     setBook((prev) => {
       const next = setActiveDevice(prev, id);
       persistBook(next);
+      return next;
+    });
+  }, []);
+
+  /** 那台桌面端自报了主机名 —— 把「设备 2」换成「Harrys-MacBook-Pro」。
+   *
+   *  用户改过名的那台不会被顶掉（devices.ts::applyHostIdentity 只动自动名），所以
+   *  这里不需要任何额外判断，照单落盘即可。名字没变时 applyHostIdentity 原样返回
+   *  同一个对象，setBook 因此不会引起重渲，也不会白写一次存储。 */
+  const adoptHostIdentity = useCallback((id: string, identity: HostIdentity) => {
+    setBook((prev) => {
+      const next = applyHostIdentity(prev, id, identity);
+      if (next !== prev) persistBook(next);
       return next;
     });
   }, []);
@@ -925,6 +940,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         connected={states[d.id]?.connected ?? false}
         pushGranted={push === "granted"}
         pushMuted={pushMuted[d.id] ?? true}
+        onHostIdentity={adoptHostIdentity}
       />
     ))}
     <div className={styles.app}>

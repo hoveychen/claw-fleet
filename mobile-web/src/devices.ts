@@ -38,6 +38,15 @@ interface DeviceCommon {
   id: string;
   /** 用户可改的显示名。 */
   label: string;
+  /** 这个名字是不是自动起的。`true` = 还没人给它取过名,那台桌面端一报上自己的
+   *  主机名就可以顶掉它(`applyHostIdentity`);用户一改名就永久变成 `false`。
+   *
+   *  存这个布尔位而不是「看看名字长得像不像默认名」,是因为后者会误伤:一个真把
+   *  自己的机器叫「设备 2」的用户,改完名下次连上又被改回主机名。 */
+  auto?: boolean;
+  /** 那台主机自报的平台键(`macos` / `windows` / `linux` …,见 core 的
+   *  `host_identity.rs`)。只用来挑图标;没连上过就缺席。 */
+  platform?: string;
   addedAt: number;
 }
 
@@ -94,6 +103,11 @@ export function parseBook(raw: unknown): DeviceBook | null {
     if (typeof d.id !== "string" || !d.id) continue;
     const label = typeof d.label === "string" ? d.label : "";
     const addedAt = typeof d.addedAt === "number" ? d.addedAt : 0;
+    const platform = typeof d.platform === "string" && d.platform ? d.platform : undefined;
+    // `auto` 是后加的字段。老记录里没有它,而它们恰恰是这次改动要救的那一批
+    // (清一色叫「设备 1」「设备 2」),所以缺席时按名字回推:长得就是默认名的,
+    // 视作还没人给它取过名。
+    const auto = typeof d.auto === "boolean" ? d.auto : looksAutoLabel(label);
     // 没有 `kind` 的记录来自只有中转一条路的年代 —— 它们都是 relay 设备。
     // 判据用「有没有 secret」而不是「kind 缺席」,这样一条既缺 kind 又缺 secret
     // 的坏记录仍然被丢掉,而不是变成一台连不上的幽灵设备。
@@ -103,6 +117,8 @@ export function parseBook(raw: unknown): DeviceBook | null {
         kind: "http",
         id: d.id,
         label,
+        auto,
+        platform,
         addedAt,
         baseUrl: d.baseUrl,
         token: typeof d.token === "string" && d.token ? d.token : null,
@@ -114,6 +130,8 @@ export function parseBook(raw: unknown): DeviceBook | null {
       kind: "relay",
       id: d.id,
       label,
+      auto,
+      platform,
       addedAt,
       secret: d.secret,
       relayBase: typeof d.relayBase === "string" ? d.relayBase : null,
@@ -134,6 +152,7 @@ export function bookFromLegacySecret(secret: string, opts: DeviceMint): DeviceBo
     kind: "relay",
     id: opts.id,
     label: opts.label,
+    auto: true,
     secret,
     // 迁移过来的那台没记过 relay:它一直用的就是构建默认值(旧代码里的
     // RELAY_BASE),所以 null 在这里不是「未知」,而是「就是默认那个」。
@@ -150,6 +169,63 @@ export function activeDevice(book: DeviceBook): PairedDevice | null {
 
 export function deviceById(book: DeviceBook, id: string): PairedDevice | null {
   return book.devices.find((d) => d.id === id) ?? null;
+}
+
+/** 这个名字看着像不像自动起的默认名(「设备 2」/「Device 2」)。
+ *
+ *  **只在迁移老记录时用**:`auto` 这个字段是后加的,老簿子里没有,而这条判据是
+ *  唯一能把「从没取过名」和「用户取的名」分开的线索。有了字段之后一律读字段。 */
+export function looksAutoLabel(label: string): boolean {
+  return label.trim() === "" || /^(设备|Device)\s*\d+$/i.test(label.trim());
+}
+
+/** 主机自报的身份里能拿来当名字的那部分。
+ *
+ *  只认主机名:它就是用户在别处认这台机器用的名字(「Harrys-MacBook-Pro」)。平台
+ *  与系统版本**不**参与命名 —— 「macOS 设备」并不比「设备 2」好认,两台 Mac 在册
+ *  时反而更糊涂;那两个字段留给图标和详情。拿不到主机名就返回 `null`,让默认的
+ *  「设备 N」留着,而不是编一个。 */
+export function hostDisplayName(identity: { hostname?: string | null } | null): string | null {
+  const raw = identity?.hostname?.trim();
+  return raw ? raw : null;
+}
+
+/** 那台桌面端报上了自己是谁 —— 把它的名字与平台落进簿子。
+ *
+ *  三条规则:
+ *  1. **只顶掉自动名**(`auto !== false`)。用户在「更多」页改过的名字是他明确的
+ *     意图,不能被一次重连覆盖掉。
+ *  2. **重名要区分**。两台主机名撞车(两台都叫 `mac-mini`)时给后来的那台加序号,
+ *     否则设备切换器上会并排出现两个一模一样的条目。
+ *  3. **平台照收**,不受第 1 条约束 —— 它只驱动图标,和用户取的名字不冲突。 */
+export function applyHostIdentity(
+  book: DeviceBook,
+  id: string,
+  identity: { hostname?: string | null; platform?: string | null },
+): DeviceBook {
+  const target = book.devices.find((d) => d.id === id);
+  if (!target) return book;
+  const platform = identity.platform?.trim() || target.platform;
+  const name = hostDisplayName(identity);
+  const keepLabel = target.auto === false || !name;
+  const label = keepLabel ? target.label : uniqueLabel(book, id, name);
+  if (label === target.label && platform === target.platform) return book;
+  return {
+    ...book,
+    devices: book.devices.map((d) =>
+      d.id === id ? { ...d, label, platform, auto: keepLabel ? d.auto : true } : d,
+    ),
+  };
+}
+
+/** `name`,若已被别的设备用掉则 `name 2`、`name 3`…… */
+function uniqueLabel(book: DeviceBook, selfId: string, name: string): string {
+  const used = new Set(book.devices.filter((d) => d.id !== selfId).map((d) => d.label));
+  if (!used.has(name)) return name;
+  for (let n = 2; ; n++) {
+    const candidate = `${name} ${n}`;
+    if (!used.has(candidate)) return candidate;
+  }
 }
 
 /** 下一台的默认名:`<prefix> N`,N 取「还没被用掉的最小序号」,这样删掉中间
@@ -208,6 +284,9 @@ export function addDevice(book: DeviceBook, input: AddDeviceInput): AddDeviceRes
     kind: "relay",
     id: input.id,
     label: input.label,
+    // 刚扫出来的名字一定是「设备 N」——那台桌面端还没机会自报主机名。标成自动名,
+    // 等它连上再顶掉(applyHostIdentity)。
+    auto: true,
     secret: input.secret,
     relayBase: input.relayBase ?? null,
     addedAt: input.now,
@@ -229,13 +308,16 @@ export function removeDevice(book: DeviceBook, id: string): DeviceBook {
   return { devices, activeId };
 }
 
-/** 改名。空白名被忽略(否则列表里会出现一台没名字的设备)。 */
+/** 改名。空白名被忽略(否则列表里会出现一台没名字的设备)。
+ *
+ *  同时把 `auto` 落成 `false`:这台从此有主人取的名字,再连上多少次也不会被主机名
+ *  顶掉。 */
 export function renameDevice(book: DeviceBook, id: string, label: string): DeviceBook {
   const trimmed = label.trim();
   if (!trimmed) return book;
   return {
     ...book,
-    devices: book.devices.map((d) => (d.id === id ? { ...d, label: trimmed } : d)),
+    devices: book.devices.map((d) => (d.id === id ? { ...d, label: trimmed, auto: false } : d)),
   };
 }
 

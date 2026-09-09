@@ -5,6 +5,7 @@ import {
   loadPendingUnsub,
   addDevice,
   activeDevice,
+  applyHostIdentity,
   adoptScannedDevice,
   bookFromLegacySecret,
   clearBook,
@@ -154,6 +155,68 @@ describe("nextDeviceLabel", () => {
   });
 });
 
+describe("applyHostIdentity", () => {
+  it("replaces an auto-generated name with the host's own name", () => {
+    const book = addDevice(emptyBook(), { secret: A, label: "设备 1", id: "d1", now: 1 }).book;
+    const next = applyHostIdentity(book, "d1", {
+      hostname: "Harrys-MacBook-Pro",
+      platform: "macos",
+    });
+    expect(next.devices[0].label).toBe("Harrys-MacBook-Pro");
+    expect(next.devices[0].platform).toBe("macos");
+  });
+
+  it("never overwrites a name the user typed", () => {
+    let book = addDevice(emptyBook(), { secret: A, label: "设备 1", id: "d1", now: 1 }).book;
+    book = renameDevice(book, "d1", "公司 Mac");
+    const next = applyHostIdentity(book, "d1", { hostname: "build-box", platform: "linux" });
+    expect(next.devices[0].label).toBe("公司 Mac");
+    // 平台仍然收下 —— 它只驱动图标，和用户取的名字不冲突
+    expect(next.devices[0].platform).toBe("linux");
+  });
+
+  it("disambiguates two hosts that share a hostname", () => {
+    let book = addDevice(emptyBook(), { secret: A, label: "设备 1", id: "d1", now: 1 }).book;
+    book = addDevice(book, { secret: B, label: "设备 2", id: "d2", now: 2 }).book;
+    book = applyHostIdentity(book, "d1", { hostname: "mac-mini", platform: "macos" });
+    book = applyHostIdentity(book, "d2", { hostname: "mac-mini", platform: "macos" });
+    expect(book.devices.map((d) => d.label)).toEqual(["mac-mini", "mac-mini 2"]);
+  });
+
+  it("keeps 设备 N when the host cannot name itself", () => {
+    const book = addDevice(emptyBook(), { secret: A, label: "设备 1", id: "d1", now: 1 }).book;
+    const next = applyHostIdentity(book, "d1", { hostname: null, platform: "linux" });
+    expect(next.devices[0].label).toBe("设备 1");
+    // 名字没变但平台变了 —— 仍然是一本新簿子
+    expect(next.devices[0].platform).toBe("linux");
+  });
+
+  it("returns the same book when nothing changed", () => {
+    let book = addDevice(emptyBook(), { secret: A, label: "设备 1", id: "d1", now: 1 }).book;
+    book = applyHostIdentity(book, "d1", { hostname: "nas", platform: "linux" });
+    expect(applyHostIdentity(book, "d1", { hostname: "nas", platform: "linux" })).toBe(book);
+    expect(applyHostIdentity(book, "ghost", { hostname: "x", platform: "linux" })).toBe(book);
+  });
+
+  it("still renames a device restored from a book written before `auto` existed", () => {
+    const raw = JSON.stringify({
+      devices: [{ id: "d1", secret: A, label: "设备 1", relayBase: null, addedAt: 1 }],
+      activeId: "d1",
+    });
+    const book = parseBook(raw)!;
+    expect(applyHostIdentity(book, "d1", { hostname: "old-mac" }).devices[0].label).toBe("old-mac");
+  });
+
+  it("leaves an old book's user-typed name alone", () => {
+    const raw = JSON.stringify({
+      devices: [{ id: "d1", secret: A, label: "公司 Mac", relayBase: null, addedAt: 1 }],
+      activeId: "d1",
+    });
+    const book = parseBook(raw)!;
+    expect(applyHostIdentity(book, "d1", { hostname: "old-mac" }).devices[0].label).toBe("公司 Mac");
+  });
+});
+
 describe("parseBook", () => {
   it("round-trips what persistBook writes", () => {
     const book = twoDevices();
@@ -206,7 +269,16 @@ describe("loadBookSync", () => {
     const book = loadBookSync(mint("d1"));
     // 迁移出来的记录带上 kind:"relay" —— 单设备时代只有中转一条路。
     expect(book.devices).toEqual([
-      { kind: "relay", id: "d1", label: "设备 1", secret: A, relayBase: null, addedAt: 1000 },
+      {
+        kind: "relay",
+        id: "d1",
+        label: "设备 1",
+        // 迁移过来的那台从没被取过名 —— 等它连上就换成主机名
+        auto: true,
+        secret: A,
+        relayBase: null,
+        addedAt: 1000,
+      },
     ]);
     expect(book.activeId).toBe("d1");
   });
