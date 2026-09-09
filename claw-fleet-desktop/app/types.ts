@@ -351,6 +351,12 @@ export interface RawMessage {
    *  failed before producing any reply — expired credentials, a stream error).
    *  Renders as a failure banner, not as an assistant bubble. */
   isTurnError?: boolean;
+  /** Fleet-owned automation prompt persisted by the harness as role=user. */
+  fleetEvent?: {
+    kind: "watch" | "handoff" | "loop" | "schedule";
+    status: "fired" | "timeout" | "successor" | "manual";
+    id?: string | null;
+  };
   sourceToolUseID?: string;
   isVisibleInTranscriptOnly?: boolean;
   agentId?: string;

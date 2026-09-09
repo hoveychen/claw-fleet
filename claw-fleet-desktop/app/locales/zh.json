@@ -1,6 +1,13 @@
 {
   "title": "Claw Fleet",
   "fleet": {
+    "event": {
+      "watch": "Fleet 监视",
+      "handoff": "Fleet 接力",
+      "loop": "Fleet 循环",
+      "schedule": "Fleet 定时任务",
+      "status": { "fired": "已触发", "timeout": "已超时", "successor": "接力已启动", "manual": "手动运行" }
+    },
     "kind": {
       "plan": "计划",
       "handoff": "接力",

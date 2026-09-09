@@ -1216,7 +1216,7 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
 /// Top-level record fields the mobile `RawMessage` declares. `uuid` is
 /// load-bearing beyond rendering — `appendUnique` dedups tailed lines by it.
 /// `isMeta`/`sourceToolUseID` drive the client's MetaFoldCard grouping.
-const TAIL_MSG_FIELDS: [&str; 7] = [
+const TAIL_MSG_FIELDS: [&str; 8] = [
     "type",
     "uuid",
     "timestamp",
@@ -1224,6 +1224,7 @@ const TAIL_MSG_FIELDS: [&str; 7] = [
     "isCompactSummary",
     "isMeta",
     "sourceToolUseID",
+    "fleetEvent",
 ];
 /// Content-block fields the mobile `ContentBlock` declares and renders.
 /// `is_error` feeds the tool chip's error badge; result bodies stay stripped.
@@ -6911,7 +6912,7 @@ mod tests {
 
     // ── transcript slimming keeps the fields the redesigned detail view reads ──
 
-    /// Regression: `isMeta`/`sourceToolUseID` were missing from `TAIL_MSG_FIELDS`,
+    /// Regression: UI classification fields were missing from `TAIL_MSG_FIELDS`,
     /// so the phone's `isMetaRow` (which requires `msg.isMeta`) never matched over
     /// the relay — SKILL.md injections rendered as full-length user bubbles
     /// instead of folding into a MetaFoldCard.
@@ -6922,6 +6923,7 @@ mod tests {
             "uuid": "u1",
             "isMeta": true,
             "sourceToolUseID": "toolu_abc",
+            "fleetEvent": { "kind": "watch", "status": "fired", "id": "w1" },
             "cwd": "/somewhere",
             "message": { "role": "user", "content": "injected SKILL.md body" }
         })];
@@ -6932,6 +6934,7 @@ mod tests {
             json!("toolu_abc"),
             "sourceToolUseID must survive slimming"
         );
+        assert_eq!(slim[0]["fleetEvent"]["kind"], json!("watch"));
         assert!(slim[0].get("cwd").is_none(), "bookkeeping fields stay stripped");
     }
 
