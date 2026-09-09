@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -20,6 +22,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
+  useDecisionStore,
   useSessionsStore,
   useUIStore,
   type MarkFilter,
@@ -58,6 +61,12 @@ const START_TIMEOUT_MS = 30_000;
 /** Sentinel `openId` for the new-session composer. A real session id is a UUID,
  *  so it can never collide with this. */
 const DRAFT_ID = "new:draft";
+
+/** Same lazy hop `SessionDetail` uses, for the same reason: `DecisionPanel`
+ *  imports `SessionDetail`, so a static import here would close the cycle. */
+const OrphanDecisionCard = lazy(() =>
+  import("./DecisionPanel").then(({ DecisionCard }) => ({ default: DecisionCard })),
+);
 
 /** Which session the detail column was showing when the app last closed. */
 const OPEN_PANE_STORAGE_KEY = "launchpad-open";
@@ -614,6 +623,22 @@ export function HistoryView() {
     [openId, sessionById],
   );
 
+  // `openId` names a real session the scan cannot see. It happens: the
+  // transcript was deleted, it aged past the scanner's mtime cap, or — the way
+  // we found this — it is unreadable by the user `fleet webui` runs as, so a
+  // card raised by that session shows up in the pending list while its session
+  // never appears in the scan. Without this the pane fell through to its
+  // resting state, which is the new-session composer: pressing 「n 张卡等你回复」
+  // silently landed on 「新建会话」 with nothing saying why.
+  const orphanId =
+    scanReady && openId != null && openId !== DRAFT_ID && !activeSession ? openId : null;
+  const simplifiedMode = useUIStore((s) => s.simplifiedMode);
+  const pendingDecisions = useDecisionStore((s) => s.decisions);
+  const orphanDecisions = useMemo(
+    () => (orphanId ? pendingDecisions.filter((d) => d.request.sessionId === orphanId) : []),
+    [orphanId, pendingDecisions],
+  );
+
   // One session row — shared by standalone rows and the members inside an
   // expanded handoff group, so both stay pixel-identical and pick up the same
   // memoisation.
@@ -808,6 +833,50 @@ export function HistoryView() {
                 </div>
               ) : (
                 <NewSessionForm onCreated={handleCreated} onCancel={cancelDraft} />
+              )}
+            </div>
+          ) : orphanId ? (
+            <div className={styles.pane} data-testid="orphan-session-pane">
+              {/* Answering a card needs nothing from the transcript, so in
+                  simplified mode — which mounts no `DecisionPanel` and would
+                  otherwise leave this card with no surface anywhere — render it
+                  right here. Full mode has the overlay for it; drawing it twice
+                  is its own bug, so there we only explain the empty pane. */}
+              {simplifiedMode && orphanDecisions.length > 0 ? (
+                <div className={styles.orphan}>
+                  <p className={styles.orphan_note}>
+                    {t(
+                      "history.orphan_with_card",
+                      "这个会话不在扫描范围内（记录可能已删除、已过期，或当前用户读不到），但它的卡还等着回复：",
+                    )}
+                  </p>
+                  {orphanDecisions.map((decision) => (
+                    <Suspense key={decision.id} fallback={<div className={styles.orphan_note}>…</div>}>
+                      <OrphanDecisionCard decision={decision} compact />
+                    </Suspense>
+                  ))}
+                </div>
+              ) : (
+                <div className={styles.detail_starting}>
+                  <span className={styles.starting_text}>
+                    {orphanDecisions.length > 0
+                      ? t(
+                          "history.orphan_card_in_panel",
+                          "这个会话不在扫描范围内，它的卡在决策面板里等你回复。",
+                        )
+                      : t(
+                          "history.orphan_not_found",
+                          "找不到这个会话：记录可能已删除、已过期，或当前用户读不到。",
+                        )}
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.starting_dismiss}
+                    onClick={() => setOpenId(null)}
+                  >
+                    {t("history.orphan_back", "关闭")}
+                  </button>
+                </div>
               )}
             </div>
           ) : (
