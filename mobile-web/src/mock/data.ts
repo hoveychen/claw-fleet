@@ -78,6 +78,11 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     procAlive: true,
     contextPercent: 0.72,
     totalCostUsd: 4.33,
+    effort: "xhigh",
+    // 头部状态轨的「N 个子代理」pill 靠这个数。这一条与下面那行真的
+    // `agent-explore-1` 对得上——mock 里给一个没有对应行的计数，会让半屏上的
+    // 作用域清单空着而 pill 却在吆喝，正是 mock 替真 bug 打掩护的那种形状。
+    runningSubagentCount: 1,
   },
   {
     // Subagent of sess-api-main. Kept in the snapshot purely as a drill-down
@@ -202,6 +207,28 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     procAlive: true,
     contextPercent: 0.36,
     totalCostUsd: 4.02,
+    // 这一条是状态轨最忙的样本：它同时有待决策卡（MOCK_ELICITATION 就挂在
+    // 这个 sessionId 上）、两个 watch、一条排队追问。改版前这三样在手机上
+    // 一个都看不见——它们本来就在快照里，只是头部没有地方放。
+    watches: [
+      {
+        id: "watch-e2e-green",
+        note: "等 v2.4 回归矩阵全绿",
+        created: NOW - 26 * MIN,
+        pollSecs: 30,
+        deadlineAt: NOW + 34 * MIN,
+        pollCount: 52,
+      },
+      {
+        id: "watch-e2e-artifact",
+        note: "等 CI 把 junit.xml 上传完",
+        created: NOW - 9 * MIN,
+        pollSecs: 60,
+        deadlineAt: NOW + 51 * MIN,
+        pollCount: 9,
+      },
+    ],
+    pendingMessages: ["顺手把 quarantine 的那条 flaky 也重跑一遍"],
   },
   {
     id: "sess-infra-idle",

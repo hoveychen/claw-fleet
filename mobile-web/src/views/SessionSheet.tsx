@@ -50,8 +50,19 @@ import styles from "./SessionSheet.module.css";
 interface PaneRow {
   pane: DetailPane;
   label: string;
-  /** 右侧读数。`null` = 这一面此刻是空的（仍可点进去，但不吆喝）。 */
-  value: string | null;
+  /** 右侧读数。
+   *
+   *  三态，别塌成两态：
+   *  - 有字符串 = 快照告诉了我们这一面有什么；
+   *  - `"empty"` = 快照**证明**这一面是空的（没有 taskPlan = 没有计划，没有
+   *    handoff = 不在任何接力链上），显示「无」；
+   *  - `undefined` = 我们不知道（Token 与 Workflow 的内容要点进去才拉，快照里
+   *    没有），什么都不显示。
+   *
+   *  第一版把后两态都当成 null 显示「无」，于是一条花了 $4.33 的会话在
+   *  「Token 与花费」那行上写着「无」——把「我不知道」说成「没有」，是这张
+   *  半屏最容易犯也最难被发现的谎。 */
+  value?: string | "empty";
   /** 读数用 accent 强调 —— 只给「它在等你」那种。 */
   hot?: boolean;
   progress?: { done: number; total: number };
@@ -132,22 +143,24 @@ export function SessionSheet({
       ? session.taskPlan.currentTask
         ? `${session.taskPlan.currentTask} · ${session.taskPlan.done}/${session.taskPlan.total}`
         : `${session.taskPlan.done}/${session.taskPlan.total}`
-      : null,
+      : "empty",
     progress: session.taskPlan ?? undefined,
   });
-  progressRows.push({ pane: "token", label: t("Token 与花费"), value: null });
-  progressRows.push({ pane: "workflow", label: t("Workflow"), value: null });
+  // Token 与 Workflow 的内容不在快照里（点进去才拉），所以这两行不带读数——
+  // 写「无」会把「我不知道」说成「没有」。
+  progressRows.push({ pane: "token", label: t("Token 与花费") });
+  progressRows.push({ pane: "workflow", label: t("Workflow") });
   progressRows.push({
     pane: "handoff",
     label: t("接力链"),
     value: session.handoff
       ? t("第 {0} 棒 / 共 {1}", session.handoff.hop, session.handoff.chainLen)
-      : null,
+      : "empty",
   });
   // 决策历史即使此刻没有待答的卡也要能进去 —— 这一面装的是**答过的**卡，
   // 「上次我到底点了哪个」是它最常被用到的问法。
   if (pendingDecisions === 0) {
-    progressRows.push({ pane: "decisions", label: t("决策记录"), value: null });
+    progressRows.push({ pane: "decisions", label: t("决策记录") });
   }
 
   // ── 「会话」──────────────────────────────────────────────────────────
@@ -200,14 +213,16 @@ export function SessionSheet({
           <i style={{ width: `${Math.round((r.progress.done / r.progress.total) * 100)}%` }} />
         </span>
       )}
-      {r.value !== null ? (
-        <span className={styles.rowValue} data-hot={r.hot || undefined}>
-          {r.value}
-        </span>
-      ) : (
+      {r.value === "empty" ? (
         <span className={styles.rowValue} data-empty="">
           {t("无")}
         </span>
+      ) : (
+        r.value !== undefined && (
+          <span className={styles.rowValue} data-hot={r.hot || undefined}>
+            {r.value}
+          </span>
+        )
       )}
       <ChevronRight size={15} className={styles.chev} />
     </button>
