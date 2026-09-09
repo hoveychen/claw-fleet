@@ -429,6 +429,16 @@ const DICT: Record<string, string> = {
   返回: "Back",
   会话: "Session",
   消息: "Messages",
+  // ── 头部下面那条活状态轨（sessionStatusPills.ts）。额度耗尽 / 运行中 已在
+  //    本 dict 别处登记过，这里复用——重复 key 会静默覆盖已有翻译，别再加一遍。
+  远端断开: "Remote lost",
+  "{0} 张待决策": "{0} awaiting you",
+  "{0} 条排队": "{0} queued",
+  "{0} 个子代理": "{0} subagents",
+  "watch ×{0}": "watch ×{0}",
+  "{0} 个 watch": "{0} watches",
+  "接力 {0}/{1}": "Relay {0}/{1}",
+  "上下文 {0}%": "Context {0}%",
   计划: "Plans",
   接力: "Relay",
   "加载消息中…": "Loading messages…",
