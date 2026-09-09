@@ -240,7 +240,12 @@ quota_billed = true
 # 一个猜测伪装成事实。老板要给某个模型钉死一条梯子，在 `~/.fleet/models.toml`
 # 里给它补 `efforts` 即可，那是一个明确的人为决定，不是 Fleet 编的。
 #
-# 同理不写 `context`：没有可信来源，速查表里会显示 `—`，那比编一个数字好。
+# `context` 只填**实测到的**那两条。本机 dsh 会话里 dsh 自己上报的
+# `contextPressure.contextWindow`：deepseek-v4-flash 与 -flash-vision-exp 各 18 / 8
+# 个会话，一致报 1000000（同一批里经 dsh 走的 anthropic/claude-haiku-4.5 报
+# 200000，与 Claude 真实窗口吻合，可作读数无误的旁证）。
+# **deepseek-v4-pro 本机没有会话，所以留空、表里显示 `—`。**同族大概率也是 1M，
+# 但「大概率」不是实测，宁可空着。哪天有一个 pro 会话跑过，就能照样填上。
 #
 # 价格是 **peak 档、cache-miss 输入**。DeepSeek 的非峰值恰好半价，cache-hit
 # 输入另有更低一档，这两点写在 note 里而不是塞进数字，免得表里那个数看起来像
@@ -259,6 +264,7 @@ id = "deepseek-official/deepseek-v4-flash"
 label = "DeepSeek V4 Flash"
 family = "dsh"
 tier = "fast"
+context = 1000000
 price_in = 0.44
 price_out = 1.32
 
@@ -267,5 +273,6 @@ id = "deepseek-official/deepseek-v4-flash-vision-exp"
 label = "DeepSeek V4 Flash (vision, exp)"
 family = "dsh"
 tier = "fast"
+context = 1000000
 price_in = 0.44
 price_out = 1.32

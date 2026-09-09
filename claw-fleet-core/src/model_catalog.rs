@@ -328,25 +328,7 @@ fn context_cell(e: &ModelEntry) -> String {
     tokens.map(window_label).unwrap_or_else(|| "—".to_string())
 }
 
-/// The price cell: a per-Mtok pair, or the quota note.
-fn price_cell(e: &ModelEntry, locale: &str) -> String {
-    if e.quota_billed.unwrap_or(false) {
-        return if locale == "zh" { "ChatGPT 套餐配额" } else { "ChatGPT-plan quota" }.to_string();
-    }
-    match (e.price_in, e.price_out) {
-        (Some(i), Some(o)) => format!("${} / ${}", trim_price(i), trim_price(o)),
-        _ => "—".to_string(),
-    }
-}
 
-/// `10.0` → `10`, `2.5` → `2.5`. Prices read as money, not as floats.
-fn trim_price(v: f64) -> String {
-    if (v.fract()).abs() < f64::EPSILON {
-        format!("{}", v as i64)
-    } else {
-        format!("{v}")
-    }
-}
 
 
 
@@ -452,8 +434,8 @@ pub fn render_sheet_with(locale: &str, is_available: impl Fn(&str) -> bool) -> S
 工具的 `model` 参数、`Workflow` 里 `agent()` 的 `opts.model`/`opts.effort`、\
 `fleet` spawn 的 `--model`、`cws dispatch` 的 `--model`/`--effort`。\n\n",
         );
-        s.push_str("| 模型 | ID | harness | 档次 | 上下文 | $/1M 入·出 | effort |\n");
-        s.push_str("|---|---|---|---|---|---|---|\n");
+        s.push_str("| 模型 | ID | harness | 档次 | 上下文 | effort |\n");
+        s.push_str("|---|---|---|---|---|---|\n");
     } else {
         s.push_str("# Fleet model-selection cheat-sheet (managed by Claw Fleet — do not edit)\n\n");
         s.push_str(
@@ -464,20 +446,19 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
 `opts.model`/`opts.effort`, `fleet` spawn's `--model`, and `cws dispatch`'s \
 `--model`/`--effort`.\n\n",
         );
-        s.push_str("| Model | ID | Harness | Tier | Context | $/1M in·out | Effort |\n");
-        s.push_str("|---|---|---|---|---|---|---|\n");
+        s.push_str("| Model | ID | Harness | Tier | Context | Effort |\n");
+        s.push_str("|---|---|---|---|---|---|\n");
     }
 
     for family in &families {
         for e in listed_models(family) {
             s.push_str(&format!(
-                "| {} | `{}` | {} | {} | {} | {} | {} |\n",
+                "| {} | `{}` | {} | {} | {} | {} |\n",
                 e.display(),
                 e.id,
                 harness_of(e),
                 e.tier.as_deref().unwrap_or("—"),
                 context_cell(e),
-                price_cell(e, locale),
                 effort_cell(e, locale),
             ));
         }
@@ -522,9 +503,9 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
         if has("dsh") {
             s.push_str(
                 "\n\
-DeepSeek 那三行的价格是**峰值、未命中缓存**的输入价。非峰值恰好半价;命中缓存的\
-输入低得多(Pro $0.044,两个 Flash $0.014)。`deepseek-v4-flash` **不收图片输入**,\
-要发图走 `-vision-exp` 那个。\n",
+`deepseek-v4-flash` **不收图片输入**,要发图走 `-vision-exp` 那个。\
+`deepseek-v4-pro` 的上下文列是 `—`:本机还没有它的会话,而 dsh 的窗口是会话运行时\
+上报的,没测到就不编。\n",
             );
         }
         s.push_str(
@@ -567,10 +548,9 @@ Claude 侧**没有**生图能力。要位图资产(插画、贴图、mockup、he
         if has("dsh") {
             s.push_str(
                 "\n\
-The three DeepSeek rows quote **peak, cache-miss** input pricing. Off-peak is exactly \
-half, and cache-hit input is far lower (Pro $0.044, both Flash rows $0.014). \
 `deepseek-v4-flash` **rejects image input** — send images to the `-vision-exp` row \
-instead.\n",
+instead. `deepseek-v4-pro` shows `—` for context: no session for it has run here, and \
+dsh reports the window at runtime, so it is left blank rather than guessed.\n",
             );
         }
         s.push_str(
@@ -868,8 +848,14 @@ mod tests {
         }
     }
 
-    /// Every listed row must carry the facts the table prints, so no cell shows
-    /// a bare placeholder where a real value exists.
+    /// Every listed row carries a tier (which the sheet prints) and a price or a
+    /// quota flag (which it does not).
+    ///
+    /// The sheet dropped its price column deliberately: what a model costs per
+    /// token is not how an agent should be choosing one — that is what the tier
+    /// vocabulary is for. The price fields stay in the catalog because cost
+    /// accounting needs them (`model_cost`), and this keeps them complete so
+    /// that consumer can rely on them.
     #[test]
     fn every_listed_row_has_a_tier_and_a_price_or_quota() {
         for family in ["claude-code", "codex", "dsh"] {
@@ -882,17 +868,22 @@ mod tests {
         }
     }
 
-    /// dsh's own three rows must stay listed with a price.
+    /// dsh's own three rows stay listed, and state exactly what was measured.
     ///
     /// They were `listed = false` at first, on the reasoning that dsh publishes
     /// its real catalog at runtime and a static copy would rot. That reasoning
-    /// holds for the ~270 openrouter entries and does not hold for the built-in
-    /// `deepseek-official` route, which has a published price table
-    /// (`dsh_cost::DEEPSEEK_PEAK_RATES`). The result was a cheat-sheet written
-    /// *for a dsh agent* that named no dsh model at all. This test is what stops
-    /// that from happening again quietly.
+    /// holds for the ~270 openrouter entries and not for the built-in
+    /// `deepseek-official` route. The result was a cheat-sheet written *for a dsh
+    /// agent* that named no dsh model at all.
+    ///
+    /// The window rule is the interesting half. dsh reports
+    /// `contextPressure.contextWindow` per session, so the catalog states a
+    /// window only where a real local session reported one: both Flash rows did
+    /// (1M, consistently), Pro never ran here. Pro is therefore blank — not
+    /// filled in from the family's "probably the same". Ladders stay unasserted
+    /// for all three; those are dsh's to publish.
     #[test]
-    fn dsh_route_models_are_listed_with_prices() {
+    fn dsh_route_models_state_only_what_was_measured() {
         let rows = listed_models("dsh");
         let ids: Vec<&str> = rows.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(
@@ -904,12 +895,20 @@ mod tests {
             ]
         );
         for e in &rows {
-            assert!(e.price_in.is_some() && e.price_out.is_some(), "{} has no price", e.id);
-            assert_eq!(e.tier.as_deref().is_some(), true, "{} has no tier", e.id);
-            // Still no ladder and no window: those are dsh's to report, not ours.
+            assert!(e.tier.is_some(), "{} has no tier", e.id);
             assert_eq!(e.efforts, None, "{} must not assert a ladder", e.id);
-            assert_eq!(e.context, None, "{} must not assert a window", e.id);
         }
+        assert_eq!(context_window("deepseek-official/deepseek-v4-flash"), Some(1_000_000));
+        assert_eq!(
+            context_window("deepseek-official/deepseek-v4-flash-vision-exp"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            context_window("deepseek-official/deepseek-v4-pro"),
+            None,
+            "no local session measured Pro's window; it must stay blank rather than \
+             inherit the family's"
+        );
     }
 
     /// The bare aliases are legal `--model` values, so they resolve too.
