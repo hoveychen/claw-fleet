@@ -226,6 +226,19 @@ pub(crate) fn route_explorer_roots(
                     );
                     return;
                 }
+                // Same shape: the candidates it stats can sit outside every
+                // workspace (that is the whole point of the parent-directory
+                // reading), so there is nothing to validate `ws` against.
+                if path == crate::routes::EXPLORER_RESOLVE {
+                    let got =
+                        crate::file_explorer::resolve_prose_path(&decode("ws"), &decode("path"));
+                    respond_explorer_json(
+                        request,
+                        json_header,
+                        Ok(serde_json::to_string(&got).unwrap_or_default()),
+                    );
+                    return;
+                }
 
                 let ws = decode("ws");
                 let sessions: Vec<String> = sources

@@ -87,3 +87,15 @@ pub(crate) fn read_external_file(
     state.backend.read_external_file(&path)
 }
 
+/// Turn a path as an agent wrote it into one that exists, if any reading of it
+/// does. The webview cannot do this itself — resolving needs `stat`, and the
+/// chip's join is computed during render — so the click asks here first.
+#[tauri::command(async)]
+pub(crate) fn resolve_prose_path(
+    workspace: String,
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> claw_fleet_core::file_explorer::PathResolution {
+    state.backend.resolve_prose_path(&workspace, &path)
+}
+

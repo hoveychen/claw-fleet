@@ -122,6 +122,10 @@ pub const EXPLORER_FILE: &str = "/explorer_file";
 /// Read one absolute path outside every workspace (a path clicked in agent
 /// prose). Admin-only, like `EXPLORER_FILE` — it carries no workspace gate.
 pub const EXPLORER_EXTERNAL_FILE: &str = "/explorer_external_file";
+/// Resolve a path as an agent wrote it into one that exists, trying each
+/// reading in turn. Admin-only: it reports existence for paths outside any
+/// workspace, which is the same widening `EXPLORER_EXTERNAL_FILE` carries.
+pub const EXPLORER_RESOLVE: &str = "/explorer_resolve";
 pub const EXPLORER_ROOTS: &str = "/explorer_roots";
 /// Locate a file by the tail of its path, for when the literal path an agent
 /// named does not exist. Same workspace gate as `EXPLORER_DIR`.

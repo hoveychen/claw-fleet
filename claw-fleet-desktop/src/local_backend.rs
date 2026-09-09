@@ -2743,6 +2743,14 @@ impl LocalBackend {
         crate::file_explorer::read_external_file(path)
     }
 
+    pub fn resolve_prose_path(
+        &self,
+        workspace: &str,
+        path: &str,
+    ) -> crate::file_explorer::PathResolution {
+        crate::file_explorer::resolve_prose_path(workspace, path)
+    }
+
     pub fn list_scratchpad_dir(
         &self,
         workspace: &str,
