@@ -104,9 +104,30 @@ interface CodexFlow {
 
 export function EnvironmentPanel() {
   const { t } = useTranslation();
-  // A browser tab can neither run installers nor drive a login pty on the
-  // machine the user sits at; statuses still show (routed to the serving host).
-  const actionsDisabled = isWebBuild();
+  /**
+   * Actions a browser tab genuinely cannot perform, as opposed to ones it
+   * merely used to be denied.
+   *
+   * The install actions are *not* here any more. They run on the machine that
+   * serves the page — the same machine `harness_statuses` reports on — so
+   * "install it there" is a coherent request, and `/harness_install` +
+   * a `/proc_output` tail now carries it (see `mock/harnessInstall.ts`). What
+   * stays disabled is the work that has to happen on the machine the user is
+   * sitting at, or on a third machine over ssh:
+   *
+   *   - **login flows** — they open a browser for an OAuth redirect and drive
+   *     a pty the user types a code into. Doing that on the serving host would
+   *     authenticate the wrong machine's session, and the tab could not show
+   *     the redirect anyway.
+   *   - **dsh credential refs** — read/write the caller's own credential store.
+   *   - **remote hosts** — ssh out *from* the desktop app's machine.
+   *
+   * Each disabled control carries `title={webOnlyHint}`, because a control
+   * that is simply grey says nothing about whether it is unsupported or broken
+   * — which is exactly how this panel read before.
+   */
+  const localOnlyDisabled = isWebBuild();
+  const webOnlyHint = localOnlyDisabled ? t("env.web_action_unavailable") : undefined;
 
   const [statuses, setStatuses] = useState<HarnessStatus[] | null>(null);
   const [custody, setCustody] = useState<FoxyCustody | null>(null);
@@ -548,7 +569,12 @@ export function EnvironmentPanel() {
     if (!s.installed || managed || s.loggedIn) return null;
     if (!claudeFlow) {
       return (
-        <button className={styles.action_btn} onClick={() => void startClaudeLogin()} disabled={actionsDisabled}>
+        <button
+          className={styles.action_btn}
+          onClick={() => void startClaudeLogin()}
+          disabled={localOnlyDisabled}
+          title={webOnlyHint}
+        >
           {t("env.login_btn")}
         </button>
       );
@@ -594,7 +620,12 @@ export function EnvironmentPanel() {
     if (!s.installed || managed || s.loggedIn) return null;
     if (!codexFlow) {
       return (
-        <button className={styles.action_btn} onClick={() => void startCodexLogin()} disabled={actionsDisabled}>
+        <button
+          className={styles.action_btn}
+          onClick={() => void startCodexLogin()}
+          disabled={localOnlyDisabled}
+          title={webOnlyHint}
+        >
           {t("env.login_btn")}
         </button>
       );
@@ -627,7 +658,8 @@ export function EnvironmentPanel() {
       return (
         <button
           className={styles.action_btn}
-          disabled={actionsDisabled}
+          disabled={localOnlyDisabled}
+          title={webOnlyHint}
           onClick={() => {
             setDshOpen(true);
             void loadDshCreds();
@@ -730,7 +762,7 @@ export function EnvironmentPanel() {
           {!s.installed && (
             <button
               className={styles.action_btn_primary}
-              disabled={!!b || actionsDisabled}
+              disabled={!!b}
               onClick={() => void runInstall(s.source)}
             >
               {b === "install" ? t("env.installing") : t("env.install_btn")}
@@ -743,7 +775,7 @@ export function EnvironmentPanel() {
             // "check for updates" it is the rest of the time.
             <button
               className={s.outdated ? styles.action_btn_primary : styles.action_btn}
-              disabled={!!b || actionsDisabled}
+              disabled={!!b}
               onClick={() => void runUpdate(s.source)}
             >
               {b === "update"
@@ -756,7 +788,7 @@ export function EnvironmentPanel() {
           {s.source === "dsh" && needNode && (
             <button
               className={styles.action_btn_primary}
-              disabled={!!b || actionsDisabled}
+              disabled={!!b}
               onClick={() => void runNodeInstall()}
             >
               {b === "node" ? t("env.installing") : t("env.install_node_btn")}
@@ -795,7 +827,8 @@ export function EnvironmentPanel() {
           {host.ssh ? (
             <button
               className={styles.action_btn}
-              disabled={st?.probing || actionsDisabled}
+              disabled={st?.probing || localOnlyDisabled}
+              title={webOnlyHint}
               onClick={() => void probeHost(host.path)}
             >
               {st?.probing ? t("env.probing") : t("env.probe_host")}
@@ -839,7 +872,8 @@ export function EnvironmentPanel() {
               {!s.installed && (
                 <button
                   className={styles.action_btn}
-                  disabled={!!busySource || actionsDisabled}
+                  disabled={!!busySource || localOnlyDisabled}
+                  title={webOnlyHint}
                   onClick={() => void installRemote(host.path, s.source)}
                 >
                   {busySource === s.source ? t("env.installing") : t("env.install_btn")}
@@ -848,7 +882,8 @@ export function EnvironmentPanel() {
               {s.source === "codex" && s.installed && s.loggedIn === false && !flow && (
                 <button
                   className={styles.action_btn}
-                  disabled={actionsDisabled}
+                  disabled={localOnlyDisabled}
+          title={webOnlyHint}
                   onClick={() => void startRemoteCodexLogin(host.path)}
                 >
                   {t("env.login_btn")}

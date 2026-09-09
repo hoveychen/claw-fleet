@@ -132,6 +132,11 @@ mod tests {
             // the same side of the boundary — and registering a browse path
             // widens what the explorer will read.
             routes::GIT_CLONE_STREAM,
+            // Same again, and then some: these spawn an *installer* — a
+            // `curl | sh` from a vendor — on the serving host. Admin-only.
+            routes::HARNESS_INSTALL,
+            routes::HARNESS_UPDATE,
+            routes::HARNESS_INSTALL_NODE,
             routes::BROWSE_PATHS_ADD,
             routes::APPLY_GUARD_HOOK,
             routes::EXPLORER_FILE,

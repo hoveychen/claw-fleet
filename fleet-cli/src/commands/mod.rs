@@ -13,6 +13,7 @@ pub(crate) mod bootstrap;
 pub(crate) mod dsh;
 pub(crate) mod guard;
 pub(crate) mod handoff;
+pub(crate) mod harness;
 pub(crate) mod loop_cmd;
 pub(crate) mod memory;
 pub(crate) mod notes;

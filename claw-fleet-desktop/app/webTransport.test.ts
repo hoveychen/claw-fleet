@@ -233,15 +233,14 @@ const KNOWN_WEB_GAPS = [
   "install_rca_remote",
   "install_rca_on_host",
   "update_rca_remote",
-  // Environment wizard *actions*: run installers / drive a login pty on the
-  // machine you are sitting at, which a tab cannot do (statuses themselves are
-  // routed — `harness_statuses` reports the serving host). The panel disables
-  // these buttons under `isWebBuild()`, mirroring the install_fleet_cli
-  // precedent above.
+  // Environment wizard *login* actions: drive an OAuth pty and hand the user a
+  // browser on the machine you are sitting at, which a tab cannot do. The
+  // *install* actions used to be listed here too and no longer are — they run
+  // on the machine that serves the page, which is the same machine
+  // `harness_statuses` already reports on, so "install it there" is a coherent
+  // request. They go through `/harness_install` + a `/proc_output` tail
+  // (`LIVE_COMPOSITES`).
   "harness_login_context",
-  "install_harness",
-  "update_harness",
-  "install_node_runtime",
   "claude_login_start",
   "claude_login_poll",
   "claude_login_submit_code",

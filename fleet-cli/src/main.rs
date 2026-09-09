@@ -57,6 +57,12 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Install, update and probe the agent harnesses (Claude Code / Codex /
+    /// DeepSeek Harness) on this machine
+    Harness {
+        #[command(subcommand)]
+        action: HarnessCommands,
+    },
     /// Show per-agent and aggregate token speed
     Speed {
         /// Output raw JSON
@@ -1090,6 +1096,32 @@ pub(crate) enum WikiGuidanceCommands {
     Status,
 }
 
+/// `fleet harness …` — the environment panel's install actions, as commands.
+///
+/// These exist so all three clients of the data plane can run them, not just
+/// the desktop: `/harness_install` and friends spawn these through
+/// `proc_runner` and the caller tails `/proc_output` for live progress. The
+/// last stdout line carries the typed outcome (see
+/// `commands::harness::RESULT_MARKER`).
+#[derive(Subcommand)]
+pub(crate) enum HarnessCommands {
+    /// Install a harness through its official channel, then verify by probing
+    Install {
+        /// Which harness: `claude-code`, `codex` or `dsh`
+        source: String,
+    },
+    /// Update an installed harness through its own updater
+    Update {
+        /// Which harness: `claude-code`, `codex` or `dsh`
+        source: String,
+    },
+    /// Bootstrap Node.js into ~/.fleet/node (dsh's npm prerequisite)
+    #[command(name = "install-node")]
+    InstallNode,
+    /// Print the install/login status of every harness as JSON
+    Status,
+}
+
 #[derive(Subcommand)]
 pub(crate) enum PrdDisciplineCommands {
     /// Regenerate the guidance file with the current schema (e.g. after a Fleet
@@ -1160,6 +1192,12 @@ fn main() {
         Commands::Stop { id, force } => commands::agents::cmd_stop(&id, force),
         Commands::Interrupt { id } => commands::agents::cmd_interrupt(&id),
         Commands::Account { json } => commands::account::cmd_account(json),
+        Commands::Harness { action } => match action {
+            HarnessCommands::Install { source } => commands::harness::cmd_harness_install(&source),
+            HarnessCommands::Update { source } => commands::harness::cmd_harness_update(&source),
+            HarnessCommands::InstallNode => commands::harness::cmd_harness_install_node(),
+            HarnessCommands::Status => commands::harness::cmd_harness_status(),
+        },
         Commands::Speed { json } => commands::agents::cmd_speed(json),
         Commands::Memory { file, json } => commands::memory::cmd_memory(file, json),
         Commands::Artifact { action } => commands::artifact::cmd_artifact(action),

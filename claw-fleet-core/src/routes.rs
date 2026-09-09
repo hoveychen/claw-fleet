@@ -138,6 +138,14 @@ pub const GUARD_ANALYZE: &str = "/guard/analyze";
 pub const GUARD_PENDING: &str = "/guard/pending";
 pub const GUARD_RESPOND: &str = "/guard/respond";
 pub const HANDOFF_CHAIN: &str = "/handoff_chain";
+/// Start `fleet harness install <source>` as a streaming proc and return its
+/// record — the caller tails it through `/proc_output`, same shape as
+/// [`GIT_CLONE_STREAM`]. The typed outcome rides the last output line.
+pub const HARNESS_INSTALL: &str = "/harness_install";
+/// Same, for `fleet harness update <source>`.
+pub const HARNESS_UPDATE: &str = "/harness_update";
+/// Same, for `fleet harness install-node` (dsh's npm prerequisite).
+pub const HARNESS_INSTALL_NODE: &str = "/harness_install_node";
 pub const HARNESS_STATUSES: &str = "/harness_statuses";
 pub const HEALTH: &str = "/health";
 pub const HOOKS_PLAN: &str = "/hooks_plan";
