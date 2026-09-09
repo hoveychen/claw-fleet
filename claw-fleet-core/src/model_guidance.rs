@@ -211,32 +211,20 @@ mod tests {
             assert!(g.contains("--effort"), "{locale} must name the effort override");
         }
     }
-
+    /// The sheet quotes no prices at all.
+    ///
+    /// This used to assert the narrower rule "never quote a per-token price for
+    /// Codex, which bills against a plan quota". The sheet now carries no price
+    /// column in any row: what a model costs is not how an agent should pick one
+    /// — that is what the tier vocabulary is for — so the Codex-specific hazard
+    /// is subsumed by the general one.
     #[test]
-    fn render_both_locales_point_image_gen_at_codex() {
-        // Claude cannot generate images; a session that doesn't know that will
-        // hand back ASCII or SVG instead of borrowing codex's gpt-image-2. Both
-        // locales must name the model and where the output lands.
-        for locale in ["en", "zh"] {
+    fn render_quotes_no_prices() {
+        for locale in ["zh", "en"] {
             let g = render_guidance(locale);
-            assert!(g.contains("gpt-image-2"), "{locale} must name the image model");
-            assert!(
-                g.contains("generated_images"),
-                "{locale} must say where generated images land"
-            );
-            assert!(
-                g.contains("codex/image-generation"),
-                "{locale} must point at the wiki doc"
-            );
+            assert!(!g.contains('$'), "{locale} must not quote a price");
+            assert!(!g.contains("/1M"), "{locale} must not carry a per-Mtok column");
         }
-    }
-
-    #[test]
-    fn render_marks_codex_as_quota_billed() {
-        // Never quote a per-token price for Codex — it bills against a plan
-        // quota. The guidance must say so explicitly in both locales.
-        assert!(render_guidance("zh").contains("配额"), "zh must flag Codex quota billing");
-        assert!(render_guidance("en").contains("quota"), "en must flag Codex quota billing");
     }
 }
 

@@ -503,9 +503,7 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
         if has("dsh") {
             s.push_str(
                 "\n\
-`deepseek-v4-flash` **不收图片输入**,要发图走 `-vision-exp` 那个。\
-`deepseek-v4-pro` 的上下文列是 `—`:本机还没有它的会话,而 dsh 的窗口是会话运行时\
-上报的,没测到就不编。\n",
+`deepseek-v4-flash` **不收图片输入**,要发图走 `-vision-exp` 那个。\n",
             );
         }
         s.push_str(
@@ -529,19 +527,8 @@ dsh 把模型拆成 `provider` + `model` 两段,Fleet 的 spawn 用一个字符�
 `deepseek-official` 路由(有官方公开价目表);经 openrouter 之类第三方 provider \
 的模型不列——同一个模型经不同 provider 价格不同、逐用户不同,要知道本机配了\
 什么就读 `~/.dsh/settings.yaml`,别猜。表里那三行的 effort 梯子是向本机 dsh 实测来的\
-(`off`/`low`/`high`/`max`,**没有 `medium`**,默认 `high`)。没编目的 dsh 模型\
+(`off`/`low`/`high`/`max`,**没有 `medium`**,默认 `high`)。没编目的 dsh 模型的 \
 effort 一列显示「见 dsh」——那些的梯子五花八门,得问 dsh 自己。\n",
-            );
-        }
-        if has("codex") {
-            s.push_str(
-                "\n\
-## 生图(只有 codex 有)\n\
-\n\
-Claude 侧**没有**生图能力。要位图资产(插画、贴图、mockup、hero 图)时借 codex \
-自带的 imagegen skill:`codex exec -m gpt-5.6-luna \"用内置图像生成工具画 …\"`。\
-模型是 `gpt-image-2`,走 ChatGPT 配额,**不需要** `OPENAI_API_KEY`。产物落 \
-`$CODEX_HOME/generated_images/<thread_id>/`。细节见 wiki `codex/image-generation`。\n",
             );
         }
     } else {
@@ -549,8 +536,7 @@ Claude 侧**没有**生图能力。要位图资产(插画、贴图、mockup、he
             s.push_str(
                 "\n\
 `deepseek-v4-flash` **rejects image input** — send images to the `-vision-exp` row \
-instead. `deepseek-v4-pro` shows `—` for context: no session for it has run here, and \
-dsh reports the window at runtime, so it is left blank rather than guessed.\n",
+instead.\n",
             );
         }
         s.push_str(
@@ -583,19 +569,6 @@ different amounts through different providers and varies per user. Read \
 those three rows were measured against this machine's dsh (`off`/`low`/`high`/`max`, \
 **no `medium`**, default `high`). Uncatalogued dsh models show \"ask dsh\" instead — \
 their ladders vary widely, so ask dsh itself.\n",
-            );
-        }
-        if has("codex") {
-            s.push_str(
-                "\n\
-## Image generation (codex only)\n\
-\n\
-The Claude side has **no** image-generation capability. When you need a raster asset \
-(illustration, sprite, mockup, hero image), borrow codex's bundled imagegen skill: \
-`codex exec -m gpt-5.6-luna \"use the built-in image generation tool to draw …\"`. The \
-model is `gpt-image-2`, it bills against the ChatGPT quota, and it does **not** need \
-`OPENAI_API_KEY`. Output lands in `$CODEX_HOME/generated_images/<thread_id>/`. Details \
-live in the wiki at `codex/image-generation`.\n",
             );
         }
     }
@@ -709,7 +682,7 @@ mod tests {
         assert_eq!(tier("deepseek-official/deepseek-v4-pro"), Some("premium"));
         assert_eq!(
             tier("deepseek-official/deepseek-v4-flash-vision-exp"),
-            Some("fast")
+            Some("standard")
         );
         let ladder = effort_ladder("deepseek-official/deepseek-v4-pro").expect("ladder");
         assert_eq!(ladder, ["off", "low", "high", "max"]);
@@ -810,7 +783,6 @@ mod tests {
         assert!(!claude_only.contains("deepseek"), "dsh rows leaked");
         // The dsh-only and codex-only sections go with them.
         assert!(!claude_only.contains("dsh 怎么点名模型"));
-        assert!(!claude_only.contains("生图"));
         assert!(!claude_only.contains("DeepSeek 那三行"));
         // The tier vocabulary is harness-independent and stays.
         assert!(claude_only.contains("## 档次"));
@@ -819,8 +791,6 @@ mod tests {
         assert!(no_dsh.contains("gpt-5.6-sol"));
         assert!(!no_dsh.contains("deepseek"));
         assert!(!no_dsh.contains("How dsh names a model"));
-        // Codex is present, so its section stays.
-        assert!(no_dsh.contains("Image generation (codex only)"));
     }
 
     /// A probe that answers "no" to everything is a broken probe, not a machine
@@ -892,13 +862,13 @@ mod tests {
     /// `deepseek-official` route. The result was a cheat-sheet written *for a dsh
     /// agent* that named no dsh model at all.
     ///
-    /// Every field on these rows is measured, and the ones that were not
-    /// measured stay blank.
+    /// Every field on these rows has a named source.
     ///
-    /// Ladders come from a live `session/modelCatalog` query; windows come from
-    /// `contextPressure.contextWindow` in real local sessions. Both Flash rows
-    /// reported a window (1M, consistently); Pro never ran here, so its window is
-    /// blank rather than inherited from the family's "probably the same".
+    /// Ladders come from a live `session/modelCatalog` query. The Flash windows
+    /// come from `contextPressure.contextWindow` in real local sessions (1M,
+    /// consistently across 26 of them); Pro never ran here, so its 1M is the
+    /// boss's own answer rather than a measurement — flagged as such in
+    /// `models.toml` so the two kinds of source stay distinguishable.
     #[test]
     fn dsh_route_models_state_only_what_was_measured() {
         let rows = listed_models("dsh");
@@ -924,17 +894,13 @@ mod tests {
             );
             assert_eq!(e.default_effort.as_deref(), Some("high"), "{}", e.id);
         }
-        assert_eq!(context_window("deepseek-official/deepseek-v4-flash"), Some(1_000_000));
-        assert_eq!(
-            context_window("deepseek-official/deepseek-v4-flash-vision-exp"),
-            Some(1_000_000)
-        );
-        assert_eq!(
-            context_window("deepseek-official/deepseek-v4-pro"),
-            None,
-            "no local session measured Pro's window; it must stay blank rather than \
-             inherit the family's"
-        );
+        for id in [
+            "deepseek-official/deepseek-v4-pro",
+            "deepseek-official/deepseek-v4-flash",
+            "deepseek-official/deepseek-v4-flash-vision-exp",
+        ] {
+            assert_eq!(context_window(id), Some(1_000_000), "{id}");
+        }
     }
 
     /// The bare aliases are legal `--model` values, so they resolve too.
