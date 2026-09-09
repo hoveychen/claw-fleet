@@ -7,6 +7,7 @@ import {
   ChevronUp,
   CheckCheck,
   Download,
+  FileArchive,
   FileSpreadsheet,
   FileText,
   FileType,
@@ -38,7 +39,7 @@ import { isWebBuild } from "../hostEnv";
 import { getItem, setItem } from "../storage";
 import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
-import { downloadArtifact } from "../mock/liveProxy";
+import { downloadArtifact, downloadFolderZip } from "../mock/liveProxy";
 import { isBrowsableArchive } from "../../../shared-ts/zipDir";
 import { PageShell } from "./PageShell";
 import { ZipBrowser } from "./ZipBrowser";
@@ -84,6 +85,15 @@ export interface ArtifactVersion {
   sizeBytes: number;
   sourcePath: string;
   hardlinked: boolean;
+}
+
+/** Mirrors `claw_fleet_core::artifacts::FolderZip`. */
+export interface FolderZip {
+  filename: string;
+  memberCount: number;
+  totalBytes: number;
+  /** Artifacts whose stored bytes were missing, by title. */
+  skipped: string[];
 }
 
 /** Mirrors `claw_fleet_core::artifacts::Folder`. */
@@ -732,6 +742,55 @@ export function ArtifactsView() {
     [folderOp],
   );
 
+  /**
+   * Pack a folder (recursively) into a zip the user picks a location for.
+   *
+   * The plan is fetched first so an empty folder is refused before a save
+   * dialog appears, and so the dialog can propose a real filename. In the
+   * browser build there is no dialog to show — the server streams the archive
+   * as a download instead, which `downloadFolderZip` handles.
+   */
+  const exportFolder = useCallback(
+    async (workspacePath: string, directory: string) => {
+      try {
+        const plan = await invoke<FolderZip>("artifact_folder_zip_plan", {
+          workspacePath,
+          directory,
+        });
+        if (plan.memberCount === 0) {
+          setError(t("artifacts.zip_empty", "这个文件夹里没有产出，无需打包。"));
+          return;
+        }
+        if (isWebBuild()) {
+          await downloadFolderZip(workspacePath, directory, plan.filename);
+          setError(null);
+          return;
+        }
+        const dest = await save({ defaultPath: plan.filename });
+        if (!dest) return;
+        setBusy(true);
+        const done = await invoke<FolderZip>("export_artifact_folder", {
+          workspacePath,
+          directory,
+          dest,
+        });
+        setError(
+          done.skipped.length === 0
+            ? null
+            : t("artifacts.zip_skipped", "已打包 {{count}} 份，跳过 {{skipped}}（存储的字节已不在）", {
+                count: done.memberCount,
+                skipped: done.skipped.join("、"),
+              }),
+        );
+      } catch (e) {
+        setError(t("artifacts.zip_failed", "打包失败：{{error}}", { error: String(e) }));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [t],
+  );
+
   const deleteFolder = useCallback(
     (workspacePath: string, path: string) =>
       folderOp(async () => {
@@ -1000,6 +1059,7 @@ export function ArtifactsView() {
           onCreateFolder={createFolder}
           onRenameFolder={renameFolder}
           onDeleteFolder={deleteFolder}
+          onExportFolder={exportFolder}
         />
       }
     >
@@ -1239,6 +1299,7 @@ function ArtifactDirectoryTree({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
+  onExportFolder,
 }: {
   nodes: ArtifactDirectoryNode[];
   selectedKey: string;
@@ -1249,6 +1310,7 @@ function ArtifactDirectoryTree({
   onCreateFolder: (workspacePath: string, path: string) => void;
   onRenameFolder: (workspacePath: string, from: string, to: string) => void;
   onDeleteFolder: (workspacePath: string, path: string) => void;
+  onExportFolder: (workspacePath: string, path: string) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -1274,6 +1336,7 @@ function ArtifactDirectoryTree({
           onCreateFolder={onCreateFolder}
           onRenameFolder={onRenameFolder}
           onDeleteFolder={onDeleteFolder}
+          onExportFolder={onExportFolder}
         />
       ))}
     </nav>
@@ -1289,6 +1352,7 @@ function ArtifactDirectoryBranch({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
+  onExportFolder,
 }: {
   node: ArtifactDirectoryNode;
   depth: number;
@@ -1298,6 +1362,7 @@ function ArtifactDirectoryBranch({
   onCreateFolder: (workspacePath: string, path: string) => void;
   onRenameFolder: (workspacePath: string, from: string, to: string) => void;
   onDeleteFolder: (workspacePath: string, path: string) => void;
+  onExportFolder: (workspacePath: string, path: string) => void;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
@@ -1358,6 +1423,17 @@ function ArtifactDirectoryBranch({
           <span className={styles.tree_count}>{node.count}</span>
         </button>
         <span className={styles.tree_actions}>
+          {/* Available on the workspace row too, where it packs everything in
+              that workspace — the tree already treats that row as a folder. */}
+          <button
+            type="button"
+            className={styles.tree_action}
+            title={t("artifacts.folder_zip", "打包导出")}
+            aria-label={t("artifacts.folder_zip", "打包导出")}
+            onClick={() => onExportFolder(node.workspacePath, node.directory)}
+          >
+            <FileArchive size={13} strokeWidth={1.5} />
+          </button>
           <button
             type="button"
             className={styles.tree_action}
@@ -1425,6 +1501,7 @@ function ArtifactDirectoryBranch({
           onCreateFolder={onCreateFolder}
           onRenameFolder={onRenameFolder}
           onDeleteFolder={onDeleteFolder}
+          onExportFolder={onExportFolder}
         />
       ))}
     </div>

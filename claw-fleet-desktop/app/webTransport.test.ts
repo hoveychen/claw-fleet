@@ -212,6 +212,10 @@ const KNOWN_WEB_GAPS = [
   // Same shape: writes to a path the user picks on the caller's filesystem.
   // The browser build downloads the blob instead (`downloadArtifact`).
   "export_artifact",
+  // And the folder-at-a-time version of it: the browser build streams the
+  // archive down as a download (`downloadFolderZip`) rather than asking a tab
+  // for a destination path it cannot write to.
+  "export_artifact_folder",
   // Saves one member of a zip artifact, whose bytes the webview already holds.
   // Same gap and same escape hatch: `exportMemberBytes` hands the tab an
   // <a download> instead of asking for a path it cannot write to.
