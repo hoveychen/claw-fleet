@@ -29,6 +29,47 @@ pub(crate) fn route_fleet_skill(request: tiny_http::Request) {
     );
 }
 
+/// The git commit this server build came from, 7 chars, or `"unknown"`.
+///
+/// Two sources, runtime first:
+///
+/// 1. `FLEET_GIT_COMMIT` in the environment. This is for images built without a
+///    `.git` in the build context — the Fleet Cloud container's `.dockerignore`
+///    excludes it, so `build.rs`'s `git rev-parse` finds nothing there. Setting
+///    it at *build* time instead would work but put a per-commit value into the
+///    env of the `cargo build --release` layer, busting that layer's cache on
+///    every push; the runtime stage's `ENV` is one cheap layer.
+/// 2. The `build.rs` stamp, which covers every ordinary build (local, CI,
+///    release tarballs).
+///
+/// Neither → `"unknown"`, which every consumer treats as "no commit" and hides
+/// rather than displays.
+pub(crate) fn build_commit() -> String {
+    if let Ok(v) = std::env::var("FLEET_GIT_COMMIT") {
+        let v = v.trim();
+        if !v.is_empty() {
+            return v.chars().take(7).collect();
+        }
+    }
+    option_env!("FLEET_GIT_COMMIT").unwrap_or("unknown").to_string()
+}
+
+/// `/health`'s body. Hand-formatted rather than serialized because it is three
+/// compile-time strings and no struct.
+///
+/// `commit` rides along because the browser build has no compile-time constant
+/// of its own to read — it shows whatever the serving process reports, the way
+/// the desktop shows its own `desktop_build_commit()`. `"unknown"` when this
+/// build had no git source (see build.rs); consumers hide the line rather than
+/// print that.
+pub(crate) fn health_body() -> String {
+    format!(
+        r#"{{"version":"{}","commit":"{}","status":"ok"}}"#,
+        env!("CARGO_PKG_VERSION"),
+        build_commit(),
+    )
+}
+
 pub(crate) fn route_health(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -37,12 +78,8 @@ pub(crate) fn route_health(
     path: &str,
 ) {
 
-                let body = format!(
-                    r#"{{"version":"{}","status":"ok"}}"#,
-                    env!("CARGO_PKG_VERSION")
-                );
                 let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
+                    tiny_http::Response::from_string(health_body()).with_header(json_header),
                 );
             }
 
@@ -963,3 +1000,57 @@ pub(crate) fn route_search(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
             }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `/health` is the browser build's only source for the version and commit
+    /// it shows in settings, and the body is hand-formatted — a stray quote in
+    /// either value would make it unparseable, which the caller sees as "no
+    /// version" with nothing pointing at why.
+    #[test]
+    fn health_body_is_json_carrying_version_commit_and_status() {
+        let v: serde_json::Value = serde_json::from_str(&health_body())
+            .expect("/health must answer parseable JSON");
+        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["commit"], build_commit());
+    }
+
+    /// Either a 7-char short SHA or the literal `"unknown"` — never empty, and
+    /// never a full 40-char sha, because consumers slice nothing and print it
+    /// as-is. build.rs truncates its stamp; the runtime env may carry a full
+    /// sha (the cloud image passes `github.sha`), so `build_commit` truncates
+    /// that one itself.
+    #[test]
+    fn build_commit_is_short_or_unknown() {
+        let c = build_commit();
+        assert!(!c.is_empty());
+        assert!(
+            c == "unknown" || (c.len() == 7 && c.chars().all(|ch| ch.is_ascii_hexdigit())),
+            "unexpected build commit: {c:?}"
+        );
+    }
+
+    /// The runtime env wins over the build stamp, and a 40-char sha is cut to
+    /// 7. This is the path the Fleet Cloud container takes: its build context
+    /// has no `.git`, so the stamp is `"unknown"` and the entrypoint's env is
+    /// the only truth. Serial with the test above by way of a shared lock —
+    /// cargo runs tests in threads and the env is process-wide.
+    #[test]
+    fn runtime_env_overrides_and_truncates() {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = LOCK.lock().unwrap();
+        let prev = std::env::var("FLEET_GIT_COMMIT").ok();
+        std::env::set_var("FLEET_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567");
+        assert_eq!(build_commit(), "0123456");
+        // Blank is not an override — fall through to the stamp.
+        std::env::set_var("FLEET_GIT_COMMIT", "   ");
+        assert_ne!(build_commit(), "");
+        match prev {
+            Some(v) => std::env::set_var("FLEET_GIT_COMMIT", v),
+            None => std::env::remove_var("FLEET_GIT_COMMIT"),
+        }
+    }
+}

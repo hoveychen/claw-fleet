@@ -94,5 +94,14 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # The commit this image is built from, twice over: `.git` is not in
+          # the build context, so neither `build.rs` nor vite can read it.
+          # FLEET_GIT_COMMIT lands as a runtime ENV (reported by `/health`, shown
+          # in the browser build's settings); APP_COMMIT is baked into the mobile
+          # bundle's __APP_COMMIT__ (shown on its 关于 page). Absent → both read
+          # "unknown" and the rows hide.
+          build-args: |
+            FLEET_GIT_COMMIT=${{ github.sha }}
+            APP_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

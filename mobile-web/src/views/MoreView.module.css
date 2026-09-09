@@ -329,3 +329,10 @@
   color: var(--color-error);
   line-height: 1.5;
 }
+
+/* 构建 commit：机器说的话，跟版本号一样右侧对齐，但用等宽体，好让一串
+   十六进制看起来是个标识符而不是一个词。 */
+.buildValue {
+  composes: rowValue;
+  font-family: var(--font-mono);
+}
