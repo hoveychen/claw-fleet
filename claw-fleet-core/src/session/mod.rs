@@ -2971,27 +2971,44 @@ mod tests {
         assert!((pct - 0.25).abs() < 1e-6);
     }
 
+    /// Catalogued Codex slugs take their window from `models.toml`, which is
+    /// populated from `~/.codex/models_cache.json`.
+    ///
+    /// This used to assert 400K for the whole GPT-5 family, from the advertised
+    /// GPT-5 figure. The cache reports `context_window: 272000` for every listed
+    /// model (with `max_context_window: 872000` as the ceiling), so 400K was
+    /// simply wrong for the 5.6 tiers and 5.5. It rarely showed: Codex reports
+    /// its real per-session window every turn and `extract_context_percent`
+    /// prefers that, so this path only fires when the field is missing.
     #[test]
-    fn context_window_gpt5_family_fallback() {
-        // Codex normally reports the precise per-session window via
-        // token_count.model_context_window, so this fallback rarely fires. But
-        // if that field is ever missing, gpt-5.x must not fall through to None
-        // (which hides the ctx chip). All Codex slugs — plain gpt-5, the 5.6
-        // sol/luna/terra tiers, and 5.5/5.4 — map to the advertised 400K
-        // GPT-5 context window.
-        for model in [
-            "gpt-5",
-            "gpt-5.6-sol",
-            "gpt-5.6-luna",
-            "gpt-5.6-terra",
-            "gpt-5.5",
-            "gpt-5.4",
-            "gpt-5.1-codex-mini",
-        ] {
+    fn context_window_catalogued_codex_slugs() {
+        for model in ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5"] {
+            assert_eq!(
+                context_window_for_model(model, 0),
+                Some(272_000),
+                "{model} should take its window from the catalog"
+            );
+        }
+    }
+
+    #[test]
+    fn context_window_uncatalogued_gpt_family_fallback() {
+        // Slugs the catalog does not name must not fall through to None, which
+        // hides the ctx chip. GPT-5 keeps its advertised 400K; GPT-6 needs its
+        // own branch — before it existed, `gpt-6-*` matched nothing at all,
+        // because the next branch down only ever matched `gpt-4*`.
+        for model in ["gpt-5", "gpt-5.4", "gpt-5.1-codex-mini"] {
             assert_eq!(
                 context_window_for_model(model, 0),
                 Some(400_000),
                 "{model} should fall back to the 400K gpt-5 window"
+            );
+        }
+        for model in ["gpt-6", "gpt-6-something-new"] {
+            assert_eq!(
+                context_window_for_model(model, 0),
+                Some(272_000),
+                "{model} must not fall through to None"
             );
         }
     }
