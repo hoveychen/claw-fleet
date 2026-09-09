@@ -104,6 +104,46 @@ impl SessionSnapshot {
         }
     }
 
+    /// The current session list, or `None` when nothing has been scanned yet.
+    ///
+    /// [`Self::sessions`] blocks on that first scan because a roster is either
+    /// right or wrong — `[]` would tell a connecting client "you have no
+    /// sessions". Some callers are not rosters, though, and for them the same
+    /// wait is the harm: the SSE broadcaster reads this list only to *decorate*
+    /// decision cards with a workspace name and a session title, and it does so
+    /// at the top of the loop that pushes those cards out. So one cold scan
+    /// delayed every card the loop had to deliver.
+    ///
+    /// Measured on Boss's Mac, 194 project dirs: a cold scan is 2.9s on its own
+    /// and 7.3s with three of them running at once. `fleet-cli`'s
+    /// `sse_dismiss.rs` had been red for exactly that reason — three tests in
+    /// parallel, each spawning a serve that paid its own cold scan, against a
+    /// 5s assertion window.
+    ///
+    /// A cold read still kicks a background refresh and still counts as a read
+    /// (so the ticker starts), which is what makes the *next* tick warm.
+    pub fn sessions_if_scanned(self: &Arc<Self>) -> Option<Vec<SessionInfo>> {
+        *self.last_read.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+
+        let cached = {
+            let cur = self.current.lock().unwrap_or_else(|e| e.into_inner());
+            cur.as_ref()
+                .map(|snap| (snap.sessions.clone(), snap.at.elapsed()))
+        };
+        match cached {
+            Some((sessions, age)) => {
+                if age >= REFRESH_INTERVAL {
+                    self.refresh_in_background();
+                }
+                Some(sessions)
+            }
+            None => {
+                self.refresh_in_background();
+                None
+            }
+        }
+    }
+
     /// Rescan now and store the result. Concurrent callers share one scan.
     pub fn refresh(&self) -> Vec<SessionInfo> {
         let _one_at_a_time = self.scanning.lock().unwrap_or_else(|e| e.into_inner());
@@ -264,6 +304,36 @@ mod tests {
             "the cold read must have waited for the scan, not answered empty"
         );
         assert_eq!(scans.load(Ordering::SeqCst), 1);
+    }
+
+    /// The property the SSE broadcaster needs: a cold read that answers *now*.
+    ///
+    /// Its loop reads the list only to decorate decision cards, and it does so
+    /// before pushing them — so with the blocking read, one cold scan sat in
+    /// front of every card. Measured on Boss's Mac (a live dsh answering
+    /// `session/list` with 294 sessions): 2.9s alone, 7.3s with three serves
+    /// scanning at once, against `sse_dismiss.rs`'s 5s assertion window.
+    #[test]
+    fn a_cold_non_blocking_read_answers_none_without_waiting() {
+        let (snap, scans) = snapshot(Duration::from_millis(400));
+        let started = Instant::now();
+        assert!(
+            snap.sessions_if_scanned().is_none(),
+            "a cold non-blocking read must say 'not scanned yet', not fabricate []",
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "the cold non-blocking read waited {:?}; waiting is the whole thing it exists to avoid",
+            started.elapsed(),
+        );
+        // …and it must have started the scan, or nothing would ever warm it.
+        std::thread::sleep(Duration::from_millis(700));
+        assert_eq!(scans.load(Ordering::SeqCst), 1, "cold read must kick a background scan");
+        assert_eq!(
+            snap.sessions_if_scanned().map(|s| s.len()),
+            Some(1),
+            "once that scan lands, the same call returns the real list",
+        );
     }
 
     #[test]

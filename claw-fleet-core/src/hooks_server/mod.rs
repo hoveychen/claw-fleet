@@ -473,59 +473,76 @@ pub fn serve(opts: ServeOptions) {
                     crate::consumer_heartbeat::WriterKind::Server,
                 );
 
-                // Broadcast session updates. Reads the same snapshot the routes
-                // read rather than scanning again: this loop and a `/sessions`
-                // poll used to each pay their own RPC to every source, and its
-                // 2s cadence matches the snapshot's refresh interval, so what a
-                // client is told still changes as fast as it did.
-                let sessions = snapshot_bg.sessions();
-                let json = serde_json::to_string(&sessions).unwrap_or_default();
-                let sessions_changed = json != prev_sessions_json;
-                if sessions_changed {
-                    sse_bg.broadcast("sessions-updated", &json);
-                }
-                // Publish to mobile on change, and also when a new mobile
-                // client just came online (it needs an initial snapshot even
-                // if nothing changed since the last one).
-                let mobile_clients = crate::mobile_relay::client_count();
-                if sessions_changed || mobile_clients > prev_mobile_clients {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
-                        crate::mobile_relay::publish_sessions(&v);
+                // Reads the same snapshot the routes read rather than scanning
+                // again: this loop and a `/sessions` poll used to each pay their
+                // own RPC to every source, and its 2s cadence matches the
+                // snapshot's refresh interval, so what a client is told still
+                // changes as fast as it did.
+                //
+                // `sessions_if_scanned`, not `sessions`, because the blocking
+                // variant put one cold scan in front of every decision card this
+                // loop had to deliver — 2.9s alone on Boss's Mac, 7.3s with three
+                // serves scanning at once. The roster and the waiting alerts do
+                // need a real scan (`[]` there would read as "you have no
+                // sessions"), so they sit out the cold tick; the decision
+                // sections below only use the list to fill in a card's workspace
+                // name and title, and a card that arrives with an unfilled title
+                // beats a card that arrives seven seconds late.
+                let scanned = snapshot_bg.sessions_if_scanned();
+                if let Some(sessions) = scanned.as_ref() {
+                    let json = serde_json::to_string(sessions).unwrap_or_default();
+                    let sessions_changed = json != prev_sessions_json;
+                    if sessions_changed {
+                        sse_bg.broadcast("sessions-updated", &json);
                     }
-                }
-                prev_mobile_clients = mobile_clients;
-                if sessions_changed {
-                    prev_sessions_json = json;
-                }
-
-                // Broadcast waiting alerts (simple detection from session status)
-                let waiting_ids: std::collections::HashSet<String> = sessions
-                    .iter()
-                    .filter(|s| {
-                        !s.is_subagent
-                            && s.status == crate::session::SessionStatus::WaitingInput
-                    })
-                    .map(|s| s.id.clone())
-                    .collect();
-                for sess in &sessions {
-                    if waiting_ids.contains(&sess.id) && !prev_alert_ids.contains(&sess.id) {
-                        let alert = crate::ui_types::WaitingAlert {
-                            session_id: sess.id.clone(),
-                            workspace_name: sess.workspace_name.clone(),
-                            summary: sess.last_message_preview.clone().unwrap_or_default(),
-                            detected_at_ms: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as u64,
-                            jsonl_path: sess.jsonl_path.clone(),
-                            source: sess.agent_source.clone(),
-                        };
-                        if let Ok(json) = serde_json::to_string(&alert) {
-                            sse_bg.broadcast("waiting-alert", &json);
+                    // Publish to mobile on change, and also when a new mobile
+                    // client just came online (it needs an initial snapshot even
+                    // if nothing changed since the last one).
+                    let mobile_clients = crate::mobile_relay::client_count();
+                    if sessions_changed || mobile_clients > prev_mobile_clients {
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
+                            crate::mobile_relay::publish_sessions(&v);
                         }
                     }
+                    prev_mobile_clients = mobile_clients;
+                    if sessions_changed {
+                        prev_sessions_json = json;
+                    }
+
+                    // Broadcast waiting alerts (simple detection from session status)
+                    let waiting_ids: std::collections::HashSet<String> = sessions
+                        .iter()
+                        .filter(|s| {
+                            !s.is_subagent
+                                && s.status == crate::session::SessionStatus::WaitingInput
+                        })
+                        .map(|s| s.id.clone())
+                        .collect();
+                    for sess in sessions {
+                        if waiting_ids.contains(&sess.id) && !prev_alert_ids.contains(&sess.id) {
+                            let alert = crate::ui_types::WaitingAlert {
+                                session_id: sess.id.clone(),
+                                workspace_name: sess.workspace_name.clone(),
+                                summary: sess.last_message_preview.clone().unwrap_or_default(),
+                                detected_at_ms: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as u64,
+                                jsonl_path: sess.jsonl_path.clone(),
+                                source: sess.agent_source.clone(),
+                            };
+                            if let Ok(json) = serde_json::to_string(&alert) {
+                                sse_bg.broadcast("waiting-alert", &json);
+                            }
+                        }
+                    }
+                    prev_alert_ids = waiting_ids;
                 }
-                prev_alert_ids = waiting_ids;
+                // Card decoration below. Empty on a cold tick, which
+                // `resolve_pending_display`'s "only fill what is missing" rule
+                // turns into "fill nothing" rather than "overwrite with blanks".
+                let sessions: &[crate::session::SessionInfo] =
+                    scanned.as_deref().unwrap_or(&[]);
 
                 // Broadcast new guard requests
                 let guard_ids: std::collections::HashSet<String> =
