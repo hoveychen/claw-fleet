@@ -613,85 +613,14 @@ knowledge-base material.\n"
 /// model to name when this session spawns *Fleet* work through the `fleet` CLI.
 /// There is deliberately no dsh price table — dsh bills through whichever
 /// provider the user configured, so any number here would be a guess.
+/// The model cheat-sheet for dsh's AGENTS.md.
+///
+/// The same single sheet the other two harnesses get — see
+/// [`crate::model_catalog::render_sheet`]. dsh-specific material (how a
+/// `provider/model` string is split) lives in that shared sheet, because a
+/// Claude or Codex agent naming a dsh model needs it just as much.
 pub fn render_dsh_model_block(locale: &str) -> String {
-    // Tables from `models.toml` via `model_catalog` — see the note in
-    // `model_guidance::render_guidance`. This sheet lists both other harnesses
-    // in one table (a dsh agent hands work to either), so it renders the two
-    // families back to back in the merged-price shape.
-    let claude_rows = crate::model_catalog::render_rows("claude-code", locale, false);
-    let codex_rows = crate::model_catalog::render_rows("codex", locale, false);
-    // dsh's own rows: only the built-in `deepseek-official` route, which has a
-    // published price table. The 270-odd openrouter entries are per-user and
-    // priced per provider, so the sheet points at settings.yaml for those
-    // instead of guessing.
-    let dsh_rows = crate::model_catalog::render_rows("dsh", locale, false);
-    let claude_efforts = crate::model_catalog::render_effort_line("claude-code", locale);
-    let codex_efforts = crate::model_catalog::render_effort_line("codex", locale);
-    if locale == "zh" {
-        return format!("# Fleet 模型选择速查 for dsh (managed by Claw Fleet — do not edit this block)\n\
-\n\
-## dsh 自己怎么点名模型\n\
-\n\
-dsh 把模型拆成 `provider` + `model` 两段,Fleet 的 spawn 用一个字符串表达,\
-以**第一个 `/`** 分界:`openrouter/anthropic/claude-haiku-4.5` → provider \
-`openrouter`,model `anthropic/claude-haiku-4.5`。不含 `/` 的字符串不指定 \
-provider,会话就留在 harness 自身配置的模型上。\n\
-\n\
-可用的 provider / model 取决于**用户 `~/.dsh/settings.yaml` 里配了什么**。\
-下表只列 dsh 内置的 `deepseek-official` 路由——它有官方公开价目表,所以能如实\
-报价。**经 openrouter 之类第三方 provider 的模型不在表里**:同一个模型经不同 \
-provider 价格不同,逐用户不同,凭印象报价就是编造。要知道本机当前配了什么,\
-读那个配置文件,别猜。\n\
-\n\
-## 你派活给 Fleet 会话时选哪档(`fleet` CLI 的 `--model` / `--effort`)\n\
-\n\
-| 模型 | ID | 上下文 | 输入/输出 $/1M | 何时选 |\n\
-|---|---|---|---|---|\n\
-{dsh_rows}{claude_rows}{codex_rows}\
-\n\
-Claude effort:{claude_efforts},`xhigh` 是编码/agentic 最佳档。\n\
-Codex effort:{codex_efforts}。\n\
-\n\
-## 怎么挑\n\
-\n\
-- 机械、可并行、量大的活 → 便宜快档(Haiku / Sonnet;Luna / Terra)+ 低 effort。\n\
-- 硬推理、最终综合、把关校验 → 最强档(Opus / Fable;Sol)+ high/xhigh。\n\
-- 拿不准就别指定,让它继承默认。\n");
-    }
-    format!("# Fleet model-selection cheat-sheet for dsh (managed by Claw Fleet — do not edit this block)\n\
-\n\
-## How dsh names a model\n\
-\n\
-dsh addresses a model as `provider` + `model`. Fleet's spawn carries one \
-string and splits on the **first `/`**: `openrouter/anthropic/claude-haiku-4.5` \
-→ provider `openrouter`, model `anthropic/claude-haiku-4.5`. A string with no \
-`/` names no provider and leaves the session on whatever the harness itself is \
-configured with.\n\
-\n\
-Which providers and models exist depends on **what the user configured in \
-`~/.dsh/settings.yaml`**. The table below lists only dsh's built-in \
-`deepseek-official` route, which has a published price table and can therefore \
-be quoted honestly. **Models reached through a third-party provider such as \
-openrouter are not listed**: the same model costs different amounts through \
-different providers, it varies per user, and quoting a number from memory would \
-be inventing one. Read that config when you need to know; don't guess.\n\
-\n\
-## Picking a tier when you hand work to a Fleet session (`fleet` CLI `--model` / `--effort`)\n\
-\n\
-| Model | ID | Context | In/Out $/1M | When to pick |\n\
-|---|---|---|---|---|\n\
-{dsh_rows}{claude_rows}{codex_rows}\
-\n\
-Claude effort: {claude_efforts} (`xhigh` is best for coding and agentic work).\n\
-Codex effort: {codex_efforts}.\n\
-\n\
-## How to pick\n\
-\n\
-- Mechanical, parallel, high-volume work → the cheap/fast tier \
-(Haiku / Sonnet; Luna / Terra) at low effort.\n\
-- Hard reasoning, final synthesis, adversarial verification → the strongest \
-tier (Opus / Fable; Sol) at high/xhigh.\n\
-- When in doubt, don't specify one — let it inherit the default.\n")
+    crate::model_catalog::render_sheet(locale)
 }
 
 /// Collapse all whitespace runs (incl. newlines) to single spaces so a

@@ -73,22 +73,6 @@ pub struct ModelEntry {
     /// Billed against a plan quota, with no per-token price (all of Codex).
     #[serde(default)]
     pub quota_billed: Option<bool>,
-    /// The "when to pick this" sentence, shared by all three cheat-sheets.
-    #[serde(default)]
-    pub note_zh: Option<String>,
-    #[serde(default)]
-    pub note_en: Option<String>,
-    /// The long form of the "when to pick" sentence, with the caveats worth
-    /// stating once (data-retention requirements, API quirks, intro pricing).
-    ///
-    /// Only the Claude-side cheat-sheet prints this: it lands in `CLAUDE.md`,
-    /// which has room. The Codex and dsh sheets land in `AGENTS.md` files with a
-    /// 32 KiB ceiling that the whole Fleet block set shares, so they print
-    /// `note_*` and stay terse. Absent → falls back to `note_*`.
-    #[serde(default)]
-    pub detail_zh: Option<String>,
-    #[serde(default)]
-    pub detail_en: Option<String>,
     /// `false` = resolvable but kept out of the cheat-sheet tables (bare
     /// aliases, dsh rows). Absent means listed.
     #[serde(default)]
@@ -115,18 +99,6 @@ impl ModelEntry {
     /// Display name, falling back to the id when none is set.
     pub fn display(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.id)
-    }
-
-    /// The localized short "when to pick" sentence.
-    pub fn note(&self, locale: &str) -> &str {
-        let picked = if locale == "zh" { &self.note_zh } else { &self.note_en };
-        picked.as_deref().unwrap_or("")
-    }
-
-    /// The localized long form, falling back to [`Self::note`].
-    pub fn detail(&self, locale: &str) -> &str {
-        let picked = if locale == "zh" { &self.detail_zh } else { &self.detail_en };
-        picked.as_deref().unwrap_or_else(|| self.note(locale))
     }
 
     /// Overlay `other`'s set fields onto `self`, leaving the rest alone. This is
@@ -162,18 +134,6 @@ impl ModelEntry {
         }
         if other.quota_billed.is_some() {
             self.quota_billed = other.quota_billed;
-        }
-        if other.note_zh.is_some() {
-            self.note_zh = other.note_zh;
-        }
-        if other.note_en.is_some() {
-            self.note_en = other.note_en;
-        }
-        if other.detail_zh.is_some() {
-            self.detail_zh = other.detail_zh;
-        }
-        if other.detail_en.is_some() {
-            self.detail_en = other.detail_en;
         }
         if other.listed.is_some() {
             self.listed = other.listed;
@@ -388,76 +348,7 @@ fn trim_price(v: f64) -> String {
     }
 }
 
-/// The "(previous `x` still selectable, same price)" clause for a row, built
-/// from whichever rows name it in `superseded_by`.
-fn legacy_clause(e: &ModelEntry, locale: &str) -> String {
-    let olds: Vec<&ModelEntry> = catalog()
-        .iter()
-        .filter(|o| {
-            o.superseded_by
-                .as_deref()
-                .is_some_and(|s| s.eq_ignore_ascii_case(&e.id))
-        })
-        .collect();
-    if olds.is_empty() {
-        return String::new();
-    }
-    let list = olds
-        .iter()
-        .map(|o| format!("`{}`", o.id))
-        .collect::<Vec<_>>()
-        .join(" / ");
-    // Caveats trail the whole clause rather than interrupting it — "前代 `x`
-    // 同价仍可选（caveat）", not "前代 `x`（caveat） 同价仍可选".
-    let caveats: Vec<&str> = olds
-        .iter()
-        .filter_map(|o| {
-            if locale == "zh" { o.legacy_note_zh.as_deref() } else { o.legacy_note_en.as_deref() }
-        })
-        .collect();
-    if locale == "zh" {
-        let tail = if caveats.is_empty() {
-            String::new()
-        } else {
-            format!("（{}）", caveats.join("；"))
-        };
-        format!("前代 {list} 同价仍可选{tail}")
-    } else {
-        let tail = if caveats.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", caveats.join("; "))
-        };
-        format!("Previous {list} still selectable at the same price{tail}.")
-    }
-}
 
-/// Append the legacy clause to a model's prose with a sentence break.
-///
-/// The two prose fields differ: `detail_*` is written as full sentences and
-/// already ends in a stop, `note_*` is a bare phrase and does not. Concatenating
-/// blindly produced "只用在最难的任务前代 `claude-fable-5` 同价仍可选" — two
-/// sentences fused into a run-on. So supply the stop when the prose lacks one.
-fn join_prose(prose: &str, legacy: &str, locale: &str) -> String {
-    if legacy.is_empty() {
-        return prose.to_string();
-    }
-    if prose.is_empty() {
-        return legacy.to_string();
-    }
-    let ends_sentence = prose.ends_with('。') || prose.ends_with('.') || prose.ends_with('；');
-    if locale == "zh" {
-        if ends_sentence {
-            format!("{prose}{legacy}")
-        } else {
-            format!("{prose}。{legacy}")
-        }
-    } else if ends_sentence {
-        format!("{prose} {legacy}")
-    } else {
-        format!("{prose}. {legacy}")
-    }
-}
 
 /// The listed rows of one family, in catalog order.
 pub fn listed_models(family: &str) -> Vec<&'static ModelEntry> {
@@ -473,112 +364,205 @@ pub fn listed_models(family: &str) -> Vec<&'static ModelEntry> {
         .collect()
 }
 
-/// Render one family's cheat-sheet table as markdown rows (no header).
-///
-/// `split_price` picks the shape the calling cheat-sheet uses: the Claude-side
-/// sheet splits input and output price into their own columns, the Codex and dsh
-/// sheets merge them. It also selects the prose length — the split-column sheet
-/// is the roomy one in `CLAUDE.md`, so it gets [`ModelEntry::detail`]; the
-/// merged-column sheets go into budget-capped `AGENTS.md` files and get the
-/// short [`ModelEntry::note`].
-pub fn render_rows(family: &str, locale: &str, split_price: bool) -> String {
-    render_rows_with(family, locale, split_price, true)
+
+
+
+/// The harness column value for a row.
+fn harness_of(e: &ModelEntry) -> &str {
+    match e
+        .family
+        .as_deref()
+        .or_else(|| crate::agent_source::source_for_model(&e.id))
+    {
+        Some("claude-code") => "claude",
+        Some(other) => other,
+        None => "?",
+    }
 }
 
-/// [`render_rows`] with the price column suppressed.
+/// The effort cell: the ladder, dot-separated, or a pointer when we don't state
+/// one (dsh publishes its own at runtime).
+fn effort_cell(e: &ModelEntry, locale: &str) -> String {
+    match e.efforts.as_deref() {
+        Some(l) => l.join("·"),
+        None => if locale == "zh" { "见 dsh" } else { "ask dsh" }.to_string(),
+    }
+}
+
+/// **The** model cheat-sheet — one document, shared by all three harnesses.
 ///
-/// A Codex-only table repeats "ChatGPT-plan quota" on every row while the
-/// paragraph above it already says so; the column carries no information there.
-/// The dsh sheet lists both families in one table, so it keeps the column —
-/// there the quota note is a real contrast against dollar amounts.
-pub fn render_rows_with(
-    family: &str,
-    locale: &str,
-    split_price: bool,
-    show_price: bool,
-) -> String {
-    let mut out = String::new();
-    for e in listed_models(family) {
-        let prose = if split_price { e.detail(locale) } else { e.note(locale) };
-        let note = join_prose(prose, &legacy_clause(e, locale), locale);
-        if split_price && !e.quota_billed.unwrap_or(false) {
-            let (pi, po) = (
-                e.price_in.map(trim_price).unwrap_or_else(|| "—".into()),
-                e.price_out.map(trim_price).unwrap_or_else(|| "—".into()),
-            );
-            out.push_str(&format!(
-                "| {} | `{}` | {} | ${} | ${} | {} |\n",
+/// It used to be three hand-written sheets (claude / codex / dsh), each with a
+/// zh and an en variant, each ordering and paraphrasing the same facts its own
+/// way. Six copies is six chances to drift, and they had: all three claimed
+/// Codex tops out at `high`, all three put Astra at 1.05M context, and the dsh
+/// one listed no dsh model at all.
+///
+/// So there is one sheet now. It is also deliberately terse: a table of facts
+/// (tier, window, price, effort ladder) instead of a prose "when to pick"
+/// column, with the tier vocabulary explained once underneath. An agent
+/// choosing a model needs the ladder and the tier; it does not need a paragraph
+/// per model.
+pub fn render_sheet(locale: &str) -> String {
+    let zh = locale == "zh";
+    let mut s = String::new();
+
+    if zh {
+        s.push_str("# Fleet 模型选择速查 (managed by Claw Fleet — do not edit)\n\n");
+        s.push_str(
+            "给 subagent、workflow agent 或新会话选模型时用。**默认继承父/会话模型**——\
+它几乎总是对的;只有当你明确判断某一档更合适时才 override。选模型的入口:`Agent` \
+工具的 `model` 参数、`Workflow` 里 `agent()` 的 `opts.model`/`opts.effort`、\
+`fleet` spawn 的 `--model`、`cws dispatch` 的 `--model`/`--effort`。\n\n",
+        );
+        s.push_str("| 模型 | ID | harness | 档次 | 上下文 | $/1M 入·出 | effort |\n");
+        s.push_str("|---|---|---|---|---|---|---|\n");
+    } else {
+        s.push_str("# Fleet model-selection cheat-sheet (managed by Claw Fleet — do not edit)\n\n");
+        s.push_str(
+            "Use this when picking a model for a subagent, a workflow agent, or a new \
+session. **Default to inheriting the parent/session model** — it is almost always \
+right; only override when you have a clear reason a different tier fits. The places \
+a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
+`opts.model`/`opts.effort`, `fleet` spawn's `--model`, and `cws dispatch`'s \
+`--model`/`--effort`.\n\n",
+        );
+        s.push_str("| Model | ID | Harness | Tier | Context | $/1M in·out | Effort |\n");
+        s.push_str("|---|---|---|---|---|---|---|\n");
+    }
+
+    for family in ["claude-code", "codex", "dsh"] {
+        for e in listed_models(family) {
+            s.push_str(&format!(
+                "| {} | `{}` | {} | {} | {} | {} | {} |\n",
                 e.display(),
                 e.id,
-                context_cell(e),
-                pi,
-                po,
-                note
-            ));
-        } else if show_price {
-            out.push_str(&format!(
-                "| {} | `{}` | {} | {} | {} |\n",
-                e.display(),
-                e.id,
+                harness_of(e),
+                e.tier.as_deref().unwrap_or("—"),
                 context_cell(e),
                 price_cell(e, locale),
-                note
-            ));
-        } else {
-            out.push_str(&format!(
-                "| {} | `{}` | {} | {} |\n",
-                e.display(),
-                e.id,
-                context_cell(e),
-                note
+                effort_cell(e, locale),
             ));
         }
     }
-    out
-}
 
-/// One sentence describing the effort ladders in `family`, built from the
-/// catalog so it cannot claim a level the models do not accept.
-///
-/// Rows that share a ladder are named together; a row that differs gets its own
-/// clause. That is what surfaces "everything supports xhigh **except** gpt-5.5"
-/// without anyone maintaining the exception by hand.
-pub fn render_effort_line(family: &str, locale: &str) -> String {
-    let mut groups: Vec<(String, Vec<&str>)> = Vec::new();
-    for e in listed_models(family) {
-        let Some(ladder) = e.efforts.as_deref() else { continue };
-        let key = ladder.join("/");
-        match groups.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, names)) => names.push(e.display()),
-            None => groups.push((key, vec![e.display()])),
-        }
-    }
-    if groups.is_empty() {
-        return String::new();
-    }
-    // A family where everything shares one ladder just states the ladder —
-    // naming all four Claude models before an identical list is noise.
-    if groups.len() == 1 {
-        return groups[0]
-            .0
-            .split('/')
-            .map(|l| format!("`{l}`"))
-            .collect::<Vec<_>>()
-            .join("/");
-    }
-    let (colon, sep) = if locale == "zh" { ("：", "；") } else { (": ", "; ") };
-    let clauses: Vec<String> = groups
+    // Superseded models, folded into one line rather than a row each.
+    let legacy: Vec<String> = catalog()
         .iter()
-        .map(|(ladder, names)| {
-            let levels = ladder
-                .split('/')
-                .map(|l| format!("`{l}`"))
-                .collect::<Vec<_>>()
-                .join("/");
-            format!("{}{colon}{levels}", names.join(" / "))
+        .filter(|e| e.superseded_by.is_some())
+        .map(|e| {
+            let caveat = if zh { &e.legacy_note_zh } else { &e.legacy_note_en };
+            match caveat.as_deref() {
+                Some(c) if zh => format!("`{}`（{c}）", e.id),
+                Some(c) => format!("`{}` ({c})", e.id),
+                None => format!("`{}`", e.id),
+            }
         })
         .collect();
-    clauses.join(sep)
+    if !legacy.is_empty() {
+        s.push('\n');
+        if zh {
+            s.push_str(&format!("前代同价仍可选:{}。\n", legacy.join("、")));
+        } else {
+            s.push_str(&format!(
+                "Previous generations, still selectable at the same price: {}.\n",
+                legacy.join(", ")
+            ));
+        }
+    }
+
+    if zh {
+        s.push_str(
+            "\n\
+DeepSeek 那三行的价格是**峰值、未命中缓存**的输入价。非峰值恰好半价;命中缓存的\
+输入低得多(Pro $0.044,两个 Flash $0.014)。`deepseek-v4-flash` **不收图片输入**,\
+要发图走 `-vision-exp` 那个。\n\
+\n## 档次\n\n\
+- **premium** — 最强推理。硬推理、最终综合、对抗性校验、长程 agentic 主循环。最贵,别拿它做机械活。\n\
+- **standard** — 接近 premium 的编码能力,成本明显更低。日常编码、高吞吐生产的默认选择。\n\
+- **fast** — 最快最便宜。分类、抽取、简单机械活、可并行的大批量 subagent、延迟敏感任务。\n\
+\n\
+effort 与档次是**两个独立的旋钮**:档次决定用哪个模型,effort 决定它想多久。\
+两边都往上顶最贵。编码和 agentic 一般 `xhigh` 最划算;`low` 给 subagent 和简单\
+任务(更少、更集中的工具调用)。\n\
+\n\
+## harness 不可用就别选\n\
+\n\
+表里跨三个 harness。**本机没装、或在 `~/.fleet/fleet-sources.json` 里被禁用的 \
+harness,它的模型一个都不要选**——spawn 会直接失败并告诉你该 source 不可用,\
+而不是悄悄降级。不确定装了哪几个就用 `fleet__inspect` 看,别猜。\n\
+\n\
+`effort` 一列写「见 dsh」的,是 dsh 在运行时自己发布每个模型的真实梯子(它有 \
+`off` 这种别家没有的档),Fleet 不替它断言。\n\
+\n\
+## dsh 怎么点名模型\n\
+\n\
+dsh 把模型拆成 `provider` + `model` 两段,Fleet 的 spawn 用一个字符串表达,\
+以**第一个 `/`** 分界:`openrouter/anthropic/claude-haiku-4.5` → provider \
+`openrouter`,model `anthropic/claude-haiku-4.5`。表里只列 dsh 内置的 \
+`deepseek-official` 路由(有官方公开价目表);经 openrouter 之类第三方 provider \
+的模型不列——同一个模型经不同 provider 价格不同、逐用户不同,要知道本机配了\
+什么就读 `~/.dsh/settings.yaml`,别猜。\n\
+\n\
+## 生图(只有 codex 有)\n\
+\n\
+Claude 侧**没有**生图能力。要位图资产(插画、贴图、mockup、hero 图)时借 codex \
+自带的 imagegen skill:`codex exec -m gpt-5.6-luna \"用内置图像生成工具画 …\"`。\
+模型是 `gpt-image-2`,走 ChatGPT 配额,**不需要** `OPENAI_API_KEY`。产物落 \
+`$CODEX_HOME/generated_images/<thread_id>/`。细节见 wiki `codex/image-generation`。\n",
+        );
+    } else {
+        s.push_str(
+            "\n\
+The three DeepSeek rows quote **peak, cache-miss** input pricing. Off-peak is exactly \
+half, and cache-hit input is far lower (Pro $0.044, both Flash rows $0.014). \
+`deepseek-v4-flash` **rejects image input** — send images to the `-vision-exp` row \
+instead.\n\
+\n## Tiers\n\n\
+- **premium** — strongest reasoning. Hard reasoning, final synthesis, adversarial \
+verification, long-horizon agentic main loops. The most expensive; don't spend it on \
+mechanical work.\n\
+- **standard** — near-premium coding at noticeably lower cost. The default for \
+everyday coding and high-throughput production.\n\
+- **fast** — fastest and cheapest. Classification, extraction, simple mechanical work, \
+parallel high-volume subagents, latency-sensitive tasks.\n\
+\n\
+Tier and effort are **two independent knobs**: the tier picks which model, the effort \
+picks how long it thinks. Turning both up is the expensive corner. `xhigh` is usually \
+the sweet spot for coding and agentic work; `low` suits subagents and simple tasks \
+(fewer, more-consolidated tool calls).\n\
+\n\
+## An unavailable harness is not an option\n\
+\n\
+The table spans three harnesses. **Do not pick a model from a harness that is not \
+installed here, or that is disabled in `~/.fleet/fleet-sources.json`** — the spawn \
+fails outright and tells you the source is unavailable rather than quietly \
+downgrading. Use `fleet__inspect` to see which are present; don't guess.\n\
+\n\
+Rows whose effort cell says \"ask dsh\" are ones where dsh publishes each model's real \
+ladder at runtime (it has levels such as `off` that no other harness offers), so Fleet \
+does not assert one on its behalf.\n\
+\n\
+## How dsh names a model\n\
+\n\
+dsh addresses a model as `provider` + `model`. Fleet's spawn carries one string and \
+splits on the **first `/`**: `openrouter/anthropic/claude-haiku-4.5` → provider \
+`openrouter`, model `anthropic/claude-haiku-4.5`. The table lists only dsh's built-in \
+`deepseek-official` route, which has a published price table; models reached through a \
+third-party provider such as openrouter are not listed — the same model costs \
+different amounts through different providers and varies per user. Read \
+`~/.dsh/settings.yaml` to see what this machine has; don't guess.\n\
+\n\
+## Image generation (codex only)\n\
+\n\
+The Claude side has **no** image-generation capability. When you need a raster asset \
+(illustration, sprite, mockup, hero image), borrow codex's bundled imagegen skill: \
+`codex exec -m gpt-5.6-luna \"use the built-in image generation tool to draw …\"`. The \
+model is `gpt-image-2`, it bills against the ChatGPT quota, and it does **not** need \
+`OPENAI_API_KEY`. Output lands in `$CODEX_HOME/generated_images/<thread_id>/`. Details \
+live in the wiki at `codex/image-generation`.\n",
+        );
+    }
+    s
 }
 
 /// Rank of an effort level in [`EFFORT_ORDER`], or `None` for an unrecognised
@@ -758,6 +742,50 @@ mod tests {
         assert_eq!(context_window("claude-haiku-4-5-20251001"), None);
     }
 
+    /// There is **one** sheet, not three. All three harnesses render the same
+    /// bytes for a given locale.
+    ///
+    /// This is the whole point of the merge: three hand-written variants meant
+    /// three chances to be wrong about one fact, and all three were wrong about
+    /// Codex's effort ladder at once. If someone reintroduces a per-harness
+    /// flavour, this fails.
+    #[test]
+    fn all_three_harnesses_get_the_same_sheet() {
+        for locale in ["zh", "en"] {
+            let a = crate::model_guidance::render_guidance(locale);
+            let b = crate::codex_guidance::render_codex_model_block(locale);
+            let c = crate::dsh_guidance::render_dsh_model_block(locale);
+            assert_eq!(a, b, "codex sheet diverged ({locale})");
+            assert_eq!(a, c, "dsh sheet diverged ({locale})");
+            assert!(!a.trim().is_empty());
+        }
+    }
+
+    /// The sheet must not mix punctuation systems: the English variant had CJK
+    /// full-width parens around the legacy caveat, because the clause builder
+    /// used `（）` unconditionally.
+    #[test]
+    fn english_sheet_uses_ascii_punctuation() {
+        let en = render_sheet("en");
+        for bad in ['（', '）', '：', '；', '、', '，', '。'] {
+            assert!(!en.contains(bad), "English sheet contains `{bad}`");
+        }
+    }
+
+    /// Every listed row must carry the facts the table prints, so no cell shows
+    /// a bare placeholder where a real value exists.
+    #[test]
+    fn every_listed_row_has_a_tier_and_a_price_or_quota() {
+        for family in ["claude-code", "codex", "dsh"] {
+            for e in listed_models(family) {
+                assert!(e.tier.is_some(), "{} has no tier", e.id);
+                let priced = e.price_in.is_some() && e.price_out.is_some();
+                let quota = e.quota_billed.unwrap_or(false);
+                assert!(priced || quota, "{} has neither a price nor a quota flag", e.id);
+            }
+        }
+    }
+
     /// dsh's own three rows must stay listed with a price.
     ///
     /// They were `listed = false` at first, on the reasoning that dsh publishes
@@ -781,8 +809,7 @@ mod tests {
         );
         for e in &rows {
             assert!(e.price_in.is_some() && e.price_out.is_some(), "{} has no price", e.id);
-            assert!(!e.note("zh").is_empty(), "{} has no zh note", e.id);
-            assert!(!e.note("en").is_empty(), "{} has no en note", e.id);
+            assert_eq!(e.tier.as_deref().is_some(), true, "{} has no tier", e.id);
             // Still no ladder and no window: those are dsh's to report, not ours.
             assert_eq!(e.efforts, None, "{} must not assert a ladder", e.id);
             assert_eq!(e.context, None, "{} must not assert a window", e.id);

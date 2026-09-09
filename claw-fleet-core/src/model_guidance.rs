@@ -37,118 +37,13 @@ fn claude_md_path() -> Option<PathBuf> {
 /// skill catalog; the Codex family (`gpt-5.6-sol`/`-terra`/`-luna`, `gpt-5.5`)
 /// from `~/.codex/models_cache.json` — Codex bills against a ChatGPT-plan
 /// quota, so it has no per-token price to quote.
+/// Build the model cheat-sheet for the locale.
+///
+/// One document, shared verbatim by all three harnesses — see
+/// [`crate::model_catalog::render_sheet`], which renders it from
+/// `models.toml`.
 pub fn render_guidance(locale: &str) -> String {
-    // The model tables come from `models.toml` via `model_catalog`. They used to
-    // be hand-written here and in the two AGENTS.md cheat-sheets, and the three
-    // copies drifted: all of them claimed Codex tops out at `high` and offers a
-    // `minimal` level, and all put Astra at 1.05M context. The catalog's numbers
-    // are read from `~/.codex/models_cache.json`.
-    let claude_rows = crate::model_catalog::render_rows("claude-code", locale, true);
-    let codex_rows = crate::model_catalog::render_rows_with("codex", locale, false, false);
-    let claude_efforts = crate::model_catalog::render_effort_line("claude-code", locale);
-    let codex_efforts = crate::model_catalog::render_effort_line("codex", locale);
-    if locale == "zh" {
-        return format!("# Fleet 模型选择速查 (managed by Claw Fleet — do not edit)\n\
-\n\
-给 subagent、workflow agent 或新会话选模型时用。**默认继承父/会话模型**——它\
-几乎总是对的;只有当你明确判断某一档更合适时才 override。选模型的入口:\
-`Agent` 工具的 `model` 参数、`Workflow` 里 `agent()` 的 `opts.model`/\
-`opts.effort`、`fleet` spawn 的 `--model`、`cws dispatch` 的 `--model`/\
-`--effort`。\n\
-\n\
-## Claude 家族(claude 工具链)\n\
-\n\
-| 模型 | ID | 上下文 | 输入 $/1M | 输出 $/1M | 何时选 |\n\
-|---|---|---|---|---|---|\n\
-{claude_rows}\
-\n\
-effort(`output_config.effort` / `--effort`):{claude_efforts}。`xhigh` 是编码和 \
-agentic 的最佳档;`high` 是多数智力敏感任务的下限;`low` 给 subagent 和简单\
-任务(更少、更集中的工具调用)。\n\
-\n\
-## Codex 家族(codex 工具链)\n\
-\n\
-Fleet 经 codex CLI 调用,按 **ChatGPT 套餐配额**计费,**没有按 token 的\
-定价**。\n\
-\n\
-| 模型 | ID | 上下文 | 定位 |\n\
-|---|---|---|---|\n\
-{codex_rows}\
-\n\
-Sol / Terra / Luna = 强 / 中 / 快 三档,同属 gpt-5.6。effort 梯子:{codex_efforts}。\n\
-\n\
-## 生图(只有 codex 有)\n\
-\n\
-Claude 侧**没有**生图能力。要位图资产(插画、贴图、mockup、hero 图)时借 \
-codex 自带的 imagegen skill:`codex exec -m gpt-5.6-luna \"用内置图像生成\
-工具画 …\"`。模型是 `gpt-image-2`,走 ChatGPT 配额,**不需要** \
-`OPENAI_API_KEY`。产物落 `$CODEX_HOME/generated_images/<thread_id>/`,其中 \
-`<thread_id>` 就是 `--json` 流里 `thread.started` 的那个 id。细节(尺寸约束、\
-透明背景限制、token 成本)见 wiki `codex/image-generation`。\n\
-\n\
-## 怎么挑\n\
-\n\
-- 机械、可并行、量大的 subagent → 便宜快档(Haiku / Sonnet;Luna / Terra)\
-+ 低 effort。\n\
-- 最难的端到端工作 → Astra + high/xhigh;普通硬推理、最终把关 → \
-Opus / Fable 或 Sol。\n\
-- 编码 / agentic 主循环 → Opus 5 或 Sonnet 5 配 xhigh;Codex 侧 Sol 从 \
-medium 起步。\n\
-- 拿不准就别 override,继承父/会话模型。\n");
-    }
-    format!("# Fleet model-selection cheat-sheet (managed by Claw Fleet — do not edit)\n\
-\n\
-Use this when picking a model for a subagent, a workflow agent, or a new \
-session. **Default to inheriting the parent/session model** — it is almost \
-always right; only override when you have a clear reason a different tier \
-fits. The places a model gets chosen: the `Agent` tool's `model` param, \
-`Workflow` `agent()`'s `opts.model`/`opts.effort`, `fleet` spawn's `--model`, \
-and `cws dispatch`'s `--model`/`--effort`.\n\
-\n\
-## Claude family (claude toolchain)\n\
-\n\
-| Model | ID | Context | In $/1M | Out $/1M | When to pick |\n\
-|---|---|---|---|---|---|\n\
-{claude_rows}\
-\n\
-Effort (`output_config.effort` / `--effort`): {claude_efforts}. `xhigh` is best \
-for coding and agentic work; `high` is the floor for most \
-intelligence-sensitive work; `low` for subagents and simple tasks (fewer, \
-more-consolidated tool calls).\n\
-\n\
-## Codex family (codex toolchain)\n\
-\n\
-Fleet drives these through the codex CLI. They bill against a **ChatGPT-plan \
-quota** and have **no per-token price**.\n\
-\n\
-| Model | ID | Context | Positioning |\n\
-|---|---|---|---|\n\
-{codex_rows}\
-\n\
-Sol / Terra / Luna = strong / balanced / fast, all in the gpt-5.6 family. \
-Effort ladders: {codex_efforts}.\n\
-\n\
-## Image generation (codex only)\n\
-\n\
-The Claude side has **no** image-generation capability. When you need a raster \
-asset (illustration, sprite, mockup, hero image), borrow codex's bundled \
-imagegen skill: `codex exec -m gpt-5.6-luna \"use the built-in image \
-generation tool to draw …\"`. The model is `gpt-image-2`, it bills against the \
-ChatGPT quota, and it does **not** need `OPENAI_API_KEY`. Output lands in \
-`$CODEX_HOME/generated_images/<thread_id>/`, where `<thread_id>` is the id \
-from `thread.started` in the `--json` stream. Details (size constraints, \
-transparency limits, token cost) live in the wiki at \
-`codex/image-generation`.\n\
-\n\
-## How to pick\n\
-\n\
-- Mechanical, parallel, high-volume subagents → the cheap/fast tier \
-(Haiku / Sonnet; Luna / Terra) at low effort.\n\
-- Hardest end-to-end work → Astra at high/xhigh; regular hard reasoning and \
-final verification → Opus / Fable or Sol.\n\
-- Coding / agentic main loop → Opus 5 or Sonnet 5 at xhigh; on the Codex \
-side, Sol starting at medium.\n\
-- When in doubt, don't override — inherit the parent/session model.\n")
+    crate::model_catalog::render_sheet(locale)
 }
 
 /// Apply model guidance: write the guidance file and inject the `@import`

@@ -648,79 +648,14 @@ knowledge-base material.\n"
 
 /// Compact codex **model-selection** block body (no sentinel markers). Mirrors
 /// [`crate::model_guidance`]; agent-agnostic, so it keeps both model families.
+/// The model cheat-sheet for codex's AGENTS.md.
+///
+/// Identical to what the Claude and dsh sides get: one sheet, rendered from
+/// `models.toml`. It used to be a hand-written codex-flavoured variant, and
+/// having three flavours meant three chances to be wrong about the same fact —
+/// which is how all three came to claim Codex tops out at `high`.
 pub fn render_codex_model_block(locale: &str) -> String {
-    // Tables from `models.toml` via `model_catalog` — see the note in
-    // `model_guidance::render_guidance`. This sheet lands in a budget-capped
-    // AGENTS.md, so it renders the short `note_*` prose and the merged price
-    // column rather than the roomy Claude-side shape.
-    let codex_rows = crate::model_catalog::render_rows_with("codex", locale, false, false);
-    let claude_rows = crate::model_catalog::render_rows("claude-code", locale, false);
-    let codex_efforts = crate::model_catalog::render_effort_line("codex", locale);
-    let claude_efforts = crate::model_catalog::render_effort_line("claude-code", locale);
-    if locale == "zh" {
-        return format!("# Fleet 模型选择速查 for Codex (managed by Claw Fleet — do not edit this block)\n\
-\n\
-给 subagent、workflow agent 或新会话选模型时用。**默认继承父/会话模型**——几乎\
-总是对的;只有明确判断某一档更合适才 override。入口:`Agent` 工具的 `model`、\
-`Workflow` `agent()` 的 `opts.model`/`opts.effort`、`fleet` spawn 的 `--model`、\
-`cws dispatch` 的 `--model`/`--effort`。\n\
-\n\
-## Codex 家族(codex 工具链;按 ChatGPT 套餐配额计费,无按 token 定价)\n\
-\n\
-| 模型 | ID | 上下文 | 定位 |\n\
-|---|---|---|---|\n\
-{codex_rows}\
-\n\
-Codex effort:{codex_efforts}。\n\
-\n\
-## Claude 家族(claude 工具链)\n\
-\n\
-| 模型 | ID | 上下文 | 输入/输出 $/1M | 何时选 |\n\
-|---|---|---|---|---|\n\
-{claude_rows}\
-\n\
-Claude effort:{claude_efforts};`xhigh` 是编码/agentic 最佳档。\n\
-\n\
-## 怎么挑\n\
-\n\
-- 机械、可并行、量大的 subagent → 便宜快档(Luna / Terra;Haiku / Sonnet)+ 低 effort。\n\
-- 最难的端到端工作 → Astra + high/xhigh;普通硬推理、最终把关 → Sol 或 Opus / Fable。\n\
-- 编码 / agentic 主循环 → Codex 侧 Sol 从 medium 起步;Claude 侧 Opus 5 / Sonnet 5 配 xhigh。\n\
-- 拿不准就别 override,继承父/会话模型。\n");
-    }
-    format!("# Fleet model-selection cheat-sheet for Codex (managed by Claw Fleet — do not edit this block)\n\
-\n\
-Use this when picking a model for a subagent, a workflow agent, or a new \
-session. **Default to inheriting the parent/session model** — almost always \
-right; only override with a clear reason. Selection points: the `Agent` tool's \
-`model`, `Workflow` `agent()`'s `opts.model`/`opts.effort`, `fleet` spawn's \
-`--model`, `cws dispatch`'s `--model`/`--effort`.\n\
-\n\
-## Codex family (codex toolchain; billed against a ChatGPT-plan quota, no per-token price)\n\
-\n\
-| Model | ID | Context | Positioning |\n\
-|---|---|---|---|\n\
-{codex_rows}\
-\n\
-Codex effort: {codex_efforts}.\n\
-\n\
-## Claude family (claude toolchain)\n\
-\n\
-| Model | ID | Context | In/Out $/1M | When to pick |\n\
-|---|---|---|---|---|\n\
-{claude_rows}\
-\n\
-Claude effort: {claude_efforts}; `xhigh` is best for coding / agentic work.\n\
-\n\
-## How to pick\n\
-\n\
-- Mechanical, parallel, high-volume subagents → the cheap/fast tier \
-(Luna / Terra; Haiku / Sonnet) at low effort.\n\
-- Hard reasoning, final synthesis, adversarial verification → the strongest \
-tier (Sol; Opus / Fable) at high/xhigh.\n\
-- Coding / agentic main loop → on Codex, Sol starting at medium; on Claude, \
-Opus 5 or Sonnet 5 at xhigh.\n\
-- When in doubt, don't override — inherit the parent/session model.\n")
+    crate::model_catalog::render_sheet(locale)
 }
 
 /// Collapse all whitespace runs (incl. newlines) to single spaces so a
