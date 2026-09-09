@@ -35,7 +35,7 @@ import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isFleetOwnedTask } from "../types";
 import { useDraft } from "../draft";
 import { itemKey, type WithDevice } from "../deviceRuntime";
-import { useChatWorkspace } from "../useChatWorkspace";
+import { useChatWorkspaces } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
 import { repoRootPath } from "../../../shared-ts/repoPath";
@@ -228,12 +228,14 @@ export interface TaskSection {
 export function groupTaskSections(
   rows: Array<WithDevice<SessionInfo>>,
   opts: {
-    chatPath: string | null;
+    /** 某台设备的聊天目录，null = 还不知道。按设备问，因为远端主机的聊天目录是
+     *  它自己 home 下的路径，与本机那一条不同。 */
+    chatPathOf: (deviceId: string) => string | null;
     multiDevice: boolean;
     deviceLabelOf?: (deviceId: string) => string | null | undefined;
   },
 ): TaskSection[] {
-  const { chatPath, multiDevice, deviceLabelOf } = opts;
+  const { chatPathOf, multiDevice, deviceLabelOf } = opts;
   const byKey = new Map<string, TaskSection>();
   for (const s of rows) {
     const path = repoRootPath(s.workspacePath);
@@ -255,10 +257,10 @@ export function groupTaskSections(
   const sections = [...byKey.values()].sort(
     (a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key),
   );
-  if (!chatPath) return sections;
-  const chat = sections.filter((sec) => sec.path === chatPath);
+  const isChat = (sec: TaskSection) => sec.path === chatPathOf(sec.deviceId);
+  const chat = sections.filter(isChat);
   if (chat.length === 0) return sections;
-  return [...chat, ...sections.filter((sec) => sec.path !== chatPath)];
+  return [...chat, ...sections.filter((sec) => !isChat(sec))];
 }
 
 /** 目录筛选项的值。单设备时就是路径本身(与从前一致,老的草稿值继续有效)。 */
@@ -451,7 +453,15 @@ export function TasksView({
   // The desktop host's pure-chat workspace — the same path the new-session sheet
   // pins. Null while it's in flight; the chat section then simply sits where its
   // activity puts it instead of being pinned on a guess.
-  const chatPath = useChatWorkspace(client);
+  const deviceIds = useMemo(
+    () => [...new Set(sessions.map((s) => s.deviceId))],
+    [sessions],
+  );
+  const chatPaths = useChatWorkspaces(deviceIds, clientFor);
+  const chatPathOf = useCallback(
+    (deviceId: string) => chatPaths[deviceId] ?? null,
+    [chatPaths],
+  );
 
   // 列表按文件夹分区展示（Chat 置顶），所以任务页不再有目录下拉：要看哪个目录
   // 就折叠掉别的分区。「终端」按钮因此不带初始目录，由终端页自己的目录选择器接手。
@@ -563,11 +573,11 @@ export function TasksView({
   // 所以 buildRenderItems 逐分区跑，不会把两个目录的会话串成一条链。
   const sections = useMemo(
     () =>
-      groupTaskSections(visible, { chatPath, multiDevice, deviceLabelOf }).map((sec) => ({
+      groupTaskSections(visible, { chatPathOf, multiDevice, deviceLabelOf }).map((sec) => ({
         ...sec,
         items: buildRenderItems(sec.sessions, groupHandoff),
       })),
-    [visible, chatPath, multiDevice, deviceLabelOf, groupHandoff],
+    [visible, chatPathOf, multiDevice, deviceLabelOf, groupHandoff],
   );
 
   // 折叠起来的分区键。默认全展开——手机上一进来就该看到会话本身。

@@ -23,7 +23,7 @@ describe("groupTaskSections", () => {
   it("pins the chat folder to the top however stale it is", () => {
     const secs = groupTaskSections(
       [row("a", "/work/repo", "repo"), row("b", CHAT, "Chat")],
-      { chatPath: CHAT, multiDevice: false },
+      { chatPathOf: () => CHAT, multiDevice: false },
     );
     expect(secs.map((s) => s.path)).toEqual([CHAT, "/work/repo"]);
   });
@@ -31,7 +31,7 @@ describe("groupTaskSections", () => {
   it("keeps the incoming row order otherwise — the freeze must survive grouping", () => {
     const secs = groupTaskSections(
       [row("a", "/work/a", "a"), row("b", "/work/b", "b"), row("c", "/work/a", "a")],
-      { chatPath: null, multiDevice: false },
+      { chatPathOf: () => null, multiDevice: false },
     );
     expect(secs.map((s) => s.path)).toEqual(["/work/a", "/work/b"]);
     expect(secs[0].sessions.map((s) => s.id)).toEqual(["a", "c"]);
@@ -41,7 +41,7 @@ describe("groupTaskSections", () => {
   it("orders folders alphabetically, not by their first member's position", () => {
     const secs = groupTaskSections(
       [row("z", "/work/zebra", "zebra"), row("a", "/work/apple", "apple")],
-      { chatPath: null, multiDevice: false },
+      { chatPathOf: () => null, multiDevice: false },
     );
     expect(secs.map((s) => s.path)).toEqual(["/work/apple", "/work/zebra"]);
   });
@@ -49,7 +49,7 @@ describe("groupTaskSections", () => {
   it("folds a worktree checkout into its repository section", () => {
     const secs = groupTaskSections(
       [row("a", "/work/repo", "repo"), row("b", "/work/repo/.worktrees/fix", "repo")],
-      { chatPath: null, multiDevice: false },
+      { chatPathOf: () => null, multiDevice: false },
     );
     expect(secs).toHaveLength(1);
     expect(secs[0].path).toBe("/work/repo");
@@ -62,12 +62,29 @@ describe("groupTaskSections", () => {
       { ...row("b", "/repos/foo", "foo"), deviceId: "dev-b" },
     ] as Array<WithDevice<SessionInfo>>;
     const secs = groupTaskSections(rows, {
-      chatPath: null,
+      chatPathOf: () => null,
       multiDevice: true,
       deviceLabelOf: (id) => (id === "dev-a" ? "MBP" : "Studio"),
     });
     expect(secs.map((s) => s.key)).toEqual(["dev-a::/repos/foo", "dev-b::/repos/foo"]);
     expect(secs.map((s) => s.name)).toEqual(["MBP · foo", "Studio · foo"]);
+  });
+
+  // 远端主机的聊天目录是它自己 home 下的路径（`/root/.fleet/chat`）：拿本机那一条
+  // 去比永远比不中，那台机器的 Chat 分区就沉在项目中间（真实症状）。
+  it("pins each device's own chat folder, not just the active device's", () => {
+    const REMOTE_CHAT = "/root/.fleet/chat";
+    const rows = [
+      { ...row("a", "/work/repo", "repo"), deviceId: "dev-a" },
+      { ...row("b", REMOTE_CHAT, "Chat"), deviceId: "dev-b" },
+      { ...row("c", CHAT, "Chat"), deviceId: "dev-a" },
+    ] as Array<WithDevice<SessionInfo>>;
+    const secs = groupTaskSections(rows, {
+      chatPathOf: (id) => (id === "dev-a" ? CHAT : REMOTE_CHAT),
+      multiDevice: true,
+    });
+    expect(secs.slice(0, 2).map((s) => s.path).sort()).toEqual([REMOTE_CHAT, CHAT].sort());
+    expect(secs[2].path).toBe("/work/repo");
   });
 });
 
