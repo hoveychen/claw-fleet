@@ -1391,6 +1391,32 @@ function probeUrl(req: LiveReq): string {
   return url.toString();
 }
 
+/**
+ * One string off `/health`, or `""` when it cannot be had.
+ *
+ * `/health` is the browser build's only source for the version and commit it
+ * shows in settings — verified against a real `fleet webui`, whose port carries
+ * no auth of its own, so this needs no token that `callProbe` does not send. (A
+ * token-gated `fleet serve` denies it exactly as it denies every other data
+ * route, so nothing regresses there.)
+ *
+ * `""` on any failure rather than a placeholder: the settings rows hide
+ * themselves on an empty value, which beats printing something that is not a
+ * version or a commit where one belongs.
+ */
+async function healthField(field: "version" | "commit"): Promise<string> {
+  try {
+    const health = (await callProbe({ method: "GET", path: "/health" })) as Record<
+      string,
+      unknown
+    > | null;
+    const value = health?.[field];
+    return typeof value === "string" ? value : "";
+  } catch {
+    return "";
+  }
+}
+
 async function callProbe(req: LiveReq): Promise<unknown> {
   const url = probeUrl(req);
   const started = performance.now();
@@ -1684,28 +1710,22 @@ export const LIVE_COMPOSITES: Record<
   /**
    * `gui::get_app_version` — on the desktop this is the binary's own
    * `CARGO_PKG_VERSION`; a tab has no compile-time constant to read, so it asks
-   * the process that served the page. `/health` answers `{version,status}` —
-   * verified against a real `fleet webui`, whose port carries no auth of its
-   * own, so this needs no token that `callProbe` does not send (a token-gated
-   * `fleet serve` denies it exactly as it denies every other data route, so
-   * nothing regresses there). Release CI stamps the tag into
-   * `claw-fleet-core/Cargo.toml` alongside the desktop's, so the number matches
-   * what the app would show.
-   *
-   * `""` on any failure rather than a placeholder: the settings row hides
-   * itself when there is no version, which beats printing something that is not
-   * one where a version belongs.
+   * the process that served the page. Release CI stamps the tag into
+   * `claw-fleet-core/Cargo.toml` alongside the desktop's, so it is the same
+   * number the app would show. See [`healthField`] for the fetch itself.
    */
-  get_app_version: async () => {
-    try {
-      const health = (await callProbe({ method: "GET", path: "/health" })) as
-        | { version?: unknown }
-        | null;
-      return typeof health?.version === "string" ? health.version : "";
-    } catch {
-      return "";
-    }
-  },
+  get_app_version: () => healthField("version"),
+
+  /**
+   * `gui::desktop_build_commit` — the same story as the version, off the same
+   * route. The commit is `claw-fleet-core`'s build stamp, i.e. the build of the
+   * process serving this page, which is the one whose behaviour a bug report is
+   * about.
+   *
+   * `"unknown"` (a build with no git source) comes back as-is; the settings row
+   * filters it, exactly as it does for the desktop's own command.
+   */
+  desktop_build_commit: () => healthField("commit"),
 
   get_guard_context: async (a) => {
     const sessions = (await callProbe({ method: "GET", path: "/sessions" })) as

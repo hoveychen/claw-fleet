@@ -29,6 +29,28 @@ pub(crate) fn route_fleet_skill(request: tiny_http::Request) {
     );
 }
 
+/// The git commit this server binary was built from, 7 chars, or `"unknown"`.
+/// Baked by `build.rs`; kept as a function so the tests below can name it.
+pub(crate) fn build_commit() -> &'static str {
+    option_env!("FLEET_GIT_COMMIT").unwrap_or("unknown")
+}
+
+/// `/health`'s body. Hand-formatted rather than serialized because it is three
+/// compile-time strings and no struct.
+///
+/// `commit` rides along because the browser build has no compile-time constant
+/// of its own to read — it shows whatever the serving process reports, the way
+/// the desktop shows its own `desktop_build_commit()`. `"unknown"` when this
+/// build had no git source (see build.rs); consumers hide the line rather than
+/// print that.
+pub(crate) fn health_body() -> String {
+    format!(
+        r#"{{"version":"{}","commit":"{}","status":"ok"}}"#,
+        env!("CARGO_PKG_VERSION"),
+        build_commit(),
+    )
+}
+
 pub(crate) fn route_health(
     ctx: &ServeCtx,
     request: tiny_http::Request,
@@ -37,12 +59,8 @@ pub(crate) fn route_health(
     path: &str,
 ) {
 
-                let body = format!(
-                    r#"{{"version":"{}","status":"ok"}}"#,
-                    env!("CARGO_PKG_VERSION")
-                );
                 let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
+                    tiny_http::Response::from_string(health_body()).with_header(json_header),
                 );
             }
 
@@ -807,3 +825,34 @@ pub(crate) fn route_search(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
             }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `/health` is the browser build's only source for the version and commit
+    /// it shows in settings, and the body is hand-formatted — a stray quote in
+    /// either value would make it unparseable, which the caller sees as "no
+    /// version" with nothing pointing at why.
+    #[test]
+    fn health_body_is_json_carrying_version_commit_and_status() {
+        let v: serde_json::Value = serde_json::from_str(&health_body())
+            .expect("/health must answer parseable JSON");
+        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["commit"], build_commit());
+    }
+
+    /// Either a 7-char short SHA or the literal `"unknown"` — never empty, and
+    /// never a full 40-char sha (build.rs truncates), because consumers slice
+    /// nothing and print it as-is.
+    #[test]
+    fn build_commit_is_short_or_unknown() {
+        let c = build_commit();
+        assert!(!c.is_empty());
+        assert!(
+            c == "unknown" || (c.len() == 7 && c.chars().all(|ch| ch.is_ascii_hexdigit())),
+            "unexpected build commit: {c:?}"
+        );
+    }
+}

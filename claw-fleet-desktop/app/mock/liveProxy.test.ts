@@ -616,4 +616,40 @@ describe("get_app_version composite", () => {
     );
     expect(value).toEqual({ handled: true, value: "" });
   });
+
+  it("reads the build commit off the same route", async () => {
+    const { liveInvoke } = await import("./liveProxy");
+    const { value, seen } = await withFetch(
+      () =>
+        new Response(JSON.stringify({ version: "2.6.2", commit: "b437239", status: "ok" }), {
+          status: 200,
+        }),
+      () => liveInvoke("desktop_build_commit", {}),
+    );
+    expect(seen[0].endsWith("/health")).toBe(true);
+    expect(value).toEqual({ handled: true, value: "b437239" });
+  });
+
+  it("passes \"unknown\" through for the settings row to filter", async () => {
+    const { liveInvoke } = await import("./liveProxy");
+    const { value } = await withFetch(
+      () =>
+        new Response(JSON.stringify({ version: "2.6.2", commit: "unknown", status: "ok" }), {
+          status: 200,
+        }),
+      () => liveInvoke("desktop_build_commit", {}),
+    );
+    // The desktop's own command answers "unknown" the same way; the row filters
+    // it in one place rather than each transport inventing its own empty.
+    expect(value).toEqual({ handled: true, value: "unknown" });
+  });
+
+  it("degrades to an empty string when an older server omits commit", async () => {
+    const { liveInvoke } = await import("./liveProxy");
+    const { value } = await withFetch(
+      () => new Response(JSON.stringify({ version: "2.6.1", status: "ok" }), { status: 200 }),
+      () => liveInvoke("desktop_build_commit", {}),
+    );
+    expect(value).toEqual({ handled: true, value: "" });
+  });
 });
