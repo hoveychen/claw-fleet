@@ -50,20 +50,35 @@ const longText =
   bulk("A paragraph of prose that goes on for a while.\n\n", 120_000) +
   "THE-VERY-END\n\nstill arriving\n";
 
+/**
+ * These cases render a deliberately huge document — 120 KB, ~2500 paragraphs —
+ * through `react-markdown` inside jsdom, which is the only way to observe
+ * chunking at all: the fixture has to clear the 32 KiB chunk target several
+ * times over for "the tail is deferred" to mean anything.
+ *
+ * Measured on Boss's Mac with the machine otherwise quiet, the heaviest is
+ * 2.2s. Under load it is far more: this repo's worktree workflow means several
+ * `cargo test` runs can be compiling while vitest runs, and at load average 20
+ * these four blew past the 5s default and the file reported 90s. That failure
+ * says nothing about the component — so the long-document cases get a budget
+ * that only a real hang can exhaust, and the two cheap cases keep the default.
+ */
+const HUGE_DOC_TIMEOUT_MS = 60_000;
+
 describe("TextBlock progressive rendering", () => {
   it("defers the tail of a long history message", () => {
     act(() => root!.render(<TextBlock text={longText} />));
     const text = container!.textContent ?? "";
     expect(text).toContain("A paragraph of prose");
     expect(text).not.toContain("THE-VERY-END");
-  });
+  }, HUGE_DOC_TIMEOUT_MS);
 
   it("never chunks a message that is still streaming", () => {
     // The reader is watching it grow; folding it to the first chunks would
     // hide text that was on screen a moment ago.
     act(() => root!.render(<TextBlock text={longText} isPartial />));
     expect(container!.textContent).toContain("THE-VERY-END");
-  });
+  }, HUGE_DOC_TIMEOUT_MS);
 
   it("keeps a streamed message whole after the stream ends", () => {
     // The regression this guards: `isPartial` flips to false when the turn
@@ -73,7 +88,7 @@ describe("TextBlock progressive rendering", () => {
     expect(container!.textContent).toContain("THE-VERY-END");
     act(() => root!.render(<TextBlock text={longText} />));
     expect(container!.textContent).toContain("THE-VERY-END");
-  });
+  }, HUGE_DOC_TIMEOUT_MS);
 
   it("still highlights search terms", () => {
     // Highlighting is injected through the `components` map, which now travels
@@ -91,5 +106,5 @@ describe("TextBlock progressive rendering", () => {
       root!.render(<TextBlock text={longText} searchTerms={["paragraph"]} />),
     );
     expect(container!.querySelectorAll("mark").length).toBeGreaterThan(0);
-  });
+  }, HUGE_DOC_TIMEOUT_MS);
 });
