@@ -2732,5 +2732,11 @@
     "no_workspaces": "No repositories yet"
   },
   "view_terminal": "Terminal",
-  "simple_navigation": "Tasks and artifacts"
+  "simple_navigation": "Tasks and artifacts",
+  "simple_nav": {
+    "decisions_pending": "Waiting on you: {{n}}",
+    "decisions_parked": "Timed out: {{n}}",
+    "decisions_title": "Open the task that is waiting on you",
+    "decisions_title_where": "Open: {{where}}"
+  }
 }

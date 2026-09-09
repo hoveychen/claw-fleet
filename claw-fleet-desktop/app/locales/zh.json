@@ -2728,5 +2728,11 @@
     "no_workspaces": "还没有可用的仓库"
   },
   "view_terminal": "终端",
-  "simple_navigation": "任务与产出"
+  "simple_navigation": "任务与产出",
+  "simple_nav": {
+    "decisions_pending": "{{n}} 张卡等你回复",
+    "decisions_parked": "{{n}} 张卡已超时",
+    "decisions_title": "点击打开等你回复的任务",
+    "decisions_title_where": "点击打开：{{where}}"
+  }
 }
