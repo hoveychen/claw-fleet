@@ -22,6 +22,11 @@ const ALL_KEYS = [
   "theme",
   "viewMode",
   "simplified-mode",
+  // 这台主机上次给出的精简模式默认值(后端的 FLEET_SIMPLIFIED_MODE)。不是用户
+  // 的选择,是一份缓存:`host_features` 是异步的,而初始布局必须同步定下来,
+  // 没有它每次打开都会先闪一帧全功能界面。必须能在启动时读回,否则那一闪永远
+  // 在。上面的 "simplified-mode"(用户的显式选择)优先于它。
+  "simplified-mode-host-default",
   // Which session sub-view (list vs gallery) the unified "Sessions" nav returns to.
   "lastSessionViewMode",
   // Last page visited under each sidebar tab (舰队 / 工作), as a JSON blob. The

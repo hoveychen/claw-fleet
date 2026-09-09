@@ -767,33 +767,82 @@ describe("精简模式", () => {
     expect(getItem("simplified-mode")).toBe("false");
   });
 
-  // fleet-cloud 上没存过选择时默认开(浏览器各存一份 localStorage,老板在一个
-  // 浏览器上开的开关到不了下一个)。这里盯的是 store 这一侧的接线:默认值要同时
-  // 落到 simplifiedMode 和初始页,否则页面会停在导航里没有的那一页;而显式存过
-  // 的 "false" 必须压过默认值。哪个 origin 算「默认开」由 hostEnv.test 钉住。
-  it("follows the host default when nothing is stored", async () => {
-    vi.doMock("./hostEnv", () => ({
-      isWebBuild: () => true,
-      defaultsToSimplifiedMode: () => true,
-    }));
+  /**
+   * 主机给的默认值(后端的 FLEET_SIMPLIFIED_MODE,经 host_features 送来)。
+   * 它存在的理由是浏览器构建的设置各存一份 localStorage —— 在一个浏览器上打开
+   * 的开关到不了下一个浏览器,只有主机能替所有客户端表态。三条不变量:
+   *
+   *   1. 主机说开、这个客户端没表过态 ⇒ 就地开,并且初始页跟着落到任务页
+   *      (两者不一致会让页面停在导航里没有的那一页);
+   *   2. 用户显式关过 ⇒ 主机不许改回来;
+   *   3. 主机的答案缓存下来给下一次同步读,主机改口时这份缓存跟着改口 ——
+   *      否则它会变成一个没人能撤销的粘滞开关。
+   */
+  it("adopts the host default and caches it for the next load", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValueOnce({ terminal: false, simplifiedDefault: true });
+
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+    expect(useUIStore.getState().simplifiedMode).toBe(false);
+
+    await useUIStore.getState().loadHostFeatures();
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+    expect(useUIStore.getState().viewMode).toBe("history");
+    // 缓存,不是用户的选择:后者必须仍然是「没表过态」。
+    expect(getItem("simplified-mode-host-default")).toBe("true");
+    expect(getItem("simplified-mode")).toBe(null);
+  });
+
+  it("boots straight into simplified mode from the cached host default", async () => {
+    const { setItem } = await import("./storage");
+    setItem("simplified-mode-host-default", "true");
     const { useUIStore } = await import("./store");
     expect(useUIStore.getState().simplifiedMode).toBe(true);
     expect(useUIStore.getState().viewMode).toBe("history");
-    vi.doUnmock("./hostEnv");
   });
 
-  it("lets a stored opt-out beat the host default", async () => {
-    vi.doMock("./hostEnv", () => ({
-      isWebBuild: () => true,
-      defaultsToSimplifiedMode: () => true,
-    }));
+  it("lets an explicit opt-out beat the host default", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValueOnce({ terminal: false, simplifiedDefault: true });
+
     const { setItem } = await import("./storage");
     setItem("simplified-mode", "false");
     setItem("viewMode", "wiki");
     const { useUIStore } = await import("./store");
+
+    await useUIStore.getState().loadHostFeatures();
     expect(useUIStore.getState().simplifiedMode).toBe(false);
     expect(useUIStore.getState().viewMode).toBe("wiki");
-    vi.doUnmock("./hostEnv");
+  });
+
+  it("drops the cache when the host stops asking for it", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValueOnce({ terminal: false });
+
+    const { setItem, getItem } = await import("./storage");
+    setItem("simplified-mode-host-default", "true");
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+
+    await useUIStore.getState().loadHostFeatures();
+    expect(getItem("simplified-mode-host-default")).toBe(null);
+    // 已经开着的这一次不动(用户正在看着这个界面);下一次加载起就不再默认开。
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+  });
+
+  it("turns simplified mode off when the host says off", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValueOnce({ terminal: false, simplifiedDefault: false });
+
+    const { setItem, getItem } = await import("./storage");
+    setItem("simplified-mode-host-default", "true");
+    const { useUIStore } = await import("./store");
+    expect(useUIStore.getState().simplifiedMode).toBe(true);
+
+    await useUIStore.getState().loadHostFeatures();
+    expect(useUIStore.getState().simplifiedMode).toBe(false);
+    expect(getItem("simplified-mode-host-default")).toBe("false");
   });
 
   it.each(["wiki", "artifacts"])("restores simplified mode on boot from %s", async (view) => {

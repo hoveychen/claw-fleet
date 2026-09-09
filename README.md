@@ -101,6 +101,16 @@ Read once at startup — every surface asks the backend what it allows, so with 
 
 macOS, app launched from the Dock or Finder: a GUI process does not inherit your shell, so an `export` in `~/.zshrc` never reaches it. Use `launchctl setenv FLEET_TERMINAL 1` and restart the app, or launch the app from a shell that has it. `fleet serve` / `fleet webui` are started from a shell, so prefixing the command is enough.
 
+### Optional: simplified mode as a host default
+
+Simplified mode (精简模式 — Tasks and Artifacts only, decisions answered inside each task) is a per-client switch in Settings. A server that wants it for *everyone who opens it* can say so at startup:
+
+```bash
+FLEET_SIMPLIFIED_MODE=1   # 1/true/yes/on = on, 0/false/no/off = off, unset = no opinion
+```
+
+This is a **default**, not a lock: a client that has flipped the switch itself keeps its own answer. It exists because the browser build stores its settings in that one browser's `localStorage` — turning the switch on in one browser does not reach the next one, so only the host can set the default for all of them. Read once at startup, so changing it means restarting the process (for a container deployment: set the env var and redeploy).
+
 ---
 
 ## 3. From the terminal
