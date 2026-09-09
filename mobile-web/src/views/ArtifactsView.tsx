@@ -136,7 +136,7 @@ function ArtifactRow({ artifact, onOpen }: { artifact: Artifact; onOpen: () => v
   );
 }
 
-function ArtifactDetail({
+export function ArtifactDetail({
   artifact,
   client,
   onBack,

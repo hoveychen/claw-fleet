@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { isFleetTool } from "./fleetTools";
+import { IngestCard, ingestStepLabel } from "./IngestCard";
 import { fleetSummary } from "./FleetBody";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
@@ -76,7 +77,7 @@ import { decisionSummary, friendlyToolName, toolSummary } from "./toolSummary";
 import { userDisplayText } from "./slashCommand";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
-import type { ToolDigest } from "../types";
+import type { IngestSummary, ToolDigest } from "../types";
 import { memberDisplayStatus } from "../../../shared-ts/memberStatus";
 import { AgentNavProvider, useAgentNav } from "./AgentNavContext";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
@@ -194,6 +195,9 @@ interface ToolMeta {
   digest?: ToolDigest;
   isError?: boolean;
   thumbs?: string[];
+  /** Set on the two calls that file something into a store, so the row can show
+   *  the deliverable instead of a bare 「产出」 chip. */
+  ingest?: IngestSummary;
 }
 
 function collectToolMeta(messages: RawMessage[]): Map<string, ToolMeta> {
@@ -207,7 +211,8 @@ function collectToolMeta(messages: RawMessage[]): Map<string, ToolMeta> {
       if (b._thumbs?.length) {
         meta.thumbs = b._thumbs.map((d) => `data:image/jpeg;base64,${d}`);
       }
-      if (meta.digest || meta.isError || meta.thumbs) map.set(b.tool_use_id, meta);
+      if (b._ingest) meta.ingest = b._ingest;
+      if (meta.digest || meta.isError || meta.thumbs || meta.ingest) map.set(b.tool_use_id, meta);
     }
   }
   return map;
@@ -570,7 +575,11 @@ function ToolStep({
   const nav = useAgentNav();
   const name = b.name ?? "";
   const fleetTool = isFleetTool(name);
-  const summary = fleetTool
+  const summary = meta?.ingest
+    ? // 入库调用的身份全在下面那张卡上，行里只留动作名（且 relay 把 title /
+      // slug 裁掉了，原来的模板在手机上只剩半句）。
+      ingestStepLabel(meta.ingest)
+    : fleetTool
     ? fleetSummary(fleetTool, b.input ?? {})
     : isDecisionTool(name)
       ? decisionSummary(b)
@@ -604,6 +613,9 @@ function ToolStep({
           {t("打开子代理")} →
         </button>
       )}
+      {/* 这一步产出的东西本身，铺在步骤行下面——它是这次调用的**结果**，
+          不是又一条脚手架记录，所以不必展开就能看见。 */}
+      {meta?.ingest && <IngestCard ingest={meta.ingest} client={client} />}
       {meta?.thumbs && <ThumbRow srcs={meta.thumbs} />}
       {open && expandable && (
         <ToolDetailPanel

@@ -730,6 +730,11 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_use", id: "fp3b", name: "mcp__fleet__fleet__watch", input: { action: "create", note: "等 muvee 拉起 backfill 版镜像（运行镜像 Created 从 05:10:08 变化）；触发时抓容器日志确认补了多少条历史 Tripo 花费", until: "test -f /tmp/ci-done", capture: "muveectl projects logs pixel-portrait --tail 300", poll: 120, timeout: 3600 } },
           { type: "tool_use", id: "fp4", name: "mcp__fleet__fleet__watch", input: { action: "list" } },
           { type: "tool_use", id: "fp5", name: "mcp__fleet__fleet__wiki", input: { action: "list" } },
+          // 两次入库。relay 把结果正文裁掉、把 input.title 也裁掉，所以卡上那点
+          // 东西全靠 `_ingest`（见对面的 tool_result）——这两行正是为了让缺了它
+          // 会怎样一眼可见。
+          { type: "tool_use", id: "fi1", name: "mcp__fleet__fleet__artifact", input: { action: "add", path: "/Users/demo/workspace/claw-fleet/.worktrees/q3/out.xlsx" } },
+          { type: "tool_use", id: "fi2", name: "mcp__fleet__fleet__wiki", input: { action: "publish", path: "/tmp/index.md" } },
           { type: "tool_use", id: "fp6", name: "mcp__fleet__fleet__handoff", input: { action: "list" } },
           { type: "tool_use", id: "fp7", name: "mcp__fleet__fleet__loop", input: { action: "list" } },
           { type: "tool_use", id: "fp8", name: "mcp__fleet__fleet__schedule", input: { action: "list" } },
@@ -763,6 +768,16 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_result", tool_use_id: "fp6" },
           { type: "tool_result", tool_use_id: "fp7" },
           { type: "tool_result", tool_use_id: "fp8" },
+          {
+            type: "tool_result",
+            tool_use_id: "fi1",
+            _ingest: { kind: "artifact", id: "20260827-142530", title: "Q3 财务分析", akind: "sheet", bytes: 184320 },
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "fi2",
+            _ingest: { kind: "wiki", slug: "arch/overview", version: "v3", title: "Architecture overview" },
+          },
           { type: "tool_result", tool_use_id: "fa1", _digest: { answer: "等 max TTL 过完再下线" } },
         ],
       },
