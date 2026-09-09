@@ -54,6 +54,21 @@ if [[ "$(id -u)" -eq 0 ]]; then
     if [[ -n "${FOXY_DATA_DIR:-}" && -d "${FOXY_DATA_DIR}" ]]; then
         chown -R fleet:fleet "${FOXY_DATA_DIR}" 2>/dev/null || true
     fi
+    # Fleet's own state dir gets the same treatment, for the same reason one
+    # directory up: an operator who `exec`s in lands as root, and anything they
+    # run that writes here leaves it root-owned. On 2026-09-09 a hand-run smoke
+    # test (a `claude` SDK turn) left its transcript 0600 root:root under
+    # claude-projects/. `fleet webui`, unprivileged, could not open it — so that
+    # session was absent from every scan while the card it had raised (0644, so
+    # readable) still showed in the pending list. Boss saw 「1 张卡等你回复」
+    # open onto an empty pane.
+    #
+    # Only the strays are touched, not the whole tree: this dir holds the
+    # transcripts and can be hundreds of MB, and a `chown -R` over all of it
+    # every boot buys nothing when the common case is zero strays.
+    if [[ -n "${FLEET_STATE_DIR:-}" && -d "${FLEET_STATE_DIR}" ]]; then
+        find "${FLEET_STATE_DIR}" ! -user fleet -exec chown fleet:fleet {} + 2>/dev/null || true
+    fi
     echo "fleet-entrypoint: dropping to user fleet" >&2
     exec gosu fleet "$0" "$@"
 fi
