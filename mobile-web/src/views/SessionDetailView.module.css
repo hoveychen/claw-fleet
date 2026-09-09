@@ -12,17 +12,18 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  /* --t-body, not --t-ui: the .tabButton row right below is --t-ui, and at the
-     same 14px the title stopped out-ranking the tabs — the top of the page read
-     as six equal-weight labels with a seventh above them. This is also what the
-     other detail headers title at. */
+  /* --t-body, not --t-ui. 这一档是九个详情页 header 共用的标题字号；曾经它
+     还要额外压住底下那条 --t-ui 的六个 tab 标签（同字号时整个页顶读起来像七个
+     等权重的标签），那条 tab 条现在已经没有了，字号留着是为了跟其他八个页
+     一致。 */
   font-size: var(--t-body, 16px);
   font-weight: 600;
   /* The title text ellipsizes via .headerTitleText. */
 }
-/* Title + chevron as one tap target (unfolds .infoPanel).
-   A bare <button> reset: it must lay out exactly like the row of spans it
-   replaced, or the careful flex weights below stop meaning anything. */
+/* 标题整块作为一个 tap 目标（打开「会话详情」半屏）。裸 <button> 重置：它必须
+   跟它取代的那一排 span 布局完全一致，否则底下那些仔细算过的 flex 权重就不再
+   说明任何事。原先它尾部还挂一个展开/收起的 chevron——inline 面板没有了之后，
+   那个 chevron 也就不再对应任何「就地展开」的动作。 */
 .titleTap {
   display: flex;
   align-items: center;
@@ -38,17 +39,6 @@
   text-align: left;
 }
 
-.titleChevron {
-  flex-shrink: 0;
-  color: var(--color-text-dim);
-  transition: transform 140ms ease;
-}
-
-.titleChevron[data-open="true"] {
-  transform: rotate(180deg);
-  color: var(--color-accent);
-}
-
 /* The title keeps a readable floor while the subagent badge ellipsizes away
    beside it. Without the floor a long `⎇ general-purpose-deep-research`
    squeezed it down to "Fi…". Both the workspace suffix and the scope switcher
@@ -62,63 +52,44 @@
   text-overflow: ellipsis;
 }
 
-.statusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-text-dim);
-  flex-shrink: 0;
-}
-
-.statusDot[data-working="true"] {
-  background: var(--color-accent);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.tabBar {
-  display: flex;
-  gap: 4px;
-  padding: 2px 12px 0;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg);
-  overflow-x: auto;
-  flex-shrink: 0;
-  scrollbar-width: none;
-}
-
-.tabBar::-webkit-scrollbar {
-  display: none;
-}
-
-.tabButton {
+/* 头部右上角开「会话详情」半屏的按钮。它顶掉的是一颗 8px 的无标签状态点加一个
+   ☰ 汉堡：状态点搬到状态轨上的「运行中」pill 里（带着两个字，不必靠猜），
+   ☰ 那张「会话操作」sheet 与展开面板合成了同一张半屏。 */
+.moreButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: none;
-  color: var(--color-text-dim);
-  font-size: var(--t-ui, 14px);
-  padding: 5px 10px 6px;
-  border-bottom: 2px solid transparent;
-  white-space: nowrap;
+  color: var(--color-text-secondary);
+  padding: 4px;
+  margin: -4px;
   flex-shrink: 0;
 }
 
-.tabButton[data-active="true"] {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent);
+.moreButton[aria-expanded="true"] {
+  color: var(--color-accent);
 }
 
-.tabScroll {
+/* 推上来的那一面（旧 tab 条上的五页之一）。整页盖住消息，于是它拿得到整个屏宽
+   ——「Token 与花费」那张表和 Workflow 那棵树在旧的 tab 布局里横向都不够用。
+
+   44：要压过 composer（Composer.module.css 的 40），否则输入框会浮在这一面上。
+   仍低于决策抽屉那条常驻底栏（45，且它在 .page 之外所以本来就压在上面）——
+   一张等你答的卡在任何一面上都该保持可达。 */
+.pane {
+  position: absolute;
+  inset: 0;
+  z-index: 44;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+}
+
+.paneScroll {
   flex: 1;
   overflow-y: auto;
+  padding-bottom: env(safe-area-inset-bottom);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -798,63 +769,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* ── Header detail panel (tap the title) ──────────────────────────────────── */
-
-/* Capped and scrollable: a long-running session with a handoff chain, watches
-   and a queue can run past a dozen rows, and a panel that pushes the transcript
-   off the screen would be a worse deal than the ellipsis it replaces. */
-.infoPanel {
-  flex-shrink: 0;
-  max-height: 46vh;
-  overflow-y: auto;
-  padding: 8px 12px 10px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg);
-  -webkit-overflow-scrolling: touch;
-}
-
-/* The whole title, wrapped — this is the first thing the folded header hides. */
-.infoFullTitle {
-  font-size: var(--t-ui, 14px);
-  font-weight: 600;
-  line-height: 1.4;
-  margin-bottom: 6px;
-  overflow-wrap: anywhere;
-}
-
-.infoRow {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  padding: 3px 0;
-  font-size: var(--t-aux, 12px);
-  border-top: 1px solid var(--color-border);
-}
-
-.infoLabel {
-  flex: 0 0 5.5em;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-}
-
-/* Values wrap rather than ellipsize: a truncated path or id here would defeat
-   the entire point of unfolding the header. */
-.infoValue {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--color-text);
-  overflow-wrap: anywhere;
-  /* Long ids/paths are meant to be selected and pasted straight out of here. */
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-.infoValue[data-mono] {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: var(--t-meta, 11px);
-  color: var(--color-text-secondary);
 }
 
 /* "↑ 来自 <父会话>" breadcrumb bar under the header of a subagent detail. */

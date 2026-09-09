@@ -1,0 +1,312 @@
+/* 55：必须压过决策抽屉那条常驻底栏（DecisionDrawer 的 45）——它就贴在半屏要
+   展开的位置上，40 那档会让最后两行被「待决策 N 张」盖掉（旧 SessionHeaderMenu
+   的实测截图确认过）。仍低于灯箱（100）与 App 的 60 档。 */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+}
+
+/* 85vh 而不是旧菜单的 80vh：这张面要装下 chip 行 + 三节内容，而旧菜单只有一列
+   复制条目。上限仍留着——占满整屏就该是一整页而不是半屏，抓手也就失去意义。 */
+.sheet {
+  position: relative;
+  width: 100%;
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border-strong);
+  border-radius: 18px 18px 0 0;
+  padding: 0 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 抓手。它不是装饰：它是移动端「这张面是拖得动的、往下一甩就没了」的既定
+   语汇，也是这一版要去掉的「像网页」那种观感里最省事的一刀。 */
+.grabber {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-border-strong);
+  margin: 9px auto 2px;
+}
+
+/* 关闭按钮浮在右上角，不占标题行的宽度 —— 标题常常是两行的中文长句，让它跟
+   一个 X 按钮抢同一行是旧菜单头部的做法，这里标题更长。 */
+.close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  line-height: 1;
+  padding: 6px;
+}
+
+.title {
+  font-size: var(--t-body, 16px);
+  font-weight: 700;
+  line-height: 1.35;
+  /* 右侧给关闭按钮留出手指宽度，免得长标题跑到它底下。 */
+  padding: 2px 34px 8px 4px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 4px 10px;
+}
+
+.chip {
+  font-size: var(--t-meta, 11px);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 3px 9px;
+  /* 会话 id 之外的字段都短，但模型名（claude-fable-5-1）在窄屏上要能断。 */
+  word-break: break-all;
+}
+
+/* 挡路的那几条：额度耗尽 / 远端断开 / 文件留在本机。原话在这里，pill 轨上只有
+   四个字的标签。 */
+.alert {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--color-warning-soft);
+}
+
+.alertLabel {
+  font-size: var(--t-ui, 14px);
+  font-weight: 700;
+  color: var(--color-warning);
+}
+
+.alertBody {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.section {
+  font-size: var(--t-meta, 11px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-text-dim);
+  padding: 10px 4px 3px;
+}
+
+/* 一行入口。左名字、右读数、末尾一个 ›。48px 是这条 sheet 里所有可点行的下限
+   （iOS HIG 44pt / Material 48dp），旧 tab 条上那些 46px **宽**的标签正是这条
+   下限被横向违反的样子。 */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 48px;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--color-text);
+  padding: 10px 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.row:active {
+  background: var(--color-bg-card-hover);
+}
+
+.rowLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowValue {
+  flex: 0 0 auto;
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-secondary);
+}
+
+.rowValue[data-hot] {
+  color: var(--color-accent);
+  font-weight: 700;
+  font-size: var(--t-ui, 14px);
+}
+
+/* 空的那一面仍然可点（决策记录、Workflow 常常是空的，但「确认它是空的」本身
+   就是一次有效的查看），只是把读数压到最暗一档，不吆喝。 */
+.rowValue[data-empty] {
+  color: var(--color-text-dim);
+}
+
+.chev {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+}
+
+/* 计划进度条。48px 宽的实心条比「3/5」先被读到 —— 数字要算，条不用。 */
+.bar {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-bg-card);
+  overflow: hidden;
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+}
+
+/* 作用域行那颗状态点。配色沿用详情页与旧 ☰ 菜单同一套语义色。 */
+.dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-dim);
+}
+.dot[data-status="thinking"],
+.dot[data-status="executing"],
+.dot[data-status="streaming"],
+.dot[data-status="processing"],
+.dot[data-status="delegating"],
+.dot[data-status="active"] {
+  background: var(--color-success);
+}
+.dot[data-status="waitingInput"] {
+  background: var(--color-warning);
+}
+.dot[data-status="rateLimited"],
+.dot[data-status="serverErrored"],
+.dot[data-status="stuck"] {
+  background: var(--color-error);
+}
+
+/* 当前作用域那一行：点了也只是收起半屏，标出来免得白点。 */
+.row[data-current] .rowLabel {
+  color: var(--color-accent);
+}
+
+/* watch 是**读**行不是入口行（没有 ›，不可点）—— 它三句话就说完了，没有更深
+   的一层可去。 */
+.watchRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.watchIcon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--color-text-secondary);
+}
+
+.watchText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.watchNote {
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+}
+
+.watchMeta {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+}
+
+/* 复制行。副行是要复制的原文（id / 路径 / 命令）——等宽、最多两行：单行省略号
+   会把每条路径都截成一模一样的 `/Users/xxx/…`，而有信息量的恰恰是尾巴。
+   承自旧 SessionHeaderMenu 的 .itemSub。 */
+.copyRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--color-text);
+  padding: 9px 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.copyRow:active {
+  background: var(--color-bg-card-hover);
+}
+
+.copyRow[data-failed] {
+  color: var(--color-error);
+}
+
+.copyIcon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+
+.copyRow[data-failed] .copyIcon {
+  color: var(--color-error);
+}
+
+.copyText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.copyLabel {
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+}
+
+.copySub {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

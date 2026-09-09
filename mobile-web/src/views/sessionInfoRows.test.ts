@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildInfoRows, resumeCommand } from "./sessionInfoRows";
+import { buildInfoChips, resumeCommand } from "./sessionInfoRows";
 import type { SessionInfo } from "../types";
 
-// label 随语言变，所以断言一律走 key / value。
 const base: SessionInfo = {
   id: "abc-123",
   workspacePath: "/Users/x/workspace/proj",
@@ -14,25 +13,19 @@ const base: SessionInfo = {
   jsonlPath: "/Users/x/.claude/projects/proj/abc-123.jsonl",
 };
 
-const keys = (s: SessionInfo) => buildInfoRows(s).map((r) => r.key);
-const valueOf = (s: SessionInfo, key: string) =>
-  buildInfoRows(s).find((r) => r.key === key)?.value;
-
-describe("buildInfoRows", () => {
-  it("给出会话 ID 与工作区名", () => {
-    expect(valueOf(base, "sessionId")).toBe("abc-123");
-    expect(valueOf(base, "workspace")).toBe("proj");
+describe("buildInfoChips", () => {
+  it("给出工作区名", () => {
+    expect(buildInfoChips(base)).toEqual(["proj"]);
   });
 
-  it("路径与时间不进面板：路径在 ☰ 的复制条目上，时间在每条消息旁", () => {
-    const k = keys(base);
-    expect(k).not.toContain("workspacePath");
-    expect(k).not.toContain("jsonlPath");
-    expect(k).not.toContain("created");
-    expect(k).not.toContain("lastActivity");
+  it("路径与时间不进这行 chip：路径在半屏的复制行副行上，时间在每条消息旁", () => {
+    const chips = buildInfoChips(base).join("|");
+    expect(chips).not.toContain("/Users/x/workspace/proj");
+    expect(chips).not.toContain(".jsonl");
+    expect(chips).not.toContain("1700000000000");
   });
 
-  it("状态/接力/PID 这些在别处已有更好的呈现，不重复搬进来", () => {
+  it("会变的那些不搬进来——它们在状态轨和半屏的「此刻」/「进度」两节里", () => {
     const rich: SessionInfo = {
       ...base,
       pid: 42,
@@ -42,29 +35,28 @@ describe("buildInfoRows", () => {
       handoff: { chainId: "c1", hop: 2, chainLen: 3 },
       watches: [{ id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 1 }],
     };
-    expect(keys(rich).sort()).toEqual(["sessionId", "workspace"].sort());
+    // 会话 id 也不在这行 chip 上：它太长，且它真正被用到的方式是复制走。
+    expect(buildInfoChips(rich)).toEqual(["proj"]);
   });
 
-  it("缺席的字段不占行（不显示成空值）", () => {
-    expect(keys(base)).not.toContain("model");
-    expect(valueOf({ ...base, model: "claude-opus-5" }, "model")).toBe("claude-opus-5");
+  it("缺席的字段不产出 chip（不是产出一颗空的）", () => {
+    expect(buildInfoChips(base)).not.toContain("claude-opus-5");
+    expect(buildInfoChips({ ...base, model: "claude-opus-5" })[0]).toBe("claude-opus-5");
   });
 
-  it("effort 成行，紧跟在模型后面（桌面 header 有这颗 chip，手机面板不能没有）", () => {
-    expect(keys(base)).not.toContain("effort");
-    const k = keys({ ...base, model: "claude-opus-5", effort: "high" });
-    expect(k).toContain("effort");
-    expect(k.indexOf("effort")).toBe(k.indexOf("model") + 1);
-    expect(valueOf({ ...base, effort: "high" }, "effort")).toBe("high");
+  it("effort 紧跟在模型后面（桌面 header 有这颗 chip，手机不能没有）", () => {
+    expect(buildInfoChips(base)).not.toContain("high");
+    const chips = buildInfoChips({ ...base, model: "claude-opus-5", effort: "high" });
+    expect(chips.indexOf("high")).toBe(chips.indexOf("claude-opus-5") + 1);
   });
 
   it("contextPercent 按 0–1 比值换算成百分比", () => {
-    expect(valueOf({ ...base, contextPercent: 0.72 }, "context")).toBe("72%");
+    expect(buildInfoChips({ ...base, contextPercent: 0.72 }).join("|")).toContain("72%");
   });
 
-  it("半分钱以下的花费不成行", () => {
-    expect(valueOf({ ...base, totalCostUsd: 0.001 }, "cost")).toBeUndefined();
-    expect(valueOf({ ...base, totalCostUsd: 4.331 }, "cost")).toBe("$4.33");
+  it("半分钱以下的花费不占一颗 chip", () => {
+    expect(buildInfoChips({ ...base, totalCostUsd: 0.001 }).join("|")).not.toContain("$");
+    expect(buildInfoChips({ ...base, totalCostUsd: 4.331 })).toContain("$4.33");
   });
 });
 

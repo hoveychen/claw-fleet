@@ -21,11 +21,19 @@
 import { t } from "../i18n";
 import type { SessionInfo, SessionStatus } from "../types";
 
+/** 会话详情页里能被推上来的整页。
+ *
+ *  就是旧 tab 条上那五个标签——它们的内容一点没变（`SessionDetailTabs.tsx` 里
+ *  那五个组件原样复用），变的只是入口：从「六个挤在一行、每个约 46px 宽的
+ *  tab」改成「从会话详情半屏或状态 pill 推上来的一整页」。一次只看一面，那一
+ *  面就拿得到整个屏宽。 */
+export type DetailPane = "decisions" | "plans" | "token" | "workflow" | "handoff";
+
 /** 头部下面这条轨里，点某个 pill 会推开哪一面。
  *
  *  `sheet` = 打开「会话详情」半屏（watch 和子代理没有自己的整页，它们的明细
- *  就在半屏上）。其余五个是旧 tab 条上那五页，现在改成从这里推开的整页。 */
-export type PillTarget = "decisions" | "plans" | "token" | "workflow" | "handoff" | "sheet";
+ *  就在半屏上）。 */
+export type PillTarget = DetailPane | "sheet";
 
 /** 三档色调。`alert` 是「这条挡着你了」（要你答的卡、耗尽的额度、断掉的远端），
  *  `live` 是「它此刻在动」，`neutral` 是背景读数。刻意只有三档：一条 pill 轨上

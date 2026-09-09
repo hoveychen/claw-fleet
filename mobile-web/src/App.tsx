@@ -1119,6 +1119,16 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           client={transportFor(detailSession.deviceId)}
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
           onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
+          // 头部那条状态轨上「N 张待决策」要靠这个数。决策卡是跨设备聚合的一个
+          // 收件箱，不挂在 SessionInfo 上，所以按 (设备, 会话) 在这里数——只数
+          // 这一台的卡，免得别台一张同名会话的卡被算进来。
+          pendingDecisions={
+            decisions.filter(
+              (d) =>
+                d.deviceId === detailSession.deviceId &&
+                d.request.sessionId === detailSession.id,
+            ).length
+          }
         />
       )}
 

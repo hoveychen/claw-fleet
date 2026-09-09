@@ -1,0 +1,91 @@
+/* 横向可滑，不换行。换行会让这条轨在忙会话上长成两三行，把正文按下去——而
+   它顶掉的那条 tab 条正是因为「固定占位」才被砍掉的，这里不能重蹈。滑动条隐藏
+   （移动端没有指针，一条 iOS 式的细条只会在纸感底色上留一道脏痕）。 */
+.rail {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  /* 头部是毛玻璃、正文在它底下滚过，这条轨要跟头部同属一层「chrome」，
+     所以背景跟着头部走而不是跟着画布走。 */
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rail::-webkit-scrollbar {
+  display: none;
+}
+
+/* 边缘留白：最后一颗 pill 贴着屏幕右沿会让人以为后面没有了。 */
+.rail::after {
+  content: "";
+  flex: 0 0 4px;
+}
+
+.pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--t-meta, 11px);
+  font-weight: 500;
+  /* 28px 高。低于可点行的 48px 下限是刻意的——这些首先是读数，不是主要动作
+     目标；主要动作在半屏上，那里每行都是 48px。放大到 44 会让这条轨吃掉
+     它刚从 tab 条那里省下来的高度。 */
+  min-height: 28px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+button.pill:active {
+  background: var(--color-bg-card-hover);
+}
+
+/* 三档色调。alert = 这条挡着你了；live = 它此刻在动；neutral = 背景读数。 */
+.pill[data-tone="alert"] {
+  background: var(--color-accent-soft);
+  border-color: transparent;
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.pill[data-tone="live"] {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* 「运行中」那颗点。它接替旧头部右上角那个脉冲点——同一个语义、同一个动画
+   节律，只是搬到了带文字的地方，于是不必靠猜就知道那颗点在说什么。 */
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  animation: railPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes railPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+}
