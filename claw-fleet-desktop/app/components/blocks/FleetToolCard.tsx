@@ -14,6 +14,7 @@ import {
   type FleetTool,
   type FleetView,
 } from "./fleetTools";
+import { ArtifactIngestPreview, WikiIngestPreview } from "./IngestPreview";
 import styles from "./FleetToolCard.module.css";
 
 /** Fields shown as key/value rows, in this order; anything else falls after.
@@ -292,6 +293,13 @@ function ResultBody({ result, tool }: { result: FleetResult; tool: FleetTool }) 
     case "confirm":
       return <div className={styles.confirm}>{result.text}</div>;
 
+    // The two ingests render outside the collapsible body as well — see
+    // `FleetToolCard` — so reaching them here means the card is expanded and
+    // the preview is already on screen above. Nothing to add.
+    case "artifact-add":
+    case "wiki-publish":
+      return null;
+
     case "plan-list":
       return (
         <div className={styles.plan_list}>
@@ -424,6 +432,16 @@ export function FleetToolCard({ block, result, isPartial, rail }: Props) {
         {isPartial && !result && <span className={styles.spinner}>⟳</span>}
         {isError && <span className={styles.error_badge}>error</span>}
       </button>
+
+      {/* An ingest's preview sits *outside* the collapsible body: the card is
+          collapsed by default because a run is mostly bookkeeping, but the one
+          thing in a run that is not bookkeeping is the deliverable it produced.
+          Making the reader expand a card to find out what was handed over is
+          how it stayed invisible. */}
+      {view.result.kind === "artifact-add" && (
+        <ArtifactIngestPreview artifact={view.result.artifact} />
+      )}
+      {view.result.kind === "wiki-publish" && <WikiIngestPreview doc={view.result.doc} />}
 
       {open && (
         <div className={styles.body}>

@@ -1,5 +1,6 @@
 import type { RawMessage, TextBlock, ToolUseBlock } from "../types";
 import { isDecisionTool } from "../toolResults";
+import { isIngestCall } from "./blocks/fleetTools";
 import { dayKey } from "../messageRows";
 import type { MetaRenderUnit } from "./metaGrouping";
 
@@ -27,7 +28,13 @@ export function isWorkRow(msg: RawMessage): boolean {
       continue;
     }
     if (block.type === "tool_use") {
-      if (isDecisionTool((block as ToolUseBlock).name)) return false;
+      const call = block as ToolUseBlock;
+      if (isDecisionTool(call.name)) return false;
+      // An ingest — a deliverable filed into 产出, a doc published to the
+      // 知识库 — is the run's *output*, not its scaffolding, and it renders as a
+      // preview of the thing itself. Folding it into a band puts the one
+      // artifact of the run two clicks away, which is how it went unnoticed.
+      if (isIngestCall(call.name, call.input)) return false;
       sawWork = true;
       continue;
     }

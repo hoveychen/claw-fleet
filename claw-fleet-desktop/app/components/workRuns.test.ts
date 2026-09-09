@@ -47,6 +47,14 @@ describe("isWorkRow", () => {
     expect(isWorkRow(user())).toBe(false);
     expect(isWorkRow(assistant([]))).toBe(false);
   });
+
+  it("rejects an ingest — a deliverable filed or a doc published", () => {
+    expect(isWorkRow(assistant([tool("mcp__fleet__fleet__artifact", { action: "add" })]))).toBe(false);
+    expect(isWorkRow(assistant([tool("mcp__fleet__fleet__wiki", { action: "publish" })]))).toBe(false);
+    // …but the same tools' reads are ordinary scaffolding and still fold.
+    expect(isWorkRow(assistant([tool("mcp__fleet__fleet__artifact", { action: "list" })]))).toBe(true);
+    expect(isWorkRow(assistant([tool("mcp__fleet__fleet__wiki", { action: "cat" })]))).toBe(true);
+  });
 });
 
 describe("groupWorkRuns", () => {
