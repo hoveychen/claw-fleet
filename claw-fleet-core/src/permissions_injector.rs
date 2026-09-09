@@ -49,9 +49,12 @@ use crate::session::{
 /// audits them via the Decision Panel. Two families: the UI tools (`fleet__ask`
 /// / `fleet__render_a2ui`) and the control tools registered for Fleet-owned
 /// sessions — without the latter, an rca remote session would trade a Bash
-/// `fleet` 127 for a per-call permission prompt. The control-tool rules are kept
-/// in sync with [`crate::mcp_control::CONTROL_TOOL_NAMES`] by
-/// `inject_rules_preauthorise_every_control_tool`.
+/// `fleet` 127 for a per-call permission prompt. Plus the two image tools, which
+/// are neither UI nor control and so fell through both rosters until 2026-09-09:
+/// every `fleet__image_edit` call raised a permission card. The rules are kept
+/// in sync with [`crate::mcp_control::CONTROL_TOOL_NAMES`] and
+/// [`crate::mcp_server::ALWAYS_ON_TOOL_NAMES`] by
+/// `inject_rules_preauthorise_every_advertised_mcp_tool`.
 ///
 /// `fleet__control` is pre-authorised alongside the rest even though it is
 /// destructive (it stops/interrupts other agents). The alternative is worse
@@ -85,6 +88,8 @@ pub const INJECT_RULES: &[&str] = &[
     "mcp__fleet__fleet__control",
     "mcp__fleet__fleet__notes",
     "mcp__fleet__fleet__history",
+    "mcp__fleet__fleet__image",
+    "mcp__fleet__fleet__image_edit",
 ];
 
 const LOCK_FILE_NAME: &str = "permissions-lock.json";
@@ -578,12 +583,24 @@ mod tests {
     /// `CONTROL_TOOL_NAMES` so adding a future control tool without an allow rule
     /// fails here rather than in production.
     #[test]
-    fn inject_rules_preauthorise_every_control_tool() {
-        for name in crate::mcp_control::CONTROL_TOOL_NAMES {
+    fn inject_rules_preauthorise_every_advertised_mcp_tool() {
+        // `fleet__permission_prompt` is the one tool the model never issues: the
+        // harness invokes it via `--permission-prompt-tool` when some OTHER tool
+        // lacks an allow rule. Pre-authorising it would be a no-op.
+        const NOT_MODEL_INVOKED: [&str; 1] = ["fleet__permission_prompt"];
+
+        let advertised = crate::mcp_control::CONTROL_TOOL_NAMES
+            .iter()
+            .chain(crate::mcp_server::ALWAYS_ON_TOOL_NAMES.iter());
+        for name in advertised {
+            if NOT_MODEL_INVOKED.contains(name) {
+                continue;
+            }
             let rule = format!("mcp__fleet__{name}");
             assert!(
                 INJECT_RULES.contains(&rule.as_str()),
-                "control tool {name} not pre-authorised (expected rule {rule} in INJECT_RULES)"
+                "MCP tool {name} not pre-authorised (expected rule {rule} in INJECT_RULES) — \
+                 every call would raise a permission card"
             );
         }
     }
