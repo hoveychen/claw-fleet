@@ -1,6 +1,13 @@
 {
   "title": "Claw Fleet",
   "fleet": {
+    "event": {
+      "watch": "Fleet watch",
+      "handoff": "Fleet handoff",
+      "loop": "Fleet loop",
+      "schedule": "Fleet schedule",
+      "status": { "fired": "Triggered", "timeout": "Timed out", "successor": "Relay started", "manual": "Manual run" }
+    },
     "kind": {
       "plan": "Plan",
       "handoff": "Handoff",

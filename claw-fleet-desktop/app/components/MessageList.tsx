@@ -36,6 +36,7 @@ import { CopyButton } from "./CopyButton";
 import { ReaderModal } from "./ReaderModal";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import { MetaFoldBlock } from "./blocks/MetaFoldBlock";
+import { FleetEventBlock } from "./blocks/FleetEventBlock";
 import { groupMetaRuns } from "./metaGrouping";
 import { groupWorkRuns } from "./workRuns";
 import { trailingIndicator, WORKING_STATUSES } from "./trailingIndicator";
@@ -131,6 +132,17 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     return (
       <div className={styles.compact_row} data-msg-idx={msgIdx}>
         <CompactSummaryBlock summary={summaryText} />
+      </div>
+    );
+  }
+
+  // Fleet must feed automation payloads through the harness's user-prompt
+  // channel, but they are not authored user turns. Keep them in the timeline
+  // as passive event cards instead of attributing them to the user bubble.
+  if (isUser && msg.fleetEvent) {
+    return (
+      <div className={styles.compact_row} data-msg-idx={msgIdx}>
+        <FleetEventBlock event={msg.fleetEvent} text={messageToText(msg)} />
       </div>
     );
   }
