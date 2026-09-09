@@ -4547,6 +4547,79 @@ mod tests {
         assert_eq!(codex_out_of_credits(&[e]).as_deref(), Some("out of credits"));
     }
 
+    /// The whole point of the field is that it reaches a `SessionInfo`, and the
+    /// codex scanner has TWO builders — the SQLite thread row (primary) and the
+    /// filesystem fallback. A detector wired into only one is invisible on
+    /// whichever path the session happens to take, so both are pinned here with
+    /// the same real rollout bytes.
+    #[test]
+    fn out_of_credits_reaches_session_info_on_both_builder_paths() {
+        use std::io::Write as _;
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-09-04T06:42:55.000Z","type":"session_meta","payload":{{"id":"t-dry-account","cwd":"/tmp","originator":"fleet","source":"exec"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-09-04T06:42:56.000Z","type":"event_msg","payload":{{"type":"task_started"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-09-04T07:02:01.794Z","type":"event_msg","payload":{{"type":"task_complete","last_agent_message":null,"error":{{"message":"Your workspace is out of credits. Ask your workspace owner to refill in order to continue.","codex_error_info":"usage_limit_exceeded"}}}}}}"#
+        )
+        .unwrap();
+        f.flush().unwrap();
+
+        // Filesystem fallback path.
+        let info = parse_codex_session(f.path(), &[]).expect("rollout must parse");
+        assert!(
+            info.out_of_credits
+                .as_deref()
+                .is_some_and(|m| m.contains("out of credits")),
+            "fs path lost the out-of-credits message: {:?}",
+            info.out_of_credits
+        );
+        // And it must NOT be dressed up as a rate limit: there is no reset time,
+        // so auto-resume must never pick it up.
+        assert_ne!(info.status, S::RateLimited);
+        assert!(info.rate_limit.is_none());
+
+        // SQLite thread path — fresh enough (updated_at = now) that it reads the
+        // rollout rather than trusting metadata alone.
+        let thread = SqliteThread {
+            id: "t-dry-account".to_string(),
+            rollout_path: f.path().to_string_lossy().into_owned(),
+            created_at: now_secs - 1200,
+            updated_at: now_secs,
+            source: "exec".to_string(),
+            cwd: "/tmp".to_string(),
+            title: String::new(),
+            model: Some("gpt-5.6-sol".to_string()),
+            reasoning_effort: Some("medium".to_string()),
+            tokens_used: 0,
+            agent_nickname: None,
+            agent_role: None,
+            archived: false,
+            first_user_message: "hi".to_string(),
+        };
+        let info = build_session_from_sqlite(&thread, &[]).expect("should build a SessionInfo");
+        assert!(
+            info.out_of_credits
+                .as_deref()
+                .is_some_and(|m| m.contains("out of credits")),
+            "sqlite path lost the out-of-credits message: {:?}",
+            info.out_of_credits
+        );
+        assert_ne!(info.status, S::RateLimited);
+    }
+
     #[test]
     fn compute_token_stats_supports_new_token_count_shape() {
         let lines = vec![
