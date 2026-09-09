@@ -206,6 +206,30 @@
   text-overflow: ellipsis;
 }
 
+/* Account out of credits. Filled, for the same reason
+   .remote_disconnect_unstopped is: nothing clears this on its own, so it needs
+   the human. Rose rather than the rate-limit red so the two never read as the
+   same thing on a board that can show both — a rate limit resumes itself on a
+   clock, this one waits on a refill. */
+.out_of_credits {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid #9f1239;
+  border-radius: 4px;
+  background: #9f1239;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #fff;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The kill failed: the agent may still be running against the empty mirror.
    Filled rather than outlined — this is the one state that needs the human. */
 .remote_disconnect_unstopped {

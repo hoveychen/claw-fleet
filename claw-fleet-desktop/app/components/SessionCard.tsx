@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileWarning, Play, Server, ServerOff } from "lucide-react";
+import { CreditCard, FileWarning, Play, Server, ServerOff } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
@@ -287,6 +287,73 @@ export function MirrorWriteNotice({ session }: { session: SessionInfo }) {
       <FileWarning size={10} strokeWidth={1.9} />
       {t("mirrorWrite.badge", { count: info.total })}
     </span>
+  );
+}
+
+// ── Out-of-credits notice (account exhausted — needs a human, not a clock) ──
+
+/**
+ * A turn that died because the account has no usage left to spend (Codex's
+ * `codex_error_info: "usage_limit_exceeded"`). Deliberately NOT a status and
+ * deliberately not auto-resumed: unlike a rate limit this failure carries no
+ * reset time, because what it waits on is somebody topping the account up.
+ *
+ * Which is exactly why it needs a chip. The session's status is a perfectly
+ * ordinary `idle` and the only other trace is one red row inside the transcript,
+ * so from the board this looks like a task that simply finished — the same
+ * "looks finished, isn't" shape as `RemoteDisconnectNotice`, whose one-click
+ * shape this borrows. Filled rather than outlined for the same reason that chip
+ * fills its unstopped variant: this is a state that cannot clear itself.
+ */
+export function OutOfCreditsNotice({ session }: { session: SessionInfo }) {
+  const { t } = useTranslation();
+  const [resuming, setResuming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const message = session.outOfCredits;
+  if (!message) return null;
+  const handleResume = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (resuming) return;
+    setResuming(true);
+    setError(null);
+    try {
+      await invoke("resume_rate_limited_session", {
+        sessionId: session.id,
+        workspacePath: session.workspacePath,
+        agentSource: session.agentSource,
+      });
+    } catch (err) {
+      setError(resumeErrorText(err));
+    } finally {
+      setResuming(false);
+    }
+  };
+  // Same resumability gate as the other three controls.
+  const RESUMABLE_SOURCES = ["claude-code", "codex"];
+  const canResume =
+    !session.isSubagent && !session.ideName && RESUMABLE_SOURCES.includes(session.agentSource);
+  return (
+    <>
+      <span className={styles.out_of_credits} title={t("outOfCredits.tip", { message })}>
+        <CreditCard size={10} strokeWidth={1.9} />
+        {t("outOfCredits.badge")}
+      </span>
+      {error && (
+        <span className={styles.resume_error} title={error}>
+          {error}
+        </span>
+      )}
+      {canResume && (
+        <button
+          className={styles.resume_btn}
+          onClick={handleResume}
+          disabled={resuming}
+          title={t("outOfCredits.resumeNow")}
+        >
+          {resuming ? "…" : <Play size={12} strokeWidth={1.75} />}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -687,6 +754,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           <span className={styles.gm_spacer} />
           <RemoteDisconnectNotice session={session} />
           <MirrorWriteNotice session={session} />
+          <OutOfCreditsNotice session={session} />
           <RateLimitControls session={session} />
           <ServerErrorControls session={session} />
         </div>
@@ -708,6 +776,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             {!hideHeader && <StatusBadge status={session.status} />}
             {!hideHeader && <RemoteDisconnectNotice session={session} />}
             {!hideHeader && <MirrorWriteNotice session={session} />}
+            {!hideHeader && <OutOfCreditsNotice session={session} />}
             {!hideHeader && <RateLimitControls session={session} />}
             {!hideHeader && <ServerErrorControls session={session} />}
           </div>
