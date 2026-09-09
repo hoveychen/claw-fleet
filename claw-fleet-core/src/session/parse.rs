@@ -954,6 +954,12 @@ pub fn parse_session_info(
         watches: Vec::new(),
         remote_disconnect: None,
         mirror_write: None,
+        // Codex-only for now. Claude's nearest equivalent ("You're out of extra
+        // usage") arrives as a rate-limit message, so `rate_limit_parser` gives
+        // it a `RateLimitType::OutOfExtraUsage` state with an estimated reset and
+        // it travels the RateLimited path instead (see
+        // `SessionInfo::out_of_credits`).
+        out_of_credits: None,
     })
     .map(|info| (info, state))
 }

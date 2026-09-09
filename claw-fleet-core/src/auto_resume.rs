@@ -582,6 +582,7 @@ mod tests {
             watches: Vec::new(),
             remote_disconnect: None,
             mirror_write: None,
+            out_of_credits: None,
         }
     }
 

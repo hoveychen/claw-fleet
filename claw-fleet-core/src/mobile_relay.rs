@@ -1007,6 +1007,10 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // file names. Absent for every session with a clean mirror, which is all of
     // them in normal operation.
     "mirrorWrite",
+    // 账号额度耗尽（codex 的 usage_limit_exceeded）。它没有 status，只有这个字段，
+    // 白名单不放行手机上就完全看不出「这活是被余额掐停的」——而手机恰恰是最可能
+    // 发现它的地方（充值也在手机上）。正常会话整个字段缺席。
+    "outOfCredits",
 ];
 
 /// Byte size a re-encoded decision-asset image is squeezed toward. Every image
@@ -5621,6 +5625,7 @@ mod tests {
                 "workspaceName": "w", "tokenSpeed": 42.0, "rateLimit": {"until": 1},
                 "lastMessagePreview": "短预览", "userMark": "done", "aiTitle": null,
                 "titleOverride": "手动重命名", "effort": "high",
+                "outOfCredits": "Your workspace is out of credits.",
                 "entrypoint": NEW_SESSION_ENTRYPOINT
             },
             {
@@ -5659,6 +5664,15 @@ mod tests {
         // appear (which is how `model` shipped alone in the first place).
         assert_eq!(list[1]["effort"], "high");
         assert_eq!(list[1]["lastMessagePreview"], "短预览");
+        // An exhausted account has NO status of its own (no reset time → no
+        // RateLimited, no auto-resume), so this field is the only thing that
+        // says the row was stopped by a dry account. Trimmed by the whitelist,
+        // the phone shows a row that looks like it simply finished — and the
+        // phone is where the refill happens.
+        assert_eq!(
+            list[1]["outOfCredits"],
+            "Your workspace is out of credits."
+        );
         // Long previews are truncated with an ellipsis.
         let preview = list[0]["lastMessagePreview"].as_str().unwrap();
         assert_eq!(preview.chars().count(), SNAPSHOT_PREVIEW_CHARS + 1);

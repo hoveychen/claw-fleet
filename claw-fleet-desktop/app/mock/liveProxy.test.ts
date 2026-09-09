@@ -585,3 +585,94 @@ describe("forwarded SSE events", () => {
     expect(FORWARDED_SSE_EVENTS.filter((e) => !broadcast.has(e))).toEqual([]);
   });
 });
+
+/**
+ * The browser build has no compile-time version constant, so the settings row
+ * would print nothing at all unless this composite fetches one. `/health` is
+ * the only public (token-free) route that carries it.
+ */
+describe("get_app_version composite", () => {
+  async function withFetch(
+    responder: (path: string) => Response,
+    run: () => Promise<unknown>,
+  ) {
+    const realFetch = globalThis.fetch;
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      seen.push(path);
+      return responder(path);
+    }) as typeof fetch;
+    try {
+      return { value: await run(), seen };
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  it("reads the serving process's version off /health", async () => {
+    const { liveInvoke } = await import("./liveProxy");
+    const { value, seen } = await withFetch(
+      () => new Response(JSON.stringify({ version: "2.6.2", status: "ok" }), { status: 200 }),
+      () => liveInvoke("get_app_version", {}),
+    );
+    expect(seen[0].endsWith("/health")).toBe(true);
+    expect(value).toEqual({ handled: true, value: "2.6.2" });
+  });
+
+  it("degrades to an empty string when the probe fails", async () => {
+    const { liveInvoke } = await import("./liveProxy");
+    const { value } = await withFetch(
+      () => new Response("nope", { status: 500 }),
+      () => liveInvoke("get_app_version", {}),
+    );
+    // Not "web", not "unknown" — the row hides on empty, and anything else
+    // would be printed as if it were a version.
+    expect(value).toEqual({ handled: true, value: "" });
+  });
+
+  it("degrades to an empty string when /health answers without a version", async () => {
+    const { liveInvoke } = await import("./liveProxy");
+    const { value } = await withFetch(
+      () => new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
+      () => liveInvoke("get_app_version", {}),
+    );
+    expect(value).toEqual({ handled: true, value: "" });
+  });
+
+  it("reads the build commit off the same route", async () => {
+    const { liveInvoke } = await import("./liveProxy");
+    const { value, seen } = await withFetch(
+      () =>
+        new Response(JSON.stringify({ version: "2.6.2", commit: "b437239", status: "ok" }), {
+          status: 200,
+        }),
+      () => liveInvoke("desktop_build_commit", {}),
+    );
+    expect(seen[0].endsWith("/health")).toBe(true);
+    expect(value).toEqual({ handled: true, value: "b437239" });
+  });
+
+  it("passes \"unknown\" through for the settings row to filter", async () => {
+    const { liveInvoke } = await import("./liveProxy");
+    const { value } = await withFetch(
+      () =>
+        new Response(JSON.stringify({ version: "2.6.2", commit: "unknown", status: "ok" }), {
+          status: 200,
+        }),
+      () => liveInvoke("desktop_build_commit", {}),
+    );
+    // The desktop's own command answers "unknown" the same way; the row filters
+    // it in one place rather than each transport inventing its own empty.
+    expect(value).toEqual({ handled: true, value: "unknown" });
+  });
+
+  it("degrades to an empty string when an older server omits commit", async () => {
+    const { liveInvoke } = await import("./liveProxy");
+    const { value } = await withFetch(
+      () => new Response(JSON.stringify({ version: "2.6.1", status: "ok" }), { status: 200 }),
+      () => liveInvoke("desktop_build_commit", {}),
+    );
+    expect(value).toEqual({ handled: true, value: "" });
+  });
+});

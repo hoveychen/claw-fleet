@@ -674,6 +674,22 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
     },
   }),
 
+  // billing-service — a codex session whose account ran dry mid-plan. Also a
+  // deliberately ordinary status: an exhausted account carries no reset time, so
+  // it gets no `RateLimited` and no auto-resume, and from the outside the row
+  // looks merely idle. The chip is the only thing that says otherwise, which is
+  // why it belongs on the mock board.
+  mkSession({
+    id: "sess-billing-credits", workspaceName: "billing-service", status: "idle",
+    agentSource: "codex", model: "gpt-5.6-sol",
+    aiTitle: "Usage-based billing — 迁移脚本收尾",
+    lastMessagePreview: "Rewrote the ledger cutover script and started the dry run...",
+    tokenSpeed: 0, contextPercent: 0.63, totalOutputTokens: 88_100,
+    createdAtMs: NOW - 3 * HOUR, lastActivityMs: NOW - 14 * MIN,
+    outOfCredits:
+      "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+  }),
+
   // payments-gateway — 2-hop handoff chain
   mkSession({
     id: "sess-pay-1", workspaceName: "payments-gateway", status: "idle",
