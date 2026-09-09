@@ -1576,6 +1576,7 @@ fn build_session_from_sqlite(
         rate_limit,
         codex_cost,
         total_input_tokens,
+        out_of_credits,
     ) = if age_secs < 600.0 && rollout_path.exists() {
         // Update last_activity_ms from file mtime for sub-second precision.
         if let Ok(meta) = fs::metadata(&rollout_path) {
@@ -1645,8 +1646,12 @@ fn build_session_from_sqlite(
                     };
                     let ctx = extract_context_percent(&all_parsed, mdl.as_deref());
                     let (cost, input) = codex_cost_and_input(&all_parsed, mdl.as_deref());
+                    // An exhausted account is not a rate limit and gets no
+                    // status of its own — it rides along as an advisory the card
+                    // can show (see `SessionInfo::out_of_credits`).
+                    let ooc = codex_out_of_credits(&all_parsed);
                     (
-                        st, spd, tok, reasoning, preview, mdl, tl, eff, ctx, rl, cost, input,
+                        st, spd, tok, reasoning, preview, mdl, tl, eff, ctx, rl, cost, input, ooc,
                     )
                 } else {
                     (
@@ -1665,6 +1670,7 @@ fn build_session_from_sqlite(
                         None,
                         0.0,
                         0,
+                        None,
                     )
                 }
             } else {
@@ -1684,6 +1690,7 @@ fn build_session_from_sqlite(
                     None,
                     0.0,
                     0,
+                    None,
                 )
             }
         } else {
@@ -1703,6 +1710,7 @@ fn build_session_from_sqlite(
                 None,
                 0.0,
                 0,
+                None,
             )
         }
     } else {
@@ -1730,6 +1738,7 @@ fn build_session_from_sqlite(
             None,
             0.0,
             0,
+            None,
         )
     };
 
@@ -1849,6 +1858,7 @@ fn build_session_from_sqlite(
         watches: Vec::new(),
         remote_disconnect: None,
         mirror_write: None,
+        out_of_credits,
     })
 }
 
@@ -1883,7 +1893,8 @@ pub fn codex_stale_rollout_paths(sessions: &[crate::session::SessionInfo]) -> Ve
 mod tests {
     use super::{
         build_session_from_sqlite, clamp_dead_session_status, codex_account_email_from_auth_json,
-        codex_cost_and_input, codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
+        codex_cost_and_input, codex_last_turn_incomplete, codex_out_of_credits,
+        codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
         codex_token_breakdown_from_lines, codex_token_deltas_from_lines,
         codex_usage_from_app_server_result, codex_usage_from_foxy, compute_token_stats,
@@ -4449,6 +4460,93 @@ mod tests {
         );
     }
 
+    // ── out-of-credits (account exhausted, no reset time) ───────────────────
+
+    /// The real payload, copied verbatim from a rollout on 2026-09-04: the
+    /// failure rides on `task_complete`'s `error` field, NOT on a `token_count`
+    /// rate-limit window, and carries `codex_error_info: usage_limit_exceeded`.
+    fn tc_out_of_credits() -> serde_json::Value {
+        json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete",
+                "last_agent_message": null,
+                "error": {
+                    "message": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+                    "codex_error_info": "usage_limit_exceeded"
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn out_of_credits_detected_from_real_task_complete_error() {
+        let parsed = vec![ev("turn_started"), tc_out_of_credits()];
+        assert_eq!(
+            codex_out_of_credits(&parsed).as_deref(),
+            Some(
+                "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+            )
+        );
+    }
+
+    #[test]
+    fn out_of_credits_cleared_once_a_later_turn_runs() {
+        // The user refilled and resumed: a newer turn start (and, later, a clean
+        // completion) means the account-exhausted state is history — the chip
+        // must not stay pinned to the card forever.
+        assert!(codex_out_of_credits(&[tc_out_of_credits(), ev("turn_started")]).is_none());
+        assert!(codex_out_of_credits(&[
+            tc_out_of_credits(),
+            ev("turn_started"),
+            ev("task_complete")
+        ])
+        .is_none());
+    }
+
+    #[test]
+    fn out_of_credits_ignores_other_error_kinds() {
+        // The other `codex_error_info` values seen in real rollouts — none of
+        // them is a refill-and-continue failure, so none may light the chip.
+        for info in ["unauthorized", "server_overloaded", "other"] {
+            let ev = json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "error": {"message": "nope", "codex_error_info": info}
+                }
+            });
+            assert!(
+                codex_out_of_credits(&[ev]).is_none(),
+                "codex_error_info={info} must not be read as out-of-credits"
+            );
+        }
+    }
+
+    #[test]
+    fn out_of_credits_none_for_healthy_and_window_limited_sessions() {
+        // A clean session, and a genuinely window-rate-limited one (which owns
+        // the RateLimited status + auto-resume path instead) — both `None`.
+        assert!(codex_out_of_credits(&[ev("turn_started"), ev("task_complete")]).is_none());
+        assert!(
+            codex_out_of_credits(&[ev("turn_started"), tc_reached(Some("secondary"))]).is_none()
+        );
+    }
+
+    #[test]
+    fn out_of_credits_survives_a_standalone_error_event() {
+        // Same discriminator delivered as a standalone `error` event rather than
+        // on the turn boundary — treated identically.
+        let e = json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "error",
+                "error": {"message": "out of credits", "codex_error_info": "usage_limit_exceeded"}
+            }
+        });
+        assert_eq!(codex_out_of_credits(&[e]).as_deref(), Some("out of credits"));
+    }
+
     #[test]
     fn compute_token_stats_supports_new_token_count_shape() {
         let lines = vec![
@@ -5051,6 +5149,9 @@ fn parse_codex_session(
     } else {
         status
     };
+    // An exhausted account is a different animal: no reset time, so no status
+    // change and no auto-resume — just an advisory for the card.
+    let out_of_credits = codex_out_of_credits(&all_parsed);
     // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
     // the composer offers resume (not enqueue) once the turn is over.
     let status = clamp_dead_session_status(status, proc_alive);
@@ -5118,6 +5219,7 @@ fn parse_codex_session(
         watches: Vec::new(),
         remote_disconnect: None,
         mirror_write: None,
+        out_of_credits,
     })
 }
 
@@ -6739,6 +6841,75 @@ fn codex_last_turn_incomplete(parsed: &[Value]) -> bool {
         }
     }
     false
+}
+
+/// The `codex_error_info` discriminator Codex stamps on a turn error when the
+/// account has no usage left to spend — as opposed to a *window* rate limit,
+/// which never reaches this path (it arrives as `token_count.rate_limits`'
+/// `rate_limit_reached_type` and is handled by [`codex_rollout_rate_limit`]).
+///
+/// Observed values across this machine's rollouts: `usage_limit_exceeded`,
+/// `unauthorized`, `server_overloaded`, `other`. Only this one is a "refill and
+/// carry on" failure, and it carries NO reset time — which is exactly why it
+/// cannot be auto-resumed: the thing being waited on is a human topping the
+/// account up, not a clock.
+const CODEX_USAGE_LIMIT_ERROR: &str = "usage_limit_exceeded";
+
+/// The message of a Codex turn that died of an exhausted account, when that is
+/// still the session's *current* state.
+///
+/// Scans backwards for the newest turn boundary (`task_complete` /
+/// `turn_complete` / standalone `error` / `stream_error`) or turn start, and
+/// reports only if that newest marker is itself the usage-limit failure. A
+/// later clean boundary or a later turn start means the session moved on (e.g.
+/// the user refilled and resumed), so the chip must disappear.
+///
+/// Source-agnostic on purpose about *which* boundary carries it: the real
+/// rollout puts it on `task_complete`'s `error` field
+/// (`{"message": "Your workspace is out of credits…", "codex_error_info":
+/// "usage_limit_exceeded"}`), but a standalone `error` event of the same shape
+/// is treated identically.
+fn codex_out_of_credits(parsed: &[Value]) -> Option<String> {
+    for v in parsed.iter().rev() {
+        if v.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let Some(payload) = v.get("payload") else { continue };
+        let kind = payload.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if !matches!(
+            kind,
+            "task_complete"
+                | "turn_complete"
+                | "error"
+                | "stream_error"
+                | "task_started"
+                | "turn_started"
+        ) {
+            continue;
+        }
+        let err = payload.get("error");
+        let is_usage_limit = err
+            .and_then(|e| e.get("codex_error_info"))
+            .and_then(|i| i.as_str())
+            == Some(CODEX_USAGE_LIMIT_ERROR);
+        if !is_usage_limit {
+            // The newest marker is something else — a clean finish, a different
+            // failure, or a fresh turn. Either way the account-exhausted state
+            // is no longer what this session is sitting in.
+            return None;
+        }
+        let msg = err
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or_default()
+            .trim();
+        return Some(if msg.is_empty() {
+            CODEX_USAGE_LIMIT_ERROR.to_string()
+        } else {
+            msg.to_string()
+        });
+    }
+    None
 }
 
 /// Decide the rate-limit state for a Codex session from its **own rollout**, for
