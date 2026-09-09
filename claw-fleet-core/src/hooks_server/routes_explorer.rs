@@ -182,6 +182,24 @@ pub(crate) fn route_dsh_models(
     }
 }
 
+/// Fleet's own model catalog (`models.toml`), for the browser build's and the
+/// cloud container's model / effort menus.
+///
+/// No query params and no failure mode: the catalog is compiled in, the user
+/// overlay is optional, and the availability probe reads local config. Unlike
+/// `dsh_models` there is nothing to start and nothing to time out.
+pub(crate) fn route_model_catalog(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let _ = ctx;
+    let body =
+        serde_json::to_string(&crate::model_catalog::picker_catalog()).unwrap_or_default();
+    let _ =
+        request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_explorer_roots(
     ctx: &ServeCtx,
     request: tiny_http::Request,

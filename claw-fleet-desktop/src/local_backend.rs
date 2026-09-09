@@ -2962,6 +2962,11 @@ impl LocalBackend {
         claw_fleet_core::dsh_source::dsh_models()
     }
 
+    /// Fleet's own model catalog for the launcher's model / effort menus.
+    pub fn model_catalog(&self) -> Vec<claw_fleet_core::model_catalog::PickerHarness> {
+        claw_fleet_core::model_catalog::picker_catalog()
+    }
+
     pub fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

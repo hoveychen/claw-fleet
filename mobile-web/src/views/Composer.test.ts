@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CODEX_MODEL_CHOICES,
   carryPromptToDevice,
-  codexEffortChoices,
   composerInset,
   defaultWorkspace,
   newSessionConfigSummary,
@@ -11,6 +9,8 @@ import {
   recentWorkspaceRows,
   resumeConfigChips,
 } from "./Composer";
+import { effortChoicesFor, modelChoicesFor } from "../useModelCatalog";
+import type { PickerHarness } from "../generated/types";
 import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import type { SessionInfo } from "../types";
 
@@ -32,19 +32,69 @@ function session(
   } as unknown as SessionInfo;
 }
 
-describe("Codex model choices", () => {
-  it("includes GPT-6 Astra", () => {
-    expect(CODEX_MODEL_CHOICES).toContainEqual(["gpt-6-astra", "GPT-6 Astra"]);
+describe("模型 / 努力度下拉（来自 model_catalog）", () => {
+  // 形状与 `model_catalog` 真实返回一致。梯子刻意逐模型不同——那正是旧的两份
+  // 手抄清单写错的地方（它们声称 Codex 只到 high 且有 minimal）。
+  const catalog: PickerHarness[] = [
+    {
+      name: "codex",
+      available: true,
+      models: [
+        {
+          id: "gpt-6-astra",
+          label: "GPT-6 Astra",
+          harness: "codex",
+          tier: "premium",
+          efforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+          defaultEffort: "medium",
+        },
+        {
+          id: "gpt-5.5",
+          label: "GPT-5.5",
+          harness: "codex",
+          tier: "premium",
+          efforts: ["low", "medium", "high", "xhigh"],
+          defaultEffort: "xhigh",
+        },
+      ],
+    },
+  ];
+
+  it("下拉开头是「默认」，其后是目录里的模型", () => {
+    expect(modelChoicesFor(catalog, "codex", "默认模型")).toEqual([
+      ["", "默认模型"],
+      ["gpt-6-astra", "GPT-6 Astra"],
+      ["gpt-5.5", "GPT-5.5"],
+    ]);
   });
 
-  it("uses Astra's supported effort ladder", () => {
-    expect(codexEffortChoices("gpt-6-astra").map(([value]) => value)).toEqual([
+  it("目录没到时只剩「默认」", () => {
+    expect(modelChoicesFor([], "codex", "默认模型")).toEqual([["", "默认模型"]]);
+  });
+
+  it("努力度跟着选中的那个模型走，而不是整个 harness", () => {
+    expect(effortChoicesFor(catalog, "codex", "gpt-5.5", "默认").map(([v]) => v)).toEqual([
+      "",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    const astra = effortChoicesFor(catalog, "codex", "gpt-6-astra", "默认").map(([v]) => v);
+    expect(astra).toContain("ultra");
+    // 旧清单凭空发明了 minimal；没有任何 Codex 模型接受它。
+    expect(astra).not.toContain("minimal");
+  });
+
+  it("没选模型时给该 harness 内的并集", () => {
+    expect(effortChoicesFor(catalog, "codex", "", "默认").map(([v]) => v)).toEqual([
       "",
       "low",
       "medium",
       "high",
       "xhigh",
       "max",
+      "ultra",
     ]);
   });
 });

@@ -2113,6 +2113,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "sources_config" => serve_sources_config(params),
         "codex_profiles" => serve_codex_profiles(params),
         "dsh_models" => serve_dsh_models(params),
+        "model_catalog" => serve_model_catalog(params),
         "dsh_token_breakdown" => serve_dsh_token_breakdown(params),
         "dsh_session_cost" => serve_dsh_session_cost(params),
         "browse_dir" => serve_browse_dir(params),
@@ -2833,6 +2834,12 @@ fn serve_codex_profiles(_params: &Value) -> Result<Value, String> {
 fn serve_dsh_models(_params: &Value) -> Result<Value, String> {
     let catalog = crate::dsh_source::dsh_models()?;
     serde_json::to_value(catalog).map_err(|e| e.to_string())
+}
+
+/// Fleet's own model catalog (`models.toml`), for the phone's composer menus.
+/// Mirrors the desktop's `model_catalog` Tauri command.
+fn serve_model_catalog(_params: &Value) -> Result<Value, String> {
+    serde_json::to_value(crate::model_catalog::picker_catalog()).map_err(|e| e.to_string())
 }
 
 /// Token usage for one dsh session. Not reachable through `token_breakdown`:

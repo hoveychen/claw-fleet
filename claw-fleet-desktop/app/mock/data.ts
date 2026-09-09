@@ -2800,6 +2800,69 @@ const DEEPSEEK_EFFORTS = [
   { id: "max", name: "Max" },
 ];
 
+const CLAUDE_LADDER = ["low", "medium", "high", "xhigh", "max"];
+const CODEX_LADDER = ["low", "medium", "high", "xhigh", "max"];
+const CODEX_ULTRA_LADDER = ["low", "medium", "high", "xhigh", "max", "ultra"];
+const DSH_LADDER = ["off", "low", "high", "max"];
+
+/** One `PickerModel` row. */
+function m(
+  id: string,
+  label: string,
+  harness: string,
+  tier: string,
+  efforts: string[],
+  defaultEffort: string | null = null,
+) {
+  return { id, label, harness, tier, efforts, defaultEffort };
+}
+
+// Fleet's own model catalog (`claw-fleet-core/models.toml`), as the
+// `model_catalog` command returns it. Kept faithful to the real payload rather
+// than simplified: the per-model effort ladders differ *within* a harness
+// (`gpt-5.5` stops at `xhigh` while its siblings reach `max`/`ultra`; the
+// deepseek route offers `off` and has no `medium`), and a uniform placeholder
+// ladder would mask the very drift this catalog was built to prevent.
+export const MOCK_MODEL_CATALOG = [
+  {
+    name: "claude",
+    available: true,
+    models: [
+      m("claude-fable-5-1", "Fable 5.1", "claude", "premium", CLAUDE_LADDER),
+      m("claude-opus-5", "Opus 5", "claude", "premium", CLAUDE_LADDER),
+      m("claude-sonnet-5", "Sonnet 5", "claude", "standard", CLAUDE_LADDER),
+      m("claude-haiku-4-5-20251001", "Haiku 4.5", "claude", "fast", CLAUDE_LADDER),
+    ],
+  },
+  {
+    name: "codex",
+    available: true,
+    models: [
+      m("gpt-6-astra", "GPT-6 Astra", "codex", "premium", CODEX_ULTRA_LADDER, "medium"),
+      m("gpt-5.6-sol", "GPT-5.6 Sol", "codex", "premium", CODEX_ULTRA_LADDER, "medium"),
+      m("gpt-5.6-terra", "GPT-5.6 Terra", "codex", "standard", CODEX_ULTRA_LADDER, "medium"),
+      m("gpt-5.6-luna", "GPT-5.6 Luna", "codex", "fast", CODEX_LADDER, "medium"),
+      m("gpt-5.5", "GPT-5.5", "codex", "premium", ["low", "medium", "high", "xhigh"], "xhigh"),
+    ],
+  },
+  {
+    name: "dsh",
+    available: true,
+    models: [
+      m("deepseek-official/deepseek-v4-pro", "DeepSeek V4 Pro", "dsh", "premium", DSH_LADDER, "high"),
+      m("deepseek-official/deepseek-v4-flash", "DeepSeek V4 Flash", "dsh", "standard", DSH_LADDER, "high"),
+      m(
+        "deepseek-official/deepseek-v4-flash-vision-exp",
+        "DeepSeek V4 Flash (vision, exp)",
+        "dsh",
+        "standard",
+        DSH_LADDER,
+        "high",
+      ),
+    ],
+  },
+];
+
 export const MOCK_DSH_MODELS = {
   groups: [
     {

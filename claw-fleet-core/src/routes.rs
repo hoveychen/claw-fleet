@@ -274,6 +274,7 @@ pub const CODEX_TOKEN_BREAKDOWN: &str = "/codex_token_breakdown";
 pub const DSH_TOKEN_BREAKDOWN: &str = "/dsh_token_breakdown";
 pub const DSH_SESSION_COST: &str = "/dsh_session_cost";
 pub const DSH_MODELS: &str = "/dsh_models";
+pub const MODEL_CATALOG: &str = "/model_catalog";
 pub const USAGE_HISTORY: &str = "/usage_history";
 pub const CODEX_USAGE_HISTORY: &str = "/codex_usage_history";
 pub const CODEX_PROFILES: &str = "/codex_profiles";

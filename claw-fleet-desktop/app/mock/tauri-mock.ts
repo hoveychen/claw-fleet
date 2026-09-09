@@ -44,6 +44,7 @@ import {
   MOCK_PLAN_FOREST,
   MOCK_MEMORY_HISTORY,
   MOCK_DSH_MODELS,
+  MOCK_MODEL_CATALOG,
   MOCK_SOURCES_CONFIG,
   MOCK_SETUP_STATUS,
   MOCK_HOOKS_PLAN,
@@ -802,6 +803,15 @@ async function handleIPC(
     // models across 43 vendors when this was written).
     case "dsh_models":
       return MOCK_DSH_MODELS;
+
+    // Fleet's own model catalog (models.toml). Mirrors the real payload's
+    // shape closely enough that the pickers render their true content in
+    // screenshots — including the per-model effort ladders, which differ
+    // *inside* a harness (gpt-5.5 stops at xhigh; the deepseek route has no
+    // `medium` at all). A flat placeholder ladder here would hide exactly the
+    // bug this catalog exists to prevent.
+    case "model_catalog":
+      return MOCK_MODEL_CATALOG;
 
     // Codex profile-v2 files on the host. Two entries so the model picker
     // shows the third-party half in screenshots; the real list comes from

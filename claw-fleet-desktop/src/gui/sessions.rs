@@ -220,6 +220,18 @@ pub(crate) fn dsh_models(
     state.backend.dsh_models()
 }
 
+/// Fleet's own model catalog (`models.toml`) for the launcher's menus.
+///
+/// Cheap and synchronous — the catalog is parsed once per process and the
+/// availability probe reads the sources config. Unlike `dsh_models` there is no
+/// server to start.
+#[tauri::command]
+pub(crate) fn model_catalog(
+    state: tauri::State<'_, AppState>,
+) -> Vec<claw_fleet_core::model_catalog::PickerHarness> {
+    state.backend.model_catalog()
+}
+
 #[tauri::command(async)]
 pub(crate) fn get_session_todos(
     jsonl_path: String,

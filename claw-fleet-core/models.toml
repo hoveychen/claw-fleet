@@ -165,6 +165,8 @@ listed = false
 
 # ── Codex ───────────────────────────────────────────────────────────────────
 # `ultra` = “最高推理强度，并自动委派任务”。只有部分模型有。
+# label 用带版本号的全名（"GPT-5.6 Sol" 而非 "Sol"）：它同时是桌面与移动端模型
+# 下拉里的那行字，光写 "Sol" 在下拉里认不出是哪一代。
 # 全家按 ChatGPT 套餐配额计费，没有按 token 的单价。
 
 [[model]]
@@ -180,7 +182,7 @@ quota_billed = true
 
 [[model]]
 id = "gpt-5.6-sol"
-label = "Sol"
+label = "GPT-5.6 Sol"
 family = "codex"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
@@ -191,7 +193,7 @@ quota_billed = true
 
 [[model]]
 id = "gpt-5.6-terra"
-label = "Terra"
+label = "GPT-5.6 Terra"
 family = "codex"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
@@ -202,7 +204,7 @@ quota_billed = true
 
 [[model]]
 id = "gpt-5.6-luna"
-label = "Luna"
+label = "GPT-5.6 Luna"
 family = "codex"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]
