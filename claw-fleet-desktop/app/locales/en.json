@@ -1857,6 +1857,10 @@
       "render_a2ui": "Rendered a rich card",
       "ask": "Raised a decision card",
       "permission_prompt": "Asked for command approval"
+    },
+    "ingest": {
+      "open_artifact": "Open in Artifacts",
+      "open_wiki": "Open in Wiki"
     }
   },
   "settings": {

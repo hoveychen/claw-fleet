@@ -37,6 +37,7 @@ import { canRevealPath } from "../canReveal";
 import { formatBytes } from "../formatBytes";
 import { isWebBuild } from "../hostEnv";
 import { getItem, setItem } from "../storage";
+import { useUIStore } from "../store";
 import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
 import { downloadArtifact, downloadFolderZip } from "../mock/liveProxy";
@@ -560,6 +561,20 @@ export function ArtifactsView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // "Open this deliverable", raised by a transcript's ingest card. The stage is
+  // driven by `selectedId` alone — no filter has to be cleared, because the
+  // detail replaces the grid rather than living inside it. The request is only
+  // consumed once the artifact is actually in `items`: a card clicked seconds
+  // after the ingest can arrive before this page's first load returns.
+  const storeNav = useUIStore((s) => s.storeNav);
+  const clearStoreNav = useUIStore((s) => s.clearStoreNav);
+  useEffect(() => {
+    if (storeNav?.target !== "artifact") return;
+    if (!(items ?? []).some((a) => a.id === storeNav.id)) return;
+    setSelectedId(storeNav.id);
+    clearStoreNav();
+  }, [storeNav, items, clearStoreNav]);
 
   const directoryTree = useMemo(
     () => buildArtifactDirectoryTree(items ?? [], folders),

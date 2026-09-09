@@ -1854,6 +1854,10 @@
       "render_a2ui": "渲染富交互卡",
       "ask": "发出决策卡",
       "permission_prompt": "请求命令授权"
+    },
+    "ingest": {
+      "open_artifact": "在产出页打开",
+      "open_wiki": "在知识库打开"
     }
   },
   "settings": {

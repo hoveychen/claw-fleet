@@ -1729,6 +1729,85 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         usage: { input_tokens: 6600, output_tokens: 60 },
       },
     },
+    // ── The two ingests — exercise the inline preview card. Their ids/slugs
+    //    point at MOCK_ARTIFACTS / MOCK_WIKI_DOCS below, so the card resolves
+    //    real metadata; the preview well itself falls back to its icon here,
+    //    since the mock host serves no blob bytes. ────────────────────────────
+    {
+      type: "assistant",
+      uuid: "msg-fleet-artifact-add",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-ingest-1",
+            name: "mcp__fleet__fleet__artifact",
+            input: {
+              action: "add",
+              path: "/Users/demo/workspace/claw-fleet/.worktrees/q3/out.xlsx",
+              title: "Q3 财务分析",
+              note: "按季度拆分的收入明细，发给财务的版本",
+            },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6650, output_tokens: 50 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-artifact-add-r",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-ingest-1",
+            content:
+              "Stored artifact 20260827-142530 — Q3 财务分析 (sheet, 184320 bytes), hard-linked. " +
+              "It is now on the 产出 page.",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-wiki-publish",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-ingest-2",
+            name: "mcp__fleet__fleet__wiki",
+            input: { action: "publish", path: "/tmp/overview.md", slug: "arch/overview" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6660, output_tokens: 45 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-wiki-publish-r",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-ingest-2",
+            content: "Published arch/overview (version v3, 3 total). title: Architecture Overview",
+          },
+        ],
+      },
+    },
     // ── Fleet MCP control-tool calls — exercise the FleetToolCard renderer ──
     {
       type: "assistant",
