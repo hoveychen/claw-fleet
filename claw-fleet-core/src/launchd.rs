@@ -45,6 +45,43 @@ fn remove_legacy_fleet_dir_at(claude_dir: &std::path::Path) -> std::io::Result<(
     Ok(())
 }
 
+/// Directories under `~/.fleet/` that belonged to features Fleet has since
+/// removed, and that nothing in the current tree reads or writes.
+///
+/// Add a name here in the same change that deletes the feature writing it —
+/// otherwise the data outlives the code that gave it meaning. `session-read`
+/// is the entry that prompted the list: the read/unread side-channel was
+/// removed on 2026-09-06 and left one small JSON file per session behind
+/// (2564 files / 10 MB on the machine this was found on), which no build since
+/// has been able to explain to anyone reading `~/.fleet`.
+const RETIRED_STATE_DIRS: &[&str] = &[
+    // `~/.fleet/session-read/<id>.json` — `{lastReadMs, workspacePath}` for the
+    // per-session read/unread marker.
+    "session-read",
+];
+
+/// Remove the `~/.fleet/` subdirectories of retired features.
+///
+/// Best-effort and idempotent, like the two legacy removals above: an absent
+/// directory is a clean no-op, and a failure to delete is not fatal — the only
+/// cost of leaving it is the disk it already occupies. Called on startup.
+pub fn remove_retired_state_dirs() -> std::io::Result<()> {
+    match real_home_dir() {
+        Some(home) => remove_retired_state_dirs_in(&home.join(".fleet")),
+        None => Ok(()),
+    }
+}
+
+fn remove_retired_state_dirs_in(fleet_dir: &std::path::Path) -> std::io::Result<()> {
+    for name in RETIRED_STATE_DIRS {
+        let dir = fleet_dir.join(name);
+        if dir.is_dir() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+    }
+    Ok(())
+}
+
 /// Label of the macOS LaunchAgent an old Fleet build installed to keep a
 /// `fleet serve` process running at login (`RunAtLoad` + `KeepAlive`).
 const LEGACY_SERVE_LAUNCHAGENT_LABEL: &str = "com.claudefleet.serve";
@@ -135,5 +172,58 @@ mod tests {
 
         // Idempotent: a second call on an absent plist is a clean no-op.
         remove_legacy_serve_launchagent_at(&launch_agents).unwrap();
+    }
+
+    #[test]
+    fn removes_retired_state_dirs_and_leaves_live_ones_alone() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let fleet = tmp.path().join(".fleet");
+        let retired = fleet.join("session-read");
+        std::fs::create_dir_all(&retired).unwrap();
+        std::fs::write(retired.join("abc.json"), br#"{"lastReadMs":1}"#).unwrap();
+        // A directory a live feature still owns, sitting right next to it.
+        let live = fleet.join("session-mark");
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::write(live.join("abc.json"), b"{}").unwrap();
+
+        remove_retired_state_dirs_in(&fleet).unwrap();
+
+        assert!(!retired.exists(), "retired dir must be removed");
+        assert!(live.join("abc.json").exists(), "only retired names may be swept");
+
+        // Idempotent: a second call on an absent dir is a clean no-op.
+        remove_retired_state_dirs_in(&fleet).unwrap();
+    }
+
+    /// The list is a delete list — a name that a live module still writes would
+    /// wipe working state on every startup. `session-read` is safe precisely
+    /// because nothing in the tree writes it any more; this pins that.
+    #[test]
+    fn no_retired_name_is_still_written_by_the_tree() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for name in RETIRED_STATE_DIRS {
+            let needle = format!("\"{name}\"");
+            let mut stack = vec![src.clone()];
+            while let Some(dir) = stack.pop() {
+                for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else if p.extension().is_some_and(|e| e == "rs") {
+                        let body = std::fs::read_to_string(&p).unwrap_or_default();
+                        // This file names it in the list itself; everyone else
+                        // naming it would mean the feature is not retired.
+                        if p.file_name().is_some_and(|f| f == "launchd.rs") {
+                            continue;
+                        }
+                        assert!(
+                            !body.contains(&needle),
+                            "{} still names retired dir {name}",
+                            p.display()
+                        );
+                    }
+                }
+            }
+        }
     }
 }
