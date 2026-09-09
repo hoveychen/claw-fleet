@@ -33,6 +33,11 @@ import { useSourcesConfig } from "../useSourcesConfig";
 import { toolChoicesForSources, toolForAgentSource } from "../agentSource";
 import { dshEffortsFor, dshLadderSpec, dshModelGroups, useDshModels } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
+import {
+  effortChoicesFor,
+  modelChoicesFor,
+  useModelCatalog,
+} from "../useModelCatalog";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
 import { timeAgo } from "./TasksView";
@@ -42,60 +47,10 @@ import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs } from "./AttachmentThumb";
 import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 
-const MODEL_CHOICES: Array<[string, string]> = [
-  ["", "默认模型"],
-  ["claude-fable-5-1", "Fable 5.1"],
-  ["claude-fable-5", "Fable 5"],
-  ["claude-opus-5", "Opus 5"],
-  ["claude-opus-4-8", "Opus 4.8"],
-  ["claude-sonnet-5", "Sonnet 5"],
-  ["claude-sonnet-4-6", "Sonnet 4.6"],
-  ["claude-haiku-4-5-20251001", "Haiku 4.5"],
-];
-
-const EFFORT_CHOICES: Array<[string, string]> = [
-  ["", "默认努力度"],
-  ["low", "low"],
-  ["medium", "medium"],
-  ["high", "high"],
-  ["xhigh", "xhigh"],
-  ["max", "max"],
-];
-
-// Codex model ids (`codex exec -m <model>`), disjoint from Claude's — mirrors
-// the desktop's CODEX_MODEL_CHOICES. "" default follows Codex's configured model.
-// 第三方模型不写在这里：它们运行时从主机的 codex profile 文件发现
-// （见 useCodexProfiles），硬编码会列出那台机器上根本没配 provider 的模型。
-export const CODEX_MODEL_CHOICES: Array<[string, string]> = [
-  ["", "默认模型"],
-  ["gpt-6-astra", "GPT-6 Astra"],
-  ["gpt-5.6-sol", "GPT-5.6 Sol"],
-  ["gpt-5.6-terra", "GPT-5.6 Terra"],
-  ["gpt-5.6-luna", "GPT-5.6 Luna"],
-  ["gpt-5.5", "GPT-5.5"],
-];
-
-// Codex reasoning effort — no "xhigh"/"max", adds "minimal" (mirrors desktop).
-const CODEX_EFFORT_CHOICES: Array<[string, string]> = [
-  ["", "默认努力度"],
-  ["minimal", "minimal"],
-  ["low", "low"],
-  ["medium", "medium"],
-  ["high", "high"],
-];
-
-export function codexEffortChoices(model: string): Array<[string, string]> {
-  return model === "gpt-6-astra"
-    ? [
-        ["", "默认努力度"],
-        ["low", "low"],
-        ["medium", "medium"],
-        ["high", "high"],
-        ["xhigh", "xhigh"],
-        ["max", "max"],
-      ]
-    : CODEX_EFFORT_CHOICES;
-}
+// 模型与努力度清单曾经硬编码在这里，并与桌面端的 modelChoices.ts 手工互抄。
+// 两份都漂了：都声称 Codex 的努力度是 `minimal/low/medium/high`，而实测没有任何
+// 一个 Codex 模型接受 `minimal`，且每个都接受 `xhigh`/`max`。现在统一由
+// `claw-fleet-core/models.toml` 经 `model_catalog` 提供，见 ../useModelCatalog。
 
 const PERMISSION_LABEL: Record<string, string> = {
   acceptEdits: "自动接受编辑",
@@ -399,9 +354,13 @@ function OptionSelects({
         : { efforts: [], defaultEffort: "" },
     [isDsh, dshCatalog, model],
   );
+  const catalog = useModelCatalog(client);
   const modelChoices = isCodex
-    ? [...CODEX_MODEL_CHOICES, ...codexProfileChoices(codexProfiles)]
-    : MODEL_CHOICES;
+    ? [
+        ...modelChoicesFor(catalog, "codex", t("默认模型")),
+        ...codexProfileChoices(codexProfiles),
+      ]
+    : modelChoicesFor(catalog, "claude", t("默认模型"));
   // dsh 的档位是**每个模型自己的**——发 Claude 那套固定档位它不认。目录还没到
   // 或该模型没有推理控制时只剩「默认」，那是诚实的降级：会话跑在主机
   // ~/.dsh/settings.yaml 选中的档位上。
@@ -414,8 +373,8 @@ function OptionSelects({
         ...dshEffort.efforts,
       ]
     : isCodex
-      ? codexEffortChoices(model)
-      : EFFORT_CHOICES;
+      ? effortChoicesFor(catalog, "codex", model, t("默认努力度"))
+      : effortChoicesFor(catalog, "claude", model, t("默认努力度"));
   return (
     <div className={styles.optionRow}>
       <label className={styles.optionField}>
@@ -426,7 +385,12 @@ function OptionSelects({
           aria-label={t("模型")}
           onChange={(e) => {
             const nextModel = e.target.value;
-            const supportedEfforts = codexEffortChoices(nextModel).map(([value]) => value);
+            const supportedEfforts = effortChoicesFor(
+              catalog,
+              "codex",
+              nextModel,
+              "",
+            ).map(([value]) => value);
             onChange({
               model: nextModel,
               ...(isCodex && !supportedEfforts.includes(effort) ? { effort: "" } : {}),
@@ -793,12 +757,11 @@ export function NewSessionSheet({
     },
   });
   const toolLabel = t(toolChoices.find(([value]) => value === tool)?.[1] ?? tool);
+  const sheetCatalog = useModelCatalog(client);
   const modelLabel = model
-    ? t(
-        (tool === "codex" ? CODEX_MODEL_CHOICES : MODEL_CHOICES).find(
-          ([value]) => value === model,
-        )?.[1] ?? model,
-      )
+    ? (modelChoicesFor(sheetCatalog, tool === "codex" ? "codex" : "claude", "").find(
+        ([value]) => value === model,
+      )?.[1] ?? model)
     : "";
   const configSummary = newSessionConfigSummary({
     toolLabel,
@@ -1260,11 +1223,13 @@ export function ResumeComposer({
   const fileRef = useRef<HTMLInputElement>(null);
   // 胶囊上报告的当前配置。dsh 的模型目录是主机运行时给的，这里认不出 id 就
   // 原样显示 —— 显示一个真实但陌生的 id，好过显示一个错的友好名字。
+  const resumeCatalog = useModelCatalog(client);
   const modelLabel = useMemo(() => {
-    const table = tool === "codex" ? CODEX_MODEL_CHOICES : tool === "dsh" ? [] : MODEL_CHOICES;
+    if (tool === "dsh") return model;
+    const table = modelChoicesFor(resumeCatalog, tool === "codex" ? "codex" : "claude", "");
     const hit = table.find(([v]) => v === model);
-    return hit ? t(hit[1]) : model;
-  }, [tool, model]);
+    return hit ? hit[1] : model;
+  }, [tool, model, resumeCatalog]);
   const configChips = useMemo(
     () =>
       resumeConfigChips({
