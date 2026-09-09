@@ -258,27 +258,49 @@ note_en = "Frontier for complex coding / research; higher default effort"
 # 运行时把每个模型的真实 `efforts` 与 `defaultEffort` 发过线来。抄一份静态副本
 # 只会过期，还会盖住那份活数据。
 #
-# 所以 dsh 条目只承载 **Fleet 自己的判断**：档位归类（跨 harness 换算要用）。
+# 列出来的只有 `deepseek-official` 这一个 provider 的三个模型。它是 dsh 内置的
+# 路由，价格有官方公开表（见 dsh_cost.rs 的 DEEPSEEK_PEAK_RATES，2026-08-16
+# 生效那版），所以能如实报价。openrouter 那 270 多个不列：同一个模型经不同
+# provider 价格不同，逐用户不同，凭印象报价就是编造。
 #
-# 这两条**故意不写 `efforts`**。省略 `efforts` 的含义是「这个模型的梯子去问
+# 三条都**故意不写 `efforts`**。省略 `efforts` 的含义是「这个模型的梯子去问
 # dsh，我们不断言」，而不是「它没有梯子」。dsh 的梯子逐模型不同，且用的是它自己
 # 的词汇（`off` 是真实档位，某些模型一路到 `max`）——凭印象抄一份进来，就是把
 # 一个猜测伪装成事实。老板要给某个模型钉死一条梯子，在 `~/.fleet/models.toml`
 # 里给它补 `efforts` 即可，那是一个明确的人为决定，不是 Fleet 编的。
 #
-# 同理不写价格：同一个模型经不同 provider 价格不同，凭印象报价就是编造。
-# 它们也不进速查表（dsh 那份 guidance 明确叫 agent 去读 settings.yaml）。
+# 同理不写 `context`：没有可信来源，速查表里会显示 `—`，那比编一个数字好。
+#
+# 价格是 **peak 档、cache-miss 输入**。DeepSeek 的非峰值恰好半价，cache-hit
+# 输入另有更低一档，这两点写在 note 里而不是塞进数字，免得表里那个数看起来像
+# 唯一价格。
 
 [[model]]
 id = "deepseek-official/deepseek-v4-pro"
 label = "DeepSeek V4 Pro"
 family = "dsh"
 tier = "premium"
-listed = false
+price_in = 1.32
+price_out = 3.96
+note_zh = "dsh 内置 deepseek-official 路由里最强的一档；表中为峰值价，非峰值半价，命中缓存的输入更低至 $0.044"
+note_en = "The strongest tier on dsh's built-in deepseek-official route; peak rates shown — off-peak is half, cache-hit input as low as $0.044"
+
+[[model]]
+id = "deepseek-official/deepseek-v4-flash"
+label = "DeepSeek V4 Flash"
+family = "dsh"
+tier = "fast"
+price_in = 0.44
+price_out = 1.32
+note_zh = "快且便宜的一档；**不收图片输入**；表中为峰值价，非峰值半价，命中缓存的输入低至 $0.014"
+note_en = "The fast, cheap tier; **rejects image input**; peak rates shown — off-peak is half, cache-hit input as low as $0.014"
 
 [[model]]
 id = "deepseek-official/deepseek-v4-flash-vision-exp"
 label = "DeepSeek V4 Flash (vision, exp)"
 family = "dsh"
 tier = "fast"
-listed = false
+price_in = 0.44
+price_out = 1.32
+note_zh = "与 flash 同价、能收图片的实验版；本机 settings.yaml 的 agent 默认就是它"
+note_en = "Experimental vision-capable sibling of flash at the same price; the agent default in this machine's settings.yaml"

@@ -758,6 +758,37 @@ mod tests {
         assert_eq!(context_window("claude-haiku-4-5-20251001"), None);
     }
 
+    /// dsh's own three rows must stay listed with a price.
+    ///
+    /// They were `listed = false` at first, on the reasoning that dsh publishes
+    /// its real catalog at runtime and a static copy would rot. That reasoning
+    /// holds for the ~270 openrouter entries and does not hold for the built-in
+    /// `deepseek-official` route, which has a published price table
+    /// (`dsh_cost::DEEPSEEK_PEAK_RATES`). The result was a cheat-sheet written
+    /// *for a dsh agent* that named no dsh model at all. This test is what stops
+    /// that from happening again quietly.
+    #[test]
+    fn dsh_route_models_are_listed_with_prices() {
+        let rows = listed_models("dsh");
+        let ids: Vec<&str> = rows.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "deepseek-official/deepseek-v4-pro",
+                "deepseek-official/deepseek-v4-flash",
+                "deepseek-official/deepseek-v4-flash-vision-exp",
+            ]
+        );
+        for e in &rows {
+            assert!(e.price_in.is_some() && e.price_out.is_some(), "{} has no price", e.id);
+            assert!(!e.note("zh").is_empty(), "{} has no zh note", e.id);
+            assert!(!e.note("en").is_empty(), "{} has no en note", e.id);
+            // Still no ladder and no window: those are dsh's to report, not ours.
+            assert_eq!(e.efforts, None, "{} must not assert a ladder", e.id);
+            assert_eq!(e.context, None, "{} must not assert a window", e.id);
+        }
+    }
+
     /// The bare aliases are legal `--model` values, so they resolve too.
     #[test]
     fn bare_claude_aliases_resolve() {

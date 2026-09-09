@@ -620,6 +620,11 @@ pub fn render_dsh_model_block(locale: &str) -> String {
     // families back to back in the merged-price shape.
     let claude_rows = crate::model_catalog::render_rows("claude-code", locale, false);
     let codex_rows = crate::model_catalog::render_rows("codex", locale, false);
+    // dsh's own rows: only the built-in `deepseek-official` route, which has a
+    // published price table. The 270-odd openrouter entries are per-user and
+    // priced per provider, so the sheet points at settings.yaml for those
+    // instead of guessing.
+    let dsh_rows = crate::model_catalog::render_rows("dsh", locale, false);
     let claude_efforts = crate::model_catalog::render_effort_line("claude-code", locale);
     let codex_efforts = crate::model_catalog::render_effort_line("codex", locale);
     if locale == "zh" {
@@ -632,15 +637,17 @@ dsh 把模型拆成 `provider` + `model` 两段,Fleet 的 spawn 用一个字符�
 `openrouter`,model `anthropic/claude-haiku-4.5`。不含 `/` 的字符串不指定 \
 provider,会话就留在 harness 自身配置的模型上。\n\
 \n\
-可用的 provider / model 取决于**用户 `~/.dsh/settings.yaml` 里配了什么**,\
-所以这里不列价目表:同一个模型经不同 provider 价格不同,凭印象报价就是编造。\
-要知道当前配了什么,读那个配置文件,别猜。\n\
+可用的 provider / model 取决于**用户 `~/.dsh/settings.yaml` 里配了什么**。\
+下表只列 dsh 内置的 `deepseek-official` 路由——它有官方公开价目表,所以能如实\
+报价。**经 openrouter 之类第三方 provider 的模型不在表里**:同一个模型经不同 \
+provider 价格不同,逐用户不同,凭印象报价就是编造。要知道本机当前配了什么,\
+读那个配置文件,别猜。\n\
 \n\
 ## 你派活给 Fleet 会话时选哪档(`fleet` CLI 的 `--model` / `--effort`)\n\
 \n\
 | 模型 | ID | 上下文 | 输入/输出 $/1M | 何时选 |\n\
 |---|---|---|---|---|\n\
-{claude_rows}{codex_rows}\
+{dsh_rows}{claude_rows}{codex_rows}\
 \n\
 Claude effort:{claude_efforts},`xhigh` 是编码/agentic 最佳档。\n\
 Codex effort:{codex_efforts}。\n\
@@ -662,15 +669,18 @@ string and splits on the **first `/`**: `openrouter/anthropic/claude-haiku-4.5` 
 configured with.\n\
 \n\
 Which providers and models exist depends on **what the user configured in \
-`~/.dsh/settings.yaml`**, so there is no price table here: the same model costs \
-different amounts through different providers, and quoting a number from memory \
-would be inventing one. Read that config when you need to know; don't guess.\n\
+`~/.dsh/settings.yaml`**. The table below lists only dsh's built-in \
+`deepseek-official` route, which has a published price table and can therefore \
+be quoted honestly. **Models reached through a third-party provider such as \
+openrouter are not listed**: the same model costs different amounts through \
+different providers, it varies per user, and quoting a number from memory would \
+be inventing one. Read that config when you need to know; don't guess.\n\
 \n\
 ## Picking a tier when you hand work to a Fleet session (`fleet` CLI `--model` / `--effort`)\n\
 \n\
 | Model | ID | Context | In/Out $/1M | When to pick |\n\
 |---|---|---|---|---|\n\
-{claude_rows}{codex_rows}\
+{dsh_rows}{claude_rows}{codex_rows}\
 \n\
 Claude effort: {claude_efforts} (`xhigh` is best for coding and agentic work).\n\
 Codex effort: {codex_efforts}.\n\
