@@ -18,6 +18,9 @@ vi.mock("./WikiTabPane", () => ({
 vi.mock("./WebTabPane", () => ({
   WebTabPane: ({ url }: { url: string }) => <div data-testid="web">{url}</div>,
 }));
+vi.mock("./ArtifactTabPane", () => ({
+  ArtifactTabPane: ({ id }: { id: string }) => <div data-testid="artifact">{id}</div>,
+}));
 
 const { SessionAuxDoc } = await import("./SessionAuxDoc");
 
@@ -63,6 +66,17 @@ describe("SessionAuxDoc", () => {
       />,
     );
     expect(el.querySelector('[data-testid="wiki"]')?.textContent).toBe("arch/overview");
+  });
+
+  it("gives a deliverable the 产出 reader, addressed by store id", () => {
+    const el = render(
+      <SessionAuxDoc
+        doc={makeAuxDoc("artifact", "20260909-080326", "9/8 对外更新日志")}
+        onOpenWiki={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(el.querySelector('[data-testid="artifact"]')?.textContent).toBe("20260909-080326");
   });
 
   it("gives a url the web reader", () => {

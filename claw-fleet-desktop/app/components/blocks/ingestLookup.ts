@@ -17,22 +17,14 @@
  *     Caching "not found" would leave the card blank for the rest of the
  *     session, so only hits are remembered.
  *
- * Both types are declared here as the narrow subset the preview needs rather
- * than imported from `ArtifactsView` / `WikiView` — importing them would drag
- * two of the heaviest views into the session-detail bundle for four fields.
+ * `Artifact` is re-exported from `ArtifactsView` as a **type-only** import — it
+ * is erased at build time, so nothing of that view reaches this module's
+ * runtime bundle, while the rail's `ArtifactTabPane`, which needs the whole
+ * record (versions included) for its stage, shares one shape with the card.
  */
 import { invoke } from "@tauri-apps/api/core";
 
-/** Subset of `claw_fleet_core::artifacts::Artifact` the preview well needs. */
-export interface IngestedArtifact {
-  id: string;
-  name: string;
-  title: string;
-  note: string;
-  mime: string;
-  kind: string;
-  sizeBytes: number;
-}
+import type { Artifact } from "../ArtifactsView";
 
 /** Subset of `claw_fleet_core::wiki::WikiDoc` the preview well needs. */
 export interface IngestedWikiDoc {
@@ -43,16 +35,16 @@ export interface IngestedWikiDoc {
   currentVersion: string;
 }
 
-const artifactCache = new Map<string, IngestedArtifact>();
-const artifactInFlight = new Map<string, Promise<IngestedArtifact | null>>();
+const artifactCache = new Map<string, Artifact>();
+const artifactInFlight = new Map<string, Promise<Artifact | null>>();
 
-export async function loadArtifact(id: string): Promise<IngestedArtifact | null> {
+export async function loadArtifact(id: string): Promise<Artifact | null> {
   const hit = artifactCache.get(id);
   if (hit) return hit;
   const pending = artifactInFlight.get(id);
   if (pending) return pending;
 
-  const req = invoke<IngestedArtifact>("get_artifact", { id })
+  const req = invoke<Artifact>("get_artifact", { id })
     .then((a) => {
       if (a) artifactCache.set(id, a);
       return a ?? null;

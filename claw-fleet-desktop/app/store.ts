@@ -321,14 +321,16 @@ interface UIState {
   terminalNav: TerminalNavRequest | null;
   requestTerminalNav: (workspacePath: string) => void;
   clearTerminalNav: () => void;
-  /** A pending "open this deliverable / doc" request, raised by a transcript's
-   *  ingest card. Same shape and the same reason as fileNav: ArtifactsView and
-   *  WikiView own their selection internally, so the detail pane has no prop to
-   *  hand them. The consuming view clears it. */
-  storeNav: StoreNavRequest | null;
+  /** A pending "open this deliverable" request, raised by a transcript's
+   *  ingest card. Same shape and the same reason as fileNav: ArtifactsView owns
+   *  its selection in component state, so there is no prop to hand it. It
+   *  clears the request once consumed.
+   *
+   *  The wiki needs no equivalent — its selected slug already lives in
+   *  `mainViewState.wiki`, which `revealSlugInWikiPage` writes directly. */
+  artifactNav: ArtifactNavRequest | null;
   requestArtifactNav: (id: string) => void;
-  requestWikiNav: (slug: string) => void;
-  clearStoreNav: () => void;
+  clearArtifactNav: () => void;
   /** Which optional surfaces the backend actually allows — read once at boot
    *  (`host_features`; the browser build gets the same answer over
    *  `GET /host_features`). Starts all-off and stays that way if the call
@@ -375,10 +377,12 @@ export interface TerminalNavRequest {
   nonce: number;
 }
 
-/** "Open this artifact / wiki doc", raised from a transcript's ingest card. */
-export type StoreNavRequest =
-  | { target: "artifact"; id: string; nonce: number }
-  | { target: "wiki"; slug: string; nonce: number };
+/** "Open this deliverable on the 产出 page", from a transcript's ingest card. */
+export interface ArtifactNavRequest {
+  id: string;
+  /** Bumped per request, so asking for the same artifact twice re-navigates. */
+  nonce: number;
+}
 
 export interface FileNavRequest {
   workspacePath: string;
@@ -669,19 +673,14 @@ export const useUIStore = create<UIState>((set) => ({
           },
     ),
   clearTerminalNav: () => set({ terminalNav: null }),
-  storeNav: null,
+  artifactNav: null,
   // Same viewModePatch bookkeeping as requestFileNav — see the note there.
   requestArtifactNav: (id) =>
     set((s) => ({
       ...viewModePatch(s, "artifacts"),
-      storeNav: { target: "artifact", id, nonce: (s.storeNav?.nonce ?? 0) + 1 },
+      artifactNav: { id, nonce: (s.artifactNav?.nonce ?? 0) + 1 },
     })),
-  requestWikiNav: (slug) =>
-    set((s) => ({
-      ...viewModePatch(s, "wiki"),
-      storeNav: { target: "wiki", slug, nonce: (s.storeNav?.nonce ?? 0) + 1 },
-    })),
-  clearStoreNav: () => set({ storeNav: null }),
+  clearArtifactNav: () => set({ artifactNav: null }),
   hostFeatures: { terminal: false },
   loadHostFeatures: async () => {
     let features: HostFeatures = { terminal: false };

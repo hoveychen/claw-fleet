@@ -22,13 +22,40 @@ import { useTranslation } from "react-i18next";
 import { FileText } from "lucide-react";
 
 import { artifactBlobUrl } from "../../artifactAssets";
+import { docId } from "../../detailAux";
 import { formatBytes } from "../../formatBytes";
+import { revealSlugInWikiPage } from "../../hooks/useWikiDocs";
 import { thumbMode } from "../../officePreview";
 import { useUIStore } from "../../store";
 import { wikiFileUrl } from "../../wikiAssets";
+import type { Artifact } from "../ArtifactsView";
 import type { ArtifactAdded, WikiPublished } from "./fleetTools";
-import { loadArtifact, loadWikiDoc, type IngestedArtifact, type IngestedWikiDoc } from "./ingestLookup";
+import { loadArtifact, loadWikiDoc, type IngestedWikiDoc } from "./ingestLookup";
+import { useIngestOpen } from "./ingestOpenContext";
 import styles from "./IngestPreview.module.css";
+
+/**
+ * What a click on an ingest card does.
+ *
+ * Two stages on purpose. The first click opens the deliverable in the
+ * auxiliary rail — beside the conversation that produced it, which is the
+ * whole reason the rail exists — and only a second click, once it is already
+ * open there, hands it to the 产出 / 知识库 page. Jumping pages on the first
+ * click would make "let me see what that is" cost losing your place in the
+ * transcript.
+ *
+ * With no rail to open into (mock board, tests), there is only one stage: go
+ * to the page.
+ */
+function useTwoStageOpen(kind: "artifact" | "wiki", ref: string, label: string, toPage: () => void) {
+  const ingest = useIngestOpen();
+  const openInRail = ingest !== null && ingest.expandedId !== docId(kind, ref);
+  return {
+    /** True while the next click shows it in the rail rather than navigating. */
+    opensInRail: openInRail,
+    onClick: () => (openInRail ? ingest.open(kind, ref, label) : toPage()),
+  };
+}
 
 /** Same lazy boundary as the 产出 grid: the document renderers are heavy and a
  *  transcript that contains no ingest must not pay for them. */
@@ -37,7 +64,7 @@ const ArtifactThumb = lazy(() => import("../ArtifactThumb"));
 export function ArtifactIngestPreview({ artifact }: { artifact: ArtifactAdded }) {
   const { t } = useTranslation();
   const requestArtifactNav = useUIStore((s) => s.requestArtifactNav);
-  const [meta, setMeta] = useState<IngestedArtifact | null>(null);
+  const [meta, setMeta] = useState<Artifact | null>(null);
   const [thumbFailed, setThumbFailed] = useState(false);
 
   useEffect(() => {
@@ -52,15 +79,23 @@ export function ArtifactIngestPreview({ artifact }: { artifact: ArtifactAdded })
 
   const url = meta ? artifactBlobUrl(meta.id, meta.name) : null;
   const mode = meta && !thumbFailed ? thumbMode(meta.mime, meta.sizeBytes) : null;
+  const title = meta?.title || artifact.title;
+  const { opensInRail, onClick } = useTwoStageOpen("artifact", artifact.id, title, () =>
+    requestArtifactNav(artifact.id),
+  );
 
   return (
     <Shell
-      title={meta?.title || artifact.title}
+      title={title}
       note={meta?.note ?? ""}
       badge={t(`artifacts.kind.${meta?.kind ?? artifact.artifactKind}`, meta?.kind ?? artifact.artifactKind)}
       size={formatBytes(meta?.sizeBytes ?? artifact.bytes)}
-      openLabel={t("detail.ingest.open_artifact", "在产出页打开")}
-      onOpen={() => requestArtifactNav(artifact.id)}
+      openLabel={
+        opensInRail
+          ? t("detail.ingest.open_rail", "在侧边打开")
+          : t("detail.ingest.open_artifact", "在产出页打开")
+      }
+      onOpen={onClick}
     >
       {meta && url && meta.kind === "image" ? (
         <img className={styles.image} src={url} alt={meta.title} />
@@ -92,7 +127,6 @@ const WIKI_KIND_LABEL: Record<IngestedWikiDoc["kind"], string> = {
 
 export function WikiIngestPreview({ doc }: { doc: WikiPublished }) {
   const { t } = useTranslation();
-  const requestWikiNav = useUIStore((s) => s.requestWikiNav);
   const [meta, setMeta] = useState<IngestedWikiDoc | null>(null);
   const [thumbFailed, setThumbFailed] = useState(false);
 
@@ -112,15 +146,23 @@ export function WikiIngestPreview({ doc }: { doc: WikiPublished }) {
   // entry is the bundle's index.html, so it renders like any other html page.
   const url = meta ? wikiFileUrl(meta.slug, meta.currentVersion, meta.entry) : null;
   const mode = meta?.kind === "markdown" ? "markdown" : "html";
+  const title = meta?.title || doc.title;
+  const { opensInRail, onClick } = useTwoStageOpen("wiki", doc.slug, title, () =>
+    revealSlugInWikiPage(doc.slug),
+  );
 
   return (
     <Shell
-      title={meta?.title || doc.title}
+      title={title}
       note={doc.slug}
       badge={WIKI_KIND_LABEL[meta?.kind ?? "markdown"]}
       size={doc.version}
-      openLabel={t("detail.ingest.open_wiki", "在知识库打开")}
-      onOpen={() => requestWikiNav(doc.slug)}
+      openLabel={
+        opensInRail
+          ? t("detail.ingest.open_rail", "在侧边打开")
+          : t("detail.ingest.open_wiki", "在知识库打开")
+      }
+      onOpen={onClick}
     >
       {meta && url && !thumbFailed ? (
         <Suspense fallback={null}>

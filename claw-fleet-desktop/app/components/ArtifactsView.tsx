@@ -567,14 +567,14 @@ export function ArtifactsView() {
   // detail replaces the grid rather than living inside it. The request is only
   // consumed once the artifact is actually in `items`: a card clicked seconds
   // after the ingest can arrive before this page's first load returns.
-  const storeNav = useUIStore((s) => s.storeNav);
-  const clearStoreNav = useUIStore((s) => s.clearStoreNav);
+  const artifactNav = useUIStore((s) => s.artifactNav);
+  const clearArtifactNav = useUIStore((s) => s.clearArtifactNav);
   useEffect(() => {
-    if (storeNav?.target !== "artifact") return;
-    if (!(items ?? []).some((a) => a.id === storeNav.id)) return;
-    setSelectedId(storeNav.id);
-    clearStoreNav();
-  }, [storeNav, items, clearStoreNav]);
+    if (!artifactNav) return;
+    if (!(items ?? []).some((a) => a.id === artifactNav.id)) return;
+    setSelectedId(artifactNav.id);
+    clearArtifactNav();
+  }, [artifactNav, items, clearArtifactNav]);
 
   const directoryTree = useMemo(
     () => buildArtifactDirectoryTree(items ?? [], folders),
@@ -2160,7 +2160,7 @@ async function exportMemberBytes(name: string, bytes: Uint8Array) {
  * through the very same `PreviewStage`, handed down as `renderPreview`, so a
  * member never grows a second, drifting renderer.
  */
-function ArtifactStage({
+export function ArtifactStage({
   artifact,
   version,
 }: {

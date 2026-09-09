@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { AuxDoc } from "../detailAux";
+import { ArtifactTabPane } from "./ArtifactTabPane";
 import { ExternalFilePreview } from "./FilesView";
 import { WebTabPane } from "./WebTabPane";
 import { WikiTabPane } from "./WikiTabPane";
@@ -52,6 +53,13 @@ export function SessionAuxDoc({
       return (
         <div className={styles.aux_doc_pane}>
           <WebTabPane url={doc.ref} />
+        </div>
+      );
+    case "artifact":
+      return (
+        <div className={styles.aux_doc_pane}>
+          {/* `ref` is the store id — a deliverable has no path to name it by. */}
+          <ArtifactTabPane id={doc.ref} />
         </div>
       );
   }

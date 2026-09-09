@@ -323,21 +323,6 @@ export function WikiView() {
     load();
   }, [load]);
 
-  // "Open this doc", raised by a transcript's ingest card. Consumed only once
-  // the slug is in `docs` — a card clicked right after `wiki publish` can land
-  // here before this page's first list returns. The folder rail is reset with
-  // it, since a doc selected under a filtered folder would otherwise disappear
-  // the moment the reader steps back out of it.
-  const storeNav = useUIStore((s) => s.storeNav);
-  const clearStoreNav = useUIStore((s) => s.clearStoreNav);
-  useEffect(() => {
-    if (storeNav?.target !== "wiki") return;
-    if (!docs.some((d) => d.slug === storeNav.slug)) return;
-    setSelectedFolder(null);
-    setSelectedSlug(storeNav.slug);
-    clearStoreNav();
-  }, [storeNav, docs, clearStoreNav, setSelectedFolder, setSelectedSlug]);
-
   // Distinct workspaces for the filter dropdown, stable order.
   const workspaces = useMemo(() => {
     const seen = new Map<string, string>();

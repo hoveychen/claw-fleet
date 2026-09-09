@@ -1673,6 +1673,7 @@
   "tabs": {
     "file_readonly": "只读预览",
     "wiki_missing": "该文档未发布，或已被删除",
+    "artifact_missing": "这份产出已被删除",
     "wiki_open_page": "在知识库中打开",
     "wiki_open_page_short": "知识库",
     "web_probing": "正在检查该站是否允许嵌入…",
@@ -1857,7 +1858,9 @@
     },
     "ingest": {
       "open_artifact": "在产出页打开",
-      "open_wiki": "在知识库打开"
+      "open_artifact_short": "产出",
+      "open_wiki": "在知识库打开",
+      "open_rail": "在侧边打开"
     }
   },
   "settings": {
