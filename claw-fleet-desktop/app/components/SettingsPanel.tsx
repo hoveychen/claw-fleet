@@ -180,6 +180,18 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
+  // ── App version ──────────────────────────────────────────────────────────
+  // A compile-time constant of the running app, not backend data. The browser
+  // build answers `"web"` (see `webTransport.ts`), which is not a version — the
+  // row hides itself rather than printing it.
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    invoke<string>("get_app_version")
+      .then((v) => setAppVersion(v === "web" ? "" : v))
+      .catch(() => {});
+  }, []);
+
   // ── Sources state ────────────────────────────────────────────────────────
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [sourcesNeedRestart, setSourcesNeedRestart] = useState(false);
@@ -1163,6 +1175,18 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             {activeTab === "general" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.general")}</div>
+                {appVersion && (
+                  <div className={styles.row}>
+                    <span className={styles.row_label}>{t("settings.app_version")}</span>
+                    <span
+                      className={styles.row_label}
+                      style={{ color: "var(--color-text-dim)", fontVariantNumeric: "tabular-nums" }}
+                      data-testid="settings-app-version"
+                    >
+                      v{appVersion}
+                    </span>
+                  </div>
+                )}
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.language")}</span>
                   <LanguageSwitcher />
