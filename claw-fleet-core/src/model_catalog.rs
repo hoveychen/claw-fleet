@@ -43,8 +43,7 @@ const EFFORT_ORDER: [&str; 8] = [
 /// `efforts = None` means "we don't assert a ladder for this model" — which for
 /// a dsh entry means "ask dsh" — and is a different statement from an empty
 /// list.
-// No `Eq`: prices are `f64`, and float equality is not an equivalence relation.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct ModelEntry {
     pub id: String,
     #[serde(default)]
@@ -65,14 +64,6 @@ pub struct ModelEntry {
     /// Display name for the cheat-sheets ("Fable 5.1", "Sol").
     #[serde(default)]
     pub label: Option<String>,
-    /// USD per million input / output tokens.
-    #[serde(default)]
-    pub price_in: Option<f64>,
-    #[serde(default)]
-    pub price_out: Option<f64>,
-    /// Billed against a plan quota, with no per-token price (all of Codex).
-    #[serde(default)]
-    pub quota_billed: Option<bool>,
     /// `false` = resolvable but kept out of the cheat-sheet tables (bare
     /// aliases, dsh rows). Absent means listed.
     #[serde(default)]
@@ -125,15 +116,6 @@ impl ModelEntry {
         }
         if other.label.is_some() {
             self.label = other.label;
-        }
-        if other.price_in.is_some() {
-            self.price_in = other.price_in;
-        }
-        if other.price_out.is_some() {
-            self.price_out = other.price_out;
-        }
-        if other.quota_billed.is_some() {
-            self.quota_billed = other.quota_billed;
         }
         if other.listed.is_some() {
             self.listed = other.listed;
@@ -958,22 +940,13 @@ mod tests {
         }
     }
 
-    /// Every listed row carries a tier (which the sheet prints) and a price or a
-    /// quota flag (which it does not).
-    ///
-    /// The sheet dropped its price column deliberately: what a model costs per
-    /// token is not how an agent should be choosing one — that is what the tier
-    /// vocabulary is for. The price fields stay in the catalog because cost
-    /// accounting needs them (`model_cost`), and this keeps them complete so
-    /// that consumer can rely on them.
+    /// Every listed row carries a tier — the one qualitative signal the sheet
+    /// and the pickers both print, and what `llm_provider` tiers against.
     #[test]
-    fn every_listed_row_has_a_tier_and_a_price_or_quota() {
+    fn every_listed_row_has_a_tier() {
         for family in ["claude-code", "codex", "dsh"] {
             for e in listed_models(family) {
                 assert!(e.tier.is_some(), "{} has no tier", e.id);
-                let priced = e.price_in.is_some() && e.price_out.is_some();
-                let quota = e.quota_billed.unwrap_or(false);
-                assert!(priced || quota, "{} has neither a price nor a quota flag", e.id);
             }
         }
     }

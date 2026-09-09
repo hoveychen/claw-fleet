@@ -22,9 +22,6 @@
 #   context        默认上下文窗口（token）。仅用作**回退**：会话自报了真实窗口
 #                  就以自报为准（Codex 每轮都会自报）。
 #   max_context    该模型能开到的最大窗口。目前只作记录，不参与百分比计算。
-#   price_in /
-#   price_out      每 100 万 token 的美元单价。
-#   quota_billed   true = 按套餐配额计费、没有按 token 单价（Codex 全家如此）。
 #   listed         false = 可解析但不进速查表（裸别名 `opus` 之类）。默认 true。
 #   superseded_by  被哪个 id 取代。这种行不单独占一行，而是折进目标行末尾的
 #                  「前代 X 同价仍可选」——那是三份 guidance 原本就用的体例。
@@ -59,8 +56,6 @@ label = "Fable 5.1"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
-price_in = 10.0
-price_out = 50.0
 
 [[model]]
 id = "claude-fable-5"
@@ -68,8 +63,6 @@ label = "Fable 5"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
-price_in = 10.0
-price_out = 50.0
 superseded_by = "claude-fable-5-1"
 # 折进 5.1 那一行时附带的差异说明。
 legacy_note_zh = "5.1 上强制 tool_choice `any`/`tool` 会 400，5 没这限制"
@@ -81,8 +74,6 @@ label = "Opus 5"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
-price_in = 5.0
-price_out = 25.0
 
 [[model]]
 id = "claude-opus-4-8"
@@ -90,8 +81,6 @@ label = "Opus 4.8"
 family = "claude-code"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max"]
-price_in = 5.0
-price_out = 25.0
 superseded_by = "claude-opus-5"
 
 [[model]]
@@ -100,8 +89,6 @@ label = "Sonnet 5"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
-price_in = 3.0
-price_out = 15.0
 
 [[model]]
 id = "claude-sonnet-4-6"
@@ -109,8 +96,6 @@ label = "Sonnet 4.6"
 family = "claude-code"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max"]
-price_in = 3.0
-price_out = 15.0
 superseded_by = "claude-sonnet-5"
 
 # 选择器里 Haiku 用的是带日期的 id，`fleet-model-guidance.md` 与手打的
@@ -122,8 +107,6 @@ label = "Haiku 4.5"
 family = "claude-code"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]
-price_in = 1.0
-price_out = 5.0
 
 [[model]]
 id = "claude-haiku-4-5"
@@ -131,8 +114,6 @@ label = "Haiku 4.5"
 family = "claude-code"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]
-price_in = 1.0
-price_out = 5.0
 listed = false
 
 [[model]]
@@ -167,7 +148,6 @@ listed = false
 # `ultra` = “最高推理强度，并自动委派任务”。只有部分模型有。
 # label 用带版本号的全名（"GPT-5.6 Sol" 而非 "Sol"）：它同时是桌面与移动端模型
 # 下拉里的那行字，光写 "Sol" 在下拉里认不出是哪一代。
-# 全家按 ChatGPT 套餐配额计费，没有按 token 的单价。
 
 [[model]]
 id = "gpt-6-astra"
@@ -178,7 +158,6 @@ efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
 context = 272000
 max_context = 872000
-quota_billed = true
 
 [[model]]
 id = "gpt-5.6-sol"
@@ -189,7 +168,6 @@ efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
 context = 272000
 max_context = 872000
-quota_billed = true
 
 [[model]]
 id = "gpt-5.6-terra"
@@ -200,7 +178,6 @@ efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
 context = 272000
 max_context = 872000
-quota_billed = true
 
 [[model]]
 id = "gpt-5.6-luna"
@@ -211,7 +188,6 @@ efforts = ["low", "medium", "high", "xhigh", "max"]
 default_effort = "medium"
 context = 272000
 max_context = 872000
-quota_billed = true
 
 # 唯一一个梯子真的停在 max 以下的 listed 模型，而且它默认就跑在自己的顶档。
 [[model]]
@@ -223,7 +199,6 @@ efforts = ["low", "medium", "high", "xhigh"]
 default_effort = "xhigh"
 context = 272000
 max_context = 272000
-quota_billed = true
 
 # ── dsh ─────────────────────────────────────────────────────────────────────
 # 这里**不**试图列全 dsh 能跑的模型。dsh 的目录是每个用户 `~/.dsh/settings.yaml`
@@ -231,10 +206,9 @@ quota_billed = true
 # 运行时把每个模型的真实 `efforts` 与 `defaultEffort` 发过线来。抄一份静态副本
 # 只会过期，还会盖住那份活数据。
 #
-# 列出来的只有 `deepseek-official` 这一个 provider 的三个模型。它是 dsh 内置的
-# 路由，价格有官方公开表（见 dsh_cost.rs 的 DEEPSEEK_PEAK_RATES，2026-08-16
-# 生效那版），所以能如实报价。openrouter 那 270 多个不列：同一个模型经不同
-# provider 价格不同，逐用户不同，凭印象报价就是编造。
+# 列出来的只有 `deepseek-official` 这一个 provider 的三个模型：它是 dsh 内置的
+# 路由，全机器一致。openrouter 那 270 多个不列——逐用户配置不同，实测里它们的
+# effort 梯子也五花八门（有的带 minimal，有的带 off，有的是空数组）。
 #
 # 三条的 `efforts` / `default_effort` 是**向本机 dsh 实测**来的，不是抄的：
 # `dsh_source::dsh_models()` 返回的 `session/modelCatalog`（复现见该模块的
@@ -254,9 +228,6 @@ quota_billed = true
 # **deepseek-v4-pro 本机没有会话，所以留空、表里显示 `—`。**同族大概率也是 1M，
 # 但「大概率」不是实测，宁可空着。哪天有一个 pro 会话跑过，就能照样填上。
 #
-# 价格是 **peak 档、cache-miss 输入**。DeepSeek 的非峰值恰好半价，cache-hit
-# 输入另有更低一档，这两点写在 note 里而不是塞进数字，免得表里那个数看起来像
-# 唯一价格。
 
 [[model]]
 id = "deepseek-official/deepseek-v4-pro"
@@ -267,8 +238,6 @@ tier = "premium"
 context = 1000000
 efforts = ["off", "low", "high", "max"]
 default_effort = "high"
-price_in = 1.32
-price_out = 3.96
 
 [[model]]
 id = "deepseek-official/deepseek-v4-flash"
@@ -278,8 +247,6 @@ tier = "standard"
 efforts = ["off", "low", "high", "max"]
 default_effort = "high"
 context = 1000000
-price_in = 0.44
-price_out = 1.32
 
 [[model]]
 id = "deepseek-official/deepseek-v4-flash-vision-exp"
@@ -289,5 +256,3 @@ tier = "standard"
 efforts = ["off", "low", "high", "max"]
 default_effort = "high"
 context = 1000000
-price_in = 0.44
-price_out = 1.32

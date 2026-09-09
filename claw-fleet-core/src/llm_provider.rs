@@ -544,13 +544,18 @@ impl LlmProvider for CodexCliProvider {
     }
 }
 
+/// Codex models to offer when `~/.codex/models_cache.json` is missing.
+///
+/// Taken from the catalog rather than restated here. The list this replaced had
+/// to be kept in step with `models.toml`, the two UI pickers and the guidance
+/// sheet by hand — four copies of "which Codex models exist", which is three too
+/// many. `gpt-5.5` joins the fallback set as a result; it was already in every
+/// other copy and its absence here was an oversight, not a decision.
 fn codex_fallback_models() -> Vec<LlmModel> {
-    vec![
-        LlmModel::new("gpt-6-astra", "GPT-6 Astra"),
-        LlmModel::new("gpt-5.6-sol", "GPT-5.6-Sol"),
-        LlmModel::new("gpt-5.6-terra", "GPT-5.6-Terra"),
-        LlmModel::new("gpt-5.6-luna", "GPT-5.6-Luna"),
-    ]
+    crate::model_catalog::listed_models("codex")
+        .into_iter()
+        .map(|e| LlmModel::new(&e.id, e.display()))
+        .collect()
 }
 
 /// Whether a `models_cache.json` row should be offered in a picker.
@@ -668,7 +673,23 @@ pub enum ModelSlot { Fast, Standard }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModelTier { Fast, Standard, Premium }
 
+/// Which capability tier a model sits in.
+///
+/// The catalog (`models.toml`) is asked first — it states this outright, for
+/// every model either picker can offer. The substring pass below is the fallback
+/// for ids the catalog does not name: a dsh model behind someone's openrouter
+/// block, or a slug newer than this build. It used to be the *only* pass, which
+/// meant the tiering silently depended on model names continuing to contain
+/// "haiku" / "sol" / "terra" forever.
 fn model_tier(model: &str, fallback: ModelSlot) -> ModelTier {
+    if let Some(t) = crate::model_catalog::tier(model) {
+        match t {
+            "fast" => return ModelTier::Fast,
+            "standard" => return ModelTier::Standard,
+            "premium" => return ModelTier::Premium,
+            _ => {}
+        }
+    }
     let model = model.to_ascii_lowercase();
     if model.contains("haiku") || model.contains("luna") {
         ModelTier::Fast
@@ -902,6 +923,39 @@ mod tests {
         let models = parse_codex_models_doc(doc).unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "gpt-5.6-luna");
+    }
+
+    /// Tiering comes from the catalog, not from the model name's spelling.
+    ///
+    /// `deepseek-official/deepseek-v4-pro` contains none of the words the
+    /// substring pass looks for, so before the catalog it fell through to the
+    /// slot default — a dsh premium model was tiered "fast" whenever it was
+    /// asked about in a Fast slot.
+    #[test]
+    fn tiering_reads_the_catalog_before_guessing_from_the_name() {
+        assert_eq!(
+            model_tier("deepseek-official/deepseek-v4-pro", ModelSlot::Fast),
+            ModelTier::Premium
+        );
+        assert_eq!(model_tier("gpt-5.5", ModelSlot::Fast), ModelTier::Premium);
+        assert_eq!(model_tier("claude-sonnet-5", ModelSlot::Fast), ModelTier::Standard);
+        // Uncatalogued ids still fall back to the substring pass, then the slot.
+        assert_eq!(model_tier("some-haiku-fork", ModelSlot::Standard), ModelTier::Fast);
+        assert_eq!(model_tier("my-finetune-v3", ModelSlot::Standard), ModelTier::Standard);
+    }
+
+    /// The offline fallback list is the catalog's codex rows, so it cannot drift
+    /// from what the pickers and the guidance sheet offer.
+    #[test]
+    fn codex_fallback_models_track_the_catalog() {
+        let ids: Vec<String> = codex_fallback_models().into_iter().map(|m| m.id).collect();
+        let expected: Vec<String> = crate::model_catalog::listed_models("codex")
+            .into_iter()
+            .map(|e| e.id.clone())
+            .collect();
+        assert_eq!(ids, expected);
+        assert!(ids.contains(&"gpt-6-astra".to_string()));
+        assert!(ids.contains(&"gpt-5.5".to_string()), "gpt-5.5 was missing before");
     }
 
     #[test]
