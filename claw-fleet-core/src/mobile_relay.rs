@@ -1322,6 +1322,80 @@ fn ask_summary(input: &Map<String, Value>) -> Option<Value> {
     Some(Value::Object(out))
 }
 
+/// Chars kept of an ingested deliverable's title. Same reasoning as
+/// [`ASK_SUMMARY_MAX_CHARS`]: enough to tell two reports apart at phone width,
+/// short enough that the skeleton stream stays KB-scale.
+const INGEST_TITLE_MAX_CHARS: usize = 80;
+
+/// Gist of a `fleet__artifact add` / `fleet__wiki publish` confirmation, for
+/// the phone's ingest preview card.
+///
+/// The subject of these two calls — the deliverable that just landed in the
+/// 产出 store, the doc that just landed in the 知识库 — is the one thing in a
+/// run the reader actually wants to see, and the phone can see none of it: the
+/// id lives in the *result* text, which the tail strips, and the title lives in
+/// `input.title`, which [`TAIL_TOOL_INPUT_FIELDS`] drops. So it is recovered
+/// here, the same way `_ask` recovers a decision card's opening line.
+///
+/// Matched on the result *sentence* rather than the calling tool's name,
+/// because a `tool_result` block does not carry one — the name is on the
+/// `tool_use` block in an earlier record, which this per-block pass never sees.
+/// The two format strings ([`crate::mcp_control`]'s `handle_artifact` /
+/// `handle_wiki`) are specific enough for that to be safe; the cost of a false
+/// positive is one card that resolves to nothing, not a wrong one.
+fn ingest_summary(block: &Map<String, Value>) -> Option<Value> {
+    let text = tool_result_text(block.get("content")?);
+    let text = text.trim();
+
+    if let Some(rest) = text.strip_prefix("Stored artifact ") {
+        // `<id> — <title> (<kind>, <n> bytes)…`. The title is free text and may
+        // itself contain " (", so the trailing group is the anchor: take the
+        // LAST one that parses as `(<kind>, <n> bytes)`.
+        let (id, rest) = rest.split_once(" — ")?;
+        let open = rest.rfind(" (")?;
+        let (title, tail) = rest.split_at(open);
+        let inner = tail.trim_start_matches(" (").split(')').next()?;
+        let (kind, bytes) = inner.split_once(", ")?;
+        let bytes: u64 = bytes.strip_suffix(" bytes")?.parse().ok()?;
+        let mut out = Map::new();
+        out.insert("kind".into(), "artifact".into());
+        out.insert("id".into(), id.into());
+        out.insert("title".into(), truncate_chars(title, INGEST_TITLE_MAX_CHARS).into());
+        out.insert("akind".into(), kind.into());
+        out.insert("bytes".into(), bytes.into());
+        return Some(Value::Object(out));
+    }
+
+    if let Some(rest) = text.strip_prefix("Published ") {
+        // `<slug> (version <v>, <n> total). title: <title>`
+        let (slug, rest) = rest.split_once(" (version ")?;
+        let (version, rest) = rest.split_once(',')?;
+        let title = rest.split_once("title: ").map(|(_, t)| t).unwrap_or("");
+        let mut out = Map::new();
+        out.insert("kind".into(), "wiki".into());
+        out.insert("slug".into(), slug.into());
+        out.insert("version".into(), version.into());
+        out.insert("title".into(), truncate_chars(title, INGEST_TITLE_MAX_CHARS).into());
+        return Some(Value::Object(out));
+    }
+
+    None
+}
+
+/// A `tool_result` block's body as plain text. Claude Code writes it either as
+/// a bare string or as an array of `{type:"text", text}` blocks.
+fn tool_result_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
 /// Digest a record's `toolUseResult` into a flat, few-dozen-byte stat object
 /// for the tool chip's header (diff ± counts, match counts, subagent totals…),
 /// so the phone can show the desktop's stat chips without downloading result
@@ -1499,6 +1573,9 @@ fn slim_tail_block(block: &Value) -> Value {
                 .collect();
             if !thumbs.is_empty() {
                 out.insert("_thumbs".into(), Value::Array(thumbs));
+            }
+            if let Some(ingest) = ingest_summary(obj) {
+                out.insert("_ingest".into(), ingest);
             }
         }
         _ => {}
@@ -6923,6 +7000,66 @@ mod tests {
             block.get("content").is_none(),
             "tool_result bodies stay stripped from the skeleton stream"
         );
+    }
+
+    /// The two ingest confirmations survive the strip as a tiny `_ingest`, so
+    /// the phone can show what a run actually produced instead of a bare
+    /// 「产出」 chip. Everything the card needs — id/slug and title — lives in
+    /// text the tail otherwise drops.
+    #[test]
+    fn slim_tail_summarizes_an_ingest() {
+        let record = |content: Value| {
+            json!({
+                "type": "user",
+                "uuid": "u9",
+                "message": { "role": "user", "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_i", "content": content }
+                ]}
+            })
+        };
+
+        let slim = slim_tail_messages(vec![record(json!(
+            "Stored artifact 20260909-080326 — 9/8 对外更新日志 (markdown, 12345 bytes), \
+             copied. It is now on the 产出 page."
+        ))]);
+        let g = &slim[0]["message"]["content"][0]["_ingest"];
+        assert_eq!(g["kind"], json!("artifact"));
+        assert_eq!(g["id"], json!("20260909-080326"));
+        assert_eq!(g["title"], json!("9/8 对外更新日志"));
+        assert_eq!(g["akind"], json!("markdown"));
+        assert_eq!(g["bytes"], json!(12345));
+
+        // A title with its own parenthesis: the LAST `(kind, n bytes)` wins.
+        let slim = slim_tail_messages(vec![record(json!(
+            "Stored artifact a1 — Q3 报表 (最终版) (xlsx, 9 bytes), hard-linked."
+        ))]);
+        let g = &slim[0]["message"]["content"][0]["_ingest"];
+        assert_eq!(g["title"], json!("Q3 报表 (最终版)"));
+        assert_eq!(g["akind"], json!("xlsx"));
+
+        // The array form of a tool_result body parses the same.
+        let slim = slim_tail_messages(vec![record(json!([
+            { "type": "text", "text": "Published arch/overview (version v3, 3 total). title: 架构总览" }
+        ]))]);
+        let g = &slim[0]["message"]["content"][0]["_ingest"];
+        assert_eq!(g["kind"], json!("wiki"));
+        assert_eq!(g["slug"], json!("arch/overview"));
+        assert_eq!(g["version"], json!("v3"));
+        assert_eq!(g["title"], json!("架构总览"));
+
+        // Anything else stays unsummarized — no card, rather than a wrong one.
+        let slim = slim_tail_messages(vec![record(json!("Deleted artifact a1."))]);
+        assert!(slim[0]["message"]["content"][0].get("_ingest").is_none());
+    }
+
+    /// The parser above reads a *sentence*, so a reworded format string in
+    /// `mcp_control` would silently stop producing cards rather than fail to
+    /// compile. Assert the two literals it depends on.
+    #[test]
+    fn ingest_wording_matches_mcp_control() {
+        let src = include_str!("mcp_control.rs");
+        assert!(src.contains("Stored artifact {} — {} ({}, {} bytes)"));
+        assert!(src.contains("Published {} (version {}, {} total). title: {}"));
     }
 
     /// `toolUseResult` is stripped as a whole, but its stats survive as a tiny
