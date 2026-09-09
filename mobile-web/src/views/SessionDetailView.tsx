@@ -26,6 +26,7 @@ import {
   ListTodo,
   LoaderCircle,
   MessageSquareDashed,
+  MoreHorizontal,
   Pencil,
   Puzzle,
   Search,
@@ -80,8 +81,10 @@ import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { IngestSummary, ToolDigest } from "../types";
 import { memberDisplayStatus } from "../../../shared-ts/memberStatus";
 import { AgentNavProvider, useAgentNav } from "./AgentNavContext";
-import { SessionHeaderMenu } from "./SessionHeaderMenu";
-import { buildInfoRows } from "./sessionInfoRows";
+import { HistoryLayer } from "../useNavStack";
+import { SessionSheet } from "./SessionSheet";
+import { StatusRail } from "./StatusRail";
+import { buildStatusPills, type DetailPane, type PillTarget } from "./sessionStatusPills";
 import styles from "./SessionDetailView.module.css";
 import { AppHeader } from "./AppHeader";
 import { FleetEventCard } from "./FleetEventCard";
@@ -336,16 +339,15 @@ function deriveMetaLabel(body: string): string {
   return t("注入指令");
 }
 
-type DetailTab = "messages" | "decisions" | "plans" | "token" | "workflow" | "handoff";
-
-const TABS: Array<[DetailTab, string]> = [
-  ["messages", "消息"],
-  ["decisions", "决策"],
-  ["plans", "计划"],
-  ["token", "Token"],
-  ["workflow", "Workflow"],
-  ["handoff", "接力"],
-];
+/** 推上来的那一面在头部显示的标题。旧 tab 条上的六个标签只剩这五个——「消息」
+ *  不在里面，因为它不再是一个 tab：它就是这一页本身。 */
+const PANE_TITLE: Record<DetailPane, string> = {
+  decisions: "决策记录",
+  plans: "计划",
+  token: "Token 与花费",
+  workflow: "Workflow",
+  handoff: "接力链",
+};
 
 interface Props {
   session: SessionInfo;
@@ -356,6 +358,11 @@ interface Props {
   onBack: () => void;
   /** Push a session id as a new drill-down layer (subagent / parent nav). */
   onOpenSessionId: (id: string) => void;
+  /** 归属这条会话的待决策卡张数。决策卡是跨设备聚合的一个收件箱（App 的
+   *  `aggregateDecisions`），不在 `SessionInfo` 上，所以由 App 按 sessionId 数好
+   *  传进来——头部那条状态轨要靠它画「N 张待决策」，那是轨上唯一一颗真正
+   *  「挡着你」的 pill。 */
+  pendingDecisions?: number;
 }
 
 /** ReactMarkdown + remarkGfm parse is heavy; mounting a few hundred of them
@@ -939,44 +946,31 @@ const MessageRow = memo(function MessageRow({
   toolMetaEqual(prev.toolMeta, next.toolMeta) &&
   JSON.stringify(prev.turnUsage ?? null) === JSON.stringify(next.turnUsage ?? null));
 
-/**
- * The header's unfolded form: the full title (the one-line header ellipsizes
- * it), then every identifying field the phone had nowhere to put — ids, both
- * paths, model, times, pid. Absent fields don't take a row (see buildInfoRows),
- * so a freshly-spawned session shows five lines, not a screen of dashes.
- *
- * Read-only on purpose — copying lives one tap away in the ☰ menu, where the
- * clipboard write can report success or failure on the item you tapped.
- */
-function SessionInfoPanel({ session }: { session: SessionInfo }) {
-  const rows = useMemo(() => buildInfoRows(session), [session]);
-  const fullTitle = session.titleOverride || session.aiTitle || session.slug;
-  return (
-    <div className={styles.infoPanel}>
-      {fullTitle && <div className={styles.infoFullTitle}>{fullTitle}</div>}
-      {rows.map((r) => (
-        <div key={r.key} className={styles.infoRow}>
-          <span className={styles.infoLabel}>{r.label}</span>
-          <span className={styles.infoValue} data-mono={r.mono || undefined}>
-            {r.value}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function SessionDetailView({
   session,
   sessions,
   client,
   onBack,
   onOpenSessionId,
+  pendingDecisions = 0,
 }: Props) {
-  const [tab, setTab] = useState<DetailTab>("messages");
-  /** Header detail panel (tap the title, or the ☰ menu's first item). Folded by
-   *  default — it costs transcript height, and most visits don't need the ids. */
-  const [infoOpen, setInfoOpen] = useState(false);
+  /** 推上来的那一面（旧 tab 条上的五页之一），`null` = 就在消息页上。
+   *
+   *  旧实现是一个六值的 `tab`，其中 `"messages"` 是缺省值——于是「消息」和
+   *  「Workflow」在结构上是平权的两个选项，而它们在使用上完全不平权：消息是
+   *  你来这一页的原因，其余五个是偶尔查一次的检查面。改成 `pane | null` 之后
+   *  这个不对称写进了类型里，正文也不再被一条常驻的 tab 条压着。 */
+  const [pane, setPane] = useState<DetailPane | null>(null);
+  /** 「会话详情」半屏。点标题或点头部右上角都开它。 */
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const openTarget = useCallback((target: PillTarget) => {
+    if (target === "sheet") setSheetOpen(true);
+    else setPane(target);
+  }, []);
+  const statusPills = useMemo(
+    () => buildStatusPills(session, { pendingDecisions }),
+    [session, pendingDecisions],
+  );
   // Subagent drill-down nav (same table-lookup model as the desktop): resolve
   // `agent-<id>` in the live session array; `open` pushes it as a new layer.
   const nav = useMemo(
@@ -1031,9 +1025,10 @@ export function SessionDetailView({
   }, [session, sessions]);
 
   useEffect(() => {
-    // A drill-down into a subagent starts folded again: the panel that was open
-    // described the session you just left.
-    setInfoOpen(false);
+    // 钻进子代理时把半屏和推上来的那一面都收掉：它们描述的是你刚离开的那个
+    // 会话（半屏上的 chip、watch、作用域清单全是上一个会话的）。
+    setSheetOpen(false);
+    setPane(null);
     // Never carry one session's pending echo (or a stuck in-flight flag) over.
     setOptimisticSends([]);
     submitInFlightRef.current = false;
@@ -1083,7 +1078,7 @@ export function SessionDetailView({
   const offsetRef = useRef<number | null>(null);
   const legacyRef = useRef(false);
   useEffect(() => {
-    if (!client || tab !== "messages") return;
+    if (!client || pane !== null) return;
     let cancelled = false;
     let timer = 0;
 
@@ -1171,11 +1166,11 @@ export function SessionDetailView({
       document.removeEventListener("visibilitychange", onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, session.jsonlPath, tailN, tab]);
+  }, [client, session.jsonlPath, tailN, pane]);
 
   // ── Live thinking polling (only while the turn looks in progress) ─────
   useEffect(() => {
-    if (!client || !working || tab !== "messages") {
+    if (!client || !working || pane !== null) {
       setLiveThinking(null);
       return;
     }
@@ -1213,7 +1208,7 @@ export function SessionDetailView({
       window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [client, session.id, working, tab]);
+  }, [client, session.id, working, pane]);
 
   // This view is not remounted when the open session changes, and the poller
   // above deliberately keeps the last reasoning through a failed or skipped
@@ -1319,10 +1314,9 @@ export function SessionDetailView({
   return (
     <AgentNavProvider nav={nav}>
     <div className={styles.page}>
-      {/* `seamless`: everything that can follow this header — the info panel,
-          the ↑来自 breadcrumb, the tab strip — shares --color-bg-secondary, so a
-          hairline here would slice one panel into stacked slabs. This page is
-          why AppHeader exists: it is the one that drifted. */}
+      {/* `seamless`: 头部底下紧跟着的是状态轨（自带一条底线）或 ↑来自 面包屑，
+          两者都与头部同属一层 chrome；头部再画一条底线就把一块面切成两片。
+          This page is why AppHeader exists: it is the one that drifted. */}
       <AppHeader
         onBack={onBack}
         seamless
@@ -1337,44 +1331,53 @@ export function SessionDetailView({
             {session.isSubagent && (
               <span className={styles.subagentBadge}>⎇ {session.agentType || t("子代理")}</span>
             )}
-            {/* The title is a tap target that unfolds the detail panel below —
-                everything this row ellipsizes away (the full title, the
-                workspace, the model, the ids) lives there. Kept as a sibling of
-                the badge, not wrapping it, so the row's flex weights still
-                describe what they did before. */}
+            {/* 标题是打开「会话详情」半屏的 tap 目标——这一行省略号吃掉的东西
+                （完整标题、工作区、模型、各种 id）都在那张半屏上。它曾经展开的
+                是一块 inline 面板，那块面板的高度是从正文借的，所以只放得下五行
+                静态字段；半屏借的是临时的屏幕，于是 watch / 子代理 / 计划进度
+                终于有地方摊开。 */}
             <button
               type="button"
               className={styles.titleTap}
-              aria-expanded={infoOpen}
-              onClick={() => setInfoOpen((v) => !v)}
+              aria-haspopup="dialog"
+              aria-expanded={sheetOpen}
+              onClick={() => setSheetOpen(true)}
             >
-              {/* Title only. The workspace used to ride here as a dim "· name"
-                  suffix capped at 34% of the row; between it, the scope switcher
-                  and the ☰ button the title was down to "Fix JWT to…". It now
-                  lives in the detail panel one tap away, and the title gets the
-                  width back. */}
               <span className={styles.headerTitleText}>
                 {session.titleOverride || session.aiTitle || session.slug || t("会话")}
               </span>
-              <ChevronDown size={13} className={styles.titleChevron} data-open={infoOpen} />
             </button>
           </div>
         }
         actions={
-          <>
-            <span className={styles.statusDot} data-working={working} />
-            <SessionHeaderMenu
-              session={session}
-              family={family}
-              onOpenSession={(s) => onOpenSessionId(s.id)}
-              infoOpen={infoOpen}
-              onToggleInfo={() => setInfoOpen((v) => !v)}
-            />
-          </>
+          /* 右上角那颗脉冲状态点搬到状态轨上的「运行中」pill 里去了——一颗
+             8px 的无标签圆点要靠猜，带着两个字就不用。这里只留一个开半屏的
+             按钮，跟点标题是同一个动作，为的是让它可发现。 */
+          <button
+            type="button"
+            className={styles.moreButton}
+            aria-label={t("会话详情")}
+            aria-haspopup="dialog"
+            aria-expanded={sheetOpen}
+            onClick={() => setSheetOpen(true)}
+          >
+            <MoreHorizontal size={19} />
+          </button>
         }
       />
 
-      {infoOpen && <SessionInfoPanel session={session} />}
+      <StatusRail pills={statusPills} onOpen={openTarget} />
+
+      {sheetOpen && (
+        <SessionSheet
+          session={session}
+          family={family}
+          pendingDecisions={pendingDecisions}
+          onClose={() => setSheetOpen(false)}
+          onOpenPane={setPane}
+          onOpenSession={(s) => onOpenSessionId(s.id)}
+        />
+      )}
 
       {session.isSubagent && (
         <button
@@ -1393,46 +1396,23 @@ export function SessionDetailView({
         </button>
       )}
 
-      <nav className={styles.tabBar}>
-        {TABS.map(([key, label]) => (
-          <button
-            key={key}
-            className={styles.tabButton}
-            data-active={tab === key}
-            onClick={() => setTab(key)}
-          >
-            {t(label)}
-          </button>
-        ))}
-      </nav>
-
-      {tab === "decisions" && (
-        <div className={styles.tabScroll}>
-          <DecisionHistoryTab session={session} client={client} />
-        </div>
-      )}
-      {tab === "plans" && (
-        <div className={styles.tabScroll}>
-          <TaskPlansTab session={session} client={client} />
-        </div>
-      )}
-      {tab === "token" && (
-        <div className={styles.tabScroll}>
-          <TokenTab session={session} client={client} />
-        </div>
-      )}
-      {tab === "workflow" && (
-        <div className={styles.tabScroll}>
-          <WorkflowTab session={session} client={client} />
-        </div>
-      )}
-      {tab === "handoff" && (
-        <div className={styles.tabScroll}>
-          <HandoffTab session={session} client={client} />
+      {/* 推上来的那一面。整页盖住消息（而不是跟消息共享一条 tab 条），所以它
+          拿得到整个屏宽和整个屏高——「Token 与花费」那张表和 Workflow 那棵树
+          在旧的 tab 布局里都是横向不够用的。 */}
+      {pane !== null && (
+        <div className={styles.pane}>
+          <HistoryLayer onBack={() => setPane(null)} />
+          <AppHeader onBack={() => setPane(null)} title={t(PANE_TITLE[pane])} />
+          <div className={styles.paneScroll}>
+            {pane === "decisions" && <DecisionHistoryTab session={session} client={client} />}
+            {pane === "plans" && <TaskPlansTab session={session} client={client} />}
+            {pane === "token" && <TokenTab session={session} client={client} />}
+            {pane === "workflow" && <WorkflowTab session={session} client={client} />}
+            {pane === "handoff" && <HandoffTab session={session} client={client} />}
+          </div>
         </div>
       )}
 
-      {tab === "messages" && (
       <div
         className={styles.scroll}
         ref={scrollRef}
@@ -1525,9 +1505,8 @@ export function SessionDetailView({
           <EmptyState compact icon={MessageSquareDashed} title={t("暂无可显示的消息")} />
         )}
       </div>
-      )}
 
-      {tab === "messages" && canResumeSession(session) && (
+      {canResumeSession(session) && (
         <ResumeComposer
           session={session}
           client={client}
@@ -1536,7 +1515,7 @@ export function SessionDetailView({
           onHeight={setComposerHeight}
         />
       )}
-      {tab === "messages" && canEnqueueSession(session) && (
+      {canEnqueueSession(session) && (
         <ResumeComposer
           session={session}
           client={client}
