@@ -45,8 +45,11 @@ aes-gcm = "0.10"
 flate2 = "1"
 # Downscale oversized decision-asset images before they cross the relay so the
 # mobile client can render them (the WS frame budget can't carry a full-res
-# 3-5 MiB AI preview). png/jpeg decode + jpeg encode is all we need.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# 3-5 MiB AI preview). The loop itself lives in `fleet-image` rather than here
+# because `image`'s generic code compiles at the *calling* crate's opt-level,
+# and a debug build of this crate cannot afford to leave it unoptimized — see
+# the comment above `[profile.dev]` in the root Cargo.toml.
+fleet-image = { path = "../fleet-image" }
 conch-parser = "0.1.1"
 shell-words = "1.1.1"
 ctrlc = { version = "3", features = ["termination"] }
@@ -81,6 +84,11 @@ windows = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_
 
 [dev-dependencies]
 tempfile = "3"
+# Tests build their own PNG fixtures and decode the squeezed output to assert
+# dimensions/format. Production code reaches `image` only through `fleet-image`,
+# so this stays a dev-dependency — keeping it out of `[dependencies]` is what
+# prevents the pixel loop from creeping back into this crate's opt-level.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # Source-text parsing for the backend drift-guard test (tests/backend_drift_guard.rs).
 # Already in the dependency tree transitively (v1.12.x via reqwest/sysinfo etc), so
 # this adds no new download; used only by the guard to detect fan-out drift.
