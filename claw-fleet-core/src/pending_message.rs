@@ -87,6 +87,41 @@ fn write_queue(path: &PathBuf, q: &PendingQueue) -> Result<(), String> {
     fs::write(path, json).map_err(|e| format!("write pending queue: {e}"))
 }
 
+/// Path of the "this queue is being drained right now" claim file. Deliberately
+/// a different extension from `.json` so [`all_pending`] never surfaces a queue
+/// that has already been handed to a spawn.
+fn claim_path(session_id: &str) -> Option<PathBuf> {
+    queue_path(session_id).map(|p| p.with_extension("draining"))
+}
+
+/// Atomically take ownership of a session's queue, returning it only to the
+/// caller that won.
+///
+/// `rename` is the whole point: it either moves the queue file or fails because
+/// somebody else already moved it, in one syscall. A read-check-then-delete
+/// sequence is *not* enough — the desktop calls the drain from three independent
+/// threads (`local_backend.rs`: the fs-watch rescan flush, the polling fallback
+/// and the 30s auto-resume ticker), and on 2026-09-08 two of them read the same
+/// queue in the same second and each spawned a `claude --resume` on session
+/// 471f07db (pids 5703/5704, then 6548/6549 for the next message) — two
+/// processes on one transcript, the exact corruption this module exists to
+/// prevent, and the user's turn ran twice. Because the guard is a filesystem
+/// rename rather than an in-process lock, it holds across processes too (desktop
+/// app + a hand-started `fleet serve`).
+fn claim_queue(session_id: &str) -> Option<PendingQueue> {
+    let src = queue_path(session_id)?;
+    let dst = claim_path(session_id)?;
+    fs::rename(&src, &dst).ok()?;
+    serde_json::from_str(&fs::read_to_string(&dst).ok()?).ok()
+}
+
+/// Drop a claim file once its spawn has been fired (or has failed). Idempotent.
+fn release_claim(session_id: &str) {
+    if let Some(p) = claim_path(session_id) {
+        let _ = fs::remove_file(p);
+    }
+}
+
 /// The queue for `session_id`, or `None` when nothing is queued.
 pub fn get(session_id: &str) -> Option<PendingQueue> {
     let path = queue_path(session_id)?;
@@ -244,12 +279,13 @@ fn is_drainable(session: &crate::session::SessionInfo) -> bool {
 /// `(session_id, workspace, prompt, model, effort, permission_mode)`; injected so
 /// the drain gate is unit-testable without spawning a real `claude`.
 ///
-/// The queue is cleared **before** `spawn` runs, not after: the desktop tick can
-/// fire again within a second, before the freshly-spawned `claude` shows up as
-/// `proc_alive`, so a clear-after would risk a *second* resume on the same
-/// transcript — the one corruption this whole module exists to avoid. The
-/// trade-off is that a `spawn` failure loses the queued text (logged); a message
-/// the user can retype is the cheaper loss.
+/// The queue is claimed (atomically renamed away — see [`claim_queue`]) **before**
+/// `spawn` runs, not after: the desktop tick can fire again within a second,
+/// before the freshly-spawned `claude` shows up as `proc_alive`, so a
+/// clear-after would risk a *second* resume on the same transcript — the one
+/// corruption this whole module exists to avoid. The trade-off is that a `spawn`
+/// failure loses the queued text (logged); a message the user can retype is the
+/// cheaper loss.
 pub fn drain_if_idle<S>(session: &crate::session::SessionInfo, spawn: S)
 where
     S: FnOnce(&str, &str, &str, Option<&str>, Option<&str>, Option<&str>) -> Result<(), String>,
@@ -278,6 +314,17 @@ where
         return;
     }
 
+    // Claim first (see doc): the rename is the double-fire guard, and only the
+    // thread/process that wins it may spawn. Everyone else finds no queue file
+    // and returns — the queue read above was just a cheap pre-filter.
+    let Some(q) = claim_queue(&session.id) else {
+        return;
+    };
+    if q.messages.is_empty() {
+        release_claim(&session.id);
+        return;
+    }
+
     let prompt = q.messages.join("\n\n");
     let workspace = if q.workspace_path.trim().is_empty() {
         session.workspace_path.clone()
@@ -292,11 +339,6 @@ where
         .or_else(|| crate::launch_spec::model_of(&session.id));
     let effort = crate::launch_spec::effort_of(&session.id);
 
-    // Clear first (see doc): removing the file is the double-fire guard.
-    if let Err(e) = clear(&session.id) {
-        crate::log_debug(&format!("pending_message: clear {} failed: {e}", session.id));
-        return;
-    }
     crate::log_debug(&format!(
         "pending_message: draining {} queued msg(s) for {} ({} chars)",
         q.messages.len(),
@@ -316,6 +358,10 @@ where
             session.id
         ));
     }
+    // The claim has done its job either way — a successful spawn owns the turn
+    // now, and a failed one already lost the text (see doc). Leaving the file
+    // behind would only be dead weight the next enqueue has to step around.
+    release_claim(&session.id);
 }
 
 /// [`drain_if_idle`] with the real resume spawn wired in. This is what the
@@ -468,6 +514,78 @@ mod tests {
             assert_eq!(fired.len(), 1, "idle codex session must drain its queue");
             assert_eq!(fired[0].0, "sess-codex-idle");
             assert!(get("sess-codex-idle").is_none(), "queue cleared after firing");
+        });
+    }
+
+    /// The claim is the double-fire guard: whoever renames the queue file away
+    /// first owns the drain, everybody else gets `None`. A read-then-delete guard
+    /// passes both callers instead — that is what put two `claude --resume`
+    /// processes on one transcript on 2026-09-08.
+    #[test]
+    fn claim_queue_admits_exactly_one_caller() {
+        with_temp_home(|| {
+            let path = queue_path("sess-claim").unwrap();
+            write_queue(
+                &path,
+                &PendingQueue {
+                    session_id: "sess-claim".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["hi".into()],
+                },
+            )
+            .unwrap();
+            assert!(claim_queue("sess-claim").is_some(), "first caller wins");
+            assert!(
+                claim_queue("sess-claim").is_none(),
+                "second caller must find nothing left to claim"
+            );
+            release_claim("sess-claim");
+            assert!(!claim_path("sess-claim").unwrap().exists());
+        });
+    }
+
+    /// The real shape of the field bug: the desktop drives the drain from three
+    /// independent threads, so several can hit one idle session in the same tick.
+    /// Exactly one resume may be fired.
+    #[test]
+    fn concurrent_drains_fire_only_one_resume() {
+        with_temp_home(|| {
+            let path = queue_path("sess-race").unwrap();
+            write_queue(
+                &path,
+                &PendingQueue {
+                    session_id: "sess-race".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["follow up".into()],
+                },
+            )
+            .unwrap();
+            let fired = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let s = base_session("sess-race", SessionStatus::WaitingInput, false);
+            let start = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let fired = fired.clone();
+                    let s = s.clone();
+                    let start = start.clone();
+                    std::thread::spawn(move || {
+                        start.wait();
+                        drain_if_idle(&s, |sid, _ws, prompt, _m, _e, _p| {
+                            // Hold the "spawn" open so a racing thread would have
+                            // every chance to fire a second one.
+                            std::thread::sleep(std::time::Duration::from_millis(20));
+                            fired.lock().unwrap().push(format!("{sid}:{prompt}"));
+                            Ok(())
+                        });
+                    })
+                })
+                .collect();
+            for h in handles {
+                h.join().unwrap();
+            }
+            let fired = fired.lock().unwrap();
+            assert_eq!(fired.len(), 1, "exactly one resume, got {fired:?}");
+            assert!(get("sess-race").is_none(), "queue consumed");
         });
     }
 
