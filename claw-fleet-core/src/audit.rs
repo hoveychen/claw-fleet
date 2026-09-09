@@ -82,6 +82,48 @@ pub enum MatchMode {
     /// (`|`, `;`, `&`, `(`, backtick, newline) plus optional whitespace.
     /// This prevents "nc " from matching inside "func ".
     CommandStart,
+    /// Substring, but each *alphanumeric* end of the pattern must land on a
+    /// word boundary.  `"eval "` no longer fires inside
+    /// `--slug anatole/credibility-tiered-retrieval --title …` (the `retri`
+    /// **`eval `** `--title` overlap), and `"| sh"` no longer fires on
+    /// `| shasum`, while `eval "$x"` and `cat x | sh` still match.
+    ///
+    /// Ends that are *not* alphanumeric are left unchecked, so patterns like
+    /// `"| bash"` / `"$(curl"` keep matching mid-expression where a leading
+    /// boundary would never exist.
+    ContainsWord,
+}
+
+/// `true` when `c` may not sit next to a pattern's alphanumeric end — i.e. it
+/// would make the match land in the middle of a word.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Substring search where every alphanumeric end of `pattern` must fall on a
+/// word boundary.  See [`MatchMode::ContainsWord`].
+fn contains_word(cmd: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return false;
+    }
+    let check_left = pattern.chars().next().is_some_and(is_word_char);
+    let check_right = pattern.chars().next_back().is_some_and(is_word_char);
+    if !check_left && !check_right {
+        return cmd.contains(pattern);
+    }
+    let mut from = 0usize;
+    while let Some(rel) = cmd[from..].find(pattern) {
+        let start = from + rel;
+        let end = start + pattern.len();
+        let left_ok = !check_left || !cmd[..start].chars().next_back().is_some_and(is_word_char);
+        let right_ok = !check_right || !cmd[end..].chars().next().is_some_and(is_word_char);
+        if left_ok && right_ok {
+            return true;
+        }
+        // Advance past this occurrence's first char (patterns may overlap).
+        from = start + cmd[start..].chars().next().map_or(1, |c| c.len_utf8());
+    }
+    false
 }
 
 /// Returns `true` if `pattern` appears at the start of some SimpleCommand
@@ -315,7 +357,11 @@ fn builtin_patterns() -> Vec<RuntimeRiskPattern> {
             id: "eval-exec".into(),
             level: AuditRiskLevel::Critical,
             tag: "eval-exec".into(),
-            match_mode: MatchMode::Contains,
+            // ContainsWord, not Contains: the bare substring `"eval "` fires on
+            // any word ending in "eval" followed by a space — a wiki slug like
+            // `credibility-tiered-retrieval --title …` was enough to raise a
+            // Critical guard card for `fleet wiki publish`.
+            match_mode: MatchMode::ContainsWord,
             patterns: vec![
                 "| bash".into(), "| sh".into(), "| zsh".into(),
                 "eval ".into(), "$(curl".into(), "$(wget".into(),
@@ -1365,6 +1411,7 @@ fn match_runtime_patterns(
         for p in &rp.patterns {
             let matched = match rp.match_mode {
                 MatchMode::Contains => cmd.contains(p.as_str()),
+                MatchMode::ContainsWord => contains_word(cmd, p.as_str()),
                 MatchMode::CommandStart => matches_command_start(cmd, p.as_str()),
             };
             if matched {
@@ -2156,6 +2203,51 @@ mod tests {
         assert_eq!(level, AuditRiskLevel::Critical);
         assert!(tags.contains(&"eval-exec".to_string()));
         assert!(tags.contains(&"network-download".to_string()));
+    }
+
+    #[test]
+    fn critical_eval_still_caught() {
+        reset();
+        let (level, tags) = classify_bash_command(r#"eval "$(cat /tmp/x)""#).unwrap();
+        assert_eq!(level, AuditRiskLevel::Critical);
+        assert!(tags.contains(&"eval-exec".to_string()));
+    }
+
+    #[test]
+    fn false_positive_retrieval_is_not_eval() {
+        reset();
+        // `retrieval --title` contains the literal substring `eval ` — under the
+        // old bare-`contains` match this raised a Critical guard card for a
+        // plain `fleet wiki publish`.
+        assert!(classify_bash_command(
+            "fleet wiki publish /tmp/out.md --slug anatole/credibility-tiered-retrieval --title 检索口径方案"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn false_positive_pipe_shasum_is_not_pipe_sh() {
+        reset();
+        assert!(classify_bash_command("cat /tmp/x | shasum -a 256").is_none());
+        // …while a real pipe-to-shell still trips.
+        let (_, tags) = classify_bash_command("cat /tmp/x | sh").unwrap();
+        assert!(tags.contains(&"eval-exec".to_string()));
+    }
+
+    #[test]
+    fn contains_word_boundary_semantics() {
+        // Alphanumeric ends demand a boundary…
+        assert!(!contains_word("credibility-tiered-retrieval --title x", "eval "));
+        assert!(contains_word("eval \"$x\"", "eval "));
+        assert!(contains_word("x && eval \"$x\"", "eval "));
+        // …non-alphanumeric ends are left unchecked, so mid-expression patterns
+        // that could never have a left boundary keep matching.
+        assert!(contains_word("curl x | bash", "| bash"));
+        assert!(!contains_word("curl x | bashrc_dump", "| bash"));
+        assert!(contains_word("echo $(curl x)", "$(curl"));
+        // Overlapping occurrences: the first is word-internal, the second isn't.
+        assert!(contains_word("retrieval and eval \"$x\"", "eval "));
+        assert!(!contains_word("anything", ""));
     }
 
     #[test]
