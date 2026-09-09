@@ -41,15 +41,22 @@ lto = true
 # `[profile.dev.package."*"]` alone can never reach it.
 #
 # For a long time the answer was `[profile.dev] opt-level = 1` — the whole
-# workspace optimized so that one loop would be. That is a bad trade: measured
-# 2026-09-08, it costs 51.2s vs 24.4s to compile claw-fleet-core from scratch
-# and 8.1s vs 3.9s to rebuild it after a one-line edit, on every crate, forever,
-# for the benefit of a single function.
+# workspace optimized so that one loop would be. That is a bad trade. Measured
+# 2026-09-08 in one worktree, flipping only this value, with a unique source
+# edit per run so sccache could not serve a hit:
+#
+#   compile claw-fleet-core from scratch .. 51.8s at opt=1 → 17.7s at opt=0
+#   rebuild it after a one-line edit ......  8.1s at opt=1 →  3.1s at opt=0
+#
+# That was the cost on every crate, on every build, forever, for the benefit of
+# a single function.
 #
 # So the loop now lives in its own crate, `fleet-image`, and only *it* is pinned
 # to opt-level 3. `[profile.dev]` is back to the cargo default, which is what a
-# debug build should be, and the phone path is faster than it was under
-# `opt-level = 1` because the loop is now compiled at 3 rather than 1.
+# debug build should be, and the phone path came out *faster* than it was under
+# `opt-level = 1` (1.51s vs 1.68s on the same fixture) because the loop is now
+# compiled at 3 rather than 1. `claw-fleet-core/tests/downscale_stays_optimized.rs`
+# guards the pin — it fails if this section is dropped.
 [profile.dev]
 opt-level = 0
 
