@@ -1184,6 +1184,13 @@ fn handle_request(
 
             crate::routes::HARNESS_STATUSES => route_harness_statuses(ctx, request, &query, json_header, path),
 
+            // The environment panel's *actions*. POST-only: each one spawns a
+            // subprocess on this host, so a GET (which a browser will issue on
+            // its own — prefetch, history restore) must not trigger one.
+            crate::routes::HARNESS_INSTALL if request.method() == &tiny_http::Method::Post => route_harness_install(ctx, request, json_header),
+            crate::routes::HARNESS_UPDATE if request.method() == &tiny_http::Method::Post => route_harness_update(ctx, request, json_header),
+            crate::routes::HARNESS_INSTALL_NODE if request.method() == &tiny_http::Method::Post => route_harness_install_node(ctx, request, json_header),
+
             crate::routes::USAGE_SUMMARIES => route_usage_summaries(ctx, request, &query, json_header, path),
 
             crate::routes::TODAY_USAGE => route_today_usage(ctx, request, &query, json_header, path),

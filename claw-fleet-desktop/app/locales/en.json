@@ -2683,6 +2683,7 @@
     "remote_hosts": "Remote hosts (rca workspaces)",
     "probe_host": "Probe this host",
     "pairing_no_actions": "Pairing-code transport — environment actions need an ssh entry",
+    "web_action_unavailable": "Not available in the browser build — this action has to run on the machine you are sitting at. Open the desktop app.",
     "login_unknown": "Login state unknown",
     "remote_codex_device_hint": "Open the link on any device and enter the code; the remote host polls until approved."
   },

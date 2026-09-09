@@ -32,6 +32,7 @@
  */
 
 import { emit } from "@tauri-apps/api/event";
+import { runHarnessAction, type HarnessTransport } from "./harnessInstall";
 
 /**
  * Path prefix every probe call is made under.
@@ -1564,6 +1565,21 @@ export async function downloadFleetSkill(): Promise<void> {
   await downloadFromProbe("/fleet_skill", {}, "SKILL.md");
 }
 
+/**
+ * The two probe calls `harnessInstall.ts` composes an install out of. Kept as
+ * a value here (rather than that module importing `callProbe`) so the module
+ * stays transport-free and its tests can drive it without a fetch.
+ */
+const harnessTransport: HarnessTransport = {
+  start: async (path, body) => (await callProbe({ method: "POST", path, body })) as never,
+  output: async (id, offset) =>
+    (await callProbe({
+      method: "GET",
+      path: "/proc_output",
+      query: { id, offset: String(offset) },
+    })) as never,
+};
+
 /** `callProbe` for a route that answers bytes rather than JSON. */
 async function callProbeBlob(req: LiveReq): Promise<Blob> {
   const url = probeUrl(req);
@@ -1605,6 +1621,21 @@ export const LIVE_COMPOSITES: Record<
    * it cannot be a plain route: `offset: null` asks only where the transcript
    * ends (`/file_size`), while an offset asks for the delta (`/tail`).
    */
+  /**
+   * The environment panel's three install actions. Each is a POST that spawns
+   * a proc plus a `/proc_output` tail — not one route — so the desktop's
+   * "resolves with the typed outcome, streams progress meanwhile" shape is
+   * reassembled in `harnessInstall.ts`. See that file for the wire contract.
+   */
+  install_harness: (a) =>
+    runHarnessAction(harnessTransport, "/harness_install", { source: a.source }, String(a.source ?? "")),
+
+  update_harness: (a) =>
+    runHarnessAction(harnessTransport, "/harness_update", { source: a.source }, String(a.source ?? "")),
+
+  // Progress files under "node", matching the desktop emitter's source key.
+  install_node_runtime: () => runHarnessAction(harnessTransport, "/harness_install_node", {}, "node"),
+
   get_messages_since: async (a) => {
     const path = String(a.jsonlPath ?? "");
     if (a.offset === null || a.offset === undefined) {
