@@ -370,7 +370,13 @@ interface Props {
   /** 合并列表:每条会话都带着它属于哪一台设备(deviceRuntime.ts 的 WithDevice)。
    *  id 只在单机内唯一,所以 React key 与「打开这一条」都必须带上 deviceId。 */
   sessions: Array<WithDevice<SessionInfo>>;
+  /** 当前作用域那一台的传输层 —— 只给「与某一条会话无关」的读操作用。 */
   client: FleetTransport | null;
+  /** 某一条会话所属设备的传输层。列表是合并的,所以每一次**写**(标记/中断/停止)
+   *  都必须按 `s.deviceId` 取,否则请求会打到当前选中的那台机器上:标记落在别的
+   *  主机 → 下一次快照推回来 userMark 还是空 → 卡片复活;停止更糟,pid 会被发到
+   *  一台毫不相干的主机上执行。 */
+  clientFor: (deviceId: string) => FleetTransport | null;
   /** WS link phone↔relay. */
   connected: boolean;
   /** Desktop↔relay link — false means nothing is there to push a snapshot. */
@@ -388,6 +394,7 @@ interface Props {
 export function TasksView({
   sessions,
   client,
+  clientFor,
   deviceLabelOf,
   connected,
   agentOnline,
@@ -428,7 +435,7 @@ export function TasksView({
         sessions
           .filter(isFleetOwnedTask)
           .map((s) => {
-            const o = markOverride[s.id];
+            const o = markOverride[itemKey(s.deviceId, s.id)];
             return o !== undefined && o !== (s.userMark ?? null) ? { ...s, userMark: o } : s;
           })
           .sort((a, b) => b.lastActivityMs - a.lastActivityMs),
@@ -488,10 +495,13 @@ export function TasksView({
   );
 
   const setMark = useCallback(
-    (s: SessionInfo, mark: SessionMark | null) => {
-      if (!client) return;
-      setMarkOverride((prev) => ({ ...prev, [s.id]: mark }));
-      client
+    (s: WithDevice<SessionInfo>, mark: SessionMark | null) => {
+      // 会话所属那一台,不是当前作用域那一台 —— 打错主机的标记等于没标记。
+      const transport = clientFor(s.deviceId);
+      if (!transport) return;
+      const key = itemKey(s.deviceId, s.id);
+      setMarkOverride((prev) => ({ ...prev, [key]: mark }));
+      transport
         .request("session_mark", {
           sessionId: s.id,
           workspacePath: s.workspacePath,
@@ -501,12 +511,12 @@ export function TasksView({
           // roll back the optimistic flip on failure
           setMarkOverride((prev) => {
             const next = { ...prev };
-            delete next[s.id];
+            delete next[key];
             return next;
           });
         });
     },
-    [client],
+    [clientFor],
   );
 
   // Full membership of every relay chain, keyed by chainId — over ALL Fleet
@@ -543,7 +553,7 @@ export function TasksView({
     }));
   }, []);
   const setMarkChain = useCallback(
-    (members: SessionInfo[], done: boolean) => {
+    (members: Array<WithDevice<SessionInfo>>, done: boolean) => {
       for (const m of members) setMark(m, done ? "done" : null);
     },
     [setMark],
@@ -572,17 +582,20 @@ export function TasksView({
   }, []);
 
   const handleStop = useCallback(
-    async (s: SessionInfo) => {
-      if (!client || busyOp) return;
+    async (s: WithDevice<SessionInfo>) => {
+      // pid / workspacePath 只在**它自己那台主机**上有意义:发到别的设备上,轻则
+      // 停不掉,重则按 pid 打到一个毫不相干的进程。
+      const transport = clientFor(s.deviceId);
+      if (!transport || busyOp) return;
       const mode = stopMode(s);
       if (mode === "spent") return;
-      setBusyOp(s.id);
+      setBusyOp(itemKey(s.deviceId, s.id));
       try {
         if (mode === "interrupt") {
-          await client.request("interrupt", { pid: s.pid });
+          await transport.request("interrupt", { pid: s.pid });
         } else if (s.pidPrecise) {
           if (!(await confirm(t("确定停止「{0}」的这个会话吗？", s.workspaceName)))) return;
-          await client.request("stop", { pid: s.pid });
+          await transport.request("stop", { pid: s.pid });
         } else {
           if (
             !(await confirm(
@@ -590,7 +603,7 @@ export function TasksView({
             ))
           )
             return;
-          await client.request("stop_workspace", { workspacePath: s.workspacePath });
+          await transport.request("stop_workspace", { workspacePath: s.workspacePath });
         }
       } catch (e) {
         window.alert(e instanceof Error ? e.message : t("操作失败"));
@@ -598,7 +611,7 @@ export function TasksView({
         setBusyOp(null);
       }
     },
-    [client, busyOp, confirm],
+    [clientFor, busyOp, confirm],
   );
 
   // ——— 滚动位置稳定化（详见文件顶部 savedTasksScrollY 的注释）———
@@ -875,10 +888,10 @@ export function TasksView({
             <button
               className={styles.stopButton}
               data-mode={mode}
-              disabled={busyOp === s.id}
+              disabled={busyOp === itemKey(s.deviceId, s.id)}
               onClick={() => void handleStop(s)}
             >
-              {busyOp === s.id ? (
+              {busyOp === itemKey(s.deviceId, s.id) ? (
                 "…"
               ) : (
                 <>
