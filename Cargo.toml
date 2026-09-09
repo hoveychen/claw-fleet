@@ -3,6 +3,7 @@ members = [
     "claw-fleet-core",
     "claw-fleet-desktop",
     "fleet-cli",
+    "fleet-image",
     "fleet-hooks-server",
     "fleet-relay",
     "fleet-cloud-api",

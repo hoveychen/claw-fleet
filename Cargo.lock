@@ -2277,6 +2277,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fleet-image"
+version = "0.0.0"
+dependencies = [
+ "image",
+]
+
+[[package]]
 name = "fleet-relay"
 version = "0.1.0"
 dependencies = [
