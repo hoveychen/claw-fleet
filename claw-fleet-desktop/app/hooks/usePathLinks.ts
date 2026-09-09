@@ -35,8 +35,8 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
     return {
       workspaceRoot: workspacePath,
       unresolved: unresolvedPaths,
-      openInFiles: (absPath, line) => {
-        requestFileNav({ workspacePath, absPath, line });
+      openInFiles: (absPath, line, tried) => {
+        requestFileNav({ workspacePath, absPath, line, tried });
       },
     };
   }, [sessionId, workspacePath, requestFileNav, unresolvedPaths]);

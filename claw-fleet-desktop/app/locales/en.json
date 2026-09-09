@@ -2418,6 +2418,7 @@
     "reveal_miss_body": "{{path}} does not exist in this repo. The agent that wrote the path may have meant it relative to a subdirectory.",
     "reveal_ambiguous_title": "Several files match",
     "reveal_ambiguous_body": "{{path}} matches more than one file in this repo — pick one:",
+    "paths_tried": "Looked for it here:",
     "tree_label": "Files",
     "loading": "Loading…",
     "empty_dir": "Empty directory.",
@@ -2481,6 +2482,7 @@
     "open_hint": "Open {{path}}",
     "open_hint_relative": "Open {{path}} (looking under {{root}})",
     "not_found_hint": "No file found for {{path}}",
+    "tried_hint": "No file at any of these:\n{{paths}}",
     "not_found": "Path not found"
   },
   "dir_picker": {

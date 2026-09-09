@@ -938,6 +938,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { path: q(a.path) },
   }),
 
+  resolve_prose_path: (a) => ({
+    method: "GET",
+    path: "/explorer_resolve",
+    query: { ws: q(a.workspace), path: q(a.path) },
+  }),
+
   read_live_thinking: (a) => ({
     method: "GET",
     path: "/live_thinking",

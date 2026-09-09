@@ -372,6 +372,10 @@ export interface FileNavRequest {
   /** Absolute path — already resolved against the workspace root. */
   absPath: string;
   line: number | null;
+  /** Every reading of the written path that was stat'ed and found empty — set
+   *  only when none of them existed, so the page that ends up showing an error
+   *  can list where it looked instead of naming the one guess in `absPath`. */
+  tried?: string[];
   /** Bumped on every request so clicking the same path twice re-navigates
    *  even when nothing else in the request changed. */
   nonce: number;

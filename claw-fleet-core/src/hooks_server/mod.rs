@@ -1411,7 +1411,8 @@ fn handle_request(
 
             crate::routes::EXPLORER_ROOTS | crate::routes::EXPLORER_DIR | crate::routes::EXPLORER_FILE | crate::routes::SCRATCHPAD_DIR
             | crate::routes::SCRATCHPAD_FILE | crate::routes::EXPLORER_EXTERNAL_FILE
-            | crate::routes::EXPLORER_FIND => route_explorer_roots(ctx, request, &query, json_header, path),
+            | crate::routes::EXPLORER_FIND
+            | crate::routes::EXPLORER_RESOLVE => route_explorer_roots(ctx, request, &query, json_header, path),
 
             crate::routes::GIT_STATUS | crate::routes::GIT_PUSH | crate::routes::GIT_PULL
                 if path == crate::routes::GIT_STATUS

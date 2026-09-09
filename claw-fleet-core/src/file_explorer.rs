@@ -381,6 +381,139 @@ pub fn read_external_file(path: &str) -> Result<ExplorerFileContent, String> {
     read_file_content(&canon)
 }
 
+// ── Resolving a path an agent wrote in prose ─────────────────────────────────
+
+/// Where a prose path landed, and everywhere it was looked for.
+///
+/// `tried` exists so a failed preview can say *which* paths came up empty. The
+/// old failure state showed one constructed path and 「读取文件失败」, which
+/// hid the one fact that explains it: the path on screen was a guess, and it
+/// was the only guess made.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PathResolution {
+    /// First candidate that exists on disk. `None` when none did.
+    pub resolved: Option<String>,
+    /// Candidates in the order they were stat'ed, deduplicated.
+    pub tried: Vec<String>,
+}
+
+/// Resolve a path as written in agent prose against a session's workspace.
+///
+/// A path in prose is genuinely ambiguous. `my-project/docs/x.md`, written in a
+/// session whose workspace *is* `…/my-project`, has two readings: relative to
+/// the workspace (giving a doubled `my-project/my-project/…` that never exists)
+/// and relative to its parent. The front end used to commit to the first
+/// reading with a single string join and no `stat`, so every path phrased the
+/// second way opened a dead preview — measured at 44 instances across 314
+/// sessions in one user's report (GitHub issue #106), including a 0/16 hit rate
+/// for the workspace-name-prefixed form specifically.
+///
+/// So: build the readings in order and take the first that exists.
+///
+/// 1. Absolute (or `~/`) — no ambiguity, the only candidate.
+/// 2. `workspace/raw` — the previous behaviour, kept first so nothing that
+///    resolved before starts resolving somewhere else.
+/// 3. `parent(workspace)/raw` — recovers the parent-relative phrasing, which
+///    subsumes the workspace-name-prefixed form (`my-project/docs/x.md` is just
+///    a parent-relative path that happens to start with the workspace's name).
+///
+/// The issue also proposed a fourth reading — strip a leading
+/// `<workspace name>/` and re-join the workspace — as a symlink-safe fallback
+/// for 3. It is not one: `Path::parent` is lexical, so for any `raw` starting
+/// with `<name>/`, `parent(ws)/raw` and `ws/<raw minus name>` are the *same
+/// string*, symlink or not. Implementing it added a candidate that was
+/// deduplicated away in every layout, so it is deliberately absent.
+///
+/// Nothing here reads file contents; it is `Path::exists` on a handful of
+/// lexically-derived paths. The read that follows still goes through
+/// [`read_external_file`] or [`read_file`], each with its own gate.
+pub fn resolve_prose_path(workspace_root: &str, raw: &str) -> PathResolution {
+    let mut tried: Vec<String> = Vec::new();
+    // A candidate that is not absolute cannot be stat'ed meaningfully here (the
+    // process CWD is Fleet's, not the agent's) and cannot be handed to a reader
+    // either — drop it rather than resolving it against the wrong directory.
+    // In practice this only fires when the caller passed a relative workspace.
+    let mut push = |p: PathBuf| {
+        let s = lexical_normalise(&p);
+        if is_absolute_spelling(&s) && !tried.contains(&s) {
+            tried.push(s);
+        }
+    };
+
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return PathResolution { resolved: None, tried };
+    }
+
+    if let Some(rest) = raw.strip_prefix("~/") {
+        match crate::session::real_home_dir() {
+            Some(home) => push(home.join(rest)),
+            // No home means no reading of `~` at all — say so by trying nothing
+            // rather than inventing a relative one.
+            None => return PathResolution { resolved: None, tried },
+        }
+    } else if is_absolute_spelling(raw) {
+        push(PathBuf::from(raw));
+    } else {
+        let ws = Path::new(workspace_root);
+        push(ws.join(raw));
+        if let Some(parent) = ws.parent() {
+            push(parent.join(raw));
+        }
+    }
+
+    let resolved = tried.iter().find(|c| Path::new(c).exists()).cloned();
+    PathResolution { resolved, tried }
+}
+
+/// `/x`, `\\server\share`, `C:\x` — spellings that name a root themselves.
+/// Mirrors `pathRef.ts`, which makes the same call in the webview.
+fn is_absolute_spelling(p: &str) -> bool {
+    if p.starts_with('/') || p.starts_with('\\') {
+        return true;
+    }
+    let b = p.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
+}
+
+/// Collapse `.`, `..` and duplicate separators *without* touching the disk, so
+/// a candidate that does not exist still prints as a sane path in `tried`.
+/// `..` past the root is clamped rather than escaping, matching `normalise` in
+/// `pathRef.ts` — the two have to agree or the front end's fallback spelling
+/// would name a different file than the one this stat'ed. Absoluteness is
+/// preserved, not assumed: a relative input stays relative so the caller can
+/// reject it instead of silently gaining a leading `/`.
+fn lexical_normalise(p: &Path) -> String {
+    let raw = p.to_string_lossy().replace('\\', "/");
+    let drive = {
+        let b = raw.as_bytes();
+        b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/'
+    };
+    let (root, rest) = if drive {
+        (raw[..2].to_string(), &raw[2..])
+    } else if let Some(stripped) = raw.strip_prefix('/') {
+        (String::new(), stripped)
+    } else {
+        return collapse(&raw).join("/");
+    };
+    format!("{root}/{}", collapse(rest).join("/"))
+}
+
+fn collapse(rest: &str) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    for segment in rest.split('/') {
+        match segment {
+            "" | "." => continue,
+            ".." => {
+                out.pop();
+            }
+            s => out.push(s),
+        }
+    }
+    out
+}
+
 /// Cap on the entries a suffix search will look at. A monorepo checkout with
 /// its ignored trees pruned lands well under this; the cap is a backstop
 /// against a workspace that keeps a huge *tracked* tree.
@@ -774,6 +907,128 @@ mod tests {
             tmp.path().join("missing.md").to_str().unwrap()
         )
         .is_err());
+    }
+
+    // ── resolve_prose_path ───────────────────────────────────────────────────
+
+    /// Builds `<tmp>/parent/my-project` with a file at `docs/report.md`, and
+    /// returns (workspace, absolute file path). This is the layout from the
+    /// issue: the workspace's own directory name is a plausible first segment.
+    fn prose_fixture() -> (tempfile::TempDir, String, String) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("parent").join("my-project");
+        fs::create_dir_all(ws.join("docs")).unwrap();
+        let file = ws.join("docs/report.md");
+        fs::write(&file, b"# report").unwrap();
+        let ws = ws.to_string_lossy().into_owned();
+        let file = file.to_string_lossy().into_owned();
+        (tmp, ws, file)
+    }
+
+    /// The previous behaviour, unchanged: a path that already resolved against
+    /// the workspace must still resolve there, and must be tried first.
+    #[test]
+    fn prose_path_keeps_the_workspace_join_first() {
+        let (_tmp, ws, file) = prose_fixture();
+        let got = resolve_prose_path(&ws, "docs/report.md");
+        assert_eq!(got.resolved.as_deref(), Some(file.as_str()));
+        assert_eq!(got.tried.first().map(String::as_str), Some(file.as_str()));
+    }
+
+    /// The 0/16 case from issue #106: the agent prefixes the path with the
+    /// workspace's own directory name. The workspace join doubles the segment
+    /// and finds nothing; the parent join is the reading that was meant.
+    #[test]
+    fn prose_path_recovers_the_workspace_name_prefixed_form() {
+        let (_tmp, ws, file) = prose_fixture();
+        let got = resolve_prose_path(&ws, "my-project/docs/report.md");
+        assert_eq!(got.resolved.as_deref(), Some(file.as_str()));
+        assert!(
+            got.tried[0].contains("my-project/my-project/"),
+            "the doubled join must still be tried first: {:?}",
+            got.tried
+        );
+    }
+
+    /// A path relative to the workspace's parent that does *not* start with the
+    /// workspace's name — a sibling directory. Only candidate 3 reaches it.
+    #[test]
+    fn prose_path_recovers_a_parent_relative_sibling() {
+        let (_tmp, ws, _) = prose_fixture();
+        let parent = Path::new(&ws).parent().unwrap().to_path_buf();
+        fs::create_dir_all(parent.join("Documents")).unwrap();
+        let file = parent.join("Documents/playbook.md");
+        fs::write(&file, b"x").unwrap();
+
+        let got = resolve_prose_path(&ws, "Documents/playbook.md");
+        assert_eq!(got.resolved, Some(file.to_string_lossy().into_owned()));
+    }
+
+    /// Pins the reason issue #106's fourth proposed candidate is not
+    /// implemented. It was pitched as a symlink-safe fallback for the parent
+    /// join, but `Path::parent` is lexical: through a symlinked workspace the
+    /// two readings are still the same string, so a fourth candidate would only
+    /// ever be deduplicated away. If this ever stops holding, the ladder needs
+    /// the extra rung after all.
+    #[cfg(unix)]
+    #[test]
+    fn prose_path_parent_join_already_covers_a_symlinked_workspace() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let real = tmp.path().join("real").join("my-project");
+        fs::create_dir_all(real.join("docs")).unwrap();
+        fs::write(real.join("docs/report.md"), b"# report").unwrap();
+
+        // `<tmp>/link` → `<tmp>/real/my-project`; the link's lexical parent is
+        // `<tmp>`, which holds no `my-project` directory at all.
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let ws = link.to_string_lossy().into_owned();
+
+        let got = resolve_prose_path(&ws, "link/docs/report.md");
+        assert_eq!(
+            got.resolved,
+            Some(link.join("docs/report.md").to_string_lossy().into_owned()),
+            "tried: {:?}",
+            got.tried
+        );
+        assert_eq!(got.tried.len(), 2, "a third reading would be a duplicate: {:?}", got.tried);
+    }
+
+    /// An absolute path has one reading, and that is the whole ladder.
+    #[test]
+    fn prose_path_leaves_an_absolute_path_alone() {
+        let (_tmp, ws, file) = prose_fixture();
+        let got = resolve_prose_path(&ws, &file);
+        assert_eq!(got.resolved.as_deref(), Some(file.as_str()));
+        assert_eq!(got.tried, vec![file]);
+
+        let missing = resolve_prose_path(&ws, "/nope/does-not-exist.md");
+        assert_eq!(missing.resolved, None);
+        assert_eq!(missing.tried, vec!["/nope/does-not-exist.md".to_string()]);
+    }
+
+    /// Nothing resolves — the caller still gets every path that was looked at,
+    /// which is what turns 「读取文件失败」 into something self-diagnosing.
+    #[test]
+    fn prose_path_reports_every_candidate_when_none_exist() {
+        let (_tmp, ws, _) = prose_fixture();
+        let got = resolve_prose_path(&ws, "my-project/gone/x.md");
+        assert_eq!(got.resolved, None);
+        assert_eq!(got.tried.len(), 2, "doubled join + parent join: {:?}", got.tried);
+        assert!(got.tried.iter().all(|c| c.ends_with("gone/x.md")));
+        // No duplicates: the parent join and the prefix strip name the same
+        // path in this layout and must not be listed twice.
+        assert_ne!(got.tried[0], got.tried[1]);
+    }
+
+    /// A relative workspace root would make every candidate meaningless — the
+    /// process CWD is Fleet's, not the agent's. Try nothing rather than resolve
+    /// against the wrong directory.
+    #[test]
+    fn prose_path_refuses_a_relative_workspace() {
+        let got = resolve_prose_path("relative/ws", "docs/report.md");
+        assert_eq!(got.resolved, None);
+        assert!(got.tried.is_empty(), "got: {:?}", got.tried);
     }
 
     /// Regression: agents write `~/Downloads/x.html` in prose far more often

@@ -743,3 +743,28 @@
 .reveal_candidate:hover {
   background: var(--color-bg-secondary);
 }
+
+/* Every reading of a written path that was stat'ed and came up empty. Not a
+   candidate list: nothing here is clickable, because nothing here exists. */
+.paths_tried {
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.paths_tried_label {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.paths_tried_list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}

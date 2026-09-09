@@ -549,6 +549,16 @@ async function handleIPC(
       const content = `# ${(args.path as string) ?? ""}\n\nmock 模式下的工作区外文件内容。\n`;
       return { kind: "text", content, truncated: false, sizeBytes: content.length };
     }
+    // ?mock has no filesystem to stat, so every reading "exists": answer with
+    // the workspace join, which is what the chip would have used anyway. The
+    // interesting case (a reading that misses) needs real files — see the
+    // core tests.
+    case "resolve_prose_path": {
+      const raw = (args.path as string) ?? "";
+      const ws = (args.workspace as string) ?? "";
+      const abs = raw.startsWith("/") ? raw : `${ws}/${raw}`;
+      return { resolved: abs, tried: [abs] };
+    }
     case "git_status":
       return MOCK_GIT_STATUS;
 
