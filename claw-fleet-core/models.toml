@@ -17,6 +17,13 @@
 #                  把一个档位映射到不支持它的模型时要向下钳位，需要一个全序。
 #   default_effort 不指定 effort 时该模型自己会落到哪一档。仅供展示与推理，
 #                  Fleet 不会替 CLI 填这个值。
+#   context        默认上下文窗口（token）。仅用作**回退**：会话自报了真实窗口
+#                  就以自报为准（Codex 每轮都会自报）。
+#   max_context    该模型能开到的最大窗口。目前只作记录，不参与百分比计算。
+#
+# Claude 各条**故意不写 context**：窗口由家族规则判定（Opus/Sonnet 4.6+、5.x、
+# Fable、Mythos 原生 1M，其余 200K），还要认 Fleet 自己的 `[1m]` 后缀和带日期的
+# 别名——那是一条规则，不是一张能逐 id 列全的表。见 session/stats.rs。
 #
 # ── 事实来源 ──
 # Codex 各条的 efforts / default_effort 读自 `~/.codex/models_cache.json` 的
@@ -118,6 +125,8 @@ family = "codex"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
+context = 272000
+max_context = 872000
 
 [[model]]
 id = "gpt-5.6-sol"
@@ -125,6 +134,8 @@ family = "codex"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
+context = 272000
+max_context = 872000
 
 [[model]]
 id = "gpt-5.6-terra"
@@ -132,6 +143,8 @@ family = "codex"
 tier = "standard"
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 default_effort = "medium"
+context = 272000
+max_context = 872000
 
 [[model]]
 id = "gpt-5.6-luna"
@@ -139,6 +152,8 @@ family = "codex"
 tier = "fast"
 efforts = ["low", "medium", "high", "xhigh", "max"]
 default_effort = "medium"
+context = 272000
+max_context = 872000
 
 # 唯一一个梯子真的停在 max 以下的 listed 模型，而且它默认就跑在自己的顶档。
 [[model]]
@@ -147,6 +162,8 @@ family = "codex"
 tier = "premium"
 efforts = ["low", "medium", "high", "xhigh"]
 default_effort = "xhigh"
+context = 272000
+max_context = 272000
 
 # ── dsh ─────────────────────────────────────────────────────────────────────
 # 这里**不**试图列全 dsh 能跑的模型。dsh 的目录是每个用户 `~/.dsh/settings.yaml`

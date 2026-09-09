@@ -54,6 +54,13 @@ pub struct ModelEntry {
     pub efforts: Option<Vec<String>>,
     #[serde(default)]
     pub default_effort: Option<String>,
+    /// Default context window in tokens. A **fallback** only — a session that
+    /// reports its own effective window (every Codex turn does) wins.
+    #[serde(default)]
+    pub context: Option<u64>,
+    /// Largest window the model can be opened with. Recorded, not yet consumed.
+    #[serde(default)]
+    pub max_context: Option<u64>,
 }
 
 impl ModelEntry {
@@ -72,6 +79,12 @@ impl ModelEntry {
         }
         if other.default_effort.is_some() {
             self.default_effort = other.default_effort;
+        }
+        if other.context.is_some() {
+            self.context = other.context;
+        }
+        if other.max_context.is_some() {
+            self.max_context = other.max_context;
         }
     }
 }
@@ -154,6 +167,19 @@ pub fn entry(model: &str) -> Option<&'static ModelEntry> {
 /// `model`, or `None` when it is not catalogued.
 pub fn tier(model: &str) -> Option<&'static str> {
     entry(model)?.tier.as_deref()
+}
+
+/// The catalogued default context window for `model`, in tokens.
+///
+/// `None` means the catalog states no window for it — which is the case for
+/// every Claude row on purpose: Claude's window follows a *family rule*
+/// (Opus/Sonnet 4.6+, 5.x, Fable and Mythos are natively 1M; everything else is
+/// 200K) that also has to honour dated aliases and Fleet's own `[1m]` suffix.
+/// That rule cannot be enumerated id-by-id, so it stays in
+/// [`crate::session::stats::context_window_for_model`] and this table does not
+/// try to shadow it.
+pub fn context_window(model: &str) -> Option<u64> {
+    entry(model)?.context
 }
 
 /// The effort levels `model` accepts, weakest first, or `None` when we have no
@@ -347,6 +373,23 @@ mod tests {
             assert!(tier(id).is_some(), "{id} is selectable but has no tier");
             assert!(effort_ladder(id).is_some(), "{id} has no ladder");
         }
+    }
+
+    /// Codex rows carry a window; Claude rows deliberately do not, because
+    /// Claude's window is a family rule (dated aliases, the `[1m]` suffix) that
+    /// an id-keyed table cannot express. `context_window` returning `None` for
+    /// Claude is what keeps `stats.rs`'s family logic in charge.
+    #[test]
+    fn codex_rows_carry_a_window_and_claude_rows_do_not() {
+        assert_eq!(context_window("gpt-6-astra"), Some(272_000));
+        assert_eq!(context_window("gpt-5.6-sol"), Some(272_000));
+        assert_eq!(context_window("gpt-5.5"), Some(272_000));
+        assert_eq!(entry("gpt-6-astra").unwrap().max_context, Some(872_000));
+        // gpt-5.5 is the one whose ceiling equals its default window.
+        assert_eq!(entry("gpt-5.5").unwrap().max_context, Some(272_000));
+
+        assert_eq!(context_window("claude-opus-5"), None);
+        assert_eq!(context_window("claude-haiku-4-5-20251001"), None);
     }
 
     /// The bare aliases are legal `--model` values, so they resolve too.
