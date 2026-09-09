@@ -11,15 +11,6 @@
   background: var(--color-bg);
 }
 
-.refresh {
-  border: none;
-  background: none;
-  color: var(--color-text-dim);
-  font-size: var(--t-h2, 18px);
-  padding: 4px 6px;
-  flex-shrink: 0;
-}
-
 /* ── Repo chips ─────────────────────────────────────────────────────────── */
 
 .repoRow {

@@ -3,7 +3,7 @@
 // 仓库排在最前、标黄点。点开进 RepoDetailView 看逐个 worktree 明细并 push/pull。
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRight, FolderGit2 } from "lucide-react";
+import { ChevronRight, FolderGit2, RefreshCw } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
@@ -11,6 +11,7 @@ import type { RepoSummary } from "../types";
 import { listRepos } from "../repo";
 import styles from "./RepoView.module.css";
 import { AppHeader } from "./AppHeader";
+import { HeaderAction } from "./HeaderAction";
 
 interface Props {
   client: FleetTransport | null;
@@ -44,9 +45,11 @@ export function RepoView({ client, onBack, onOpenRepo }: Props) {
         onBack={onBack}
         title={t("仓库")}
         actions={
-          <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")}>
-            ⟳
-          </button>
+          <HeaderAction
+            icon={<RefreshCw size={17} />}
+            label={t("刷新")}
+            onClick={() => void refresh()}
+          />
         }
       />
 

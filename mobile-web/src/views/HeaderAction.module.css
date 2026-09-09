@@ -1,0 +1,57 @@
+/* 详情页 header 右侧那个图标动作按钮。
+   32×32 的可见方框配一个 44×44 的隐形命中区，跟同一个 header 里的 .backButton
+   逐字节同一套做法——两边一个在左一个在右，长得不一样才是怪事。 */
+.action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  /* 右侧那颗要把 32px 方框的光学右沿拉回 header 的 12px 边距上，与
+     .backButton 的 margin-left:-6px 镜像。 */
+  margin-right: -6px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+/* 命中区做法与 .backButton::after 一致：绝对定位的伪元素替自己那一块接管
+   pointer events，却不给布局贡献任何尺寸，于是命中区变大而 header 高度不变。 */
+.action::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.action:active {
+  background: var(--color-bg-card-hover);
+}
+
+.action:disabled {
+  color: var(--color-text-dim);
+}
+
+/* 刷新中就转起来。四份手搓版本里一份都没有这个——按下去之后没有任何反馈，
+   在手机上（网络往返几百毫秒）等同于「这个按钮坏了」。 */
+.action[data-busy="true"] svg {
+  animation: headerActionSpin 800ms linear infinite;
+}
+
+@keyframes headerActionSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action[data-busy="true"] svg {
+    animation: none;
+  }
+}

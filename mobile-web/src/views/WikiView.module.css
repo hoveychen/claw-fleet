@@ -28,15 +28,6 @@
   padding: 1px 8px;
 }
 
-.refresh {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  color: var(--color-text-secondary);
-  padding: 2px 6px;
-  line-height: 1;
-}
-
 .searchWrap {
   position: relative;
   flex: 1;

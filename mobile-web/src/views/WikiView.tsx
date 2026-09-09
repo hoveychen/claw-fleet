@@ -22,6 +22,7 @@ import { useWikiSearch } from "../useWikiSearch";
 import { listWikiDocs } from "../wiki";
 import styles from "./WikiView.module.css";
 import { AppHeader } from "./AppHeader";
+import { HeaderAction } from "./HeaderAction";
 
 const KIND_BADGE: Record<WikiDoc["kind"], string> = {
   markdown: "MD",
@@ -138,9 +139,11 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
         title={t("知识库")}
         titleAfter={total > 0 && <span className={styles.count}>{total}</span>}
         actions={
-          <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")}>
-            <RefreshCw size={16} />
-          </button>
+          <HeaderAction
+            icon={<RefreshCw size={17} />}
+            label={t("刷新")}
+            onClick={() => void refresh()}
+          />
         }
       />
 

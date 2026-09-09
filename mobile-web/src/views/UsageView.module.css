@@ -9,18 +9,6 @@
   background: var(--color-bg);
 }
 
-.refresh {
-  font-size: var(--t-h2, 18px);
-  color: var(--color-text-secondary);
-  padding: 2px 6px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.refresh:disabled {
-  color: var(--color-text-dim);
-}
-
 .body {
   flex: 1;
   min-height: 0;

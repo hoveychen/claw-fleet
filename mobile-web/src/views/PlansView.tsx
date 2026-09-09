@@ -5,7 +5,7 @@
 // 没有 parent 关系、没有 done/total、没有接力链。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight, GitBranch, ListTree, TriangleAlert, X } from "lucide-react";
+import { ChevronRight, GitBranch, ListTree, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import { useHistoryLayer } from "../useNavStack";
@@ -22,6 +22,7 @@ import {
 } from "./planMatrix";
 import styles from "./PlansView.module.css";
 import { AppHeader } from "./AppHeader";
+import { HeaderAction } from "./HeaderAction";
 
 interface Props {
   sessions: SessionInfo[];
@@ -157,9 +158,12 @@ export function PlansView({ sessions, client, onBack }: Props) {
         onBack={onBack}
         title={t("计划")}
         actions={
-          <button className={styles.refresh} onClick={() => void load()} aria-label={t("刷新")}>
-            ⟳
-          </button>
+          <HeaderAction
+            icon={<RefreshCw size={17} />}
+            label={t("刷新")}
+            onClick={() => void load()}
+            busy={loading}
+          />
         }
       />
 

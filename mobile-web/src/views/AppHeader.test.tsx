@@ -26,7 +26,7 @@ describe("AppHeader", () => {
     expect(bare).not.toMatch(/class="[^"]*actions[^"]*"/);
 
     const full = renderToStaticMarkup(
-      <AppHeader onBack={noop} title="仓库" sub="/tmp/x" actions={<button>⟳</button>} />,
+      <AppHeader onBack={noop} title="仓库" sub="/tmp/x" actions={<button>x</button>} />,
     );
     expect(full).toMatch(/class="[^"]*sub[^"]*"/);
     expect(full).toMatch(/class="[^"]*actions[^"]*"/);
