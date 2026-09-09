@@ -692,11 +692,25 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         )));
     }
 
+    // Sidechain guard: a subagent shares its parent's CLI process, hence this
+    // server child and its session id, so a card it raises is filed under the
+    // parent and the terminal button on that card closes the *parent's* task —
+    // see `subagent_caller` for the 2026-09-08 case that motivated this. Refuse
+    // it and tell the agent to hand its report back to the parent as text.
+    let session_id = current_session_id();
+    let first_question = questions.first().map(|q| q.question.as_str()).unwrap_or_default();
+    if let Some(agent_type) = crate::subagent_caller::detect_ask_caller(&session_id, first_question)
+    {
+        return Ok(tool_error(format!(
+            "{} (detected agent type: `{agent_type}`)",
+            crate::subagent_caller::SUBAGENT_ASK_REFUSAL
+        )));
+    }
+
     // Re-entry guard: this session already has a question parked and waiting for
     // the user. An agent that got here anyway ignored the stop notice from that
     // one — hand it straight back rather than stacking a second card the user
     // has to dismiss.
-    let session_id = current_session_id();
     if crate::parked::has_parked_for_session(&session_id) {
         return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
     }

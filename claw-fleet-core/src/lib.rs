@@ -151,6 +151,7 @@ pub mod session_todos;
 pub mod skill_history;
 pub mod skill_sync;
 pub mod skills;
+pub mod subagent_caller;
 pub mod tcc;
 pub mod today_usage;
 pub mod token_analysis;
