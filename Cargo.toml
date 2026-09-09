@@ -49,7 +49,15 @@ lto = true
 #   rebuild it after a one-line edit ......  8.1s at opt=1 →  3.1s at opt=0
 #
 # That was the cost on every crate, on every build, forever, for the benefit of
-# a single function.
+# a single function. `scripts/build-local.sh` is debug-profile only, so it pays
+# it on every local app build too.
+#
+# The one thing opt=0 does cost is test *execution*: the same 2714-test
+# claw-fleet-core lib suite runs in 91.4s at opt=0 vs 84.2s at opt=1 (+8.5%).
+# It stays that small because `[profile.dev.package."*"]` keeps every dependency
+# at 3 — only our own orchestration/IO code drops to 0, and the one tight loop
+# we own is pinned below. The edit→test cycle is still far ahead: building that
+# test binary goes 55.7s → 20.0s, so the round trip is 139.9s → 111.4s.
 #
 # So the loop now lives in its own crate, `fleet-image`, and only *it* is pinned
 # to opt-level 3. `[profile.dev]` is back to the cargo default, which is what a
