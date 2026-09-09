@@ -68,7 +68,8 @@ compactCostUsd: number,
 pendingMessages: Array<string>, 
 watches?: Array<WatchSummary>, 
 remoteDisconnect?: RemoteDisconnect | null, 
-mirrorWrite?: MirrorWrite | null, };
+mirrorWrite?: MirrorWrite | null, 
+outOfCredits?: string | null, };
 
 export type SessionMark = "pending" | "done";
 

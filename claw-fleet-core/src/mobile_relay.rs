@@ -1007,6 +1007,10 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // file names. Absent for every session with a clean mirror, which is all of
     // them in normal operation.
     "mirrorWrite",
+    // 账号额度耗尽（codex 的 usage_limit_exceeded）。它没有 status，只有这个字段，
+    // 白名单不放行手机上就完全看不出「这活是被余额掐停的」——而手机恰恰是最可能
+    // 发现它的地方（充值也在手机上）。正常会话整个字段缺席。
+    "outOfCredits",
 ];
 
 /// Byte size a re-encoded decision-asset image is squeezed toward. Every image

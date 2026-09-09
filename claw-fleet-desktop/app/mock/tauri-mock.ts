@@ -683,10 +683,18 @@ async function handleIPC(
       // remote-disconnect verdict (all three of them do — desktop, fleet serve,
       // mobile). Without this the demo's reopen button is a button that visibly
       // does nothing, which is exactly the shape of "looks finished, isn't".
+      // `outOfCredits` clears the same way for the same reason, and in the real
+      // backend for a stronger one: it is re-derived from the rollout every scan,
+      // and a newer turn start makes `codex_out_of_credits` return None.
       const sessionId = args.sessionId as string;
       currentSessions = currentSessions.map((s) =>
-        s.id === sessionId && s.remoteDisconnect
-          ? { ...s, remoteDisconnect: null, status: "active" as const }
+        s.id === sessionId && (s.remoteDisconnect || s.outOfCredits)
+          ? {
+              ...s,
+              remoteDisconnect: null,
+              outOfCredits: null,
+              status: "active" as const,
+            }
           : s,
       );
       emit("sessions-updated", currentSessions);
