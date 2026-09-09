@@ -10,7 +10,6 @@ import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
 import { getItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
 import i18n from "./i18n";
-import { playChime } from "./audio";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 
 /** Open the in-app Settings overlay.
@@ -1534,13 +1533,30 @@ interface DecisionState {
   setActiveDecision: (id: string) => void;
 }
 
+/**
+ * NONE of the `add*` actions below plays a sound. Announcing a card is
+ * `useDecisionEvents`'s job alone (`playDecisionAlert`), and it is the sole
+ * caller of every one of these actions.
+ *
+ * They used to chime too, which made every card announce twice and — for the
+ * two channels whose dedup lives *inside* the `set` updater rather than as an
+ * early return (`fleet-ask`, `a2ui-render`) — chime forever: the hook
+ * reconciles against the backend's pending set every 10s and re-seeds each
+ * still-outstanding card, so a store-level chime after the no-op `set` fired
+ * once per poll for as long as the card sat there. Boss hit exactly that on
+ * 2026-09-09 in simplified mode, where no DecisionPanel is mounted to explain
+ * the noise. `playChime` is also raw — it honours neither `tts-muted` nor
+ * `tts-mode`, so the ringing could not even be silenced. `playDecisionAlert`
+ * checks both, dedups by id, skips parked re-listings, and picks the urgent
+ * preset for guard/permission-prompt. Keep announcements there.
+ */
 export const useDecisionStore = create<DecisionState>((set, get) => ({
   decisions: [],
   activeDecisionId: null,
 
   addGuardRequest: (req) => {
     // Dedup by id: mount catch-up may seed the same request the live watcher
-    // also emits. Skip the duplicate (and its chime + LLM analysis) entirely.
+    // also emits. Skip the duplicate (and its LLM analysis) entirely.
     if (get().decisions.some((d) => d.id === req.id)) return;
     const decision: PendingDecision = {
       kind: "guard",
@@ -1555,9 +1571,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       // Auto-select new decision when it's the first one
       activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
-
-    // Play chime to alert user that a decision is waiting
-    playChime("triple").catch(() => {});
 
     // Kick off LLM analysis if enabled
     const llmEnabled = getItem("guard-llm-analysis") !== "false";
@@ -1585,7 +1598,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
 
   addElicitationRequest: (req) => {
     // Dedup by id: mount catch-up may seed the same request the live watcher
-    // also emits. Skip the duplicate (and its chime) entirely.
+    // also emits. Skip the duplicate entirely.
     if (get().decisions.some((d) => d.id === req.id)) return;
     const decision: PendingDecision = {
       kind: "elicitation",
@@ -1602,9 +1615,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       decisions: [...s.decisions, decision],
       activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
-
-    // Play chime to alert user that a decision is waiting
-    playChime("ding_dong").catch(() => {});
   },
 
   addFleetAskRequest: (req) => {
@@ -1637,7 +1647,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
         activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
       };
     });
-    playChime("ding_dong").catch(() => {});
   },
 
   addA2uiRenderRequest: (req) => {
@@ -1656,7 +1665,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
         activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
       };
     });
-    playChime("ding_dong").catch(() => {});
   },
 
   setA2uiActionPayload: (id, name, context) => {
@@ -1671,7 +1679,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
 
   addPlanApprovalRequest: (req) => {
     // Dedup by id: mount catch-up may seed the same request the live watcher
-    // also emits. Skip the duplicate (and its chime) entirely.
+    // also emits. Skip the duplicate entirely.
     if (get().decisions.some((d) => d.id === req.id)) return;
     const decision: PendingDecision = {
       kind: "plan-approval",
@@ -1685,12 +1693,11 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       decisions: [...s.decisions, decision],
       activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
-    playChime("ding_dong").catch(() => {});
   },
 
   addPermissionPromptRequest: (req) => {
     // Dedup by id: mount catch-up may seed the same request the live watcher
-    // also emits. Skip the duplicate (and its chime) entirely.
+    // also emits. Skip the duplicate entirely.
     if (get().decisions.some((d) => d.id === req.id)) return;
     const decision: PendingDecision = {
       kind: "permission-prompt",
@@ -1703,8 +1710,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       decisions: [...s.decisions, decision],
       activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
-    // Same urgency feel as guard — the agent is blocked on this.
-    playChime("triple").catch(() => {});
   },
 
   setPermissionPromptDenyReason: (id, text) =>
