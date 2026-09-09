@@ -338,6 +338,7 @@ const DICT: Record<string, string> = {
   需添加到主屏幕: "Add to Home Screen",
   配对: "Pairing",
   关于: "About",
+  构建: "Build",
 
   // ── 终端（「更多」页进去的全屏页）──
   终端: "Terminal",

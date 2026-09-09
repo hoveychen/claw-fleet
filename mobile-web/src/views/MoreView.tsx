@@ -24,6 +24,7 @@ import { canScanPairing, scanPairing } from "../nativeScan";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
 import { useConfirm } from "../confirmDialog";
+import { BUILD_COMMIT } from "../buildCommit";
 import styles from "./MoreView.module.css";
 
 const LANG_CHOICES: Array<[Lang, string]> = [
@@ -632,6 +633,20 @@ export function MoreView({
             <span className={styles.rowLabel}>Fleet Mobile</span>
             <span className={styles.rowValue}>v{__APP_VERSION__}</span>
           </div>
+          {/* 构建 commit：报问题时「哪个构建」比「哪个版本」精确——package.json
+              的版本号很少动，而这个 bundle 每次发布都不同。桌面端已经拿它比对
+              手机 bundle 是否过期（hello 帧的 appCommit），这里只是把同一个值
+              显示给人看。无 commit 来源时它是 "unknown"，那不是 commit，整行
+              不渲染。 */}
+          {BUILD_COMMIT && (
+            <>
+              <div className={styles.divider} />
+              <div className={styles.row}>
+                <span className={styles.rowLabel}>{t("构建")}</span>
+                <span className={styles.buildValue}>{BUILD_COMMIT}</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
