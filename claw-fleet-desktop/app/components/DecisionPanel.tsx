@@ -32,8 +32,8 @@ import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { SessionDetail } from "./SessionDetail";
 import { StructuredCommandView } from "./StructuredCommandView";
 import { useAutoFlip } from "./useAutoFlip";
-import { decisionAssetUrl } from "../decisionAssets";
 import { AutoHeightFrame } from "./AutoHeightFrame";
+import { DecisionAssetFrame } from "./DecisionAssetFrame";
 import { ReviewDocsColumn } from "./ReviewDocsColumn";
 import styles from "./DecisionPanel.module.css";
 
@@ -1615,11 +1615,14 @@ export function FleetAskCard({
 
         {q.images && q.images.length > 0 ? (
           // Image-bearing card: load the served index.html (agent html or auto
-          // gallery) via the fleet-decision:// protocol so <img src="name">
-          // resolves to the copied files — no base64 in the tool call.
-          <AutoHeightFrame
+          // gallery) so <img src="name"> resolves to the copied files — no
+          // base64 in the tool call. `DecisionAssetFrame` picks how to reach
+          // those bytes per host (custom protocol vs. parent-fetched srcDoc).
+          <DecisionAssetFrame
             title={`fleet-ask-html-${decision.id}-${step}`}
-            src={decisionAssetUrl(decision.id, `q${step}`, "index.html", theme)}
+            id={decision.id}
+            qidx={`q${step}`}
+            theme={theme}
             minHeight={200}
             style={fleetAskFrameStyle(theme)}
           />
