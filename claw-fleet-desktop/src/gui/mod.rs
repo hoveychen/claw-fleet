@@ -1573,6 +1573,7 @@ pub fn run() {
             get_dsh_token_breakdown,
             get_dsh_session_cost,
             dsh_models,
+            model_catalog,
             get_session_todos,
             get_audit_events,
             get_audit_rules,
