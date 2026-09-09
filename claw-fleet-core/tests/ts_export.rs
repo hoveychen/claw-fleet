@@ -124,6 +124,12 @@ fn build_bundle() -> String {
         claw_fleet_core::dsh_source::DshModelCatalog,
     );
 
+    // ── Fleet's own model catalog (models.toml → the pickers) ────────────────
+    emit!(
+        claw_fleet_core::model_catalog::PickerModel,
+        claw_fleet_core::model_catalog::PickerHarness,
+    );
+
     // ── todos / bg / prd / handoff / live thinking ───────────────────────────
     emit!(
         claw_fleet_core::session_todos::TodoItem,

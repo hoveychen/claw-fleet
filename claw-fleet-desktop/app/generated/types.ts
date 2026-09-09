@@ -237,6 +237,18 @@ export type DshModelCatalog = { groups: Array<DshModelGroup>, failures: Array<Ds
 defaultSpec: string | null, 
 defaultEffort: string | null, };
 
+export type PickerModel = { 
+id: string, 
+label: string, 
+harness: string, 
+tier: string | null, 
+efforts: Array<string>, 
+defaultEffort: string | null, };
+
+export type PickerHarness = { 
+name: string, 
+available: boolean, models: Array<PickerModel>, };
+
 export type SessionTodo = { content: string, activeForm: string, 
 status: string, };
 

@@ -349,6 +349,91 @@ pub fn listed_models(family: &str) -> Vec<&'static ModelEntry> {
 
 
 
+// ── Picker catalog (the UI surface) ─────────────────────────────────────────
+
+/// One selectable model, as the desktop and mobile pickers need it.
+///
+/// Deliberately not [`ModelEntry`]: the pickers want a display label and the
+/// effort ladder, and they do **not** want prices or the superseded rows. Sending
+/// the raw catalog would make every client re-derive the same filtering, which is
+/// exactly the duplication this whole change is removing.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct PickerModel {
+    /// The value to send as `--model`.
+    pub id: String,
+    /// What to show in the menu.
+    pub label: String,
+    /// `claude` / `codex` / `dsh`.
+    pub harness: String,
+    /// `fast` / `standard` / `premium`, when the catalog assigns one.
+    pub tier: Option<String>,
+    /// Effort levels this model accepts, weakest first. Empty when we don't
+    /// assert one (an uncatalogued dsh model — ask dsh).
+    pub efforts: Vec<String>,
+    /// The level the model itself defaults to, when known.
+    pub default_effort: Option<String>,
+}
+
+/// The selectable models for one harness, plus whether that harness is here.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct PickerHarness {
+    /// `claude` / `codex` / `dsh`.
+    pub name: String,
+    /// False when the harness is not installed here or is disabled in
+    /// `~/.fleet/fleet-sources.json`. The picker greys it out or drops it —
+    /// offering a model whose spawn is guaranteed to fail is a dead end the
+    /// client should not have to discover by trying.
+    pub available: bool,
+    pub models: Vec<PickerModel>,
+}
+
+/// The model catalog as the pickers consume it.
+///
+/// One core function behind all three clients (desktop Tauri command,
+/// `fleet serve` route, mobile relay arm) — the "one data plane, three clients"
+/// contract in `CLAUDE.md`. It replaces two hand-maintained TS lists that had
+/// drifted from each other and from the guidance sheets.
+pub fn picker_catalog() -> Vec<PickerHarness> {
+    picker_catalog_with(|family| {
+        crate::agent_source::find_source_by_api_name(
+            &crate::agent_source::build_sources(),
+            crate::agent_source::normalize_tool(family),
+        )
+        .is_some()
+    })
+}
+
+/// [`picker_catalog`] against an injectable availability probe.
+pub fn picker_catalog_with(is_available: impl Fn(&str) -> bool) -> Vec<PickerHarness> {
+    ["claude-code", "codex", "dsh"]
+        .into_iter()
+        .map(|family| PickerHarness {
+            name: match family {
+                "claude-code" => "claude".to_string(),
+                other => other.to_string(),
+            },
+            available: is_available(family),
+            models: listed_models(family)
+                .into_iter()
+                .map(|e| PickerModel {
+                    id: e.id.clone(),
+                    label: e.display().to_string(),
+                    harness: harness_of(e).to_string(),
+                    tier: e.tier.clone(),
+                    efforts: e.efforts.clone().unwrap_or_default(),
+                    default_effort: e.default_effort.clone(),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 /// The harness column value for a row.
 fn harness_of(e: &ModelEntry) -> &str {
     match e
@@ -802,6 +887,45 @@ mod tests {
         assert!(all.contains("claude-opus-5"));
         assert!(all.contains("gpt-5.6-sol"));
         assert!(all.contains("deepseek-official/deepseek-v4-pro"));
+    }
+
+    /// The picker catalog carries what a menu needs and nothing else.
+    ///
+    /// Notably it keeps *unavailable* harnesses in the list with
+    /// `available: false`, unlike the cheat-sheet which omits them. The two want
+    /// different things: an agent reading prose should not see a model it cannot
+    /// use, but a picker may want to show the harness greyed out with a reason
+    /// rather than have it silently vanish. Sending the flag lets each client
+    /// decide; sending nothing would not.
+    #[test]
+    fn picker_catalog_reports_availability_per_harness() {
+        let cat = picker_catalog_with(|f| f == "claude-code");
+        let names: Vec<&str> = cat.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(names, ["claude", "codex", "dsh"]);
+        assert!(cat[0].available);
+        assert!(!cat[1].available);
+        assert!(!cat[2].available);
+        // Models are listed regardless of availability — the flag is the signal.
+        assert!(!cat[1].models.is_empty(), "codex models still enumerated");
+    }
+
+    /// Superseded rows and bare aliases stay out of the menus, and every entry
+    /// carries the ladder the effort picker needs.
+    #[test]
+    fn picker_catalog_omits_aliases_and_superseded_rows() {
+        let cat = picker_catalog_with(|_| true);
+        let all: Vec<&str> =
+            cat.iter().flat_map(|h| h.models.iter().map(|m| m.id.as_str())).collect();
+        assert!(all.contains(&"claude-opus-5"));
+        assert!(!all.contains(&"opus"), "bare alias leaked into the menu");
+        assert!(!all.contains(&"claude-opus-4-8"), "superseded row leaked into the menu");
+
+        let claude = &cat[0];
+        for m in &claude.models {
+            assert!(!m.label.is_empty(), "{} has no label", m.id);
+            assert_eq!(m.harness, "claude");
+            assert!(!m.efforts.is_empty(), "{} has no ladder", m.id);
+        }
     }
 
     /// There is **one** sheet, not three. All three harnesses render the same
