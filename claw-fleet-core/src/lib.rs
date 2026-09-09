@@ -48,6 +48,7 @@ pub mod elicitation;
 pub mod feature_flags;
 pub mod file_explorer;
 pub mod fleet_cli;
+pub mod fleet_event;
 pub mod foxy;
 pub mod git_ops;
 pub mod guard;

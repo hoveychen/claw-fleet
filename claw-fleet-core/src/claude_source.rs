@@ -51,16 +51,20 @@ impl AgentSource for ClaudeCodeSource {
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
         let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        Ok(content
+        let mut messages: Vec<Value> = content
             .lines()
             .filter(|l| !l.trim().is_empty())
             .filter_map(|l| serde_json::from_str(l).ok())
-            .collect())
+            .collect();
+        messages.iter_mut().for_each(crate::fleet_event::annotate);
+        Ok(messages)
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
-        crate::jsonl_tail::read_tail_lines_as_json(std::path::Path::new(path), n)
-            .map_err(|e| e.to_string())
+        let mut messages = crate::jsonl_tail::read_tail_lines_as_json(std::path::Path::new(path), n)
+            .map_err(|e| e.to_string())?;
+        messages.iter_mut().for_each(crate::fleet_event::annotate);
+        Ok(messages)
     }
 
     fn watch_strategy(&self) -> WatchStrategy {
