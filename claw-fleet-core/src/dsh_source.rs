@@ -907,6 +907,7 @@ impl AgentSource for DshSource {
         let id = Self::session_id_of(path).ok_or_else(|| format!("invalid dsh URI: {path}"))?;
         let mut records = history_with(id, None, |before, max| self.fetch_history(id, before, max))?;
         self.resolve_images(id, &mut records);
+        records.iter_mut().for_each(crate::fleet_event::annotate);
         Ok(records)
     }
 
@@ -915,6 +916,7 @@ impl AgentSource for DshSource {
         let mut records =
             history_with(id, Some(n), |before, max| self.fetch_history(id, before, max))?;
         self.resolve_images(id, &mut records);
+        records.iter_mut().for_each(crate::fleet_event::annotate);
         Ok(records)
     }
 
