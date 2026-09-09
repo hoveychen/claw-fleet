@@ -10,9 +10,13 @@
    `rgb(244,241,234)`: 93% of a colour composited over itself is that colour, so
    the bar is the page's own background plus a hairline, and the blur only shows
    as content scrolls beneath it. Matching that here means a detail header is
-   also just the page plus a hairline. Everything that continues the panel
-   (.tabBar / .infoPanel / .parentCrumb, TerminalView's .tabs) moved with it, so
-   `seamless` still means one continuous surface. */
+   also just the page plus a hairline. Everything that continues the panel moved
+   with it, so `seamless` still means one continuous surface.
+
+   那份「继续同一块面」的清单现在是：会话详情的 .rail（活状态轨）与
+   .parentCrumb、计划页的 .repoRow、终端页的 .tabs。会话详情的六个 tab 条与
+   inline 展开面板（.tabBar / .infoPanel）曾经也在这份清单上，2026-09-09 那轮
+   头部原生化里删掉了——轨接替了它们的位置，也接替了它们对 seamless 的需要。 */
 .header {
   display: flex;
   align-items: center;
@@ -24,9 +28,14 @@
   flex-shrink: 0;
 }
 
-/* No hairline: for a header with its own tab strip under it (会话详情), a line
-   here would cut the top chrome into two stacked slabs of the same background
-   colour. The strip's own bottom border closes the panel off instead. */
+/* No hairline: for a header with a strip of its own directly under it (会话详情
+   的活状态轨、计划页的仓库 chip 行、终端页的 tab 条), a line here would cut the
+   top chrome into two stacked slabs of the same background colour. That strip's
+   own bottom border closes the panel off instead.
+
+   所以它只在下面真有那条 strip 时才该给。计划页的 chip 行是**条件**渲染的
+   （仓库多于一个时才有），于是它传的也是条件值——无条件给会让单仓库时的页顶
+   连一条封口线都没有。 */
 .header[data-seamless="true"] {
   border-bottom: none;
 }

@@ -4,7 +4,7 @@
 // 数据走 relay 的 `account_usage`（见 ../account.ts）。
 
 import { useCallback, useEffect, useState } from "react";
-import {  } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { fetchAccountUsage } from "../account";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
@@ -14,6 +14,7 @@ import { UsageChart } from "./UsageChart";
 import { CodexUsageChart } from "./CodexUsageChart";
 import styles from "./UsageView.module.css";
 import { AppHeader } from "./AppHeader";
+import { HeaderAction } from "./HeaderAction";
 
 interface Props {
   client: FleetTransport | null;
@@ -137,7 +138,7 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
   const [data, setData] = useState<AccountUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // 点 ⟳ 时递增，作为曲线组件的 key —— 让它连同账号一起重新拉一遍。
+  // 点刷新时递增，作为曲线组件的 key —— 让它连同账号一起重新拉一遍。
   const [reloadKey, setReloadKey] = useState(0);
 
   const refresh = useCallback(async () => {
@@ -166,14 +167,13 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
         onBack={onBack}
         title={t("账号与用量")}
         actions={
-          <button
-            className={styles.refresh}
+          <HeaderAction
+            icon={<RefreshCw size={17} />}
+            label={t("刷新")}
             onClick={() => void refresh()}
+            busy={loading}
             disabled={loading}
-            aria-label={t("刷新")}
-          >
-            ⟳
-          </button>
+          />
         }
       />
 
