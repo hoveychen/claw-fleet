@@ -2,7 +2,12 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef } from "react";
 import { playDecisionAlert } from "../audio";
-import { flattenPending, reconcilePlan, suppressedIds } from "../decisionReconcile";
+import {
+  announcementFor,
+  flattenPending,
+  reconcilePlan,
+  suppressedIds,
+} from "../decisionReconcile";
 import { normalizeForSpeech } from "../decisionText";
 import { useDecisionStore } from "../store";
 import type {
@@ -173,9 +178,12 @@ export function useDecisionEvents() {
             // precisely the one whose push was dropped. Silent on mount (a card
             // that predates the page is not news) and silent for a parked card,
             // which is an old question being re-listed — same two exemptions
-            // the live listeners make.
-            if (why !== "mount" && !r.parked && !announcedIds.current.has(r.id)) {
-              announcedIds.current.add(r.id);
+            // the live listeners make. The mount pass still *records* what it
+            // saw, or the next tick would announce those same old cards; see
+            // `announcementFor`.
+            const verdict = announcementFor(why, r.parked, announcedIds.current.has(r.id));
+            if (verdict !== "skip") announcedIds.current.add(r.id);
+            if (verdict === "announce") {
               const a = ANNOUNCERS[bucket];
               playDecisionAlert(a.chime, a.speak(r));
             }
