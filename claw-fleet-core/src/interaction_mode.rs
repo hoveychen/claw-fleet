@@ -391,11 +391,29 @@ Fleet 把每个值字符串化，所以线上是 `Record<String, String>`（形�
 `Option` 形状与 `fleet__ask` 相同（`label` / `description` / 可选 `preview`），\
 但没有 `html` / `images` / `formFields`。\n\
 \n\
+## 你是子代理（Agent/Task 工具派出的 sidechain）时：一张卡都不许发\n\
+\n\
+本文件只写给**会话本体**。如果你是被 Agent / Task 工具派出来的子代理，\
+`fleet__ask`、`fleet__plan`、`fleet__set_session_title` 大概率仍在你的工具集里\
+（`general-purpose` 之类的 agent 工具集是 `*`，原样继承 MCP 工具）——**别用。**\
+把你本来想放到卡上的东西（报告、选项、要问的问题）作为**最终文本结果**返回给父\
+会话，由它决定要不要发卡。\n\
+\n\
+理由不是风格，是归属错位：子代理与父会话跑在同一个 claude CLI 进程里、共用同一\
+个 fleet MCP server 子进程，而 session id 取自进程 env。所以你发的卡会被记在\
+**父会话**名下，卡上那颗终态按钮关掉的是**父会话的任务**；老板一按，`TASK \
+FINISHED` 回给的是**你**，你的汇报当场被截断，父会话那边只看到你留下四个字。\
+`fleet__set_session_title` 同理会改掉父会话的标题，`fleet__plan` 会挪走父会话的\
+计划焦点。\n\
+\n\
+`fleet__ask` 现在会在服务端识别并拒绝子代理的调用（返回一条要你改用文本的\
+提示）；那道门是安全网，不是许可——按本节做，别去试探它。\n\
+\n\
 ## 当决策卡工具都缺席时\n\
 \n\
 如果本回合 `fleet__ask` 和 `AskUserQuestion` 都不在你的工具集里——既没直接\
-列出、也不在延迟工具清单里（例如 subagent 上下文、非 Claude-Code 的 harness）\
-——本文件即失效，你就像没有本指引时那样用纯文本回复。被延迟列出**不**\
+列出、也不在延迟工具清单里（例如非 Claude-Code 的 harness）——本文件即失效，\
+你就像没有本指引时那样用纯文本回复。被延迟列出**不**\
 等于缺席；deferred listing does NOT qualify as absent。\n\
 ",
             title_zh = title_zh,
@@ -809,11 +827,32 @@ Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
 `Option` has the same shape as in `fleet__ask` (`label` / `description` / \
 optional `preview`), but without `html` / `images` / `formFields`.\n\
 \n\
+## If you are a subagent (an Agent/Task sidechain): raise no cards at all\n\
+\n\
+This file is written for the session itself. If you were spawned by the Agent / \
+Task tool, `fleet__ask`, `fleet__plan` and `fleet__set_session_title` are most \
+likely still in your toolset (an agent type like `general-purpose` has `*` and \
+inherits every MCP tool) — **do not use them.** Return whatever you would have \
+put on the card (the report, the options, the question) as your **final text \
+result**; your parent decides whether it warrants a card.\n\
+\n\
+The reason is misattribution, not style: a subagent shares its parent's claude \
+CLI process and therefore the same fleet MCP server child, whose session id \
+comes from process env. A card you raise is filed under the **parent's** \
+session, and its terminal button closes the **parent's task** — when the user \
+presses it, `TASK FINISHED` comes back to **you**, cutting your report short \
+and leaving the parent with a stub. `fleet__set_session_title` likewise renames \
+the parent session, and `fleet__plan` moves the parent's plan focus.\n\
+\n\
+`fleet__ask` now detects and refuses subagent calls server-side (it hands back \
+a notice telling you to answer in text). That gate is a safety net, not a \
+licence — follow this section instead of probing it.\n\
+\n\
 ## When both decision-card tools are absent\n\
 \n\
 If neither `fleet__ask` nor `AskUserQuestion` is in your toolset this turn — \
 neither directly listed nor present in the deferred-tool list (for example: \
-subagent contexts, non-Claude-Code harnesses) — this file is inert and you \
+non-Claude-Code harnesses) — this file is inert and you \
 respond with plain text exactly as you would without this guidance. A \
 deferred listing does NOT qualify as absent.\n\
 ",
@@ -1068,6 +1107,34 @@ mod tests {
         assert!(
             z.contains("兜底"),
             "zh guidance must keep AskUserQuestion as a documented fallback (兜底)"
+        );
+    }
+
+    #[test]
+    fn render_bans_subagents_from_raising_cards() {
+        // A subagent inherits `fleet__ask` (agent types like general-purpose
+        // carry `*`), and the old text implied the opposite by listing "subagent
+        // contexts" as a case where the tool is absent. Both branches must now
+        // ban it outright and say why — the card lands on the parent session and
+        // its terminal button closes the parent's task.
+        for locale in ["en", "zh"] {
+            let g = render_guidance("Boss", locale);
+            assert!(
+                g.contains("fleet__set_session_title"),
+                "{locale}: the subagent ban must name the other two parent-scoped tools too"
+            );
+            assert!(
+                !g.contains("subagent contexts") && !g.contains("subagent 上下文"),
+                "{locale}: must stop citing subagents as a case where the tool is absent"
+            );
+        }
+        assert!(
+            render_guidance("Boss", "en").contains("raise no cards at all"),
+            "en guidance must carry the outright subagent ban heading"
+        );
+        assert!(
+            render_guidance("老板", "zh").contains("一张卡都不许发"),
+            "zh guidance must carry the outright subagent ban heading"
         );
     }
 }
