@@ -1302,7 +1302,13 @@ mod tests {
         assert!(wiki.contains("fleet wiki publish"), "wiki must teach publish");
         assert!(wiki.contains("[[slug]]"), "wiki must teach cross-links");
         assert!(!wiki.contains("git worktree"), "wiki block must not drag in PRD content");
-        let model = render_dsh_model_block("en");
+        // Against an all-available probe, not `render_dsh_model_block`: the sheet
+        // only renders the harnesses this machine actually has
+        // ([`crate::model_catalog::render_sheet_with`]), and dsh's arm is gated on
+        // the binary existing, so the dsh addressing section is simply absent on a
+        // machine without dsh — CI Linux, where this asserted a fact about the
+        // runner rather than about the sheet.
+        let model = crate::model_catalog::render_sheet_with("en", |_| true);
         assert!(
             model.contains("provider") && model.contains("first `/`"),
             "model block must teach dsh's own provider/model addressing"
