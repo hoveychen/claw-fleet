@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   REMOVED_GRACE_MS,
+  announcementFor,
   clearRemovedLocally,
   flattenPending,
   noteRemovedLocally,
@@ -156,5 +157,35 @@ describe("locally removed cards", () => {
       flattenPending(snapshot({ fleetAsk: [{ id: "f1" }] })),
     );
     expect(plan.drop).toEqual(["f2"]);
+  });
+});
+
+describe("announcementFor", () => {
+  it("announces a card the poll is the first to see on a live page", () => {
+    expect(announcementFor("interval", false, false)).toBe("announce");
+    expect(announcementFor("visible", undefined, false)).toBe("announce");
+  });
+
+  /**
+   * The regression this function exists for: the mount pass must be silent
+   * *and* remembered. When it only did the first half, the 10s tick behind it
+   * re-announced every card that predated the page — a chime for a card that
+   * had been sitting there for half an hour, on every page load and every
+   * remount, with nothing new on screen to explain it.
+   */
+  it("records a card seen on mount instead of leaving it to be re-announced", () => {
+    expect(announcementFor("mount", false, false)).toBe("record");
+    // Recorded means the next tick sees it as already announced → silence.
+    expect(announcementFor("interval", false, true)).toBe("skip");
+  });
+
+  it("never announces or records a parked card", () => {
+    expect(announcementFor("interval", true, false)).toBe("skip");
+    expect(announcementFor("mount", true, false)).toBe("skip");
+  });
+
+  it("stays quiet about a card it already announced", () => {
+    expect(announcementFor("interval", false, true)).toBe("skip");
+    expect(announcementFor("mount", false, true)).toBe("skip");
   });
 });

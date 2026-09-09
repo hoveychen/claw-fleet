@@ -60,6 +60,39 @@ export function flattenPending(p: PendingDecisions): Map<string, { parked?: bool
   return out;
 }
 
+/**
+ * What the reconcile poll should do about one card it found pending.
+ *
+ * `announce` chimes and speaks; `record` marks the card as already-known
+ * *without* a sound; `skip` leaves the bookkeeping alone.
+ */
+export type ReconcileAnnouncement = "announce" | "record" | "skip";
+
+/**
+ * Whether a pending card the poll just saw is news worth a chime.
+ *
+ * The `record` case is the whole reason this is a function. The mount poll is
+ * deliberately silent — a card that predates the page is not news — but it used
+ * to be silent *and* forgetful: it never wrote the id into the announced set,
+ * so the very next tick, 10 seconds later, saw the same card as unseen and
+ * chimed it. Every page load, every reconnect that remounted the panel, and
+ * every card still sitting on the backend re-announced itself: Boss heard a
+ * chime, went looking, and found nothing new — the card had been there for half
+ * an hour. Recording on mount keeps the silence and the memory together.
+ *
+ * A parked card is neither announced nor recorded: it is an old question being
+ * re-listed, it never chimes on any path, and leaving it out of the set matches
+ * what the live listeners do.
+ */
+export function announcementFor(
+  why: string,
+  parked: boolean | undefined,
+  alreadyAnnounced: boolean,
+): ReconcileAnnouncement {
+  if (alreadyAnnounced || parked) return "skip";
+  return why === "mount" ? "record" : "announce";
+}
+
 /** What the store has to change to agree with a pending snapshot. */
 export interface ReconcilePlan {
   /** Cards to remove: the backend no longer has them pending. */
