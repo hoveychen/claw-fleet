@@ -367,10 +367,13 @@ function WorkingIndicator({ status }: { status: string }) {
 interface Props {
   messages: RawMessage[];
   isLoading: boolean;
-  /** The fetch blew its deadline or failed with nothing to show. Replaces the
-   *  spinner with an explanation + retry — a transcript fetch that never lands
-   *  used to leave this pane on 「加载中…」 forever. */
+  /** The fetch blew its deadline with nothing to show. Replaces the spinner
+   *  with an explanation + retry — a transcript fetch that never lands used to
+   *  leave this pane on 「加载中…」 forever. */
   stalled?: boolean;
+  /** Why the fetch rejected, if it did. Rendered instead of the timeout
+   *  message, which would otherwise blame a backend that answered fine. */
+  loadError?: string | null;
   /** Re-run the fetch. Required for the stalled pane's retry button to appear. */
   onRetry?: () => void;
   searchQuery?: string | null;
@@ -412,6 +415,7 @@ export function MessageList({
   messages,
   isLoading,
   stalled = false,
+  loadError = null,
   onRetry,
   searchQuery,
   status,
@@ -675,10 +679,24 @@ export function MessageList({
   const placeholder = conversationPlaceholder({
     isLoading,
     stalled,
+    failed: loadError != null,
     messageCount: displayMsgs.length,
   });
   if (placeholder === "loading") {
     return <div className={styles.loading}>{t("loading", "Loading…")}</div>;
+  }
+  if (placeholder === "failed") {
+    return (
+      <div className={styles.loading} data-testid="conversation-failed">
+        <div>{t("detail.load_failed")}</div>
+        <div className={styles.stalled_reason}>{loadError}</div>
+        {onRetry && (
+          <button type="button" className={styles.stalled_retry} onClick={onRetry}>
+            {t("detail.load_retry")}
+          </button>
+        )}
+      </div>
+    );
   }
   if (placeholder === "stalled") {
     return (

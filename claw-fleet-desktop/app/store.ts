@@ -897,10 +897,14 @@ interface DetailState {
   session: SessionInfo | null;
   messages: RawMessage[];
   isLoading: boolean;
-  /** The transcript fetch blew its deadline or failed outright, and there is
-   *  nothing to render. The pane must say so (and offer a retry) instead of
-   *  spinning forever — see `TAIL_LOAD_DEADLINE_MS`. */
+  /** The transcript fetch blew its deadline with nothing to render. The pane
+   *  must say so (and offer a retry) instead of spinning forever — see
+   *  `TAIL_LOAD_DEADLINE_MS`. A fetch that *failed* sets `loadError` instead;
+   *  the two are different diagnoses and must not share a message. */
   loadStalled: boolean;
+  /** Why the transcript fetch rejected, or null. Distinct from `loadStalled`:
+   *  this one lands immediately and knows the reason. */
+  loadError: string | null;
   searchQuery: string | null;
   /** How many tail messages we are currently displaying. Grows when the user
    * presses "load earlier" or null when the full transcript has been loaded. */
@@ -942,6 +946,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
   messages: [],
   isLoading: false,
   loadStalled: false,
+  loadError: null,
   searchQuery: null,
   loadedTail: null,
   fullyLoaded: false,
@@ -963,6 +968,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       messages: [],
       isLoading: true,
       loadStalled: false,
+      loadError: null,
       searchQuery: searchQuery ?? null,
       loadedTail: INITIAL_TAIL,
       fullyLoaded: false,
@@ -1000,6 +1006,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
         messages: rawMessages,
         isLoading: false,
         loadStalled: false,
+        loadError: null,
         fullyLoaded: rawMessages.length < INITIAL_TAIL,
       });
 
@@ -1019,7 +1026,15 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       // Only clear loading if this open() is still the active one — a newer
       // open()/close() may have superseded us while awaiting.
       if (get().session === session) {
-        set({ isLoading: false, loadStalled: true, fullyLoaded: true });
+        // Not `loadStalled`: this fetch answered, with a reason. Saying
+        // "the backend never answered" here sent the last reader hunting a
+        // timeout that never happened.
+        set({
+          isLoading: false,
+          loadStalled: false,
+          loadError: String(err),
+          fullyLoaded: true,
+        });
       }
     }
   },
@@ -1043,6 +1058,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       messages: [],
       isLoading: false,
       loadStalled: false,
+      loadError: null,
       searchQuery: null,
       loadedTail: null,
       fullyLoaded: false,

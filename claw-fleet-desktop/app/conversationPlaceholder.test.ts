@@ -24,6 +24,30 @@ describe("conversationPlaceholder", () => {
       .toBeNull();
   });
 
+  it("取数失败要报「失败」,不许冒充「超时」", () => {
+    // 这正是老板看到的那一幕:后端秒回一个错误,界面却说「后端一直没有响应」。
+    expect(
+      conversationPlaceholder({ isLoading: false, stalled: false, failed: true, messageCount: 0 }),
+    ).toBe("failed");
+  });
+
+  it("failed 压过 stalled —— 慢到超时最后又报错时,报错更具体", () => {
+    expect(
+      conversationPlaceholder({ isLoading: false, stalled: true, failed: true, messageCount: 0 }),
+    ).toBe("failed");
+  });
+
+  it("已经有消息可看时,报错也不许占领整个面板", () => {
+    expect(
+      conversationPlaceholder({ isLoading: false, stalled: false, failed: true, messageCount: 3 }),
+    ).toBeNull();
+  });
+
+  it("failed 缺省为 false,老调用点行为不变", () => {
+    expect(conversationPlaceholder({ isLoading: false, stalled: true, messageCount: 0 }))
+      .toBe("stalled");
+  });
+
   it("空会话、也不在取数时,交给正常的空态渲染", () => {
     expect(conversationPlaceholder({ isLoading: false, stalled: false, messageCount: 0 }))
       .toBeNull();

@@ -204,6 +204,10 @@ export function SessionDetail({
   const [localLoading, setLocalLoading] = useState(false);
   const [localLoadingEarlier, setLocalLoadingEarlier] = useState(false);
   const [localStalled, setLocalStalled] = useState(false);
+  /** Why the standalone fetch rejected. Kept apart from `localStalled` so a
+   *  fast failure is not reported as a 20s timeout — see
+   *  `conversationPlaceholder`. */
+  const [localError, setLocalError] = useState<string | null>(null);
   /** Bumped by the stalled pane's retry button to re-run the fetch effect. */
   const [reloadKey, setReloadKey] = useState(0);
   const [localFullyLoaded, setLocalFullyLoaded] = useState(false);
@@ -258,6 +262,7 @@ export function SessionDetail({
     const tail = localTailRef.current;
     setLocalLoading(true);
     setLocalStalled(false);
+    setLocalError(null);
     // dsh:// fetches log their whole lifecycle: the Rust side of this command
     // logs entry/exit for the same paths, so if a request goes dark the log
     // says on which side of the IPC boundary it happened. Claude paths stay
@@ -312,14 +317,17 @@ export function SessionDetail({
         setLocalFullyLoaded(msgs.length < tail);
         setLocalLoading(false);
         setLocalStalled(false);
+        setLocalError(null);
       })
       .catch((e) => {
         probeDsh?.(`rejected ${String(e).slice(0, 200)}${cancelled ? " (cancelled)" : ""}`);
         if (cancelled) return;
         setLocalLoading(false);
         // A rejection with nothing on screen used to render as a silent blank
-        // pane; say so instead, and give the reader a retry.
-        setLocalStalled(true);
+        // pane; say so instead, and give the reader a retry. Not `stalled` —
+        // this fetch answered, and its reason is worth more than a guess.
+        setLocalStalled(false);
+        setLocalError(String(e));
       });
     return () => {
       cancelled = true;
@@ -350,6 +358,7 @@ export function SessionDetail({
   const messages = isStandalone ? localMessages : global.messages;
   const isLoading = isStandalone ? localLoading : global.isLoading;
   const loadStalled = isStandalone ? localStalled : global.loadStalled;
+  const loadError = isStandalone ? localError : global.loadError;
   const retryLoad = useCallback(() => {
     if (isStandalone) setReloadKey((k) => k + 1);
     else void global.retryLoad();
@@ -1031,6 +1040,7 @@ export function SessionDetail({
     fullyLoaded,
     isLoading,
     stalled: loadStalled,
+    failed: loadError != null,
     following: followRef.current.following,
     detached: followRef.current.detached,
     // The conversation is no longer a tab; what varies is which auxiliary
@@ -1526,6 +1536,7 @@ export function SessionDetail({
                       messages={displayedMessages}
                       isLoading={isLoading}
                       stalled={loadStalled}
+                      loadError={loadError}
                       onRetry={retryLoad}
                       searchQuery={searchQuery}
                       status={liveSession?.status ?? null}
