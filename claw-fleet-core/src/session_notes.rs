@@ -263,6 +263,26 @@ pub fn read_in(
     Err(format!("no note at `{}`", path.trim()))
 }
 
+/// Read one *named* owner's note file, without walking the handoff chain.
+///
+/// [`read`] is the agent's view: "the note at this path", resolved to whichever
+/// readable session has it. A reader browsing a session's notes has already
+/// picked a row out of [`list`], and that row carries its owning
+/// `session_id` — so resolving again would show the wrong file whenever the
+/// session and a predecessor both kept a `checkpoint.md`.
+pub fn read_owned(owner_session_id: &str, path: &str) -> Result<String, String> {
+    let root = notes_root().ok_or("cannot determine home dir")?;
+    read_owned_in(&root, owner_session_id, path)
+}
+
+pub fn read_owned_in(root: &Path, owner_session_id: &str, path: &str) -> Result<String, String> {
+    let full = resolve(root, owner_session_id, path)?;
+    if !full.is_file() {
+        return Err(format!("no note at `{}`", path.trim()));
+    }
+    fs::read_to_string(&full).map_err(|e| format!("read {}: {e}", full.display()))
+}
+
 /// Apply a 1-based inclusive, negative-aware line range to `text`.
 fn slice_lines(text: &str, start_line: Option<i64>, stop_line: Option<i64>) -> String {
     if start_line.is_none() && stop_line.is_none() {
@@ -489,6 +509,26 @@ mod tests {
         assert!(hint.contains("old.md  9 bytes  [own]"));
         assert!(hint.contains("--- checkpoint.md (latest) ---"), "{hint}");
         assert!(hint.contains("[clipped;"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_owned_picks_the_named_session_not_the_chain() {
+        let root = fresh_root("read-owned");
+        write_in(&root, "s1", "checkpoint.md", "predecessor").unwrap();
+        write_in(&root, "s2", "checkpoint.md", "successor").unwrap();
+        let readable = vec!["s2".to_string(), "s1".to_string()];
+
+        // The agent's view resolves to its own file …
+        assert_eq!(read_in(&root, &readable, "checkpoint.md", None, None).unwrap(), "successor");
+        // … while a reader that picked the predecessor's row gets that file.
+        assert_eq!(read_owned_in(&root, "s1", "checkpoint.md").unwrap(), "predecessor");
+        assert_eq!(read_owned_in(&root, "s2", "checkpoint.md").unwrap(), "successor");
+
+        assert!(read_owned_in(&root, "s1", "missing.md").is_err());
+        // Path validation still applies — a note path can never escape the dir.
+        assert!(read_owned_in(&root, "s1", "../s2/checkpoint.md").is_err());
+        assert!(read_owned_in(&root, "../..", "checkpoint.md").is_err());
         let _ = fs::remove_dir_all(&root);
     }
 

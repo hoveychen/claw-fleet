@@ -788,6 +788,20 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { session_id: q(a.sessionId), jsonl_path: q(a.jsonlPath) },
   }),
 
+  list_session_notes: (a) => ({
+    method: "GET",
+    path: "/session_notes",
+    query: { session_id: q(a.sessionId) },
+  }),
+
+  // `sessionId` here is the note's OWNER, not the session on screen — see the
+  // route's doc comment.
+  read_session_note: (a) => ({
+    method: "GET",
+    path: "/session_note",
+    query: { session_id: q(a.sessionId), path: q(a.path) },
+  }),
+
   list_sessions: () => ({ method: "GET", path: "/sessions" }),
 
   list_skill_files: (a) => ({

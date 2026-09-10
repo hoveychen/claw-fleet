@@ -2779,6 +2779,21 @@ impl LocalBackend {
         )
     }
 
+    /// Note files a session can see: its own, then its handoff predecessors'.
+    pub fn list_session_notes(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<claw_fleet_core::session_notes::NoteFile>, String> {
+        claw_fleet_core::session_notes::list(session_id, None)
+    }
+
+    /// One note's full text. `session_id` is the file's *owner* (the `sessionId`
+    /// on the listed entry), so an inherited note reads back as the predecessor
+    /// wrote it rather than being re-resolved to the viewer's own copy.
+    pub fn read_session_note(&self, session_id: &str, path: &str) -> Result<String, String> {
+        claw_fleet_core::session_notes::read_owned(session_id, path)
+    }
+
     pub fn git_status(
         &self,
         workspace: &str,
