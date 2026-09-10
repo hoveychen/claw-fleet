@@ -835,7 +835,17 @@ fn fetch_generation_cost(key: &str, id: &str) -> Result<f64, String> {
 /// the network, so callers fetch it separately from the (cheap, local) token
 /// counts rather than making the token view wait on it.
 pub fn dsh_session_calls(uri: &str) -> Result<Vec<PricedCall>, String> {
-    let events = crate::dsh_source::session_events(uri)?;
+    session_calls_from(uri, crate::dsh_source::session_events(uri)?)
+}
+
+/// [`dsh_session_calls`] for the background re-pricing walk, which must not sit
+/// on the interactive history-cursor budget — see
+/// `dsh_source::session_events_for_pricing`.
+fn dsh_session_calls_for_pricing(uri: &str) -> Result<Vec<PricedCall>, String> {
+    session_calls_from(uri, crate::dsh_source::session_events_for_pricing(uri)?)
+}
+
+fn session_calls_from(uri: &str, events: Vec<serde_json::Value>) -> Result<Vec<PricedCall>, String> {
     // The session's own id namespaces the metered keys, so two sessions cannot
     // collide on a `seq` they both happen to use. Absent (a URI shape this
     // module does not recognise) means nothing is cacheable — an empty id would
@@ -1012,7 +1022,7 @@ pub fn all_session_spend() -> BTreeMap<String, SessionSpend> {
 /// and only when [`SessionSpend::priced_at_updated_ms`] says the session has
 /// moved since it was last priced.
 pub fn refresh_session_spend(uri: &str, updated_ms: i64) -> Result<SessionSpend, String> {
-    let calls = dsh_session_calls(uri)?;
+    let calls = dsh_session_calls_for_pricing(uri)?;
     let cost = fold_session_cost(&calls);
     let spend = SessionSpend {
         usd: cost.total_usd,
