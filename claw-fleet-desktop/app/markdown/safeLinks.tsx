@@ -141,3 +141,19 @@ export const safeMarkdownComponents: Components = {
     );
   },
 };
+
+/**
+ * `safeMarkdownComponents` with `p` unwrapped to a fragment.
+ *
+ * For one-line surfaces whose prose carries markdown but whose row must stay
+ * inline — a work-run band title (`**Planning store tests**`), a TASKS.md
+ * P-task line, a decision header. A block `<p>` there both breaks the row's
+ * clamp/ellipsis and inherits paragraph margins the row never wanted.
+ *
+ * Shared because this had been hand-copied four times over (WorkRunBlock,
+ * DecisionToolCard, DecisionHistory, and nearly a fifth in the tasks panel).
+ */
+export const inlineMarkdownComponents: Components = {
+  ...safeMarkdownComponents,
+  p: ({ children }) => <>{children}</>,
+};
