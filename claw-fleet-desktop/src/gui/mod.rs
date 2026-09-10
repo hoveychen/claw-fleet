@@ -552,7 +552,7 @@ fn tray_model_from(
 /// NSStatusItem) have to run on the main thread; deriving what to show does
 /// not. Splitting them matters because the main thread is also what carries
 /// every Tauri command's *answer* back into the webview — see the header of
-/// `app/invokeProbe.ts`. This used to dispatch the whole job, so each of the
+/// `app/tauriCoreProbe.ts`. This used to dispatch the whole job, so each of the
 /// ~1300-session scans (back-to-back on a busy box) and every 10s account
 /// refresh put a full clone of the scanned session list plus a hash of it on
 /// the main thread, whether or not the tray had changed. Now an unchanged tray

@@ -1,4 +1,4 @@
-import { resolve } from "path";
+import { resolve, sep } from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -26,9 +26,50 @@ const liveProxy = liveProbe
     }
   : undefined;
 
+// ── IPC timing shim ────────────────────────────────────────────────────────
+// Every `invoke` in the app — the ~100 modules that import it and the seven
+// `@tauri-apps/plugin-*` packages that import it too — resolves to
+// `app/tauriCoreProbe.ts` instead of the real module, which re-exports
+// everything and times `invoke`. See that file for why the previous approach
+// (wrapping `window.__TAURI_INTERNALS__.invoke` at runtime) is impossible:
+// Tauri defines that property non-writable AND non-configurable.
+//
+// Two aliases, not one: the shim itself has to reach the real module, and it
+// cannot ask for `@tauri-apps/api/core` (that is what is aliased) nor for
+// `@tauri-apps/api/core.js` (the package's `"./*"` export map would turn that
+// into `core.js.js`). So it imports the `-real` specifier, resolved here to
+// the actual file. Regex-anchored so neither alias catches the other.
+const TAURI_CORE_REAL = resolve(__dirname, "node_modules/@tauri-apps/api/core.js");
+export const TAURI_CORE_SHIM = resolve(__dirname, "app/tauriCoreProbe.ts");
+
+export const tauriCoreProbe = [
+  { find: /^@tauri-apps\/api\/core-real$/, replacement: TAURI_CORE_REAL },
+  { find: /^@tauri-apps\/api\/core$/, replacement: TAURI_CORE_SHIM },
+];
+
+// The alias above only catches the *bare* specifier. `@tauri-apps/api`'s own
+// modules (event, window, path, …) reach `invoke` through a relative
+// `./core.js`, which would slip past it — and leave a second, unwrapped copy of
+// core in the bundle. Redirect those too, identified by their importer. The
+// shim's own `-real` import is exempt because its importer is the shim, not a
+// file inside the package.
+export function tauriCoreProbePlugin() {
+  return {
+    name: "fleet-tauri-core-probe",
+    enforce: "pre" as const,
+    resolveId(source: string, importer: string | undefined) {
+      if (!importer || !source.endsWith("./core.js")) return null;
+      if (!importer.includes(`${sep}@tauri-apps${sep}api${sep}`)) return null;
+      return TAURI_CORE_SHIM;
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [tauriCoreProbePlugin(), react()],
+
+  resolve: { alias: tauriCoreProbe },
 
   build: {
     rollupOptions: {
