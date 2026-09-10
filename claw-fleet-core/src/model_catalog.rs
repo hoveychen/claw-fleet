@@ -537,8 +537,9 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
         .filter(|e| e.superseded_by.is_some())
         // Same harness gate as the table: a superseded model from a harness that
         // is not here would otherwise reappear on this line after its own row
-        // was filtered out. Every superseded row happens to be Claude today, so
-        // this is guarding the invariant rather than a live bug.
+        // was filtered out. Live since 2026-09-10: the two retired DeepSeek
+        // flash aliases are superseded dsh rows, so a Claude-only sheet really
+        // does have to drop them.
         .filter(|e| {
             e.family
                 .as_deref()
@@ -570,7 +571,10 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
         if has("dsh") {
             s.push_str(
                 "\n\
-`deepseek-v4-flash` **不收图片输入**,要发图走 `-vision-exp` 那个。\n",
+`deepseek-official` 这一路现在只推 `deepseek-flash` 一个。另外三个 id 仍然点得动,\
+但都在退役:`deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 已经是它的别名,\
+`deepseek-v4-pro` 从 2026-09-14 12:00(北京)起请求也转由它承接。flash 那几个 id \
+都收图片,**只有 `deepseek-v4-pro` 不收图片输入**。\n",
             );
         }
         s.push_str(
@@ -593,7 +597,7 @@ dsh 把模型拆成 `provider` + `model` 两段,Fleet 的 spawn 用一个字符�
 `openrouter`,model `anthropic/claude-haiku-4.5`。表里只列 dsh 内置的 \
 `deepseek-official` 路由(有官方公开价目表);经 openrouter 之类第三方 provider \
 的模型不列——同一个模型经不同 provider 价格不同、逐用户不同,要知道本机配了\
-什么就读 `~/.dsh/settings.yaml`,别猜。表里那三行的 effort 梯子是向本机 dsh 实测来的\
+什么就读 `~/.dsh/settings.yaml`,别猜。表里那几行的 effort 梯子是向本机 dsh 实测来的\
 (`off`/`low`/`high`/`max`,**没有 `medium`**,默认 `high`)。没编目的 dsh 模型的 \
 effort 一列显示「见 dsh」——那些的梯子五花八门,得问 dsh 自己。\n",
             );
@@ -602,8 +606,11 @@ effort 一列显示「见 dsh」——那些的梯子五花八门,得问 dsh 自
         if has("dsh") {
             s.push_str(
                 "\n\
-`deepseek-v4-flash` **rejects image input** — send images to the `-vision-exp` row \
-instead.\n",
+The `deepseek-official` route now offers just `deepseek-flash`. The other three ids \
+still resolve but are all on the way out: `deepseek-v4-flash` and \
+`deepseek-v4-flash-vision-exp` are already aliases of it, and `deepseek-v4-pro`'s \
+requests move to it too from 2026-09-14 12:00 Beijing time. On images, every flash id \
+takes them and **only `deepseek-v4-pro` rejects image input**.\n",
             );
         }
         s.push_str(
@@ -633,7 +640,7 @@ splits on the **first `/`**: `openrouter/anthropic/claude-haiku-4.5` → provide
 third-party provider such as openrouter are not listed — the same model costs \
 different amounts through different providers and varies per user. Read \
 `~/.dsh/settings.yaml` to see what this machine has; don't guess. The effort ladders on \
-those three rows were measured against this machine's dsh (`off`/`low`/`high`/`max`, \
+those rows were measured against this machine's dsh (`off`/`low`/`high`/`max`, \
 **no `medium`**, default `high`). Uncatalogued dsh models show \"ask dsh\" instead — \
 their ladders vary widely, so ask dsh itself.\n",
             );
@@ -860,6 +867,46 @@ mod tests {
         assert!(!no_dsh.contains("How dsh names a model"));
     }
 
+    /// What the dsh half of the sheet says about DeepSeek, checked against what
+    /// was actually measured on 2026-09-10 rather than against habit.
+    ///
+    /// Both claims here used to be wrong in the same direction — the sheet was
+    /// written when `deepseek-v4-flash` really did refuse images and told the
+    /// agent to route pictures to `-vision-exp`. DeepSeek has since retired both
+    /// of those models behind V4.1 Flash, and the live check is unambiguous: the
+    /// same 64×64 PNG sent to `deepseek-flash` and to `deepseek-v4-flash` came
+    /// back with the same answer and field-for-field identical token counts
+    /// (228 prompt / 44 completion / 42 reasoning), and the official pricing
+    /// page marks Vision ✓ for flash and "Not supported" for pro. Sending an
+    /// agent chasing a `-vision-exp` row that is now just an alias is worse than
+    /// saying nothing.
+    #[test]
+    fn the_dsh_section_names_v41_flash_and_puts_the_image_caveat_on_pro() {
+        for locale in ["zh", "en"] {
+            let sheet = render_sheet_with(locale, |f| f == "dsh");
+            assert!(
+                sheet.contains("deepseek-official/deepseek-flash"),
+                "{locale}: V4.1 Flash must have its own row"
+            );
+            // The retired aliases are named once, on the legacy tail — never as
+            // rows of their own.
+            assert_eq!(
+                sheet.matches("deepseek-official/deepseek-v4-flash-vision-exp").count(),
+                1,
+                "{locale}: the retired alias belongs on the legacy line only"
+            );
+            let caveat = if locale == "zh" { "不收图片输入" } else { "rejects image input" };
+            let line = sheet
+                .lines()
+                .find(|l| l.contains(caveat))
+                .unwrap_or_else(|| panic!("{locale}: the image caveat must still be stated"));
+            assert!(
+                line.contains("deepseek-v4-pro"),
+                "{locale}: the caveat now belongs to pro, not to flash — got {line:?}"
+            );
+        }
+    }
+
     /// A probe that answers "no" to everything is a broken probe, not a machine
     /// with no agent on it — something had to render this sheet. Falling back to
     /// the full table beats emitting an empty one.
@@ -868,7 +915,7 @@ mod tests {
         let all = render_sheet_with("zh", |_| false);
         assert!(all.contains("claude-opus-5"));
         assert!(all.contains("gpt-5.6-sol"));
-        assert!(all.contains("deepseek-official/deepseek-v4-pro"));
+        assert!(all.contains("deepseek-official/deepseek-flash"));
     }
 
     /// The picker catalog carries what a menu needs and nothing else.
@@ -951,7 +998,7 @@ mod tests {
         }
     }
 
-    /// dsh's own three rows stay listed, and state exactly what was measured.
+    /// dsh's own rows stay listed, and state exactly what was measured.
     ///
     /// They were `listed = false` at first, on the reasoning that dsh publishes
     /// its real catalog at runtime and a static copy would rot. That reasoning
@@ -966,19 +1013,46 @@ mod tests {
     /// consistently across 26 of them); Pro never ran here, so its 1M is the
     /// boss's own answer rather than a measurement — flagged as such in
     /// `models.toml` so the two kinds of source stay distinguishable.
+    ///
+    /// Since 2026-09-10 exactly **one** of the four is listed. DeepSeek retired
+    /// the models behind `deepseek-v4-flash` and `-flash-vision-exp` and serves
+    /// both names off V4.1 Flash, and announced V4 Pro's orderly retirement
+    /// (its requests move to V4.1 Flash on 2026-09-14); the boss's call was to
+    /// stop offering Pro rather than keep recommending a model on its way out.
+    ///
+    /// The two hidings use *different* fields on purpose. The aliases get
+    /// `superseded_by`, which folds them into the Flash row's "previous
+    /// generations, still selectable at the same price" tail — and for them that
+    /// sentence is literally true. Pro gets a plain `listed = false`, because it
+    /// is billed at three times Flash until the 14th and that same tail would
+    /// state a false price equivalence. Either way every measured field survives:
+    /// all four ids are still live on the wire and dsh still offers them, so
+    /// deleting a row would only turn a known model into an uncatalogued one.
     #[test]
     fn dsh_route_models_state_only_what_was_measured() {
         let rows = listed_models("dsh");
         let ids: Vec<&str> = rows.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            [
-                "deepseek-official/deepseek-v4-pro",
-                "deepseek-official/deepseek-v4-flash",
-                "deepseek-official/deepseek-v4-flash-vision-exp",
-            ]
-        );
-        for e in &rows {
+        assert_eq!(ids, ["deepseek-official/deepseek-flash"]);
+        // The retired aliases are hidden from the menu but still fully answerable.
+        for id in [
+            "deepseek-official/deepseek-v4-flash",
+            "deepseek-official/deepseek-v4-flash-vision-exp",
+        ] {
+            let e = entry(id).unwrap_or_else(|| panic!("{id} must stay catalogued"));
+            assert!(!e.is_listed(), "{id} should be folded into the Flash row");
+            assert_eq!(
+                e.superseded_by.as_deref(),
+                Some("deepseek-official/deepseek-flash"),
+                "{id}"
+            );
+        }
+        // Pro is delisted, but NOT as a superseded row: it is still its own
+        // model at its own (dearer) price until the 14th.
+        let pro = entry("deepseek-official/deepseek-v4-pro").expect("pro must stay catalogued");
+        assert!(!pro.is_listed(), "pro is retiring and no longer recommended");
+        assert_eq!(pro.superseded_by, None, "pro must not claim Flash's price");
+        assert_eq!(pro.tier.as_deref(), Some("premium"), "delisting is not re-tiering");
+        for e in catalog().iter().filter(|e| e.family.as_deref() == Some("dsh")) {
             assert!(e.tier.is_some(), "{} has no tier", e.id);
             assert_eq!(
                 e.efforts.as_deref(),
@@ -992,6 +1066,7 @@ mod tests {
             assert_eq!(e.default_effort.as_deref(), Some("high"), "{}", e.id);
         }
         for id in [
+            "deepseek-official/deepseek-flash",
             "deepseek-official/deepseek-v4-pro",
             "deepseek-official/deepseek-v4-flash",
             "deepseek-official/deepseek-v4-flash-vision-exp",
