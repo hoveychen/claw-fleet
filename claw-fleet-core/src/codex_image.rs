@@ -316,6 +316,46 @@ pub fn parse_last_agent_message(stdout: &str) -> Option<String> {
     last
 }
 
+/// Why a `codex exec --json` turn failed, if it did.
+///
+/// A failed turn still prints `thread.started` on stdout and *then* fails, so
+/// neither the exit code check in [`run_turn`] (which needs stdout to be empty)
+/// nor the thread-id lookup catches it. The two shapes Codex 0.153 emits,
+/// measured:
+///
+/// ```text
+/// {"type":"error","message":"Selected model is at capacity. …"}
+/// {"type":"turn.failed","error":{"message":"Selected model is at capacity. …"}}
+/// ```
+///
+/// Both are accepted (either alone is enough) and the last one wins, so a turn
+/// that recovered from an early error and failed later reports the failure that
+/// actually ended it.
+pub fn parse_turn_failure(stdout: &str) -> Option<String> {
+    let mut last = None;
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let message = match v.get("type").and_then(|t| t.as_str()) {
+            Some("error") => v.get("message").and_then(|m| m.as_str()),
+            Some("turn.failed") => v
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str()),
+            _ => continue,
+        };
+        if let Some(message) = message.map(str::trim).filter(|m| !m.is_empty()) {
+            last = Some(message.to_string());
+        }
+    }
+    last
+}
+
 /// Assemble the exact `(program, argv, env)` a generation turn launches with.
 ///
 /// Split out from [`generate_image`] so the launch shape is testable without
@@ -447,7 +487,12 @@ pub fn generate_image(
     let thread_id = stdout
         .lines()
         .find_map(crate::codex_launch::parse_thread_started)
-        .ok_or_else(|| format!("codex never printed thread.started; output: {}", tail(&stdout)))?;
+        .ok_or_else(|| match parse_turn_failure(&stdout) {
+            // Failing before the thread even starts is the auth/config shape of
+            // the same problem; name it rather than dumping the raw stream.
+            Some(reason) => format!("codex turn failed before it started: {reason}"),
+            None => format!("codex never printed thread.started; output: {}", tail(&stdout)),
+        })?;
 
     // Fresh thread: everything in the directory is this turn's output.
     finish_turn(thread_id, &[], &stdout)
@@ -501,10 +546,20 @@ fn finish_turn(
     let agent_message = parse_last_agent_message(stdout).unwrap_or_default();
 
     if images.is_empty() {
-        // A turn can end cleanly having generated nothing — the agent asked a
-        // question, refused, or (despite the wrapper) substituted an SVG. Its
-        // message is the only explanation, so surface it instead of a bare
-        // "no images".
+        // A turn that never reached the agent at all — out of credits, rate
+        // limited, auth expired, model at capacity — says so in an `error` /
+        // `turn.failed` event and emits no `agent_message`. Reported as
+        // "Agent said: (nothing)" that reads like the agent declined, which is
+        // what sent a session hunting for a prompt problem on 2026-09-09 while
+        // every model on the account was answering "Selected model is at
+        // capacity". Codex's own words first, always.
+        if let Some(reason) = parse_turn_failure(stdout) {
+            return Err(format!("codex turn failed for thread {thread_id}: {reason}"));
+        }
+        // Otherwise the turn really did end cleanly having generated nothing —
+        // the agent asked a question, refused, or (despite the wrapper)
+        // substituted an SVG. Its message is the only explanation, so surface
+        // it instead of a bare "no images".
         return Err(format!(
             "codex produced no image for thread {thread_id}. Agent said: {}",
             if agent_message.trim().is_empty() {
@@ -680,6 +735,77 @@ mod tests {
             parse_last_agent_message(stdout).as_deref(),
             Some("done, saved it")
         );
+    }
+
+    /// Verbatim capture of `codex exec --json -m gpt-5.6-luna` on 2026-09-09,
+    /// when every model on the account answered "at capacity". This exact stream
+    /// used to surface as "produced no image … Agent said: (nothing)".
+    const CAPACITY_FAILURE_STDOUT: &str = concat!(
+        r#"{"type":"thread.started","thread_id":"01a08968-1a48-7483-89c7-396316522686"}"#,
+        "\n",
+        r#"{"type":"turn.started"}"#,
+        "\n",
+        r#"{"type":"error","message":"Selected model is at capacity. Please try a different model."}"#,
+        "\n",
+        r#"{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}"#,
+        "\n",
+    );
+
+    #[test]
+    fn turn_failure_is_read_off_the_real_capacity_stream() {
+        assert_eq!(
+            parse_turn_failure(CAPACITY_FAILURE_STDOUT).as_deref(),
+            Some("Selected model is at capacity. Please try a different model.")
+        );
+    }
+
+    #[test]
+    fn turn_failure_accepts_either_shape_alone() {
+        assert_eq!(
+            parse_turn_failure(r#"{"type":"error","message":"out of credits"}"#).as_deref(),
+            Some("out of credits")
+        );
+        assert_eq!(
+            parse_turn_failure(r#"{"type":"turn.failed","error":{"message":"rate limited"}}"#)
+                .as_deref(),
+            Some("rate limited")
+        );
+    }
+
+    #[test]
+    fn turn_failure_is_none_on_a_healthy_turn() {
+        let ok = concat!(
+            r#"{"type":"thread.started","thread_id":"abc"}"#,
+            "\n",
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"done"}}"#,
+            "\n",
+            r#"{"type":"turn.completed","usage":{}}"#,
+        );
+        assert_eq!(parse_turn_failure(ok), None);
+    }
+
+    #[test]
+    fn empty_turn_reports_codex_failure_over_the_agent_silence() {
+        // The whole point: a failed turn must never be reported as the agent
+        // having produced nothing to say.
+        let err = finish_turn("t1".to_string(), &[], CAPACITY_FAILURE_STDOUT)
+            .expect_err("no images means Err");
+        assert!(err.contains("at capacity"), "must carry codex's reason: {err}");
+        assert!(
+            !err.contains("(nothing)"),
+            "must not fall through to the agent-silence wording: {err}"
+        );
+    }
+
+    #[test]
+    fn empty_turn_without_a_failure_still_reports_agent_silence() {
+        let clean = concat!(
+            r#"{"type":"thread.started","thread_id":"t2"}"#,
+            "\n",
+            r#"{"type":"turn.completed","usage":{}}"#,
+        );
+        let err = finish_turn("t2".to_string(), &[], clean).expect_err("no images means Err");
+        assert!(err.contains("(nothing)"), "unchanged for a clean empty turn: {err}");
     }
 
     #[test]
