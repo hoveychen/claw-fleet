@@ -86,6 +86,7 @@ import { HistoryLayer } from "../useNavStack";
 import { SessionSheet } from "./SessionSheet";
 import { StatusRail } from "./StatusRail";
 import { buildStatusPills, type DetailPane, type PillTarget } from "./sessionStatusPills";
+import { filterMainRows } from "./mainRows";
 import styles from "./SessionDetailView.module.css";
 import { AppHeader } from "./AppHeader";
 import { FleetEventCard } from "./FleetEventCard";
@@ -1287,10 +1288,10 @@ export function SessionDetailView({
   }, []);
 
   const mainRows = useMemo(() => {
-    const base = rows.filter((m) => !m.isSidechain);
+    const base = filterMainRows(rows, session.jsonlPath);
     if (pendingOptimistic.length === 0) return base;
     return [...base, ...pendingOptimistic.map(optimisticToMessage)];
-  }, [rows, pendingOptimistic]);
+  }, [rows, pendingOptimistic, session.jsonlPath]);
 
   // Tool metadata lives on the tool_result rows the renderable filter drops —
   // harvest it from the unfiltered list, keyed by tool_use_id.
