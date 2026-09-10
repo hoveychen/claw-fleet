@@ -1,6 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
+import { markdownUrlTransform } from "../markdown/plugins";
+import {
+  safeMarkdownComponents,
+  safeRemarkPlugins,
+  safeRehypePlugins,
+} from "../markdown/safeLinks";
 import { useSessionsStore } from "../store";
 import type { HandoffChain } from "../types";
 import { AgentSourceIcon, formatModel } from "./SessionCard";
@@ -127,7 +134,7 @@ export function HandoffChainModal({
                         {chain.links[i].planId} · {chain.links[i].nextTask}
                       </span>
                     )}
-                    <span className={styles.handoff_note}>{chain.links[i].note}</span>
+                    <RelayNote note={chain.links[i].note} />
                     <span className={styles.handoff_time}>
                       {new Date(chain.links[i].handedAt).toLocaleString()}
                     </span>
@@ -140,5 +147,63 @@ export function HandoffChainModal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** How much note counts as long enough to fold. A shift-handover briefing is
+ *  written to be read, so the default is to show it; the fold exists for the
+ *  ones that run to a page, where an unfolded leg pushes the rest of the chain
+ *  off screen. Measured on the note text rather than on the rendered height
+ *  because a `ResizeObserver` here would only answer the same question later. */
+const NOTE_FOLD_CHARS = 260;
+const NOTE_FOLD_LINES = 6;
+
+function isLongNote(note: string): boolean {
+  return note.length > NOTE_FOLD_CHARS || note.split("\n").length > NOTE_FOLD_LINES;
+}
+
+/**
+ * One leg's relay note.
+ *
+ * These are markdown by construction — `fleet handoff --note` briefings come
+ * out of an agent that writes lists, `code` spans and bold the same way it
+ * writes them everywhere else. Rendering the string raw (what this did) put
+ * the syntax on screen: bullets as `- `, file names in backticks. Block
+ * components, not the inline set, because a handover is multi-paragraph and
+ * the paragraph breaks are load-bearing.
+ */
+function RelayNote({ note }: { note: string }) {
+  const { t } = useTranslation();
+  const foldable = isLongNote(note);
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={styles.note_wrap}>
+      <div className={styles.note_body} data-folded={foldable && !open ? "" : undefined}>
+        <ReactMarkdown
+          urlTransform={markdownUrlTransform}
+          remarkPlugins={safeRemarkPlugins}
+          rehypePlugins={safeRehypePlugins}
+          components={safeMarkdownComponents}
+        >
+          {note}
+        </ReactMarkdown>
+      </div>
+      {foldable && (
+        <button
+          className={styles.note_toggle}
+          aria-expanded={open}
+          onClick={(e) => {
+            // The leg above is itself clickable in the 计划树 (it opens that
+            // session); expanding a note must not navigate away from it.
+            e.stopPropagation();
+            setOpen((v) => !v);
+          }}
+        >
+          {open
+            ? t("card.handoff_note_less", { defaultValue: "收起" })
+            : t("card.handoff_note_more", { defaultValue: "展开" })}
+        </button>
+      )}
+    </div>
   );
 }

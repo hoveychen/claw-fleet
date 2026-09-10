@@ -150,3 +150,54 @@
   font-size: 10px;
   opacity: 0.6;
 }
+
+/* A leg's relay note, rendered as markdown. Folded with a max-height + fade
+   rather than `-webkit-line-clamp`, because line-clamp needs `display:
+   -webkit-box` and that collapses the block children (lists, paragraphs) the
+   block component set exists to produce. */
+.note_wrap {
+  min-width: 0;
+}
+
+.note_body {
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.note_body[data-folded] {
+  max-height: calc(6 * 1.6em);
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4em), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4em), transparent);
+}
+
+.note_body > :first-child {
+  margin-top: 0;
+}
+
+.note_body > :last-child {
+  margin-bottom: 0;
+}
+
+.note_body :is(p, li) {
+  margin: var(--space-1) 0;
+}
+
+.note_body :is(ul, ol) {
+  margin: var(--space-1) 0;
+  padding-left: var(--space-7);
+}
+
+.note_toggle {
+  margin-top: var(--space-1);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font-size: var(--font-size-2xs);
+  cursor: pointer;
+}
+
+.note_toggle:hover {
+  text-decoration: underline;
+}

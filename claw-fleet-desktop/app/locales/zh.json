@@ -1013,6 +1013,8 @@
     "tip_watch": "已等待 {{elapsed}}，条件已轮询 {{count}} 次（每 {{poll}} 秒一次）。",
     "handoff_loading": "正在加载接力链…",
     "handoff_hop": "第 {{n}} 棒",
+    "handoff_note_more": "展开",
+    "handoff_note_less": "收起",
     "tip_compact": "Context Compact：共 {{count}} 次 · 输入累计 {{pre}} tokens · 摘要累计 {{post}} tokens · 估算成本 ~${{cost}}（compact LLM 调用未单独入库，按 cache_read 和 output 单价估算）"
   },
   "onboarding": {

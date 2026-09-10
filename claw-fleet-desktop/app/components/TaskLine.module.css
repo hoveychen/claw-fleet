@@ -1,0 +1,125 @@
+/* One P-task row. Shared by the 计划树 drawer and the 任务 facet, so every
+   value here comes off the App.css ladder rather than being eyeballed — the
+   two surfaces used to drift by a pixel in every dimension. */
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--color-bg-hover);
+}
+
+.row:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/* Current item: an accent left rail, the same vocabulary the transcript uses
+   for "this is the live one". The previous treatment was a hover-coloured
+   block pulled out of the column with a negative margin, which read as a
+   stuck hover state rather than as a marker. */
+.row[data-state="current"] {
+  color: var(--color-text);
+  background: var(--color-accent-soft);
+}
+
+.row[data-state="current"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: 2px;
+  border-radius: var(--radius-hair);
+  background: var(--color-accent);
+}
+
+.row[data-state="done"] {
+  color: var(--color-text-muted);
+}
+
+.row[data-state="done"] .text {
+  text-decoration: line-through;
+}
+
+.box {
+  flex: 0 0 auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.row[data-state="current"] .box {
+  color: var(--color-accent);
+}
+
+.row[data-state="done"] .box {
+  color: var(--color-success);
+}
+
+/* The `P3` marker, lifted out of the prose so it can be scanned down a column
+   instead of being read out of a sentence. */
+.marker {
+  flex: 0 0 auto;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-field);
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+}
+
+.row[data-state="current"] .marker {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+/* Clamped to two lines until the row is opened. One line was too tight for a
+   CJK item (the ellipsis landed inside the first clause); unclamped is the
+   wall of text this component exists to prevent. */
+.text {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.row[data-open] .text {
+  display: block;
+  overflow: visible;
+  word-break: break-word;
+}
+
+/* Open rows render with the *block* markdown component set, so a multi-
+   paragraph note keeps its breaks — but its outer margins would push the row
+   apart, and nested lists come with a browser default indent that is wider
+   than this column. */
+.row[data-open] .text > :first-child {
+  margin-top: 0;
+}
+
+.row[data-open] .text > :last-child {
+  margin-bottom: 0;
+}
+
+.row[data-open] .text :is(ul, ol) {
+  margin: var(--space-1) 0;
+  padding-left: var(--space-7);
+}
+
+.row[data-open] .text :is(p, li) {
+  margin: var(--space-1) 0;
+}

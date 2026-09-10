@@ -17,6 +17,7 @@ import {
 import type { MatrixMetrics, MatrixRow } from "./planMatrix";
 import { useDetailStore, useSessionsStore, useUIStore } from "../store";
 import type { HandoffChain, PlanForest, PlanNode } from "../types";
+import { TaskLine, taskTip } from "./TaskLine";
 import styles from "./PlansView.module.css";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -32,19 +33,6 @@ function chainLegCount(chain: HandoffChain): number {
   return ids.length;
 }
 
-/** Split a TASKS.md item into its `P<n>` marker and the rest.
- *
- *  Items are written `**P3** — do the thing`, so the raw string renders as
- *  literal asterisks — the P-number, the one part you scan a plan by, is the
- *  part that looks like noise. Pull it out as a badge and drop the emphasis
- *  markers from the remainder. Anything that doesn't match keeps its text
- *  verbatim rather than being mangled by a half-baked markdown pass. */
-function splitMarker(text: string): { marker: string | null; rest: string } {
-  const m = /^\*\*(P\d+[a-z]?)\*\*\s*(?:[—–-]\s*)?([\s\S]*)$/.exec(text.trim());
-  if (!m) return { marker: null, rest: text };
-  return { marker: m[1], rest: m[2].replace(/\*\*/g, "") };
-}
-
 /** Total plans in a subtree, for the 「已完成 N 个」 fold's count. */
 function subtreeSize(node: PlanNode): number {
   return 1 + node.children.reduce((n, c) => n + subtreeSize(c), 0);
@@ -57,15 +45,6 @@ function flatten(roots: PlanNode[], out: PlanNode[] = []): PlanNode[] {
     flatten(r.children, out);
   }
   return out;
-}
-
-/** Cell tooltip: the P-task's own text, trimmed to something a title attribute
- *  can carry (items here run to several paragraphs). */
-function cellTip(text: string): string {
-  const { marker, rest } = splitMarker(text);
-  const body = rest.replace(/\s+/g, " ");
-  const head = marker ? `${marker} — ` : "";
-  return head + (body.length > 160 ? `${body.slice(0, 160)}…` : body);
 }
 
 // ── Root view ────────────────────────────────────────────────────────────────
@@ -460,7 +439,7 @@ function PlanMatrixRow({ row, metrics, selected, onSelect, onToggleSubtree }: Ro
             key={i}
             className={`${styles.cell} ${styles[`cell_${state}`]}`}
             style={{ width: metrics.cellW }}
-            title={node.items[i] ? cellTip(node.items[i].text) : `P${i + 1}`}
+            title={node.items[i] ? taskTip(node.items[i].text) : `P${i + 1}`}
             onClick={() => onSelect(row.key, i)}
           />
         ))}
@@ -532,8 +511,13 @@ function PlanDrawer({
       )}
 
       <div className={styles.drawer_body}>
-        {pendingItems.map(({ item, i }) => (
-          <TaskLine key={`p${i}`} text={item.text} startOpen={i === focusItem} />
+        {pendingItems.map(({ item, i }, n) => (
+          <TaskLine
+            key={`p${i}`}
+            text={item.text}
+            state={n === 0 ? "current" : "pending"}
+            startOpen={i === focusItem}
+          />
         ))}
         {doneItems.length > 0 && (
           <button className={styles.done_fold} onClick={onToggleDone}>
@@ -551,34 +535,13 @@ function PlanDrawer({
           doneItems
             .filter(({ i }) => doneShown || i === focusItem)
             .map(({ item, i }) => (
-              <TaskLine key={`d${i}`} text={item.text} done startOpen={i === focusItem} />
+              <TaskLine key={`d${i}`} text={item.text} state="done" startOpen={i === focusItem} />
             ))}
         {node.chains.map((c) => (
           <ChainChip key={c.chainId} chain={c} onOpen={onOpenChain} />
         ))}
       </div>
     </aside>
-  );
-}
-
-/** One P-task line: `P3` as a badge, then its prose — clamped to a single line
- *  until clicked. Items here run to several paragraphs of implementation notes;
- *  showing them all in full is the thing this redesign exists to stop. */
-function TaskLine({ text, done, startOpen }: { text: string; done?: boolean; startOpen?: boolean }) {
-  const { marker, rest } = splitMarker(text);
-  const [open, setOpen] = useState(!!startOpen);
-  return (
-    <button
-      className={`${styles.item} ${done ? styles.item_done : ""}`}
-      onClick={() => setOpen((v) => !v)}
-      title={open ? undefined : rest}
-    >
-      <span className={styles.box_glyph} aria-hidden>
-        {done ? "☑" : "☐"}
-      </span>
-      {marker && <span className={styles.marker}>{marker}</span>}
-      <span className={open ? styles.item_text_open : styles.item_text}>{rest}</span>
-    </button>
   );
 }
 
