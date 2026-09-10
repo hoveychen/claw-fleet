@@ -16,6 +16,7 @@ import {
   parsePlanList,
   parseWikiList,
   parseWikiSearch,
+  resultText,
 } from "./fleetTools";
 
 describe("isFleetTool", () => {
@@ -325,6 +326,51 @@ describe("isIngestCall", () => {
     expect(isIngestCall("mcp__fleet__fleet__plan", { action: "add" })).toBe(false);
     expect(isIngestCall("Read", { action: "add" })).toBe(false);
     expect(isIngestCall("mcp__fleet__fleet__artifact", null)).toBe(false);
+  });
+});
+
+describe("resultText", () => {
+  // The regression that hid every Fleet card's result for months: an MCP tool
+  // never returns a bare string, only a block array, and the old one-liner
+  // dropped that shape on the floor. Every test above hand-fed a string, so
+  // the suite stayed green while the app showed empty cards.
+  it("reads the block-array shape MCP actually returns", () => {
+    const content = [{ type: "text", text: "Stored artifact 20260909-211340 — x (image, 1 bytes)" }];
+    expect(resultText(content)).toBe("Stored artifact 20260909-211340 — x (image, 1 bytes)");
+  });
+
+  it("concatenates multiple text blocks and skips non-text ones", () => {
+    expect(resultText([{ type: "text", text: "a" }, { type: "image" }, { type: "text", text: "b" }])).toBe("ab");
+  });
+
+  it("still passes a plain string through", () => {
+    expect(resultText("ok: done")).toBe("ok: done");
+  });
+
+  it("survives an empty or malformed array", () => {
+    expect(resultText([])).toBe("");
+    expect(resultText([null, 42] as unknown[])).toBe("");
+  });
+});
+
+describe("an ingest arriving in MCP's real block-array shape", () => {
+  // End-to-end over the two functions FleetToolCard composes: the exact
+  // tool_result content from a real transcript must reach `artifact-add`.
+  it("classifies through resultText into artifact-add", () => {
+    const content = [
+      {
+        type: "text",
+        text:
+          "Stored artifact 20260909-211340 — 教师节海报 · 生成模型暖光教室版 " +
+          "(image, 857146 bytes), hard-linked. It is now on the 产出 page.",
+      },
+    ];
+    const view = parseFleetCall("artifact", { action: "add" }, resultText(content), false);
+    expect(view.result.kind).toBe("artifact-add");
+    if (view.result.kind !== "artifact-add") return;
+    expect(view.result.artifact.id).toBe("20260909-211340");
+    expect(view.result.artifact.artifactKind).toBe("image");
+    expect(view.result.artifact.bytes).toBe(857146);
   });
 });
 
