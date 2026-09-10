@@ -234,12 +234,9 @@ struct PeakRates {
 /// were billed at the rates in force when they ran, and this table only ever
 /// decides what a *newly* seen call costs.
 ///
-/// One dated change is deliberately **not** pre-programmed here: the page's
-/// second footnote says that from 12:00 Beijing time on 2026-09-14, requests to
-/// `deepseek-v4-pro` are also routed to V4.1 Flash and billed at the Flash
-/// price, until a V4.1 Pro ships. Encoding that as a date switch would mean
-/// guessing what the events will then say — whether calls keep self-reporting
-/// as `deepseek-v4-pro` at all. Re-measure on the day and edit the Pro row.
+/// The Pro row is **dated**: see [`PRO_ROUTED_TO_FLASH_MS`] and
+/// [`rates_for`]. It bills at its own rates until the published cut-over and at
+/// Flash's rates from then on.
 const DEEPSEEK_PEAK_RATES: &[PeakRates] = &[
     PeakRates {
         model: "deepseek-flash",
@@ -271,6 +268,43 @@ const DEEPSEEK_PEAK_RATES: &[PeakRates] = &[
         output: 1.20,
     },
 ];
+
+/// When `deepseek-v4-pro` starts billing at V4.1 Flash's rates: **2026-09-14
+/// 12:00 Beijing time**, i.e. 04:00 UTC, as ms since the epoch.
+///
+/// Straight off the pricing page's second footnote: "From 12:00 Beijing Time on
+/// September 14, 2026, and until V4.1 Pro is released in the future, requests to
+/// `deepseek-v4-pro` will all be routed to V4.1 Flash and billed at the V4.1
+/// Flash price."
+///
+/// The gate is on the **call's timestamp**, never on the model id, and that is
+/// the whole reason this can be written down ahead of the date at all. The open
+/// question on 2026-09-10 was what a post-cut-over event would *call* itself —
+/// still `deepseek-v4-pro`, or already `deepseek-flash`? Keying off `at_ms`
+/// makes that question moot: an event that still says `deepseek-v4-pro` gets
+/// Flash's rates, which is exactly what DeepSeek says it bills, and one that
+/// says `deepseek-flash` hits the Flash row directly. Both roads arrive at the
+/// same number, so nothing here is a guess about behaviour we have not seen.
+///
+/// What it *does* assume is that DeepSeek keeps to its own published date. If
+/// the cut-over slips, calls in the gap are under-priced until this constant is
+/// moved. That is the trade the boss took on 2026-09-10, against the
+/// alternative of over-pricing Pro by ~3× for however long it took someone to
+/// notice the date had passed.
+const PRO_ROUTED_TO_FLASH_MS: i64 = 1_789_358_400_000;
+
+/// The rate row that applies to `model` at `at_ms`.
+///
+/// A plain table lookup for everything except `deepseek-v4-pro`, which follows
+/// [`PRO_ROUTED_TO_FLASH_MS`] onto the Flash row.
+fn rates_for(model: &str, at_ms: i64) -> Option<&'static PeakRates> {
+    let effective = if model == "deepseek-v4-pro" && at_ms >= PRO_ROUTED_TO_FLASH_MS {
+        "deepseek-flash"
+    } else {
+        model
+    };
+    DEEPSEEK_PEAK_RATES.iter().find(|r| r.model == effective)
+}
 
 /// Is `at_ms` inside DeepSeek's peak window?
 ///
@@ -316,7 +350,7 @@ pub(crate) struct MeteredPrice {
 /// asking the provider is that a plausible-looking wrong number is worse than
 /// an absent one, and that applies just as much to a stale price table.
 fn rate_price(call: &MeteredCall) -> Option<MeteredPrice> {
-    let rates = DEEPSEEK_PEAK_RATES.iter().find(|r| r.model == call.model)?;
+    let rates = rates_for(&call.model, call.at_ms)?;
     let peak = is_peak(call.at_ms);
     let scale = if peak { 1.0 } else { 0.5 };
     let usd = scale
@@ -1404,6 +1438,86 @@ mod tests {
             "expected 0.66 + 0.022 + 1.98 = $2.662, got {total}"
         );
         assert_eq!(off_n, 1);
+    }
+
+    /// The cut-over constant sits exactly on 12:00 Beijing time, on a Monday.
+    ///
+    /// Checked through `is_peak`, which already owns the UTC+8 shift, rather
+    /// than by re-deriving the arithmetic: the last instant before the constant
+    /// is inside the 09:00–12:00 Beijing weekday peak and the constant itself is
+    /// not, which can only be true if the local clock ticks from 11:59:59.999 to
+    /// 12:00:00.000 right there — and being in a *weekday* window at all pins
+    /// the day to Mon–Fri. An off-by-one-hour constant (a forgotten DST fudge,
+    /// say) fails both halves.
+    #[test]
+    fn the_pro_cutover_lands_on_1200_beijing_on_a_weekday() {
+        assert!(
+            is_peak(PRO_ROUTED_TO_FLASH_MS - 1),
+            "the instant before the cut-over must still be inside the 09:00–12:00 \
+             Beijing weekday peak"
+        );
+        assert!(
+            !is_peak(PRO_ROUTED_TO_FLASH_MS),
+            "12:00 Beijing is the first off-peak millisecond of the midday break"
+        );
+        // Mon = 1 … Sun = 7, on DeepSeek's own clock — same shift `is_peak` uses.
+        let local_ms = PRO_ROUTED_TO_FLASH_MS + 8 * 3_600_000;
+        let weekday = (local_ms.div_euclid(86_400_000) + 3).rem_euclid(7) + 1;
+        assert_eq!(weekday, 1, "2026-09-14 is a Monday");
+    }
+
+    /// Pro's rate row follows the published date, and only Pro's does.
+    ///
+    /// The gate is on the timestamp rather than the model id on purpose, so
+    /// this holds whichever name a post-cut-over event reports itself under.
+    #[test]
+    fn only_pro_switches_rows_at_the_cutover() {
+        let row = |m, t| rates_for(m, t).expect("rated").model;
+        assert_eq!(row("deepseek-v4-pro", PRO_ROUTED_TO_FLASH_MS - 1), "deepseek-v4-pro");
+        assert_eq!(row("deepseek-v4-pro", PRO_ROUTED_TO_FLASH_MS), "deepseek-flash");
+        // Everything else is date-independent: the flash ids were already
+        // aligned when V4.1 landed, and an unknown id stays unknown.
+        for id in ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"] {
+            assert_eq!(row(id, PRO_ROUTED_TO_FLASH_MS - 1), row(id, PRO_ROUTED_TO_FLASH_MS));
+        }
+        assert!(rates_for("deepseek-v5-unreleased", PRO_ROUTED_TO_FLASH_MS).is_none());
+    }
+
+    /// The money actually moves at the cut-over: the same Pro call costs 3.5×
+    /// less the day after.
+    ///
+    /// Both instants are 12:00 Beijing and both are off-peak — the day before is
+    /// a Sunday (the whole weekend is off-peak) and the cut-over itself is the
+    /// first off-peak millisecond of Monday's midday break — so the only thing
+    /// that differs between them is the rate row, not the peak multiplier.
+    #[test]
+    fn a_pro_call_after_the_cutover_is_billed_at_flash_rates() {
+        let call = |at_ms| MeteredCall {
+            provider: "deepseek-official".into(),
+            model: "deepseek-v4-pro".into(),
+            seq: Some(20),
+            at_ms,
+            input_tokens: 1_000_000,
+            cache_read_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+        };
+
+        // Sunday 2026-09-13 12:00 Beijing, one day before the cut-over.
+        let (before, _, off_n, _) = priced(&[call(PRO_ROUTED_TO_FLASH_MS - 86_400_000)]);
+        assert_eq!(off_n, 1, "the weekend is off-peak");
+        // Off-peak pro: 0.66 miss + 0.022 hit + 1.98 out.
+        assert!(
+            (before - 2.662).abs() < 1e-9,
+            "before the cut-over Pro is still Pro: expected $2.662, got {before}"
+        );
+
+        let (after, _, off_n, _) = priced(&[call(PRO_ROUTED_TO_FLASH_MS)]);
+        assert_eq!(off_n, 1, "12:00 Beijing is off-peak");
+        // Off-peak flash: 0.15 miss + 0.003 hit + 0.60 out.
+        assert!(
+            (after - 0.753).abs() < 1e-9,
+            "from the cut-over Pro bills at Flash rates: expected $0.753, got {after}"
+        );
     }
 
     #[test]
