@@ -256,6 +256,7 @@ pub const SESSION_DECISIONS: &str = "/session_decisions";
 pub const SESSION_MARK: &str = "/session_mark";
 pub const SESSION_NOTE: &str = "/session_note";
 pub const SESSION_NOTES: &str = "/session_notes";
+pub const SESSION_NOTES_SEARCH: &str = "/session_notes_search";
 pub const SESSION_TITLE: &str = "/session_title";
 pub const SESSIONS: &str = "/sessions";
 pub const SET_SOURCE_ENABLED: &str = "/set_source_enabled";

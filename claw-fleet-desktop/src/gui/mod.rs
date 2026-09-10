@@ -1731,6 +1731,7 @@ pub fn run() {
             read_scratchpad_file,
             list_session_notes,
             read_session_note,
+            search_session_notes,
             list_skills,
             skill_sync_inventory,
             skill_sync_apply,

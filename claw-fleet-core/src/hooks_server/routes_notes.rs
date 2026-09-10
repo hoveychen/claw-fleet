@@ -42,6 +42,28 @@ pub(crate) fn route_session_note(
     );
 }
 
+/// `GET /session_notes_search?session_id=…&q=…` — literal, case-sensitive
+/// substring hits across everything the session can read.
+pub(crate) fn route_session_notes_search(
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+) {
+    let session_id = decoded(query, "session_id");
+    let q = decoded(query, "q");
+    respond_notes_json(
+        request,
+        json_header,
+        crate::session_notes::search(
+            &session_id,
+            &q,
+            None,
+            crate::session_notes::SEARCH_MAX_FILES,
+            crate::session_notes::SEARCH_MAX_MATCHES_PER_FILE,
+        ),
+    );
+}
+
 fn decoded(query: &std::collections::HashMap<String, String>, key: &str) -> String {
     let raw = query.get(key).map(|s| s.as_str()).unwrap_or("");
     percent_decode_str(raw).decode_utf8_lossy().to_string()

@@ -1233,6 +1233,8 @@ fn handle_request(
 
             crate::routes::SESSION_NOTE => route_session_note(request, &query, json_header),
 
+            crate::routes::SESSION_NOTES_SEARCH => route_session_notes_search(request, &query, json_header),
+
             crate::routes::MESSAGES => route_messages(ctx, request, &query, json_header, path),
 
             crate::routes::TOOL_RESULT => route_tool_result(ctx, request, &query, json_header, path),

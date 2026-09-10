@@ -131,6 +131,9 @@ export type NoteFile = {
 path: string, 
 sessionId: string, bytes: number, updatedMs: number, };
 
+export type NoteMatch = { path: string, sessionId: string, 
+line: number, text: string, };
+
 export type WorkflowAgentStatus = "running" | "done";
 
 export type WorkflowAgent = { 

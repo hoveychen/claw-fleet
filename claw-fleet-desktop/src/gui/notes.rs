@@ -24,3 +24,12 @@ pub(crate) fn read_session_note(
 ) -> Result<String, String> {
     state.backend.read_session_note(&session_id, &path)
 }
+
+#[tauri::command(async)]
+pub(crate) fn search_session_notes(
+    session_id: String,
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<claw_fleet_core::session_notes::NoteMatch>, String> {
+    state.backend.search_session_notes(&session_id, &query)
+}

@@ -47,6 +47,7 @@ pub struct NoteFile {
 
 /// One matching line from [`search`].
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct NoteMatch {
     pub path: String,
@@ -362,6 +363,16 @@ fn walk(base: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
 }
 
 // ── Search ───────────────────────────────────────────────────────────────────
+
+/// Caps on a note search from a UI, shared by all three clients so a hit list
+/// means the same thing wherever it is read.
+///
+/// Deliberately not surfaced as parameters: a knob on a search box is a knob
+/// that has to mean something to whoever turns it. Wide enough that a normal
+/// handoff chain never reaches them, narrow enough that a pathological one
+/// cannot return megabytes.
+pub const SEARCH_MAX_FILES: usize = 40;
+pub const SEARCH_MAX_MATCHES_PER_FILE: usize = 20;
 
 /// Case-sensitive literal-substring search over note lines visible to
 /// `session_id`. Files are visited own-session-first, newest-updated first.
