@@ -2936,16 +2936,11 @@ export const MOCK_MODEL_CATALOG = [
     name: "dsh",
     available: true,
     models: [
-      m("deepseek-official/deepseek-v4-pro", "DeepSeek V4 Pro", "dsh", "premium", DSH_LADDER, "high"),
-      m("deepseek-official/deepseek-v4-flash", "DeepSeek V4 Flash", "dsh", "standard", DSH_LADDER, "high"),
-      m(
-        "deepseek-official/deepseek-v4-flash-vision-exp",
-        "DeepSeek V4 Flash (vision, exp)",
-        "dsh",
-        "standard",
-        DSH_LADDER,
-        "high",
-      ),
+      // One row, not three — verified against the real `model_catalog()` on
+      // 2026-09-10. DeepSeek retired the two older flash ids into aliases of
+      // V4.1 Flash and is retiring V4 Pro into it too, so `models.toml` marks
+      // all three unlisted and the picker offers exactly this one.
+      m("deepseek-official/deepseek-flash", "DeepSeek V4.1 Flash", "dsh", "standard", DSH_LADDER, "high"),
     ],
   },
 ];
@@ -2956,6 +2951,18 @@ export const MOCK_DSH_MODELS = {
       id: "deepseek-official",
       name: "DeepSeek",
       models: [
+        // dsh's live catalog is a different list from Fleet's own: it still
+        // serves the retired alias ids alongside V4.1 Flash, in this order
+        // (measured against dsh 0.1.5-rc.1 on 2026-09-10). So the picker's dsh
+        // menu legitimately shows more than the cheat-sheet's single row.
+        {
+          id: "deepseek-flash",
+          name: "DeepSeek-V41-Flash",
+          description: null,
+          spec: "deepseek-official/deepseek-flash",
+          efforts: DEEPSEEK_EFFORTS,
+          defaultEffort: "high",
+        },
         {
           id: "deepseek-v4-flash",
           name: "DeepSeek-V4-Flash",
@@ -3008,7 +3015,7 @@ export const MOCK_DSH_MODELS = {
   failures: [],
   // dsh's saved default selection: what the launcher's "default" model item
   // means, and whose effort ladder the effort pill shows in that state.
-  defaultSpec: "deepseek-official/deepseek-v4-flash",
+  defaultSpec: "deepseek-official/deepseek-flash",
   defaultEffort: "high",
 };
 
