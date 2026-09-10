@@ -127,6 +127,10 @@ permissionPrompt: Array<PermissionPromptRequest>, };
 
 export type SkillInvocation = { skill: string, args: string | null, timestamp: string, isSubagent: boolean, };
 
+export type NoteFile = { 
+path: string, 
+sessionId: string, bytes: number, updatedMs: number, };
+
 export type WorkflowAgentStatus = "running" | "done";
 
 export type WorkflowAgent = { 

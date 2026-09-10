@@ -34,6 +34,7 @@ pub const MAX_NOTE_FILE_BYTES: usize = 1_000_000;
 
 /// A note file as listed back to the agent.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct NoteFile {
     /// Virtual path within the owning session's notes directory.

@@ -13,7 +13,7 @@ import {
 } from "../store";
 import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, SCHEDULE_ENTRYPOINT } from "../types";
-import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
+import type { DecisionHistoryRecord, LiveThinking, NoteFile, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
 import { landedUserTexts, stillPending } from "../optimisticEcho";
@@ -823,6 +823,30 @@ export function SessionDetail({
   }, [workspacePath, sessionId]);
   const hasScratchpad = scratchpadCount > 0;
 
+  // Checkpoint notes (`~/.fleet/notes/`) — the agent's own store for surviving a
+  // context compaction. Probed on the same terms as the scratchpad: the facet
+  // only appears for a session that actually took notes. The count spans the
+  // handoff chain, because so does what the agent could read.
+  const [noteCount, setNoteCount] = useState(0);
+  useEffect(() => {
+    if (!sessionId) {
+      setNoteCount(0);
+      return;
+    }
+    let cancelled = false;
+    invoke<NoteFile[]>("list_session_notes", { sessionId })
+      .then((files) => {
+        if (!cancelled) setNoteCount(files?.length ?? 0);
+      })
+      .catch(() => {
+        if (!cancelled) setNoteCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+  const hasNotes = noteCount > 0;
+
   // Background tasks the session was still waiting on when it last ended a turn
   // (shells, monitors, subagents — see `bg_guard`). Only populated while the
   // session's latest hook event is that Stop and within the 5-min freshness
@@ -1113,7 +1137,7 @@ export function SessionDetail({
     return mainSession ? [mainSession, ...ordered] : ordered;
   }, [liveSession, sessions]);
 
-  /* The session's facets — Skills, 决策, Token, 任务, 后台任务, 临时文件,
+  /* The session's facets — Skills, 决策, Token, 任务, 后台任务, 临时文件, 笔记,
      Workflow — are things you go *look up*, one at a time, so they live in the
      header's overflow menu rather than as seven permanent tabs above the panel.
      Conditional ones appear on the same terms their old tabs did: only when the
@@ -1134,6 +1158,9 @@ export function SessionDetail({
         label: `${t("detail.tab_scratchpad")} (${scratchpadCount})`,
       });
     }
+    if (hasNotes) {
+      list.push({ id: "notes", label: `${t("detail.tab_notes")} (${noteCount})` });
+    }
     if (hasWorkflows) {
       list.push({
         id: "workflow",
@@ -1148,6 +1175,8 @@ export function SessionDetail({
     bgTasks.length,
     hasScratchpad,
     scratchpadCount,
+    hasNotes,
+    noteCount,
     hasWorkflows,
     workflowTrees.length,
   ]);
