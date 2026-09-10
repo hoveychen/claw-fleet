@@ -114,11 +114,22 @@ impl SessionSnapshot {
     /// at the top of the loop that pushes those cards out. So one cold scan
     /// delayed every card the loop had to deliver.
     ///
-    /// Measured on Boss's Mac, 194 project dirs: a cold scan is 2.9s on its own
-    /// and 7.3s with three of them running at once. `fleet-cli`'s
-    /// `sse_dismiss.rs` had been red for exactly that reason — three tests in
-    /// parallel, each spawning a serve that paid its own cold scan, against a
-    /// 5s assertion window.
+    /// Measured on Boss's Mac (a live dsh answering `session/list` with 294
+    /// sessions): a cold scan is 2.9s on its own and 7.3s with three of them
+    /// running at once. `fleet-cli`'s `sse_dismiss.rs` had been red for exactly
+    /// that reason — three tests in parallel, each spawning a serve that paid
+    /// its own cold scan, against a 5s assertion window.
+    ///
+    /// The cost is the **dsh** source, not Claude's transcript tree: an earlier
+    /// wording here blamed "194 project dirs", and a later task grew out of it
+    /// proposing that `sse_dismiss.rs` isolate `HOME` too. That would buy
+    /// nothing. `FLEET_HOME` already short-circuits the whole home chain
+    /// ([`crate::session::paths::real_home_dir`]), so the Claude and codex roots
+    /// are already tempdir-rooted; and on macOS `user_home_dir` reads `getpwuid`
+    /// and ignores `$HOME` outright. dsh is the one source that escapes it, and
+    /// not via home at all — `dsh_server::discover` finds the binary on `PATH`
+    /// and `spawn_on` overrides only `PATH` on the child. Its levers are
+    /// `DSH_HOME` / `FLEET_DSH_BIN`.
     ///
     /// A cold read still kicks a background refresh and still counts as a read
     /// (so the ticker starts), which is what makes the *next* tick warm.
