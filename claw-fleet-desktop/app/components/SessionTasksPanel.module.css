@@ -1,0 +1,152 @@
+/* 任务 facet. Previously this panel had no stylesheet of its own — it borrowed
+   SessionDetail's, with every dimension written as a raw pixel value beside a
+   token ladder that already had the value. Hence its own file, on the ladder. */
+
+.panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3) var(--space-5) var(--space-7);
+}
+
+.plan + .plan {
+  margin-top: var(--space-7);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--color-border-soft);
+}
+
+/* Two lines, not one. A CJK plan title is long enough that a single-line
+   ellipsis cut it inside the first clause — the panel's most-read string was
+   also its least legible one. */
+.title {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.4;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  min-width: 0;
+}
+
+.status {
+  flex: 0 0 auto;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.status_active {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.status_done {
+  color: var(--color-text-dim);
+  background: var(--color-bg-sunken);
+}
+
+/* An explore plan's checklist is research, not shipping work — same badge the
+   计划树 uses, so the two surfaces label it identically. */
+.kind {
+  flex: 0 0 auto;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-teal) 15%, transparent);
+  color: var(--color-teal);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.id {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+}
+
+.source {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+}
+
+/* The count alone made you compute the ratio; the meter states it. Both are
+   here — the bar for the glance, the number for the exact answer. */
+.meter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.track {
+  flex: 1 1 auto;
+  height: 3px;
+  border-radius: var(--radius-hair);
+  background: var(--color-bg-field);
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-hair);
+  background: var(--color-accent);
+}
+
+.fill_done {
+  background: var(--color-success);
+}
+
+.count {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.items {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.fold {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-sunken);
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+  cursor: pointer;
+}
+
+.fold:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}

@@ -273,7 +273,8 @@ export type TaskItem = { text: string, done: boolean, };
 
 export type TaskPlanDetail = { id: string | null, 
 title: string | null, 
-source: string | null, items: Array<TaskItem>, };
+source: string | null, 
+kind: PlanKind, items: Array<TaskItem>, };
 
 export type HandoffLink = { fromSessionId: string, toSessionId: string, note: string, planId?: string | null, nextTask?: string | null, 
 handedAt: number, };

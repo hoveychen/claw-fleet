@@ -156,6 +156,12 @@ pub struct TaskPlanDetail {
     /// `None` when the plan lives in the main checkout's TASKS.md; otherwise a
     /// relative (or absolute fallback) path to the worktree source file.
     pub source: Option<String>,
+    /// `kind="..."` from the begin sentinel. See [`PlanKind`]. Carried so the
+    /// task panels can mark an explore plan as one — its P-tasks produce
+    /// understanding, and its deliverable is the exec children it spawns, so
+    /// reading its checklist as "the work" is a category error the 计划树
+    /// already labels and the detail panels used to hide.
+    pub kind: PlanKind,
     pub items: Vec<TaskItem>,
 }
 
@@ -1375,6 +1381,7 @@ fn list_workspace_task_plans_scoped(cwd: &Path, scope: PlanScope) -> Vec<TaskPla
             source: display_source(&b.source, main_root.as_deref(), primary.as_deref()),
             title: extract_plan_name(&b.body),
             id: b.id,
+            kind: b.kind,
             items: parse_task_items(&b.body),
         })
         .collect()
