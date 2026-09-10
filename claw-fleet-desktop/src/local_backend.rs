@@ -1605,11 +1605,48 @@ fn rescan_and_emit(
 /// re-scan only the dirty ones, then re-apply the scan-time enrichers over the
 /// merged list.
 ///
-/// Split out of `incremental_rescan_and_emit` so it can be tested without an
-/// `AppHandle` — the enrichers are exactly what this path used to get wrong.
+/// Test-only: production runs the two halves separately, because they have very
+/// different costs. [`scan_dirty_sources`] is the multi-second part that must
+/// run with no lock held; [`merge_incremental_sessions`] is the cheap part that
+/// must run *under* the session lock, against the list as it stands then — see
+/// [`commit_rescan`] for why that ordering is the whole point. This wrapper
+/// keeps the tests that only care about the merged *content* (enrichers,
+/// age-out) readable.
+#[cfg(test)]
 fn build_incremental_sessions(
     sources: &[Box<dyn AgentSource>],
     existing: &[SessionInfo],
+    dirty: &HashSet<usize>,
+    now_ms: u64,
+) -> Vec<SessionInfo> {
+    let scanned = scan_dirty_sources(sources, dirty);
+    merge_incremental_sessions(sources, existing, scanned, dirty, now_ms)
+}
+
+/// Rescan just the dirty sources. The expensive half — a dsh tick spends 5–9s
+/// in here on a busy box — so it deliberately touches no shared state.
+fn scan_dirty_sources(
+    sources: &[Box<dyn AgentSource>],
+    dirty: &HashSet<usize>,
+) -> Vec<SessionInfo> {
+    let mut scanned = Vec::new();
+    for &idx in dirty {
+        if let Some(source) = sources.get(idx) {
+            if source.is_available() {
+                scanned.extend(source.scan_sessions());
+            }
+        }
+    }
+    scanned
+}
+
+/// Splice freshly-scanned dirty-source rows into `existing`, keeping every clean
+/// source's rows. In-memory apart from the enrichers' few small state files, so
+/// it is cheap enough to run while holding the session lock.
+fn merge_incremental_sessions(
+    sources: &[Box<dyn AgentSource>],
+    existing: &[SessionInfo],
+    scanned: Vec<SessionInfo>,
     dirty: &HashSet<usize>,
     now_ms: u64,
 ) -> Vec<SessionInfo> {
@@ -1659,13 +1696,7 @@ fn build_incremental_sessions(
         crate::session::age_out_status(sess, age_secs);
     }
 
-    for &idx in dirty {
-        if let Some(source) = sources.get(idx) {
-            if source.is_available() {
-                s.extend(source.scan_sessions());
-            }
-        }
-    }
+    s.extend(scanned);
 
     // Re-stamp the out-of-jsonl state for retained AND freshly-scanned sessions.
     // Freshly-scanned ones arrive with `user_mark` / `title_override` / `handoff`
@@ -1674,6 +1705,46 @@ fn build_incremental_sessions(
     crate::session::enrich_all(&mut s);
     crate::session::sort_sessions(&mut s);
     s
+}
+
+/// Publish a finished rescan: merge `scanned` into the shared list and store the
+/// result, all under one lock acquisition.
+///
+/// The merge reads the list AS IT STANDS NOW, never a copy taken before the
+/// scan. Both rescan threads write the whole Vec — one list holds every source's
+/// sessions, partitioned by `agent_source` — so a thread that carried clean-
+/// source rows forward from a pre-scan copy silently reverted whatever another
+/// thread had committed while it was scanning. That lost update was
+/// user-visible: dsh is the only `WatchStrategy::Poll` source, it ticks every 3s
+/// (`dsh_source::POLL_INTERVAL`), and one tick costs 5–9s on a busy box — so
+/// every ~8s the claude-code rows were rolled back by ~5s. A session created
+/// inside that window disappeared from the launchpad, and its open detail pane
+/// fell back to 找不到这个会话, until the next fs-watch rescan put it back. That
+/// is the 5–10s blink Boss hit on 2026-09-10.
+///
+/// The merge is in-memory apart from the enrichers' small state files, so
+/// holding the lock across it costs nothing like holding it across a scan would
+/// — which is why `scanned` is passed in already scanned.
+fn commit_rescan(
+    sources: &[Box<dyn AgentSource>],
+    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
+    scanned: Vec<SessionInfo>,
+    dirty: &HashSet<usize>,
+    outcome_tags: &HashMap<String, Vec<String>>,
+) -> Vec<SessionInfo> {
+    let mut guard = sessions.lock().unwrap();
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let mut merged = merge_incremental_sessions(sources, guard.as_slice(), scanned, dirty, now_ms);
+    for sess in &mut merged {
+        if let Some(tags) = outcome_tags.get(&sess.id) {
+            sess.last_outcome = Some(tags.clone());
+        }
+    }
+    *guard = merged.clone();
+    merged
 }
 
 /// Incremental rescan: only rescan sources whose indices appear in `dirty`.
@@ -1686,39 +1757,27 @@ fn incremental_rescan_and_emit(
     outcomes: &Arc<Mutex<HashMap<String, Vec<String>>>>,
     dirty: &HashSet<usize>,
 ) {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    // Snapshot the previous list and RELEASE the lock before scanning. The scan
-    // itself takes tens of seconds on a busy box (`[POLL] scan slow: took 55s`
-    // is a routine log line here), and holding `sessions` across it blocks every
-    // other consumer of that mutex for the whole duration — including the 30s
-    // liveness ticker, whose first act is `sessions.lock()` inside
-    // `refresh_dead_codex_liveness_and_emit`. On 2026-09-09 that is what left
-    // session a878d652 stamped `proc_alive = true` for ~108s after its turn had
-    // ended: the composer kept saying 会话运行中, so a typed follow-up went into
-    // the pending-message queue instead of being sent, and the queue could only
-    // drain once the ticker finally got the lock. The clone costs one Vec copy;
-    // the write-back below already paid for one anyway.
+    // Scan the dirty sources WITHOUT holding `sessions`. The scan takes tens of
+    // seconds on a busy box (`[POLL] scan slow: took 55s` is a routine log line
+    // here), and holding the mutex across it blocks every other consumer for the
+    // whole duration — including the 30s liveness ticker, whose first act is
+    // `sessions.lock()` inside `refresh_dead_codex_liveness_and_emit`. On
+    // 2026-09-09 that is what left session a878d652 stamped `proc_alive = true`
+    // for ~108s after its turn had ended: the composer kept saying 会话运行中, so
+    // a typed follow-up went into the pending-message queue instead of being
+    // sent, and the queue could only drain once the ticker finally got the lock.
+    let started = Instant::now();
+    let scanned = scan_dirty_sources(sources, dirty);
+    let scan_took = started.elapsed();
+
+    // Read the outcome tags before taking `sessions`, so the two mutexes are
+    // never held nested and the lock order can't matter.
+    let outcome_tags = { outcomes.lock().unwrap().clone() };
+
     let lock_started = Instant::now();
-    let existing = { sessions.lock().unwrap().clone() };
-    let lock_wait = lock_started.elapsed();
-    let scan_started = Instant::now();
-    let mut s = build_incremental_sessions(sources, &existing, dirty, now_ms);
-    let scan_took = scan_started.elapsed();
+    let s = commit_rescan(sources, sessions, scanned, dirty, &outcome_tags);
+    let lock_took = lock_started.elapsed();
 
-    // Inject cached outcome tags into each session.
-    {
-        let oc = outcomes.lock().unwrap();
-        for sess in &mut s {
-            if let Some(tags) = oc.get(&sess.id) {
-                sess.last_outcome = Some(tags.clone());
-            }
-        }
-    }
-
-    *sessions.lock().unwrap() = s.clone();
     let _ = app.emit("sessions-updated", &s);
     crate::update_tray(app, &s);
     publish_mobile_sessions(&s);
@@ -1730,12 +1789,12 @@ fn incremental_rescan_and_emit(
     // exactly why the 2026-09-09 `proc_alive` stall could not be attributed to
     // it either way. The threshold is deliberately low (5s): the point is to see
     // the distribution of rescan cost, not only the pathological tail.
-    let total = lock_started.elapsed();
+    let total = started.elapsed();
     if total >= Duration::from_secs(5) {
         log_debug(&format!(
-            "[RESCAN] {:.1}s total (lock_wait {:.1}s, scan {:.1}s, dirty={}, sessions={})",
+            "[RESCAN] {:.1}s total (merge {:.1}s, scan {:.1}s, dirty={}, sessions={})",
             total.as_secs_f64(),
-            lock_wait.as_secs_f64(),
+            lock_took.as_secs_f64(),
             scan_took.as_secs_f64(),
             dirty.len(),
             s.len()
@@ -4433,6 +4492,87 @@ mod tests {
             SessionStatus::Active,
             "a polling source's status must survive the retain branch — aging it \
              out here fights the poll tick and blinks the run dot",
+        );
+    }
+
+    /// A slow rescan must not roll back what another thread committed while it
+    /// was scanning.
+    ///
+    /// Every source's sessions live in one shared `Vec`, and every rescan writes
+    /// the whole thing — the clean sources' rows included. The old code built
+    /// that write-back from a copy of the list taken *before* the scan, so a dsh
+    /// poll tick (the only `WatchStrategy::Poll` source, 3s interval, 5–9s per
+    /// tick on a busy box) republished claude-code rows as they were 5s earlier.
+    /// A session spawned inside that window was erased from the launchpad and
+    /// its open detail pane fell back to 找不到这个会话, until the next fs-watch
+    /// rescan brought it back 5–10s later (Boss, 2026-09-10).
+    #[test]
+    fn slow_rescan_does_not_revert_a_session_added_mid_scan() {
+        let _lock = claw_fleet_core::paths::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        let dsh_sess = mk_session("dsh-1", "dsh");
+        let sources: Vec<Box<dyn AgentSource>> = vec![
+            Box::new(MockSource {
+                watch_fs: true,
+                ..MockSource::new("claude-code", "claude", "")
+            }),
+            Box::new(MockSource {
+                sessions: vec![dsh_sess.clone()],
+                ..MockSource::new("dsh", "dsh", "dsh://")
+            }),
+        ];
+
+        // The shared list as the dsh tick starts: one existing claude session.
+        let sessions: Arc<Mutex<Vec<SessionInfo>>> =
+            Arc::new(Mutex::new(vec![mk_session("claude-old", "claude-code")]));
+
+        // What the old code captured here, before scanning.
+        let pre_scan_snapshot = sessions.lock().unwrap().clone();
+
+        // The dsh tick scans (slow, no lock held) …
+        let dirty = HashSet::from([1]);
+        let scanned = scan_dirty_sources(&sources, &dirty);
+
+        // … and meanwhile the fs-watch thread commits a freshly-spawned session.
+        sessions
+            .lock()
+            .unwrap()
+            .push(mk_session("claude-new", "claude-code"));
+
+        // Only now does the dsh tick publish its result.
+        let out = commit_rescan(&sources, &sessions, scanned.clone(), &dirty, &HashMap::new());
+
+        // The shape the old code produced, kept here so this test provably
+        // covers the defect rather than merely passing: merging against the
+        // pre-scan copy is what dropped the new session.
+        let old_shape =
+            merge_incremental_sessions(&sources, &pre_scan_snapshot, scanned, &dirty, 0);
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+
+        let ids: Vec<&str> = out.iter().map(|s| s.id.as_str()).collect();
+        assert!(
+            ids.contains(&"claude-new"),
+            "a session committed during the scan was rolled back by the write-back \
+             (ids: {ids:?}) — this is the 找不到这个会话 blink",
+        );
+        assert!(ids.contains(&"claude-old"), "existing clean-source rows must survive");
+        assert!(ids.contains(&"dsh-1"), "the dirty source's fresh rows must be spliced in");
+        assert_eq!(
+            sessions.lock().unwrap().len(),
+            out.len(),
+            "the stored list and the emitted list must agree",
+        );
+        assert!(
+            !old_shape.iter().any(|s| s.id == "claude-new"),
+            "the pre-scan-snapshot merge is supposed to lose the new session — if \
+             it no longer does, this test has stopped covering the defect",
         );
     }
 
