@@ -479,6 +479,31 @@ export function SessionDetail({
   /* The messages pane. The expanded doc card's width is a ratio of *this* box,
      and the transcript reserves the same number as a right-hand band. */
   const messagesPaneRef = useRef<HTMLDivElement>(null);
+  /* The row holding the two slabs, and the width it would have to have to seat
+     the drawer *beside* the rail — see `railCovered` below. Both measured: the
+     second one comes off a zero-height probe (`.fit_probe`) whose width is that
+     sum expressed in CSS, so the comparison uses the same clamp()/% the layout
+     uses instead of a copy of those numbers here that would silently rot when
+     the CSS is tuned. */
+  const bodyRowRef = useRef<HTMLDivElement>(null);
+  const fitProbeRef = useRef<HTMLDivElement>(null);
+  const [bodyRowW, setBodyRowW] = useState(0);
+  const [railFitW, setRailFitW] = useState(0);
+  const rowMounted = liveSession != null;
+  useEffect(() => {
+    const row = bodyRowRef.current;
+    const probe = fitProbeRef.current;
+    if (!row || !probe) return;
+    const read = () => {
+      setBodyRowW(row.clientWidth);
+      setRailFitW(probe.getBoundingClientRect().width);
+    };
+    const ro = new ResizeObserver(read);
+    ro.observe(row);
+    ro.observe(probe);
+    read();
+    return () => ro.disconnect();
+  }, [rowMounted]);
   const [dockHeight, setDockHeight] = useState(0);
   /* The conversation is no longer one tab among many — it owns this column for
      good. Beside it are two surfaces, at two different levels: a permanent rail
@@ -1275,6 +1300,17 @@ export function SessionDetail({
   const toggleRail = useCallback(() => {
     setRailOverride((prev) => !(prev ?? railCards > 0));
   }, [railCards]);
+  /* Can the drawer be seated *beside* the rail at this width? The design has it
+     stop at the rail's left edge, so the card you clicked to open it stays
+     readable — but that only works while the row is wide enough to hold both.
+     It usually is not: the pane is 50vw, so the row has to reach ~820px (i.e. a
+     ~1640px window) before DRAWER_W + the rail's band both fit. Below that the
+     drawer used to keep its 560px and its `right` offset and simply overflowed
+     the pane's left edge, where `.root`'s `overflow: hidden` cut it off — at
+     1280px that clipped 173px including its own title. So when it does not fit,
+     it gives up the side-by-side and slides in over the rail instead, which is
+     also what you expect a drawer entering from the right to do. */
+  const railCovered = railOpen && auxOpen && bodyRowW > 0 && bodyRowW < railFitW;
 
   return (
     // Both link capabilities cover the whole component, so the reader modal and
@@ -1284,7 +1320,7 @@ export function SessionDetail({
       <WebLinkProvider value={openWebInAux}>
       <IngestOpenProvider value={ingestOpen}>
       <div
-        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railOpen ? styles.rail_open : ""}`}
+        className={`${styles.root} ${liveSession ? styles.open : ""} ${inline ? styles.inline : ""} ${auxOpen ? styles.aux_open : ""} ${railOpen ? styles.rail_open : ""} ${railCovered ? styles.rail_covered : ""}`}
         /* Standalone only: the pane grows by what the reader needs, so the room
            the auto-collapsed chrome gave up lands here rather than in the list
            beside it. Inline hosts own their own width. */
@@ -1302,6 +1338,7 @@ export function SessionDetail({
               ancestor). The resize handle inside it is a child without the
               attribute, so col-resize dragging still wins there. */}
           <div
+            ref={bodyRowRef}
             className={styles.body_row}
             data-tauri-drag-region
             /* The band the transcript, the composer and the drawer all hold
@@ -1313,6 +1350,9 @@ export function SessionDetail({
                 : undefined
             }
           >
+            {/* Not visible and not in flow — see the `.fit_probe` rule and the
+                measurement above. */}
+            <div ref={fitProbeRef} className={styles.fit_probe} aria-hidden />
             <div className={styles.main_col}>
               {/* Hero banner. The session's identity and the controls that act
                   on it, as one surface rather than a title row with a tab strip
