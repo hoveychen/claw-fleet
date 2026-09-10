@@ -3,7 +3,7 @@
 // first open via its relay method and renders a compact mobile layout.
 
 import { useEffect, useState } from "react";
-import { Check, CheckCircle2, ChevronRight, ListTodo, NotebookPen, Waypoints, Workflow } from "lucide-react";
+import { Check, CheckCircle2, ChevronRight, ListTodo, NotebookPen, Search, Waypoints, Workflow } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { splitMarker } from "./planMatrix";
 import ReactMarkdown from "react-markdown";
@@ -15,6 +15,7 @@ import type {
   DecisionHistoryRecord,
   HandoffChain,
   NoteFile,
+  NoteMatch,
   SessionInfo,
   TaskPlanDetail,
   TokenBreakdown,
@@ -551,14 +552,42 @@ export function NotesTab({
     sessionId: session.id,
   });
   const [open, setOpen] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   if (data === "loading") return <Hint>{t("加载笔记…")}</Hint>;
   if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
   if (data.length === 0)
     return <EmptyState compact icon={NotebookPen} title={t("该会话没有留下笔记")} />;
 
+  const search = (
+    <div className={styles.searchWrap}>
+      <span className={styles.searchIcon}>
+        <Search size={14} />
+      </span>
+      <input
+        className={styles.search}
+        type="search"
+        placeholder={t("搜索笔记（区分大小写）")}
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+    </div>
+  );
+
+  // 搜索中:这一面整体换成命中行,点一行展开那份笔记(词由 relay 侧原样匹配,
+  // 手机上不再本地二次过滤 —— 两套匹配规则会给出两个「命中数」)。
+  if (query.trim()) {
+    return (
+      <div className={styles.stack}>
+        {search}
+        <NoteHits session={session} client={client} query={query.trim()} />
+      </div>
+    );
+  }
+
   return (
     <div className={styles.stack}>
+      {search}
       {data.map((f) => {
         const id = `${f.sessionId}:${f.path}`;
         return (
@@ -573,6 +602,71 @@ export function NotesTab({
         );
       })}
     </div>
+  );
+}
+
+/** 命中行列表。每行点开就是那份笔记的正文卡（和不搜索时同一个组件），所以
+ *  「搜到 → 读全文」不需要先清空搜索框再去目录里找。 */
+function NoteHits({
+  session,
+  client,
+  query,
+}: {
+  session: SessionInfo;
+  client: FleetTransport | null;
+  query: string;
+}) {
+  const hits = useRelayData<NoteMatch[]>(client, "session_notes_search", {
+    sessionId: session.id,
+    query,
+  });
+  const [open, setOpen] = useState<string | null>(null);
+
+  if (hits === "loading") return <Hint>{t("搜索中…")}</Hint>;
+  if (hits === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (hits.length === 0)
+    return <EmptyState compact icon={NotebookPen} title={t("没有匹配的行")} />;
+
+  return (
+    <>
+      {hits.map((m) => {
+        const id = `${m.sessionId}:${m.path}:${m.line}`;
+        const isOpen = open === id;
+        return (
+          <div key={id} className={styles.planCard}>
+            <div
+              className={styles.hopHead}
+              role="button"
+              tabIndex={0}
+              aria-expanded={isOpen}
+              style={{ cursor: "pointer" }}
+              onClick={() => setOpen((cur) => (cur === id ? null : id))}
+            >
+              <ChevronRight
+                size={14}
+                className={styles.hopChevron}
+                style={{ transform: isOpen ? "rotate(90deg)" : "none" }}
+              />
+              <span className={styles.hopBadge}>
+                {m.sessionId === session.id
+                  ? t("本会话")
+                  : t("前任 {0}", m.sessionId.slice(0, 8))}
+              </span>
+              <span className={styles.recordTime}>
+                {m.path}:{m.line}
+              </span>
+            </div>
+            <div className={styles.hitLine}>{m.text.trim()}</div>
+            {isOpen && (
+              <NoteBody
+                file={{ path: m.path, sessionId: m.sessionId, bytes: 0, updatedMs: 0 }}
+                client={client}
+              />
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
