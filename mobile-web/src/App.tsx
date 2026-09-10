@@ -1223,6 +1223,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             client={client}
             todayUsage={todayUsage}
             perDevice={usageRows}
+            activeDeviceLabel={deviceLabelOf(activeDeviceId)}
             onBack={() => setShowUsage(false)}
           />
         </>
