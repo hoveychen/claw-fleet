@@ -275,42 +275,6 @@
   border-top: 1px solid var(--color-border);
   overflow-y: auto;
 }
-.item {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 5px 2px;
-  font-size: var(--t-aux, 12px);
-  line-height: 1.5;
-  color: var(--color-text);
-}
-.item[data-done="true"] {
-  color: var(--color-text-dim);
-}
-.box {
-  flex-shrink: 0;
-  font-size: var(--t-meta, 11px);
-  color: var(--color-text-dim);
-}
-.marker {
-  flex-shrink: 0;
-  font-size: var(--t-meta, 11px);
-  font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  color: var(--color-text-dim);
-}
-/* Clamped until tapped — plan items here run to several paragraphs. */
-.itemText {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.itemText[data-open="true"] {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 .doneFold {
   display: inline-flex;
   align-items: center;
