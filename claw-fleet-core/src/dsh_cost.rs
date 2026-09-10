@@ -218,12 +218,34 @@ struct PeakRates {
 /// and DeepSeek's own announcement.
 ///
 /// A model absent from this table is **not** priced — see [`price_metered`].
+///
+/// **Re-read 2026-09-10**, when V4.1 Flash landed. The pricing page now carries
+/// exactly two columns — `deepseek-flash` (DeepSeek-V4.1-Flash) and
+/// `deepseek-v4-pro` — and its first footnote retires the two older flash ids:
+/// they are "still accepted, but the corresponding models have been retired,
+/// their requests are served by the DeepSeek-V4.1-Flash model and billed at the
+/// Flash price". So the three flash rows below all carry the *same*, and now
+/// distinctly cheaper, numbers: 0.006 / 0.30 / 1.20 peak, down from
+/// 0.014 / 0.44 / 1.32. Keeping the old numbers on the alias rows would have
+/// over-charged every future flash call in the panel by roughly a third.
+///
+/// Already-priced calls keep the number they were frozen with (see
+/// [`MeteredPrice`]) — that is not staleness but the point: those calls really
+/// were billed at the rates in force when they ran, and this table only ever
+/// decides what a *newly* seen call costs.
+///
+/// One dated change is deliberately **not** pre-programmed here: the page's
+/// second footnote says that from 12:00 Beijing time on 2026-09-14, requests to
+/// `deepseek-v4-pro` are also routed to V4.1 Flash and billed at the Flash
+/// price, until a V4.1 Pro ships. Encoding that as a date switch would mean
+/// guessing what the events will then say — whether calls keep self-reporting
+/// as `deepseek-v4-pro` at all. Re-measure on the day and edit the Pro row.
 const DEEPSEEK_PEAK_RATES: &[PeakRates] = &[
     PeakRates {
-        model: "deepseek-v4-flash",
-        cache_hit_input: 0.014,
-        cache_miss_input: 0.44,
-        output: 1.32,
+        model: "deepseek-flash",
+        cache_hit_input: 0.006,
+        cache_miss_input: 0.30,
+        output: 1.20,
     },
     PeakRates {
         model: "deepseek-v4-pro",
@@ -231,12 +253,22 @@ const DEEPSEEK_PEAK_RATES: &[PeakRates] = &[
         cache_miss_input: 1.32,
         output: 3.96,
     },
-    // Published at flash's rates, as its own row on the pricing page.
+    // Retired aliases: no longer their own column on the pricing page, served by
+    // V4.1 Flash and billed at its price. Kept because the ids are still live on
+    // the wire (dsh 0.1.5-rc.1 still offers both, and this machine's
+    // `agent-default-model` still names `-vision-exp`), and an id missing from
+    // this table is not priced at all.
+    PeakRates {
+        model: "deepseek-v4-flash",
+        cache_hit_input: 0.006,
+        cache_miss_input: 0.30,
+        output: 1.20,
+    },
     PeakRates {
         model: "deepseek-v4-flash-vision-exp",
-        cache_hit_input: 0.014,
-        cache_miss_input: 0.44,
-        output: 1.32,
+        cache_hit_input: 0.006,
+        cache_miss_input: 0.30,
+        output: 1.20,
     },
 ];
 
@@ -1328,10 +1360,10 @@ mod tests {
     #[test]
     fn prices_off_peak_at_half_the_peak_rate() {
         // 1M cache-miss input + 1M output on flash, so the arithmetic is the
-        // published rate itself: peak 0.44 + 1.32 = 1.76, off-peak half of that.
+        // published rate itself: peak 0.30 + 1.20 = 1.50, off-peak half of that.
         let call = |at_ms| MeteredCall {
             provider: "deepseek-official".into(),
-            model: "deepseek-v4-flash".into(),
+            model: "deepseek-flash".into(),
             seq: Some(20),
             at_ms,
             input_tokens: 1_000_000,
@@ -1340,15 +1372,15 @@ mod tests {
         };
         let (peak_total, peak_n, off_n, unknown) = priced(&[call(PEAK_MS)]);
         assert!(
-            (peak_total - 1.76).abs() < 1e-9,
-            "peak flash 1M in + 1M out must be $1.76, got {peak_total}"
+            (peak_total - 1.50).abs() < 1e-9,
+            "peak flash 1M in + 1M out must be $1.50, got {peak_total}"
         );
         assert_eq!((peak_n, off_n, unknown), (1, 0, 0));
 
         let (off_total, peak_n, off_n, _) = priced(&[call(OFF_PEAK_MS)]);
         assert!(
-            (off_total - 0.88).abs() < 1e-9,
-            "off-peak is exactly half — $0.88 expected, got {off_total}"
+            (off_total - 0.75).abs() < 1e-9,
+            "off-peak is exactly half — $0.75 expected, got {off_total}"
         );
         assert_eq!((peak_n, off_n), (0, 1));
     }
@@ -1392,26 +1424,33 @@ mod tests {
         );
     }
 
-    /// The vision model is on the same published table at flash's rates. Leaving
-    /// it out is safe (it lands in `unknown` rather than being guessed at) but
-    /// under-reports every session that used it.
+    /// The two retired flash aliases price identically to `deepseek-flash`.
+    ///
+    /// Dropping them from the table would be safe (they would land in `unknown`
+    /// rather than be guessed at) but would under-report every session that used
+    /// them — and this machine's dsh default still names `-vision-exp`. Holding
+    /// them at their *old*, dearer numbers would be worse still: DeepSeek serves
+    /// both names off V4.1 Flash now and bills them at the Flash price, so the
+    /// panel would overstate them by about a third.
     #[test]
-    fn the_vision_model_is_priced_at_flash_rates() {
-        let (total, peak_n, off_n, unknown) = priced(&[MeteredCall {
-            provider: "deepseek-official".into(),
-            model: "deepseek-v4-flash-vision-exp".into(),
-            seq: Some(20),
-            at_ms: PEAK_MS,
-            input_tokens: 1_000_000,
-            cache_read_tokens: 1_000_000,
-            output_tokens: 1_000_000,
-        }]);
-        // Peak flash: 0.44 miss + 0.014 hit + 1.32 out.
-        assert!(
-            (total - 1.774).abs() < 1e-9,
-            "expected 0.44 + 0.014 + 1.32 = $1.774, got {total}"
-        );
-        assert_eq!((peak_n, off_n, unknown), (1, 0, 0));
+    fn the_retired_flash_aliases_are_priced_at_v41_flash_rates() {
+        for model in ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"] {
+            let (total, peak_n, off_n, unknown) = priced(&[MeteredCall {
+                provider: "deepseek-official".into(),
+                model: model.into(),
+                seq: Some(20),
+                at_ms: PEAK_MS,
+                input_tokens: 1_000_000,
+                cache_read_tokens: 1_000_000,
+                output_tokens: 1_000_000,
+            }]);
+            // Peak flash: 0.30 miss + 0.006 hit + 1.20 out.
+            assert!(
+                (total - 1.506).abs() < 1e-9,
+                "{model}: expected 0.30 + 0.006 + 1.20 = $1.506, got {total}"
+            );
+            assert_eq!((peak_n, off_n, unknown), (1, 0, 0), "{model}");
+        }
     }
 
     /// The window boundaries themselves, since an off-by-one hour would misprice
@@ -1484,12 +1523,13 @@ mod tests {
     }
 
     /// One flash call, 1M cache-miss input + 1M output, on Saturday
-    /// 2026-08-22 02:00 UTC. Today's table prices it off-peak at $0.88; the
-    /// same call was priced at peak, $1.76, before the Mon–Fri rule landed.
+    /// 2026-08-22 02:00 UTC. Today's table prices it off-peak at $0.75; the
+    /// same call was priced at peak, and at the dearer pre-V4.1 rates, $1.76,
+    /// before the Mon–Fri rule and the V4.1 price cut landed.
     fn weekend_call(seq: Option<i64>) -> MeteredCall {
         MeteredCall {
             provider: "deepseek-official".into(),
-            model: "deepseek-v4-flash".into(),
+            model: "deepseek-flash".into(),
             seq,
             at_ms: 1_787_364_000_000,
             input_tokens: 1_000_000,
@@ -1521,7 +1561,7 @@ mod tests {
         assert!(
             (usd - 1.76).abs() < 1e-9,
             "the frozen price must survive a rule change: expected $1.76, got \
-             {usd} (today's table would say $0.88)"
+             {usd} (today's table would say $0.75)"
         );
         assert_eq!(
             out[0].peak,
@@ -1541,13 +1581,13 @@ mod tests {
     fn a_first_pricing_is_handed_back_to_be_written_down() {
         let (out, fresh) = ledger(TEST_SESSION, &CostCache::default(), &[weekend_call(Some(20))]);
         assert!(
-            (out[0].usd.expect("priced") - 0.88).abs() < 1e-9,
+            (out[0].usd.expect("priced") - 0.75).abs() < 1e-9,
             "priced at today's table"
         );
         assert_eq!(
             fresh.get(&metered_key(TEST_SESSION, 20)),
             Some(&MeteredPrice {
-                usd: 0.88,
+                usd: 0.75,
                 peak: false
             }),
             "the computed price is owed to the cache under its session:seq key"
@@ -1560,7 +1600,7 @@ mod tests {
     #[test]
     fn a_call_with_no_seq_is_priced_but_not_cached() {
         let (out, fresh) = ledger(TEST_SESSION, &CostCache::default(), &[weekend_call(None)]);
-        assert!((out[0].usd.expect("priced") - 0.88).abs() < 1e-9);
+        assert!((out[0].usd.expect("priced") - 0.75).abs() < 1e-9);
         assert_eq!(out[0].peak, Some(false));
         assert!(fresh.is_empty(), "unaddressable, so uncacheable");
     }
@@ -1570,7 +1610,7 @@ mod tests {
     #[test]
     fn an_empty_session_id_caches_nothing() {
         let (out, fresh) = ledger("", &CostCache::default(), &[weekend_call(Some(20))]);
-        assert!((out[0].usd.expect("priced") - 0.88).abs() < 1e-9);
+        assert!((out[0].usd.expect("priced") - 0.75).abs() < 1e-9);
         assert!(fresh.is_empty(), "no session id, no keyspace");
     }
 
@@ -1580,7 +1620,7 @@ mod tests {
     fn a_weekend_call_is_billed_at_the_off_peak_half() {
         let (total, peak_n, off_n, _) = priced(&[MeteredCall {
             provider: "deepseek-official".into(),
-            model: "deepseek-v4-flash".into(),
+            model: "deepseek-flash".into(),
             seq: Some(20),
             // Saturday 2026-08-22 02:00 UTC.
             at_ms: 1_787_364_000_000,
@@ -1589,8 +1629,8 @@ mod tests {
             output_tokens: 1_000_000,
         }]);
         assert!(
-            (total - 0.88).abs() < 1e-9,
-            "weekend flash 1M in + 1M out is off-peak $0.88, got {total}"
+            (total - 0.75).abs() < 1e-9,
+            "weekend flash 1M in + 1M out is off-peak $0.75, got {total}"
         );
         assert_eq!((peak_n, off_n), (0, 1));
     }
