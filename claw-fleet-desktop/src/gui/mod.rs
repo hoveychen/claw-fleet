@@ -459,45 +459,67 @@ pub fn update_tray(app: &tauri::AppHandle, sessions: &[SessionInfo]) {
     // Cache sessions for use by background usage refresh.
     let state = app.state::<AppState>();
     *state.cached_sessions.lock().unwrap() = sessions.to_vec();
-    // Tray operations (set_menu, set_tooltip, set_title) touch NSStatusItem on
-    // macOS and MUST run on the main thread.  This function is often called
-    // from background scanner threads, so dispatch rather than calling directly.
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || rebuild_tray(&handle));
+    refresh_tray(app);
 }
 
 pub fn update_tray_usage(app: &tauri::AppHandle, summaries: Vec<ui_types::SourceUsageSummary>) {
     let state = app.state::<AppState>();
     *state.cached_usage.lock().unwrap() = summaries;
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || rebuild_tray(&handle));
+    refresh_tray(app);
 }
 
 /// How long after a tray click we assume the menu is still open and defer
 /// rebuilds so macOS doesn't yank it away from the user.
 const TRAY_MENU_GRACE_SECS: u64 = 15;
 
-fn rebuild_tray(app: &tauri::AppHandle) {
-    let state = app.state::<AppState>();
-    let sessions = state.cached_sessions.lock().unwrap().clone();
+/// Everything the tray displays, derived from the caches.
+///
+/// It exists so the derivation can happen on whatever thread asked for the
+/// refresh, leaving the main thread only the AppKit calls — see [`refresh_tray`].
+struct TrayModel {
+    /// Active sessions only (main first, then subagents) — the menu's rows.
+    /// Cloned rather than borrowed because the model crosses to the main thread.
+    active: Vec<SessionInfo>,
+    sub_count: usize,
+    total: usize,
+    summaries: Vec<ui_types::SourceUsageSummary>,
+    /// Hash of everything above; equal fingerprints mean an identical tray.
+    fingerprint: u64,
+    tooltip: String,
+}
+
+/// Derive the tray model from the caches. Cheap enough for any thread: it
+/// clones the *active* sessions, not the whole scanned list.
+fn compute_tray_model(state: &AppState) -> TrayModel {
+    // Filter while the lock is held so only the handful of active sessions is
+    // cloned. Cloning the full list here is what used to cost ~1300 SessionInfo
+    // copies per refresh — see `refresh_tray`.
+    let active: Vec<SessionInfo> = {
+        let sessions = state.cached_sessions.lock().unwrap();
+        sessions.iter().filter(|s| is_session_active(s)).cloned().collect()
+    };
     let summaries = state.cached_usage.lock().unwrap().clone();
+    tray_model_from(active, summaries)
+}
 
+/// The derivation itself, over an already-filtered active set — split out from
+/// [`compute_tray_model`] so it is reachable from tests without an `AppState`.
+fn tray_model_from(
+    mut active: Vec<SessionInfo>,
+    summaries: Vec<ui_types::SourceUsageSummary>,
+) -> TrayModel {
     // Show all active sessions (main + subagents), sorted: main first, then subs.
-    let mut active_all: Vec<&SessionInfo> = sessions.iter()
-        .filter(|s| is_session_active(s))
-        .collect();
-    active_all.sort_by_key(|s| s.is_subagent);
-    let active_main = &active_all; // alias for build_tray_menu signature
-    let sub_count = active_all.iter().filter(|s| s.is_subagent).count();
-    let total = active_all.len();
+    active.sort_by_key(|s| s.is_subagent);
+    let sub_count = active.iter().filter(|s| s.is_subagent).count();
+    let total = active.len();
 
-    // Compute a fingerprint of the tray content so we can skip redundant
-    // menu rebuilds — calling set_menu() closes the menu if it is open.
+    // Fingerprint of the tray content, so we can skip redundant menu rebuilds —
+    // calling set_menu() closes the menu if it is open.
     let fingerprint = {
         let mut h = DefaultHasher::new();
         total.hash(&mut h);
         sub_count.hash(&mut h);
-        for s in active_main.iter() {
+        for s in active.iter() {
             s.workspace_name.hash(&mut h);
             s.is_subagent.hash(&mut h);
             status_label(&s.status).hash(&mut h);
@@ -512,49 +534,79 @@ fn rebuild_tray(app: &tauri::AppHandle) {
         h.finish()
     };
 
-    let prev = {
-        let mut fp = state.tray_fingerprint.lock().unwrap();
-        let old = *fp;
-        *fp = fingerprint;
-        old
-    };
-
-    // Update tooltip & title (cheap, won't close menu)
     let tooltip = if total == 0 {
         "Claw Fleet".to_string()
     } else {
         format!(
             "Claw Fleet — {} active  (Main: {}  Sub: {})",
-            total, active_main.len(), sub_count
+            total, total, sub_count
         )
     };
 
+    TrayModel { active, sub_count, total, summaries, fingerprint, tooltip }
+}
+
+/// Refresh the tray from the caches. Safe to call from **any** thread.
+///
+/// Only the AppKit calls (`set_menu` / `set_tooltip` / `set_title` touch
+/// NSStatusItem) have to run on the main thread; deriving what to show does
+/// not. Splitting them matters because the main thread is also what carries
+/// every Tauri command's *answer* back into the webview — see the header of
+/// `app/invokeProbe.ts`. This used to dispatch the whole job, so each of the
+/// ~1300-session scans (back-to-back on a busy box) and every 10s account
+/// refresh put a full clone of the scanned session list plus a hash of it on
+/// the main thread, whether or not the tray had changed. Now an unchanged tray
+/// — the overwhelmingly common case — costs the main thread nothing at all.
+pub fn refresh_tray(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let model = compute_tray_model(&state);
+
+    let prev = {
+        let mut fp = state.tray_fingerprint.lock().unwrap();
+        let old = *fp;
+        *fp = model.fingerprint;
+        old
+    };
+    // Tooltip and title are derived purely from hashed inputs, so an unchanged
+    // fingerprint means there is nothing to set anywhere.
+    if model.fingerprint == prev {
+        return;
+    }
+
+    // If the menu is presumed open (recent tray click), defer the *menu*
+    // rebuild so we don't close it under the user's cursor. Tooltip and title
+    // are safe to set meanwhile.
+    let within_grace = state
+        .tray_last_click
+        .lock()
+        .unwrap()
+        .map_or(false, |t| t.elapsed() < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS));
+    if within_grace {
+        *state.tray_rebuild_pending.lock().unwrap() = true;
+    } else {
+        *state.tray_rebuild_pending.lock().unwrap() = false;
+    }
+
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || apply_tray_model(&handle, model, within_grace));
+}
+
+/// The main-thread half: hand the finished model to AppKit.
+fn apply_tray_model(app: &tauri::AppHandle, model: TrayModel, menu_deferred: bool) {
     let Some(tray) = app.tray_by_id("main") else { return };
-    let _ = tray.set_tooltip(Some(&tooltip));
+    let _ = tray.set_tooltip(Some(&model.tooltip));
     #[cfg(target_os = "macos")]
     {
-        let title = if total > 0 { format!("{}", total) } else { String::new() };
+        let title = if model.total > 0 { format!("{}", model.total) } else { String::new() };
         let _ = tray.set_title(Some(&title));
     }
 
-    // Only rebuild the menu when content actually changed.
-    if fingerprint != prev {
-        // If the menu is presumed open (recent tray click), defer the rebuild
-        // so we don't close it under the user's cursor.
-        let within_grace = state
-            .tray_last_click
-            .lock()
-            .unwrap()
-            .map_or(false, |t| t.elapsed() < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS));
-        if within_grace {
-            *state.tray_rebuild_pending.lock().unwrap() = true;
-            return;
-        }
-
-        if let Ok(menu) = build_tray_menu(app, active_main, sub_count, total, &summaries) {
-            let _ = tray.set_menu(Some(menu));
-        }
-        *state.tray_rebuild_pending.lock().unwrap() = false;
+    if menu_deferred {
+        return;
+    }
+    let active: Vec<&SessionInfo> = model.active.iter().collect();
+    if let Ok(menu) = build_tray_menu(app, &active, model.sub_count, model.total, &model.summaries) {
+        let _ = tray.set_menu(Some(menu));
     }
 }
 
@@ -577,8 +629,9 @@ fn flush_pending_tray_rebuild(app: &tauri::AppHandle) {
     // Force a rebuild by resetting the fingerprint so the next call rebuilds.
     *state.tray_fingerprint.lock().unwrap() = 0;
     *state.tray_rebuild_pending.lock().unwrap() = false;
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || rebuild_tray(&handle));
+    // Already on the flush timer's own thread; `refresh_tray` hops to the main
+    // thread itself, and only for the AppKit half.
+    refresh_tray(app);
 }
 
 /// Render a utilization value (0.0–1.0) as a percentage string, e.g. `45%`.
@@ -1474,7 +1527,7 @@ pub fn run() {
             });
 
             // ── Tray icon ────────────────────────────────────────────────────
-            // Build an initial menu; it will be rebuilt dynamically by rebuild_tray().
+            // Build an initial menu; it will be rebuilt dynamically by refresh_tray().
             let tray_menu = MenuBuilder::new(app)
                 .item(&MenuItemBuilder::new("No Active Agents").id("info-header").enabled(false).build(app)?)
                 .item(&PredefinedMenuItem::separator(app)?)
@@ -1866,3 +1919,72 @@ pub fn run() {
             }
         });
 }
+
+#[cfg(test)]
+mod tray_model_tests {
+    use super::*;
+    use session::SessionStatus;
+
+    fn session(name: &str, status: SessionStatus, is_subagent: bool) -> SessionInfo {
+        SessionInfo {
+            workspace_name: name.to_string(),
+            status,
+            is_subagent,
+            ..Default::default()
+        }
+    }
+
+    /// The tray only ever shows active sessions, so an idle one must not reach
+    /// the model — nor the fingerprint, or every idle status flip on a
+    /// thousand-session box would wake the main thread for nothing.
+    #[test]
+    fn idle_sessions_are_excluded_and_subagents_sort_last() {
+        let model = tray_model_from(
+            vec![
+                session("sub", SessionStatus::Thinking, true),
+                session("main", SessionStatus::Executing, false),
+            ],
+            vec![],
+        );
+        assert_eq!(model.total, 2);
+        assert_eq!(model.sub_count, 1);
+        assert_eq!(model.active[0].workspace_name, "main");
+        assert_eq!(model.active[1].workspace_name, "sub");
+        assert!(model.tooltip.contains("2 active"));
+    }
+
+    /// The load-bearing property of the split: an unchanged tray must produce
+    /// an unchanged fingerprint, because that equality is the only thing that
+    /// keeps a rescan (back-to-back on a busy box) off the main thread.
+    #[test]
+    fn fingerprint_is_stable_across_identical_inputs() {
+        let build = || tray_model_from(vec![session("w", SessionStatus::Thinking, false)], vec![]);
+        assert_eq!(build().fingerprint, build().fingerprint);
+    }
+
+    /// …and must still change when something the menu displays changes.
+    #[test]
+    fn fingerprint_tracks_status_and_count() {
+        let base = tray_model_from(vec![session("w", SessionStatus::Thinking, false)], vec![]);
+        let other_status =
+            tray_model_from(vec![session("w", SessionStatus::Executing, false)], vec![]);
+        let other_count = tray_model_from(
+            vec![
+                session("w", SessionStatus::Thinking, false),
+                session("x", SessionStatus::Thinking, false),
+            ],
+            vec![],
+        );
+        assert_ne!(base.fingerprint, other_status.fingerprint);
+        assert_ne!(base.fingerprint, other_count.fingerprint);
+    }
+
+    /// An empty tray keeps the plain product name as its tooltip.
+    #[test]
+    fn empty_tray_tooltip() {
+        let model = tray_model_from(vec![], vec![]);
+        assert_eq!(model.tooltip, "Claw Fleet");
+        assert_eq!(model.total, 0);
+    }
+}
+

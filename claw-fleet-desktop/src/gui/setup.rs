@@ -467,8 +467,7 @@ pub(crate) async fn get_account_info(
             cached.insert(0, summary);
         }
     }
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || rebuild_tray(&handle));
+    refresh_tray(&app);
     Ok(info)
 }
 
@@ -506,7 +505,6 @@ pub(crate) async fn get_source_usage(
             }
         }
     }
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || rebuild_tray(&handle));
+    refresh_tray(&app);
     Ok(val)
 }
