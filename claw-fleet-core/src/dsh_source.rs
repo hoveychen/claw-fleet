@@ -77,6 +77,17 @@ const POLL_INTERVAL: Duration = Duration::from_secs(3);
 /// snapshot build.
 const HISTORY_CURSOR_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The same wait, for the background re-pricing walk instead of a read someone
+/// is looking at.
+///
+/// The 5s budget above buys a *transcript* — a human opened a session and the
+/// alternative to waiting is an empty pane. Re-pricing is neither seen nor
+/// urgent: it runs off the poll tick, its result is one number on a card, and
+/// the next tick will try again. Meanwhile the wait is not free — it runs inside
+/// `scan_sessions`, so every second of it is a second the whole rescan (and, via
+/// the shared scan gate, the filesystem-watch rescan behind it) is stalled.
+const SPEND_CURSOR_TIMEOUT: Duration = Duration::from_millis(750);
+
 /// How long one `session/list` answer may be reused for a later roster scan.
 ///
 /// Deliberately shorter than [`POLL_INTERVAL`], so the registry's own cadence
@@ -235,7 +246,19 @@ impl DshSource {
         before_seq: Option<i64>,
         max: Option<usize>,
     ) -> Result<Value, String> {
-        let through = self.history_cursor(id)?;
+        self.fetch_history_within(id, before_seq, max, HISTORY_CURSOR_TIMEOUT)
+    }
+
+    /// [`Self::fetch_history`] with an explicit cursor budget — see
+    /// [`SPEND_CURSOR_TIMEOUT`].
+    fn fetch_history_within(
+        &self,
+        id: &str,
+        before_seq: Option<i64>,
+        max: Option<usize>,
+        cursor_budget: Duration,
+    ) -> Result<Value, String> {
+        let through = self.history_cursor(id, cursor_budget)?;
         let mut request = json!({
             "address": { "kind": "session", "sessionId": id },
             "throughSeq": through,
@@ -258,14 +281,14 @@ impl DshSource {
     /// Touching the client first is deliberate: the watcher only exists once a
     /// server does, and the cursor only exists once that watcher has a follow
     /// stream open on this session.
-    fn history_cursor(&self, id: &str) -> Result<u64, String> {
+    fn history_cursor(&self, id: &str, budget: Duration) -> Result<u64, String> {
         self.with_client(|_| Ok(()))?;
         let watcher = lock(watcher_slot());
         let watcher = watcher
             .as_ref()
             .ok_or_else(|| "dsh: no event watcher to read a history cursor from".to_string())?;
         watcher
-            .cursor_for_history(id, HISTORY_CURSOR_TIMEOUT)
+            .cursor_for_history(id, budget)
             .ok_or_else(|| format!("dsh: {id} published no history cursor"))
     }
 
@@ -762,24 +785,53 @@ fn refresh_one_stale_spend(
     roster_updated: &[i64],
     spend: &std::collections::BTreeMap<String, crate::dsh_cost::SessionSpend>,
 ) {
-    let Some(idx) = pick_stale_spend(infos, roster_updated, spend) else {
+    let idx = {
+        let failed = lock(spend_failures());
+        pick_stale_spend(infos, roster_updated, spend, &failed)
+    };
+    let Some(idx) = idx else {
         return;
     };
     let updated = roster_updated[idx];
     let info = &mut infos[idx];
     match crate::dsh_cost::refresh_session_spend(&info.jsonl_path, updated) {
-        Ok(fresh) => info.total_cost_usd = fresh.usd.unwrap_or(0.0),
-        Err(e) => crate::log_debug(&format!("dsh spend refresh {}: {e}", info.id)),
+        Ok(fresh) => {
+            info.total_cost_usd = fresh.usd.unwrap_or(0.0);
+            lock(spend_failures()).remove(&info.id);
+        }
+        Err(e) => {
+            // Remember the exact `updatedAt` this failed at, so the next poll
+            // does not pick the same session again. Without this the pick is a
+            // closed loop: a failed refresh writes no cache entry, so
+            // `spend_is_current` stays false and the same session is chosen
+            // forever. Measured on 2026-09-10: one session that never published
+            // a history cursor was retried 14472 times over 36 hours, each
+            // attempt burning the full cursor budget — which is what made the
+            // dsh poll tick cost 5–9s and starve every other rescan.
+            lock(spend_failures()).insert(info.id.clone(), updated);
+            crate::log_debug(&format!("dsh spend refresh {}: {e}", info.id));
+        }
     }
 }
 
+/// Sessions whose last re-price attempt failed, and the `updatedAt` it failed
+/// at. Process-memory only: a restart, or the session running one more turn, is
+/// enough to earn another attempt.
+static SPEND_FAILURES: OnceLock<Mutex<std::collections::HashMap<String, i64>>> = OnceLock::new();
+
+fn spend_failures() -> &'static Mutex<std::collections::HashMap<String, i64>> {
+    SPEND_FAILURES.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
 /// Which session to re-price this poll, if any: the most recently persisted one
-/// whose recorded spend predates its current `updatedAt`. Pure, so the choice is
+/// whose recorded spend predates its current `updatedAt` **and** that we have
+/// not already failed to price at that same `updatedAt`. Pure, so the choice is
 /// testable without a server.
 fn pick_stale_spend(
     infos: &[SessionInfo],
     roster_updated: &[i64],
     spend: &std::collections::BTreeMap<String, crate::dsh_cost::SessionSpend>,
+    failed: &std::collections::HashMap<String, i64>,
 ) -> Option<usize> {
     infos
         .iter()
@@ -787,6 +839,7 @@ fn pick_stale_spend(
         .filter(|(i, info)| {
             let updated = roster_updated.get(*i).copied().unwrap_or_default();
             !crate::dsh_cost::spend_is_current(spend.get(&info.id), updated)
+                && failed.get(&info.id) != Some(&updated)
         })
         .max_by_key(|(i, _)| roster_updated.get(*i).copied().unwrap_or_default())
         .map(|(idx, _)| idx)
@@ -1222,9 +1275,21 @@ pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
 /// here has to re-derive them — and unlike a one-shot read it reaches the whole
 /// history rather than whatever one page happened to hold.
 pub fn session_events(uri: &str) -> Result<Vec<Value>, String> {
+    session_events_within(uri, HISTORY_CURSOR_TIMEOUT)
+}
+
+/// [`session_events`] with an explicit history-cursor budget.
+///
+/// The background re-pricing walk passes [`SPEND_CURSOR_TIMEOUT`]: it runs
+/// inside `scan_sessions`, so it must not sit on the interactive budget.
+pub fn session_events_for_pricing(uri: &str) -> Result<Vec<Value>, String> {
+    session_events_within(uri, SPEND_CURSOR_TIMEOUT)
+}
+
+fn session_events_within(uri: &str, cursor_budget: Duration) -> Result<Vec<Value>, String> {
     let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
     let source = DshSource::new();
-    raw_history_with(|before, max| source.fetch_history(id, before, max))
+    raw_history_with(|before, max| source.fetch_history_within(id, before, max, cursor_budget))
 }
 
 /// Walk `session/page` backwards and keep the **durable events themselves**.
@@ -2080,6 +2145,10 @@ mod spend_refresh_tests {
         }
     }
 
+    fn none() -> std::collections::HashMap<String, i64> {
+        std::collections::HashMap::new()
+    }
+
     fn spend(at: i64) -> SessionSpend {
         SessionSpend {
             usd: Some(0.5),
@@ -2097,11 +2166,11 @@ mod spend_refresh_tests {
         let updated = [100, 200];
         let mut cache = BTreeMap::new();
         cache.insert("b".to_string(), spend(200));
-        assert_eq!(pick_stale_spend(&infos, &updated, &cache), Some(0));
+        assert_eq!(pick_stale_spend(&infos, &updated, &cache, &none()), Some(0));
 
         cache.insert("a".to_string(), spend(100));
         assert_eq!(
-            pick_stale_spend(&infos, &updated, &cache),
+            pick_stale_spend(&infos, &updated, &cache, &none()),
             None,
             "nothing to do once every session is priced at its current updatedAt"
         );
@@ -2118,7 +2187,7 @@ mod spend_refresh_tests {
             ("old".to_string(), spend(50)),
             ("new".to_string(), spend(200)),
         ]);
-        assert_eq!(pick_stale_spend(&infos, &updated, &cache), Some(1));
+        assert_eq!(pick_stale_spend(&infos, &updated, &cache, &none()), Some(1));
     }
 
     /// The staleness clock must be the roster's `updatedAt`, not the overlaid
@@ -2134,7 +2203,60 @@ mod spend_refresh_tests {
         let infos = [running];
         let updated = [200];
         let cache = BTreeMap::from([("live".to_string(), spend(200))]);
-        assert_eq!(pick_stale_spend(&infos, &updated, &cache), None);
+        assert_eq!(pick_stale_spend(&infos, &updated, &cache, &none()), None);
+    }
+
+    /// A session that cannot be priced must not be retried forever.
+    ///
+    /// A failed refresh writes no cache entry, so `spend_is_current` stays false
+    /// and — before the failure map — the same session was picked again on the
+    /// very next poll. Measured on 2026-09-10: one session that never published
+    /// a history cursor was retried 14472 times across 36 hours, each attempt
+    /// burning the whole cursor budget inside `scan_sessions`.
+    #[test]
+    fn a_session_that_failed_to_price_is_not_picked_again_at_the_same_updated_at() {
+        let infos = [info("broken"), info("ok")];
+        let updated = [300, 100];
+        // Neither is priced, so both are stale; "broken" would win on recency.
+        let cache = BTreeMap::from([("ok".to_string(), spend(50))]);
+        assert_eq!(pick_stale_spend(&infos, &updated, &cache, &none()), Some(0));
+
+        let failed = std::collections::HashMap::from([("broken".to_string(), 300)]);
+        assert_eq!(
+            pick_stale_spend(&infos, &updated, &cache, &failed),
+            Some(1),
+            "the poll must move on to the next stale session, not re-pick the \
+             one it just failed on",
+        );
+    }
+
+    /// The skip is scoped to the `updatedAt` it failed at, not to the session:
+    /// one more turn means genuinely new history, which is worth another try.
+    #[test]
+    fn a_failed_session_is_retried_once_it_runs_again() {
+        let infos = [info("broken")];
+        let cache = BTreeMap::new();
+        let failed = std::collections::HashMap::from([("broken".to_string(), 300)]);
+
+        assert_eq!(pick_stale_spend(&infos, &[300], &cache, &failed), None);
+        assert_eq!(
+            pick_stale_spend(&infos, &[400], &cache, &failed),
+            Some(0),
+            "a new updatedAt means new history — the old failure must not \
+             blacklist the session permanently",
+        );
+    }
+
+    /// Re-pricing runs off the poll tick and nobody is looking at its result, so
+    /// it must not wait on the budget that exists for a transcript someone
+    /// opened. Every second it waits stalls the whole `scan_sessions` call.
+    #[test]
+    fn the_pricing_cursor_budget_is_well_under_the_interactive_one() {
+        assert!(
+            SPEND_CURSOR_TIMEOUT * 4 <= HISTORY_CURSOR_TIMEOUT,
+            "background re-pricing ({SPEND_CURSOR_TIMEOUT:?}) must stay far \
+             below the interactive read budget ({HISTORY_CURSOR_TIMEOUT:?})",
+        );
     }
 }
 
