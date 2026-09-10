@@ -11,6 +11,13 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+
+    /* `@tauri-apps/api/core-real` is the un-shimmed module — see the
+       `tauriCoreProbe` alias in vite.config.ts. Only the bundler knows that
+       specifier, so tsc needs it spelled out here. */
+    "paths": {
+      "@tauri-apps/api/core-real": ["./node_modules/@tauri-apps/api/core.d.ts"]
+    },
     "noEmit": true,
     "jsx": "react-jsx",
 
