@@ -1,5 +1,8 @@
+import { ChevronDown, ExternalLink } from "lucide-react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { SessionInfo } from "../types";
+import { agentCardId } from "../detailAux";
+import { isLiveMember, type SessionInfo } from "../types";
 import { StatusBadge } from "./SessionCard";
 import { timeAgo } from "./SessionRow";
 import styles from "./SessionDetail.module.css";
@@ -20,57 +23,153 @@ export const LIVE_CARD_CAP = 6;
  * cards do, and they disappear the moment the last one finishes — the rail is a
  * picture of what is live, not a log.
  *
+ * **Clicking one expands it in place into its transcript** (`renderPane`),
+ * exactly as a doc card expands into its reader. It used to navigate to the
+ * subagent's own session view, which cost you the conversation you were reading
+ * and a trip back — for a thing whose only content *is* its messages. Going
+ * there is still one click, from the expanded card's ↗ button.
+ *
  * Renders bare cards, no container: the rail owns the stack (and its scroll),
  * because the doc cards below these are siblings in one column, not a second
  * section under a divider.
  */
 export function SubagentLiveCards({
   agents,
-  onOpen,
+  expandedId,
+  onToggle,
+  onClose,
+  onGoto,
+  onGripDown,
+  renderPane,
 }: {
-  /** Live subagents, most-recently-active first. */
+  /** Subagents to card, most-recently-active first. Live ones, plus at most
+   *  one finished agent the reader pinned by opening it (see `pinnedAgent`). */
   agents: SessionInfo[];
-  onOpen: (session: SessionInfo) => void;
+  /** The expanded card's id, doc or agent. Only an `agent:` id matches here. */
+  expandedId: string | null;
+  /** Expand this agent's transcript, or collapse the one already expanded. */
+  onToggle: (session: SessionInfo) => void;
+  /** Dismiss the preview — and the card itself, when it is only still in the
+   *  rail because it was pinned. */
+  onClose: (session: SessionInfo) => void;
+  /** Leave for the subagent's own session view. The escape hatch, not the
+   *  default: everything the page adds over this pane is composer and chrome a
+   *  subagent has no use for. */
+  onGoto: (session: SessionInfo) => void;
+  onGripDown: (e: ReactPointerEvent<HTMLElement>) => void;
+  /** The transcript pane for the expanded card. Supplied by the rail so this
+   *  component stays free of the fetching. */
+  renderPane: (session: SessionInfo) => ReactNode;
 }) {
   const { t } = useTranslation();
   if (agents.length === 0) return null;
-  const shown = agents.slice(0, LIVE_CARD_CAP);
-  const hidden = agents.length - shown.length;
+  // The one being read is never capped out. The list is sorted by activity, so
+  // a fan-out of seven can push the agent you are reading past the cap between
+  // two scan ticks — which would unmount its transcript while the rail stayed
+  // widened around the hole where it had been.
+  const openIdx = agents.findIndex((a) => agentCardId(a.id) === expandedId);
+  const ordered =
+    openIdx >= LIVE_CARD_CAP
+      ? [agents[openIdx], ...agents.filter((_, i) => i !== openIdx)]
+      : agents;
+  const shown = ordered.slice(0, LIVE_CARD_CAP);
+  const hidden = ordered.length - shown.length;
 
   return (
     <>
-      {shown.map((a) => (
-        <button
-          key={a.id}
-          type="button"
-          className={`${styles.rail_card} ${styles.agent_card}`}
-          onClick={() => onOpen(a)}
-          title={t("detail.bgtask_open_hint")}
-        >
-          <div className={styles.agent_card_head}>
-            <span className={styles.agent_card_type}>
-              {a.agentType ?? t("detail.live_agent_generic", "Agent")}
-            </span>
-            <StatusBadge status={a.status} />
-          </div>
-          {/* Identity: the agent's own title if the scan inferred one, else the
-              description the parent gave the Task tool. */}
-          <div className={styles.agent_card_title}>
-            {a.aiTitle || a.agentDescription || a.id}
-          </div>
-          {/* Latest activity — the same preview the session cards show, which
-              is what makes this a live card rather than a name tag. */}
-          {a.lastMessagePreview && (
-            <div className={styles.agent_card_preview}>{a.lastMessagePreview}</div>
-          )}
-          <div className={styles.agent_card_meta}>
-            <span>{timeAgo(a.lastActivityMs, t)}</span>
-            {a.agentTokenSpeed > 0 && (
-              <span>{Math.round(a.agentTokenSpeed)} tok/s</span>
+      {shown.map((a) => {
+        const isOpen = expandedId === agentCardId(a.id);
+        // A card the scan no longer lists as live is here only because the
+        // reader pinned it — so it, unlike a live one, is dismissible.
+        const pinned = !isLiveMember(a);
+        const head = (
+          <>
+            <button
+              type="button"
+              className={styles.agent_card_main}
+              onClick={() => onToggle(a)}
+              title={t("detail.bgtask_open_hint")}
+              aria-expanded={isOpen}
+            >
+              <div className={styles.agent_card_head}>
+                {isOpen && (
+                  <ChevronDown
+                    className={styles.doc_card_icon}
+                    size={13}
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                )}
+                <span className={styles.agent_card_type}>
+                  {a.agentType ?? t("detail.live_agent_generic", "Agent")}
+                </span>
+                <StatusBadge status={a.status} />
+              </div>
+              {/* Identity: the agent's own title if the scan inferred one, else
+                  the description the parent gave the Task tool. */}
+              <div className={styles.agent_card_title}>
+                {a.aiTitle || a.agentDescription || a.id}
+              </div>
+              {/* Latest activity — the same preview the session cards show,
+                  which is what makes this a live card rather than a name tag.
+                  Redundant once the transcript itself is on screen. */}
+              {!isOpen && a.lastMessagePreview && (
+                <div className={styles.agent_card_preview}>{a.lastMessagePreview}</div>
+              )}
+              <div className={styles.agent_card_meta}>
+                <span>{timeAgo(a.lastActivityMs, t)}</span>
+                {a.agentTokenSpeed > 0 && <span>{Math.round(a.agentTokenSpeed)} tok/s</span>}
+              </div>
+            </button>
+            {(isOpen || pinned) && (
+              <div className={styles.agent_card_tools}>
+                {isOpen && (
+                  <button
+                    type="button"
+                    className={styles.agent_card_tool}
+                    onClick={() => onGoto(a)}
+                    title={t("detail.agent_card_goto", "在会话页打开")}
+                    aria-label={t("detail.agent_card_goto", "在会话页打开")}
+                  >
+                    <ExternalLink size={12} strokeWidth={1.8} aria-hidden="true" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={styles.agent_card_tool}
+                  onClick={() => onClose(a)}
+                  title={t("common.close", "关闭")}
+                  aria-label={t("common.close", "关闭")}
+                >
+                  ✕
+                </button>
+              </div>
             )}
+          </>
+        );
+        if (!isOpen) {
+          return (
+            <div key={a.id} className={`${styles.rail_card} ${styles.agent_card}`}>
+              {head}
+            </div>
+          );
+        }
+        return (
+          <div key={a.id} className={`${styles.rail_card} ${styles.doc_card_expanded}`}>
+            {/* Same grip as a doc reader: the card grows toward the
+                conversation, so its left edge is the one that moves. */}
+            <div
+              className={styles.doc_card_grip}
+              onPointerDown={onGripDown}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("detail.doc_card_resize", "调整卡片宽度")}
+            />
+            <div className={`${styles.agent_card} ${styles.doc_card_head}`}>{head}</div>
+            {renderPane(a)}
           </div>
-        </button>
-      ))}
+        );
+      })}
       {hidden > 0 && (
         <div className={styles.agents_deck_more}>
           {t("detail.live_agents_more", { count: hidden })}

@@ -51,12 +51,14 @@ import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
 import {
+  closeAgent,
   closeAux,
   closeDoc,
   isAuxFacet,
   openDoc,
   pruneTab,
   showFacet,
+  toggleAgent,
   toggleDoc,
   type AuxDocKind,
   type AuxFacet,
@@ -859,6 +861,14 @@ export function SessionDetail({
   const pickDoc = useCallback((id: string) => {
     setAux((st) => toggleDoc(st, id));
   }, []);
+  /* Same for a subagent card: its transcript expands in the rail rather than
+     replacing the conversation the card is floating over. */
+  const pickAgent = useCallback((s: SessionInfo) => {
+    setAux((st) => toggleAgent(st, s.id));
+  }, []);
+  const dropAgent = useCallback((s: SessionInfo) => {
+    setAux((st) => closeAgent(st, s.id));
+  }, []);
   /* Picking a facet from the overflow menu only ever *opens* it: a menu item
      that sometimes closed the panel you just asked for would read as the click
      having missed. */
@@ -1200,7 +1210,19 @@ export function SessionDetail({
   const drawerTitle = activeFacet
     ? auxFacets.find((f) => f.id === activeFacet)?.label ?? activeFacet
     : "";
-  const railCards = liveSubagents.length + aux.docs.length;
+  /* What the rail actually cards: the live subagents, plus the one the reader
+     pinned by opening it, if the scan has since retired it. Without this a
+     subagent finishing pulls its transcript out from under whoever is reading
+     it — the cards are derived from the live set, and a Task run can end
+     mid-paragraph. The pin is dropped by the card's ✕ (and by switching
+     sessions, which resets the whole aux state). */
+  const railAgents = useMemo((): SessionInfo[] => {
+    const pinnedId = aux.pinnedAgent;
+    if (!pinnedId || liveSubagents.some((s) => s.id === pinnedId)) return liveSubagents;
+    const pinned = sessions.find((s) => s.id === pinnedId);
+    return pinned ? [pinned, ...liveSubagents] : liveSubagents;
+  }, [aux.pinnedAgent, liveSubagents, sessions]);
+  const railCards = railAgents.length + aux.docs.length;
   /* The rail follows its content by default — present when it has cards, zero
      width when it does not — until the reader says otherwise with the toolbar
      switch. The switch owns *this* layer, not the drawer: the drawer is a place
@@ -1560,13 +1582,16 @@ export function SessionDetail({
                     scrollbar on the pane's right edge. */}
                 <SessionAuxRail
                   open={railOpen}
-                  agents={liveSubagents}
+                  agents={railAgents}
                   docs={aux.docs}
                   expandedId={aux.expanded}
                   onOpenAgent={open}
+                  onToggleAgent={pickAgent}
+                  onCloseAgent={dropAgent}
                   onToggleDoc={pickDoc}
                   onCloseDoc={dropDoc}
                   onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
+                  paths={pathLinks}
                   cardWidth={docCardW}
                   onGripDown={onGripDown}
                 />

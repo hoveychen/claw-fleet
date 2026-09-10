@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentCardId,
   auxDocLabel,
+  closeAgent,
   closeAux,
   closeDoc,
   collapseDoc,
@@ -11,6 +13,7 @@ import {
   openDoc,
   pruneTab,
   showFacet,
+  toggleAgent,
   toggleDoc,
   type AuxState,
 } from "./detailAux";
@@ -175,5 +178,52 @@ describe("artifact docs", () => {
 
   it("falls back to the id when no label is given", () => {
     expect(makeAuxDoc("artifact", "20260909-080326").label).toBe("20260909-080326");
+  });
+});
+
+describe("subagent cards", () => {
+  it("expands a subagent in place and collapses it on a second click", () => {
+    const opened = toggleAgent(initialAux, "sub-1");
+    expect(opened.expanded).toBe(agentCardId("sub-1"));
+    // Expanding pins it, so the agent finishing mid-read cannot pull the
+    // transcript out from under the reader.
+    expect(opened.pinnedAgent).toBe("sub-1");
+
+    const closed = toggleAgent(opened, "sub-1");
+    expect(closed.expanded).toBeNull();
+    // Collapsing is not dismissing: the chip stays.
+    expect(closed.pinnedAgent).toBe("sub-1");
+  });
+
+  it("only ever expands one thing — a doc and an agent share the band", () => {
+    const withAgent = toggleAgent(initialAux, "sub-1");
+    const withDoc = openDoc(withAgent, "file", "/repo/main.rs");
+    expect(withDoc.expanded).toBe("file:/repo/main.rs");
+
+    const backToAgent = toggleAgent(withDoc, "sub-1");
+    expect(backToAgent.expanded).toBe(agentCardId("sub-1"));
+  });
+
+  it("switching to another subagent moves both the expansion and the pin", () => {
+    const first = toggleAgent(initialAux, "sub-1");
+    const second = toggleAgent(first, "sub-2");
+    expect(second.expanded).toBe(agentCardId("sub-2"));
+    expect(second.pinnedAgent).toBe("sub-2");
+  });
+
+  it("dismissing a pinned agent drops the pin and the expansion", () => {
+    const st = closeAgent(toggleAgent(initialAux, "sub-1"), "sub-1");
+    expect(st.pinnedAgent).toBeNull();
+    expect(st.expanded).toBeNull();
+  });
+
+  it("dismissing an agent that is neither pinned nor expanded is a no-op", () => {
+    const st = toggleAgent(initialAux, "sub-1");
+    expect(closeAgent(st, "sub-9")).toBe(st);
+  });
+
+  it("gives an agent an id no doc can collide with", () => {
+    expect(agentCardId("sub-1")).toBe("agent:sub-1");
+    expect(docId("file", "sub-1")).not.toBe(agentCardId("sub-1"));
   });
 });

@@ -3,8 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import "../i18n";
-import { makeAuxDoc } from "../detailAux";
+import i18n from "../i18n";
+import { agentCardId, makeAuxDoc } from "../detailAux";
 import type { SessionInfo } from "../types";
 import { SessionAuxRail } from "./SessionAuxRail";
 
@@ -24,7 +24,7 @@ function agent(id: string, title: string): SessionInfo {
   return {
     id,
     aiTitle: title,
-    status: "Executing",
+    status: "executing",
     isSubagent: true,
     lastActivityMs: Date.now(),
     agentTokenSpeed: 0,
@@ -43,6 +43,8 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
         docs={[]}
         expandedId={null}
         onOpenAgent={() => {}}
+        onToggleAgent={() => {}}
+        onCloseAgent={() => {}}
         onToggleDoc={() => {}}
         onCloseDoc={() => {}}
         onOpenWiki={() => {}}
@@ -117,5 +119,43 @@ describe("SessionAuxRail", () => {
     // WikiTabPane mounts inside the card rather than in a drawer beside it.
     expect(card.childElementCount).toBeGreaterThan(2);
     expect(el.querySelectorAll("aside > *")).toHaveLength(1);
+  });
+
+  // The behaviour this rail change is for: a subagent is read here, not by
+  // leaving for its own session view.
+  it("clicking a subagent card expands it instead of navigating", () => {
+    const onToggleAgent = vi.fn();
+    const onOpenAgent = vi.fn();
+    const a = agent("sub-1", "Trace the watcher");
+    const el = render({ agents: [a], onToggleAgent, onOpenAgent });
+
+    act(() => (el.querySelector("button") as HTMLElement).click());
+    expect(onToggleAgent).toHaveBeenCalledWith(a);
+    expect(onOpenAgent).not.toHaveBeenCalled();
+  });
+
+  it("gives the expanded subagent card a width grip and a way out to its page", () => {
+    const onOpenAgent = vi.fn();
+    const a = agent("sub-1", "Trace the watcher");
+    const el = render({ agents: [a], expandedId: agentCardId("sub-1"), onOpenAgent });
+    const card = el.querySelector("aside > div") as HTMLElement;
+
+    expect(card.querySelector('[role="separator"]')).not.toBeNull();
+    // The transcript pane mounts inside the card: grip + head + pane.
+    expect(card.childElementCount).toBeGreaterThan(2);
+
+    const goto = card.querySelector(
+      `[aria-label="${i18n.t("detail.agent_card_goto")}"]`,
+    ) as HTMLElement;
+    act(() => goto.click());
+    expect(onOpenAgent).toHaveBeenCalledWith(a);
+  });
+
+  // A live agent's chip is derived from the scan, so dismissing it would last
+  // until the next tick. Only the expanded card (and a pinned leftover) offers
+  // the ✕.
+  it("offers no ✕ on a live agent's collapsed chip", () => {
+    const el = render({ agents: [agent("sub-1", "Trace the watcher")] });
+    expect(el.textContent).not.toContain("✕");
   });
 });
