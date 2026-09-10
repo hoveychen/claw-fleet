@@ -15,7 +15,7 @@
  *
  * 2. **The drawer** — an overlay panel that floats over the transcript and
  *    shows exactly one *session facet* (Skills, 决策, Token, 任务, 后台任务,
- *    临时文件, Workflow) picked from the header menu. This is "go look
+ *    临时文件, 笔记, Workflow) picked from the header menu. This is "go look
  *    something up" — singular, deliberate, dismissed when you are done.
  *    `active` is that one thing.
  *
@@ -38,6 +38,7 @@ export type AuxFacet =
   | "tasks"
   | "bgtasks"
   | "scratchpad"
+  | "notes"
   | "workflow";
 
 const FACETS: readonly AuxFacet[] = [
@@ -47,6 +48,7 @@ const FACETS: readonly AuxFacet[] = [
   "tasks",
   "bgtasks",
   "scratchpad",
+  "notes",
   "workflow",
 ];
 

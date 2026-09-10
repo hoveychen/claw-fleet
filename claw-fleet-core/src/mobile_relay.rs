@@ -2083,6 +2083,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "usage_history" => serve_usage_history(params),
         "codex_usage_history" => serve_codex_usage_history(params),
         "skill_history" => serve_skill_history(params),
+        "session_notes" => serve_session_notes(params),
+        "session_note" => serve_session_note(params),
         "guard_analyze" => serve_guard_analyze(params),
         "session_search" => serve_session_search(params),
         "wiki_list" => serve_wiki_list(params),
@@ -2274,6 +2276,27 @@ fn serve_session_decisions(params: &Value) -> Result<Value, String> {
     let records =
         crate::decision_history::list_session_records_with_jsonl(session_id, jsonl);
     serde_json::to_value(records).map_err(|e| e.to_string())
+}
+
+fn serve_session_notes(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    let files = crate::session_notes::list(session_id, None)?;
+    serde_json::to_value(files).map_err(|e| e.to_string())
+}
+
+/// `sessionId` is the note's **owner** as listed by `session_notes`, not the
+/// session being viewed — see `session_notes::read_owned`.
+fn serve_session_note(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let text = crate::session_notes::read_owned(session_id, path)?;
+    Ok(Value::String(text))
 }
 
 fn serve_decision_asset(params: &Value) -> Result<Value, String> {

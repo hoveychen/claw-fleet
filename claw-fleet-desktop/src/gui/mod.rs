@@ -41,6 +41,7 @@ mod memory;
 mod wiki;
 mod explorer;
 mod scratchpad;
+mod notes;
 mod source_control;
 mod skills;
 mod plugins;
@@ -73,6 +74,7 @@ use self::artifacts::*;
 use self::wiki::*;
 use self::explorer::*;
 use self::scratchpad::*;
+use self::notes::*;
 use self::source_control::*;
 use self::skills::*;
 use self::plugins::*;
@@ -1727,6 +1729,8 @@ pub fn run() {
             resolve_prose_path,
             list_scratchpad_dir,
             read_scratchpad_file,
+            list_session_notes,
+            read_session_note,
             list_skills,
             skill_sync_inventory,
             skill_sync_apply,

@@ -1,9 +1,9 @@
 // Lazy-loading tab bodies for the session detail page: decision history,
-// task plans, token breakdown, workflow runs, handoff chain. Each fetches on
+// task plans, token breakdown, workflow runs, notes, handoff chain. Each fetches on
 // first open via its relay method and renders a compact mobile layout.
 
 import { useEffect, useState } from "react";
-import { Check, CheckCircle2, ChevronRight, ListTodo, Waypoints, Workflow } from "lucide-react";
+import { Check, CheckCircle2, ChevronRight, ListTodo, NotebookPen, Waypoints, Workflow } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { splitMarker } from "./planMatrix";
 import ReactMarkdown from "react-markdown";
@@ -14,6 +14,7 @@ import type { FleetTransport } from "../transport";
 import type {
   DecisionHistoryRecord,
   HandoffChain,
+  NoteFile,
   SessionInfo,
   TaskPlanDetail,
   TokenBreakdown,
@@ -528,6 +529,133 @@ export function WorkflowTab({
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── 笔记 ─────────────────────────────────────────────────────────────────────
+
+/** 代理为熬过上下文压缩写下的 checkpoint 笔记（`~/.fleet/notes/`），只读。
+ *
+ *  列表跨接力链：一条 68 棒的链上，有用的那份 checkpoint 往往是早几棒记的。
+ *  所以每行带自己的归属会话，读取也按归属走 —— 整条链常常每棒都留了一个叫
+ *  `checkpoint.md` 的文件，按路径重新解析会拿错那一份。 */
+export function NotesTab({
+  session,
+  client,
+}: {
+  session: SessionInfo;
+  client: FleetTransport | null;
+}) {
+  const data = useRelayData<NoteFile[]>(client, "session_notes", {
+    sessionId: session.id,
+  });
+  const [open, setOpen] = useState<string | null>(null);
+
+  if (data === "loading") return <Hint>{t("加载笔记…")}</Hint>;
+  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (data.length === 0)
+    return <EmptyState compact icon={NotebookPen} title={t("该会话没有留下笔记")} />;
+
+  return (
+    <div className={styles.stack}>
+      {data.map((f) => {
+        const id = `${f.sessionId}:${f.path}`;
+        return (
+          <NoteCard
+            key={id}
+            file={f}
+            isOwn={f.sessionId === session.id}
+            open={open === id}
+            onToggle={() => setOpen((cur) => (cur === id ? null : id))}
+            client={client}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** 一份笔记：折起时只是一行标题，点开才去拉正文。一份 checkpoint 动辄上万字，
+ *  整条链的笔记全量预取会把这一面变成一次几百 KB 的 relay 往返。 */
+function NoteCard({
+  file,
+  isOwn,
+  open,
+  onToggle,
+  client,
+}: {
+  file: NoteFile;
+  isOwn: boolean;
+  open: boolean;
+  onToggle: () => void;
+  client: FleetTransport | null;
+}) {
+  const body = open ? (
+    <NoteBody file={file} client={client} />
+  ) : null;
+
+  return (
+    <div className={styles.planCard}>
+      <div
+        className={styles.hopHead}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        style={{ cursor: "pointer" }}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+      >
+        <ChevronRight
+          size={14}
+          className={styles.hopChevron}
+          style={{ transform: open ? "rotate(90deg)" : "none" }}
+        />
+        <span className={styles.hopBadge}>
+          {isOwn ? t("本会话") : t("前任 {0}", file.sessionId.slice(0, 8))}
+        </span>
+        <span className={styles.recordTime}>
+          {new Date(file.updatedMs).toLocaleString(dateLocale(), {
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+      </div>
+      <div className={styles.notePreview}>{file.path}</div>
+      {body}
+    </div>
+  );
+}
+
+function NoteBody({
+  file,
+  client,
+}: {
+  file: NoteFile;
+  client: FleetTransport | null;
+}) {
+  // 归属会话,不是屏幕上这个会话 —— 继承来的笔记要按前任写下的样子读回。
+  const text = useRelayData<string>(client, "session_note", {
+    sessionId: file.sessionId,
+    path: file.path,
+  });
+  if (text === "loading") return <Hint>{t("读取中…")}</Hint>;
+  if (text === "error") return <Hint>{t("读取失败")}</Hint>;
+  return (
+    <div className={styles.markdown}>
+      <ReactMarkdown
+        remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}
+        components={mdComponents}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
