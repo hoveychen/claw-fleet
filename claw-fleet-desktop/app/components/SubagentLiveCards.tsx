@@ -63,8 +63,17 @@ export function SubagentLiveCards({
 }) {
   const { t } = useTranslation();
   if (agents.length === 0) return null;
-  const shown = agents.slice(0, LIVE_CARD_CAP);
-  const hidden = agents.length - shown.length;
+  // The one being read is never capped out. The list is sorted by activity, so
+  // a fan-out of seven can push the agent you are reading past the cap between
+  // two scan ticks — which would unmount its transcript while the rail stayed
+  // widened around the hole where it had been.
+  const openIdx = agents.findIndex((a) => agentCardId(a.id) === expandedId);
+  const ordered =
+    openIdx >= LIVE_CARD_CAP
+      ? [agents[openIdx], ...agents.filter((_, i) => i !== openIdx)]
+      : agents;
+  const shown = ordered.slice(0, LIVE_CARD_CAP);
+  const hidden = ordered.length - shown.length;
 
   return (
     <>

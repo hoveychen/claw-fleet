@@ -1,7 +1,7 @@
 import { ChevronDown, FileText, Globe, NotebookText, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { AuxDoc, AuxDocKind } from "../detailAux";
+import { agentCardId, type AuxDoc, type AuxDocKind } from "../detailAux";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import type { SessionInfo } from "../types";
 import { SessionAuxAgent } from "./SessionAuxAgent";
@@ -101,8 +101,10 @@ export function SessionAuxRail({
   if (!open) return null;
   const empty = agents.length === 0 && docs.length === 0;
   // Either kind of expansion widens the box — a transcript needs the reading
-  // width a file does.
-  const wide = cardWidth > 0 && (expandedDoc != null || expandedId?.startsWith("agent:") === true);
+  // width a file does. Checked against the cards actually in hand, so a stale
+  // id (its agent retired and unpinned) cannot widen the rail around nothing.
+  const expandedAgent = agents.some((a) => agentCardId(a.id) === expandedId);
+  const wide = cardWidth > 0 && (expandedDoc != null || expandedAgent);
   // No drag region on the <aside>: the column is pointer-events:none between
   // the cards so the transcript underneath keeps the wheel and the clicks.
   return (
