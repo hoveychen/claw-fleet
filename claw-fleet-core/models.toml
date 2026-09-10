@@ -248,11 +248,23 @@ max_context = 272000
 # `agent-default-model` 现在指着 `-vision-exp`，历史会话里也全是这两个名字，删了
 # 就变成查不出档位和梯子的未编目模型。
 #
-# 一个尚未落地的已知变更：同一张价目页脚注 2 说，2026-09-14 12:00 北京时间起，
-# 发给 `deepseek-v4-pro` 的请求也会被路由到 V4.1 Flash 并按 Flash 价计费（直到
-# V4.1 Pro 发布）。那天之后 Pro 这一行的 premium 档与 `dsh_cost` 里的 Pro 价目都
-# 会变成错的。这里**不**预先按日期改——改法要等那天的实际行为坐实（模型是否仍
-# 自报 v4-pro、账单里落哪个名字），提前写死一个日期开关就是在猜。
+# Pro 也不再进速查表（`listed = false`，老板 2026-09-10 拍板：「只保留 flash，
+# 因为 pro 档要下架」）。同一张价目页的脚注 2 给了下架时间表：2026-09-14 12:00
+# 北京时间起，发给 `deepseek-v4-pro` 的请求会被路由到 V4.1 Flash 并按 Flash 价
+# 计费，直到 V4.1 Pro 发布；官方原话是 V4.1 Flash 在性能、成本、速度、总耗时上
+# 已经全面超过 V4 Pro，所以要「有序退役」它。既然它今后连自己都不是了，速查表
+# 就没有理由再把它作为一个可选项推给 agent。
+#
+# 用 `listed = false` 而不是 `superseded_by`，是因为这两个字段说的不是一回事：
+# `superseded_by` 会把它折进 Flash 行末尾那句「前代**同价**仍可选」，而 Pro 直到
+# 09-14 都还是三倍价，那句话会是假的。`listed = false` 只表达「不进表」，其余
+# 事实（premium 档、梯子、1M 窗口）原样留着——桌面选择器读的是 dsh 的活目录不是
+# 这张表，所以老板真要点 Pro 仍然点得到，只是我们不再推荐。
+#
+# **Pro 的价目这次故意不动**（`dsh_cost.rs` 里仍是 0.044/1.32/3.96）。到 09-14
+# 之前它就是真价；那之后要改成什么，得等当天实测坐实（事件里的 model 字段还报不
+# 报 `deepseek-v4-pro`、账单落哪个名字），提前写死一个日期开关就是在猜。已经算过
+# 的调用价格是冻结的，所以晚改几天不会污染历史。
 
 [[model]]
 id = "deepseek-official/deepseek-flash"
@@ -269,6 +281,8 @@ id = "deepseek-official/deepseek-v4-pro"
 label = "DeepSeek V4 Pro"
 family = "dsh"
 tier = "premium"
+# 退役中，见上面那节：不进速查表，但档位/梯子/窗口/价目一律保留。
+listed = false
 # 老板确认 Pro 也是 1M（本机没有它的会话可量，这一条的来源是人不是探针）。
 context = 1000000
 efforts = ["off", "low", "high", "max"]

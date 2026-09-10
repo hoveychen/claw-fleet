@@ -571,8 +571,10 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
         if has("dsh") {
             s.push_str(
                 "\n\
-`deepseek-official` 这一路只有 `deepseek-v4-pro` **不收图片输入**;\
-flash 那几个 id(含两个退役别名)都收。\n",
+`deepseek-official` 这一路现在只推 `deepseek-flash` 一个。另外三个 id 仍然点得动,\
+但都在退役:`deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 已经是它的别名,\
+`deepseek-v4-pro` 从 2026-09-14 12:00(北京)起请求也转由它承接。flash 那几个 id \
+都收图片,**只有 `deepseek-v4-pro` 不收图片输入**。\n",
             );
         }
         s.push_str(
@@ -604,8 +606,11 @@ effort 一列显示「见 dsh」——那些的梯子五花八门,得问 dsh 自
         if has("dsh") {
             s.push_str(
                 "\n\
-On the `deepseek-official` route only `deepseek-v4-pro` **rejects image input**; \
-every flash id (including the two retired aliases) takes images.\n",
+The `deepseek-official` route now offers just `deepseek-flash`. The other three ids \
+still resolve but are all on the way out: `deepseek-v4-flash` and \
+`deepseek-v4-flash-vision-exp` are already aliases of it, and `deepseek-v4-pro`'s \
+requests move to it too from 2026-09-14 12:00 Beijing time. On images, every flash id \
+takes them and **only `deepseek-v4-pro` rejects image input**.\n",
             );
         }
         s.push_str(
@@ -910,7 +915,7 @@ mod tests {
         let all = render_sheet_with("zh", |_| false);
         assert!(all.contains("claude-opus-5"));
         assert!(all.contains("gpt-5.6-sol"));
-        assert!(all.contains("deepseek-official/deepseek-v4-pro"));
+        assert!(all.contains("deepseek-official/deepseek-flash"));
     }
 
     /// The picker catalog carries what a menu needs and nothing else.
@@ -1009,17 +1014,25 @@ mod tests {
     /// boss's own answer rather than a measurement — flagged as such in
     /// `models.toml` so the two kinds of source stay distinguishable.
     ///
-    /// Since 2026-09-10 only two of the four are *listed*: DeepSeek retired the
-    /// models behind `deepseek-v4-flash` and `-flash-vision-exp` and now serves
-    /// both names off V4.1 Flash, so they fold into the Flash row's "previous
-    /// generations, still selectable at the same price" tail instead of standing
-    /// as menu entries. They keep every measured field, because the ids are
-    /// still live on the wire and dsh still offers them.
+    /// Since 2026-09-10 exactly **one** of the four is listed. DeepSeek retired
+    /// the models behind `deepseek-v4-flash` and `-flash-vision-exp` and serves
+    /// both names off V4.1 Flash, and announced V4 Pro's orderly retirement
+    /// (its requests move to V4.1 Flash on 2026-09-14); the boss's call was to
+    /// stop offering Pro rather than keep recommending a model on its way out.
+    ///
+    /// The two hidings use *different* fields on purpose. The aliases get
+    /// `superseded_by`, which folds them into the Flash row's "previous
+    /// generations, still selectable at the same price" tail — and for them that
+    /// sentence is literally true. Pro gets a plain `listed = false`, because it
+    /// is billed at three times Flash until the 14th and that same tail would
+    /// state a false price equivalence. Either way every measured field survives:
+    /// all four ids are still live on the wire and dsh still offers them, so
+    /// deleting a row would only turn a known model into an uncatalogued one.
     #[test]
     fn dsh_route_models_state_only_what_was_measured() {
         let rows = listed_models("dsh");
         let ids: Vec<&str> = rows.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(ids, ["deepseek-official/deepseek-flash", "deepseek-official/deepseek-v4-pro"]);
+        assert_eq!(ids, ["deepseek-official/deepseek-flash"]);
         // The retired aliases are hidden from the menu but still fully answerable.
         for id in [
             "deepseek-official/deepseek-v4-flash",
@@ -1033,6 +1046,12 @@ mod tests {
                 "{id}"
             );
         }
+        // Pro is delisted, but NOT as a superseded row: it is still its own
+        // model at its own (dearer) price until the 14th.
+        let pro = entry("deepseek-official/deepseek-v4-pro").expect("pro must stay catalogued");
+        assert!(!pro.is_listed(), "pro is retiring and no longer recommended");
+        assert_eq!(pro.superseded_by, None, "pro must not claim Flash's price");
+        assert_eq!(pro.tier.as_deref(), Some("premium"), "delisting is not re-tiering");
         for e in catalog().iter().filter(|e| e.family.as_deref() == Some("dsh")) {
             assert!(e.tier.is_some(), "{} has no tier", e.id);
             assert_eq!(
