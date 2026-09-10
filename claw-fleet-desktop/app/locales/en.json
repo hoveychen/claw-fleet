@@ -62,6 +62,17 @@
       "limit_chars": "Char limit",
       "force": "Force"
     },
+    "param_for": {
+      "handoff": {
+        "note": "Briefing"
+      },
+      "watch": {
+        "note": "Waiting for"
+      },
+      "artifact": {
+        "note": "Note"
+      }
+    },
     "summary": {
       "plan": {
         "check": "Check {{task}} · {{plan}}",

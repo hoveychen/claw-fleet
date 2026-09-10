@@ -56,6 +56,24 @@ function paramRows(
 }
 
 /**
+ * Label for one param row, tool-scoped first.
+ *
+ * `fleet.param.*` is keyed by param *name* alone, and the same name means
+ * different things across tools: `note` is a handoff briefing on `fleet__handoff`,
+ * "what you are waiting for" on `fleet__watch`, and a one-line blurb on
+ * `fleet__artifact add`. The flat table had settled on 「交接」 for all three,
+ * so a 产出 card said "交接" over its description.
+ *
+ * So look up `fleet.param_for.<tool>.<key>` first and fall back to the flat
+ * `fleet.param.<key>`. A separate `param_for` namespace rather than nesting
+ * under `fleet.param` because param names and tool names overlap — `plan` is
+ * both — and `fleet.param.plan` is already a string.
+ */
+export function paramLabel(t: TFunction, tool: FleetTool, key: string): string {
+  return t([`fleet.param_for.${tool}.${key}`, `fleet.param.${key}`], { defaultValue: key });
+}
+
+/**
  * Free-text "intent" surfaced on the collapsed header, right after the summary
  * label, so the reader sees *what* an op is for without expanding the card.
  * These are exactly the human-readable fields NOT already interpolated into the
@@ -449,7 +467,7 @@ export function FleetToolCard({ block, result, isPartial, rail }: Props) {
             <div className={styles.params}>
               {rows.map((r) => (
                 <div key={r.key} className={r.long ? styles.param_block : styles.param_row}>
-                  <span className={styles.param_key}>{t(`fleet.param.${r.key}`, r.key)}</span>
+                  <span className={styles.param_key}>{paramLabel(t, tool, r.key)}</span>
                   <span className={`${styles.param_val} ${r.shell ? styles.param_val_shell : ""}`}>
                     {r.value}
                   </span>
