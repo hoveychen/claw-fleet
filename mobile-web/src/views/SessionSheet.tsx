@@ -30,6 +30,7 @@ import {
   Copy,
   FileJson2,
   Folder,
+  Square,
   Terminal,
   Timer,
   X,
@@ -37,7 +38,10 @@ import {
 import { t } from "../i18n";
 import { HistoryLayer } from "../useNavStack";
 import type { SessionInfo } from "../types";
+import type { FleetTransport } from "../transport";
+import { useConfirm } from "../confirmDialog";
 import { agentIdTail, agentLabel } from "./agentScope";
+import { canControl, runStop, stopMode } from "./sessionStop";
 import { buildInfoChips, resumeCommand } from "./sessionInfoRows";
 import type { DetailPane } from "./sessionStatusPills";
 import styles from "./SessionSheet.module.css";
@@ -83,6 +87,7 @@ export function SessionSheet({
   session,
   family,
   pendingDecisions,
+  client,
   onClose,
   onOpenPane,
   onOpenSession,
@@ -94,6 +99,10 @@ export function SessionSheet({
   /** 归属这条会话的待决策卡张数（决策卡是跨设备聚合的收件箱，不在 SessionInfo
    *  上，所以由调用方数好传进来）。 */
   pendingDecisions: number;
+  /** 这条会话所属**那一台设备**的 transport —— 停止走 pid / workspacePath，发到
+   *  别台上轻则停不掉，重则按 pid 打到一个毫不相干的进程。`null`（那台设备此刻
+   *  不可达）时这一节整段不出现：给一颗按不动的按钮比没有按钮更难解释。 */
+  client: FleetTransport | null;
   onClose: () => void;
   onOpenPane: (pane: DetailPane) => void;
   onOpenSession: (s: SessionInfo) => void;
@@ -114,6 +123,27 @@ export function SessionSheet({
       setResult({ id: row.id, ok: false });
     }
   }, []);
+
+  // ── 停止 / 中断 ──────────────────────────────────────────────────────
+  // 在这张半屏出现之前，会话详情页上没有任何停的办法：你正看着它跑，却得退回
+  // 任务列表把那张卡再找出来。三态与确认文案跟列表卡片共用 sessionStop.ts。
+  const confirm = useConfirm();
+  const [stopping, setStopping] = useState(false);
+  const mode = stopMode(session);
+  const stoppable = client !== null && canControl(session) && mode !== "spent";
+  const doStop = useCallback(async () => {
+    if (!client || stopping) return;
+    setStopping(true);
+    try {
+      const done = await runStop(client, session, confirm);
+      // 真停下了就把半屏收掉——留在原地看着一行读数不会自己变，像是没生效。
+      if (done) onClose();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : t("操作失败"));
+    } finally {
+      setStopping(false);
+    }
+  }, [client, stopping, session, confirm, onClose]);
 
   const title = session.titleOverride || session.aiTitle || session.slug || t("会话");
   const resume = resumeCommand(session);
@@ -293,10 +323,35 @@ export function SessionSheet({
               </div>
             )}
 
-            {(nowRows.length > 0 || watches.length > 0 || family.length > 0) && (
+            {(nowRows.length > 0 || watches.length > 0 || family.length > 0 || stoppable) && (
               <div className={styles.section}>{t("此刻")}</div>
             )}
             {nowRows.map(paneRow)}
+
+            {stoppable && (
+              <button
+                type="button"
+                className={styles.stopRow}
+                data-mode={mode}
+                disabled={stopping}
+                onClick={() => void doStop()}
+              >
+                <Square size={14} className={styles.stopIcon} />
+                <span className={styles.stopText}>
+                  <span className={styles.stopLabel}>
+                    {mode === "interrupt" ? t("中断当前回合") : t("停止这个会话")}
+                  </span>
+                  {/* 两者差别很大，而按钮上那两个字说不清：中断只掐掉手上这一轮，
+                      会话还在，还能接着发下一条；停止是把进程杀掉。 */}
+                  <span className={styles.stopSub}>
+                    {mode === "interrupt"
+                      ? t("只掐掉手上这一轮，会话还在，可以接着发下一条")
+                      : t("结束这个进程，之后要用恢复命令才能继续")}
+                  </span>
+                </span>
+                {stopping && <span className={styles.stopBusy}>…</span>}
+              </button>
+            )}
 
             {/* watch 没有自己的整页 —— 它的全部内容就是「在等什么、轮询了几次、
                 什么时候放弃」这三句，够放在这里，不值得一次跳转。 */}

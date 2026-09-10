@@ -390,6 +390,12 @@ const DICT: Record<string, string> = {
   "无法精确定位进程，将停止「{0}」目录下的所有会话，确定吗？":
     "Cannot pinpoint the process — this stops ALL sessions under \"{0}\". Continue?",
   操作失败: "Operation failed",
+  中断当前回合: "Interrupt this turn",
+  停止这个会话: "Stop this session",
+  "只掐掉手上这一轮，会话还在，可以接着发下一条":
+    "Cuts the current turn only — the session stays alive and takes the next message",
+  "结束这个进程，之后要用恢复命令才能继续":
+    "Ends the process — resuming later needs the resume command",
   "还没有会话": "No sessions yet",
   "显示上次缓存，正在同步…": "Showing last cached list, syncing…",
   "等待桌面端推送快照。桌面端各会话上线后会出现在这里。":

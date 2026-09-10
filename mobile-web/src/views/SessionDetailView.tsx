@@ -1373,6 +1373,7 @@ export function SessionDetailView({
           session={session}
           family={family}
           pendingDecisions={pendingDecisions}
+          client={client}
           onClose={() => setSheetOpen(false)}
           onOpenPane={setPane}
           onOpenSession={(s) => onOpenSessionId(s.id)}
