@@ -3,7 +3,11 @@ import { useTranslation } from "react-i18next";
 import { BookOpen, NotebookText } from "lucide-react";
 
 import { useUIStore } from "../store";
-import { revealSlugInWikiPage, useWikiDocs } from "../hooks/useWikiDocs";
+import {
+  refetchWikiDocsForMissingSlug,
+  revealSlugInWikiPage,
+  useWikiDocs,
+} from "../hooks/useWikiDocs";
 import type { AuxDoc } from "../detailAux";
 import { AuxDocBar, AuxPane } from "./AuxDocBar";
 import { buildWikiMenu, type AuxCardTail } from "./auxDocMenu";
@@ -55,7 +59,17 @@ export function WikiTabPane({
   // the 知识库 page's current filter is still live here.
   const wikiLinks = useMemo(() => {
     const slugs = new Set(docs.map((d) => d.slug));
-    return { hasSlug: (s: string) => slugs.has(s), openSlug: onOpenSlug };
+    return {
+      hasSlug: (s: string) => {
+        if (slugs.has(s)) return true;
+        // Same one-shot list as this pane's own slug: a link to a doc published
+        // after the app opened is live, not dead. Deferred because hasSlug runs
+        // inside the markdown render.
+        queueMicrotask(() => refetchWikiDocsForMissingSlug(s));
+        return false;
+      },
+      openSlug: onOpenSlug,
+    };
   }, [docs, onOpenSlug]);
 
   // Hand the doc to the full page, which owns the destructive actions.
