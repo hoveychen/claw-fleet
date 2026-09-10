@@ -467,6 +467,23 @@ describe("详情取数期限", () => {
     expect(useDetailStore.getState().loadStalled).toBe(true);
   });
 
+  it("重新打开会清掉上一次的 loadError", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const mock = invoke as unknown as { mockImplementation: (f: unknown) => void };
+    mock.mockImplementation((cmd: string) =>
+      cmd === "get_messages_tail" ? Promise.reject(new Error("boom")) : Promise.resolve(undefined),
+    );
+    const { useDetailStore } = await import("./store");
+    await useDetailStore.getState().open(session);
+    expect(useDetailStore.getState().loadError).toContain("boom");
+
+    mock.mockImplementation((cmd: string) =>
+      cmd === "get_messages_tail" ? Promise.resolve([{ type: "user" }]) : Promise.resolve(undefined),
+    );
+    await useDetailStore.getState().open(session);
+    expect(useDetailStore.getState().loadError).toBeNull();
+  });
+
   it("迟到的 transcript 仍会渲染并清掉 stalled", async () => {
     vi.useFakeTimers();
     let land: (v: unknown) => void = () => {};
@@ -542,7 +559,9 @@ describe("详情取数期限", () => {
     await useDetailStore.getState().open(session);
 
     expect(useDetailStore.getState().isLoading).toBe(false);
-    expect(useDetailStore.getState().loadStalled).toBe(true);
+    // 摊开的方式变了:失败走 loadError(带原因),不再冒充超时的 loadStalled。
+    expect(useDetailStore.getState().loadStalled).toBe(false);
+    expect(useDetailStore.getState().loadError).toContain("No agent source");
   });
 });
 

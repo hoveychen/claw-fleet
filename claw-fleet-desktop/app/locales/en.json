@@ -1886,6 +1886,7 @@
     "more": "More",
     "switch_agent": "Switch agent",
     "agent_current": "current",
+    "load_failed": "Loading the conversation failed — the backend returned an error. You can retry now.",
     "load_stalled": "Loading the conversation timed out — the backend never answered. It may be busy or wedged; it recovers on its own, or retry now.",
     "load_retry": "Retry",
     "diff_no_changes": "No textual changes.",

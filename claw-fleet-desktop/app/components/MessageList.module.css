@@ -82,6 +82,16 @@
   padding: 0 24px;
 }
 
+/* The backend's own words for why the fetch failed, under the explanation.
+   Quieter and monospaced: it is evidence to copy into a bug report, not prose. */
+.stalled_reason {
+  max-width: 46ch;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--t-caption, 11px);
+  color: var(--color-text-faint, var(--color-text-dim));
+  overflow-wrap: anywhere;
+}
+
 /* Retry for a transcript fetch that blew its deadline. */
 .stalled_retry {
   padding: 5px 14px;
