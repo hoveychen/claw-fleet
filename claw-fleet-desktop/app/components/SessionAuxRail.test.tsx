@@ -18,6 +18,7 @@ afterEach(() => {
   root = null;
   container?.remove();
   container = null;
+  document.body.querySelectorAll("[class*='menu']").forEach((n) => n.remove());
 });
 
 function agent(id: string, title: string): SessionInfo {
@@ -42,11 +43,16 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
         agents={[]}
         docs={[]}
         expandedId={null}
+        workspacePath="/repo"
         onOpenAgent={() => {}}
         onToggleAgent={() => {}}
         onCloseAgent={() => {}}
         onToggleDoc={() => {}}
         onCloseDoc={() => {}}
+        onCloseOtherDocs={() => {}}
+        onCloseAllDocs={() => {}}
+        onCollapseDoc={() => {}}
+        onHideRail={() => {}}
         onOpenWiki={() => {}}
         cardWidth={420}
         onGripDown={() => {}}
@@ -117,8 +123,83 @@ describe("SessionAuxRail", () => {
 
     expect(card.querySelector('[role="separator"]')).not.toBeNull();
     // WikiTabPane mounts inside the card rather than in a drawer beside it.
-    expect(card.childElementCount).toBeGreaterThan(2);
+    expect(card.querySelector("[class*='aux_doc_pane']")).not.toBeNull();
     expect(el.querySelectorAll("aside > *")).toHaveLength(1);
+  });
+
+  // An expanded doc card's header is the reader's own AuxDocBar. It used to be
+  // a strip *above* that bar, which printed the doc's name twice in a row. (An
+  // agent card keeps its strip — a transcript has no header to borrow.)
+  it("prints the expanded doc's name once, not in a strip of its own", () => {
+    const doc = makeAuxDoc("wiki", "arch/overview");
+    const el = render({ docs: [doc], expandedId: doc.id });
+
+    expect(el.querySelector("[class*='doc_card_head']")).toBeNull();
+  });
+
+  // A chip's disambiguator: `auxDocMeta` reads it off the ref, so two same-named
+  // files from different directories are still told apart at a glance.
+  it("gives a collapsed chip the value that tells it apart from its namesakes", () => {
+    const el = render({ docs: [makeAuxDoc("file", "/repo/src/gui/mod.rs")] });
+
+    expect(el.querySelector("[class*='doc_card_meta']")?.textContent).toBe("gui");
+  });
+
+  // With no handler, a right-click anywhere in the rail bubbled to the app-wide
+  // menu (contextMenu.ts) and answered a request to act on a document with
+  // Settings / About / Quit.
+  it("answers a right-click on a chip with the card's own menu", () => {
+    const doc = makeAuxDoc("file", "/repo/src/main.rs");
+    const el = render({ docs: [doc] });
+    const chip = el.querySelector("[class*='doc_card']") as HTMLElement;
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+
+    act(() => void chip.dispatchEvent(ev));
+
+    expect(ev.defaultPrevented).toBe(true);
+    // Portalled to the body, so it is not under `container`.
+    const menu = document.body.querySelector("[class*='menu']") as HTMLElement;
+    expect(menu.textContent).toContain("/repo/src/main.rs");
+  });
+
+  // Regression guard for a bug the unit tests could not see and the browser
+  // pass caught: `.rail` is `pointer-events: none` (so the transcript keeps the
+  // clicks between cards), which means an `onContextMenu` on the <aside> is
+  // dead in the app while passing in jsdom, where there is no hit-testing. The
+  // stack-level actions therefore have to live on the cards.
+  it("puts hiding the rail on a card's menu, not on the rail's dead background", () => {
+    const el = render({ docs: [makeAuxDoc("file", "/repo/a.rs")] });
+    const chip = el.querySelector("[class*='doc_card']") as HTMLElement;
+
+    act(() =>
+      void chip.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
+    );
+    const labels = Array.from(document.body.querySelectorAll("[class*='menu'] button")).map(
+      (b) => b.textContent ?? "",
+    );
+
+    expect(labels.some((l) => /辅助栏|side rail/i.test(l))).toBe(true);
+    // And the aside itself must not carry one, or the fix rots back.
+    const rail = el.querySelector("aside") as HTMLElement;
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    act(() => void rail.dispatchEvent(ev));
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
+  // The one state with no card to right-click: held open by the switch with
+  // nothing in play. That line IS a `.rail > *`, so it does get the events.
+  it("carries the stack menu on the empty-rail line", () => {
+    const onHideRail = vi.fn();
+    const el = render({ open: true, onHideRail });
+    const line = el.querySelector("aside > p") as HTMLElement;
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+
+    act(() => void line.dispatchEvent(ev));
+    expect(ev.defaultPrevented).toBe(true);
+    const items = Array.from(document.body.querySelectorAll("[class*='menu'] button"));
+    expect(items).toHaveLength(1);
+    act(() => (items[0] as HTMLElement).click());
+    expect(onHideRail).toHaveBeenCalled();
   });
 
   // The behaviour this rail change is for: a subagent is read here, not by

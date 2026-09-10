@@ -1,0 +1,149 @@
+/* The one header shape shared by all four auxiliary-rail readers. Replaces the
+   three hand-rolled `.bar` blocks in TabPanes.module.css and the `.external_*`
+   block FilesView's preview wore — see AuxDocBar.tsx for why they merged. */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+/* The glyph + name + facts as one press target: collapsing the card is what
+   clicking its header means, and a 12px name is too small a thing to aim at. */
+.subject {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.subject:disabled {
+  cursor: default;
+}
+
+.subject:hover:not(:disabled) .name {
+  color: var(--color-accent);
+}
+
+/* Flex-shrink 0 and a fixed box, so a one-line name and a two-line one put the
+   glyph in the same place. */
+.icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-secondary);
+}
+
+/* The four families, told apart before anything is read. */
+.icon[data-kind="file"] {
+  color: var(--color-info);
+}
+
+.icon[data-kind="artifact"] {
+  color: var(--color-warning);
+}
+
+.icon[data-kind="wiki"] {
+  color: var(--color-success);
+}
+
+.icon[data-kind="web"] {
+  color: var(--color-teal);
+}
+
+.text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* Held apart from the actions by a hairline: dismissing the card is not one
+   more thing to do to the document. */
+.act_close {
+  margin-left: 3px;
+  border-color: transparent;
+}
+
+.act_close:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  color: var(--color-error);
+}
+
+.name {
+  font-size: 12px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mono, because every fact on this line is a value (a size, a version, a
+   directory) and a proportional font makes a column of them unscannable. */
+.dense {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dense_sep {
+  opacity: 0.55;
+}
+
+/* The one value worth scanning for. Not bold — weight on a 10.5px mono line
+   reads as noise; a step up in contrast is enough. */
+.dense_strong {
+  color: var(--color-text-secondary);
+}
+
+.actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Icon-only and square: three of these plus `⋯` have to fit beside a name in a
+   rail card that can be 320px wide, which a row of labelled pills cannot. */
+.act {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.act:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.act:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

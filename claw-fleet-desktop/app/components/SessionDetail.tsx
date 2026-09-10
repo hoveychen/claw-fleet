@@ -52,8 +52,11 @@ import { isWorkflowAgent } from "../workflowAgent";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
 import {
   closeAgent,
+  closeAllDocs,
   closeAux,
   closeDoc,
+  closeOtherDocs,
+  collapseDoc,
   isAuxFacet,
   openDoc,
   pruneTab,
@@ -887,6 +890,18 @@ export function SessionDetail({
   const dropDoc = useCallback((id: string) => {
     setAux((st) => closeDoc(st, id));
   }, []);
+  /* The rail caps at MAX_AUX_DOCS and a talkative session fills it, so clearing
+     the stack is offered from the cards' own menus rather than only one ✕ at a
+     time. */
+  const dropOtherDocs = useCallback((id: string) => {
+    setAux((st) => closeOtherDocs(st, id));
+  }, []);
+  const dropAllDocs = useCallback(() => {
+    setAux((st) => closeAllDocs(st));
+  }, []);
+  const collapseDocCard = useCallback(() => {
+    setAux((st) => collapseDoc(st));
+  }, []);
 
   // `isFollowing` drives the footer, but the pin below runs from a
   // ResizeObserver callback that must not re-subscribe on every state change —
@@ -1585,11 +1600,16 @@ export function SessionDetail({
                   agents={railAgents}
                   docs={aux.docs}
                   expandedId={aux.expanded}
+                  workspacePath={workspacePath ?? ""}
                   onOpenAgent={open}
                   onToggleAgent={pickAgent}
                   onCloseAgent={dropAgent}
                   onToggleDoc={pickDoc}
                   onCloseDoc={dropDoc}
+                  onCloseOtherDocs={dropOtherDocs}
+                  onCloseAllDocs={dropAllDocs}
+                  onCollapseDoc={collapseDocCard}
+                  onHideRail={toggleRail}
                   onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
                   paths={pathLinks}
                   cardWidth={docCardW}

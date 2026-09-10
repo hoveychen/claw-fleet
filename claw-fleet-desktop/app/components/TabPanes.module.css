@@ -13,70 +13,12 @@
   min-height: 0;
 }
 
-.bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-  padding: 7px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
-}
-
-.bar_text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.bar_label {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-
-.bar_main {
-  font-size: 12px;
-  color: var(--color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bar_mono {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-text);
-  overflow-wrap: anywhere;
-}
-
-.bar_actions {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.bar_btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.bar_btn:hover {
-  color: var(--color-text);
-}
-
+/* The one class left of the old hand-rolled bar: the wiki reader's version
+   picker. Everything else that used to live here — a `.bar` each for wiki, web
+   and artifact, plus their label/main/mono/actions/btn variants — became the
+   shared AuxDocBar, which is a component rather than a class family precisely
+   because three copies of a "thin bar naming what this holds" is how they drift
+   into offering different actions for the same job. */
 .bar_select {
   max-width: 190px;
   padding: 2px 6px;
@@ -85,6 +27,20 @@
   background: var(--color-bg-field);
   color: var(--color-text-secondary);
   font-size: 11px;
+}
+
+/* The version picker sits below the bar rather than in it: it is a state of the
+   reader, not an action, and the bar's action slot is icon-only. */
+.version_row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.version_label {
+  font-size: 11px;
+  color: var(--color-text-dim);
 }
 
 .body {
@@ -104,6 +60,19 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--canvas-fixed-light);
+}
+
+/* A failed action reports here rather than in the menu item that started it: a
+   context-menu item has already closed by the time its invoke rejects, so it
+   has no surface of its own to fail on. */
+.error_line {
+  margin: 0 0 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 .status {

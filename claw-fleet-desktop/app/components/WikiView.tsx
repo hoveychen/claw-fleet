@@ -155,7 +155,10 @@ async function copyDocRef(slug: string): Promise<boolean> {
 }
 
 /** Prompts for a destination, then writes `version` of `doc` to it. */
-async function exportDoc(doc: WikiDoc, version: string): Promise<void> {
+// Exported for the auxiliary rail's wiki card, which offers the same export the
+// 知识库 page does — reimplementing the kind → extension mapping and the browser
+// build's download fallback in a second place is how those two drift.
+export async function exportWikiDoc(doc: WikiDoc, version: string): Promise<void> {
   // Mirrors core's wiki::export_filename — kind decides the artifact shape,
   // and only the slug's last segment is a name (the rest are directories).
   const ext = doc.kind === "markdown" ? "md" : doc.kind === "html" ? "html" : "zip";
@@ -607,7 +610,7 @@ export function WikiView() {
       label: t("wiki.export_short", "导出"),
       icon: <Download size={13} strokeWidth={1.7} />,
       onSelect: () => {
-        exportDoc(doc, doc.currentVersion).catch((e) => console.error("wiki export failed:", e));
+        exportWikiDoc(doc, doc.currentVersion).catch((e) => console.error("wiki export failed:", e));
       },
     },
     {
@@ -1037,7 +1040,7 @@ function WikiDetail({
   const handleExport = async () => {
     setExporting(true);
     try {
-      await exportDoc(doc, effectiveVersion);
+      await exportWikiDoc(doc, effectiveVersion);
     } catch (e) {
       console.error("wiki export failed:", e);
     } finally {
