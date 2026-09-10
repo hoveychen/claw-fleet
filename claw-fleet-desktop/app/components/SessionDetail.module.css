@@ -63,7 +63,35 @@
      that, the rail's to the slab inside it. Verified in the mock at 1512px:
      with a bare `+ slab-gap` the drawer's right edge landed 3px *over* the
      cards' left edge. */
-  --rail-space: calc(var(--rail-band) + 24px);
+  --rail-space: calc(var(--rail-band) + var(--rail-gutter));
+}
+
+/* Too narrow to seat the drawer beside the rail, so it covers it instead of
+   being shoved off the pane's left edge (where `.root`'s `overflow: hidden`
+   used to eat it — 173px of it, its own title included, at a 1280px window).
+   Set by SessionDetail from the measurement described on `.fit_probe`; more
+   specific than `.rail_open .body_row` above, which is what makes it win. */
+.root.rail_covered .body_row {
+  --rail-space: 0px;
+}
+
+/* How wide the row would have to be for the drawer to fit beside the rail:
+   both slab gutters, the rail's band, the gap between them, and the drawer's
+   ideal width. Expressed here rather than as numbers in TS so the clamp() and
+   the percentage stay in one place — SessionDetail measures this box and
+   compares it with the row's real width. Deliberately reads --rail-band and
+   not --rail-space: the latter is what `.rail_covered` above switches off, and
+   a probe that moved with the answer would oscillate. */
+.fit_probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 0;
+  width: calc(
+    var(--slab-gap) * 2 + var(--rail-band) + var(--rail-gutter) + var(--drawer-w)
+  );
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* ── Hero banner ────────────────────────────────────────────────────────────
@@ -345,6 +373,11 @@
      SessionDetail overrides it inline with that card's measured width, so the
      reader pushes the prose aside instead of covering it. */
   --rail-band: var(--rail-w);
+  /* The gap between the drawer's right edge and the rail's cards. */
+  --rail-gutter: 24px;
+  /* The drawer's ideal reading width. Wide enough to be a real reader: a facet
+     panel and a file preview both land there. */
+  --drawer-w: 560px;
   --rail-space: 0px;
   position: relative;
   flex: 1;
@@ -425,9 +458,9 @@
   top: var(--slab-gap, 0px);
   right: calc(var(--slab-gap, 0px) + var(--rail-space, 0px));
   bottom: var(--slab-gap, 0px);
-  /* Wide enough to be a real reader: a facet panel and a file preview both
-     land here now, and the file preview used to get a doc-tab-sized column. */
-  width: min(94%, 560px);
+  /* --drawer-w is the width it wants (see .body_row); the percentage is the
+     floor that keeps it inside a narrow pane. */
+  width: min(94%, var(--drawer-w, 560px));
   z-index: 6;
   box-shadow: var(--shadow-drawer);
   animation: aux_drawer_in 160ms ease-out;
@@ -481,8 +514,11 @@
 }
 
 /* Windows frameless: with the drawer open and no rail beside it, IT owns the
-   pane's right edge. With a rail the caption strip is the rail's problem. */
-.root:not(.inline):not(.rail_open) .aux_head {
+   pane's right edge. With a rail the caption strip is the rail's problem —
+   unless the drawer is covering the rail, in which case it is back to being
+   the drawer's. */
+.root:not(.inline):not(.rail_open) .aux_head,
+.root:not(.inline).rail_covered .aux_head {
   padding-right: calc(7px + max(0px, var(--win-caption-inset-x) - var(--slab-gap, 0px)));
 }
 
