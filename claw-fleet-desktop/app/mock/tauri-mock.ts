@@ -42,6 +42,7 @@ import {
   MOCK_SKILL_FILES,
   MOCK_MEMORY_CONTENT,
   MOCK_PLAN_FOREST,
+  MOCK_TASK_PLANS,
   MOCK_MEMORY_HISTORY,
   MOCK_DSH_MODELS,
   MOCK_MODEL_CATALOG,
@@ -722,7 +723,7 @@ async function handleIPC(
         ? mockQaDecisionHistory(String(args.sessionId ?? ""))
         : [];
     case "get_task_plans":
-      return [];
+      return MOCK_TASK_PLANS;
     case "get_plan_forest":
       return MOCK_PLAN_FOREST;
     case "get_platform":

@@ -4,7 +4,7 @@
  * statuses, and workspaces to showcase all core features.
  */
 
-import type { AuditEvent, AuditRuleInfo, AuditSummary, DailyMetrics, DailyReport, DailyReportStats, HandoffChain, Lesson, PlanForest, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
+import type { AuditEvent, AuditRuleInfo, AuditSummary, DailyMetrics, DailyReport, DailyReportStats, HandoffChain, Lesson, PlanForest, PlanNode, RawMessage, SessionInfo, SkillInvocation, TaskPlanDetail, WaitingAlert } from "../types";
 
 const NOW = Date.now();
 const MIN = 60_000;
@@ -907,7 +907,15 @@ export const MOCK_HANDOFF_CHAINS: Record<string, HandoffChain> = {
       {
         fromSessionId: "sess-billing-2",
         toSessionId: "sess-billing-3",
-        note: "P2/P3 green: backfill + shadow table validated on staging (2.1M rows, 0 drift). P4: flip read path behind usage_billing_v2, keep dual-write for 48h.",
+        note:
+          "**P2/P3 green.** Backfill + shadow table validated on staging " +
+          "(2.1M rows, 0 drift).\n\nNext up is P4 — flip the read path behind " +
+          "`usage_billing_v2`:\n\n- keep dual-write on for 48h, the rollback is " +
+          "the flag alone\n- `LedgerReader::get` counts `ledger_v2_miss_total` " +
+          "per tenant; watch it before widening\n- three enterprise tenants stay " +
+          "on the legacy path (custom proration, not reproduced by the shadow " +
+          "table yet)\n\nAcceptance gate: 24h at zero misses across the top 50 " +
+          "tenants by volume.",
         planId: "billing-migration",
         nextTask: "P4",
         handedAt: NOW - 38 * MIN,
@@ -4121,3 +4129,30 @@ export function mockCreateDir(path: string | null | undefined, name: string) {
   MOCK_BROWSE_TREE[child] = { path: child, parent: parent.path, entries: [], truncated: false };
   return MOCK_BROWSE_TREE[child];
 }
+
+// ── 任务 facet (session detail's TASKS.md panel) ─────────────────────────────
+// `get_task_plans` used to answer `[]` in mock mode, which hid the 任务 facet
+// altogether — the panel could not be looked at, let alone designed, without a
+// live session that happened to own a TASKS.md. That is most of why it stayed
+// the one un-designed panel in the app for as long as it did.
+//
+// Derived from the forest above rather than written out again, so the two
+// surfaces that read a plan's items cannot drift in the mock the way they had
+// drifted in the code. The three picked cover what the panel has to survive: a
+// part-done plan whose current P is a multi-paragraph note (the clamp), an
+// explore plan (the kind badge), and one that lives in a worktree (the source
+// line).
+export const MOCK_TASK_PLANS: TaskPlanDetail[] = (() => {
+  const flat: PlanNode[] = [];
+  const walk = (nodes: PlanNode[]) => {
+    for (const n of nodes) {
+      flat.push(n);
+      walk(n.children);
+    }
+  };
+  walk(MOCK_PLAN_FOREST.roots);
+  return ["billing-migration", "ledger-index-fix", "index-build-probe"]
+    .map((id) => flat.find((n) => n.id === id))
+    .filter((n): n is PlanNode => Boolean(n))
+    .map(({ id, title, source, kind, items }) => ({ id, title, source, kind, items }));
+})();
