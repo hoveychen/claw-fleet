@@ -180,6 +180,8 @@ export function SessionSheet({
   // 写「无」会把「我不知道」说成「没有」。
   progressRows.push({ pane: "token", label: t("Token 与花费") });
   progressRows.push({ pane: "workflow", label: t("Workflow") });
+  // 笔记的份数也不在快照里,同理不带读数。
+  progressRows.push({ pane: "notes", label: t("笔记") });
   progressRows.push({
     pane: "handoff",
     label: t("接力链"),

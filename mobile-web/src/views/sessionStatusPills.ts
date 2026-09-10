@@ -27,7 +27,13 @@ import type { SessionInfo, SessionStatus } from "../types";
  *  那五个组件原样复用），变的只是入口：从「六个挤在一行、每个约 46px 宽的
  *  tab」改成「从会话详情半屏或状态 pill 推上来的一整页」。一次只看一面，那一
  *  面就拿得到整个屏宽。 */
-export type DetailPane = "decisions" | "plans" | "token" | "workflow" | "handoff";
+export type DetailPane =
+  | "decisions"
+  | "plans"
+  | "token"
+  | "workflow"
+  | "notes"
+  | "handoff";
 
 /** 头部下面这条轨里，点某个 pill 会推开哪一面。
  *
