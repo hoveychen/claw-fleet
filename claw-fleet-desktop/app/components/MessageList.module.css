@@ -87,8 +87,11 @@
 .stalled_reason {
   max-width: 46ch;
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--t-caption, 11px);
-  color: var(--color-text-faint, var(--color-text-dim));
+  /* --t-meta is this scale's 11px tier (see the ladder above); there is no
+     --t-caption and no --color-text-faint, so both references rendered off
+     their fallback and the token guard failed the build. */
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
   overflow-wrap: anywhere;
 }
 
