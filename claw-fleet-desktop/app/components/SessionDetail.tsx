@@ -38,7 +38,7 @@ import type { WikiLinkContext } from "../markdown/wikiLinks";
 import { WikiLinksProvider } from "../markdown/wikiLinksContext";
 import { WebLinkProvider } from "../markdown/webLinks";
 import { IngestOpenProvider, type IngestOpenContext } from "./blocks/ingestOpenContext";
-import { useWikiDocs } from "../hooks/useWikiDocs";
+import { refetchWikiDocsForMissingSlug, useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
@@ -803,12 +803,20 @@ export function SessionDetail({
   //
   // Unknown slugs render grayed out rather than clickable, which is exactly the
   // signal worth having: it marks a doc the agent said it would write and
-  // didn't.
+  // didn't. But the list is fetched once per app run, so a doc the session
+  // published a minute ago is missing from it and its ref would gray out too —
+  // a miss buys one re-read (once per slug) before we believe it.
   const { docs: wikiDocs } = useWikiDocs();
   const wikiLinks = useMemo<WikiLinkContext>(() => {
     const slugs = new Set(wikiDocs.map((d) => d.slug));
     return {
-      hasSlug: (slug) => slugs.has(slug),
+      hasSlug: (slug) => {
+        if (slugs.has(slug)) return true;
+        // Off the render path: the re-read flips `inFlight` synchronously, and
+        // hasSlug runs while the markdown renderer is rendering.
+        queueMicrotask(() => refetchWikiDocsForMissingSlug(slug));
+        return false;
+      },
       // Beside the prose, same as a clicked path.
       openSlug: (slug) => openAuxDoc("wiki", slug),
     };
