@@ -67,11 +67,13 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
  * control and its trailing ✕ dismisses the card. (An agent card keeps its
  * strip: its pane is a transcript, which has no header of its own to borrow.)
  *
- * **Everything here answers a right-click.** A collapsed chip, an expanded
- * card and the rail's own empty space each raise a menu (`auxDocMenu`), and
+ * **Every card answers a right-click** with its own menu (`auxDocMenu`), and
  * they must: with no handler, the right-click bubbled to the app-wide menu in
  * `contextMenu.ts` and answered a request to act on a file with
- * Settings / About / Quit.
+ * Settings / About / Quit. The rail's *background* deliberately answers
+ * nothing — it is `pointer-events: none` so the transcript underneath keeps the
+ * clicks, which means stack-level actions have to live on the cards
+ * (`tailItems`) and only the empty-rail line carries them.
  */
 export function SessionAuxRail({
   open,
@@ -152,6 +154,7 @@ export function SessionAuxRail({
     onClose: () => onCloseDoc(d.id),
     onCloseOthers: () => onCloseOtherDocs(d.id),
     onCloseAll: onCloseAllDocs,
+    onHideRail,
     otherCount: docs.length - 1,
   });
 
@@ -191,7 +194,20 @@ export function SessionAuxRail({
     });
   };
 
-  /** The rail's own menu: what to do with the *stack*, not with one card. */
+  /**
+   * The stack's menu — the one thing no single card can offer on its own
+   * behalf, raised from the empty-rail line.
+   *
+   * There is deliberately **no** `onContextMenu` on the `<aside>`. The rail is
+   * `pointer-events: none` with `.rail > * { pointer-events: auto }` (see the
+   * CSS), so the transparent gaps between cards hand every click to the
+   * transcript underneath — which is the whole reason the rail can float over
+   * the conversation. A handler on the aside reads as correct and passes a
+   * jsdom test (no hit-testing there) while being dead in the app; it was, and
+   * the browser pass is what caught it. Collapsing, clearing the stack and
+   * hiding the rail live in every card's own menu instead (`tailItems`), which
+   * is reachable. This line covers the one state with no card to right-click.
+   */
   const railItems = (): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
     if (expandedDoc || expandedAgent) {
@@ -228,24 +244,29 @@ export function SessionAuxRail({
     <aside
       className={`${styles.rail} ${wide ? styles.rail_wide : ""}`}
       style={wide ? { width: cardWidth } : undefined}
-      onContextMenu={(e) => {
-        // Reached only by the rail's own background — a chip, a doc card and an
-        // agent card all stop propagation with their own menu.
-        e.preventDefault();
-        e.stopPropagation();
-        setMenu({ anchor: { x: e.clientX, y: e.clientY }, items: railItems() });
-      }}
     >
       {/* Held open by the switch with nothing in it. Saying so beats an empty
           column, which reads as the rail having failed to load rather than as
           "there is genuinely nothing running and nothing opened yet". */}
-      {empty && <p className={styles.rail_empty}>{t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}</p>}
+      {empty && (
+        <p
+          className={styles.rail_empty}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenu({ anchor: { x: e.clientX, y: e.clientY }, items: railItems() });
+          }}
+        >
+          {t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}
+        </p>
+      )}
       <SubagentLiveCards
         agents={agents}
         expandedId={expandedId}
         onToggle={onToggleAgent}
         onClose={onCloseAgent}
         onGoto={onOpenAgent}
+        onHideRail={onHideRail}
         onGripDown={onGripDown}
         renderPane={(a) => <SessionAuxAgent agent={a} paths={paths} />}
       />

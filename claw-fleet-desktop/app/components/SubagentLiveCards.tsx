@@ -1,4 +1,12 @@
-import { ChevronDown, Copy, ExternalLink, FileText, FolderOpen, PanelRightOpen } from "lucide-react";
+import {
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  FileText,
+  FolderOpen,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react";
 import { useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -47,6 +55,7 @@ function agentMenuItems(
   isOpen: boolean,
   onToggle: (s: SessionInfo) => void,
   onGoto: (s: SessionInfo) => void,
+  onHideRail: () => void,
   t: TFunction,
 ): ContextMenuItem[] {
   const copy = (text: string) => {
@@ -101,6 +110,17 @@ function agentMenuItems(
       });
     }
   }
+  // The rail's own switch, offered here for the same reason the doc cards
+  // offer it: the rail's transparent background cannot answer a right-click
+  // (`.rail` is pointer-events:none), so the cards are the only reachable
+  // place to put the rail away from.
+  items.push({
+    id: "hide-rail",
+    label: t("detail.rail_hide", "收起辅助栏"),
+    icon: <PanelRightClose size={13} strokeWidth={1.7} />,
+    dividerBefore: true,
+    onSelect: onHideRail,
+  });
   return items;
 }
 
@@ -141,6 +161,7 @@ export function SubagentLiveCards({
   onToggle,
   onClose,
   onGoto,
+  onHideRail,
   onGripDown,
   renderPane,
 }: {
@@ -158,6 +179,8 @@ export function SubagentLiveCards({
    *  default: everything the page adds over this pane is composer and chrome a
    *  subagent has no use for. */
   onGoto: (session: SessionInfo) => void;
+  /** Put the whole rail away — see `agentMenuItems`. */
+  onHideRail: () => void;
   onGripDown: (e: ReactPointerEvent<HTMLElement>) => void;
   /** The transcript pane for the expanded card. Supplied by the rail so this
    *  component stays free of the fetching. */
@@ -320,6 +343,7 @@ export function SubagentLiveCards({
             expandedId === agentCardId(menu.agent.id),
             onToggle,
             onGoto,
+            onHideRail,
             t,
           )}
           onClose={() => setMenu(null)}

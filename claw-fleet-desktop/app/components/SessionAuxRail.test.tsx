@@ -162,38 +162,44 @@ describe("SessionAuxRail", () => {
     expect(menu.textContent).toContain("/repo/src/main.rs");
   });
 
-  // The rail's own background is a third menu: what to do with the *stack*.
-  it("answers a right-click on its own background with the stack's menu", () => {
+  // Regression guard for a bug the unit tests could not see and the browser
+  // pass caught: `.rail` is `pointer-events: none` (so the transcript keeps the
+  // clicks between cards), which means an `onContextMenu` on the <aside> is
+  // dead in the app while passing in jsdom, where there is no hit-testing. The
+  // stack-level actions therefore have to live on the cards.
+  it("puts hiding the rail on a card's menu, not on the rail's dead background", () => {
     const el = render({ docs: [makeAuxDoc("file", "/repo/a.rs")] });
-    const rail = el.querySelector("aside") as HTMLElement;
+    const chip = el.querySelector("[class*='doc_card']") as HTMLElement;
 
     act(() =>
-      void rail.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
+      void chip.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
     );
-
     const labels = Array.from(document.body.querySelectorAll("[class*='menu'] button")).map(
       (b) => b.textContent ?? "",
     );
-    // Closing the whole stack and putting the rail away are stack-level; they
-    // are the two things a card's own menu cannot offer on its own behalf.
-    expect(labels).toHaveLength(2);
-    expect(labels[0]).toMatch(/全部|all/i);
-    expect(labels[1]).toMatch(/辅助栏|side rail/i);
+
+    expect(labels.some((l) => /辅助栏|side rail/i.test(l))).toBe(true);
+    // And the aside itself must not carry one, or the fix rots back.
+    const rail = el.querySelector("aside") as HTMLElement;
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    act(() => void rail.dispatchEvent(ev));
+    expect(ev.defaultPrevented).toBe(false);
   });
 
-  it("offers the stack menu a way to collapse whatever is expanded", () => {
-    const onCollapseDoc = vi.fn();
-    const doc = makeAuxDoc("wiki", "arch/overview");
-    const el = render({ docs: [doc], expandedId: doc.id, onCollapseDoc });
-    const rail = el.querySelector("aside") as HTMLElement;
+  // The one state with no card to right-click: held open by the switch with
+  // nothing in play. That line IS a `.rail > *`, so it does get the events.
+  it("carries the stack menu on the empty-rail line", () => {
+    const onHideRail = vi.fn();
+    const el = render({ open: true, onHideRail });
+    const line = el.querySelector("aside > p") as HTMLElement;
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
 
-    act(() =>
-      void rail.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
-    );
+    act(() => void line.dispatchEvent(ev));
+    expect(ev.defaultPrevented).toBe(true);
     const items = Array.from(document.body.querySelectorAll("[class*='menu'] button"));
+    expect(items).toHaveLength(1);
     act(() => (items[0] as HTMLElement).click());
-
-    expect(onCollapseDoc).toHaveBeenCalled();
+    expect(onHideRail).toHaveBeenCalled();
   });
 
   // The behaviour this rail change is for: a subagent is read here, not by

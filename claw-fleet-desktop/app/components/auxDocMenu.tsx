@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FolderOpen,
   Package,
+  PanelRightClose,
   RotateCw,
   Trash2,
   X,
@@ -61,6 +62,17 @@ export interface AuxCardTail {
   onClose: () => void;
   onCloseOthers: () => void;
   onCloseAll: () => void;
+  /** Put the whole rail away — the header switch's action, offered from the
+   *  card because that is where the pointer already is.
+   *
+   *  It lives on the *cards* rather than on a menu of the rail's own for a
+   *  layout reason worth stating: `.rail` is `pointer-events: none` with
+   *  `.rail > * { pointer-events: auto }`, so the transparent gaps between
+   *  cards hand every click to the transcript underneath. A right-click on the
+   *  rail's "background" therefore never reaches the rail at all — an
+   *  `onContextMenu` on the `<aside>` looks correct, passes a jsdom test (no
+   *  hit-testing there) and is dead in the app. */
+  onHideRail: () => void;
   /** Cards other than this one — hides "close others" when there are none. */
   otherCount: number;
 }
@@ -123,6 +135,13 @@ function tailItems(tail: AuxCardTail, t: TFunction): ContextMenuItem[] {
       },
     );
   }
+  items.push({
+    id: "hide-rail",
+    label: t("detail.rail_hide", "收起辅助栏"),
+    icon: <PanelRightClose {...ICON} />,
+    dividerBefore: true,
+    onSelect: tail.onHideRail,
+  });
   return items;
 }
 
