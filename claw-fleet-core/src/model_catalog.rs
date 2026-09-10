@@ -537,8 +537,9 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
         .filter(|e| e.superseded_by.is_some())
         // Same harness gate as the table: a superseded model from a harness that
         // is not here would otherwise reappear on this line after its own row
-        // was filtered out. Every superseded row happens to be Claude today, so
-        // this is guarding the invariant rather than a live bug.
+        // was filtered out. Live since 2026-09-10: the two retired DeepSeek
+        // flash aliases are superseded dsh rows, so a Claude-only sheet really
+        // does have to drop them.
         .filter(|e| {
             e.family
                 .as_deref()
@@ -570,7 +571,8 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
         if has("dsh") {
             s.push_str(
                 "\n\
-`deepseek-v4-flash` **不收图片输入**,要发图走 `-vision-exp` 那个。\n",
+`deepseek-official` 这一路只有 `deepseek-v4-pro` **不收图片输入**;\
+flash 那几个 id(含两个退役别名)都收。\n",
             );
         }
         s.push_str(
@@ -593,7 +595,7 @@ dsh 把模型拆成 `provider` + `model` 两段,Fleet 的 spawn 用一个字符�
 `openrouter`,model `anthropic/claude-haiku-4.5`。表里只列 dsh 内置的 \
 `deepseek-official` 路由(有官方公开价目表);经 openrouter 之类第三方 provider \
 的模型不列——同一个模型经不同 provider 价格不同、逐用户不同,要知道本机配了\
-什么就读 `~/.dsh/settings.yaml`,别猜。表里那三行的 effort 梯子是向本机 dsh 实测来的\
+什么就读 `~/.dsh/settings.yaml`,别猜。表里那几行的 effort 梯子是向本机 dsh 实测来的\
 (`off`/`low`/`high`/`max`,**没有 `medium`**,默认 `high`)。没编目的 dsh 模型的 \
 effort 一列显示「见 dsh」——那些的梯子五花八门,得问 dsh 自己。\n",
             );
@@ -602,8 +604,8 @@ effort 一列显示「见 dsh」——那些的梯子五花八门,得问 dsh 自
         if has("dsh") {
             s.push_str(
                 "\n\
-`deepseek-v4-flash` **rejects image input** — send images to the `-vision-exp` row \
-instead.\n",
+On the `deepseek-official` route only `deepseek-v4-pro` **rejects image input**; \
+every flash id (including the two retired aliases) takes images.\n",
             );
         }
         s.push_str(
@@ -633,7 +635,7 @@ splits on the **first `/`**: `openrouter/anthropic/claude-haiku-4.5` → provide
 third-party provider such as openrouter are not listed — the same model costs \
 different amounts through different providers and varies per user. Read \
 `~/.dsh/settings.yaml` to see what this machine has; don't guess. The effort ladders on \
-those three rows were measured against this machine's dsh (`off`/`low`/`high`/`max`, \
+those rows were measured against this machine's dsh (`off`/`low`/`high`/`max`, \
 **no `medium`**, default `high`). Uncatalogued dsh models show \"ask dsh\" instead — \
 their ladders vary widely, so ask dsh itself.\n",
             );
@@ -858,6 +860,46 @@ mod tests {
         assert!(no_dsh.contains("gpt-5.6-sol"));
         assert!(!no_dsh.contains("deepseek"));
         assert!(!no_dsh.contains("How dsh names a model"));
+    }
+
+    /// What the dsh half of the sheet says about DeepSeek, checked against what
+    /// was actually measured on 2026-09-10 rather than against habit.
+    ///
+    /// Both claims here used to be wrong in the same direction — the sheet was
+    /// written when `deepseek-v4-flash` really did refuse images and told the
+    /// agent to route pictures to `-vision-exp`. DeepSeek has since retired both
+    /// of those models behind V4.1 Flash, and the live check is unambiguous: the
+    /// same 64×64 PNG sent to `deepseek-flash` and to `deepseek-v4-flash` came
+    /// back with the same answer and field-for-field identical token counts
+    /// (228 prompt / 44 completion / 42 reasoning), and the official pricing
+    /// page marks Vision ✓ for flash and "Not supported" for pro. Sending an
+    /// agent chasing a `-vision-exp` row that is now just an alias is worse than
+    /// saying nothing.
+    #[test]
+    fn the_dsh_section_names_v41_flash_and_puts_the_image_caveat_on_pro() {
+        for locale in ["zh", "en"] {
+            let sheet = render_sheet_with(locale, |f| f == "dsh");
+            assert!(
+                sheet.contains("deepseek-official/deepseek-flash"),
+                "{locale}: V4.1 Flash must have its own row"
+            );
+            // The retired aliases are named once, on the legacy tail — never as
+            // rows of their own.
+            assert_eq!(
+                sheet.matches("deepseek-official/deepseek-v4-flash-vision-exp").count(),
+                1,
+                "{locale}: the retired alias belongs on the legacy line only"
+            );
+            let caveat = if locale == "zh" { "不收图片输入" } else { "rejects image input" };
+            let line = sheet
+                .lines()
+                .find(|l| l.contains(caveat))
+                .unwrap_or_else(|| panic!("{locale}: the image caveat must still be stated"));
+            assert!(
+                line.contains("deepseek-v4-pro"),
+                "{locale}: the caveat now belongs to pro, not to flash — got {line:?}"
+            );
+        }
     }
 
     /// A probe that answers "no" to everything is a broken probe, not a machine
