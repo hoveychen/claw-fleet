@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BookOpen, NotebookText } from "lucide-react";
 
@@ -35,13 +35,21 @@ export function WikiTabPane({
   onOpenSlug: (slug: string) => void;
 }) {
   const { t } = useTranslation();
-  const { docs, loaded } = useWikiDocs();
+  const { docs, loaded, inFlight, refetchForMissingSlug } = useWikiDocs();
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const versionBySlug = useUIStore((s) => s.mainViewState.wiki.versionBySlug);
   const [error, setError] = useState<string | null>(null);
   const slug = card.ref;
 
   const doc = useMemo(() => docs.find((d) => d.slug === slug) ?? null, [docs, slug]);
+
+  // The shared list is fetched once, so a doc published *after* the app opened
+  // is absent from it — which is exactly this pane's common case, since the card
+  // that opened it is a publish the session just made. Ask for one re-read
+  // before believing the miss.
+  useEffect(() => {
+    if (loaded && !doc) refetchForMissingSlug(slug);
+  }, [loaded, doc, slug, refetchForMissingSlug]);
 
   // Cross-doc links resolve against the whole list, so a link to a doc hidden by
   // the 知识库 page's current filter is still live here.
@@ -77,15 +85,17 @@ export function WikiTabPane({
   });
 
   if (!doc || !version) {
+    // Before the first fetch settles — or while the re-read the miss just asked
+    // for is still running — "not found" would be a lie.
+    const settled = loaded && !inFlight;
     return (
       <AuxPane menuItems={build.menu} className={styles.pane}>
         <div className={styles.missing}>
-          {/* Before the first fetch settles, "not found" would be a lie. */}
-          {loaded
+          {settled
             ? t("tabs.wiki_missing", "该文档未发布，或已被删除")
             : t("wiki.loading", "Loading…")}
           <code className={styles.missing_key}>{slug}</code>
-          {loaded && (
+          {settled && (
             <button type="button" className={styles.blocked_btn} onClick={openInWikiPage}>
               <BookOpen size={12} strokeWidth={1.7} />
               {t("tabs.wiki_open_page", "在知识库中打开")}

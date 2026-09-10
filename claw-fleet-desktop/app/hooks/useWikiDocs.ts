@@ -46,15 +46,57 @@ export const useWikiDocsStore = create<WikiDocsState>((set, get) => ({
   },
 }));
 
+/**
+ * Slugs a consumer already missed once and re-fetched the list for.
+ *
+ * The fetch below runs only while `loaded` is false, so the list is a snapshot
+ * of whatever existed when the app opened: a doc published *afterwards* — the
+ * common case, since the agent publishing it is running in the session you are
+ * reading — is missing from it forever, and a tab for that slug renders
+ * "该文档未发布，或已被删除" for a doc that is fine. `refetchForMissingSlug`
+ * gives such a consumer one re-fetch before it believes the miss.
+ *
+ * Module-level rather than component state so remounting a tab (collapsing the
+ * rail, switching sessions) cannot re-fire the call, and never cleared: one
+ * extra IPC per genuinely-dead slug per app run is the whole cost, and clearing
+ * it on every list change would loop.
+ */
+const refetchedForSlug = new Set<string>();
+
+/**
+ * Re-read the list because `slug` was not in it — once per slug, and only once
+ * the first fetch has settled (before that a miss says nothing).
+ */
+export function refetchWikiDocsForMissingSlug(slug: string): void {
+  const { loaded, fetch } = useWikiDocsStore.getState();
+  if (!loaded) return;
+  if (refetchedForSlug.has(slug)) return;
+  refetchedForSlug.add(slug);
+  void fetch();
+}
+
+/** Test seam: forget which slugs already spent their one re-read. */
+export function resetWikiRefetchGuard(): void {
+  refetchedForSlug.clear();
+}
+
 /** Subscribe to the shared doc list, fetching it once on first use. */
-export function useWikiDocs(): { docs: WikiDoc[]; loaded: boolean } {
+export function useWikiDocs(): {
+  docs: WikiDoc[];
+  loaded: boolean;
+  /** A list read is in flight — a miss is not yet an answer. */
+  inFlight: boolean;
+  /** @see refetchWikiDocsForMissingSlug */
+  refetchForMissingSlug: (slug: string) => void;
+} {
   const docs = useWikiDocsStore((s) => s.docs);
   const loaded = useWikiDocsStore((s) => s.loaded);
+  const inFlight = useWikiDocsStore((s) => s.inFlight);
   const fetch = useWikiDocsStore((s) => s.fetch);
   useEffect(() => {
     if (!loaded) void fetch();
   }, [loaded, fetch]);
-  return { docs, loaded };
+  return { docs, loaded, inFlight, refetchForMissingSlug: refetchWikiDocsForMissingSlug };
 }
 
 /**
