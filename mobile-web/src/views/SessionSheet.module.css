@@ -310,3 +310,61 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* 停止 / 中断。形制跟着这张半屏的行（整宽、带副行），而不是任务卡上那颗胶囊：
+   卡片上的按钮要跟标记按钮挤在一行里，这里有整个屏宽，正好把「中断只掐这一轮 /
+   停止是杀进程」写清楚——那两个字自己说不清，而这两件事的后果差得很远。
+   配色仍沿用卡片那套：停止红、中断琥珀。 */
+.stopRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--color-error);
+  padding: 9px 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.stopRow[data-mode="interrupt"] {
+  color: var(--color-warning);
+}
+
+.stopRow:active {
+  background: var(--color-bg-card-hover);
+}
+
+.stopRow:disabled {
+  opacity: 0.5;
+}
+
+.stopIcon {
+  flex: 0 0 auto;
+}
+
+.stopText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.stopLabel {
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+}
+
+.stopSub {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+}
+
+.stopBusy {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+}
