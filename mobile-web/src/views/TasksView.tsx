@@ -32,12 +32,13 @@ import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
-import { isFleetOwnedEntrypoint, isFleetOwnedTask } from "../types";
+import { isFleetOwnedTask } from "../types";
 import { useDraft } from "../draft";
 import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useChatWorkspaces } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
+import { canControl, runStop, stopMode } from "./sessionStop";
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import styles from "./TasksView.module.css";
@@ -177,22 +178,6 @@ function formatWatchElapsed(ms: number): string {
   if (diff < 3_600_000) return t("已过 {0} 分", Math.floor(diff / 60_000));
   if (diff < 86_400_000) return t("已过 {0} 时", Math.floor(diff / 3_600_000));
   return t("已过 {0} 天", Math.floor(diff / 86_400_000));
-}
-
-type StopMode = "interrupt" | "stop" | "spent";
-
-/** Same escalation as the desktop StopControl: interrupt only for Fleet-owned
- *  sessions with a precise pid mid-turn; otherwise kill; no pid → dead. */
-function stopMode(s: SessionInfo): StopMode {
-  if (s.pid == null) return "spent";
-  if (isFleetOwnedEntrypoint(s.entrypoint) && s.pidPrecise && WORKING.includes(s.status)) {
-    return "interrupt";
-  }
-  return "stop";
-}
-
-function canControl(s: SessionInfo): boolean {
-  return !s.isSubagent;
 }
 
 type MarkFilter = "all" | "pending" | "done";
@@ -595,24 +580,9 @@ export function TasksView({
       // 停不掉,重则按 pid 打到一个毫不相干的进程。
       const transport = clientFor(s.deviceId);
       if (!transport || busyOp) return;
-      const mode = stopMode(s);
-      if (mode === "spent") return;
       setBusyOp(itemKey(s.deviceId, s.id));
       try {
-        if (mode === "interrupt") {
-          await transport.request("interrupt", { pid: s.pid });
-        } else if (s.pidPrecise) {
-          if (!(await confirm(t("确定停止「{0}」的这个会话吗？", s.workspaceName)))) return;
-          await transport.request("stop", { pid: s.pid });
-        } else {
-          if (
-            !(await confirm(
-              t("无法精确定位进程，将停止「{0}」目录下的所有会话，确定吗？", s.workspaceName),
-            ))
-          )
-            return;
-          await transport.request("stop_workspace", { workspacePath: s.workspacePath });
-        }
+        await runStop(transport, s, confirm);
       } catch (e) {
         window.alert(e instanceof Error ? e.message : t("操作失败"));
       } finally {
