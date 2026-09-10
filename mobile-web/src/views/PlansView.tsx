@@ -17,9 +17,9 @@ import {
   matrixRows,
   nodeKey,
   pendingOf,
-  splitMarker,
   subtreeHasPending,
 } from "./planMatrix";
+import { TaskItemLine } from "./TaskItemLine";
 import styles from "./PlansView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
@@ -337,8 +337,13 @@ function PlanSheet({
       {node.source && <div className={styles.source}>{node.source}</div>}
 
       <div className={styles.sheetBody}>
-        {pendingItems.map(({ item, i }) => (
-          <TaskLine key={`p${i}`} text={item.text} startOpen={i === focusItem} />
+        {pendingItems.map(({ item, i }, n) => (
+          <TaskItemLine
+            key={`p${i}`}
+            text={item.text}
+            state={n === 0 ? "current" : "pending"}
+            startOpen={i === focusItem}
+          />
         ))}
         {doneItems.length > 0 && (
           <button className={styles.doneFold} onClick={() => setDoneShown((v) => !v)}>
@@ -350,7 +355,7 @@ function PlanSheet({
           doneItems
             .filter(({ i }) => doneShown || i === focusItem)
             .map(({ item, i }) => (
-              <TaskLine key={`d${i}`} text={item.text} done startOpen={i === focusItem} />
+              <TaskItemLine key={`d${i}`} text={item.text} state="done" startOpen={i === focusItem} />
             ))}
         {node.chains.map((c) => (
           <div key={c.chainId} className={styles.chain}>
@@ -364,17 +369,3 @@ function PlanSheet({
   );
 }
 
-/** One P-task: `P3` badge then prose, clamped to a line until tapped. */
-function TaskLine({ text, done, startOpen }: { text: string; done?: boolean; startOpen?: boolean }) {
-  const { marker, rest } = splitMarker(text);
-  const [open, setOpen] = useState(!!startOpen);
-  return (
-    <div className={styles.item} data-done={done} onClick={() => setOpen((v) => !v)}>
-      <span className={styles.box}>{done ? "☑" : "☐"}</span>
-      {marker && <span className={styles.marker}>{marker}</span>}
-      <span className={styles.itemText} data-open={open}>
-        {rest}
-      </span>
-    </div>
-  );
-}

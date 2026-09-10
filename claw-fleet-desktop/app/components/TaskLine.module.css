@@ -123,3 +123,12 @@
 .row[data-open] .text :is(p, li) {
   margin: var(--space-1) 0;
 }
+
+/* 这一行本身就是个列表项的缩进语境（勾选框 + P 徽章），所以要撤掉中文段落
+   的首行缩进（rehype cjkIndent 打的 `.cjk-indent`，见 App.css）。插件自己的
+   理由就是这条：li / blockquote / td 里的段落一律跳过，因为「已有自己的缩进
+   语境，再叠加会显得错乱」——一个 P-task 行同理，否则展开后首行会莫名右移
+   两个字。 */
+.row[data-open] .text :global(.cjk-indent) {
+  text-indent: 0;
+}

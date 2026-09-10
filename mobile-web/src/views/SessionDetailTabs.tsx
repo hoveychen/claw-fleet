@@ -3,12 +3,12 @@
 // first open via its relay method and renders a compact mobile layout.
 
 import { useEffect, useState } from "react";
-import { Check, CheckCircle2, ChevronRight, ListTodo, NotebookPen, Search, Waypoints, Workflow } from "lucide-react";
+import { CheckCircle2, ChevronRight, ListTodo, NotebookPen, Search, Waypoints, Workflow } from "lucide-react";
 import { EmptyState } from "./EmptyState";
-import { splitMarker } from "./planMatrix";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
+import { TaskItemLine } from "./TaskItemLine";
 import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type {
@@ -262,17 +262,19 @@ export function TaskPlansTab({
         return (
           <div key={p.id ?? i} className={styles.planCard}>
             {p.title && <div className={styles.planTitle}>{p.title}</div>}
+            {/* explore 计划的 P-task 产出的是理解,交付物是它派生的 exec 子计划 —
+                把清单读成「要做的活」是个范畴错误,所以这里跟桌面一样标出来。 */}
+            {p.kind === "explore" && <div className={styles.planKind}>explore</div>}
             <PlanStrip items={p.items} done={done} />
             {p.items.map((item, j) => {
               const isCurrent = Boolean(
                 current && !item.done && item.text.includes(current),
               );
               return (
-                <PlanItemLine
+                <TaskItemLine
                   key={j}
                   text={item.text}
-                  done={item.done}
-                  current={isCurrent}
+                  state={item.done ? "done" : isCurrent ? "current" : "pending"}
                 />
               );
             })}
@@ -305,34 +307,6 @@ function PlanStrip({ items, done }: { items: TaskItem[]; done: number }) {
   );
 }
 
-/** 单条 P:默认压成一行,点一下才展开全文。P-task 正文常常是几百字的实现
- *  笔记,整段铺开会把这个页签变成一堵墙 —— 桌面端同样的毛病已经改掉了。 */
-function PlanItemLine({
-  text,
-  done,
-  current,
-}: {
-  text: string;
-  done: boolean;
-  current: boolean;
-}) {
-  const { marker, rest } = splitMarker(text);
-  const [open, setOpen] = useState(false);
-  return (
-    <div
-      className={styles.planItem}
-      data-done={done}
-      data-current={current}
-      onClick={() => setOpen((v) => !v)}
-    >
-      <span className={styles.checkbox}>{done ? <Check size={11} /> : ""}</span>
-      {marker && <span className={styles.planMarker}>{marker}</span>}
-      <span className={styles.planItemText} data-open={open}>
-        {rest}
-      </span>
-    </div>
-  );
-}
 
 // ── Token ────────────────────────────────────────────────────────────────────
 

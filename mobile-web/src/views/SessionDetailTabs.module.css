@@ -263,63 +263,15 @@
   color: var(--color-text-dim);
 }
 
-.planMarker {
-  flex-shrink: 0;
+/* explore 徽章:跟桌面 任务面板 / 计划树 用同一个词与同一种青色。 */
+.planKind {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-teal) 15%, transparent);
+  color: var(--color-teal);
   font-size: var(--t-meta, 11px);
   font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  color: var(--color-text-dim);
-}
-
-/* 默认压成一行:P 任务正文常是几百字的实现笔记,点一下才展开。 */
-.planItemText {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.planItemText[data-open="true"] {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.planItem {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: var(--t-aux, 12px);
-  line-height: 1.45;
-  color: var(--color-text-secondary);
-  /* overflow-wrap 可继承到文字 span；P 任务文本常含长路径。 */
-  overflow-wrap: anywhere;
-}
-
-/* 文字 span(checkbox 之后的最后一个子项)是 flex 子项，需 min-width:0 才能收缩断行。 */
-.planItem > span:last-child {
-  min-width: 0;
-}
-
-.planItem[data-done="true"] {
-  color: var(--color-text-dim);
-  text-decoration: line-through;
-}
-
-.planItem[data-current="true"] {
-  color: var(--color-accent);
-}
-
-.checkbox {
-  width: 15px;
-  height: 15px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 4px;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--t-meta, 11px);
-  color: var(--color-success);
-  margin-top: 1px;
 }
 
 /* ── Token ── */

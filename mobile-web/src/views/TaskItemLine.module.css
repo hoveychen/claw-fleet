@@ -1,0 +1,95 @@
+/* 单条 P 任务。会话页签与计划页共用，所以样式也只有一份 —— 此前两处各写
+   一份，间距、字号、勾选框形状全都差着一点。 */
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: var(--t-aux, 12px);
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  /* P 任务正文常含长路径，overflow-wrap 要能继承到文字 span。 */
+  overflow-wrap: anywhere;
+}
+
+.row[data-state="done"] {
+  color: var(--color-text-dim);
+}
+
+.row[data-state="done"] .text {
+  text-decoration: line-through;
+}
+
+.row[data-state="current"] {
+  color: var(--color-accent);
+}
+
+.box {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  color: var(--color-success);
+  font-size: var(--t-meta, 11px);
+}
+
+.row[data-state="current"] .box {
+  border-color: var(--color-accent);
+}
+
+.marker {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: var(--t-meta, 11px);
+  font-weight: 600;
+  color: var(--color-text-dim);
+}
+
+.row[data-state="current"] .marker {
+  color: var(--color-accent);
+}
+
+/* 压成一行，点一下换成折行版。 */
+.text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row[data-open] .text {
+  white-space: normal;
+  overflow: visible;
+}
+
+/* 展开态走块级 markdown 组件表，段落/列表的外边距与浏览器默认缩进都要
+   收一收，否则一条 P 会把整卡撑开。 */
+.row[data-open] .text > :first-child {
+  margin-top: 0;
+}
+
+.row[data-open] .text > :last-child {
+  margin-bottom: 0;
+}
+
+.row[data-open] .text :is(p, li) {
+  margin: 3px 0;
+}
+
+.row[data-open] .text :is(ul, ol) {
+  margin: 3px 0;
+  padding-left: 16px;
+}
+
+/* 撤掉中文段落首行缩进（rehype cjkIndent 打的 `.cjk-indent`，见 index.css）：
+   这一行本身就是列表项的缩进语境（勾选框 + P 徽章），插件跳过 li / td 的
+   理由在这里同样成立，否则展开后首行会莫名右移两个字。 */
+.row[data-open] .text :global(.cjk-indent) {
+  text-indent: 0;
+}
