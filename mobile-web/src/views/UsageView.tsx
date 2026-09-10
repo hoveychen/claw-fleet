@@ -16,10 +16,20 @@ import styles from "./UsageView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
 
+/** 「今日累计」里某一台出了多少。`usage` 为 `null` = 这台还没报过。 */
+export interface DeviceUsageRow {
+  id: string;
+  label: string;
+  usage: TodayUsage | null;
+}
+
 interface Props {
   client: FleetTransport | null;
   /** App header 里那份今日累计，直接复用——避免为同一个数字再扫一遍会话。 */
   todayUsage: TodayUsage | null;
+  /** 合计的设备明细。只配了一台时为空数组——那时候明细就是合计本身，多画一行
+   *  只是噪音。 */
+  perDevice?: DeviceUsageRow[];
   onBack: () => void;
 }
 
@@ -134,7 +144,7 @@ function UsageSourceValue({
   );
 }
 
-export function UsageView({ client, todayUsage, onBack }: Props) {
+export function UsageView({ client, todayUsage, perDevice = [], onBack }: Props) {
   const [data, setData] = useState<AccountUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -196,6 +206,29 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
                   value={`$${todayUsage.agentCostUsd.toFixed(2)} · ${t("{0} 个会话", todayUsage.sessionCount)}`}
                 />
                 <Row label={t("Fleet 自身花费")} value={`$${todayUsage.fleetCostUsd.toFixed(2)}`} />
+                {/* 合计是**所有**设备之和（deviceRuntime 的 totalUsage），但它回答
+                    不了「哪一台在烧钱」——两台登的还可能不是同一个账号。所以多设备
+                    时把它拆回每台一行。 */}
+                {perDevice.length > 1 && (
+                  <>
+                    <div className={styles.divider} />
+                    {perDevice.map((d) => (
+                      <Row
+                        key={d.id}
+                        label={d.label}
+                        value={
+                          d.usage ? (
+                            `$${d.usage.costUsd.toFixed(2)} · ${fmtTokens(
+                              d.usage.inputTokens + d.usage.outputTokens,
+                            )}`
+                          ) : (
+                            <span className={styles.rowMuted}>{t("未上报")}</span>
+                          )
+                        }
+                      />
+                    ))}
+                  </>
+                )}
               </>
             ) : (
               <div className={styles.hint}>{t("桌面端离线，拿不到今日用量。")}</div>

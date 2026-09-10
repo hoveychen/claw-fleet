@@ -610,6 +610,7 @@ const DICT: Record<string, string> = {
 
   // ── 英文缺口补漏：以下条目此前只有中文，英文界面下会露中文 ──
   今日累计: "Today",
+  未上报: "Not reported",
   "relay 未能转交（桌面离线）": "Relay could not deliver it (desktop offline)",
   用量: "Usage",
   "codex 近 24 小时占用率": "Codex utilization, last 24h",

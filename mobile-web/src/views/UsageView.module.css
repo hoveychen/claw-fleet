@@ -197,3 +197,8 @@
 .barPrevLabel {
   flex-shrink: 0;
 }
+
+/* 「未上报」这类占位值：比正常数值再弱一档，免得读起来像一个真的读数。 */
+.rowMuted {
+  color: var(--color-text-dim);
+}

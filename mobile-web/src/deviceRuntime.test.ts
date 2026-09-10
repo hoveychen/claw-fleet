@@ -9,6 +9,7 @@ import {
   emptyDeviceState,
   itemKey,
   totalUsage,
+  usageByDevice,
   worstCongestion,
   type DeviceStates,
 } from "./deviceRuntime";
@@ -222,6 +223,23 @@ describe("header rollups", () => {
   // 「还不知道」和「今天没花钱」是两回事：一台都没报过时不能显示 $0.00。
   it("spend is null until at least one device reports", () => {
     expect(totalUsage({}, ORDER)).toBeNull();
+  });
+
+  // 合计回答不了「哪一台在烧钱」，所以同一份状态还要能按设备拆回去。
+  it("today's spend also splits back per device, in switcher order", () => {
+    const states = run([
+      { deviceId: A, type: "usage", usage: usage(1.5) },
+      { deviceId: B, type: "usage", usage: usage(2.25) },
+    ]);
+    const rows = usageByDevice(states, ORDER);
+    expect(rows.map((r) => r.id)).toEqual(ORDER);
+    expect(rows.map((r) => r.usage?.costUsd)).toEqual([1.5, 2.25]);
+  });
+
+  // 没报过的那一台仍要占一行（null），否则界面看不出「合计里少了它」。
+  it("a device that has not reported keeps its row with a null usage", () => {
+    const states = run([{ deviceId: A, type: "usage", usage: usage(1.5) }]);
+    expect(usageByDevice(states, ORDER)[1]).toEqual({ id: B, usage: null });
   });
 
   it("the skeleton only retires once every device has answered once", () => {

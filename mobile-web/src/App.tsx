@@ -31,6 +31,7 @@ import {
   devicesReducer,
   emptyDeviceState,
   totalUsage,
+  usageByDevice,
   worstCongestion,
   type DeviceStates,
   type WithDevice,
@@ -513,6 +514,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const agentOnline = anyAgentOnline(states, deviceOrder);
   const congestion = worstCongestion(states, deviceOrder);
   const todayUsage = totalUsage(states, deviceOrder);
+  /** 合计的设备明细（用量页里展开那几行）。名字从簿子取，与设备切换器同一份。 */
+  const usageRows = useMemo(
+    () =>
+      usageByDevice(states, deviceOrder).map((r) => ({
+        ...r,
+        label: runtimeDevices.find((d) => d.id === r.id)?.label ?? r.id,
+      })),
+    [states, deviceOrder, runtimeDevices],
+  );
   // header 那枚连接图标：形状/亮度由 kind 决定,原来的文案降级成它的
   // title + aria-label(读屏与长按仍读得到,只是不再占版面)。
   const connKind = connIconKind(connected, agentOnline, congestion);
@@ -1212,6 +1222,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           <UsageView
             client={client}
             todayUsage={todayUsage}
+            perDevice={usageRows}
             onBack={() => setShowUsage(false)}
           />
         </>

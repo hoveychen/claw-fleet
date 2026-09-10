@@ -330,6 +330,21 @@ export function totalUsage(states: DeviceStates, order: string[]): TodayUsage | 
   return sum;
 }
 
+/** 合计里某一台出了多少。`usage` 为 `null` = 这台还没报过(离线/刚连上),
+ *  与「这台今天没花钱」是两回事,所以留给渲染层去区分。 */
+export interface DeviceUsage {
+  id: string;
+  usage: TodayUsage | null;
+}
+
+/** 把合计拆回每台一行。顺序跟 `order` 走,和设备切换器上的顺序一致。
+ *
+ *  存在的理由是 `totalUsage` 把两台加成了一个数,而那个数回答不了「哪一台在烧
+ *  钱」——尤其两台登的不是同一个账号时。 */
+export function usageByDevice(states: DeviceStates, order: string[]): DeviceUsage[] {
+  return order.map((id) => ({ id, usage: states[id]?.todayUsage ?? null }));
+}
+
 /** 最差的那一档拥塞 —— 头部只有一盏灯,而用户感觉到的是最卡的那条链路。 */
 export function worstCongestion(states: DeviceStates, order: string[]): Congestion {
   let level: Congestion = "good";
