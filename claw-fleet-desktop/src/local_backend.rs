@@ -841,10 +841,28 @@ impl LocalBackend {
                 // interrupt-looped forever.
                 let mut stall_fired: HashMap<String, u32> = HashMap::new();
                 let mut stall_last_fire: HashMap<String, Instant> = HashMap::new();
+                // When the previous tick's *body* finished, so a late tick can be
+                // told apart from a slow one. This ticker is the only thing that
+                // unsticks a `proc_alive` nobody rescanned (and therefore the only
+                // thing that drains a queued follow-up on a session that stopped
+                // writing), so how punctual it actually is has to be observable —
+                // the 2026-09-09 ~108s stall was invisible because neither this
+                // loop nor the watch-path rescan logged a single line.
+                let mut last_tick_end: Option<Instant> = None;
                 loop {
                     std::thread::sleep(Duration::from_secs(30));
                     if !running_ar.load(Ordering::SeqCst) {
                         break;
+                    }
+                    let tick_started = Instant::now();
+                    if let Some(prev) = last_tick_end {
+                        let gap = prev.elapsed();
+                        if gap >= Duration::from_secs(40) {
+                            log_debug(&format!(
+                                "[LIVENESS-TICK] late: {:.1}s since previous tick finished (sleep is 30s)",
+                                gap.as_secs_f64()
+                            ));
+                        }
                     }
                     // Heal Codex AND Claude sessions frozen at `proc_alive = true`
                     // by a turn that ended without a final transcript write — a
@@ -887,6 +905,14 @@ impl LocalBackend {
                     if !dead.is_empty() {
                         claw_fleet_core::orphan_reaper::reap_orphaned_session_processes(&dead);
                     }
+                    let body = tick_started.elapsed();
+                    if body >= Duration::from_secs(5) {
+                        log_debug(&format!(
+                            "[LIVENESS-TICK] slow body: {:.1}s",
+                            body.as_secs_f64()
+                        ));
+                    }
+                    last_tick_end = Some(Instant::now());
                 }
             });
         }
@@ -1675,8 +1701,12 @@ fn incremental_rescan_and_emit(
     // the pending-message queue instead of being sent, and the queue could only
     // drain once the ticker finally got the lock. The clone costs one Vec copy;
     // the write-back below already paid for one anyway.
+    let lock_started = Instant::now();
     let existing = { sessions.lock().unwrap().clone() };
+    let lock_wait = lock_started.elapsed();
+    let scan_started = Instant::now();
     let mut s = build_incremental_sessions(sources, &existing, dirty, now_ms);
+    let scan_took = scan_started.elapsed();
 
     // Inject cached outcome tags into each session.
     {
@@ -1694,6 +1724,23 @@ fn incremental_rescan_and_emit(
     publish_mobile_sessions(&s);
     // Pre-fold changed sessions so the cost-breakdown modal opens warm.
     claw_fleet_core::today_usage::warm_usage_cache(&s);
+    // This path runs on BOTH the fs-watch thread and the polling thread, and
+    // until now only the polling one was timed (`[POLL] scan slow`, >30s). A
+    // watch-path rescan that takes half a minute left no trace at all, which is
+    // exactly why the 2026-09-09 `proc_alive` stall could not be attributed to
+    // it either way. The threshold is deliberately low (5s): the point is to see
+    // the distribution of rescan cost, not only the pathological tail.
+    let total = lock_started.elapsed();
+    if total >= Duration::from_secs(5) {
+        log_debug(&format!(
+            "[RESCAN] {:.1}s total (lock_wait {:.1}s, scan {:.1}s, dirty={}, sessions={})",
+            total.as_secs_f64(),
+            lock_wait.as_secs_f64(),
+            scan_took.as_secs_f64(),
+            dirty.len(),
+            s.len()
+        ));
+    }
 }
 
 /// Returns true when `path` resides inside a known memory directory.
@@ -1848,8 +1895,20 @@ fn refresh_dead_codex_liveness_and_emit(
     sessions: &Arc<Mutex<Vec<SessionInfo>>>,
     app: &AppHandle,
 ) {
+    // Lock wait is the load-bearing number here: this reconcile is what clears a
+    // stale `proc_alive`, and it can only run once whoever is scanning lets go of
+    // `sessions`. A long wait logged here is the proof that a rescan starved the
+    // liveness ticker (2026-09-09, session a878d652, ~108s).
+    let lock_started = Instant::now();
     let updated: Option<Vec<SessionInfo>> = {
         let mut s = sessions.lock().unwrap();
+        let lock_wait = lock_started.elapsed();
+        if lock_wait >= Duration::from_secs(2) {
+            log_debug(&format!(
+                "[LIVENESS] waited {:.1}s for the sessions lock",
+                lock_wait.as_secs_f64()
+            ));
+        }
         // Run both reconcilers (not short-circuit `||`) so a Codex change never
         // masks a Claude one in the same pass.
         let codex_changed = claw_fleet_core::codex_source::refresh_dead_codex_liveness(&mut s);
