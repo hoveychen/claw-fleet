@@ -727,8 +727,42 @@
   color: var(--color-text-dim);
 }
 
+/* The four families, told apart before the label is read — the same colours the
+   expanded card's AuxDocBar gives its glyph, so a chip and the card it opens
+   are visibly the same thing. */
+.doc_card_icon[data-kind="file"] {
+  color: var(--color-info);
+}
+
+.doc_card_icon[data-kind="artifact"] {
+  color: var(--color-warning);
+}
+
+.doc_card_icon[data-kind="wiki"] {
+  color: var(--color-success);
+}
+
+.doc_card_icon[data-kind="web"] {
+  color: var(--color-teal);
+}
+
 .doc_card_label {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The chip's disambiguator (see `auxDocMeta`): which directory, which slug
+   prefix, which day. Shrink-proof and never ellipsised — a chip's name can be
+   cut, but the value that tells two same-named chips apart cannot. */
+.doc_card_meta {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--color-text-dim);
+  opacity: 0.85;
+  max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

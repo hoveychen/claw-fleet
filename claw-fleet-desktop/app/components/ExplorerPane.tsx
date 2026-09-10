@@ -269,10 +269,17 @@ export function FileTree({
 export function FilePreview({
   file,
   load,
+  onLoaded,
 }: {
   file: ExplorerEntry;
   /** Reads the active file's content. Identity change = re-read. */
   load: (relPath: string) => Promise<ExplorerFileContent>;
+  /** Hands the settled read back to a caller that has to *describe* the file
+   *  as well as show it. The auxiliary rail's header needs the size and the
+   *  line count, and this read is where they live: an out-of-tree file has no
+   *  directory listing behind it, which is why that header used to be fed a
+   *  hard-coded `sizeBytes: 0` and printed no size at all. `null` on failure. */
+  onLoaded?: (content: ExplorerFileContent | null) => void;
 }) {
   const { t } = useTranslation();
   const [content, setContent] = useState<ExplorerFileContent | null>(null);
@@ -290,10 +297,14 @@ export function FilePreview({
     let stale = false;
     load(relPath)
       .then((c) => {
-        if (!stale) setContent(c);
+        if (stale) return;
+        setContent(c);
+        onLoaded?.(c);
       })
       .catch(() => {
-        if (!stale) setError(true);
+        if (stale) return;
+        setError(true);
+        onLoaded?.(null);
       })
       .finally(() => {
         if (!stale) setLoading(false);
@@ -301,6 +312,9 @@ export function FilePreview({
     return () => {
       stale = true;
     };
+    // `onLoaded` is deliberately not a dependency: a caller passing an inline
+    // arrow would re-read the file on every one of its renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, relPath]);
 
   if (loading) return <p className={styles.loading}>{t("files.loading")}</p>;

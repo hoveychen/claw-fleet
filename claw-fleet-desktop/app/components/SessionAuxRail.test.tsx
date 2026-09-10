@@ -42,9 +42,14 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
         agents={[]}
         docs={[]}
         expandedId={null}
+        workspacePath="/repo"
         onOpenAgent={() => {}}
         onToggleDoc={() => {}}
         onCloseDoc={() => {}}
+        onCloseOtherDocs={() => {}}
+        onCloseAllDocs={() => {}}
+        onCollapseDoc={() => {}}
+        onHideRail={() => {}}
         onOpenWiki={() => {}}
         cardWidth={420}
         onGripDown={() => {}}
@@ -115,7 +120,75 @@ describe("SessionAuxRail", () => {
 
     expect(card.querySelector('[role="separator"]')).not.toBeNull();
     // WikiTabPane mounts inside the card rather than in a drawer beside it.
-    expect(card.childElementCount).toBeGreaterThan(2);
+    expect(card.querySelector("[class*='aux_doc_pane']")).not.toBeNull();
     expect(el.querySelectorAll("aside > *")).toHaveLength(1);
+  });
+
+  // The expanded card's header is the reader's own AuxDocBar. It used to be a
+  // strip *above* that bar, which printed the doc's name twice in a row.
+  it("prints the expanded doc's name once, not in a strip of its own", () => {
+    const doc = makeAuxDoc("wiki", "arch/overview");
+    const el = render({ docs: [doc], expandedId: doc.id });
+
+    expect(el.querySelector("[class*='doc_card_head']")).toBeNull();
+  });
+
+  // A chip's disambiguator: `auxDocMeta` reads it off the ref, so two same-named
+  // files from different directories are still told apart at a glance.
+  it("gives a collapsed chip the value that tells it apart from its namesakes", () => {
+    const el = render({ docs: [makeAuxDoc("file", "/repo/src/gui/mod.rs")] });
+
+    expect(el.querySelector("[class*='doc_card_meta']")?.textContent).toBe("gui");
+  });
+
+  // The bug this pass closes: with no handler, a right-click anywhere in the
+  // rail bubbled to the app-wide menu (contextMenu.ts) and answered a request
+  // to act on a document with Settings / About / Quit.
+  it("answers a right-click on a chip with the card's own menu", () => {
+    const doc = makeAuxDoc("file", "/repo/src/main.rs");
+    const el = render({ docs: [doc] });
+    const chip = el.querySelector("[class*='doc_card']") as HTMLElement;
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+
+    act(() => void chip.dispatchEvent(ev));
+
+    expect(ev.defaultPrevented).toBe(true);
+    // Portalled to the body, so it is not under `container`.
+    const menu = document.body.querySelector("[class*='menu']") as HTMLElement;
+    expect(menu.textContent).toContain("/repo/src/main.rs");
+  });
+
+  // The rail's own background is a third menu: what to do with the *stack*.
+  it("answers a right-click on its own background with the stack's menu", () => {
+    const el = render({ docs: [makeAuxDoc("file", "/repo/a.rs")] });
+    const rail = el.querySelector("aside") as HTMLElement;
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+
+    act(() => void rail.dispatchEvent(ev));
+
+    const menu = document.body.querySelector("[class*='menu']") as HTMLElement;
+    // Closing the whole stack and putting the rail away are stack-level; they
+    // are the two things a card's own menu cannot offer on its own behalf.
+    const labels = Array.from(document.body.querySelectorAll("[class*='menu'] button")).map(
+      (b) => b.textContent ?? "",
+    );
+    expect(labels).toHaveLength(2);
+    expect(labels[0]).toMatch(/全部|all/i);
+    expect(labels[1]).toMatch(/辅助栏|side rail/i);
+  });
+
+  it("offers the stack menu a way to collapse whatever is expanded", () => {
+    const onCollapseDoc = vi.fn();
+    const doc = makeAuxDoc("wiki", "arch/overview");
+    const el = render({ docs: [doc], expandedId: doc.id, onCollapseDoc });
+    const rail = el.querySelector("aside") as HTMLElement;
+
+    act(() =>
+      void rail.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
+    );
+    const items = Array.from(document.body.querySelectorAll("[class*='menu'] button"));
+    act(() => (items[0] as HTMLElement).click());
+
+    expect(onCollapseDoc).toHaveBeenCalled();
   });
 });

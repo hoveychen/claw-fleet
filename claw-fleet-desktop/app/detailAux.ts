@@ -121,6 +121,50 @@ export function auxDocLabel(kind: AuxDocKind, ref: string): string {
   return basename(ref);
 }
 
+/**
+ * The one extra value a *collapsed* chip shows beside its name.
+ *
+ * Derived from the ref alone, on purpose. The obvious thing to print is a size,
+ * but a chip has no loaded document behind it, and reading eight files (and
+ * eight deliverable blobs) so the rail can print eight sizes would be a fetch
+ * per chip for a number nobody asked for. What a stack of chips actually has to
+ * answer is *which one is this* — two `mod.rs` chips, two posters from the same
+ * run — and the ref already says that:
+ *
+ * - a file → its parent directory's name
+ * - a wiki doc → its slug's folder prefix (`arch/deep/x` → `arch/deep`)
+ * - a web page → the last path segment
+ * - a deliverable → the date its store id starts with
+ *
+ * The *expanded* card is where sizes, versions and timestamps belong; its
+ * header has already loaded the document and prints all of them.
+ */
+export function auxDocMeta(kind: AuxDocKind, ref: string): string {
+  switch (kind) {
+    case "file": {
+      const dir = ref.slice(0, Math.max(ref.lastIndexOf("/"), ref.lastIndexOf("\\")));
+      return dir ? basename(dir) : "";
+    }
+    case "wiki": {
+      const cut = ref.lastIndexOf("/");
+      return cut > 0 ? ref.slice(0, cut) : "";
+    }
+    case "web": {
+      try {
+        const segments = new URL(ref).pathname.split("/").filter((s) => s.length > 0);
+        return segments.length > 0 ? segments[segments.length - 1] : "";
+      } catch {
+        return "";
+      }
+    }
+    case "artifact": {
+      // Store ids are `YYYYMMDD-HHMMSS`; the day is what tells two runs apart.
+      const m = /^(\d{4})(\d{2})(\d{2})-/.exec(ref);
+      return m ? `${m[2]}-${m[3]}` : "";
+    }
+  }
+}
+
 export function makeAuxDoc(kind: AuxDocKind, ref: string, label?: string): AuxDoc {
   return { id: docId(kind, ref), kind, ref, label: label || auxDocLabel(kind, ref) };
 }
@@ -180,6 +224,26 @@ export function closeDoc(state: AuxState, id: string): AuxState {
   if (idx < 0) return state;
   const docs = state.docs.filter((d) => d.id !== id);
   return { ...state, docs, expanded: state.expanded === id ? null : state.expanded };
+}
+
+/**
+ * Keep one card, drop the rest.
+ *
+ * The rail caps at {@link MAX_AUX_DOCS}, and a session that names files freely
+ * fills it: by the time you are reading one card, the seven chips above it are
+ * things you finished with. Dismissing them one ✕ at a time is the friction
+ * this removes. The kept card stays expanded if it was.
+ */
+export function closeOtherDocs(state: AuxState, id: string): AuxState {
+  const keep = state.docs.find((d) => d.id === id);
+  if (!keep || state.docs.length === 1) return state;
+  return { ...state, docs: [keep], expanded: state.expanded === id ? id : null };
+}
+
+/** Clear the stack. Nothing is left expanded, because nothing is left. */
+export function closeAllDocs(state: AuxState): AuxState {
+  if (state.docs.length === 0) return state;
+  return { ...state, docs: [], expanded: null };
 }
 
 /** The drawer's own close button (and its scrim). The rail is untouched — the
