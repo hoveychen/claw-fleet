@@ -388,9 +388,26 @@ export function classifyResult(
   return { kind: "confirm", text };
 }
 
-/** Pull the plain string out of a `tool_result.content` (string | blocks). */
+/**
+ * Pull the plain string out of a `tool_result.content` (string | blocks).
+ *
+ * The block-array form is not an edge case — it is the *only* shape an MCP
+ * tool returns (`[{"type":"text","text":"Stored artifact …"}]`), so dropping it
+ * meant every Fleet control tool's result was silently empty: no preview card
+ * for an ingest, no progress bars for `plan list`, no rows for `wiki list`.
+ * The card still rendered its header summary off the *input*, which is why it
+ * looked fine for months. Tests fed strings, so they stayed green.
+ */
 export function resultText(content: string | unknown[]): string {
-  return typeof content === "string" ? content : "";
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((b) =>
+      typeof b === "object" && b !== null && typeof (b as { text?: unknown }).text === "string"
+        ? (b as { text: string }).text
+        : "",
+    )
+    .join("");
 }
 
 /**
