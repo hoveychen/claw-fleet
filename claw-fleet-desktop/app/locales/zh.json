@@ -1736,6 +1736,7 @@
     "aux_version_of": "{{version}} / 共 {{count}} 版",
     "aux_updated": "更新 {{when}}",
     "aux_lines": "{{count}} 行",
+    "aux_copy_transcript": "复制 transcript 路径",
     "tab_decisions": "决策",
     "task_notification": "后台任务",
     "task_done": "已完成",

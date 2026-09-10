@@ -1739,6 +1739,7 @@
     "aux_version_of": "{{version}} of {{count}}",
     "aux_updated": "updated {{when}}",
     "aux_lines": "{{count}} lines",
+    "aux_copy_transcript": "Copy transcript path",
     "tab_decisions": "Decisions",
     "task_notification": "Background task",
     "task_done": "Completed",

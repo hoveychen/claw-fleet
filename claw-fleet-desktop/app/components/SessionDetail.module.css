@@ -808,6 +808,18 @@
   white-space: nowrap;
 }
 
+/* What the agent was given: model · effort. Fixed for the agent's whole life,
+   which is why it sits above the preview and the meta row rather than among
+   the numbers that move. */
+.agent_card_spec {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The agent's latest line — two rows at most, so one verbose agent can't
    crowd out the others. */
 .agent_card_preview {
