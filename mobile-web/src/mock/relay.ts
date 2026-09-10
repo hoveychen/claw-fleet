@@ -11,7 +11,7 @@
 // the deployed bundle can be inspected the same way in any browser. Nothing is
 // mocked unless `?mock` is in the URL.
 import { RelayClient, type RelayHandlers } from "../relay";
-import type { DecisionKind, ProcRecord } from "../types";
+import type { DecisionKind, PlanNode, ProcRecord } from "../types";
 import {
   MOCK_ARTIFACTS,
   MOCK_ATTACHMENT_BYTES,
@@ -152,13 +152,26 @@ export class MockRelayClient extends RelayClient {
         return MOCK_PLAN_FOREST;
       // The session-detail 任务计划 tab reads the flat per-session shape; derive
       // it from the same fixture so the two never drift apart.
-      case "task_plans":
-        return MOCK_PLAN_FOREST.roots.map((r) => ({
+      case "task_plans": {
+        // 平铺整棵森林(不只 roots):explore 计划挂在子层,只映射 roots 的话
+        // 手机上永远看不到 explore 徽章。`kind` 也要带上 —— 它是 kind 徽章
+        // 的唯一数据来源。
+        const flat: PlanNode[] = [];
+        const walk = (nodes: PlanNode[]) => {
+          for (const n of nodes) {
+            flat.push(n);
+            walk(n.children);
+          }
+        };
+        walk(MOCK_PLAN_FOREST.roots);
+        return flat.map((r) => ({
           id: r.id,
           title: r.title,
           source: r.source,
+          kind: r.kind,
           items: r.items,
         }));
+      }
       case "session_decisions":
         return MOCK_DECISION_HISTORY;
       case "today_usage":

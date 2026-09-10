@@ -86,3 +86,10 @@
   margin: 3px 0;
   padding-left: 16px;
 }
+
+/* 撤掉中文段落首行缩进（rehype cjkIndent 打的 `.cjk-indent`，见 index.css）：
+   这一行本身就是列表项的缩进语境（勾选框 + P 徽章），插件跳过 li / td 的
+   理由在这里同样成立，否则展开后首行会莫名右移两个字。 */
+.row[data-open] .text :global(.cjk-indent) {
+  text-indent: 0;
+}
