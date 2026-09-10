@@ -1664,10 +1664,19 @@ fn incremental_rescan_and_emit(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
-    let mut s = {
-        let existing = sessions.lock().unwrap();
-        build_incremental_sessions(sources, &existing, dirty, now_ms)
-    };
+    // Snapshot the previous list and RELEASE the lock before scanning. The scan
+    // itself takes tens of seconds on a busy box (`[POLL] scan slow: took 55s`
+    // is a routine log line here), and holding `sessions` across it blocks every
+    // other consumer of that mutex for the whole duration — including the 30s
+    // liveness ticker, whose first act is `sessions.lock()` inside
+    // `refresh_dead_codex_liveness_and_emit`. On 2026-09-09 that is what left
+    // session a878d652 stamped `proc_alive = true` for ~108s after its turn had
+    // ended: the composer kept saying 会话运行中, so a typed follow-up went into
+    // the pending-message queue instead of being sent, and the queue could only
+    // drain once the ticker finally got the lock. The clone costs one Vec copy;
+    // the write-back below already paid for one anyway.
+    let existing = { sessions.lock().unwrap().clone() };
+    let mut s = build_incremental_sessions(sources, &existing, dirty, now_ms);
 
     // Inject cached outcome tags into each session.
     {
