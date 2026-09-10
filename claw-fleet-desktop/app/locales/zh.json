@@ -62,6 +62,17 @@
       "limit_chars": "字符上限",
       "force": "强制"
     },
+    "param_for": {
+      "handoff": {
+        "note": "交接便条"
+      },
+      "watch": {
+        "note": "在等什么"
+      },
+      "artifact": {
+        "note": "说明"
+      }
+    },
     "summary": {
       "plan": {
         "check": "勾选 {{task}} · {{plan}}",
