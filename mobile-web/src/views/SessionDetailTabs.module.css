@@ -456,3 +456,41 @@
 .markdown :global(p:last-child) {
   margin-bottom: 0;
 }
+
+/* 笔记搜索框。与知识库那个同一套尺寸与 token —— 手机上每多一种输入框长相
+   就多一次「这是同一个东西吗」的犹豫。 */
+.searchWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 11px;
+  display: inline-flex;
+  color: var(--color-text-dim);
+  pointer-events: none;
+}
+
+.search {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px 9px 34px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-size: var(--t-ui, 14px);
+}
+
+/* 一条命中行:上面是文件与行号,下面是那一行的原文(单行截断)。 */
+.hitLine {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

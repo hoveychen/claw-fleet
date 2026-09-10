@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "../i18n";
+import { agentCardId } from "../detailAux";
 import type { SessionInfo } from "../types";
 import { SubagentLiveCards } from "./SubagentLiveCards";
 
@@ -17,6 +18,7 @@ afterEach(() => {
   root = null;
   container?.remove();
   container = null;
+  // The menu is portalled to the body, so it outlives the container.
   document.body.querySelectorAll("[class*='menu']").forEach((n) => n.remove());
 });
 
@@ -25,7 +27,7 @@ function agent(over: Partial<SessionInfo> = {}): SessionInfo {
     id: "a4f1-9c",
     aiTitle: "Trace the watcher",
     agentType: "Explore",
-    status: "Executing",
+    status: "executing",
     isSubagent: true,
     lastActivityMs: Date.now(),
     createdAtMs: Date.now() - 134_000,
@@ -38,12 +40,34 @@ function agent(over: Partial<SessionInfo> = {}): SessionInfo {
   } as unknown as SessionInfo;
 }
 
-function render(a: SessionInfo, onOpen = () => {}) {
+function render(
+  a: SessionInfo,
+  props: Partial<Parameters<typeof SubagentLiveCards>[0]> = {},
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root!.render(<SubagentLiveCards agents={[a]} onOpen={onOpen} />));
+  act(() =>
+    root!.render(
+      <SubagentLiveCards
+        agents={[a]}
+        expandedId={null}
+        onToggle={() => {}}
+        onClose={() => {}}
+        onGoto={() => {}}
+        onGripDown={() => {}}
+        renderPane={() => <div data-testid="pane" />}
+        {...props}
+      />,
+    ),
+  );
   return container;
+}
+
+function rightClick(el: HTMLElement): MouseEvent {
+  const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+  act(() => void el.dispatchEvent(ev));
+  return ev;
 }
 
 describe("SubagentLiveCards", () => {
@@ -67,12 +91,19 @@ describe("SubagentLiveCards", () => {
     expect(el.querySelector("[class*='agent_card_spec']")).toBeNull();
   });
 
+  // Unlike the preview, the spec survives expansion: the transcript pane below
+  // names no model, so collapsing that line would lose the fact entirely.
+  it("keeps the spec row once the transcript is open", () => {
+    const a = agent();
+    const el = render(a, { expandedId: agentCardId(a.id) });
+
+    expect(el.querySelector("[class*='agent_card_spec']")).not.toBeNull();
+    expect(el.querySelector('[data-testid="pane"]')).not.toBeNull();
+  });
+
   it("answers a right-click with the agent's own menu, not the app-wide one", () => {
     const el = render(agent());
-    const card = el.querySelector("button") as HTMLElement;
-    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
-
-    act(() => void card.dispatchEvent(ev));
+    const ev = rightClick(el.querySelector("button") as HTMLElement);
 
     // preventDefault is what stops contextMenu.ts answering with 设置/关于/退出.
     expect(ev.defaultPrevented).toBe(true);
@@ -86,26 +117,29 @@ describe("SubagentLiveCards", () => {
   // cancel the parent's whole turn. It must not be offered here.
   it("offers no stop, because a subagent is not ours to signal", () => {
     const el = render(agent());
-    const card = el.querySelector("button") as HTMLElement;
+    rightClick(el.querySelector("button") as HTMLElement);
 
-    act(() =>
-      void card.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
-    );
     const menu = document.body.querySelector("[class*='menu']") as HTMLElement;
     expect(menu.textContent).not.toMatch(/停止|Stop|Interrupt|中断/);
   });
 
-  it("opens the agent from its menu as well as from the card", () => {
-    const onOpen = vi.fn();
-    const el = render(agent(), onOpen);
-    const card = el.querySelector("button") as HTMLElement;
+  // Expanding here is the default and leaving is the escape hatch, so the menu
+  // has to offer both — and must not confuse them.
+  it("separates expanding the card from leaving for the session page", () => {
+    const onToggle = vi.fn();
+    const onGoto = vi.fn();
+    const a = agent();
+    const el = render(a, { onToggle, onGoto });
+    rightClick(el.querySelector("button") as HTMLElement);
+    const items = Array.from(document.body.querySelectorAll("[class*='menu'] button"));
 
-    act(() =>
-      void card.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
-    );
-    const first = document.body.querySelector("[class*='menu'] button") as HTMLElement;
-    act(() => first.click());
+    act(() => (items[0] as HTMLElement).click());
+    expect(onToggle).toHaveBeenCalledWith(a);
+    expect(onGoto).not.toHaveBeenCalled();
 
-    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "a4f1-9c" }));
+    rightClick(el.querySelector("button") as HTMLElement);
+    const again = Array.from(document.body.querySelectorAll("[class*='menu'] button"));
+    act(() => (again[1] as HTMLElement).click());
+    expect(onGoto).toHaveBeenCalledWith(a);
   });
 });

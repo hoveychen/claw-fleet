@@ -13,7 +13,7 @@ import {
 } from "../store";
 import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, SCHEDULE_ENTRYPOINT } from "../types";
-import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
+import type { DecisionHistoryRecord, LiveThinking, NoteFile, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
 import { landedUserTexts, stillPending } from "../optimisticEcho";
@@ -51,6 +51,7 @@ import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
 import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
 import {
+  closeAgent,
   closeAllDocs,
   closeAux,
   closeDoc,
@@ -60,6 +61,7 @@ import {
   openDoc,
   pruneTab,
   showFacet,
+  toggleAgent,
   toggleDoc,
   type AuxDocKind,
   type AuxFacet,
@@ -826,6 +828,30 @@ export function SessionDetail({
   }, [workspacePath, sessionId]);
   const hasScratchpad = scratchpadCount > 0;
 
+  // Checkpoint notes (`~/.fleet/notes/`) — the agent's own store for surviving a
+  // context compaction. Probed on the same terms as the scratchpad: the facet
+  // only appears for a session that actually took notes. The count spans the
+  // handoff chain, because so does what the agent could read.
+  const [noteCount, setNoteCount] = useState(0);
+  useEffect(() => {
+    if (!sessionId) {
+      setNoteCount(0);
+      return;
+    }
+    let cancelled = false;
+    invoke<NoteFile[]>("list_session_notes", { sessionId })
+      .then((files) => {
+        if (!cancelled) setNoteCount(files?.length ?? 0);
+      })
+      .catch(() => {
+        if (!cancelled) setNoteCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+  const hasNotes = noteCount > 0;
+
   // Background tasks the session was still waiting on when it last ended a turn
   // (shells, monitors, subagents — see `bg_guard`). Only populated while the
   // session's latest hook event is that Stop and within the 5-min freshness
@@ -837,6 +863,14 @@ export function SessionDetail({
      expanded one collapses it back — the card is its own on/off control. */
   const pickDoc = useCallback((id: string) => {
     setAux((st) => toggleDoc(st, id));
+  }, []);
+  /* Same for a subagent card: its transcript expands in the rail rather than
+     replacing the conversation the card is floating over. */
+  const pickAgent = useCallback((s: SessionInfo) => {
+    setAux((st) => toggleAgent(st, s.id));
+  }, []);
+  const dropAgent = useCallback((s: SessionInfo) => {
+    setAux((st) => closeAgent(st, s.id));
   }, []);
   /* Picking a facet from the overflow menu only ever *opens* it: a menu item
      that sometimes closed the panel you just asked for would read as the click
@@ -1128,7 +1162,7 @@ export function SessionDetail({
     return mainSession ? [mainSession, ...ordered] : ordered;
   }, [liveSession, sessions]);
 
-  /* The session's facets — Skills, 决策, Token, 任务, 后台任务, 临时文件,
+  /* The session's facets — Skills, 决策, Token, 任务, 后台任务, 临时文件, 笔记,
      Workflow — are things you go *look up*, one at a time, so they live in the
      header's overflow menu rather than as seven permanent tabs above the panel.
      Conditional ones appear on the same terms their old tabs did: only when the
@@ -1149,6 +1183,9 @@ export function SessionDetail({
         label: `${t("detail.tab_scratchpad")} (${scratchpadCount})`,
       });
     }
+    if (hasNotes) {
+      list.push({ id: "notes", label: `${t("detail.tab_notes")} (${noteCount})` });
+    }
     if (hasWorkflows) {
       list.push({
         id: "workflow",
@@ -1163,6 +1200,8 @@ export function SessionDetail({
     bgTasks.length,
     hasScratchpad,
     scratchpadCount,
+    hasNotes,
+    noteCount,
     hasWorkflows,
     workflowTrees.length,
   ]);
@@ -1186,7 +1225,19 @@ export function SessionDetail({
   const drawerTitle = activeFacet
     ? auxFacets.find((f) => f.id === activeFacet)?.label ?? activeFacet
     : "";
-  const railCards = liveSubagents.length + aux.docs.length;
+  /* What the rail actually cards: the live subagents, plus the one the reader
+     pinned by opening it, if the scan has since retired it. Without this a
+     subagent finishing pulls its transcript out from under whoever is reading
+     it — the cards are derived from the live set, and a Task run can end
+     mid-paragraph. The pin is dropped by the card's ✕ (and by switching
+     sessions, which resets the whole aux state). */
+  const railAgents = useMemo((): SessionInfo[] => {
+    const pinnedId = aux.pinnedAgent;
+    if (!pinnedId || liveSubagents.some((s) => s.id === pinnedId)) return liveSubagents;
+    const pinned = sessions.find((s) => s.id === pinnedId);
+    return pinned ? [pinned, ...liveSubagents] : liveSubagents;
+  }, [aux.pinnedAgent, liveSubagents, sessions]);
+  const railCards = railAgents.length + aux.docs.length;
   /* The rail follows its content by default — present when it has cards, zero
      width when it does not — until the reader says otherwise with the toolbar
      switch. The switch owns *this* layer, not the drawer: the drawer is a place
@@ -1546,11 +1597,13 @@ export function SessionDetail({
                     scrollbar on the pane's right edge. */}
                 <SessionAuxRail
                   open={railOpen}
-                  agents={liveSubagents}
+                  agents={railAgents}
                   docs={aux.docs}
                   expandedId={aux.expanded}
                   workspacePath={workspacePath ?? ""}
                   onOpenAgent={open}
+                  onToggleAgent={pickAgent}
+                  onCloseAgent={dropAgent}
                   onToggleDoc={pickDoc}
                   onCloseDoc={dropDoc}
                   onCloseOtherDocs={dropOtherDocs}
@@ -1558,6 +1611,7 @@ export function SessionDetail({
                   onCollapseDoc={collapseDocCard}
                   onHideRail={toggleRail}
                   onOpenWiki={(slug) => openAuxDoc("wiki", slug)}
+                  paths={pathLinks}
                   cardWidth={docCardW}
                   onGripDown={onGripDown}
                 />

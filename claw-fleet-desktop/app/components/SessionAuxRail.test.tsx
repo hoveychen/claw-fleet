@@ -3,8 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import "../i18n";
-import { makeAuxDoc } from "../detailAux";
+import i18n from "../i18n";
+import { agentCardId, makeAuxDoc } from "../detailAux";
 import type { SessionInfo } from "../types";
 import { SessionAuxRail } from "./SessionAuxRail";
 
@@ -18,13 +18,14 @@ afterEach(() => {
   root = null;
   container?.remove();
   container = null;
+  document.body.querySelectorAll("[class*='menu']").forEach((n) => n.remove());
 });
 
 function agent(id: string, title: string): SessionInfo {
   return {
     id,
     aiTitle: title,
-    status: "Executing",
+    status: "executing",
     isSubagent: true,
     lastActivityMs: Date.now(),
     agentTokenSpeed: 0,
@@ -44,6 +45,8 @@ function render(props: Partial<Parameters<typeof SessionAuxRail>[0]> = {}) {
         expandedId={null}
         workspacePath="/repo"
         onOpenAgent={() => {}}
+        onToggleAgent={() => {}}
+        onCloseAgent={() => {}}
         onToggleDoc={() => {}}
         onCloseDoc={() => {}}
         onCloseOtherDocs={() => {}}
@@ -124,8 +127,9 @@ describe("SessionAuxRail", () => {
     expect(el.querySelectorAll("aside > *")).toHaveLength(1);
   });
 
-  // The expanded card's header is the reader's own AuxDocBar. It used to be a
-  // strip *above* that bar, which printed the doc's name twice in a row.
+  // An expanded doc card's header is the reader's own AuxDocBar. It used to be
+  // a strip *above* that bar, which printed the doc's name twice in a row. (An
+  // agent card keeps its strip — a transcript has no header to borrow.)
   it("prints the expanded doc's name once, not in a strip of its own", () => {
     const doc = makeAuxDoc("wiki", "arch/overview");
     const el = render({ docs: [doc], expandedId: doc.id });
@@ -141,9 +145,9 @@ describe("SessionAuxRail", () => {
     expect(el.querySelector("[class*='doc_card_meta']")?.textContent).toBe("gui");
   });
 
-  // The bug this pass closes: with no handler, a right-click anywhere in the
-  // rail bubbled to the app-wide menu (contextMenu.ts) and answered a request
-  // to act on a document with Settings / About / Quit.
+  // With no handler, a right-click anywhere in the rail bubbled to the app-wide
+  // menu (contextMenu.ts) and answered a request to act on a document with
+  // Settings / About / Quit.
   it("answers a right-click on a chip with the card's own menu", () => {
     const doc = makeAuxDoc("file", "/repo/src/main.rs");
     const el = render({ docs: [doc] });
@@ -162,16 +166,16 @@ describe("SessionAuxRail", () => {
   it("answers a right-click on its own background with the stack's menu", () => {
     const el = render({ docs: [makeAuxDoc("file", "/repo/a.rs")] });
     const rail = el.querySelector("aside") as HTMLElement;
-    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
 
-    act(() => void rail.dispatchEvent(ev));
+    act(() =>
+      void rail.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
+    );
 
-    const menu = document.body.querySelector("[class*='menu']") as HTMLElement;
-    // Closing the whole stack and putting the rail away are stack-level; they
-    // are the two things a card's own menu cannot offer on its own behalf.
     const labels = Array.from(document.body.querySelectorAll("[class*='menu'] button")).map(
       (b) => b.textContent ?? "",
     );
+    // Closing the whole stack and putting the rail away are stack-level; they
+    // are the two things a card's own menu cannot offer on its own behalf.
     expect(labels).toHaveLength(2);
     expect(labels[0]).toMatch(/全部|all/i);
     expect(labels[1]).toMatch(/辅助栏|side rail/i);
@@ -190,5 +194,43 @@ describe("SessionAuxRail", () => {
     act(() => (items[0] as HTMLElement).click());
 
     expect(onCollapseDoc).toHaveBeenCalled();
+  });
+
+  // The behaviour this rail change is for: a subagent is read here, not by
+  // leaving for its own session view.
+  it("clicking a subagent card expands it instead of navigating", () => {
+    const onToggleAgent = vi.fn();
+    const onOpenAgent = vi.fn();
+    const a = agent("sub-1", "Trace the watcher");
+    const el = render({ agents: [a], onToggleAgent, onOpenAgent });
+
+    act(() => (el.querySelector("button") as HTMLElement).click());
+    expect(onToggleAgent).toHaveBeenCalledWith(a);
+    expect(onOpenAgent).not.toHaveBeenCalled();
+  });
+
+  it("gives the expanded subagent card a width grip and a way out to its page", () => {
+    const onOpenAgent = vi.fn();
+    const a = agent("sub-1", "Trace the watcher");
+    const el = render({ agents: [a], expandedId: agentCardId("sub-1"), onOpenAgent });
+    const card = el.querySelector("aside > div") as HTMLElement;
+
+    expect(card.querySelector('[role="separator"]')).not.toBeNull();
+    // The transcript pane mounts inside the card: grip + head + pane.
+    expect(card.childElementCount).toBeGreaterThan(2);
+
+    const goto = card.querySelector(
+      `[aria-label="${i18n.t("detail.agent_card_goto")}"]`,
+    ) as HTMLElement;
+    act(() => goto.click());
+    expect(onOpenAgent).toHaveBeenCalledWith(a);
+  });
+
+  // A live agent's chip is derived from the scan, so dismissing it would last
+  // until the next tick. Only the expanded card (and a pinned leftover) offers
+  // the ✕.
+  it("offers no ✕ on a live agent's collapsed chip", () => {
+    const el = render({ agents: [agent("sub-1", "Trace the watcher")] });
+    expect(el.textContent).not.toContain("✕");
   });
 });

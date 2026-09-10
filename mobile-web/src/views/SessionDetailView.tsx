@@ -67,6 +67,7 @@ import {
 import {
   DecisionHistoryTab,
   HandoffTab,
+  NotesTab,
   TaskPlansTab,
   TokenTab,
   WorkflowTab,
@@ -346,6 +347,7 @@ const PANE_TITLE: Record<DetailPane, string> = {
   plans: "计划",
   token: "Token 与花费",
   workflow: "Workflow",
+  notes: "笔记",
   handoff: "接力链",
 };
 
@@ -1409,6 +1411,7 @@ export function SessionDetailView({
             {pane === "plans" && <TaskPlansTab session={session} client={client} />}
             {pane === "token" && <TokenTab session={session} client={client} />}
             {pane === "workflow" && <WorkflowTab session={session} client={client} />}
+            {pane === "notes" && <NotesTab session={session} client={client} />}
             {pane === "handoff" && <HandoffTab session={session} client={client} />}
           </div>
         </div>

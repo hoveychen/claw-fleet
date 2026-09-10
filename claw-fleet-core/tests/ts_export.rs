@@ -89,6 +89,8 @@ fn build_bundle() -> String {
         claw_fleet_core::ui_types::WaitingAlert,
         claw_fleet_core::ui_types::PendingDecisions,
         claw_fleet_core::skill_history::SkillInvocation,
+        claw_fleet_core::session_notes::NoteFile,
+        claw_fleet_core::session_notes::NoteMatch,
     );
 
     // ── workflow ───────────────────────────────────────────────────────────

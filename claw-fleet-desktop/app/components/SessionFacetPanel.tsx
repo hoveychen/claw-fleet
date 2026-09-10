@@ -12,6 +12,7 @@ import { tokenPanelForAgentSource } from "../modelChoices";
 import { CodexTokenPanel } from "./CodexTokenPanel";
 import { DecisionHistory } from "./DecisionHistory";
 import { DshTokenPanel } from "./DshTokenPanel";
+import { NotesView } from "./NotesView";
 import { ScratchpadView } from "./ScratchpadView";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
@@ -54,6 +55,9 @@ export function SessionFacetPanel({
   switch (facet) {
     case "scratchpad":
       return <ScratchpadView workspace={session.workspacePath} sessionId={session.id} />;
+
+    case "notes":
+      return <NotesView sessionId={session.id} />;
 
     case "decisions":
       return <DecisionHistory records={decisionRecords} mode="tab" />;

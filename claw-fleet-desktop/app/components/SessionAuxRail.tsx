@@ -2,14 +2,16 @@ import { ChevronsDownUp, FileText, Globe, NotebookText, Package, PanelRightClose
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PointerEvent as ReactPointerEvent } from "react";
-
 import { openUrl } from "@tauri-apps/plugin-opener";
+
 import { revealSlugInWikiPage } from "../hooks/useWikiDocs";
 import { useUIStore } from "../store";
-import { auxDocMeta, type AuxDoc, type AuxDocKind } from "../detailAux";
+import { agentCardId, auxDocMeta, type AuxDoc, type AuxDocKind } from "../detailAux";
+import type { PathLinkContext } from "../markdown/pathLinks";
 import type { SessionInfo } from "../types";
 import { buildChipMenu, type AuxCardTail } from "./auxDocMenu";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
+import { SessionAuxAgent } from "./SessionAuxAgent";
 import { SessionAuxDoc } from "./SessionAuxDoc";
 import { SubagentLiveCards } from "./SubagentLiveCards";
 import styles from "./SessionDetail.module.css";
@@ -54,19 +56,22 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
  * scrollbar on the pane's own right edge. Its width is a persisted ratio of the
  * pane (see useDocCardWidth), dragged from the grip on its left edge.
  *
- * **The expanded card has no separate title strip.** Its reader's own
+ * **A subagent card expands here too**, into its transcript. It used to
+ * navigate to the subagent's own session view, which cost you the conversation
+ * you were reading — for a thing whose only content is its messages. See
+ * SubagentLiveCards.
+ *
+ * **An expanded doc card has no separate title strip.** Its reader's own
  * `AuxDocBar` is the header — it already carries the name, so a strip above it
  * printed that name a second time. The bar's subject doubles as the collapse
- * control and its trailing ✕ dismisses the card.
+ * control and its trailing ✕ dismisses the card. (An agent card keeps its
+ * strip: its pane is a transcript, which has no header of its own to borrow.)
  *
  * **Everything here answers a right-click.** A collapsed chip, an expanded
  * card and the rail's own empty space each raise a menu (`auxDocMenu`), and
  * they must: with no handler, the right-click bubbled to the app-wide menu in
  * `contextMenu.ts` and answered a request to act on a file with
  * Settings / About / Quit.
- *
- * Clicking a subagent card navigates to that subagent's transcript, the same as
- * it always did.
  */
 export function SessionAuxRail({
   open,
@@ -75,6 +80,8 @@ export function SessionAuxRail({
   expandedId,
   workspacePath,
   onOpenAgent,
+  onToggleAgent,
+  onCloseAgent,
   onToggleDoc,
   onCloseDoc,
   onCloseOtherDocs,
@@ -82,6 +89,7 @@ export function SessionAuxRail({
   onCollapseDoc,
   onHideRail,
   onOpenWiki,
+  paths,
   cardWidth,
   onGripDown,
 }: {
@@ -91,11 +99,16 @@ export function SessionAuxRail({
   /** Live subagents, most-recently-active first. */
   agents: SessionInfo[];
   docs: AuxDoc[];
-  /** The doc card expanded into a reader, if any. */
+  /** The card expanded into a reader — a doc or an agent — if any. */
   expandedId: string | null;
   /** The session's repo, for the file card's 在仓库页打开. */
   workspacePath: string;
+  /** Leave for the subagent's own session view (the expanded card's ↗). */
   onOpenAgent: (session: SessionInfo) => void;
+  /** Expand a subagent's transcript here, or collapse the open one. */
+  onToggleAgent: (session: SessionInfo) => void;
+  /** Dismiss a subagent's preview, and its card when it was only pinned. */
+  onCloseAgent: (session: SessionInfo) => void;
   /** Expand a card, or collapse the one already expanded. */
   onToggleDoc: (id: string) => void;
   onCloseDoc: (id: string) => void;
@@ -109,6 +122,8 @@ export function SessionAuxRail({
   onHideRail: () => void;
   /** A `[[slug]]` followed from inside a wiki doc opens the next one. */
   onOpenWiki: (slug: string) => void;
+  /** Workspace context for path chips inside an expanded agent transcript. */
+  paths?: PathLinkContext;
   /** px width for the expanded card — owned by SessionDetail because the
    *  conversation has to reserve the same number. 0 when nothing is expanded. */
   cardWidth: number;
@@ -125,7 +140,11 @@ export function SessionAuxRail({
 
   if (!open) return null;
   const empty = agents.length === 0 && docs.length === 0;
-  const wide = expandedDoc != null && cardWidth > 0;
+  // Either kind of expansion widens the box — a transcript needs the reading
+  // width a file does. Checked against the cards actually in hand, so a stale
+  // id (its agent retired and unpinned) cannot widen the rail around nothing.
+  const expandedAgent = agents.some((a) => agentCardId(a.id) === expandedId);
+  const wide = cardWidth > 0 && (expandedDoc != null || expandedAgent);
 
   const tailFor = (d: AuxDoc): AuxCardTail => ({
     isExpanded: d.id === expandedId,
@@ -175,7 +194,7 @@ export function SessionAuxRail({
   /** The rail's own menu: what to do with the *stack*, not with one card. */
   const railItems = (): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
-    if (expandedDoc) {
+    if (expandedDoc || expandedAgent) {
       items.push({
         id: "collapse",
         label: t("detail.aux_collapse_card", "收起此卡"),
@@ -210,8 +229,8 @@ export function SessionAuxRail({
       className={`${styles.rail} ${wide ? styles.rail_wide : ""}`}
       style={wide ? { width: cardWidth } : undefined}
       onContextMenu={(e) => {
-        // Reached only by the rail's own background — a chip and an expanded
-        // card both stop propagation with their own menu.
+        // Reached only by the rail's own background — a chip, a doc card and an
+        // agent card all stop propagation with their own menu.
         e.preventDefault();
         e.stopPropagation();
         setMenu({ anchor: { x: e.clientX, y: e.clientY }, items: railItems() });
@@ -221,7 +240,15 @@ export function SessionAuxRail({
           column, which reads as the rail having failed to load rather than as
           "there is genuinely nothing running and nothing opened yet". */}
       {empty && <p className={styles.rail_empty}>{t("detail.rail_empty", "暂无运行中的 Agent 或已打开的文档")}</p>}
-      <SubagentLiveCards agents={agents} onOpen={onOpenAgent} />
+      <SubagentLiveCards
+        agents={agents}
+        expandedId={expandedId}
+        onToggle={onToggleAgent}
+        onClose={onCloseAgent}
+        onGoto={onOpenAgent}
+        onGripDown={onGripDown}
+        renderPane={(a) => <SessionAuxAgent agent={a} paths={paths} />}
+      />
       {/* Newest first: the file the agent just named is the one you are most
           likely to be reaching for, and it lands nearest the live agents. */}
       {[...docs].reverse().map((d) => {

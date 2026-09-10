@@ -13,6 +13,7 @@ import {
   type LucideIcon,
   MessageSquareQuote,
   MoreHorizontal,
+  NotebookPen,
   Sparkles,
   Terminal,
   Workflow,
@@ -32,6 +33,7 @@ const FACET_ICONS: Record<AuxFacet, LucideIcon> = {
   tasks: ListChecks,
   bgtasks: Terminal,
   scratchpad: FileClock,
+  notes: NotebookPen,
   workflow: Workflow,
 };
 
@@ -39,7 +41,7 @@ const FACET_ICONS: Record<AuxFacet, LucideIcon> = {
  * The detail header's overflow menu.
  *
  * Two families live here. First the session's facets — Skills, 决策, Token,
- * 任务, 后台任务, 临时文件, Workflow — each one a button that pulls that panel up
+ * 任务, 后台任务, 临时文件, 笔记, Workflow — each one a button that pulls that panel up
  * in the auxiliary column. They used to be a permanent tab strip above the
  * panel, which spent the strip's whole width on destinations you visit once an
  * hour; as menu items they cost nothing until asked for, and the strip is left

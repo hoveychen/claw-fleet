@@ -15,7 +15,7 @@
  *
  * 2. **The drawer** — an overlay panel that floats over the transcript and
  *    shows exactly one *session facet* (Skills, 决策, Token, 任务, 后台任务,
- *    临时文件, Workflow) picked from the header menu. This is "go look
+ *    临时文件, 笔记, Workflow) picked from the header menu. This is "go look
  *    something up" — singular, deliberate, dismissed when you are done.
  *    `active` is that one thing.
  *
@@ -38,6 +38,7 @@ export type AuxFacet =
   | "tasks"
   | "bgtasks"
   | "scratchpad"
+  | "notes"
   | "workflow";
 
 const FACETS: readonly AuxFacet[] = [
@@ -47,6 +48,7 @@ const FACETS: readonly AuxFacet[] = [
   "tasks",
   "bgtasks",
   "scratchpad",
+  "notes",
   "workflow",
 ];
 
@@ -82,12 +84,33 @@ export interface AuxState {
   /** The facet the drawer is showing. `null` means the drawer is closed —
    *  which says nothing about the rail. */
   active: AuxFacet | null;
-  /** The doc card currently expanded into a reader, by id. `null` means every
-   *  card is collapsed to its one-line chip. */
+  /** The card currently expanded into a reader, by id — a doc's `kind:ref` or
+   *  a subagent's `agentCardId`. `null` means every card is collapsed to its
+   *  one-line chip. One expansion at a time, across both kinds: the rail only
+   *  reserves one band of the conversation. */
   expanded: string | null;
+  /** Session id of a subagent whose card must survive the agent finishing.
+   *
+   *  The agent cards are derived from the live-session set, so a subagent that
+   *  ends is pulled out of the rail — which is right for a chip nobody is
+   *  looking at, and wrong for the transcript you are in the middle of
+   *  reading. Expanding a card pins it here; the rail keeps rendering it from
+   *  the last snapshot it saw until the reader dismisses it. */
+  pinnedAgent: string | null;
 }
 
-export const initialAux: AuxState = { docs: [], active: null, expanded: null };
+export const initialAux: AuxState = {
+  docs: [],
+  active: null,
+  expanded: null,
+  pinnedAgent: null,
+};
+
+/** Rail id for a subagent card. Prefixed like a doc's, so `expanded` can hold
+ *  either and the two can never collide. */
+export function agentCardId(sessionId: string): string {
+  return `agent:${sessionId}`;
+}
 
 /** Cap on remembered doc cards. A long session can name dozens of files; the
  *  rail is a "what I have been reading" stack, not a history. Oldest drops
@@ -185,6 +208,42 @@ export function toggleDoc(state: AuxState, id: string): AuxState {
 export function collapseDoc(state: AuxState): AuxState {
   if (state.expanded == null) return state;
   return { ...state, expanded: null };
+}
+
+/**
+ * Click a rail subagent card: expand it in place into a transcript preview, or
+ * — clicking the one already expanded — collapse it back to a chip.
+ *
+ * Clicking used to *navigate*: the detail view swapped to the subagent's own
+ * session, so checking what a fan-out was doing cost you the conversation you
+ * were reading and a trip back. A subagent has nothing to show but its
+ * messages, so it does not need a page of its own — it needs the same in-place
+ * reader a file gets, which is what this is. (Going there is still one click,
+ * from the expanded card's header.)
+ *
+ * Expanding also *pins* the agent: see `pinnedAgent`.
+ */
+export function toggleAgent(state: AuxState, sessionId: string): AuxState {
+  const id = agentCardId(sessionId);
+  if (state.expanded === id) return { ...state, expanded: null };
+  return { ...state, expanded: id, pinnedAgent: sessionId };
+}
+
+/**
+ * Dismiss a pinned subagent card — the ✕ on a card the rail is only still
+ * showing because it was read after the agent finished.
+ *
+ * A live agent's card has no ✕: it is derived from the live set and dismissing
+ * it would last until the next scan tick. Only the pin is dismissible.
+ */
+export function closeAgent(state: AuxState, sessionId: string): AuxState {
+  const id = agentCardId(sessionId);
+  if (state.pinnedAgent !== sessionId && state.expanded !== id) return state;
+  return {
+    ...state,
+    pinnedAgent: state.pinnedAgent === sessionId ? null : state.pinnedAgent,
+    expanded: state.expanded === id ? null : state.expanded,
+  };
 }
 
 /** Open a facet in the drawer. Facets have no card, so this is the only way in

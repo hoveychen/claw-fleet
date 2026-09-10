@@ -70,6 +70,7 @@ mod routes_interaction;
 mod routes_llm;
 mod routes_memory;
 mod routes_mobile;
+mod routes_notes;
 mod routes_plan_approval;
 mod routes_proc;
 mod routes_schedule;
@@ -91,6 +92,7 @@ use routes_interaction::*;
 use routes_llm::*;
 use routes_memory::*;
 use routes_mobile::*;
+use routes_notes::*;
 use routes_plan_approval::*;
 use routes_proc::*;
 use routes_schedule::*;
@@ -1226,6 +1228,12 @@ fn handle_request(
             crate::routes::USAGE_RANGE_BREAKDOWN => route_usage_range_breakdown(ctx, request, &query, json_header, path),
 
             crate::routes::SESSION_DECISIONS => route_session_decisions(ctx, request, &query, json_header, path),
+
+            crate::routes::SESSION_NOTES => route_session_notes(request, &query, json_header),
+
+            crate::routes::SESSION_NOTE => route_session_note(request, &query, json_header),
+
+            crate::routes::SESSION_NOTES_SEARCH => route_session_notes_search(request, &query, json_header),
 
             crate::routes::MESSAGES => route_messages(ctx, request, &query, json_header, path),
 
