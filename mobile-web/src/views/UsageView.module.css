@@ -33,6 +33,21 @@
   text-transform: uppercase;
   color: var(--color-text-dim);
   padding: 0 4px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 「来自 <设备名>」：这一区的数只属于当前那台机器。主机名不该被 uppercase
+   （那会把 Harrys-MacBook 变成一串喊叫），所以在这里把继承来的字形复位。 */
+.sectionDevice {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card {
@@ -196,4 +211,9 @@
 
 .barPrevLabel {
   flex-shrink: 0;
+}
+
+/* 「未上报」这类占位值：比正常数值再弱一档，免得读起来像一个真的读数。 */
+.rowMuted {
+  color: var(--color-text-dim);
 }

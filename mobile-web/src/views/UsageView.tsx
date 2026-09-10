@@ -16,11 +16,36 @@ import styles from "./UsageView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
 
+/** 「今日累计」里某一台出了多少。`usage` 为 `null` = 这台还没报过。 */
+export interface DeviceUsageRow {
+  id: string;
+  label: string;
+  usage: TodayUsage | null;
+}
+
 interface Props {
   client: FleetTransport | null;
   /** App header 里那份今日累计，直接复用——避免为同一个数字再扫一遍会话。 */
   todayUsage: TodayUsage | null;
+  /** 合计的设备明细。只配了一台时为空数组——那时候明细就是合计本身，多画一行
+   *  只是噪音。 */
+  perDevice?: DeviceUsageRow[];
+  /** 当前作用域设备的名字，用来标注「下面这些数只属于这一台」。只配了一台时为
+   *  `null`（那时候没有别的设备可混淆，标了反而是噪音）。 */
+  activeDeviceLabel?: string | null;
   onBack: () => void;
+}
+
+/** 区块小标题。`device` 给出时右侧缀一句「来自 <设备名>」——「今日累计」是全部
+ *  设备之和，而它下面这些区块（账号、限流条、曲线）读的都是**当前那一台**，
+ *  两台登不同账号时这个区别决定了限流条在说谁。 */
+function SectionHead({ label, device }: { label: string; device?: string | null }) {
+  return (
+    <div className={styles.sectionLabel}>
+      <span>{label}</span>
+      {device && <span className={styles.sectionDevice}>{t("来自 {0}", device)}</span>}
+    </div>
+  );
 }
 
 /** 各源在标题里的显示名；未知源回落到原始 id。 */
@@ -134,7 +159,13 @@ function UsageSourceValue({
   );
 }
 
-export function UsageView({ client, todayUsage, onBack }: Props) {
+export function UsageView({
+  client,
+  todayUsage,
+  perDevice = [],
+  activeDeviceLabel = null,
+  onBack,
+}: Props) {
   const [data, setData] = useState<AccountUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -196,6 +227,29 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
                   value={`$${todayUsage.agentCostUsd.toFixed(2)} · ${t("{0} 个会话", todayUsage.sessionCount)}`}
                 />
                 <Row label={t("Fleet 自身花费")} value={`$${todayUsage.fleetCostUsd.toFixed(2)}`} />
+                {/* 合计是**所有**设备之和（deviceRuntime 的 totalUsage），但它回答
+                    不了「哪一台在烧钱」——两台登的还可能不是同一个账号。所以多设备
+                    时把它拆回每台一行。 */}
+                {perDevice.length > 1 && (
+                  <>
+                    <div className={styles.divider} />
+                    {perDevice.map((d) => (
+                      <Row
+                        key={d.id}
+                        label={d.label}
+                        value={
+                          d.usage ? (
+                            `$${d.usage.costUsd.toFixed(2)} · ${fmtTokens(
+                              d.usage.inputTokens + d.usage.outputTokens,
+                            )}`
+                          ) : (
+                            <span className={styles.rowMuted}>{t("未上报")}</span>
+                          )
+                        }
+                      />
+                    ))}
+                  </>
+                )}
               </>
             ) : (
               <div className={styles.hint}>{t("桌面端离线，拿不到今日用量。")}</div>
@@ -209,7 +263,7 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
         {/* ── Claude 账号 ── */}
         {data && (
           <div className={styles.section}>
-            <div className={styles.sectionLabel}>Claude Code</div>
+            <SectionHead label="Claude Code" device={activeDeviceLabel} />
             <div className={styles.card}>
               {claude ? (
                 <>
@@ -252,7 +306,7 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
 
         {/* ── 近 24h 占用率曲线 ── */}
         <div className={styles.section}>
-          <div className={styles.sectionLabel}>{t("占用率变化 · 近 24 小时")}</div>
+          <SectionHead label={t("占用率变化 · 近 24 小时")} device={activeDeviceLabel} />
           <div className={styles.card}>
             <UsageChart key={reloadKey} client={client} />
           </div>
@@ -261,7 +315,10 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
         {/* ── 其它 agent 源 ── */}
         {data?.sources.map((s) => (
           <div key={s.source} className={styles.section}>
-            <div className={styles.sectionLabel}>{SOURCE_LABEL[s.source] ?? s.source}</div>
+            <SectionHead
+              label={SOURCE_LABEL[s.source] ?? s.source}
+              device={activeDeviceLabel}
+            />
             <div className={styles.card}>
               {s.email && <Row label={t("账号")} value={s.email} />}
               {s.plan && <Row label={t("套餐")} value={s.plan} />}
