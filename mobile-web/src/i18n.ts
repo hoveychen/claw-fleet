@@ -542,6 +542,8 @@ const DICT: Record<string, string> = {
   "该会话没有 workflow 运行": "No workflow runs for this session",
   "加载接力链…": "Loading relay chain…",
   "加载笔记…": "Loading notes…",
+  "搜索笔记（区分大小写）": "Search notes (case-sensitive)",
+  没有匹配的行: "No matching lines",
   本会话: "This session",
   "前任 {0}": "Predecessor {0}",
   该会话没有留下笔记: "This session left no notes",

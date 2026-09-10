@@ -802,6 +802,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { session_id: q(a.sessionId), path: q(a.path) },
   }),
 
+  search_session_notes: (a) => ({
+    method: "GET",
+    path: "/session_notes_search",
+    query: { session_id: q(a.sessionId), q: q(a.query) },
+  }),
+
   list_sessions: () => ({ method: "GET", path: "/sessions" }),
 
   list_skill_files: (a) => ({

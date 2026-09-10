@@ -2085,6 +2085,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "skill_history" => serve_skill_history(params),
         "session_notes" => serve_session_notes(params),
         "session_note" => serve_session_note(params),
+        "session_notes_search" => serve_session_notes_search(params),
         "guard_analyze" => serve_guard_analyze(params),
         "session_search" => serve_session_search(params),
         "wiki_list" => serve_wiki_list(params),
@@ -2297,6 +2298,22 @@ fn serve_session_note(params: &Value) -> Result<Value, String> {
     let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
     let text = crate::session_notes::read_owned(session_id, path)?;
     Ok(Value::String(text))
+}
+
+fn serve_session_notes_search(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    let query = params.get("query").and_then(Value::as_str).ok_or("missing query")?;
+    let matches = crate::session_notes::search(
+        session_id,
+        query,
+        None,
+        crate::session_notes::SEARCH_MAX_FILES,
+        crate::session_notes::SEARCH_MAX_MATCHES_PER_FILE,
+    )?;
+    serde_json::to_value(matches).map_err(|e| e.to_string())
 }
 
 fn serve_decision_asset(params: &Value) -> Result<Value, String> {

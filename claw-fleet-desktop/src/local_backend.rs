@@ -2862,6 +2862,21 @@ impl LocalBackend {
         claw_fleet_core::session_notes::read_owned(session_id, path)
     }
 
+    /// Literal substring search across the notes this session can read.
+    pub fn search_session_notes(
+        &self,
+        session_id: &str,
+        query: &str,
+    ) -> Result<Vec<claw_fleet_core::session_notes::NoteMatch>, String> {
+        claw_fleet_core::session_notes::search(
+            session_id,
+            query,
+            None,
+            claw_fleet_core::session_notes::SEARCH_MAX_FILES,
+            claw_fleet_core::session_notes::SEARCH_MAX_MATCHES_PER_FILE,
+        )
+    }
+
     pub fn git_status(
         &self,
         workspace: &str,

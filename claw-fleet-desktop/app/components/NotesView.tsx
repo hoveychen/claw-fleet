@@ -6,7 +6,7 @@ import { TextBlock } from "./blocks/TextBlock";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { formatBytes } from "../formatBytes";
-import type { NoteFile } from "../types";
+import type { NoteFile, NoteMatch } from "../types";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 
@@ -28,7 +28,11 @@ import skillStyles from "./SkillsView.module.css";
 export function NotesView({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
   const [files, setFiles] = useState<NoteFile[]>([]);
-  const [active, setActive] = useState<NoteFile | null>(null);
+  const [query, setQuery] = useState("");
+  const [matches, setMatches] = useState<NoteMatch[] | null>(null);
+  /* Only identity is needed to read a note back, and a search hit carries just
+     that (no bytes / mtime) — so the selection is the pair, not a NoteFile. */
+  const [active, setActive] = useState<{ sessionId: string; path: string } | null>(null);
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const {
@@ -51,9 +55,36 @@ export function NotesView({ sessionId }: { sessionId: string }) {
     };
   }, [sessionId]);
 
+  /* Search is literal and case-sensitive (core's `session_notes::search`), so
+     it is cheap enough to run per keystroke behind a short debounce rather than
+     needing a submit button. An empty box means "not searching" — `null`, not
+     an empty result list, so the tree shows the file list again instead of
+     "no hits". */
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setMatches(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      invoke<NoteMatch[]>("search_session_notes", { sessionId, query: q })
+        .then((hits) => {
+          if (!cancelled) setMatches(hits ?? []);
+        })
+        .catch(() => {
+          if (!cancelled) setMatches([]);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [sessionId, query]);
+
   const pick = useCallback(
-    (file: NoteFile) => {
-      setActive(file);
+    (file: { sessionId: string; path: string }) => {
+      setActive({ sessionId: file.sessionId, path: file.path });
       setContent(null);
       setError(null);
       // The owner, not the session on screen: an inherited `checkpoint.md`
@@ -87,8 +118,44 @@ export function NotesView({ sessionId }: { sessionId: string }) {
   return (
     <div className={skillStyles.detail_split}>
       <aside className={skillStyles.tree_pane} style={{ width: treeWidth }}>
+        {files.length > 0 && (
+          <input
+            className={skillStyles.tree_filter}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("detail.notes_search_placeholder")}
+            spellCheck={false}
+          />
+        )}
+
         {files.length === 0 ? (
           <div className={skillStyles.tree_empty}>{t("detail.notes_empty")}</div>
+        ) : matches != null ? (
+          /* Searching: the tree becomes the hit list. Each row is one matched
+             line, so clicking it opens that note with the term highlighted —
+             the file list is one keystroke away (clear the box) and repeating
+             it here would just push the hits off screen. */
+          matches.length === 0 ? (
+            <div className={skillStyles.tree_empty}>{t("detail.notes_search_none")}</div>
+          ) : (
+            matches.map((m) => (
+              <button
+                key={`${m.sessionId}:${m.path}:${m.line}`}
+                className={`${skillStyles.tree_item} ${
+                  active?.sessionId === m.sessionId && active?.path === m.path
+                    ? skillStyles.tree_item_active
+                    : ""
+                }`}
+                onClick={() => pick(m)}
+                title={`${m.path}:${m.line}\n${m.text}`}
+              >
+                <span className={skillStyles.tree_name}>{m.text.trim() || m.path}</span>
+                <span className={skillStyles.tree_size}>
+                  {m.sessionId === sessionId ? `:${m.line}` : `${m.sessionId.slice(0, 4)}:${m.line}`}
+                </span>
+              </button>
+            ))
+          )
         ) : (
           groups.map((g) => (
             <div key={g.owner}>
@@ -127,7 +194,9 @@ export function NotesView({ sessionId }: { sessionId: string }) {
         ) : content == null ? (
           <p className={styles.empty}>{t("detail.notes_loading")}</p>
         ) : (
-          <TextBlock text={content} />
+          /* The same term the hit list matched on, so the reader lands on a
+             page where the line they clicked is already marked. */
+          <TextBlock text={content} searchTerms={query.trim() ? [query.trim()] : undefined} />
         )}
       </div>
     </div>
