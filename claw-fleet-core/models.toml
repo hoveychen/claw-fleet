@@ -206,15 +206,19 @@ max_context = 272000
 # 运行时把每个模型的真实 `efforts` 与 `defaultEffort` 发过线来。抄一份静态副本
 # 只会过期，还会盖住那份活数据。
 #
-# 列出来的只有 `deepseek-official` 这一个 provider 的三个模型：它是 dsh 内置的
+# 列出来的只有 `deepseek-official` 这一个 provider 的四个模型：它是 dsh 内置的
 # 路由，全机器一致。openrouter 那 270 多个不列——逐用户配置不同，实测里它们的
 # effort 梯子也五花八门（有的带 minimal，有的带 off，有的是空数组）。
 #
-# 三条的 `efforts` / `default_effort` 是**向本机 dsh 实测**来的，不是抄的：
+# 四条的 `efforts` / `default_effort` 是**向本机 dsh 实测**来的，不是抄的：
 # `dsh_source::dsh_models()` 返回的 `session/modelCatalog`（复现见该模块的
-# `live_probe::dump_dsh_models`，2026-09-08 抓取）。三个 deepseek-official 模型
-# 一致是 `off / low / high / max`，默认 `high`——**注意没有 `medium`**，这正是
-# 凭印象绝对写不对的那种事实。
+# `live_probe::dump_dsh_models`；前三条 2026-09-08 抓取，`deepseek-flash` 一条
+# 2026-09-10 向 dsh 0.1.5-rc.1 新起的 `dsh web` 抓取——**注意要新起一个**，
+# 升级 dsh 不会换掉已经在跑的 `dsh web` 进程里加载好的旧目录）。四个
+# deepseek-official 模型一致是 `off / low / high / max`，默认 `high`——
+# **注意没有 `medium`**，这正是凭印象绝对写不对的那种事实。梯子是 provider 级的
+# （`@deepseek-ai/dsh-llm-deepseek` 的 `Config.reasoningEffort` 就是这个 union，
+# 每个模型的 catalog 条目里并没有各自的 efforts 字段），所以新模型进来也是这一档。
 #
 # 仍然不列 openrouter：实测里它那 270 多个模型的梯子五花八门（有的是
 # `minimal/low/medium/high`，有的带 `off`，有的干脆是空数组），且逐用户配置不同。
@@ -228,6 +232,37 @@ max_context = 272000
 # **deepseek-v4-pro 本机没有会话，所以留空、表里显示 `—`。**同族大概率也是 1M，
 # 但「大概率」不是实测，宁可空着。哪天有一个 pro 会话跑过，就能照样填上。
 #
+# ── 2026-09-10：V4.1 Flash 上线，两个旧 flash id 变成退役别名 ──
+# DeepSeek 官方价目页（api-docs.deepseek.com/quick_start/pricing，脚注 1）写得很
+# 直白：模型名用 `deepseek-flash`（版本号 DeepSeek-V4.1-Flash），`deepseek-v4-flash`
+# 与 `deepseek-v4-flash-vision-exp` 这两个旧名「仍被接受，但对应的模型已经退役，
+# 请求由 DeepSeek-V4.1-Flash 承接、按 Flash 价计费」。本机实测对得上：三个 id 都
+# 还能正常应答，而 `GET /models` 只列 `deepseek-flash` 与 `deepseek-v4-pro`；同一
+# 张图分别发给 `deepseek-flash` 与 `deepseek-v4-flash`，token 计数逐字段相同
+# （228/44/42），说明背后就是同一个模型。
+#
+# 所以两个旧 id 记成 `superseded_by = deepseek-official/deepseek-flash`：它们不再
+# 单独占速查表一行，而是折进 Flash 行末尾的「前代同价仍可选」——这正是这个字段的
+# 用途，而且「同价」这次是字面为真的。它们**不能**直接删掉：dsh 的活目录仍然发这
+# 两个 id（0.1.5-rc.1 的 `DEFAULT_MODELS` 里都在），本机 settings.yaml 的
+# `agent-default-model` 现在指着 `-vision-exp`，历史会话里也全是这两个名字，删了
+# 就变成查不出档位和梯子的未编目模型。
+#
+# 一个尚未落地的已知变更：同一张价目页脚注 2 说，2026-09-14 12:00 北京时间起，
+# 发给 `deepseek-v4-pro` 的请求也会被路由到 V4.1 Flash 并按 Flash 价计费（直到
+# V4.1 Pro 发布）。那天之后 Pro 这一行的 premium 档与 `dsh_cost` 里的 Pro 价目都
+# 会变成错的。这里**不**预先按日期改——改法要等那天的实际行为坐实（模型是否仍
+# 自报 v4-pro、账单里落哪个名字），提前写死一个日期开关就是在猜。
+
+[[model]]
+id = "deepseek-official/deepseek-flash"
+label = "DeepSeek V4.1 Flash"
+family = "dsh"
+tier = "standard"
+efforts = ["off", "low", "high", "max"]
+default_effort = "high"
+# 官方价目页的 CONTEXT LENGTH 一栏：1M（MAX OUTPUT 384K，这里不建模）。
+context = 1000000
 
 [[model]]
 id = "deepseek-official/deepseek-v4-pro"
@@ -247,6 +282,9 @@ tier = "standard"
 efforts = ["off", "low", "high", "max"]
 default_effort = "high"
 context = 1000000
+superseded_by = "deepseek-official/deepseek-flash"
+legacy_note_zh = "退役别名，请求由 V4.1 Flash 承接"
+legacy_note_en = "retired alias, served by V4.1 Flash"
 
 [[model]]
 id = "deepseek-official/deepseek-v4-flash-vision-exp"
@@ -256,3 +294,6 @@ tier = "standard"
 efforts = ["off", "low", "high", "max"]
 default_effort = "high"
 context = 1000000
+superseded_by = "deepseek-official/deepseek-flash"
+legacy_note_zh = "退役别名，请求由 V4.1 Flash 承接"
+legacy_note_en = "retired alias, served by V4.1 Flash"

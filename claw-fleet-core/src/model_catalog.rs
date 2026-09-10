@@ -951,7 +951,7 @@ mod tests {
         }
     }
 
-    /// dsh's own three rows stay listed, and state exactly what was measured.
+    /// dsh's own rows stay listed, and state exactly what was measured.
     ///
     /// They were `listed = false` at first, on the reasoning that dsh publishes
     /// its real catalog at runtime and a static copy would rot. That reasoning
@@ -966,19 +966,32 @@ mod tests {
     /// consistently across 26 of them); Pro never ran here, so its 1M is the
     /// boss's own answer rather than a measurement — flagged as such in
     /// `models.toml` so the two kinds of source stay distinguishable.
+    ///
+    /// Since 2026-09-10 only two of the four are *listed*: DeepSeek retired the
+    /// models behind `deepseek-v4-flash` and `-flash-vision-exp` and now serves
+    /// both names off V4.1 Flash, so they fold into the Flash row's "previous
+    /// generations, still selectable at the same price" tail instead of standing
+    /// as menu entries. They keep every measured field, because the ids are
+    /// still live on the wire and dsh still offers them.
     #[test]
     fn dsh_route_models_state_only_what_was_measured() {
         let rows = listed_models("dsh");
         let ids: Vec<&str> = rows.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            [
-                "deepseek-official/deepseek-v4-pro",
-                "deepseek-official/deepseek-v4-flash",
-                "deepseek-official/deepseek-v4-flash-vision-exp",
-            ]
-        );
-        for e in &rows {
+        assert_eq!(ids, ["deepseek-official/deepseek-flash", "deepseek-official/deepseek-v4-pro"]);
+        // The retired aliases are hidden from the menu but still fully answerable.
+        for id in [
+            "deepseek-official/deepseek-v4-flash",
+            "deepseek-official/deepseek-v4-flash-vision-exp",
+        ] {
+            let e = entry(id).unwrap_or_else(|| panic!("{id} must stay catalogued"));
+            assert!(!e.is_listed(), "{id} should be folded into the Flash row");
+            assert_eq!(
+                e.superseded_by.as_deref(),
+                Some("deepseek-official/deepseek-flash"),
+                "{id}"
+            );
+        }
+        for e in catalog().iter().filter(|e| e.family.as_deref() == Some("dsh")) {
             assert!(e.tier.is_some(), "{} has no tier", e.id);
             assert_eq!(
                 e.efforts.as_deref(),
@@ -992,6 +1005,7 @@ mod tests {
             assert_eq!(e.default_effort.as_deref(), Some("high"), "{}", e.id);
         }
         for id in [
+            "deepseek-official/deepseek-flash",
             "deepseek-official/deepseek-v4-pro",
             "deepseek-official/deepseek-v4-flash",
             "deepseek-official/deepseek-v4-flash-vision-exp",
