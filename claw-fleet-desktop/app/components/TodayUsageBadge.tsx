@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { TodayUsage } from "../types";
 import { fmtRailMoney } from "../railNumbers";
+import { singleFlight } from "../singleFlight";
 import { RailStatTile } from "./RailStatTile";
 import { TokenReceiptModal } from "./TokenReceiptModal";
 import styles from "./TodayUsageBadge.module.css";
@@ -31,7 +32,11 @@ export function TodayUsageBadge({
     let cancelled = false;
     const fetchUsage = async () => {
       try {
-        const u = await invoke<TodayUsage>("today_usage");
+        // `sessions-updated` arrives in bursts during the startup scan, and
+        // this badge is mounted in every sidebar — without the guard a slow
+        // `today_usage` collects a copy per event and per 15s tick, and each
+        // copy parks one of Tauri's 10 async-runtime threads. See singleFlight.
+        const u = await singleFlight("today_usage", () => invoke<TodayUsage>("today_usage"));
         if (!cancelled) setUsage(u);
       } catch {
         /* backend not ready / remote offline — keep last value */
