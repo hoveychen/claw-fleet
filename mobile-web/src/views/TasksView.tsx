@@ -564,15 +564,18 @@ export function TasksView({
   );
 
   // 折叠起来的分区键。默认全展开——手机上一进来就该看到会话本身。
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
-  const toggleSection = useCallback((key: string) => {
-    setCollapsedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
+  // 与搜索/筛选同样落 localStorage：标签页切走会卸载本视图，不持久化的话折叠状态
+  // 每次回任务页都被复位成全展开。Set 不能 JSON 序列化，故盘上存字符串数组。
+  const [collapsedKeys, setCollapsedKeys] = useDraft<string[]>("tasks:collapsedSections", []);
+  const collapsedSections = useMemo(() => new Set(collapsedKeys), [collapsedKeys]);
+  const toggleSection = useCallback(
+    (key: string) => {
+      setCollapsedKeys((prev) =>
+        prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+      );
+    },
+    [setCollapsedKeys],
+  );
 
   const handleStop = useCallback(
     async (s: WithDevice<SessionInfo>) => {
