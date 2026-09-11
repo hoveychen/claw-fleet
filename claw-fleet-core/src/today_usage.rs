@@ -1369,6 +1369,19 @@ fn usage_cache() -> &'static std::sync::Mutex<UsageBreakdownCache> {
 /// background fold should run at a time.
 static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// How many sessions one warm iteration folds before it drops the global cache
+/// lock and lets whoever is queued behind it through.
+///
+/// The startup freeze this exists to prevent: on 2026-09-10 a cold launch with
+/// 1361 sessions held this lock for the whole fold, and every `today_usage`
+/// invoke queued on it — 11 of them, each pinning one of Tauri's `num_cpus`
+/// async-runtime workers. With all 10 workers parked, *every* `(async)` command
+/// starved, including `get_messages_tail` (task detail stuck on 「加载中…」) and
+/// Tauri's own `plugin:event|listen` (32s). The window was ~47s, i.e. exactly
+/// one cold fold. Batching keeps the fold's total work identical but caps how
+/// long any one waiter can be stuck behind it.
+const WARM_BATCH: usize = 32;
+
 /// Pre-fold any new/changed sessions into the cache **off the caller's thread**,
 /// so the first receipt open after a scan finds everything warm instead of paying
 /// the full transcript re-parse. Skips when a warm is already in flight (the next
@@ -1393,11 +1406,25 @@ pub fn warm_usage_cache(sessions: &[SessionInfo]) {
         }
         let _guard = WarmGuard;
 
-        let mut cache = usage_cache().lock().unwrap();
-        cache.retain_sessions(&live_ids(&owned));
-        for s in &owned {
-            let _ = cache.cells(s);
+        // Re-acquire per batch instead of holding the lock across the whole
+        // fold — see WARM_BATCH. Each `cells()` is independently memoised, so
+        // splitting the loop changes nothing about the result; a `today_usage`
+        // that slips in between two batches just folds the few sessions this
+        // warm hasn't reached yet and returns.
+        {
+            let mut cache = usage_cache().lock().unwrap();
+            cache.retain_sessions(&live_ids(&owned));
         }
+        for batch in owned.chunks(WARM_BATCH) {
+            let mut cache = usage_cache().lock().unwrap();
+            for s in batch {
+                let _ = cache.cells(s);
+            }
+        }
+        // One disk write at the end, not one per batch: `store_to` serialises
+        // the entire cache, so persisting per batch would turn a single write
+        // into ~43 full rewrites on a 1361-session machine.
+        let mut cache = usage_cache().lock().unwrap();
         persist_cache(&mut cache);
     });
 }

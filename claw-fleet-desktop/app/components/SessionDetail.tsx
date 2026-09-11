@@ -74,6 +74,7 @@ import { SessionFacetPanel } from "./SessionFacetPanel";
 import styles from "./SessionDetail.module.css";
 import { showLatestSync } from "../conversationPlaceholder";
 import { followGrowthBehavior, liveThinkingLanded, retainLiveThinking } from "../streamContinuity";
+import { singleFlight } from "../singleFlight";
 
 
 /** Max subagents listed in the scope dropdown (AgentScopeSwitcher). Active ones
@@ -567,7 +568,13 @@ export function SessionDetail({
     if (paused) return;
     let cancelled = false;
     const poll = () => {
-      invoke<LiveThinking | null>("read_live_thinking", { sessionId: liveSessionId })
+      // Keyed by session: two tabs on the same session share a sample, two
+      // different sessions don't. At 700ms this is the hottest poller in the
+      // app, so a backend that answers slower than the interval would otherwise
+      // stack one copy per tick (7 of them on the 2026-09-10 cold start).
+      singleFlight(`read_live_thinking:${liveSessionId}`, () =>
+        invoke<LiveThinking | null>("read_live_thinking", { sessionId: liveSessionId }),
+      )
         .then((lt) => {
           if (!cancelled)
             setLiveThinking((previous) => retainLiveThinking(previous, lt, liveSessionId));

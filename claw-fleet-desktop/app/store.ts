@@ -11,6 +11,7 @@ import { getItem, removeItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
 import i18n from "./i18n";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
+import { singleFlight } from "./singleFlight";
 
 /** Open the in-app Settings overlay.
  *
@@ -2331,7 +2332,9 @@ export const useProcStore = create<ProcState>((set) => ({
   procs: [],
   fetchProcs: async () => {
     try {
-      const procs = await invoke<ProcRecord[] | null>("list_workspace_procs");
+      const procs = await singleFlight("list_workspace_procs", () =>
+        invoke<ProcRecord[] | null>("list_workspace_procs"),
+      );
       set({ procs: procs ?? [] });
     } catch {
       // Backend not ready (startup) — keep the previous list.
