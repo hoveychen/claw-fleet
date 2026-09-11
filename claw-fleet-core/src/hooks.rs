@@ -1045,10 +1045,20 @@ pub fn apply_default_model(model: &str) -> Result<(), String> {
 /// reachable from guidance text — `attribution` in settings.json is the only
 /// lever, so a Fleet-governed host has to set it here alongside the hooks.
 ///
-/// Two keys, both booleans (`includeCoAuthoredBy` is the deprecated older
-/// spelling of `commitTrailers`; writing the new one is enough):
+/// Inside `attribution`, two keys, both booleans:
 /// - `commitTrailers` — the `Co-Authored-By` / `Generated with` trailers.
 /// - `sessionUrl` — the claude.ai session link in web/Remote Control commits.
+///
+/// Plus the top-level `includeCoAuthoredBy`, the older spelling of
+/// `commitTrailers`. Writing the new one alone is **not** enough: measured
+/// against Claude Code 2.1.263 on 2026-09-10, `attribution.commitTrailers:
+/// false` does not reach the system-prompt assembly, and a fresh session still
+/// gets `End git commit messages with: Co-Authored-By: …`. The probe was a new
+/// `claude -p` session asked to quote that line verbatim — with only
+/// `attribution.commitTrailers` it quoted the trailer, with
+/// `includeCoAuthoredBy: false` it answered `NONE`, and with both it answered
+/// `NONE` (they do not conflict). So write both spellings until upstream wires
+/// the new key up; dropping the old one silently re-enables the byline.
 ///
 /// Merges into an existing `attribution` object rather than replacing it, so a
 /// future key someone set by hand survives. Claude Code reads settings.json at
@@ -1056,6 +1066,7 @@ pub fn apply_default_model(model: &str) -> Result<(), String> {
 pub fn apply_no_commit_attribution() -> Result<(), String> {
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    obj.insert("includeCoAuthoredBy".to_string(), json!(false));
     let attribution = obj
         .entry("attribution".to_string())
         .or_insert_with(|| json!({}));
@@ -1086,6 +1097,12 @@ pub fn no_commit_attribution_applied() -> bool {
     };
     attribution.get("commitTrailers").and_then(|v| v.as_bool()) == Some(false)
         && attribution.get("sessionUrl").and_then(|v| v.as_bool()) == Some(false)
+        // The old spelling is the one Claude Code actually honours, so a host
+        // that only has the new key is *not* whole — heal must rewrite it.
+        && settings
+            .get("includeCoAuthoredBy")
+            .and_then(|v| v.as_bool())
+            == Some(false)
 }
 
 // ── Read hook events ─────────────────────────────────────────────────────────
@@ -1985,6 +2002,12 @@ mod tests {
             if attr.get("sessionUrl").and_then(|v| v.as_bool()) != Some(false) {
                 return Err(format!("sessionUrl not disabled: {after}"));
             }
+            // Both spellings, because as of Claude Code 2.1.263 only the old
+            // one suppresses the trailer in the system prompt — see
+            // `apply_no_commit_attribution`'s doc comment for the probe.
+            if after.get("includeCoAuthoredBy").and_then(|v| v.as_bool()) != Some(false) {
+                return Err(format!("includeCoAuthoredBy not disabled: {after}"));
+            }
             if attr.get("somethingElse").and_then(|v| v.as_str()) != Some("keep me") {
                 return Err(format!("apply replaced the attribution object: {after}"));
             }
@@ -1999,6 +2022,20 @@ mod tests {
             apply_no_commit_attribution()?;
             if !no_commit_attribution_applied() {
                 return Err("second apply must leave it applied".into());
+            }
+
+            // A host carrying only the new spelling — every host Fleet healed
+            // before 2026-09-10 — still gets the byline, so it must read as
+            // *not* applied and be rewritten.
+            write_settings(&json!({
+                "attribution": { "commitTrailers": false, "sessionUrl": false }
+            }))?;
+            if no_commit_attribution_applied() {
+                return Err("attribution-only host must not read as applied".into());
+            }
+            apply_no_commit_attribution()?;
+            if !no_commit_attribution_applied() {
+                return Err("heal must add the old spelling to such a host".into());
             }
             Ok(())
         })();
