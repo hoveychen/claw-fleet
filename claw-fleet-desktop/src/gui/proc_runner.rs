@@ -13,11 +13,15 @@ pub(crate) fn host_features() -> claw_fleet_core::feature_flags::HostFeatures {
     claw_fleet_core::feature_flags::host_features()
 }
 
-#[tauri::command(async)]
-pub(crate) fn list_workspace_procs(
+/// On the blocking pool: `list_procs` reaps exited children and takes the proc
+/// registry's lock, and the 文件 page polls it — 5 copies were parked on async
+/// workers during the 2026-09-10 cold start.
+#[tauri::command]
+pub(crate) async fn list_workspace_procs(
     state: tauri::State<'_, AppState>,
-) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
-    state.backend.list_procs()
+) -> Result<Vec<claw_fleet_core::proc_runner::ProcRecord>, String> {
+    let backend = state.backend.clone();
+    super::blocking::run_blocking(move || backend.list_procs()).await
 }
 
 #[tauri::command(async)]

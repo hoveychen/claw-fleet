@@ -20,6 +20,7 @@ use super::session::SessionInfo;
 use super::*;
 
 // ── Submodules (extracted command groups) ───────────────────────────────────
+mod blocking;
 mod tts;
 mod decision;
 mod permissions;

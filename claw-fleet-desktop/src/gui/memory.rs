@@ -8,15 +8,18 @@ pub(crate) fn list_memories(state: tauri::State<'_, AppState>) -> Vec<memory::Wo
     state.backend.list_memories()
 }
 
-/// `(async)` → threadpool: polled every 700ms while a session streams. Even
-/// after the stale-skip fix it still does a `readdir` + `stat` per sidecar, so
-/// keep it off the main thread. The body stays synchronous.
-#[tauri::command(async)]
-pub(crate) fn read_live_thinking(
+/// On the blocking pool: polled every 700ms while a session streams — the
+/// hottest poller in the app. Even after the stale-skip fix it still does a
+/// `readdir` + `stat` per sidecar, so it must be off the main thread, and at
+/// that rate it must also be off the async workers (7 copies were parked on
+/// them during the 2026-09-10 cold start). The body stays synchronous.
+#[tauri::command]
+pub(crate) async fn read_live_thinking(
     session_id: String,
     state: tauri::State<'_, AppState>,
-) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
-    state.backend.read_live_thinking(&session_id)
+) -> Result<Option<claw_fleet_core::live_thinking::LiveThinking>, String> {
+    let backend = state.backend.clone();
+    super::blocking::run_blocking(move || backend.read_live_thinking(&session_id)).await
 }
 
 #[tauri::command(async)]
