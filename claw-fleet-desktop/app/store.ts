@@ -9,7 +9,7 @@ import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./compone
 import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
 import { getItem, removeItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
-import i18n from "./i18n";
+import i18n, { isSupportedLanguage } from "./i18n";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 import { singleFlight } from "./singleFlight";
 
@@ -573,6 +573,23 @@ function readSimplifiedMode(): boolean {
 
 const initialSimplifiedMode = readSimplifiedMode();
 
+/**
+ * 记下这台主机对界面语言的意见(`FLEET_LOCALE`),并在这个客户端还没有过显式
+ * 选择时就地生效 —— 第一次打开这个浏览器时缓存还是空的,只更新缓存的话得等
+ * 下一次加载才看得到中文。用户在设置里选过的语言,主机不该替他改回来。
+ *
+ * 主机报了个这个 bundle 没有的语言时只记不换:换过去只会把界面变成一屏
+ * translation key,而缓存仍然要如实记着,主机改口时才不会读到一个旧答案。
+ */
+function applyHostLocale(hostLang: string | null): void {
+  if (hostLang === null) removeItem("lang-host-default");
+  else setItem("lang-host-default", hostLang);
+  if (hostLang === null || getItem("lang") !== null) return;
+  if (isSupportedLanguage(hostLang) && i18n.language !== hostLang) {
+    void i18n.changeLanguage(hostLang);
+  }
+}
+
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
   simplifiedMode: initialSimplifiedMode,
@@ -700,6 +717,7 @@ export const useUIStore = create<UIState>((set) => ({
     const hostDefault = features.simplifiedDefault ?? null;
     if (hostDefault === null) removeItem("simplified-mode-host-default");
     else setItem("simplified-mode-host-default", String(hostDefault));
+    applyHostLocale(features.localeDefault ?? null);
     set((s) => ({
       hostFeatures: features,
       // The last-used page is restored from storage, so a host that used to

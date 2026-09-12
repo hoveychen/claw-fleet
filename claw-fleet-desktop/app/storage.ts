@@ -42,6 +42,11 @@ const ALL_KEYS = [
   // the user has since chosen.
   "feature-tristate-migrated",
   "lang",
+  // 这台主机上次给出的界面语言默认值(后端的 FLEET_LOCALE)。和上面的
+  // "simplified-mode-host-default" 同理:不是用户的选择,是一份缓存,因为
+  // `host_features` 是异步的而 i18next 的 lng 必须同步定下来,没有它每次打开
+  // 都会先闪一帧英文。上面的 "lang"(用户的显式选择)优先于它。
+  "lang-host-default",
   "sidebar-width",
   "sidebar-collapsed",
   // Per-view collapse map for the secondary sidebars, stored as a JSON blob.

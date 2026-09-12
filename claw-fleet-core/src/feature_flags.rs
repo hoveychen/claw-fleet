@@ -30,7 +30,9 @@ use std::sync::OnceLock;
 /// Deliberately a struct with named fields rather than a bare bool: the next
 /// flag added here reaches all three clients without a second round trip and
 /// without any of them growing a new endpoint.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+/// Not `Copy`: `locale_default` is a `String`. Every caller hands the struct
+/// straight to `serde`, so there was nothing leaning on the implicit copy.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct HostFeatures {
@@ -53,6 +55,23 @@ pub struct HostFeatures {
     /// generated binding.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub simplified_default: Option<bool>,
+    /// Which language this host wants a client that has never been told
+    /// otherwise to open in — the language subtag of [`LOCALE_ENV`], e.g.
+    /// `"zh"`. `None` = this host has no opinion.
+    ///
+    /// A presentation default like `simplified_default`, and it exists for the
+    /// same reason: the browser build's settings live in one browser's
+    /// localStorage, so a host that is configured for Chinese (this is the very
+    /// `FLEET_LOCALE` that already renders the `~/.claude` guidance) had no way
+    /// to say so to a page it serves — every visitor got English until they
+    /// found the switch themselves.
+    ///
+    /// Deliberately *not* validated against a list of languages here: which
+    /// bundles exist is the frontend's fact, not core's, so core reports what
+    /// the host said and each client keeps its own default when it has no
+    /// bundle for it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub locale_default: Option<String>,
 }
 
 /// This host's feature set, as served to every client.
@@ -60,6 +79,7 @@ pub fn host_features() -> HostFeatures {
     HostFeatures {
         terminal: terminal_enabled(),
         simplified_default: simplified_default(),
+        locale_default: locale_default(),
     }
 }
 
@@ -113,6 +133,40 @@ pub fn env_tristate(raw: Option<&str>) -> Option<bool> {
 pub fn simplified_default() -> Option<bool> {
     static CACHED: OnceLock<Option<bool>> = OnceLock::new();
     *CACHED.get_or_init(|| env_tristate(std::env::var(SIMPLIFIED_ENV).ok().as_deref()))
+}
+
+/// Env var naming this host's language. The same one `fleet bootstrap` /
+/// `fleet webui`'s startup heal read to render the `~/.claude` guidance, so a
+/// host says "I am a Chinese host" once and both surfaces follow.
+pub const LOCALE_ENV: &str = "FLEET_LOCALE";
+
+/// Reduce a locale to its language subtag: `"zh-CN"` / `"zh_CN"` / `" ZH "` all
+/// become `"zh"`. `None` for unset, empty, or anything that is not letters —
+/// garbage must not be reported as an opinion, for the same reason
+/// [`env_tristate`] refuses to read a typo as either answer.
+pub fn locale_subtag(raw: Option<&str>) -> Option<String> {
+    let tag = raw?
+        .trim()
+        .split(['-', '_'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if tag.is_empty() || !tag.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    Some(tag)
+}
+
+/// This host's language default, from [`LOCALE_ENV`].
+///
+/// Cached like [`terminal_enabled`] and for the same reason: it is a launch
+/// property of the process, and the desktop / browser build / phone reading one
+/// host must not disagree about it mid-run.
+pub fn locale_default() -> Option<String> {
+    static CACHED: OnceLock<Option<String>> = OnceLock::new();
+    CACHED
+        .get_or_init(|| locale_subtag(std::env::var(LOCALE_ENV).ok().as_deref()))
+        .clone()
 }
 
 #[cfg(test)]
@@ -188,5 +242,24 @@ mod tests {
             assert_eq!(env_tristate(Some(silent)), None, "{silent:?} says nothing");
         }
         assert_eq!(env_tristate(None), None, "unset says nothing");
+    }
+
+    // The host names a *locale*; the clients index bundles by language. Region
+    // and case are noise in between, and must not turn "zh-CN" into a language
+    // nobody ships a bundle for.
+    #[test]
+    fn locale_is_reduced_to_its_language_subtag() {
+        for raw in ["zh", "zh-CN", "zh_CN", " ZH ", "zh-Hans-CN"] {
+            assert_eq!(locale_subtag(Some(raw)).as_deref(), Some("zh"), "{raw:?}");
+        }
+        assert_eq!(locale_subtag(Some("en_US.UTF-8")).as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn a_locale_that_is_not_a_language_says_nothing() {
+        for silent in ["", "   ", "-", "_CN", "1", "zh2", "C.UTF-8"] {
+            assert_eq!(locale_subtag(Some(silent)), None, "{silent:?} says nothing");
+        }
+        assert_eq!(locale_subtag(None), None, "unset says nothing");
     }
 }
