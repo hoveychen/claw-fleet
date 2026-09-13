@@ -224,7 +224,11 @@ export function fleetToolSummary(
   input: Record<string, unknown>,
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string | null {
-  const is = (tail: string) => name === `fleet__${tail}` || name.endsWith(`fleet__fleet__${tail}`);
+  // `mcp__fleet__fleet__ask` is the current wire name, but an older Fleet build
+  // registered the tools one namespace shallower (`mcp__fleet__ask`); match both
+  // so those rows don't fall through to the raw-JSON dump. A foreign server's
+  // same-named tool (`mcp__dayday__ask`) still doesn't match.
+  const is = (tail: string) => name === `fleet__${tail}` || name.endsWith(`__fleet__${tail}`);
   // { title } — the one field, and it reads as the summary itself.
   if (is("set_session_title")) {
     const title = snippet(input.title);
@@ -406,6 +410,26 @@ export function claudeToolSummary(
       const stopped = asTaskStopResult(meta);
       const cmd = stopped?.command?.trim().split("\n")[0].trim();
       return cmd ? t("detail.tool_task_stop_cmd", { cmd }) : t("detail.tool_task_stop");
+    }
+    // { to, summary, message } — a message to another agent. `summary` is the
+    // one-line gist the sender writes for exactly this purpose; the full
+    // message stays in the expanded body.
+    case "SendMessage": {
+      const gist = snippet(input.summary) || snippet(input.message);
+      const to = typeof input.to === "string" ? input.to.trim() : "";
+      if (gist) return t("detail.tool_send_message_gist", { gist });
+      return to ? t("detail.tool_send_message_to", { to }) : t("detail.tool_send_message");
+    }
+    // {} — takes no parameters, so it would render the bare "{}" fallback.
+    case "ListAgents":
+      return t("detail.tool_list_agents");
+    // { command } | { target, wait_for } — the shell form (14 of 15 calls
+    // measured) reads best as its command, which formatInput already does, so
+    // only the condition form is relabelled here.
+    case "Monitor": {
+      if ("command" in input) return null;
+      const until = snippet(input.wait_for);
+      return until ? t("detail.tool_monitor_until", { until }) : t("detail.tool_monitor");
     }
     // { shell_id | bash_id } — kills a background shell (KillBash is the older name).
     case "KillShell":

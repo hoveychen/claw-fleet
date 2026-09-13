@@ -262,6 +262,26 @@ describe("claudeToolSummary", () => {
     );
   });
 
+  it("SendMessage / ListAgents / Monitor → readable rows instead of raw JSON", () => {
+    expect(
+      claudeToolSummary(
+        "SendMessage",
+        { to: "af6ecc", summary: "Correct B1's lineage rule", message: "…long body…" },
+        t,
+      ),
+    ).toBe('detail.tool_send_message_gist|{"gist":"Correct B1\'s lineage rule"}');
+    expect(claudeToolSummary("SendMessage", { to: "af6ecc" }, t)).toBe(
+      'detail.tool_send_message_to|{"to":"af6ecc"}',
+    );
+    expect(claudeToolSummary("ListAgents", {}, t)).toBe("detail.tool_list_agents");
+    // The condition form gets a label; the shell form (14 of 15 calls) returns
+    // null so formatInput can show the command itself.
+    expect(
+      claudeToolSummary("Monitor", { target: "bymbrfi4h", wait_for: "Vitest summary appears" }, t),
+    ).toBe('detail.tool_monitor_until|{"until":"Vitest summary appears"}');
+    expect(claudeToolSummary("Monitor", { command: "until ls; do sleep 5; done" }, t)).toBeNull();
+  });
+
   it("returns null for any other tool (falls back to formatInput)", () => {
     expect(claudeToolSummary("Bash", { command: "ls" }, t)).toBeNull();
     expect(claudeToolSummary("Read", { file_path: "a.ts" }, t)).toBeNull();
@@ -458,6 +478,15 @@ describe("fleetToolSummary", () => {
   it("falls back to the unnamed label when the field is absent or blank", () => {
     expect(fleetToolSummary("fleet__set_session_title", {}, t)).toBe("detail.fleet_sum.title");
     expect(fleetToolSummary("fleet__image", { description: "   " }, t)).toBe("detail.fleet_sum.image");
+  });
+
+  it("matches the older one-level-shallower wire name too", () => {
+    // An older Fleet build registered these as `mcp__fleet__ask`; a foreign
+    // server's same-named tool must still fall through.
+    expect(fleetToolSummary("mcp__fleet__ask", { questions: "[]" }, t)).toBe(
+      "detail.fleet_sum.ask",
+    );
+    expect(fleetToolSummary("mcp__dayday__ask", { questions: [] }, t)).toBeNull();
   });
 
   it("returns null for control tools (FleetToolCard owns those) and foreign tools", () => {
