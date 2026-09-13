@@ -72,6 +72,9 @@ interface Props {
   /** 这台设备的显示名;只配了一台时返回 null,徽标整个不出现 —— 单设备用户不该
    *  为多设备付出一行视觉噪音。 */
   deviceLabelOf: (deviceId: string) => string | null;
+  /** 有几台配过的设备此刻桌面端不在线。只配了一台时恒为 0 —— 那种情况下「桌面端
+   *  离线」本身就是整页的终态,不需要再数一遍。 */
+  offlineDevices?: number;
   /** 通知点击要聚焦的卡。`nonce` 使连点同一张卡也能重新触发;`deviceId` 来自
    *  relay 盖在通知上的来源标记 —— 有它才能在两台机器同号的卡之间选对。 */
   focusDecision?: { id: string; deviceId?: string; nonce: number } | null;
@@ -87,6 +90,7 @@ export function DecisionsView({
   onAnswered,
   onOpenSession,
   deviceLabelOf,
+  offlineDevices = 0,
   focusDecision,
 }: Props) {
   // One focused card at a time + a queue bar, mirroring the desktop panel's
@@ -154,7 +158,16 @@ export function DecisionsView({
       <EmptyState
         icon={CheckCircle2}
         title={t("没有待处理的决策")}
-        description={t("所有决策卡都已作答，收工。有新决策时会自动出现在这里。")}
+        description={
+          // 「都答完了」只对在线的那几台成立。有设备离线时不说清楚,这句会读成
+          // 「全部机器都没事了」——而离线那台的卡只是同步不过来。
+          offlineDevices > 0
+            ? t(
+                "在线设备的决策卡都已作答。另有 {0} 台设备离线，它们的卡暂时同步不过来。",
+                offlineDevices,
+              )
+            : t("所有决策卡都已作答，收工。有新决策时会自动出现在这里。")
+        }
       />
     ) : (
       <EmptyState

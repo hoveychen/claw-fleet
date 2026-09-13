@@ -30,6 +30,7 @@ import {
   itemKey,
   devicesReducer,
   emptyDeviceState,
+  offlineDeviceCount,
   totalUsage,
   usageByDevice,
   worstCongestion,
@@ -491,6 +492,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 骨架屏只为**还在线、但首份快照没到**的设备转;离线的那台不守闸门(它的快照
   // 永远不会来)。
   const decisionsLoaded = allDecisionsLoaded(states, deviceOrder);
+  // 只配了一台时不报这个数:那种情况下「桌面端离线」本身就是整页的终态,再数一
+  // 遍只是噪音。
+  const offlineDevices =
+    runtimeDevices.length > 1 ? offlineDeviceCount(states, deviceOrder) : 0;
   /** 卡片/列表上的设备徽标。只配了一台时返回 null —— 单设备用户不该为多设备
    *  付出一行视觉噪音。 */
   const deviceLabelOf = useCallback(
@@ -1056,6 +1061,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onAnswered={markAnswered}
             onOpenSession={openSessionRoot}
             deviceLabelOf={deviceLabelOf}
+            offlineDevices={offlineDevices}
             focusDecision={focusDecision}
           />
         ) : tab === "tasks" ? (

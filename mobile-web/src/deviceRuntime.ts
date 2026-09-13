@@ -371,6 +371,12 @@ export function allDecisionsLoaded(states: DeviceStates, order: string[]): boole
   });
 }
 
+/** 桌面端不在线的设备数。合并收件箱只会显示在线设备的卡,所以「都答完了」这句
+ *  话在有设备离线时是不完整的 —— 这个数就是补上那半句用的。 */
+export function offlineDeviceCount(states: DeviceStates, order: string[]): number {
+  return order.filter((id) => !states[id]?.agentOnline).length;
+}
+
 export function anySessionsLoaded(states: DeviceStates, order: string[]): boolean {
   return order.some((id) => states[id]?.sessionsLoaded);
 }

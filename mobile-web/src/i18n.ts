@@ -603,6 +603,8 @@ const DICT: Record<string, string> = {
   "没有待处理的决策": "No pending decisions",
   "所有决策卡都已作答，收工。有新决策时会自动出现在这里。":
     "Every decision card is answered — you're all caught up. New ones will appear here automatically.",
+  "在线设备的决策卡都已作答。另有 {0} 台设备离线，它们的卡暂时同步不过来。":
+    "Every card from the online devices is answered. {0} device(s) are offline — their cards can't sync over yet.",
   "暂时收不到新决策，等桌面端重新上线就会同步过来。":
     "No new decisions for now — they'll sync over once the desktop reconnects.",
   "AI 风险分析": "AI risk analysis",
