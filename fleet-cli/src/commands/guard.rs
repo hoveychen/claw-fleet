@@ -67,6 +67,21 @@ pub(crate) fn cmd_guard() {
     // Classify the command.
     match guard::classify_hook_input(&hook_input) {
         GuardClassification::Allow => {
+            // A no-op command that only exists to hold the turn open. Denied
+            // before the reminder below: that reminder fires once per session,
+            // and spending it on a call that will never run wastes it. Rides
+            // this hook rather than adding its own — see `idle_spin`.
+            if let Some(reason) = claw_fleet_core::idle_spin::decide(
+                hook_input.tool_name.as_deref(),
+                hook_input
+                    .tool_input
+                    .as_ref()
+                    .and_then(|v| v.get("command"))
+                    .and_then(|c| c.as_str()),
+            ) {
+                println!("{}", deny_hook_output(reason));
+                return;
+            }
             // Not critical — allow. Codex's outer code-mode `exec` has no
             // description field, so inspect its rollout and inject the Rule 7
             // correction instead. Claude keeps the original Bash-description
