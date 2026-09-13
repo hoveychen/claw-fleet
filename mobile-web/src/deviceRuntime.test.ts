@@ -8,6 +8,7 @@ import {
   devicesReducer,
   emptyDeviceState,
   itemKey,
+  offlineDeviceCount,
   totalUsage,
   usageByDevice,
   worstCongestion,
@@ -290,6 +291,24 @@ describe("header rollups", () => {
     ]);
     expect(states[B].decisionsLoaded).toBe(false);
     expect(allDecisionsLoaded(states, ORDER)).toBe(true);
+  });
+
+  // 「都答完了」这句只对在线那几台成立，所以空态要报出离线的台数。
+  it("counts the devices whose desktop is offline", () => {
+    const states = run([
+      { deviceId: A, type: "status", connected: true },
+      { deviceId: A, type: "agentOnline", online: true },
+      { deviceId: B, type: "status", connected: true },
+    ]);
+    expect(offlineDeviceCount(states, ORDER)).toBe(1);
+    expect(
+      offlineDeviceCount(
+        devicesReducer(states, { deviceId: B, type: "agentOnline", online: true }),
+        ORDER,
+      ),
+    ).toBe(0);
+    // 还没 attach 过的设备也算离线 —— 它显然没有在推卡。
+    expect(offlineDeviceCount({}, ORDER)).toBe(2);
   });
 
   // 每一台都离线时同样不该转骨架屏 —— 该显示「桌面端离线」。
