@@ -1404,6 +1404,10 @@ fn tool_result_text(content: &Value) -> String {
 /// keys differ per tool, so every probe is shape-based and optional. Errored
 /// calls degrade `toolUseResult` to a bare string — no digest, the block's
 /// `is_error` bit already tells the story.
+/// Prefix of Claude Code's cwd-restore notice — housekeeping the harness writes
+/// to a Bash call's stderr, not the command's own output.
+pub(crate) const CWD_RESET_NOTICE: &str = "Shell cwd was reset to ";
+
 fn tool_result_digest(meta: &Value) -> Option<Value> {
     // MCP tools (`fleet__ask`) hand back their payload as a JSON *string* where
     // native tools hand back an object; parse that form too so a decision card's
@@ -1450,7 +1454,17 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
         obj.get("stdout").and_then(Value::as_str),
         obj.get("stderr").and_then(Value::as_str),
     ) {
-        let count = |s: &str| s.lines().filter(|l| !l.trim().is_empty()).count() as u64;
+        // `Shell cwd was reset to …` is the harness restoring the session cwd
+        // after a `cd`, not output the command produced — measured 2026-09-12,
+        // all 289 non-empty stderrs across the 120 newest transcripts were
+        // exactly that notice. Counting it made `stderrLines` claim a command
+        // wrote to stderr when it hadn't (the desktop's twin fix lives in
+        // `toolResults.ts::asBashResult`).
+        let count = |s: &str| {
+            s.lines()
+                .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with(CWD_RESET_NOTICE))
+                .count() as u64
+        };
         d.insert("stdoutLines".into(), count(stdout).into());
         d.insert("stderrLines".into(), count(stderr).into());
         if obj.get("interrupted") == Some(&Value::Bool(true)) {
@@ -7150,6 +7164,21 @@ mod tests {
         assert_eq!(d["stdoutLines"], json!(2));
         assert_eq!(d["stderrLines"], json!(0));
         assert!(d.get("interrupted").is_none(), "false flags stay omitted");
+
+        // Bash → the harness's cwd-restore notice is not the command's output,
+        // so it must not inflate stderrLines; a real line alongside it still counts.
+        let slim = slim_tail_messages(vec![record(json!({
+            "stdout": "",
+            "stderr": "\nShell cwd was reset to /Users/h/workspace/foxy",
+            "interrupted": false
+        }))]);
+        assert_eq!(slim[0]["message"]["content"][0]["_digest"]["stderrLines"], json!(0));
+        let slim = slim_tail_messages(vec![record(json!({
+            "stdout": "",
+            "stderr": "warning: unused\nShell cwd was reset to /Users/h/workspace/foxy",
+            "interrupted": false
+        }))]);
+        assert_eq!(slim[0]["message"]["content"][0]["_digest"]["stderrLines"], json!(1));
 
         // Agent → status + totals.
         let slim = slim_tail_messages(vec![record(json!({
