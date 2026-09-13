@@ -20,7 +20,11 @@
 //! A denial costs the same round trip the `echo` would have. The saving is not
 //! in the block, it is in the reason travelling back with it: [`DENY_REASON`]
 //! names the three ways to wait that actually work, so one denial ends the spin
-//! instead of the spin ending the budget.
+//! instead of the spin ending the budget. A repeat within the same session is
+//! counted, and the second one onward says so — a denial the agent answers with
+//! a synonym has to escalate or it is just a second spin wearing Fleet's name.
+
+use std::path::PathBuf;
 
 /// Shell separators that start a fresh command. `&&` and `||` are listed before
 /// a bare `&` is rejected below, so `cmd &` (backgrounding — a real side effect)
@@ -125,15 +129,95 @@ round trip。（若你已经 armed 了 Monitor，那就等它——不要在旁�
 \n\
 如果老板确实要你把一段文本打印出来，别走 Bash：直接写在你的回复里。";
 
+/// Appended from the second strike onward.
+///
+/// A repeat means the first denial did not land, and the likeliest reason is
+/// that the agent read it as a syntax complaint and reached for a synonym. A
+/// second copy of the same text would cost another round trip and teach nothing
+/// new, so the repeat names what is happening instead of restating the rule.
+const ESCALATION: &str = "\n\
+\n\
+——本回合你已经是第 {n} 次撞上这条拦截了。\n\
+\n\
+换个词不会过：被拦的不是某个拼法，是「发一条零信息量的命令」这件事本身。你现在不是\
+在解决问题，只是在给同一个空转换壳，而每次重试都和那条 `echo` 一样贵。\n\
+\n\
+停下来，先回答一个问题：**你到底在等什么？**\n\
+\n\
+- 等得出结果的东西 → 上面四条里挑一条真的去用它，别再发第五条空命令。\n\
+- 说不出在等什么 → 那就是没有在等，直接结束回合。\n\
+\n\
+如果你是怕结束回合会弄丢后台任务：那正是 `fleet watch` 存在的理由——它登记一个条件，\
+在你回合结束后继续轮询，条件满足时 resume 本会话并把结果喂给你。注册它，然后结束回合。";
+
+/// The denial text for the `n`-th time this session has hit the guard
+/// (1-based). The first is [`DENY_REASON`]; later ones carry [`ESCALATION`].
+pub fn deny_reason_for_strike(n: u32) -> String {
+    if n <= 1 {
+        return DENY_REASON.to_string();
+    }
+    format!("{DENY_REASON}{}", ESCALATION.replace("{n}", &n.to_string()))
+}
+
+/// Per-session strike counter: `~/.fleet/idle-spin-strikes/`.
+fn strike_dir() -> Option<PathBuf> {
+    crate::session::get_fleet_dir().map(|d| d.join("idle-spin-strikes"))
+}
+
+/// Record one strike for `session_id` under `dir`, returning the new count.
+///
+/// Fails soft to `1` — an unwritable counter must degrade to the plain denial,
+/// never to letting a spin through or to crashing the hook.
+fn record_strike_in(dir: &std::path::Path, session_id: &str) -> u32 {
+    if session_id.is_empty() || std::fs::create_dir_all(dir).is_err() {
+        return 1;
+    }
+    // Session ids are uuids; sanitize anyway so an id can never escape the dir.
+    let safe: String = session_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let path = dir.join(safe);
+    let next = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0)
+        .saturating_add(1);
+    let _ = std::fs::write(&path, next.to_string());
+    next
+}
+
+/// Record one strike for `session_id`, returning how many it has now had.
+pub fn record_strike(session_id: &str) -> u32 {
+    match strike_dir() {
+        Some(dir) => record_strike_in(&dir, session_id),
+        None => 1,
+    }
+}
+
 /// Decide whether to deny a Bash call. `Some(reason)` denies; `None` allows.
 ///
 /// Scoped to `Bash` because that is the only tool whose payload carries a shell
-/// command; every other tool passes through untouched.
-pub fn decide(tool_name: Option<&str>, command: Option<&str>) -> Option<&'static str> {
-    if tool_name? != "Bash" {
+/// command; every other tool passes through untouched. Counts a strike as a
+/// side effect, so a repeat offender gets [`ESCALATION`] rather than the same
+/// paragraph twice.
+pub fn decide(
+    tool_name: Option<&str>,
+    command: Option<&str>,
+    session_id: Option<&str>,
+) -> Option<String> {
+    if tool_name? != "Bash" || !is_idle_spin(command?) {
         return None;
     }
-    is_idle_spin(command?).then_some(DENY_REASON)
+    Some(deny_reason_for_strike(record_strike(
+        session_id.unwrap_or(""),
+    )))
 }
 
 #[cfg(test)]
@@ -220,12 +304,56 @@ mod tests {
 
     #[test]
     fn decide_is_scoped_to_bash_calls() {
-        assert_eq!(decide(Some("Bash"), Some("echo waiting")), Some(DENY_REASON));
-        assert!(decide(Some("Bash"), Some("cargo test")).is_none());
+        assert!(decide(Some("Bash"), Some("echo waiting"), None).is_some());
+        assert!(decide(Some("Bash"), Some("cargo test"), None).is_none());
         // Another tool's payload may carry an unrelated `command` field.
-        assert!(decide(Some("Read"), Some("echo waiting")).is_none());
-        assert!(decide(None, Some("echo waiting")).is_none());
-        assert!(decide(Some("Bash"), None).is_none());
+        assert!(decide(Some("Read"), Some("echo waiting"), None).is_none());
+        assert!(decide(None, Some("echo waiting"), None).is_none());
+        assert!(decide(Some("Bash"), None, None).is_none());
+    }
+
+    #[test]
+    fn strikes_count_per_session_and_start_at_one() {
+        let dir = std::env::temp_dir().join(format!("idle-spin-strikes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(record_strike_in(&dir, "session-a"), 1);
+        assert_eq!(record_strike_in(&dir, "session-a"), 2);
+        assert_eq!(record_strike_in(&dir, "session-a"), 3);
+        // A second session is counted independently — one agent's spin must not
+        // escalate the denial another agent sees on its first offence.
+        assert_eq!(record_strike_in(&dir, "session-b"), 1);
+        assert_eq!(record_strike_in(&dir, "session-a"), 4);
+
+        // An absent session id must not escalate everyone into a shared bucket.
+        assert_eq!(record_strike_in(&dir, ""), 1);
+        assert_eq!(record_strike_in(&dir, ""), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_strike_is_plain_and_repeats_escalate() {
+        let first = deny_reason_for_strike(1);
+        assert_eq!(first, DENY_REASON);
+        assert!(
+            !first.contains("换个词不会过"),
+            "a first offence must not be lectured for repeating"
+        );
+
+        let second = deny_reason_for_strike(2);
+        assert!(second.starts_with(DENY_REASON), "escalation appends, never replaces — the four replacements must survive");
+        assert!(second.contains("第 2 次"), "the repeat must name the count");
+        assert!(
+            second.contains("换个词不会过"),
+            "the repeat must name the synonym-retry it is answering"
+        );
+        assert!(
+            second.contains("fleet watch"),
+            "the repeat must still leave a concrete way out"
+        );
+
+        assert!(deny_reason_for_strike(7).contains("第 7 次"));
     }
 
     #[test]

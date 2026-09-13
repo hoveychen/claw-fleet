@@ -78,8 +78,9 @@ pub(crate) fn cmd_guard() {
                     .as_ref()
                     .and_then(|v| v.get("command"))
                     .and_then(|c| c.as_str()),
+                hook_input.session_id.as_deref(),
             ) {
-                println!("{}", deny_hook_output(reason));
+                println!("{}", deny_hook_output(&reason));
                 return;
             }
             // Not critical — allow. Codex's outer code-mode `exec` has no
