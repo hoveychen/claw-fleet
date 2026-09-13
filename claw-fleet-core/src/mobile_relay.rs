@@ -6271,6 +6271,22 @@ mod tests {
     /// these existed). The catalogue/breakdown parsing is tested in `dsh_source`.
     #[test]
     fn dsh_reads_are_dispatched_even_when_dsh_is_unreachable() {
+        // These three methods reach `DshSource::with_client`, which may start a
+        // real `dsh web` and *register* it — so this test writes to the dsh
+        // registry under whatever FLEET_HOME is current. Without a home of its
+        // own under the shared lock, that is a neighbouring test's temp
+        // registry. Traced at `--test-threads=16` on 2026-09-13: this test
+        // registered a live server (pid 9261, port 52573) into
+        // `dsh_server::tests::a_restarted_server_comes_back_on_the_same_port`'s
+        // home, and that test then failed asserting its registry was empty
+        // after stopping its own server.
+        let _lock = fleet_home_lock();
+        let home = std::env::temp_dir().join(format!("fleet-relay-dsh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &home);
+
         for (method, params) in [
             ("dsh_models", json!({})),
             ("dsh_token_breakdown", json!({ "uri": "dsh://nonexistent" })),
@@ -6283,6 +6299,12 @@ mod tests {
                 );
             }
         }
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// The phone's repo-level 计划 page needs the *forest*, not `task_plans`'s
