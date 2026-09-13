@@ -682,6 +682,68 @@ fn projection_u64(projections: &Value, key: &str, field: &str) -> u64 {
         .unwrap_or(0)
 }
 
+/// The route and effort a roster item names, if it names either.
+#[derive(Debug, Default, PartialEq)]
+struct RosterSelection {
+    /// `provider/model`, on the same shape [`known_model`] produces.
+    route: Option<String>,
+    effort: Option<String>,
+}
+
+/// Read `projections.values.modelSelection` off one roster item.
+///
+/// dsh publishes two selections: `lastUsed` — what the most recent request
+/// actually went out with — and `next`, what the following turn is configured
+/// to use. `lastUsed` wins, because the card is a report of what this session
+/// *is*, and for a running session that is the model generating right now. A
+/// session that has never taken a turn has no `lastUsed`, and there `next` is
+/// the only honest answer available: it is what will run the moment it does.
+fn roster_selection(projections: &Value) -> Option<RosterSelection> {
+    let selection = projections
+        .get("values")
+        .and_then(|v| v.get("modelSelection"))?;
+    let pick = |key: &str| selection.get(key).filter(|v| v.is_object());
+    let chosen = pick("lastUsed").or_else(|| pick("next"))?;
+
+    let text = |key: &str| {
+        chosen
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
+    let route = match (text("provider"), text("model")) {
+        (Some(provider), Some(model)) => Some(format!("{provider}/{model}")),
+        _ => None,
+    };
+    Some(RosterSelection {
+        route,
+        effort: text("reasoningEffort").map(str::to_string),
+    })
+}
+
+/// Context-window occupancy from `projections.values.contextPressure`, as the
+/// 0..1 fraction [`SessionInfo::context_percent`] carries.
+///
+/// `pressureTokens` rather than `projectedTokens`: the former is what the
+/// retained surface currently weighs, which is the same thing Claude's chip
+/// measures (its last turn's input snapshot). The latter includes what the
+/// *next* request would add, and a chip that moves before anything has been
+/// sent would be reporting a forecast as a fact.
+///
+/// The denominator comes from dsh rather than from Fleet's
+/// [`crate::session::stats::context_window_for_model`] table: dsh knows the
+/// window the session is actually configured against, and the table would have
+/// to learn every model in an open routing space to guess it.
+fn roster_context_percent(projections: &Value) -> Option<f64> {
+    let pressure = projections
+        .get("values")
+        .and_then(|v| v.get("contextPressure"))?;
+    let used = pressure.get("pressureTokens").and_then(Value::as_u64)?;
+    let window = pressure.get("contextWindow").and_then(Value::as_u64)?;
+    (window > 0).then(|| (used as f64 / window as f64).min(1.0))
+}
+
 /// Map one `session/list` item onto Fleet's [`SessionInfo`].
 ///
 /// dsh hands over its own projections (title, token usage, context breakdown)
@@ -729,18 +791,26 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
             .unwrap_or_else(|| crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string())
     });
 
+    let selection = roster_selection(&projections);
+
     Some(SessionInfo {
-        // The roster names no route (see `latest_route`), so this is
-        // whatever reading the session's own history last taught this process.
-        // `None` until something reads it — the desktop's detail pane does so
-        // the moment a session is opened.
-        model: known_model(&id),
-        // Same story for the effort, with one extra source: for a session Fleet
-        // spawned with an explicit `--effort`, the launch spec is a record of
-        // what Fleet asked for (and applied via `session/selectModel`). The log
-        // header wins when known — it is the effort a real request went out
-        // with, and it tracks a later change the spawn record cannot.
-        effort: known_effort(&id).or_else(|| crate::launch_spec::effort_of(&id)),
+        // The roster *does* name a route, in `modelSelection` — it just took
+        // until 2026-09-13 to notice. Preferred over the two older sources
+        // because it is present on the very first scan, where reading a
+        // session's history ([`known_model`]) only answers once something has
+        // opened that session in this process.
+        model: selection
+            .as_ref()
+            .and_then(|s| s.route.clone())
+            .or_else(|| known_model(&id)),
+        // Same precedence for the effort, over the same two fallbacks: the log
+        // header this process has read, then — for a session Fleet spawned with
+        // an explicit `--effort` — what Fleet asked for at launch.
+        effort: selection
+            .as_ref()
+            .and_then(|s| s.effort.clone())
+            .or_else(|| known_effort(&id))
+            .or_else(|| crate::launch_spec::effort_of(&id)),
         // dsh reports no per-message thinking blocks, so the extended-thinking
         // marker stays empty — the effort dial above is the whole story here.
         thinking_level: None,
@@ -760,6 +830,7 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         },
         total_output_tokens: output,
         total_input_tokens: input,
+        context_percent: roster_context_percent(&projections),
         last_activity_ms: updated_at,
         agent_last_activity_ms: updated_at,
         created_at_ms: updated_at,
@@ -867,6 +938,40 @@ fn pick_stale_spend(
 /// than the event clock is.
 ///
 /// [`pump`]: crate::dsh_events
+/// Fill in every session's generation speed by differencing this poll's
+/// counters against the last ([`crate::dsh_speed`]).
+///
+/// Runs *after* [`refresh_one_stale_spend`] so the one session re-priced this
+/// poll contributes its fresh dollars to the same sample the tokens go into,
+/// rather than a poll later.
+///
+/// **Why the roster has to do this at all:** the desktop's realtime readout is
+/// a sum over every session's `token_speed` (`store.ts`), so a source that
+/// leaves the field at its `0.0` default does not merely under-report itself —
+/// it makes the whole panel read zero whenever it is the only source running.
+fn overlay_speed(infos: &mut [SessionInfo]) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    for info in infos.iter_mut() {
+        let (token_speed, cost_speed) = crate::dsh_speed::observe(
+            &info.id,
+            info.total_output_tokens,
+            info.total_cost_usd,
+            now_ms,
+        );
+        info.token_speed = token_speed;
+        // `agent_token_speed` is "this session plus its subagents". dsh's
+        // subagents run inside the parent session rather than as roster
+        // entries of their own, so there is nothing to roll up: the session's
+        // own counter already covers the whole tree.
+        info.agent_token_speed = token_speed;
+        info.cost_speed_usd_per_min = cost_speed;
+    }
+    crate::dsh_speed::sweep(now_ms);
+}
+
 fn overlay_activity(info: &mut SessionInfo, last_event_at_ms: Option<u64>) {
     let Some(ms) = last_event_at_ms else { return };
     info.last_activity_ms = info.last_activity_ms.max(ms);
@@ -946,6 +1051,7 @@ impl AgentSource for DshSource {
                         infos.push(info);
                     }
                     refresh_one_stale_spend(&mut infos, &roster_updated, &spend);
+                    overlay_speed(&mut infos);
                     infos
                 })
                 .unwrap_or_default(),
@@ -1154,9 +1260,9 @@ impl AgentSource for DshSource {
 /// No cost figure: dsh routes through OpenRouter to an open model space, and
 /// Fleet's price table only knows Claude and GPT tiers, so an unknown model
 /// would silently price at the Opus fallback. A wrong number is worse than none.
-/// No model id either: the roster carries none, and the durable log's route
-/// evidence is reached by reading history — which [`latest_route`] already
-/// harvests on every read, so `SessionInfo::model` is where the route shows up.
+/// No model id either — not because the roster lacks one (it has
+/// `modelSelection`, read by [`roster_selection`]), but because this panel is
+/// about tokens; the route belongs to `SessionInfo::model` and is already there.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -2464,14 +2570,122 @@ mod tests {
         assert!(session_info_from_list_item(&json!({ "cwd": "/tmp" })).is_none());
     }
 
+    // ── What the roster itself publishes ─────────────────────────────────────
+    //
+    // Fixtures verbatim off a live 0.1.5-rc.1 `session/list` (335 sessions,
+    // 2026-09-13). Both blocks below sit in `projections.values` alongside the
+    // token buckets this file already read.
+
+    fn projections_with(values: Value) -> Value {
+        json!({ "values": values })
+    }
+
+    /// The route the *last request* used, not the one configured for the next
+    /// turn: the card reports what this session is, and for a running session
+    /// that is the model generating right now.
+    #[test]
+    fn the_roster_names_the_route_the_last_request_used() {
+        let p = projections_with(json!({
+            "modelSelection": {
+                "lastUsed": { "provider": "deepseek-official", "model": "deepseek-v4-pro",
+                              "reasoningEffort": "high" },
+                "next": { "provider": "openrouter", "model": "anthropic/claude-haiku-4.5",
+                          "reasoningEffort": "low" }
+            }
+        }));
+        let sel = roster_selection(&p).expect("a selection");
+        assert_eq!(sel.route.as_deref(), Some("deepseek-official/deepseek-v4-pro"));
+        assert_eq!(sel.effort.as_deref(), Some("high"));
+    }
+
+    /// A session that has never taken a turn has no `lastUsed`. `next` is then
+    /// the only honest answer — it is what will run the moment it does.
+    #[test]
+    fn a_session_that_never_ran_falls_back_to_its_configured_route() {
+        let p = projections_with(json!({
+            "modelSelection": {
+                "lastUsed": null,
+                "next": { "provider": "deepseek-official", "model": "deepseek-flash" }
+            }
+        }));
+        let sel = roster_selection(&p).expect("a selection");
+        assert_eq!(sel.route.as_deref(), Some("deepseek-official/deepseek-flash"));
+        assert_eq!(sel.effort, None);
+    }
+
+    /// Half a route is not a route: `SessionInfo::model` feeds a price lookup
+    /// and a model chip, both of which need `provider/model` whole.
+    #[test]
+    fn a_selection_missing_half_its_route_yields_no_route() {
+        let p = projections_with(json!({
+            "modelSelection": { "lastUsed": { "provider": "deepseek-official",
+                                              "reasoningEffort": "high" } }
+        }));
+        let sel = roster_selection(&p).expect("a selection");
+        assert_eq!(sel.route, None);
+        assert_eq!(sel.effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn a_roster_item_with_no_model_selection_names_nothing() {
+        assert_eq!(roster_selection(&projections_with(json!({}))), None);
+    }
+
+    /// Occupancy is `pressureTokens / contextWindow`, the window taken from dsh
+    /// rather than guessed from Fleet's model table.
+    #[test]
+    fn context_pressure_becomes_the_occupancy_fraction() {
+        let p = projections_with(json!({
+            "contextPressure": { "pressureTokens": 35182, "projectedTokens": 38928,
+                                 "contextWindow": 1000000 }
+        }));
+        let pct = roster_context_percent(&p).expect("a fraction");
+        assert!((pct - 0.035182).abs() < 1e-9, "fraction was {pct}");
+    }
+
+    /// The fixture roster item carries a `contextPressure` with no
+    /// `pressureTokens` — a session that has not yet been measured. No chip is
+    /// better than a chip reading 0%.
+    #[test]
+    fn an_unmeasured_context_reports_no_percentage() {
+        let info = session_info_from_list_item(&live_list_item()).expect("mapped");
+        assert_eq!(info.context_percent, None);
+    }
+
+    /// A zero window would divide by zero; a full one must not exceed 100%.
+    #[test]
+    fn occupancy_is_clamped_and_a_zero_window_is_refused() {
+        let zero = projections_with(json!({
+            "contextPressure": { "pressureTokens": 10, "contextWindow": 0 }
+        }));
+        assert_eq!(roster_context_percent(&zero), None);
+
+        let over = projections_with(json!({
+            "contextPressure": { "pressureTokens": 300, "contextWindow": 200 }
+        }));
+        assert_eq!(roster_context_percent(&over), Some(1.0));
+    }
+
+    /// The roster's route beats what reading history taught this process: it is
+    /// there on the very first scan, before anything has opened the session.
+    #[test]
+    fn the_roster_route_reaches_session_info() {
+        let mut item = live_list_item();
+        item["projections"]["values"]["modelSelection"] = json!({
+            "lastUsed": { "provider": "deepseek-official", "model": "deepseek-v4-pro",
+                          "reasoningEffort": "high" }
+        });
+        let info = session_info_from_list_item(&item).expect("mapped");
+        assert_eq!(info.model.as_deref(), Some("deepseek-official/deepseek-v4-pro"));
+        assert_eq!(info.effort.as_deref(), Some("high"));
+    }
+
     // ── Which model a session runs on ────────────────────────────────────────
     //
-    // `session/list` names no route (the `SessionSummary` contract carries
-    // sessionId / updatedAt / running / blank / parentSessionId / origin / cwd /
-    // agentPreset / projections and nothing else, and none of the projection
-    // units publishes one either — read off `@deepseek-ai/dsh-host-apiproxy`
-    // and confirmed against a live 75-session roster). The durable log does, in
-    // three places; these fixtures are verbatim events off `session.history`.
+    // Before `modelSelection` was noticed in the roster (2026-09-13), the
+    // durable log was the only evidence, and it stays the fallback for a roster
+    // that names none. It records the route in three places; these fixtures are
+    // verbatim events off `session.history`.
 
     /// [`latest_route`] without its `seq`, which only `remember_model` needs.
     fn model_from_events(events: &[Value]) -> Option<String> {
