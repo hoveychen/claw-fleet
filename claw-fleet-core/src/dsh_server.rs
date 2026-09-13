@@ -58,22 +58,23 @@ const HEALTH_ENDPOINT: &str = "settings/describe";
 
 /// The oldest dsh Fleet can actually drive.
 ///
-/// Not a policy choice — every integration point here was written against the
-/// 0.1.2 wire contract, and older builds fail at a different layer each:
-/// `≤0.1.0-rc.7` rejects [`web_args`]' `--no-open` as an unknown option,
-/// `0.1.1` starts but prints no `?token=` for [`parse_launch_line`] to take,
-/// and before 0.1.2 the `{args:…}` gateway envelope and the paged
-/// `session/events` read were different shapes again
-/// ([`crate::dsh_client`], [`crate::dsh_source`]). Checking the version once
-/// up front turns three unrelated failures — all of which surface as "dsh web
-/// exited before reporting a port" — into one actionable message.
-pub const MIN_VERSION: &str = "0.1.2";
+/// The *wire* floor is 0.1.2 — that is when dsh added the per-process launch
+/// token, the slash endpoints, and the `{args:…}` gateway envelope every
+/// integration point here speaks ([`crate::dsh_client`], [`crate::dsh_source`]).
+/// The *content* floor is higher: Fleet's dsh model catalog and cost tables
+/// were captured and verified against 0.1.5-rc.1, the build whose
+/// `DEFAULT_MODELS` carries the current line (`deepseek-flash` / V4.1 Flash,
+/// plus the Pro→Flash routing it anchors). A pre-0.1.5 dsh still answers RPC,
+/// but its live `session/modelCatalog` lacks those entries, so it would
+/// quietly run sessions on an uncatalogued model. Checking the version once up
+/// front turns that gap into one actionable message instead of a silent miss.
+pub const MIN_VERSION: &str = "0.1.5";
 
-/// Does `version` (a `--version` token like `0.1.2-rc.1`) meet [`MIN_VERSION`]?
+/// Does `version` (a `--version` token like `0.1.5-rc.1`) meet [`MIN_VERSION`]?
 ///
 /// **Prerelease tags are ignored, deliberately.** Under strict semver
-/// `0.1.2-rc.1 < 0.1.2`, but the published stream is still on rc tags and
-/// `0.1.2-rc.1` is the build every integration point here was verified
+/// `0.1.5-rc.1 < 0.1.5`, but the published stream is still on rc tags and
+/// `0.1.5-rc.1` is the build every integration point here was verified
 /// against — a strict-semver floor would reject the only working version
 /// there is. So only the numeric `major.minor.patch` core is compared.
 ///
@@ -940,7 +941,8 @@ mod tests {
     /// probe would turn a slow machine into a broken one.
     #[test]
     fn min_version_floor_ignores_prerelease_tags() {
-        // Too old — the three real failure modes documented on MIN_VERSION.
+        // Too old — including the 0.1.2 wire-contract floor, which is below
+        // the current content floor (see MIN_VERSION).
         assert!(!meets_min_version(Some("0.1.1")), "0.1.1 must be rejected");
         assert!(
             !meets_min_version(Some("0.1.1-rc.2")),
@@ -951,14 +953,16 @@ mod tests {
             "0.1.0-rc.7 must be rejected"
         );
         assert!(!meets_min_version(Some("0.0.9")), "0.0.9 must be rejected");
+        assert!(!meets_min_version(Some("0.1.2")), "0.1.2 must be rejected");
+        assert!(!meets_min_version(Some("0.1.4")), "0.1.4 must be rejected");
 
         // Acceptable — including the rc line that is the only shipping build.
-        assert!(meets_min_version(Some("0.1.2")), "0.1.2 must be accepted");
+        assert!(meets_min_version(Some("0.1.5")), "0.1.5 must be accepted");
         assert!(
-            meets_min_version(Some("0.1.2-rc.1")),
-            "0.1.2-rc.1 must be accepted — it is the verified build"
+            meets_min_version(Some("0.1.5-rc.1")),
+            "0.1.5-rc.1 must be accepted — it is the verified build"
         );
-        assert!(meets_min_version(Some("0.1.3")), "0.1.3 must be accepted");
+        assert!(meets_min_version(Some("0.1.6")), "0.1.6 must be accepted");
         assert!(meets_min_version(Some("0.2.0")), "0.2.0 must be accepted");
         assert!(meets_min_version(Some("1.0.0")), "1.0.0 must be accepted");
 
@@ -1764,8 +1768,8 @@ mod tests {
         );
     }
 
-    /// The gate must not fire on the version that actually ships. `0.1.2-rc.1`
-    /// is below `0.1.2` under strict semver, so a semver-shaped check here
+    /// The gate must not fire on the version that actually ships. `0.1.5-rc.1`
+    /// is below `0.1.5` under strict semver, so a semver-shaped check here
     /// would refuse to launch on the boss's own machine.
     ///
     /// Stops at the launch line rather than a real server: the fake exits
@@ -1783,7 +1787,7 @@ mod tests {
             let mut f = std::fs::File::create(&fake).unwrap();
             writeln!(
                 f,
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 0.1.2-rc.1; exit 0; fi\nexit 1"
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 0.1.5-rc.1; exit 0; fi\nexit 1"
             )
             .unwrap();
         }
@@ -1795,7 +1799,7 @@ mod tests {
         };
         assert!(
             !err.contains(&format!("needs dsh {MIN_VERSION}")),
-            "0.1.2-rc.1 must pass the version gate, got: {err}"
+            "0.1.5-rc.1 must pass the version gate, got: {err}"
         );
     }
 }
