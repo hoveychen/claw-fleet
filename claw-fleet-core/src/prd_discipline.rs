@@ -1354,18 +1354,10 @@ fn apply_prd_discipline_inner(user_title: &str, locale: &str) -> Result<(), Stri
     Ok(())
 }
 
-/// Re-attach the `@import` sentinel block to CLAUDE.md content: strip any prior
-/// block, then append `block` separated by one blank line.
+/// Thin wrapper over [`crate::claude_md_block::compose`] — see there for why
+/// the blank-line accounting is what it is.
 fn compose_claude_md(existing: &str, block: &str) -> String {
-    let stripped = strip_sentinel_block(existing);
-    if stripped.trim().is_empty() {
-        block.to_string()
-    } else {
-        // Trim trailing newlines the strip left behind, then re-add exactly one
-        // blank-line separator. Without the trim, re-applying accumulates a
-        // blank line each time (strip leaves the prior separator in place).
-        format!("{base}\n\n{block}", base = stripped.trim_end_matches('\n'))
-    }
+    crate::claude_md_block::compose(existing, block, BEGIN_MARKER, END_MARKER)
 }
 
 /// Remove PRD-discipline mode: strip the sentinel block and delete the
@@ -1409,27 +1401,10 @@ pub fn is_prd_discipline_installed() -> bool {
     content.contains(BEGIN_MARKER) && content.contains(END_MARKER)
 }
 
+/// Thin wrapper over [`crate::claude_md_block::strip`] — the markers are this
+/// module's, the blank-line accounting is shared.
 fn strip_sentinel_block(content: &str) -> String {
-    let mut out = String::with_capacity(content.len());
-    let mut in_block = false;
-    for line in content.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\n', '\r']);
-        if trimmed == BEGIN_MARKER {
-            in_block = true;
-            continue;
-        }
-        if trimmed == END_MARKER {
-            in_block = false;
-            continue;
-        }
-        if !in_block {
-            out.push_str(line);
-        }
-    }
-    while out.ends_with("\n\n\n") {
-        out.pop();
-    }
-    out
+    crate::claude_md_block::strip(content, BEGIN_MARKER, END_MARKER)
 }
 
 #[cfg(test)]

@@ -191,14 +191,8 @@ fn apply_inner(user_title: &str, locale: &str) -> Result<(), String> {
     );
     crate::claude_md_lock::with_lock(&claude_md, || {
         let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-        let stripped = strip_sentinel_block(&existing);
-        let new_content = if stripped.is_empty() {
-            block
-        } else if stripped.ends_with('\n') {
-            format!("{stripped}\n{block}")
-        } else {
-            format!("{stripped}\n\n{block}")
-        };
+        let new_content =
+            crate::claude_md_block::compose(&existing, &block, BEGIN_MARKER, END_MARKER);
         crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))
     })
 }
@@ -273,24 +267,10 @@ pub fn is_session_title_guidance_installed() -> bool {
 // `prd_discipline`, `wiki_guidance` and `model_guidance`: each owns its own
 // markers, and folding all five into one helper is a refactor of four unrelated
 // modules, not part of this change.
+/// Thin wrapper over [`crate::claude_md_block::strip`] — the markers are this
+/// module's, the blank-line accounting is shared.
 fn strip_sentinel_block(content: &str) -> String {
-    let mut out = String::with_capacity(content.len());
-    let mut in_block = false;
-    for line in content.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\n', '\r']);
-        if trimmed == BEGIN_MARKER {
-            in_block = true;
-            continue;
-        }
-        if trimmed == END_MARKER {
-            in_block = false;
-            continue;
-        }
-        if !in_block {
-            out.push_str(line);
-        }
-    }
-    out
+    crate::claude_md_block::strip(content, BEGIN_MARKER, END_MARKER)
 }
 
 #[cfg(test)]
