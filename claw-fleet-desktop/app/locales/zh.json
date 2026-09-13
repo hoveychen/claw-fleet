@@ -1825,6 +1825,8 @@
     "tool_task_output": "读取后台任务输出",
     "tool_task_output_timed": "等待后台任务 · 最多 {{secs}} 秒",
     "tool_kill_shell": "终止后台 shell",
+    "tool_task_stop": "停止后台任务",
+    "tool_task_stop_cmd": "停止后台任务：{{cmd}}",
     "tool_search": "加载工具",
     "tool_search_load": "加载工具 {{names}}",
     "tool_search_query": "搜索工具：{{query}}",

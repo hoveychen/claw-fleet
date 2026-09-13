@@ -203,6 +203,38 @@ describe("claudeToolSummary", () => {
     );
   });
 
+  it("TaskStop → the command it stopped, read from the result", () => {
+    const meta = {
+      message: 'Successfully stopped task: b3ttmyto5 (tail -f /tmp/build.log)',
+      task_id: "b3ttmyto5",
+      task_type: "local_bash",
+      command: "tail -f /tmp/build.log",
+    };
+    expect(claudeToolSummary("TaskStop", { task_id: "b3ttmyto5" }, t, meta)).toBe(
+      'detail.tool_task_stop_cmd|{"cmd":"tail -f /tmp/build.log"}',
+    );
+    // Multi-line command → first line only, like the Bash row.
+    expect(
+      claudeToolSummary(
+        "TaskStop",
+        { task_id: "b7ak0qaqz" },
+        t,
+        { task_id: "b7ak0qaqz", command: "until ! pgrep -f go >/dev/null; do sleep 20; done\necho done" },
+      ),
+    ).toBe('detail.tool_task_stop_cmd|{"cmd":"until ! pgrep -f go >/dev/null; do sleep 20; done"}');
+    // Still running (no result yet), or an agent task with no command → the
+    // plain label rather than the raw {"task_id":…} JSON dump.
+    expect(claudeToolSummary("TaskStop", { task_id: "b5v3jiba2" }, t)).toBe(
+      "detail.tool_task_stop",
+    );
+    expect(
+      claudeToolSummary("TaskStop", { task_id: "b5v3jiba2" }, t, {
+        task_id: "b5v3jiba2",
+        task_type: "local_agent",
+      }),
+    ).toBe("detail.tool_task_stop");
+  });
+
   it("returns null for any other tool (falls back to formatInput)", () => {
     expect(claudeToolSummary("Bash", { command: "ls" }, t)).toBeNull();
     expect(claudeToolSummary("Read", { file_path: "a.ts" }, t)).toBeNull();
