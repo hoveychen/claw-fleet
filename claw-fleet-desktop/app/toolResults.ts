@@ -164,6 +164,25 @@ function asObject(v: unknown): Record<string, unknown> | null {
 
 // ── Guards ───────────────────────────────────────────────────────────────────
 
+/**
+ * Claude Code's persistent shell prints this when a command `cd`s somewhere and
+ * the harness restores the session cwd afterwards. It is housekeeping, not the
+ * command's own output — but it lands on `stderr`, which used to light the
+ * amber `stderr` chip on the collapsed card. Measured 2026-09-12 over the 120
+ * most recent transcripts: **all 289** non-empty Bash stderrs were exactly this
+ * notice and nothing else, so the chip was a 100% false alarm — any session
+ * reading a sibling repo with `cd /other/repo && …` flagged nearly every call.
+ * Strip it here, at the parse boundary, so the chip and the expanded stderr
+ * stream both see only what the command actually wrote.
+ */
+const CWD_RESET_NOTICE = /^[ \t]*Shell cwd was reset to .*$/gm;
+
+function stripHarnessNotices(stderr: string): string {
+  return stderr.includes("Shell cwd was reset to ")
+    ? stderr.replace(CWD_RESET_NOTICE, "")
+    : stderr;
+}
+
 export function asBashResult(v: unknown): BashToolResult | null {
   if (!isRecord(v)) return null;
   // stdout/stderr are the load-bearing pair; a Bash payload always has both,
@@ -173,7 +192,7 @@ export function asBashResult(v: unknown): BashToolResult | null {
   if (stdout === undefined || stderr === undefined) return null;
   return {
     stdout,
-    stderr,
+    stderr: stripHarnessNotices(stderr),
     interrupted: v.interrupted === true,
     isImage: v.isImage === true,
     noOutputExpected: v.noOutputExpected === true,
