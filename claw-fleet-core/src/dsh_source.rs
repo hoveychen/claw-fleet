@@ -844,9 +844,10 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
 ///
 /// Pricing a session means walking its whole history, so the roster cannot do it
 /// for everyone on every poll. It does it for one session per poll instead — the
-/// most recently active of those whose `updatedAt` has moved past the figure we
-/// hold — which converges the whole roster in as many polls as there are stale
-/// sessions, and keeps an actively-running session at most one poll behind.
+/// most recently active of those whose roster reading has moved past the figure
+/// we hold — which converges the whole roster in as many polls as there are
+/// stale sessions, and keeps an actively-running session at most one poll
+/// behind.
 ///
 /// Deliberately silent on failure: a card showing a slightly stale figure is a
 /// far better outcome than a scan that errors because one session's history was
@@ -864,53 +865,65 @@ fn refresh_one_stale_spend(
         return;
     };
     let updated = roster_updated[idx];
+    let tokens = infos[idx].total_output_tokens;
     let info = &mut infos[idx];
-    match crate::dsh_cost::refresh_session_spend(&info.jsonl_path, updated) {
+    match crate::dsh_cost::refresh_session_spend(&info.jsonl_path, updated, tokens) {
         Ok(fresh) => {
             info.total_cost_usd = fresh.usd.unwrap_or(0.0);
             lock(spend_failures()).remove(&info.id);
         }
         Err(e) => {
-            // Remember the exact `updatedAt` this failed at, so the next poll
-            // does not pick the same session again. Without this the pick is a
-            // closed loop: a failed refresh writes no cache entry, so
+            // Remember the exact reading this failed at, so the next poll does
+            // not pick the same session again. Without this the pick is a closed
+            // loop: a failed refresh writes no cache entry, so
             // `spend_is_current` stays false and the same session is chosen
             // forever. Measured on 2026-09-10: one session that never published
             // a history cursor was retried 14472 times over 36 hours, each
             // attempt burning the full cursor budget — which is what made the
             // dsh poll tick cost 5–9s and starve every other rescan.
-            lock(spend_failures()).insert(info.id.clone(), updated);
+            //
+            // The token count is part of the key for the same reason it is part
+            // of `spend_is_current`: a session generating through a failure has
+            // genuinely changed and deserves another attempt. That does mean a
+            // permanently unreadable session still retries while it generates —
+            // bounded, since it is one attempt per poll and only while tokens
+            // are actually moving.
+            lock(spend_failures()).insert(info.id.clone(), (updated, tokens));
             crate::log_debug(&format!("dsh spend refresh {}: {e}", info.id));
         }
     }
 }
 
-/// Sessions whose last re-price attempt failed, and the `updatedAt` it failed
-/// at. Process-memory only: a restart, or the session running one more turn, is
-/// enough to earn another attempt.
-static SPEND_FAILURES: OnceLock<Mutex<std::collections::HashMap<String, i64>>> = OnceLock::new();
+/// Sessions whose last re-price attempt failed, and the `(updatedAt, output
+/// tokens)` reading it failed at. Process-memory only: a restart, or the session
+/// generating anything more, is enough to earn another attempt.
+static SPEND_FAILURES: OnceLock<Mutex<std::collections::HashMap<String, (i64, u64)>>> =
+    OnceLock::new();
 
-fn spend_failures() -> &'static Mutex<std::collections::HashMap<String, i64>> {
+fn spend_failures() -> &'static Mutex<std::collections::HashMap<String, (i64, u64)>> {
     SPEND_FAILURES.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
 /// Which session to re-price this poll, if any: the most recently persisted one
-/// whose recorded spend predates its current `updatedAt` **and** that we have
-/// not already failed to price at that same `updatedAt`. Pure, so the choice is
-/// testable without a server.
+/// whose recorded spend predates its current reading **and** that we have not
+/// already failed to price at that same reading. Pure, so the choice is testable
+/// without a server.
 fn pick_stale_spend(
     infos: &[SessionInfo],
     roster_updated: &[i64],
     spend: &std::collections::BTreeMap<String, crate::dsh_cost::SessionSpend>,
-    failed: &std::collections::HashMap<String, i64>,
+    failed: &std::collections::HashMap<String, (i64, u64)>,
 ) -> Option<usize> {
     infos
         .iter()
         .enumerate()
         .filter(|(i, info)| {
-            let updated = roster_updated.get(*i).copied().unwrap_or_default();
-            !crate::dsh_cost::spend_is_current(spend.get(&info.id), updated)
-                && failed.get(&info.id) != Some(&updated)
+            let reading = (
+                roster_updated.get(*i).copied().unwrap_or_default(),
+                info.total_output_tokens,
+            );
+            !crate::dsh_cost::spend_is_current(spend.get(&info.id), reading.0, reading.1)
+                && failed.get(&info.id) != Some(&reading)
         })
         .max_by_key(|(i, _)| roster_updated.get(*i).copied().unwrap_or_default())
         .map(|(idx, _)| idx)
@@ -2251,16 +2264,21 @@ mod spend_refresh_tests {
         }
     }
 
-    fn none() -> std::collections::HashMap<String, i64> {
+    fn none() -> std::collections::HashMap<String, (i64, u64)> {
         std::collections::HashMap::new()
     }
 
     fn spend(at: i64) -> SessionSpend {
+        spend_at(at, 0)
+    }
+
+    fn spend_at(at: i64, output_tokens: u64) -> SessionSpend {
         SessionSpend {
             usd: Some(0.5),
             priced_calls: 1,
             unpriced_calls: 0,
             priced_at_updated_ms: at,
+            priced_at_output_tokens: output_tokens,
         }
     }
 
@@ -2312,6 +2330,37 @@ mod spend_refresh_tests {
         assert_eq!(pick_stale_spend(&infos, &updated, &cache, &none()), None);
     }
 
+    /// Tokens generated *inside* a turn make a priced session stale again.
+    ///
+    /// This is the bug the cost readout hit. `updatedAt` is stamped when the
+    /// prompt goes in and not touched again until the turn settles, so the
+    /// roster's first sight of a new turn is also the moment it re-prices — at
+    /// which point the turn has produced nothing. On `updatedAt` alone that
+    /// empty answer stays "current" for the whole turn: measured 2026-09-13,
+    /// two live sessions sat at `usd: null, pricedCalls: 0` while a direct
+    /// re-price of the same ids answered $0.154 over 36 calls and $0.593 over
+    /// 85 — so the card read $0.00 and the cost-rate readout, which differences
+    /// that total, could only ever read $0.00/min.
+    #[test]
+    fn a_session_that_generated_more_since_it_was_priced_is_stale() {
+        let mut running = info("live");
+        running.total_output_tokens = 2_743;
+        let infos = [running];
+        let updated = [200];
+
+        // Priced at the top of the turn, across zero calls.
+        let empty = BTreeMap::from([("live".to_string(), spend_at(200, 0))]);
+        assert_eq!(
+            pick_stale_spend(&infos, &updated, &empty, &none()),
+            Some(0),
+            "the turn has generated 2743 tokens since that price was recorded",
+        );
+
+        // Priced again after those tokens landed: nothing left to do.
+        let caught_up = BTreeMap::from([("live".to_string(), spend_at(200, 2_743))]);
+        assert_eq!(pick_stale_spend(&infos, &updated, &caught_up, &none()), None);
+    }
+
     /// A session that cannot be priced must not be retried forever.
     ///
     /// A failed refresh writes no cache entry, so `spend_is_current` stays false
@@ -2327,7 +2376,7 @@ mod spend_refresh_tests {
         let cache = BTreeMap::from([("ok".to_string(), spend(50))]);
         assert_eq!(pick_stale_spend(&infos, &updated, &cache, &none()), Some(0));
 
-        let failed = std::collections::HashMap::from([("broken".to_string(), 300)]);
+        let failed = std::collections::HashMap::from([("broken".to_string(), (300, 0))]);
         assert_eq!(
             pick_stale_spend(&infos, &updated, &cache, &failed),
             Some(1),
@@ -2342,7 +2391,7 @@ mod spend_refresh_tests {
     fn a_failed_session_is_retried_once_it_runs_again() {
         let infos = [info("broken")];
         let cache = BTreeMap::new();
-        let failed = std::collections::HashMap::from([("broken".to_string(), 300)]);
+        let failed = std::collections::HashMap::from([("broken".to_string(), (300, 0))]);
 
         assert_eq!(pick_stale_spend(&infos, &[300], &cache, &failed), None);
         assert_eq!(
