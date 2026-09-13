@@ -92,8 +92,8 @@ impl LlmConfig {
     pub fn effective_daily_report_preference(&self) -> &str {
         self.daily_report_preference
             .as_deref()
-            .filter(|name| matches!(*name, "claude" | "codex"))
-            .or_else(|| matches!(self.provider.as_str(), "claude" | "codex").then_some(self.provider.as_str()))
+            .filter(|name| matches!(*name, "claude" | "codex" | "dsh"))
+            .or_else(|| matches!(self.provider.as_str(), "claude" | "codex" | "dsh").then_some(self.provider.as_str()))
             .unwrap_or("claude")
     }
 
@@ -605,6 +605,144 @@ fn parse_codex_models_doc(content: &str) -> Option<Vec<LlmModel>> {
     Some(models)
 }
 
+// ── dsh CLI provider ────────────────────────────────────────────────────────
+
+pub struct DshCliProvider {
+    bin_path: Option<String>,
+}
+
+impl DshCliProvider {
+    pub fn new() -> Self {
+        let bin_path = resolve_binary("dsh", &[
+            "/opt/homebrew/bin/dsh",
+            "/usr/local/bin/dsh",
+            "~/.local/bin/dsh",
+        ]);
+        Self { bin_path }
+    }
+}
+
+/// Split a dsh model spec (`provider/model`) into its two halves. A bare id
+/// (no `/`) rides the built-in `deepseek-official` route — the only route the
+/// internal LLM catalog lists, so this branch is defensive only.
+fn split_dsh_model_spec(spec: &str) -> (&str, &str) {
+    match spec.split_once('/') {
+        Some((provider, model)) => (provider, model),
+        None => ("deepseek-official", spec),
+    }
+}
+
+/// The `--patch` overlay that forces the per-call model.
+///
+/// The isolated home carries no `settings.yaml`, so `agent-default-model`
+/// resolves from composition alone — and this patch is the composition entry.
+/// Without it the headless runner would fall back to the bundle default
+/// (`deepseek-flash`) and a selected model would silently never take effect.
+fn dsh_model_patch(provider: &str, model: &str) -> String {
+    format!(
+        "- id: agent-default-model\n  config:\n    provider: {provider}\n    model: {model}\n"
+    )
+}
+
+/// A per-call isolated `DSH_HOME`, removed on drop.
+///
+/// Hand-rolled instead of `tempfile::TempDir` because `tempfile` is a
+/// dev-dependency only — production code must not link it.
+struct DshHome {
+    path: std::path::PathBuf,
+}
+
+impl Drop for DshHome {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// Build a per-call isolated `DSH_HOME` for a one-shot headless run.
+///
+/// Mirrors the Codex `clean CODEX_HOME` isolation. The real `~/.dsh` carries
+/// Fleet's per-turn context injection (`cordis.patch.yml`) and the user's saved
+/// `agent-default-model` (`settings.yaml`), both of which must stay out of pure
+/// text generation: the former would bleed PRD/decision-card voice into a
+/// daily-report summary (the exact bug Codex's clean home fixed on 2026-07-16),
+/// the latter would override the per-call model. A fresh home keeps only the
+/// credential file, so the run is authorised but otherwise clean.
+///
+/// Returns `None` when no credentials can be found to copy — an unauthorised
+/// run would fail anyway, so report the provider as unavailable up front.
+fn prepare_dsh_home() -> Option<DshHome> {
+    let home = crate::session::real_home_dir()?;
+    let creds = home.join(".dsh").join(".credentials.yaml");
+    if !creds.exists() {
+        return None;
+    }
+    let path = std::env::temp_dir().join(format!(
+        "fleet-dsh-llm-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    ));
+    std::fs::create_dir_all(&path).ok()?;
+    if std::fs::copy(&creds, path.join(".credentials.yaml")).is_err() {
+        let _ = std::fs::remove_dir_all(&path);
+        return None;
+    }
+    Some(DshHome { path })
+}
+
+impl LlmProvider for DshCliProvider {
+    fn name(&self) -> &str { "dsh" }
+    fn display_name(&self) -> &str { "DeepSeek Harness" }
+
+    fn is_available(&self) -> bool {
+        self.bin_path.is_some()
+    }
+
+    fn list_models(&self) -> Vec<LlmModel> {
+        // Only the built-in `deepseek-official` route is catalogued (the
+        // openrouter models are per-user and their effort ladders vary); see
+        // models.toml's dsh section. The single listed model is V4.1 Flash.
+        crate::model_catalog::listed_models("dsh")
+            .into_iter()
+            .map(|e| LlmModel::new(&e.id, e.display()))
+            .collect()
+    }
+
+    // Flash is dsh's only current listed model; it serves both the fast and
+    // standard slots. There is no distinct cheap/fast tier in the built-in
+    // route, and `deepseek-v4-pro` is being retired (routed to Flash from
+    // 2026-09-14), so no separate premium model is offered.
+    fn default_fast_model(&self) -> &str { "deepseek-official/deepseek-flash" }
+    fn default_standard_model(&self) -> &str { "deepseek-official/deepseek-flash" }
+
+    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
+        let bin = self.bin_path.as_deref()?;
+        let home = prepare_dsh_home()?;
+        let (provider, model) = split_dsh_model_spec(model);
+        let patch_path = home.path.join("model.patch.yml");
+        std::fs::write(&patch_path, dsh_model_patch(provider, model)).ok()?;
+
+        // `--profile headless`: one task, final assistant message on stdout
+        // (reasoning deltas on stderr, suppressed by run_cli), exit 0 when the
+        // turn completes. A non-zero exit or timeout makes run_cli return None,
+        // which lets `complete_routed` fall through to the next provider.
+        let text = run_cli(
+            bin,
+            &[
+                "--profile", "headless",
+                "--patch", patch_path.to_str()?,
+                prompt,
+            ],
+            &[("DSH_HOME".into(), home.path.to_string_lossy().into_owned())],
+            timeout,
+            "llm:dsh",
+        )?;
+        Some(Completion { text, usage: None })
+    }
+}
+
 // ── Provider registry ────────────────────────────────────────────────────────
 
 /// Create a provider by name.
@@ -612,6 +750,7 @@ pub fn resolve_provider(name: &str) -> Option<Box<dyn LlmProvider>> {
     match name {
         "claude" => Some(Box::new(ClaudeCliProvider::new())),
         "codex" => Some(Box::new(CodexCliProvider::new())),
+        "dsh" => Some(Box::new(DshCliProvider::new())),
         _ => None,
     }
 }
@@ -622,6 +761,7 @@ pub fn all_provider_infos() -> Vec<LlmProviderInfo> {
     let providers: Vec<Box<dyn LlmProvider>> = vec![
         Box::new(ClaudeCliProvider::new()),
         Box::new(CodexCliProvider::new()),
+        Box::new(DshCliProvider::new()),
     ];
 
     let mut infos: Vec<LlmProviderInfo> = providers
@@ -710,6 +850,13 @@ fn equivalent_model(target_provider: &str, selected_model: &str, slot: ModelSlot
         ("codex", ModelTier::Fast) => "gpt-5.6-luna",
         ("codex", ModelTier::Standard) => "gpt-5.6-terra",
         ("codex", ModelTier::Premium) => "gpt-5.6-sol",
+        // dsh's built-in route offers a single current model (V4.1 Flash),
+        // standard tier; `deepseek-v4-pro` is retired (routed to Flash from
+        // 2026-09-14). Every tier therefore maps onto Flash — there is no
+        // distinct cheap/premium model left to preserve.
+        ("dsh", ModelTier::Fast) => "deepseek-official/deepseek-flash",
+        ("dsh", ModelTier::Standard) => "deepseek-official/deepseek-flash",
+        ("dsh", ModelTier::Premium) => "deepseek-official/deepseek-flash",
         _ => selected_model,
     }.to_string()
 }
@@ -789,6 +936,9 @@ fn provider_quota_state(name: &str) -> QuotaState {
     let state = match name {
         "claude" => claude_quota_state(),
         "codex" => codex_quota_state(),
+        // dsh is pay-per-use: there is no account quota ceiling to probe, so it
+        // is never "Limited" and never drops out of the fallback order.
+        "dsh" => QuotaState::Healthy,
         _ => QuotaState::Unknown,
     };
     QUOTA_CACHE.lock().unwrap().insert(name.to_string(), (Instant::now(), state));
@@ -802,7 +952,7 @@ pub fn provider_routes(config: &LlmConfig, slot: ModelSlot, preference: &str) ->
     if config.provider == "none" { return Vec::new() }
     let sources = crate::agent_source::SourcesConfig::load();
     let mut providers = Vec::<(String, Box<dyn LlmProvider>)>::new();
-    for name in ["claude", "codex"] {
+    for name in ["claude", "codex", "dsh"] {
         if !sources.is_source_enabled(name) { continue }
         let Some(provider) = resolve_provider(name) else { continue };
         if provider.is_available() { providers.push((name.to_string(), provider)); }
@@ -1219,5 +1369,61 @@ mod tests {
         assert_eq!(cfg.provider, "claude");
         assert_eq!(cfg.fast_model, "haiku");
         assert_eq!(cfg.standard_model, "sonnet");
+    }
+
+    #[test]
+    fn resolve_dsh_provider() {
+        let p = resolve_provider("dsh").expect("dsh provider resolves");
+        assert_eq!(p.name(), "dsh");
+        assert_eq!(p.display_name(), "DeepSeek Harness");
+    }
+
+    #[test]
+    fn dsh_provider_lists_flash() {
+        let p = DshCliProvider::new();
+        let models = p.list_models();
+        assert!(models.iter().any(|m| m.id == "deepseek-official/deepseek-flash"));
+        assert_eq!(p.default_fast_model(), "deepseek-official/deepseek-flash");
+        assert_eq!(p.default_standard_model(), "deepseek-official/deepseek-flash");
+    }
+
+    #[test]
+    fn split_dsh_model_spec_splits_on_first_slash() {
+        assert_eq!(split_dsh_model_spec("deepseek-official/deepseek-flash"), ("deepseek-official", "deepseek-flash"));
+        assert_eq!(split_dsh_model_spec("openrouter/anthropic/claude-haiku-4.5"), ("openrouter", "anthropic/claude-haiku-4.5"));
+        assert_eq!(split_dsh_model_spec("deepseek-flash"), ("deepseek-official", "deepseek-flash"));
+    }
+
+    #[test]
+    fn dsh_model_patch_forces_agent_default_model() {
+        let patch = dsh_model_patch("deepseek-official", "deepseek-flash");
+        assert!(patch.contains("id: agent-default-model"));
+        assert!(patch.contains("provider: deepseek-official"));
+        assert!(patch.contains("model: deepseek-flash"));
+    }
+
+    #[test]
+    fn equivalent_models_map_to_dsh_flash() {
+        assert_eq!(equivalent_model("dsh", "sonnet", ModelSlot::Standard), "deepseek-official/deepseek-flash");
+        assert_eq!(equivalent_model("dsh", "opus", ModelSlot::Standard), "deepseek-official/deepseek-flash");
+        assert_eq!(equivalent_model("dsh", "haiku", ModelSlot::Fast), "deepseek-official/deepseek-flash");
+        // And the reverse: a dsh-selected model still translates onto claude/codex.
+        assert_eq!(equivalent_model("claude", "deepseek-official/deepseek-flash", ModelSlot::Standard), "sonnet");
+    }
+
+    #[test]
+    fn daily_report_preference_accepts_dsh() {
+        let cfg = LlmConfig { provider: "dsh".into(), fast_model: "deepseek-official/deepseek-flash".into(), standard_model: "deepseek-official/deepseek-flash".into(), daily_report_preference: Some("dsh".into()) };
+        assert_eq!(cfg.effective_daily_report_preference(), "dsh");
+    }
+
+    #[test]
+    fn provider_infos_include_dsh() {
+        let infos = all_provider_infos();
+        let dsh = infos.iter().find(|p| p.name == "dsh").expect("dsh provider");
+        assert_eq!(dsh.display_name, "DeepSeek Harness");
+        assert!(dsh.models.iter().any(|m| m.id == "deepseek-official/deepseek-flash"));
+        // dsh has no cross-engine tier sibling (claude↔codex pair only).
+        assert!(dsh.models.iter().all(|m| m.aligned_display.is_none()));
     }
 }

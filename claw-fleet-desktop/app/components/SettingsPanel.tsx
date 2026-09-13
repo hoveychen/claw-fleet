@@ -1089,17 +1089,27 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, [llmProviders]);
 
   const currentProviderInfo = llmProviders.find((p) => p.name === llmConfig.provider);
-  const dualReportProvidersEnabled = ["claude-code", "codex"].every((name) =>
-    sources.some((source) => source.name === name && source.enabled && source.available),
-  );
 
-  // Show the cross-engine tier sibling (e.g. "Haiku / Luna") only when both
-  // engines are active, since that's the only time quota fallback swaps them.
+  // Map an LLM-engine name to its agent-source name and test whether that
+  // harness is enabled AND installed here. dsh is now a third engine, so the
+  // "prefer A / fall back to B" dial is meaningful whenever two of the three
+  // (claude, codex, dsh) can actually run.
+  const llmEngineUsable = useCallback((name: string) => {
+    const sourceName = name === "claude" ? "claude-code" : name;
+    return sources.some((source) => source.name === sourceName && source.enabled && source.available);
+  }, [sources]);
+  const dualReportProvidersEnabled =
+    llmProviders.filter((p) => p.name !== "none" && p.available && llmEngineUsable(p.name)).length >= 2;
+
+  // The cross-engine tier sibling (e.g. "Haiku / Luna") only exists between
+  // claude and codex — dsh models carry no `alignedDisplay` — so it stays gated
+  // on that pair rather than on the ≥2-engine report dial.
+  const claudeCodexPairActive = llmEngineUsable("claude") && llmEngineUsable("codex");
   const modelOptionLabel = useCallback((m: LlmModel) => (
-    dualReportProvidersEnabled && m.alignedDisplay
+    claudeCodexPairActive && m.alignedDisplay
       ? `${m.displayName} / ${m.alignedDisplay}`
       : m.displayName
-  ), [dualReportProvidersEnabled]);
+  ), [claudeCodexPairActive]);
 
   // ── Auto-resume config ──────────────────────────────────────────────────
   const [autoResume, setAutoResume] = useState<{ enabled: boolean; maxWaitHours: number }>({
@@ -1366,8 +1376,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <select className={styles.select} style={{ flex: "none", width: 180 }}
                       value={llmConfig.dailyReportPreference || llmConfig.provider || "claude"}
                       onChange={(e) => handleLlmConfigChange({ dailyReportPreference: e.target.value })}>
-                      <option value="claude">Claude Code</option>
-                      <option value="codex">Codex</option>
+                      {llmProviders.filter((p) => p.name !== "none").map((p) => (
+                        <option key={p.name} value={p.name} disabled={!p.available}>
+                          {p.displayName}{!p.available ? ` (${t("settings.source_not_detected")})` : ""}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}
@@ -1411,7 +1424,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     </div>
                   </>
                 )}
-                {llmConfig.provider !== "none" && dualReportProvidersEnabled && (
+                {llmConfig.provider !== "none" && claudeCodexPairActive && (
                   <div className={styles.row}>
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                       {t("settings.llm_model_alignment_desc")}
