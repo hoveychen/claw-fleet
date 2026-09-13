@@ -45,6 +45,7 @@ pub mod dsh_messages;
 pub mod dsh_plugin;
 pub mod dsh_server;
 pub mod dsh_source;
+pub mod dsh_speed;
 pub mod elicitation;
 pub mod feature_flags;
 pub mod file_explorer;
