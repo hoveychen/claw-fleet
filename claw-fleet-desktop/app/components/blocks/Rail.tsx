@@ -43,13 +43,32 @@ import styles from "./Rail.module.css";
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch"]);
 // "PowerShell" is Claude Code's separate shell tool on Windows without Git Bash
 // (tool name `PowerShell`, not `Bash`); it gets the same Terminal icon.
-const SHELL_TOOLS = new Set(["Bash", "PowerShell", "exec", "exec_command", "write_stdin"]);
+// dsh's own names appear here only for the tools with no Claude counterpart —
+// the rest are renamed upstream in `dsh_messages.rs`. A persistent terminal and
+// a background job are both "the agent ran something", so they take Terminal.
+const SHELL_TOOLS = new Set([
+  "Bash", "PowerShell", "exec", "exec_command", "write_stdin",
+  "job_output", "job_kill", "job_list", "run_code",
+  "terminal_open", "terminal_list", "terminal_read", "terminal_send",
+  "terminal_close", "terminal_signal",
+]);
 const WEB_TOOLS = new Set(["WebSearch", "WebFetch"]);
-const SEARCH_TOOLS = new Set(["Grep", "Glob", "Explore", "LSP"]);
-const AGENT_TOOLS = new Set(["Agent", "spawn_agent", "wait_agent"]);
+const SEARCH_TOOLS = new Set([
+  "Grep", "Glob", "Explore", "LSP",
+  "session_search", "session_trace",
+  "session_event_read", "session_event_search", "session_event_trace",
+]);
+const AGENT_TOOLS = new Set([
+  "Agent", "spawn_agent", "wait_agent",
+  "subagent", "list_agents", "send_message", "interrupt_agent", "report",
+]);
 const PLAN_TOOLS = new Set([
   "TodoWrite", "TodoRead", "update_plan", "EnterPlanMode", "ExitPlanMode",
+  "create_goal", "update_goal", "get_goal",
 ]);
+// dsh's schedule_* trio — the same thing Fleet's own `schedule` tool does, so
+// it takes the same calendar glyph.
+const SCHEDULE_TOOLS = new Set(["schedule_create", "schedule_delete", "schedule_list"]);
 
 /** Icon for one of Fleet's own MCP control tools, by tail segment. These used
  *  to render as callout blocks outside the rail; they are now steps like any
@@ -76,6 +95,7 @@ export function railToolIcon(name: string): ReactNode {
   if (WEB_TOOLS.has(name)) return <Globe />;
   if (AGENT_TOOLS.has(name)) return <Bot />;
   if (PLAN_TOOLS.has(name)) return <ListTodo />;
+  if (SCHEDULE_TOOLS.has(name)) return <CalendarClock />;
   if (name === "TaskOutput") return <Clock3 />;
   return <Wrench />;
 }

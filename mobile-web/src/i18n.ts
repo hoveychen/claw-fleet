@@ -490,6 +490,27 @@ const DICT: Record<string, string> = {
   "编辑 {0} 个文件": "Patching {0} files",
   "加载工具 {0}": "Loading tools {0}",
   "搜索工具：{0}": "Searching tools: {0}",
+  // dsh's own tools (no Claude counterpart) — see views/toolSummary.ts.
+  "读取后台任务输出": "Reading background job output",
+  "停止后台任务": "Stopping a background job",
+  "列出后台任务": "Listing background jobs",
+  "打开常驻终端": "Opening a persistent terminal",
+  "列出常驻终端": "Listing persistent terminals",
+  "读取终端输出": "Reading terminal output",
+  "输入：{0}": "Sending input: {0}",
+  "向终端发送输入": "Sending input to a terminal",
+  "关闭常驻终端": "Closing a persistent terminal",
+  "向终端发送信号": "Signalling a terminal",
+  "发给子代理：{0}": "To subagent: {0}",
+  "给子代理发消息": "Messaging a subagent",
+  "列出子代理": "Listing subagents",
+  "打断子代理": "Interrupting a subagent",
+  "向上级汇报：{0}": "Reporting: {0}",
+  "向上级汇报": "Reporting to the parent agent",
+  "更新目标": "Updating the goal",
+  "读取目标": "Reading the goal",
+  "管理定时任务": "Managing scheduled work",
+  "检索会话记录": "Searching the session record",
   // Fleet MCP tool labels for the ToolSearch load line. 决策卡/计划/交接/知识库
   // already exist in this dict (reused here — do NOT re-add, duplicate keys
   // silently override existing translations); only the new ones are declared.

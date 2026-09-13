@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   claudeToolSummary,
+  dshToolSummary,
   codexToolSummary,
   fleetToolSummary,
   parseExecCommand,
@@ -405,5 +406,45 @@ describe("fleetToolSummary", () => {
     expect(fleetToolSummary("mcp__fleet__fleet__plan", { action: "check" }, t)).toBeNull();
     expect(fleetToolSummary("mcp__fleet__fleet__inspect", { action: "list" }, t)).toBeNull();
     expect(fleetToolSummary("Bash", { command: "ls" }, t)).toBeNull();
+  });
+});
+
+// dsh's residue: the tools with no Claude counterpart, which keep their own
+// names through `dsh_messages.rs` and so used to dump their whole args object
+// into the collapsed row.
+describe("dshToolSummary", () => {
+  it("labels background jobs and persistent terminals instead of dumping args", () => {
+    expect(dshToolSummary("job_output", { job_id: "796215df" }, t)).toBe(
+      "detail.tool_dsh_job_output",
+    );
+    expect(dshToolSummary("job_list", {}, t)).toBe("detail.tool_dsh_job_list");
+    expect(dshToolSummary("terminal_open", { type: "shell" }, t)).toBe(
+      "detail.tool_dsh_terminal_open",
+    );
+  });
+
+  it("leads terminal_send with the text it sent, clipped to one line", () => {
+    expect(dshToolSummary("terminal_send", { sessionId: "t1", text: "cargo test\nnext" }, t)).toBe(
+      'detail.tool_stdin|{"text":"cargo test"}',
+    );
+    expect(dshToolSummary("terminal_send", { sessionId: "t1", text: "  " }, t)).toBe(
+      "detail.tool_dsh_terminal_send",
+    );
+  });
+
+  // These two were the worst rows in a dsh transcript: the whole message /
+  // report body, unwrapped, as the one-line summary.
+  it("clips send_message and report to their first line", () => {
+    expect(
+      dshToolSummary("send_message", { agent_id: "a6278d05", message: "把结论交给我\n细节…" }, t),
+    ).toBe('detail.tool_dsh_send_message_text|{"text":"把结论交给我"}');
+    expect(dshToolSummary("report", { output: "已定位根因" }, t)).toBe(
+      'detail.tool_dsh_report_text|{"text":"已定位根因"}',
+    );
+  });
+
+  it("returns null for tools it does not handle (falls back to formatInput)", () => {
+    expect(dshToolSummary("Bash", { command: "ls" }, t)).toBeNull();
+    expect(dshToolSummary("cordis_run", { name: "x" }, t)).toBeNull();
   });
 });
