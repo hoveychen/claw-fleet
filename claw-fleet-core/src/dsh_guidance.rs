@@ -113,9 +113,13 @@ fn language_lines(locale: &str) -> (&'static str, &'static str) {
     }
 }
 
-fn title_or_default(user_title: &str) -> String {
+fn title_or_default(user_title: &str, locale: &str) -> String {
     if user_title.is_empty() {
-        "Boss".to_string()
+        if locale == "zh" {
+            "老板".to_string()
+        } else {
+            "Boss".to_string()
+        }
     } else {
         user_title.to_string()
     }
@@ -128,7 +132,7 @@ fn title_or_default(user_title: &str) -> String {
 /// no Fleet MCP), and Rule 2 states the attribution caveat that follows from dsh
 /// running every session inside one shared server process.
 pub fn render_dsh_prd_block(user_title: &str, locale: &str) -> String {
-    let title = title_or_default(user_title);
+    let title = title_or_default(user_title, locale);
     let (prd_lang, _) = language_lines(locale);
 
     format!(
@@ -338,7 +342,7 @@ when there is real work. Do NOT default to an LLM session every tick.",
 /// `fleet__set_session_title` is absent here, and the card's field vocabulary is
 /// the narrower one `ask_user_question` actually accepts.
 pub fn render_dsh_interaction_block(user_title: &str, locale: &str) -> String {
-    let title = title_or_default(user_title);
+    let title = title_or_default(user_title, locale);
     let (_, ix_lang) = language_lines(locale);
 
     format!(
@@ -1272,6 +1276,14 @@ mod tests {
         assert!(
             ix.contains("decision-card question and option text in English"),
             "en locale selects the English interaction language line"
+        );
+        assert!(
+            render_dsh_prd_block("", "zh").contains("老板"),
+            "empty title in zh must fall back to 老板, not Boss"
+        );
+        assert!(
+            render_dsh_interaction_block("", "zh").contains("老板"),
+            "empty title in zh must fall back to 老板, not Boss"
         );
     }
 
