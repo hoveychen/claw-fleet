@@ -40,6 +40,9 @@ use serde_json::{json, Value};
 
 use crate::dsh_client::DshClient;
 use crate::dsh_events::DshFrame;
+use crate::decision_history::{
+    build_elicitation_record, DecisionHistoryRecord, ElicitationOutcome,
+};
 use crate::elicitation::{
     ElicitationOption, ElicitationQuestion, ElicitationRequest, ElicitationResponse,
 };
@@ -251,6 +254,9 @@ enum Pending {
         /// map comes back under (which is the *rendered* text, not the dsh one,
         /// because `detail` is folded into it).
         texts: Vec<String>,
+        /// The card as written to disk, kept so the decision-history record can
+        /// be rebuilt once the user answers.
+        request: ElicitationRequest,
     },
 }
 
@@ -437,6 +443,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
                         Pending::Question {
                             questions,
                             texts,
+                            request,
                         },
                     );
                 }
@@ -489,18 +496,50 @@ fn collect_answers(
         let Some(entry) = pending.remove(&id) else {
             continue;
         };
-        let outcome = match &entry {
-            Pending::Approval { .. } => crate::permission_prompt_ipc::try_read_response(&id)
-                .map(|r| send_approval(client, client_id, &id, &r)),
+        match &entry {
+            Pending::Approval { .. } => {
+                if let Some(r) = crate::permission_prompt_ipc::try_read_response(&id) {
+                    if let Err(e) = send_approval(client, client_id, &id, &r) {
+                        crate::log_debug(&format!("dsh decisions: respond {id}: {e}"));
+                    }
+                }
+            }
             Pending::Question {
-                questions, texts, ..
-            } => crate::elicitation::try_read_response(&id)
-                .map(|r| send_question(client, client_id, &id, questions, texts, &r)),
-        };
-        if let Some(Err(e)) = outcome {
-            crate::log_debug(&format!("dsh decisions: respond {id}: {e}"));
+                questions,
+                texts,
+                request,
+            } => {
+                if let Some(r) = crate::elicitation::try_read_response(&id) {
+                    if let Err(e) = send_question(client, client_id, &id, questions, texts, &r) {
+                        crate::log_debug(&format!("dsh decisions: respond {id}: {e}"));
+                    }
+                    record_question_history(request, &r);
+                }
+            }
         }
         entry.cleanup(&id);
+    }
+}
+
+/// Record a dsh question card in decision_history once answered, so the
+/// turn-completion-card check and the daily report see dsh cards like every
+/// other source's.
+fn record_question_history(request: &ElicitationRequest, resp: &ElicitationResponse) {
+    let outcome = if resp.declined {
+        ElicitationOutcome::Declined
+    } else {
+        ElicitationOutcome::Answered
+    };
+    let record = build_elicitation_record(
+        request,
+        outcome,
+        &resp.answers,
+        chrono::Utc::now().to_rfc3339(),
+    );
+    if let Err(e) =
+        crate::decision_history::append_record(&DecisionHistoryRecord::Elicitation(record))
+    {
+        crate::log_debug(&format!("dsh decisions: decision_history append: {e}"));
     }
 }
 

@@ -76,6 +76,12 @@ pub struct LocalBackend {
     watch: Arc<crate::WatchState>,
     /// Active waiting-input alerts, keyed by session ID.
     waiting_alerts: Arc<Mutex<HashMap<String, WaitingAlert>>>,
+    /// Worker that watches raised turn-completion cards and injects the
+    /// "use a decision card next time" reminder once the user answers. Held
+    /// only to keep the broker (and its worker thread) alive for the backend's
+    /// lifetime — the scan threads clone it and hand jobs to it.
+    #[allow(dead_code)]
+    turn_cards: Arc<claw_fleet_core::turn_completion_card::TurnCardBroker>,
     /// Semantic outcome tags per session, set by background analysis.
     /// Cleared when a session transitions away from WaitingInput/Idle.
     session_outcomes: Arc<Mutex<HashMap<String, Vec<String>>>>,
@@ -202,6 +208,8 @@ impl LocalBackend {
         let watch = Arc::new(crate::WatchState::new());
         let waiting_alerts: Arc<Mutex<HashMap<String, WaitingAlert>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        let turn_cards =
+            Arc::new(claw_fleet_core::turn_completion_card::TurnCardBroker::start());
         let session_outcomes: Arc<Mutex<HashMap<String, Vec<String>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let audit_cache: Arc<Mutex<HashMap<String, (u64, Vec<crate::audit::AuditEvent>)>>> =
@@ -432,6 +440,7 @@ impl LocalBackend {
         let sources2 = sources.clone();
         let wa2 = waiting_alerts.clone();
         let so2 = session_outcomes.clone();
+        let turn_cards2 = turn_cards.clone();
         let locale2 = locale.clone();
         let llm_config2 = llm_config.clone();
         let watch2 = watch.clone();
@@ -458,6 +467,7 @@ impl LocalBackend {
         // Only rescans sources whose watch directories contain changed paths.
         std::thread::spawn(move || {
             let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
+            let mut turn_started: HashMap<String, u64> = HashMap::new();
             let analyzing = analyzing2;
             let mut last_rescan = Instant::now();
             let mut last_memory_rescan = Instant::now();
@@ -638,6 +648,8 @@ impl LocalBackend {
                     detect_waiting_transitions(
                         &sess2,
                         &mut prev_statuses,
+                        &mut turn_started,
+                        &turn_cards2,
                         &analyzing,
                         &wa2,
                         &so2,
@@ -725,6 +737,7 @@ impl LocalBackend {
             let sources3 = sources.clone();
             let wa3 = waiting_alerts.clone();
             let so3 = session_outcomes.clone();
+            let turn_cards3 = turn_cards.clone();
             let locale3 = locale.clone();
             let llm_config3 = llm_config.clone();
             let analyzing3 = analyzing.clone();
@@ -746,6 +759,7 @@ impl LocalBackend {
             let gate_poll = scan_gate.clone();
             std::thread::spawn(move || {
                 let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
+                let mut turn_started: HashMap<String, u64> = HashMap::new();
                 let analyzing = analyzing3;
 
                 // Use the shortest poll interval among all polling sources.
@@ -805,6 +819,8 @@ impl LocalBackend {
                     detect_waiting_transitions(
                         &sess3,
                         &mut prev_statuses,
+                        &mut turn_started,
+                        &turn_cards3,
                         &analyzing,
                         &wa3,
                         &so3,
@@ -1468,6 +1484,7 @@ impl LocalBackend {
             sessions,
             watch,
             waiting_alerts,
+            turn_cards,
             session_outcomes,
             audit_cache,
             audit_history,
@@ -3936,9 +3953,19 @@ pub(crate) fn should_notify_waiting_transition(
     }
 }
 
+/// Current wall-clock epoch milliseconds, for turn-start bookkeeping.
+fn turn_card_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 fn detect_waiting_transitions(
     sessions: &Arc<Mutex<Vec<SessionInfo>>>,
     prev_statuses: &mut HashMap<String, SessionStatus>,
+    turn_started: &mut HashMap<String, u64>,
+    turn_cards: &claw_fleet_core::turn_completion_card::TurnCardBroker,
     analyzing: &Arc<Mutex<HashSet<String>>>,
     waiting_alerts: &Arc<Mutex<HashMap<String, WaitingAlert>>>,
     session_outcomes: &Arc<Mutex<HashMap<String, Vec<String>>>>,
@@ -3970,6 +3997,30 @@ fn detect_waiting_transitions(
             }
             guard.insert(sess.id.clone());
             drop(guard);
+
+            // Raise a turn-completion card when a task turn ended without any
+            // decision card, so the phone notification pipeline fires. Skipped
+            // for chat-workspace sessions, parked/interactive sessions and
+            // turns that already raised a card (all handled inside maybe_raise).
+            let since = turn_started
+                .get(&sess.id)
+                .copied()
+                .unwrap_or_else(turn_card_now_ms);
+            match claw_fleet_core::turn_completion_card::maybe_raise(
+                sess,
+                &sess.last_message_preview.clone().unwrap_or_default(),
+                since,
+            ) {
+                Ok(Some(card_id)) => {
+                    turn_cards.offer(claw_fleet_core::turn_completion_card::TurnCardJob {
+                        card_id,
+                        session: sess.clone(),
+                        deadline: claw_fleet_core::turn_completion_card::default_deadline(),
+                    });
+                }
+                Ok(None) => {}
+                Err(e) => log_debug(&format!("turn card: {e}")),
+            }
 
             let session_id = sess.id.clone();
             let display_name = sess.ai_title.clone().unwrap_or_else(|| sess.workspace_name.clone());
@@ -4047,9 +4098,12 @@ fn detect_waiting_transitions(
             }
         }
 
-        // Session became busy again → clear stale outcome tags.
+        // Session became busy again → clear stale outcome tags and record when
+        // this turn started, so the completion-card check can ignore cards from
+        // earlier turns.
         if BUSY_STATUSES.contains(&sess.status) && !was_busy {
             session_outcomes.lock().unwrap().remove(&sess.id);
+            turn_started.insert(sess.id.clone(), turn_card_now_ms());
         }
     }
 
