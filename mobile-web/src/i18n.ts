@@ -490,6 +490,8 @@ const DICT: Record<string, string> = {
   "编辑 {0} 个文件": "Patching {0} files",
   "加载工具 {0}": "Loading tools {0}",
   "搜索工具：{0}": "Searching tools: {0}",
+  停止后台任务: "Stopping background task",
+  "停止后台任务：{0}": "Stopping background task: {0}",
   // Fleet MCP tool labels for the ToolSearch load line. 决策卡/计划/交接/知识库
   // already exist in this dict (reused here — do NOT re-add, duplicate keys
   // silently override existing translations); only the new ones are declared.

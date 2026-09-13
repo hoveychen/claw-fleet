@@ -1526,6 +1526,22 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
         d.insert("todoDone".into(), done.into());
         d.insert("todoTotal".into(), (todos.len() as u64).into());
     }
+    // TaskStop: the command of the background task that was killed. Its *input*
+    // is only the opaque `task_id`, so without this the phone's row says nothing
+    // about what was stopped. `task_type` gates it so a foreign payload with a
+    // stray `command` key doesn't match; multi-line commands keep their first
+    // line, which is all a phone-width row can show anyway.
+    if obj.get("task_type").and_then(Value::as_str).is_some() {
+        if let Some(cmd) = obj.get("command").and_then(Value::as_str) {
+            let first = cmd.trim().lines().next().unwrap_or("").trim();
+            if !first.is_empty() {
+                d.insert(
+                    "stoppedCommand".into(),
+                    truncate_chars(first, ASK_SUMMARY_MAX_CHARS).into(),
+                );
+            }
+        }
+    }
     if d.is_empty() { None } else { Some(Value::Object(d)) }
 }
 
@@ -5777,6 +5793,24 @@ mod tests {
         assert_eq!(d["agentStatus"], "completed");
         assert_eq!(d["agentId"], "abc-123");
         assert_eq!(d["toolUses"], 7);
+    }
+
+    #[test]
+    fn tool_result_digest_carries_stopped_command() {
+        // TaskStop's input is only `{task_id}`; the command it killed lives in
+        // the result, so the phone's row has nothing to show without this.
+        let meta = json!({
+            "message": "Successfully stopped task: b3t (until ! pgrep -f go; do sleep 5; done)",
+            "task_id": "b3t",
+            "task_type": "local_bash",
+            "command": "until ! pgrep -f go; do sleep 5; done\necho done"
+        });
+        let d = tool_result_digest(&meta).expect("digest");
+        assert_eq!(d["stoppedCommand"], "until ! pgrep -f go; do sleep 5; done");
+        // An agent task carries no command → no field (the phone shows the
+        // plain 「停止后台任务」 label).
+        let agent = json!({"task_id": "b5v", "task_type": "local_agent"});
+        assert!(tool_result_digest(&agent).is_none());
     }
 
     #[test]
