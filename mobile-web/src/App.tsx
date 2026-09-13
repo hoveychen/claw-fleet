@@ -488,7 +488,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     () => aggregateDecisions(states, deviceOrder),
     [states, deviceOrder],
   );
-  // 骨架屏只在**每一台**都还没回过首份快照时显示;有一台回了就先画它的卡。
+  // 骨架屏只为**还在线、但首份快照没到**的设备转;离线的那台不守闸门(它的快照
+  // 永远不会来)。
   const decisionsLoaded = allDecisionsLoaded(states, deviceOrder);
   /** 卡片/列表上的设备徽标。只配了一台时返回 null —— 单设备用户不该为多设备
    *  付出一行视觉噪音。 */
