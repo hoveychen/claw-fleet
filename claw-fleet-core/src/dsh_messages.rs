@@ -91,6 +91,45 @@ fn model_of(message: &Value) -> Option<String> {
     (!provider.is_empty() && !model.is_empty()).then(|| format!("{provider}/{model}"))
 }
 
+/// dsh's built-in tools carry lowercase snake_case names (`bash`, `read`,
+/// `grep`); every renderer table downstream is keyed on Claude's names — the
+/// rail's icon map, the collapsed row's summary rule, the read-only fold, the
+/// hit-count badges, the work-run categoriser, the decision-card detector. A
+/// dsh name matches none of them, so every dsh step used to render as a
+/// generic wrench above a naked argument: a `grep` showed only its regex, with
+/// nothing on screen naming the tool.
+///
+/// Translating here — the one place a dsh tool call becomes a `tool_use`, and
+/// the same seam where `reasoning` becomes `thinking` below — lights all three
+/// clients at once, instead of each growing its own alias table.
+///
+/// Only names whose argument shape is identical to the Claude tool are mapped;
+/// the input keys are what the cards actually read. `str_replace_editor`
+/// (`command`/`path`/`old_str`) and `skill` (`name`, not `skill`) are
+/// deliberately absent — mapping them would point a card at fields they do not
+/// have. Unmapped names pass through and keep the generic card.
+fn canonical_tool_name(name: &str) -> &str {
+    match name {
+        "bash" => "Bash",
+        "pwsh" => "PowerShell",
+        // `read_image` takes the same `file_path` and renders as a Read whose
+        // result is an image — which is exactly Claude's Read of an image.
+        "read" | "read_image" => "Read",
+        "write" => "Write",
+        "edit" => "Edit",
+        "grep" => "Grep",
+        "glob" => "Glob",
+        "lsp" => "LSP",
+        "web_search" => "WebSearch",
+        "web_fetch" => "WebFetch",
+        "subagent" => "Agent",
+        "todo_write" => "TodoWrite",
+        "ask_user_question" => "AskUserQuestion",
+        "exit_plan_mode" => "ExitPlanMode",
+        other => other,
+    }
+}
+
 /// Convert one assistant content block.
 ///
 /// Text passes through unchanged (dsh and Claude agree on that shape). A
@@ -110,7 +149,10 @@ fn assistant_block(block: &Value) -> Option<Value> {
             Some(json!({
                 "type": "tool_use",
                 "id": block.get("id").cloned().unwrap_or(Value::Null),
-                "name": block.get("name").cloned().unwrap_or(Value::Null),
+                "name": match block.get("name").and_then(Value::as_str) {
+                    Some(name) => json!(canonical_tool_name(name)),
+                    None => Value::Null,
+                },
                 "input": input,
             }))
         }
@@ -525,9 +567,52 @@ mod tests {
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[1]["type"], "tool_use");
         assert_eq!(content[1]["id"], "toolu_bdrk_01MUz");
-        assert_eq!(content[1]["name"], "bash");
+        // Canonicalised to Claude's name — dsh calls it `bash`.
+        assert_eq!(content[1]["name"], "Bash");
         // Parsed, not the raw JSON string dsh puts on the wire.
         assert_eq!(content[1]["input"]["command"], "touch /tmp/x");
+    }
+
+    /// Every dsh tool whose arguments match a Claude tool's must arrive under
+    /// the Claude name, or the renderer's icon / fold / badge tables — all
+    /// keyed on those names — skip it and it draws as a bare wrench.
+    #[test]
+    fn dsh_tool_names_are_canonicalised() {
+        for (dsh, claude) in [
+            ("bash", "Bash"),
+            ("pwsh", "PowerShell"),
+            ("read", "Read"),
+            ("read_image", "Read"),
+            ("write", "Write"),
+            ("edit", "Edit"),
+            ("grep", "Grep"),
+            ("glob", "Glob"),
+            ("lsp", "LSP"),
+            ("web_search", "WebSearch"),
+            ("web_fetch", "WebFetch"),
+            ("subagent", "Agent"),
+            ("todo_write", "TodoWrite"),
+            ("ask_user_question", "AskUserQuestion"),
+            ("exit_plan_mode", "ExitPlanMode"),
+        ] {
+            let mut event = assistant_with_tool_call();
+            event["data"]["message"]["content"][1]["name"] = json!(dsh);
+            let out = normalize(&[event]);
+            assert_eq!(out[0]["message"]["content"][1]["name"], claude, "{dsh}");
+        }
+    }
+
+    /// A tool with no Claude counterpart — or one whose arguments differ —
+    /// keeps its own name rather than being forced onto a card that would read
+    /// fields it does not have.
+    #[test]
+    fn unmapped_dsh_tools_keep_their_name() {
+        for dsh in ["job_output", "send_message", "str_replace_editor", "skill"] {
+            let mut event = assistant_with_tool_call();
+            event["data"]["message"]["content"][1]["name"] = json!(dsh);
+            let out = normalize(&[event]);
+            assert_eq!(out[0]["message"]["content"][1]["name"], dsh);
+        }
     }
 
     /// A malformed argument blob is what a reader most needs to see, so it is

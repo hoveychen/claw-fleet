@@ -100,6 +100,13 @@ function formatInput(input: Record<string, unknown>, name?: string): string {
   if ("pattern" in input) return String(input.pattern);
   if ("path" in input) return basename(String(input.path));
   if ("query" in input) return String(input.query);
+  // dsh's web_search takes a *list* of queries where Claude's takes one. It
+  // arrives here under Claude's name (canonicalised in `dsh_messages.rs`), so
+  // without this the row falls to the raw-JSON last resort below.
+  if (Array.isArray(input.queries)) {
+    const qs = input.queries.filter((q): q is string => typeof q === "string");
+    if (qs.length > 0) return qs.join(" · ");
+  }
   if ("url" in input) return String(input.url);
   // Last resort (unhandled MCP tools, etc.): a compact single-line object, not a
   // multi-line pretty-print — the collapsed row is a one-line flex cell, so
@@ -839,7 +846,12 @@ function GlobInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLink
 /** Expanded body for `WebSearch`: the query as the headline over any allowed /
  *  blocked domain chips (`+example.com` / `−spam.com`). */
 function WebSearchInput({ block }: { block: ToolUseBlockType }) {
-  const query = typeof block.input.query === "string" ? block.input.query : "";
+  // `queries` is dsh's plural form of the same field (see `formatInput`).
+  const queries = Array.isArray(block.input.queries)
+    ? block.input.queries.filter((q): q is string => typeof q === "string")
+    : [];
+  const query =
+    typeof block.input.query === "string" ? block.input.query : queries.join(" · ");
   if (!query) return <ParamsBody block={block} />;
   const allow = Array.isArray(block.input.allowed_domains) ? block.input.allowed_domains : [];
   const deny = Array.isArray(block.input.blocked_domains) ? block.input.blocked_domains : [];

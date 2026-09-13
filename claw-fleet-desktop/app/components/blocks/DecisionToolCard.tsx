@@ -38,6 +38,9 @@ const inlineMarkdown: Components = {
 /** A question as it appears in the `tool_use` input — the richest source, and
  *  the only one carrying `preview` / `html` / `images` / `formFields`. */
 interface InputQuestion extends AskQuestion {
+  /** dsh's `ask_user_question` gives each question an id and keys its answers
+   *  on it rather than on the question text; the answer parser needs it. */
+  id?: string;
   html?: string;
   images?: FleetAskImage[];
   formFields?: FleetAskFormField[];
@@ -52,6 +55,7 @@ function readInputQuestions(input: Record<string, unknown>): InputQuestion[] {
     if (typeof q.question !== "string") continue;
     out.push({
       question: q.question,
+      id: typeof q.id === "string" ? q.id : undefined,
       header: typeof q.header === "string" ? q.header : undefined,
       multiSelect: q.multiSelect === true,
       options: Array.isArray(q.options)
