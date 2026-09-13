@@ -1,4 +1,4 @@
-//! LLM provider abstraction — trait + CLI implementations for Claude and Codex.
+//! LLM provider abstraction — trait + CLI implementations for Claude, Codex and dsh.
 //!
 //! Each provider wraps its respective CLI tool for non-interactive text completion.
 //! The trait is used by `claude_analyze` and `daily_report` modules so that any
@@ -150,7 +150,7 @@ pub struct Completion {
 }
 
 pub trait LlmProvider: Send + Sync {
-    /// Short identifier: "claude", "codex".
+    /// Short identifier: "claude", "codex", "dsh".
     fn name(&self) -> &str;
     /// Human-readable display name.
     fn display_name(&self) -> &str;
