@@ -315,6 +315,10 @@ export interface ToolDigest {
   bytes?: number;
   todoDone?: number;
   todoTotal?: number;
+  /** `TaskStop`: the first line of the command the killed background task was
+   *  running. The call's input carries only an opaque `task_id`, so this is the
+   *  only thing that tells a reader what was stopped. */
+  stoppedCommand?: string;
 }
 
 export interface RawMessage {

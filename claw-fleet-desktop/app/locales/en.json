@@ -1828,6 +1828,8 @@
     "tool_task_output": "Reading background task output",
     "tool_task_output_timed": "Waiting for background task · up to {{secs}}s",
     "tool_kill_shell": "Killing background shell",
+    "tool_task_stop": "Stopping background task",
+    "tool_task_stop_cmd": "Stopping background task: {{cmd}}",
     "tool_search": "Loading tools",
     "tool_search_load": "Loading tools {{names}}",
     "tool_search_query": "Searching tools: {{query}}",

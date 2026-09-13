@@ -6,7 +6,7 @@ import type {
   ToolResultBlock,
   ToolUseBlock as ToolUseBlockType,
 } from "../../types";
-import { asFileEditResult } from "../../toolResults";
+import { asFileEditResult, asTaskStopResult } from "../../toolResults";
 import type { PathLinkContext } from "../../markdown/pathLinks";
 import { DiffView } from "./DiffView";
 import { fileExtIcon } from "./Rail";
@@ -356,6 +356,7 @@ export function claudeToolSummary(
   name: string,
   input: Record<string, unknown>,
   t: (key: string, opts?: Record<string, unknown>) => string,
+  meta?: unknown,
 ): string | null {
   switch (name) {
     // { skill: "game-pilot", args?: "…" }
@@ -386,6 +387,16 @@ export function claudeToolSummary(
       return secs
         ? t("detail.tool_task_output_timed", { secs })
         : t("detail.tool_task_output");
+    }
+    // { task_id } — kills a background task. The input names only the opaque
+    // handle ("bsx9m7b94"), so the row used to say nothing about what was
+    // stopped. The answer is in the result: a shell task carries the `command`
+    // it was running. Multi-line commands collapse to their first line, the
+    // same shape the Bash row shows.
+    case "TaskStop": {
+      const stopped = asTaskStopResult(meta);
+      const cmd = stopped?.command?.trim().split("\n")[0].trim();
+      return cmd ? t("detail.tool_task_stop_cmd", { cmd }) : t("detail.tool_task_stop");
     }
     // { shell_id | bash_id } — kills a background shell (KillBash is the older name).
     case "KillShell":
@@ -1139,7 +1150,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   const namedSummary =
     fleetToolSummary(block.name, block.input, t) ??
     codexToolSummary(block.name, block.input, t) ??
-    claudeToolSummary(block.name, block.input, t);
+    claudeToolSummary(block.name, block.input, t, meta);
   const summary = namedSummary ?? formatInput(block.input, block.name);
   const summaryIsProse = namedSummary !== null;
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);

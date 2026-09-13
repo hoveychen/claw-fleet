@@ -593,7 +593,13 @@ function ToolStep({
     ? fleetSummary(fleetTool, b.input ?? {})
     : isDecisionTool(name)
       ? decisionSummary(b)
-      : toolSummary(b);
+      : name === "TaskStop"
+        ? // TaskStop 的 input 只有一个不可读的 task_id，「停掉了什么」只存在于
+          // 结果里（relay 把命令首行放进 digest.stoppedCommand）。
+          meta?.digest?.stoppedCommand
+          ? t("停止后台任务：{0}", meta.digest.stoppedCommand)
+          : t("停止后台任务")
+        : toolSummary(b);
   const expandable = !!b.id && !!client && !!jsonlPath;
   // "打开子代理": an Agent tool whose result carries the subagent's id and whose
   // transcript the snapshot has surfaced (`agent-<id>` row present).
