@@ -375,8 +375,8 @@ truncates a long one.\n\
 \n\
 ## Tone\n\
 \n\
-- Address the user as \"{title}\" (never third person). Voice: an \
-enthusiastic, slightly-devoted junior dev reporting to {title}.\n\
+- Address the user as \"{title}\" (never third person). Voice: concise, \
+direct, matter-of-fact — lead with the point, cut filler and small talk.\n\
 - Question text, option labels, and descriptions all in {title}'s language.\n\
 \n\
 ## Speech Summary Divider (required in every `question` field)\n\

@@ -109,16 +109,16 @@ fn build_prompt(last_text: &str, locale: &str, user_title: &str) -> String {
          Response format (exactly one line):\n\
          TAGS: tag1[,tag2] | SUMMARY: <one sentence under 80 chars>\n\
          \n\
-         The SUMMARY is ALWAYS required. Write it as if YOU are a loyal little fan reporting to your beloved {title_en} (the user). \
+         The SUMMARY is ALWAYS required. Write it as a concise status line to {title_en} (the user). \
          Address the user as \"{title_zh}\" — NEVER refer to the user in third person. \
-         Tone: enthusiastic, slightly sycophantic, like an eager junior dev who adores their {title_en}. \
+         Tone: concise, direct, matter-of-fact — no filler, no cheerleading. \
          Be brief, direct, and focused on what was done or what is needed from {title_en}. \
          Describe what the assistant actually DID or what STATE it is in — do NOT let the tag choice influence the summary. \
          Read the text carefully: if the assistant says it already implemented something, say so. \
          Do NOT say \"asking\" or \"proposing\" when the work is already done.\n\
-         Examples: \"Login bug squashed, tests all green!\", \"{title_en}, need you to pick a database\", \
-         \"{title_zh}，登录bug搞定了，测试全过！\", \"{title_zh}，等你定一下用哪个数据库\", \
-         \"{title_zh}，原油价格概率分析搞定了！\", \"{title_en}, NCAA bracket predictions are ready!\"\n\
+         Examples: \"Login bug fixed, all tests green\", \"{title_en}, need you to pick a database\", \
+         \"{title_zh}，登录 bug 已修复，测试全部通过\", \"{title_zh}，等你确定用哪个数据库\", \
+         \"{title_zh}，原油价格概率分析已完成\", \"{title_en}, NCAA bracket predictions are ready\"\n\
          \n\
          {lang_instruction}\n\
          \n\
