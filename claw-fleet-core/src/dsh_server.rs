@@ -1105,6 +1105,19 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn reap_sweeps_a_registry_invisible_orphan_by_signature() {
+        // `sweep_unregistered_orphans` reads the registry to learn which pids
+        // are spoken for, so it needs a FLEET_HOME of its own under the shared
+        // lock like every other registry test — without one it runs against
+        // whichever neighbour currently holds the env, reading that test's
+        // registry and writing to its file. Traced at `--test-threads=16` on
+        // 2026-09-13: this sweep ran with `a_busy_remembered_port_falls_back_to
+        // _os_assignment`'s temp home, so that test's live fixture was
+        // "unregistered" from this sweep's point of view.
+        with_temp_fleet_home(|_| reap_sweeps_a_registry_invisible_orphan_by_signature_body());
+    }
+
+    #[cfg(unix)]
+    fn reap_sweeps_a_registry_invisible_orphan_by_signature_body() {
         use std::io::Write as _;
         use std::os::unix::fs::PermissionsExt as _;
 
