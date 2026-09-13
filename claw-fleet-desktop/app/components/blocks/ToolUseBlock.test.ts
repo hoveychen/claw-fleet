@@ -235,6 +235,33 @@ describe("claudeToolSummary", () => {
     ).toBe("detail.tool_task_stop");
   });
 
+  it("TaskOutput → names the task when the result carries its description", () => {
+    const meta = {
+      retrieval_status: "success",
+      task: {
+        task_id: "byfs0uivv",
+        task_type: "local_bash",
+        status: "completed",
+        description: "Run core test suite",
+      },
+    };
+    expect(claudeToolSummary("TaskOutput", { task_id: "byfs0uivv" }, t, meta)).toBe(
+      'detail.tool_task_output_named|{"name":"Run core test suite"}',
+    );
+    expect(
+      claudeToolSummary(
+        "TaskOutput",
+        { task_id: "byfs0uivv", block: true, timeout: 600000 },
+        t,
+        meta,
+      ),
+    ).toBe('detail.tool_task_output_named_timed|{"name":"Run core test suite","secs":"600"}');
+    // Older string-shaped payload (1 of 76 measured) → the plain labels.
+    expect(claudeToolSummary("TaskOutput", { task_id: "abc" }, t, "<task_id>abc</task_id>")).toBe(
+      "detail.tool_task_output",
+    );
+  });
+
   it("returns null for any other tool (falls back to formatInput)", () => {
     expect(claudeToolSummary("Bash", { command: "ls" }, t)).toBeNull();
     expect(claudeToolSummary("Read", { file_path: "a.ts" }, t)).toBeNull();

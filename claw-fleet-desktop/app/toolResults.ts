@@ -232,6 +232,36 @@ export function asTaskStopResult(v: unknown): TaskStopToolResult | null {
   };
 }
 
+/**
+ * `TaskOutput` — reading (or waiting on) a background task. Like `TaskStop`,
+ * the input names only the opaque `task_id`; the readable handle is here, as
+ * `task.description` — the model-written summary line the task was launched
+ * with ("Run core test suite"). Measured across this machine's 300 newest
+ * transcripts: 75 of 76 payloads were this object shape and all 75 carried a
+ * description (the 76th was an older string-shaped payload, which returns null
+ * and falls back to the plain label).
+ */
+export interface TaskOutputToolResult {
+  taskId?: string;
+  taskType?: string;
+  status?: string;
+  description?: string;
+}
+
+export function asTaskOutputResult(v: unknown): TaskOutputToolResult | null {
+  if (!isRecord(v)) return null;
+  const task = isRecord(v.task) ? v.task : null;
+  if (!task) return null;
+  const taskId = str(task.task_id);
+  if (taskId === undefined) return null;
+  return {
+    taskId,
+    taskType: str(task.task_type),
+    status: str(task.status),
+    description: str(task.description),
+  };
+}
+
 function asPatchHunk(v: unknown): PatchHunk | null {
   if (!isRecord(v)) return null;
   const oldStart = num(v.oldStart);

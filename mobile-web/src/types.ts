@@ -319,6 +319,9 @@ export interface ToolDigest {
    *  running. The call's input carries only an opaque `task_id`, so this is the
    *  only thing that tells a reader what was stopped. */
   stoppedCommand?: string;
+  /** `TaskOutput`: the description the background task being read was launched
+   *  with ("Run core test suite"). Same reason as `stoppedCommand`. */
+  taskDescription?: string;
 }
 
 export interface RawMessage {

@@ -1542,6 +1542,22 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
             }
         }
     }
+    // TaskOutput: which background task is being read. Same problem as TaskStop
+    // — the input is an opaque `task_id` — and the readable handle is the
+    // description the task was launched with, nested under `task`.
+    if let Some(desc) = obj
+        .get("task")
+        .and_then(Value::as_object)
+        .and_then(|t| t.get("description"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        d.insert(
+            "taskDescription".into(),
+            truncate_chars(desc, ASK_SUMMARY_MAX_CHARS).into(),
+        );
+    }
     if d.is_empty() { None } else { Some(Value::Object(d)) }
 }
 
@@ -5811,6 +5827,20 @@ mod tests {
         // plain 「停止后台任务」 label).
         let agent = json!({"task_id": "b5v", "task_type": "local_agent"});
         assert!(tool_result_digest(&agent).is_none());
+    }
+
+    #[test]
+    fn tool_result_digest_carries_task_description() {
+        // TaskOutput: the readable handle is nested under `task`.
+        let meta = json!({
+            "retrieval_status": "success",
+            "task": {
+                "task_id": "byf", "task_type": "local_bash",
+                "status": "completed", "description": "Run core test suite"
+            }
+        });
+        let d = tool_result_digest(&meta).expect("digest");
+        assert_eq!(d["taskDescription"], "Run core test suite");
     }
 
     #[test]
