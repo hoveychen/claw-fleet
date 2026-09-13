@@ -36,6 +36,22 @@ function folderOf(slug: string): string {
   return i < 0 ? "" : slug.slice(0, i);
 }
 
+/** 把（已按 updatedMs 倒序的）文档按虚拟目录分组，组间也按各自最新一篇倒序。
+ *  组间若按 slug 字典序排，「未归类」这种老目录会永远钉在页首。 */
+export function groupDocsByRecency(docs: WikiDoc[]): [string, WikiDoc[]][] {
+  const byFolder = new Map<string, WikiDoc[]>();
+  for (const d of docs) {
+    const key = folderOf(d.slug);
+    const arr = byFolder.get(key);
+    if (arr) arr.push(d);
+    else byFolder.set(key, [d]);
+  }
+  const newest = (items: WikiDoc[]) => Math.max(...items.map((d) => d.updatedMs || 0));
+  return [...byFolder.entries()].sort(
+    (a, b) => newest(b[1]) - newest(a[1]) || a[0].localeCompare(b[0]),
+  );
+}
+
 /** slug 最后一段，用作组内显示名的兜底（当 title 缺失时）。 */
 function leafOf(slug: string): string {
   const i = slug.lastIndexOf("/");
@@ -90,15 +106,7 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
   // Empty/short query → grouped-by-folder browse view.
   const groups = useMemo(() => {
     if (!docs || searchActive) return [];
-    const byFolder = new Map<string, WikiDoc[]>();
-    for (const d of docs) {
-      if (!matchesWorkspace(d)) continue;
-      const key = folderOf(d.slug);
-      const arr = byFolder.get(key);
-      if (arr) arr.push(d);
-      else byFolder.set(key, [d]);
-    }
-    return [...byFolder.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return groupDocsByRecency(docs.filter(matchesWorkspace));
   }, [docs, searchActive, matchesWorkspace]);
 
   // Active query → flat relay-search results (resolved to docs, workspace-filtered).
