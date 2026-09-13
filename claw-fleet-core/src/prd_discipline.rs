@@ -554,6 +554,29 @@ Fleet 托管、durable，每个 interval spawn 一个全新的**本地** detache
 处理。别默认每个 tick 都起一个 LLM 会话。纯粹等一个外部事件、之后要接着干活的，\
 仍用上面的 `fleet watch`。\n\
 \n\
+### 绝不用空转命令保活回合\n\
+\n\
+**别为了「撑住这个回合」去发一条什么都不做的命令**——`echo waiting`、`true`、\
+`:`、裸 `sleep 30`，以及它们用 `;` / `&&` 串起来的组合。一次空转不比一次真工作\
+便宜：你每个回合都要重读整个上下文。实测一个会话连发 57 次 `echo waiting`，\
+重读了 1163 万 cache token，换回 57 遍「waiting」，约 $17.80——而它当时**已经\
+armed 了 `Monitor`**，正确答案就在手边，它还是在旁边空转。\n\
+\n\
+你会这么干，是因为你知道「后台 shell 会随回合结束而死」。这句是对的，但撑住回合\
+的办法不是空转。按你在等什么挑一条：\n\
+\n\
+- **等一个能前台跑的命令**（编译、测试、脚本）→ 直接前台跑它，把 Bash 的 \
+`timeout` 调大（上限 600000 毫秒）。一次调用等到底，只花一个 round trip。\n\
+- **等一个已经在跑的条件** → 用 `Monitor` 的 until 轮询。它在回合*内*阻塞，\
+轮询本身不花 round trip。已经 armed 了就等它，别在旁边另开空转。\n\
+- **等的事跨回合**（CI、构建产物、部署上线）→ `fleet watch`（见上），然后干净地\
+结束回合。\n\
+- **真的无事可等** → 直接结束回合。\n\
+\n\
+划清一条界：`sleep 45; <真正的检查命令>` **不**是空转——一次 round trip 换一次\
+真观察，那是划算的，随便用。被禁的只有零信息量的那种。Fleet 的 Bash PreToolUse \
+hook 会 deny 它们并把上面四条回给你；hook 是安全网，不是许可。\n\
+\n\
 ## Rule 6 —— 需求保真：别把不存在的需求写进计划\n\
 \n\
 Rule 1/2/4 管执行期的纪律，本规则管它们的上游——把{title}的请求变成计划的那一刻。长程计划最贵的失败不是做得慢，而是**做歪**：计划里混进了{title}从没要求的需求，实现又和这些幻觉需求强耦合，最后重构比重写还贵。本规则锁死这个失败模式。\n\
@@ -1239,6 +1262,36 @@ spawns an LLM session when it actually detects new data (probe exits 0). Do \
 NOT default to spawning an LLM session every tick. For purely waiting on an \
 event then continuing, use `fleet watch` above.\n\
 \n\
+### Never spin a no-op command to hold the turn open\n\
+\n\
+**Don't issue a command that does nothing just to \"keep this turn alive\"** — \
+`echo waiting`, `true`, `:`, a bare `sleep 30`, or any of them chained with \
+`;` / `&&`. A spin is no cheaper than real work: every turn re-reads your whole \
+context. Measured on one session that fired `echo waiting` 57 times: 11.6M \
+cached tokens re-read to produce 57 copies of the word \"waiting\", roughly \
+$17.80 — and that session **had already armed a `Monitor`**. The right answer \
+was in its hand and it spun anyway.\n\
+\n\
+You do this because you know background shells die when the turn ends. That \
+part is true; holding the turn open with a spin is not the fix. Pick by what \
+you're waiting on:\n\
+\n\
+- **A command you can run in the foreground** (a build, tests, a script) → just \
+run it in the foreground and raise the Bash `timeout` (max 600000 ms). One call \
+waits it out, for one round trip.\n\
+- **A condition already in flight** → `Monitor` with an until-loop. It blocks \
+*inside* the turn; the polling itself costs no round trips. If you've already \
+armed one, wait on it instead of spinning beside it.\n\
+- **Something that outlives the turn** (CI, a build artifact, a deploy) → \
+`fleet watch` (above), then end the turn cleanly.\n\
+- **Genuinely nothing to wait for** → just end the turn.\n\
+\n\
+One line to keep straight: `sleep 45; <a real probe>` is **not** a spin — one \
+round trip buys one real observation, which is a good trade; use it freely. \
+Only zero-information commands are off-limits. Fleet's Bash PreToolUse hook \
+denies them and hands you the four options above; the hook is a safety net, not \
+permission.\n\
+\n\
 ## Rule 6 — Requirement fidelity: don't plan hallucinated scope\n\
 \n\
 Rules 1/2/4 govern execution discipline; this rule governs their upstream — the moment you turn {title}'s request into a plan. The most expensive way a long plan fails is not by being slow, it's by going **sideways**: the plan picks up requirements {title} never asked for, the implementation couples tightly to those hallucinated requirements, and refactoring ends up costing more than a rewrite. This rule locks that failure mode down.\n\
@@ -1757,6 +1810,47 @@ mod tests {
     /// Checking both is the point: `render_guidance` early-returns an entirely
     /// separate Chinese body for `locale == "zh"`, so editing the English half
     /// alone leaves a zh session — the common case here — with none of it.
+    #[test]
+    fn render_forbids_no_op_spins_in_both_locales() {
+        // Prevention half of the idle-spin guard (see `crate::idle_spin`). The
+        // ban alone is not enough — an agent spins because it correctly fears
+        // losing backgrounded work, so both locales must also carry the four
+        // replacements and the `sleep N; <probe>` carve-out. Without those, the
+        // text reads as "don't" and the agent has nowhere to go but back.
+        let en = render_guidance("Boss", "en");
+        assert!(
+            en.contains("Never spin a no-op command to hold the turn open")
+                && en.contains("echo waiting"),
+            "[en] the no-op spin ban must be documented"
+        );
+        for replacement in ["timeout", "Monitor", "fleet watch", "just end the turn"] {
+            assert!(
+                en.contains(replacement),
+                "[en] the ban must point at {replacement}"
+            );
+        }
+        assert!(
+            en.contains("sleep 45"),
+            "[en] the cheaper sleep-then-probe neighbour must stay explicitly allowed"
+        );
+
+        let zh = render_guidance("老板", "zh");
+        assert!(
+            zh.contains("绝不用空转命令保活回合") && zh.contains("echo waiting"),
+            "[zh] the no-op spin ban must be documented"
+        );
+        for replacement in ["timeout", "Monitor", "fleet watch", "直接结束回合"] {
+            assert!(
+                zh.contains(replacement),
+                "[zh] the ban must point at {replacement}"
+            );
+        }
+        assert!(
+            zh.contains("sleep 45"),
+            "[zh] the cheaper sleep-then-probe neighbour must stay explicitly allowed"
+        );
+    }
+
     #[test]
     fn render_documents_the_plan_tree_mechanisms_in_both_locales() {
         let en = render_guidance("Boss", "en");
