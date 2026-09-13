@@ -367,7 +367,6 @@ const DICT: Record<string, string> = {
   "加载中…": "Loading…",
   "渲染中…（正在拉取页面资源）": "Rendering… (fetching page assets)",
   最新: "Latest",
-  未归类: "Ungrouped",
   "知识库加载失败：{0}": "Failed to load wiki: {0}",
   "加载失败：{0}": "Load failed: {0}",
   "还没有归档的文档": "No archived docs yet",

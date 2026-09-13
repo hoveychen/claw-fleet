@@ -86,15 +86,6 @@
   gap: 6px;
 }
 
-.groupLabel {
-  font-size: var(--t-meta, 11px);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-text-dim);
-  padding: 4px 2px 0;
-}
-
 .doc {
   display: flex;
   align-items: center;
