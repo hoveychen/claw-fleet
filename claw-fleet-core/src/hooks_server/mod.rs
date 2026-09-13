@@ -442,6 +442,14 @@ pub fn serve(opts: ServeOptions) {
             // ids are uuids), so the flip is broadcast once instead of on
             // every tick for as long as the card sits there.
             let mut announced_parked: std::collections::HashSet<String> = std::collections::HashSet::new();
+            // Turn-completion cards: previous status per session (to catch the
+            // busy→WaitingInput transition) and when each session's current turn
+            // started (to ignore cards from earlier turns).
+            let mut prev_statuses: std::collections::HashMap<String, SessionStatus> =
+                std::collections::HashMap::new();
+            let mut turn_started: std::collections::HashMap<String, u64> =
+                std::collections::HashMap::new();
+            let turn_cards = crate::turn_completion_card::TurnCardBroker::start();
 
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -546,6 +554,57 @@ pub fn serve(opts: ServeOptions) {
                         }
                     }
                     prev_alert_ids = waiting_ids;
+
+                    // Turn-completion cards: a task session that transitions
+                    // busy→WaitingInput without having raised a decision card
+                    // gets a "done" card so the phone notification fires. This
+                    // mirrors the desktop's `detect_waiting_transitions`.
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let busy = |s: &SessionStatus| {
+                        matches!(
+                            s,
+                            SessionStatus::Thinking
+                                | SessionStatus::Executing
+                                | SessionStatus::Streaming
+                                | SessionStatus::Processing
+                                | SessionStatus::Delegating
+                                | SessionStatus::Active
+                        )
+                    };
+                    let mut next_statuses: std::collections::HashMap<String, SessionStatus> =
+                        std::collections::HashMap::new();
+                    for sess in sessions {
+                        if sess.is_subagent {
+                            continue;
+                        }
+                        let was_busy = prev_statuses.get(&sess.id).map_or(false, busy);
+                        if sess.status == SessionStatus::WaitingInput && was_busy {
+                            let since = turn_started.get(&sess.id).copied().unwrap_or(now_ms);
+                            match crate::turn_completion_card::maybe_raise(
+                                sess,
+                                &sess.last_message_preview.clone().unwrap_or_default(),
+                                since,
+                            ) {
+                                Ok(Some(card_id)) => {
+                                    turn_cards.offer(crate::turn_completion_card::TurnCardJob {
+                                        card_id,
+                                        session: sess.clone(),
+                                        deadline: crate::turn_completion_card::default_deadline(),
+                                    });
+                                }
+                                Ok(None) => {}
+                                Err(e) => crate::log_debug(&format!("turn card: {e}")),
+                            }
+                        }
+                        if busy(&sess.status) && !was_busy {
+                            turn_started.insert(sess.id.clone(), now_ms);
+                        }
+                        next_statuses.insert(sess.id.clone(), sess.status.clone());
+                    }
+                    prev_statuses = next_statuses;
                 }
                 // Card decoration below. Empty on a cold tick, which
                 // `resolve_pending_display`'s "only fill what is missing" rule
