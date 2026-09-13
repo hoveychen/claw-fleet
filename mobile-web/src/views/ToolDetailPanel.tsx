@@ -94,9 +94,22 @@ function DiffBody({ result }: { result: Record<string, unknown> }) {
   );
 }
 
+/**
+ * Claude Code writes this to stderr whenever a command `cd`s away and the
+ * harness restores the session cwd. It is housekeeping, not the command's
+ * output, so printing it in the red stderr block claims a failure that never
+ * happened — and it is the *only* thing most stderrs contain (measured
+ * 2026-09-12: 289/289 non-empty stderrs across the 120 newest transcripts).
+ * The desktop strips it in `toolResults.ts::asBashResult`; this is its twin.
+ */
+const CWD_RESET_NOTICE = /^[ \t]*Shell cwd was reset to .*$/gm;
+
 function ShellBody({ result, fallback }: { result: Record<string, unknown> | null; fallback: string }) {
   const stdout = typeof result?.stdout === "string" ? result.stdout : fallback;
-  const stderr = typeof result?.stderr === "string" ? result.stderr : "";
+  const rawStderr = typeof result?.stderr === "string" ? result.stderr : "";
+  const stderr = rawStderr.includes("Shell cwd was reset to ")
+    ? rawStderr.replace(CWD_RESET_NOTICE, "")
+    : rawStderr;
   return (
     <>
       {stdout.trim() && <pre className={styles.pre}>{stdout}</pre>}
