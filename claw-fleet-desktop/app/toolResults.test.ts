@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { asWebSearchResult } from "./toolResults";
+import { asBashResult, asWebSearchResult } from "./toolResults";
+
+describe("asBashResult", () => {
+  // The exact wire shape measured in transcripts: a leading newline, then the
+  // harness's cwd-restore notice, and nothing the command itself wrote.
+  const notice = "\nShell cwd was reset to /Users/h/workspace/foxy-switcher";
+
+  it("drops the harness cwd-reset notice so it can't light the stderr chip", () => {
+    const r = asBashResult({ stdout: "ok\n", stderr: notice, interrupted: false });
+    expect(r!.stderr.trim()).toBe("");
+  });
+
+  it("keeps real stderr that arrives alongside the notice", () => {
+    const r = asBashResult({
+      stdout: "",
+      stderr: `warning: unused variable${notice}`,
+      interrupted: false,
+    });
+    expect(r!.stderr.trim()).toBe("warning: unused variable");
+  });
+
+  it("leaves ordinary stderr untouched", () => {
+    const r = asBashResult({ stdout: "", stderr: "fatal: not a git repository", interrupted: false });
+    expect(r!.stderr).toBe("fatal: not a git repository");
+  });
+});
 
 describe("asWebSearchResult", () => {
   it("flattens links out of the mixed narration/result array", () => {
