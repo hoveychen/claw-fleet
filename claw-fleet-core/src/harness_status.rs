@@ -546,14 +546,23 @@ mod tests {
         assert!(old.outdated, "0.1.1 must be flagged outdated");
         assert_eq!(old.min_version.as_deref(), Some(crate::dsh_server::MIN_VERSION));
 
+        // The 0.1.2 wire-contract build is now below the content floor and
+        // must be flagged, not silently accepted.
+        let below_floor = dsh_status_from_probe(
+            Some("/usr/local/bin/dsh".to_string()),
+            Some("npm-global"),
+            Some("0.1.2".to_string()),
+        );
+        assert!(below_floor.outdated, "0.1.2 must be flagged outdated");
+
         let shipping = dsh_status_from_probe(
             Some("/usr/local/bin/dsh".to_string()),
             Some("npm-global"),
-            Some("0.1.2-rc.1".to_string()),
+            Some("0.1.5-rc.1".to_string()),
         );
         assert!(
             !shipping.outdated,
-            "0.1.2-rc.1 is the shipping build and must not be flagged"
+            "0.1.5-rc.1 is the shipping build and must not be flagged"
         );
 
         // Not installed at all is not "outdated", and an unreadable version
