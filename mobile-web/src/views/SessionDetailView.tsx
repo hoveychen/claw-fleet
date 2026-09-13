@@ -599,7 +599,10 @@ function ToolStep({
           meta?.digest?.stoppedCommand
           ? t("停止后台任务：{0}", meta.digest.stoppedCommand)
           : t("停止后台任务")
-        : toolSummary(b);
+        : // TaskOutput 同理：读的是哪个任务只在结果里（digest.taskDescription）。
+          name === "TaskOutput" && meta?.digest?.taskDescription
+          ? t("读取后台任务输出：{0}", meta.digest.taskDescription)
+          : toolSummary(b);
   const expandable = !!b.id && !!client && !!jsonlPath;
   // "打开子代理": an Agent tool whose result carries the subagent's id and whose
   // transcript the snapshot has surfaced (`agent-<id>` row present).
