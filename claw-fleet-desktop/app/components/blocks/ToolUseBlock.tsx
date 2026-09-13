@@ -6,7 +6,7 @@ import type {
   ToolResultBlock,
   ToolUseBlock as ToolUseBlockType,
 } from "../../types";
-import { asFileEditResult, asTaskStopResult } from "../../toolResults";
+import { asFileEditResult, asTaskOutputResult, asTaskStopResult } from "../../toolResults";
 import type { PathLinkContext } from "../../markdown/pathLinks";
 import { DiffView } from "./DiffView";
 import { fileExtIcon } from "./Rail";
@@ -382,8 +382,17 @@ export function claudeToolSummary(
       return t("detail.tool_bash_output");
     // { task_id, block, timeout? } — reads or waits for any Claude background
     // task. A blocking call can sit for minutes, so keep its timeout visible.
+    // Which task is being read lives in the result, as the description the task
+    // was launched with ("Run core test suite"); the input's `task_id` alone
+    // told the reader nothing.
     case "TaskOutput": {
       const secs = input.block === true ? timeoutMsToSecs(input.timeout) : null;
+      const name = asTaskOutputResult(meta)?.description?.trim();
+      if (name) {
+        return secs
+          ? t("detail.tool_task_output_named_timed", { name, secs })
+          : t("detail.tool_task_output_named", { name });
+      }
       return secs
         ? t("detail.tool_task_output_timed", { secs })
         : t("detail.tool_task_output");
