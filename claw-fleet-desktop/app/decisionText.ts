@@ -149,6 +149,58 @@ export function normalizeAnswer(
 }
 
 /**
+ * dsh's `ask_user_question` result shape, mapped back onto question text.
+ *
+ * dsh answers as `{"answers":[{"id":"<question id>","selected":["<label>"],
+ * "custom":"<free text>"}]}`. `selected` holds the chosen option labels (empty
+ * when 老板 typed instead), `custom` the free-text escape hatch; a card may
+ * carry both. The id is the question's own `id` field in the tool input, which
+ * is why `readInputQuestions` keeps it.
+ *
+ * Returns `{}` for any other shape, so the text-keyed parsers downstream still
+ * get their turn.
+ */
+function parseDshAnswers(
+  text: string,
+  questions: Array<AskQuestion & { id?: string }>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return out;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return out;
+  }
+  if (typeof parsed !== "object" || parsed === null) return out;
+  const list = (parsed as Record<string, unknown>).answers;
+  if (!Array.isArray(list)) return out;
+
+  // Single-question cards are the common case and dsh sometimes emits an id
+  // that does not appear in the input; fall back to the only question there is
+  // rather than dropping an answer we plainly have.
+  const byId = new Map(questions.filter((q) => q.id).map((q) => [q.id as string, q.question]));
+  for (const raw of list) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const a = raw as Record<string, unknown>;
+    const id = typeof a.id === "string" ? a.id : undefined;
+    const question =
+      (id ? byId.get(id) : undefined) ??
+      (list.length === 1 && questions.length === 1 ? questions[0].question : undefined);
+    if (!question) continue;
+    const selected = Array.isArray(a.selected)
+      ? a.selected.filter((s): s is string => typeof s === "string")
+      : [];
+    const custom = typeof a.custom === "string" ? a.custom.trim() : "";
+    const label = selected.length > 0 ? selected.join(", ") : custom;
+    if (label) out[question] = label;
+  }
+  return out;
+}
+
+/**
  * Last-resort answer recovery for transcripts with no `toolUseResult` (an older
  * CLI, or a non-Claude agent source). `AskUserQuestion` stringifies its result
  * as:
@@ -162,9 +214,16 @@ export function normalizeAnswer(
  */
 export function parseAnswersFromResultText(
   text: string,
-  questions: AskQuestion[],
+  questions: Array<AskQuestion & { id?: string }>,
 ): Record<string, string> {
   const answers: Record<string, string> = {};
+
+  // dsh's `ask_user_question` answers as `{"answers":[{id, selected, custom}]}`
+  // — an array keyed by the *question id*, not by question text like the two
+  // shapes below. Without this branch a dsh decision card renders its options
+  // but never shows which one 老板 picked.
+  const fromDsh = parseDshAnswers(text, questions);
+  if (Object.keys(fromDsh).length > 0) return fromDsh;
 
   // Codex's deferred `fleet__ask` call returns the answer map as bare JSON,
   // unlike Claude Code's prose wrapper below. Only copy keys belonging to the

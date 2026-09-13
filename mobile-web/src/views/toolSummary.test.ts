@@ -113,3 +113,31 @@ describe("toolSummary", () => {
     expect(toolSummary(toolUse("Read", { file_path: "/a/b.rs" }))).toBe("/a/b.rs");
   });
 });
+
+// dsh's tools with no Claude counterpart carry none of TOOL_SUMMARY_FIELDS, so
+// before this they rendered as a bare icon with no text beside it.
+describe("toolSummary for dsh's own tools", () => {
+  const block = (name: string, input: Record<string, unknown>) =>
+    ({ type: "tool_use", name, input }) as unknown as ContentBlock;
+
+  it("labels background jobs and terminals", () => {
+    // The test locale is English, so these also prove the dict entries landed.
+    expect(toolSummary(block("job_output", { job_id: "796215df" }))).toBe(
+      "Reading background job output",
+    );
+    expect(toolSummary(block("terminal_open", { type: "shell" }))).toBe(
+      "Opening a persistent terminal",
+    );
+  });
+
+  it("leads with the text a send carried, clipped to one line", () => {
+    expect(toolSummary(block("terminal_send", { sessionId: "t1", text: "cargo test\nnext" })))
+      .toBe("Sending input: cargo test");
+    expect(toolSummary(block("report", { output: "已定位根因\n细节…" })))
+      .toBe("Reporting: 已定位根因");
+  });
+
+  it("leaves tools it does not know to the field fallback", () => {
+    expect(toolSummary(block("cordis_run", { path: "/w/a.rs" }))).toBe("/w/a.rs");
+  });
+});

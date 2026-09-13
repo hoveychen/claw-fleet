@@ -104,7 +104,20 @@ export type WorkRunCategory = "edit" | "run" | "web" | "explore" | "think" | "wo
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
 const WEB_TOOLS = new Set(["WebSearch", "WebFetch"]);
-const EXPLORE_TOOLS = new Set(["Read", "Grep", "Glob", "Explore", "LSP", "TodoWrite", "TodoRead"]);
+const EXPLORE_TOOLS = new Set([
+  "Read", "Grep", "Glob", "Explore", "LSP", "TodoWrite", "TodoRead",
+  // dsh's transcript-search tools; no Claude counterpart, so they keep their
+  // own names through `dsh_messages.rs` and have to be named here.
+  "session_search", "session_trace",
+  "session_event_read", "session_event_search", "session_event_trace",
+]);
+/** Tools that make the run a "ran something" run. dsh's persistent terminals
+ *  and background jobs are the same act as a Bash call. */
+const RUN_TOOLS = new Set([
+  "Bash", "PowerShell",
+  "terminal_send", "terminal_open", "terminal_signal", "terminal_close",
+  "job_output", "job_kill", "run_code",
+]);
 
 /**
  * Category precedence: what the run *changed* outranks what it merely looked
@@ -116,7 +129,7 @@ const EXPLORE_TOOLS = new Set(["Read", "Grep", "Glob", "Explore", "LSP", "TodoWr
 export function runCategory(toolNames: string[]): WorkRunCategory {
   if (toolNames.length === 0) return "think";
   if (toolNames.some((n) => EDIT_TOOLS.has(n))) return "edit";
-  if (toolNames.some((n) => n === "Bash" || n === "PowerShell")) return "run";
+  if (toolNames.some((n) => RUN_TOOLS.has(n))) return "run";
   if (toolNames.every((n) => WEB_TOOLS.has(n))) return "web";
   if (toolNames.every((n) => EXPLORE_TOOLS.has(n) || WEB_TOOLS.has(n))) return "explore";
   return "work";

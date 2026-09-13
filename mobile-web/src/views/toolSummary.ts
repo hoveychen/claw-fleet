@@ -138,9 +138,78 @@ export function toolSummary(block: ContentBlock): string {
     }
   }
 
+  const dsh = dshToolSummary(block.name, input);
+  if (dsh) return dsh;
+
   for (const field of TOOL_SUMMARY_FIELDS) {
     const value = input[field];
     if (typeof value === "string" && value) return value;
   }
   return "";
+}
+
+/**
+ * dsh's tools with no Claude counterpart. They keep their own names through
+ * `dsh_messages.rs`, and none of their inputs carries a `TOOL_SUMMARY_FIELDS`
+ * key — so without this every one of them rendered as a bare icon with no text
+ * at all. Mirrors the desktop's `dshToolSummary`.
+ */
+function dshToolSummary(name: string | undefined, input: Record<string, unknown>): string {
+  const first = (key: string) => {
+    const v = input[key];
+    if (typeof v !== "string") return "";
+    const line = v.trim().split("\n", 1)[0].trim();
+    return line.length > 60 ? `${line.slice(0, 59)}…` : line;
+  };
+  switch (name) {
+    case "job_output":
+      return t("读取后台任务输出");
+    case "job_kill":
+      return t("停止后台任务");
+    case "job_list":
+      return t("列出后台任务");
+    case "terminal_open":
+      return t("打开常驻终端");
+    case "terminal_list":
+      return t("列出常驻终端");
+    case "terminal_read":
+      return t("读取终端输出");
+    case "terminal_send": {
+      const text = first("text");
+      return text ? t("输入：{0}", text) : t("向终端发送输入");
+    }
+    case "terminal_close":
+      return t("关闭常驻终端");
+    case "terminal_signal":
+      return t("向终端发送信号");
+    case "send_message": {
+      const msg = first("message");
+      return msg ? t("发给子代理：{0}", msg) : t("给子代理发消息");
+    }
+    case "list_agents":
+      return t("列出子代理");
+    case "interrupt_agent":
+      return t("打断子代理");
+    case "report": {
+      const out = first("output");
+      return out ? t("向上级汇报：{0}", out) : t("向上级汇报");
+    }
+    case "create_goal":
+    case "update_goal":
+      return t("更新目标");
+    case "get_goal":
+      return t("读取目标");
+    case "schedule_create":
+    case "schedule_delete":
+    case "schedule_list":
+      return t("管理定时任务");
+    case "session_search":
+    case "session_trace":
+    case "session_event_read":
+    case "session_event_search":
+    case "session_event_trace":
+      return t("检索会话记录");
+    default:
+      return "";
+  }
 }

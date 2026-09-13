@@ -91,6 +91,88 @@ fn model_of(message: &Value) -> Option<String> {
     (!provider.is_empty() && !model.is_empty()).then(|| format!("{provider}/{model}"))
 }
 
+/// dsh's built-in tools carry lowercase snake_case names (`bash`, `read`,
+/// `grep`); every renderer table downstream is keyed on Claude's names — the
+/// rail's icon map, the collapsed row's summary rule, the read-only fold, the
+/// hit-count badges, the work-run categoriser, the decision-card detector. A
+/// dsh name matches none of them, so every dsh step used to render as a
+/// generic wrench above a naked argument: a `grep` showed only its regex, with
+/// nothing on screen naming the tool.
+///
+/// Translating here — the one place a dsh tool call becomes a `tool_use`, and
+/// the same seam where `reasoning` becomes `thinking` below — lights all three
+/// clients at once, instead of each growing its own alias table.
+///
+/// This function handles the names whose argument shape is *already* identical
+/// to the Claude tool's — the input keys are what the cards actually read, so a
+/// name alone is only half the translation. The two dsh tools that carry the
+/// same meaning under different keys (`str_replace_editor`, `skill`) are
+/// renamed *and* rekeyed by [`rekeyed_tool_call`]. Unmapped names pass through
+/// and keep the generic card.
+fn canonical_tool_name(name: &str) -> &str {
+    match name {
+        "bash" => "Bash",
+        "pwsh" => "PowerShell",
+        // `read_image` takes the same `file_path` and renders as a Read whose
+        // result is an image — which is exactly Claude's Read of an image.
+        "read" | "read_image" => "Read",
+        "write" => "Write",
+        "edit" => "Edit",
+        "grep" => "Grep",
+        "glob" => "Glob",
+        "lsp" => "LSP",
+        "web_search" => "WebSearch",
+        "web_fetch" => "WebFetch",
+        "subagent" => "Agent",
+        "todo_write" => "TodoWrite",
+        "ask_user_question" => "AskUserQuestion",
+        "exit_plan_mode" => "ExitPlanMode",
+        other => other,
+    }
+}
+
+/// The two dsh tools that mean a Claude tool but spell its arguments
+/// differently. A rename alone would be worse than nothing here: the card would
+/// carry the right icon and then read fields that are not there, so a
+/// `str_replace` would draw an empty diff.
+///
+/// * `str_replace_editor` is four tools behind one name, selected by `command`:
+///   `view` is a Read, `create` a Write, `str_replace` an Edit, `insert` an
+///   Edit whose "before" is empty (an insertion really is an all-added hunk).
+///   Its file argument is `path`, and its strings are `old_str` / `new_str` /
+///   `file_text`.
+/// * `skill` names its target `name` where Claude's names it `skill`.
+///
+/// Returns `None` when the call is not one of these, or when its own arguments
+/// are incomplete (a `str_replace` with no `path`) — an unrecognised shape
+/// keeps the generic card, which shows the raw arguments honestly.
+fn rekeyed_tool_call(name: &str, input: &Value) -> Option<(&'static str, Value)> {
+    let s = |key: &str| input.get(key).and_then(Value::as_str);
+    match name {
+        "skill" => Some(("Skill", json!({ "skill": s("name")? }))),
+        "str_replace_editor" => {
+            let path = s("path")?;
+            match input.get("command").and_then(Value::as_str)? {
+                "view" => Some(("Read", json!({ "file_path": path }))),
+                "create" => Some((
+                    "Write",
+                    json!({ "file_path": path, "content": s("file_text").unwrap_or("") }),
+                )),
+                "str_replace" | "insert" => Some((
+                    "Edit",
+                    json!({
+                        "file_path": path,
+                        "old_string": s("old_str").unwrap_or(""),
+                        "new_string": s("new_str").unwrap_or(""),
+                    }),
+                )),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Convert one assistant content block.
 ///
 /// Text passes through unchanged (dsh and Claude agree on that shape). A
@@ -107,10 +189,17 @@ fn assistant_block(block: &Value) -> Option<Value> {
                 .ok()
                 .filter(Value::is_object)
                 .unwrap_or_else(|| json!({ "raw": arguments }));
+            let (name, input) = match block.get("name").and_then(Value::as_str) {
+                Some(raw) => match rekeyed_tool_call(raw, &input) {
+                    Some((name, input)) => (json!(name), input),
+                    None => (json!(canonical_tool_name(raw)), input),
+                },
+                None => (Value::Null, input),
+            };
             Some(json!({
                 "type": "tool_use",
                 "id": block.get("id").cloned().unwrap_or(Value::Null),
-                "name": block.get("name").cloned().unwrap_or(Value::Null),
+                "name": name,
                 "input": input,
             }))
         }
@@ -525,9 +614,119 @@ mod tests {
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[1]["type"], "tool_use");
         assert_eq!(content[1]["id"], "toolu_bdrk_01MUz");
-        assert_eq!(content[1]["name"], "bash");
+        // Canonicalised to Claude's name — dsh calls it `bash`.
+        assert_eq!(content[1]["name"], "Bash");
         // Parsed, not the raw JSON string dsh puts on the wire.
         assert_eq!(content[1]["input"]["command"], "touch /tmp/x");
+    }
+
+    /// Every dsh tool whose arguments match a Claude tool's must arrive under
+    /// the Claude name, or the renderer's icon / fold / badge tables — all
+    /// keyed on those names — skip it and it draws as a bare wrench.
+    #[test]
+    fn dsh_tool_names_are_canonicalised() {
+        for (dsh, claude) in [
+            ("bash", "Bash"),
+            ("pwsh", "PowerShell"),
+            ("read", "Read"),
+            ("read_image", "Read"),
+            ("write", "Write"),
+            ("edit", "Edit"),
+            ("grep", "Grep"),
+            ("glob", "Glob"),
+            ("lsp", "LSP"),
+            ("web_search", "WebSearch"),
+            ("web_fetch", "WebFetch"),
+            ("subagent", "Agent"),
+            ("todo_write", "TodoWrite"),
+            ("ask_user_question", "AskUserQuestion"),
+            ("exit_plan_mode", "ExitPlanMode"),
+        ] {
+            let mut event = assistant_with_tool_call();
+            event["data"]["message"]["content"][1]["name"] = json!(dsh);
+            let out = normalize(&[event]);
+            assert_eq!(out[0]["message"]["content"][1]["name"], claude, "{dsh}");
+        }
+    }
+
+    /// A tool with no Claude counterpart keeps its own name rather than being
+    /// forced onto a card that would read fields it does not have.
+    #[test]
+    fn unmapped_dsh_tools_keep_their_name() {
+        for dsh in ["job_output", "send_message", "run_code", "terminal_open"] {
+            let mut event = assistant_with_tool_call();
+            event["data"]["message"]["content"][1]["name"] = json!(dsh);
+            let out = normalize(&[event]);
+            assert_eq!(out[0]["message"]["content"][1]["name"], dsh);
+        }
+    }
+
+    /// One tool call through the rekeying path, by its raw dsh arguments.
+    fn rekeyed(name: &str, arguments: Value) -> Value {
+        let mut event = assistant_with_tool_call();
+        let call = &mut event["data"]["message"]["content"][1];
+        call["name"] = json!(name);
+        call["arguments"] = json!(arguments.to_string());
+        normalize(&[event])[0]["message"]["content"][1].clone()
+    }
+
+    /// `str_replace_editor` is four tools behind one name. Each `command` has
+    /// to land on the Claude tool that means the same thing *and* under the
+    /// keys that tool's card reads — a rename alone would draw an empty diff.
+    #[test]
+    fn str_replace_editor_becomes_the_claude_tool_its_command_means() {
+        let view = rekeyed("str_replace_editor", json!({"command": "view", "path": "/w/a.rs"}));
+        assert_eq!(view["name"], "Read");
+        assert_eq!(view["input"]["file_path"], "/w/a.rs");
+
+        let create = rekeyed(
+            "str_replace_editor",
+            json!({"command": "create", "path": "/w/b.rs", "file_text": "fn main() {}"}),
+        );
+        assert_eq!(create["name"], "Write");
+        assert_eq!(create["input"]["content"], "fn main() {}");
+
+        let replace = rekeyed(
+            "str_replace_editor",
+            json!({"command": "str_replace", "path": "/w/c.rs", "old_str": "a", "new_str": "b"}),
+        );
+        assert_eq!(replace["name"], "Edit");
+        assert_eq!(replace["input"]["old_string"], "a");
+        assert_eq!(replace["input"]["new_string"], "b");
+
+        // An insertion is an all-added hunk: no "before", only "after".
+        let insert = rekeyed(
+            "str_replace_editor",
+            json!({"command": "insert", "path": "/w/d.rs", "insert_line": 7, "new_str": "x"}),
+        );
+        assert_eq!(insert["name"], "Edit");
+        assert_eq!(insert["input"]["old_string"], "");
+        assert_eq!(insert["input"]["new_string"], "x");
+    }
+
+    /// An incomplete or unknown `str_replace_editor` call keeps its own name,
+    /// so the generic card shows the raw arguments instead of an Edit card
+    /// reading fields that are not there.
+    #[test]
+    fn an_unusable_str_replace_editor_call_is_left_alone() {
+        for args in [
+            json!({"command": "str_replace", "old_str": "a"}), // no path
+            json!({"path": "/w/a.rs"}),                        // no command
+            json!({"command": "undelete", "path": "/w/a.rs"}), // unknown command
+        ] {
+            assert_eq!(rekeyed("str_replace_editor", args)["name"], "str_replace_editor");
+        }
+    }
+
+    /// dsh's `skill` names its target `name`; Claude's card reads `skill`.
+    #[test]
+    fn the_skill_tool_is_renamed_and_rekeyed() {
+        let call = rekeyed("skill", json!({"name": "muveectl"}));
+        assert_eq!(call["name"], "Skill");
+        assert_eq!(call["input"]["skill"], "muveectl");
+
+        // No target to rekey — keep the raw call rather than invent one.
+        assert_eq!(rekeyed("skill", json!({}))["name"], "skill");
     }
 
     /// A malformed argument blob is what a reader most needs to see, so it is
