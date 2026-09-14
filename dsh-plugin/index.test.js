@@ -150,6 +150,35 @@ describe('fetchSections', () => {
     assert.deepEqual(await fetchSections({ fleetBin, timeoutMs: 300 }, '/ws', 's'), [])
   })
 
+  // A Fleet build older than `--ctx-used` exits 2 on the unknown flag. Without
+  // the retry that takes down the plan and guidance sections too — the ones
+  // that worked before the reminder existed.
+  test('a CLI that rejects the pressure flags is retried without them', async () => {
+    const fleetBin = stubFleet(
+      'old-fleet',
+      'case "$*" in *--ctx-used*) echo "error: unexpected argument" >&2; exit 2;; esac\n' +
+        'printf \'{"sections":[{"name":"fleet-prd","text":"PLANS"}]}\'',
+    )
+    const sections = await fetchSections({ fleetBin, timeoutMs: 5000 }, '/ws', 's', {
+      used: 260_000,
+      window: 1_000_000,
+      model: 'deepseek-flash',
+    })
+    assert.deepEqual(sections, [{ name: 'fleet-prd', text: 'PLANS' }])
+  })
+
+  test('a CLI that fails either way still yields nothing rather than throwing', async () => {
+    const fleetBin = stubFleet('always-fails', 'exit 1')
+    assert.deepEqual(
+      await fetchSections({ fleetBin, timeoutMs: 5000 }, '/ws', 's', {
+        used: 260_000,
+        window: 1_000_000,
+        model: 'm',
+      }),
+      [],
+    )
+  })
+
   // The measurement is taken here and the tier policy lives in the CLI, so the
   // numbers have to survive the argv crossing.
   test('forwards the measured pressure, and omits it when unmeasured', async () => {

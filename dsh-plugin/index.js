@@ -106,7 +106,35 @@ function deepFreeze(value) {
  * @param {{used: number, window: number, model: string}} [pressure]
  * @returns {Promise<{sections: Array<{name: string, text: string}>, sandboxMode: string | undefined}>}
  */
-export function fetchContext(config, cwd, sessionId, pressure) {
+export async function fetchContext(config, cwd, sessionId, pressure) {
+  const result = await runFleet(config, cwd, sessionId, pressure)
+  // Version skew: this plugin is installed from `~/.fleet/dsh-plugin`, but
+  // `fleetBin` points at whichever Fleet build is on the machine, and the two
+  // update independently. A build predating `--ctx-used` rejects the whole
+  // invocation, which would take the plan and guidance sections down with the
+  // reminder — the sections that were working before this feature existed.
+  // Retrying without the pressure flags costs one process on such a machine
+  // and keeps the older contract intact until Fleet catches up.
+  if (result === undefined) {
+    return pressure
+      ? ((await runFleet(config, cwd, sessionId, undefined)) ?? NOTHING)
+      : NOTHING
+  }
+  return result
+}
+
+/** What a CLI that could not answer yields: inject nothing, fail nothing. */
+const NOTHING = { sections: [], sandboxMode: undefined }
+
+/**
+ * One `fleet dsh-context` invocation.
+ *
+ * @returns {Promise<{sections: Array<{name: string, text: string}>, sandboxMode: string | undefined} | undefined>}
+ *   `undefined` when the process itself failed — the signal {@link fetchContext}
+ *   retries on. A process that ran but said nothing useful resolves to empty
+ *   sections instead, because re-running it would say the same thing.
+ */
+function runFleet(config, cwd, sessionId, pressure) {
   const args = ['dsh-context', '--cwd', cwd, '--session', sessionId]
   if (config.userTitle) args.push('--title', config.userTitle)
   if (config.locale) args.push('--locale', config.locale)
@@ -114,14 +142,14 @@ export function fetchContext(config, cwd, sessionId, pressure) {
     args.push('--ctx-used', String(pressure.used), '--ctx-window', String(pressure.window))
     if (pressure.model) args.push('--ctx-model', pressure.model)
   }
-  const nothing = { sections: [], sandboxMode: undefined }
+  const nothing = NOTHING
   return new Promise((resolve) => {
     execFile(
       config.fleetBin,
       args,
       { timeout: config.timeoutMs, maxBuffer: 4 * 1024 * 1024 },
       (error, stdout) => {
-        if (error) return resolve(nothing)
+        if (error) return resolve(undefined)
         let parsed
         try {
           parsed = JSON.parse(stdout)
