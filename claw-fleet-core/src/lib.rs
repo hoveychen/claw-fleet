@@ -26,6 +26,7 @@ pub mod codex_usage_history;
 pub mod console;
 pub mod consumer_heartbeat;
 pub mod context_files;
+pub mod context_pressure;
 pub mod control_plane;
 pub mod control_plane_prefs;
 pub mod daily_report;
