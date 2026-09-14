@@ -179,6 +179,27 @@ describe('fetchSections', () => {
     )
   })
 
+  // A `fleetBin` that cannot answer means a dsh session runs with no Fleet
+  // context at all. Degrading is correct; degrading *silently* is what made the
+  // last skew take a debugging session to spot, so the pair gets named once.
+  test('a CLI that fails either way names the skewed pair on stderr, once', async () => {
+    const fleetBin = stubFleet('mute-fleet', 'exit 1')
+    const printed = []
+    const realError = console.error
+    console.error = (m) => printed.push(String(m))
+    try {
+      const config = { fleetBin, timeoutMs: 5000, fleetVersion: '9.9.9' }
+      const pressure = { used: 1, window: 2, model: 'm' }
+      await fetchSections(config, '/ws', 's', pressure)
+      await fetchSections(config, '/ws', 's', pressure)
+    } finally {
+      console.error = realError
+    }
+    assert.equal(printed.length, 1, 'the warning must not repeat every step')
+    assert.ok(printed[0].includes(fleetBin), 'names the binary that could not answer')
+    assert.ok(printed[0].includes('9.9.9'), 'names the build that installed this plugin')
+  })
+
   // The measurement is taken here and the tier policy lives in the CLI, so the
   // numbers have to survive the argv crossing.
   test('forwards the measured pressure, and omits it when unmeasured', async () => {
