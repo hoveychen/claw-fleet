@@ -3,6 +3,7 @@ mod fmt;
 mod webui_embed;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use std::io::IsTerminal;
 
 // ── CLI definition ─────────────────────────────────────────────────────────────
 
@@ -291,6 +292,11 @@ enum Commands {
         /// Target process id (the root claude/codex CLI process).
         pid: u32,
     },
+    /// [internal] Any subcommand this build does not know. Exists so an older
+    /// `fleet` named by a newer `settings.json` fails *open* instead of dying
+    /// with clap's exit 2 — see [`claw_fleet_core::hooks::unknown_subcommand_exit_code`].
+    #[command(external_subcommand)]
+    Unknown(Vec<String>),
     /// Manage the current fleet-managed session (called from inside a Claude session)
     Session {
         #[command(subcommand)]
@@ -1285,6 +1291,28 @@ fn main() {
                 eprintln!("win-interrupt {pid}: Windows-only helper");
                 std::process::exit(1);
             }
+        }
+        // A subcommand this build has never heard of. Hooks and the dsh plugin
+        // bake an absolute fleet path into files that outlive the binary they
+        // named, so this is the skew arrival point, not a typo arrival point.
+        Commands::Unknown(argv) => {
+            let name = argv.first().map(String::as_str).unwrap_or("");
+            let code = claw_fleet_core::hooks::unknown_subcommand_exit_code(
+                std::io::stdin().is_terminal(),
+            );
+            if code == 0 {
+                claw_fleet_core::log_debug(&format!(
+                    "fleet: ignoring unknown subcommand '{name}' from a non-interactive \
+                     caller — this binary is older than the config that names it"
+                ));
+            } else {
+                eprintln!(
+                    "error: unrecognized subcommand '{name}'\n\n\
+                     Usage: fleet <COMMAND>\n\n\
+                     For more information, try '--help'."
+                );
+            }
+            std::process::exit(code);
         }
         Commands::Session { action } => match action {
             SessionCommands::Idle => commands::session::cmd_session_idle(),

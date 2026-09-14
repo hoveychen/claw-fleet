@@ -1322,10 +1322,54 @@ fn is_fleet_group(group: &Value) -> bool {
     cat_shape || group_invokes_fleet_subcommand(group, "hook-event")
 }
 
+/// What a `fleet` build should exit with when handed a subcommand it has never
+/// heard of. `true` means the caller is a human at a terminal.
+///
+/// [`fault_tolerant_command`] guards against the fleet binary being *missing*.
+/// It cannot guard against the binary being merely *older* than the
+/// `settings.json` that names it — that binary exists, runs, and dies on
+/// clap's usage error (exit 2). And exit 2 from a hook is not cosmetic.
+/// Measured on Claude Code 2.1.263 (temp dir + a `settings.local.json` hook
+/// that just `exit 2`s, driven by `claude -p --output-format stream-json`):
+///
+/// - **PreToolUse** — the tool call is *denied* and lands in the result's
+///   `permission_denials`. Fleet's `guard` matches `Bash|PowerShell`, so this
+///   refuses every shell command on the machine.
+/// - **UserPromptSubmit** — the prompt never reaches the model at all (zero
+///   turns), yet the run still reports `subtype: "success", is_error: false`.
+///   Two Fleet hooks live here (`prd-context`, `session resume`), and a
+///   headless spawn — a handoff successor, a `fleet loop` tick — looks like it
+///   succeeded while having done nothing.
+/// - **Stop** — the session can never end: the failure is fed back to the
+///   model as `Stop hook feedback` forever, bounded only by `--max-turns`.
+/// - PostToolUse / SessionStart — harmless.
+///
+/// So an unknown subcommand must fail *open* when it arrived from a hook.
+/// Piped stdin is the discriminator: Claude Code always feeds hook JSON on
+/// stdin and a person at a terminal never does. Known subcommands never reach
+/// here, so a deliberate `echo … | fleet guard` is untouched — and the human
+/// typo (`fleet agnts`) still gets clap's error.
+///
+/// This cannot be solved in the wrapper string instead: `guard`,
+/// `elicitation`, `plan-approval` and `wakeup-guard` all use exit 2 as their
+/// *intended* "block this" signal, so a wrapper that swallows exit 2 would
+/// disarm them. Only the binary itself knows which of the two it meant.
+pub fn unknown_subcommand_exit_code(stdin_is_terminal: bool) -> i32 {
+    if stdin_is_terminal {
+        2
+    } else {
+        0
+    }
+}
+
 /// Build a fault-tolerant shell command that silently exits 0 when the fleet
 /// binary is missing (e.g. after uninstall), so Claude Code is not blocked.
 /// When the binary exists, it `exec`s into it — propagating its exit code and
 /// stdout/stderr as normal.
+///
+/// Note this only covers a *missing* binary; a stale one that no longer knows
+/// the subcommand is handled inside the binary, by
+/// [`unknown_subcommand_exit_code`].
 fn fault_tolerant_command(fleet_bin: &str, subcommand: &str) -> String {
     // Use `test -x` so it works even if the binary was removed from PATH but
     // the absolute path is stale.  `exec` avoids an extra shell process.
