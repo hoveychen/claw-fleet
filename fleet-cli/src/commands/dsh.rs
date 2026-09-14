@@ -42,11 +42,19 @@ use std::path::PathBuf;
 /// purpose: falling back to `Boss` / `en` would render English guidance
 /// addressing the user as "Boss" for a user whose Fleet says otherwise, so an
 /// absent value keeps the CLI's declared defaults visible in one place instead.
+///
+/// `ctx_used` / `ctx_window` / `ctx_model` are this session's context occupancy,
+/// measured by the plugin off the in-memory dsh session log — see
+/// `readContextPressure` there for why the measurement lives on that side and
+/// the tier policy on this one.
 pub(crate) fn cmd_dsh_context(
     cwd: Option<PathBuf>,
     session: Option<String>,
     title: &str,
     locale: &str,
+    ctx_used: Option<u64>,
+    ctx_window: Option<u64>,
+    ctx_model: Option<String>,
 ) {
     let cwd = cwd
         .or_else(|| std::env::current_dir().ok())
@@ -84,6 +92,33 @@ pub(crate) fn cmd_dsh_context(
         claw_fleet_core::prd_tasks::render_active_plans_reminder(&cwd, session.as_deref())
     {
         sections.push(serde_json::json!({ "name": "fleet-prd", "text": reminder }));
+    }
+
+    // Context pressure — the dsh arm of the reminder Claude gets from the
+    // `fleet ctx-reminder` PostToolUse hook.
+    //
+    // Deliberately NOT turn-scoped on the plugin side: unlike the plan block,
+    // which would otherwise re-enter mid-turn every time anyone ticked a box in
+    // the workspace, this is emitted at most once per tier per session — and a
+    // session that crosses 750K mid-turn is exactly the one that should not
+    // wait for its next prompt to hear about it.
+    //
+    // `claim_tier` is consuming: the tier is recorded as announced as soon as
+    // the section is emitted here. A plugin that then drops it (an aborted
+    // step) loses that one announcement rather than repeating it forever; the
+    // tiers above it still fire, and a compaction re-arms all of them.
+    if let (Some(used), Some(window), Some(session)) = (ctx_used, ctx_window, session.as_deref()) {
+        let pressure = claw_fleet_core::context_pressure::ContextPressure {
+            used,
+            window,
+            model: ctx_model.unwrap_or_default(),
+        };
+        if let Some(tier) = claw_fleet_core::context_pressure::claim_tier(session, &pressure) {
+            sections.push(serde_json::json!({
+                "name": "fleet-ctx",
+                "text": claw_fleet_core::context_pressure::reminder_text(&pressure, tier),
+            }));
+        }
     }
 
     // The sandbox mode this session should switch to, if any. Sent alongside the

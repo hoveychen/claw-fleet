@@ -251,7 +251,18 @@ pub fn reminder_text(pressure: &ContextPressure, tier: u64) -> String {
     // Deliberately no percentage and no "x / 1000K" framing: those read as "还
     // 早，才用了四分之一" when the truth is the opposite. Past ~250K the model's
     // judgement is already degrading, whatever fraction of the window that is.
-    let head = format!("[Fleet] 上下文已用 {}K（{}）。", pressure.used / 1000, pressure.model);
+    // dsh names the model on `request/context` and Claude on every assistant
+    // turn, but neither is guaranteed — say the number rather than an empty
+    // pair of parens.
+    let head = if pressure.model.is_empty() {
+        format!("[Fleet] 上下文已用 {}K。", pressure.used / 1000)
+    } else {
+        format!(
+            "[Fleet] 上下文已用 {}K（{}）。",
+            pressure.used / 1000,
+            pressure.model
+        )
+    };
     let body = match tier {
         250_000 => {
             "超过 250K 之后模型开始变钝——记不住早先的约束、重复已经做过的调查、把摘要当原话。\
@@ -394,6 +405,20 @@ mod tests {
                 "[{tier}] must not show the window size: {text}"
             );
         }
+    }
+
+    /// `fleet dsh-context --ctx-model` is optional, so an unnamed model must
+    /// still produce readable copy rather than a dangling "（）".
+    #[test]
+    fn an_unnamed_model_still_reports_the_number() {
+        let p = ContextPressure {
+            used: 300_000,
+            window: 1_000_000,
+            model: String::new(),
+        };
+        let text = reminder_text(&p, 250_000);
+        assert!(text.contains("已用 300K"), "{text}");
+        assert!(!text.contains("（）"), "{text}");
     }
 
     #[test]

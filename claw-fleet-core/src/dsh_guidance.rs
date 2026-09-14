@@ -301,6 +301,15 @@ successor is attributed automatically.\n\
 `ok: handoff registered`, then end the turn. **Narrating a handoff in prose \
 does nothing** — only the actual command spawns a successor.\n\
 \n\
+**You do not have to judge \"running long\" by feel.** Fleet measures your \
+context from this session's own log and injects one `[Fleet] 上下文已用 …K` \
+message each time you cross 250K / 500K / 750K prompt tokens (once per tier; a \
+compaction re-arms them). **Treat the first one as the cue to prepare a \
+handoff** — past ~250K a model starts to blur: it forgets constraints it set \
+itself, redoes investigations, quotes its own summary as the original. A relay \
+buys back a clear head; it is not a loss, so do not read those messages as a \
+remaining-budget meter.\n\
+\n\
 ## Rule 6 — Waiting on an external condition (`fleet watch`)\n\
 \n\
 Handoff continues *work*; `fleet watch` waits for an *event* — a CI run \

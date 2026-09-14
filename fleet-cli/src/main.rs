@@ -241,7 +241,7 @@ enum Commands {
     /// [internal] PRD-context hook — re-injects the workspace's TASKS.md on every UserPromptSubmit
     #[command(hide = true)]
     PrdContext,
-    /// [internal] Context-pressure hook — on PostToolUse, announces 25/50/75% window occupancy
+    /// [internal] Context-pressure hook — on PostToolUse, announces 250K/500K/750K context use
     #[command(name = "ctx-reminder", hide = true)]
     CtxReminder,
     /// [internal] Notes-hint hook — on SessionStart (compact/resume/startup)
@@ -263,6 +263,16 @@ enum Commands {
         /// Guidance locale: `en` or `zh`.
         #[arg(long, default_value = "en")]
         locale: String,
+        /// Context tokens the session's last request used, measured by the
+        /// plugin off the dsh session log (`inputTokens + cacheReadTokens`).
+        #[arg(long)]
+        ctx_used: Option<u64>,
+        /// That request's context window, from the log's `request/context`.
+        #[arg(long)]
+        ctx_window: Option<u64>,
+        /// The model that request went to, named in the reminder.
+        #[arg(long)]
+        ctx_model: Option<String>,
     },
     /// [internal] Wakeup guard — denies ScheduleWakeup/CronCreate in Fleet sessions
     #[command(hide = true)]
@@ -1244,7 +1254,18 @@ fn main() {
             session,
             title,
             locale,
-        } => commands::dsh::cmd_dsh_context(cwd, session, &title, &locale),
+            ctx_used,
+            ctx_window,
+            ctx_model,
+        } => commands::dsh::cmd_dsh_context(
+            cwd,
+            session,
+            &title,
+            &locale,
+            ctx_used,
+            ctx_window,
+            ctx_model,
+        ),
         Commands::WakeupGuard => commands::guard::cmd_wakeup_guard(),
         // Best-effort like the unix `cat >>` hook it replaces: a failed append
         // must not surface as a hook error to Claude Code.

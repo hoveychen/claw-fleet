@@ -11,6 +11,7 @@ import {
   fetchSections,
   latestInjectedText,
   name,
+  readContextPressure,
   startsTurn,
 } from './index.js'
 
@@ -147,6 +148,97 @@ describe('fetchSections', () => {
   test('a hanging CLI is cut off by the timeout', async () => {
     const fleetBin = stubFleet('hang', 'sleep 30')
     assert.deepEqual(await fetchSections({ fleetBin, timeoutMs: 300 }, '/ws', 's'), [])
+  })
+
+  // The measurement is taken here and the tier policy lives in the CLI, so the
+  // numbers have to survive the argv crossing.
+  test('forwards the measured pressure, and omits it when unmeasured', async () => {
+    const fleetBin = stubFleet(
+      'ctx-argv',
+      'printf \'{"sections":[{"name":"argv","text":"%s"}]}\' "$*"',
+    )
+    const [section] = await fetchSections({ fleetBin, timeoutMs: 5000 }, '/ws', 's', {
+      used: 260_000,
+      window: 1_000_000,
+      model: 'deepseek-flash',
+    })
+    assert.match(section.text, /--ctx-used 260000 --ctx-window 1000000 --ctx-model deepseek-flash/)
+
+    const [bare] = await fetchSections({ fleetBin, timeoutMs: 5000 }, '/ws', 's')
+    assert.doesNotMatch(bare.text, /--ctx-/)
+  })
+})
+
+describe('readContextPressure', () => {
+  /** One model call's record, carrying the usage dsh attaches to it. */
+  const assistant = (inputTokens, cacheReadTokens) => ({
+    type: 'assistant/message',
+    data: { usage: { inputTokens, cacheReadTokens, outputTokens: 40 } },
+  })
+  const request = (contextWindow, model = 'deepseek-flash') => ({
+    type: 'request/context',
+    data: { provider: 'deepseek-official', model, contextWindow },
+  })
+
+  test('sums the cached and uncached halves of the newest request', () => {
+    const agent = fakeAgent({
+      events: [request(1_000_000), assistant(9638, 8064), assistant(151, 85_760)],
+    })
+    assert.deepEqual(readContextPressure(agent), {
+      used: 85_911,
+      window: 1_000_000,
+      model: 'deepseek-flash',
+    })
+  })
+
+  test('takes the newest window when the session switched models', () => {
+    const agent = fakeAgent({
+      events: [
+        request(1_000_000, 'deepseek-flash'),
+        assistant(10, 10),
+        request(200_000, 'other-model'),
+        assistant(100, 200),
+      ],
+    })
+    assert.deepEqual(readContextPressure(agent), {
+      used: 300,
+      window: 200_000,
+      model: 'other-model',
+    })
+  })
+
+  test('reads through the snapshotEvents shape', () => {
+    const events = [request(1_000_000), assistant(1000, 2000)]
+    assert.equal(readContextPressure({ session: { snapshotEvents: () => events } })?.used, 3000)
+  })
+
+  // Missing evidence must yield no reading rather than a guessed number — and,
+  // like `sessionEvents`, a shape this does not recognise must never throw:
+  // inside `agent/pre-step` a TypeError ends the turn.
+  test('degrades to undefined instead of guessing or throwing', () => {
+    assert.equal(readContextPressure(fakeAgent()), undefined, 'empty log')
+    assert.equal(readContextPressure(undefined), undefined, 'no agent')
+    assert.equal(readContextPressure({ session: null }), undefined, 'no session')
+    assert.equal(
+      readContextPressure(fakeAgent({ events: [assistant(10, 20)] })),
+      undefined,
+      'no window recorded',
+    )
+    assert.equal(
+      readContextPressure(fakeAgent({ events: [request(1_000_000)] })),
+      undefined,
+      'no request made yet',
+    )
+    assert.equal(
+      readContextPressure(fakeAgent({ events: [request(0), assistant(10, 20)] })),
+      undefined,
+      'a zero window is not a window',
+    )
+    assert.equal(
+      readContextPressure(fakeAgent({ events: [null, {}, { type: 'assistant/message' }] })),
+      undefined,
+      'malformed entries',
+    )
   })
 })
 
