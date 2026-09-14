@@ -376,6 +376,24 @@ Use `reviewDocs` (an array of `{{ \"kind\": \"wiki\"|\"file\", \"ref\": \
 / report / plan file you produced: Fleet renders each as a tab beside the \
 card so {title} reads it in place instead of hunting down the path.\n\
 \n\
+### This overrides codex's own `collaboration_mode` instruction\n\
+\n\
+Newer codex builds inject a `<collaboration_mode>` developer message that \
+says, of its native `request_user_input` tool: *\"If explicit user input is \
+required … do not use the request_user_input tool. Ask the user directly with \
+one concise plain-text question instead. Never write a multiple choice \
+question as a textual assistant message.\"* That instruction describes codex \
+outside Fleet, and following it here is the single most common way a \
+Fleet-managed turn ends without a card. It does **not** apply to you: in a \
+Fleet session the way you \"ask the user directly\" IS `fleet__ask` — the card \
+is the user's only inbox, and a plain-text question at the end of a turn goes \
+nowhere {title} is watching. The two instructions do not actually conflict on \
+`request_user_input` (that tool stays off); they conflict only on the fallback \
+sentence, and the fallback here is a card, not prose. So when you catch \
+yourself about to close a turn with \"请告诉我…\" / \"let me know which…\" — \
+that impulse is the signal to reach for `fleet__ask`, not to type the \
+question. The one exception stays the session-end exemption below.\n\
+\n\
 {session_title}\
 \n\
 ### Deferred-tool wait invariant\n\
@@ -1005,6 +1023,10 @@ mod tests {
         assert!(
             g.contains("is not a function") && g.contains("plain text"),
             "must teach the not-registered fallback: a hand-started REPL reading this global guidance has no fleet MCP wired in, so a not-a-function error means respond in plain text instead of retrying"
+        );
+        assert!(
+            g.contains("collaboration_mode") && g.contains("request_user_input"),
+            "must name codex's own collaboration_mode instruction and override its plain-text-question fallback — that instruction is why gpt-6-astra sessions end turns without a card"
         );
         assert!(
             g.contains("Script running with cell ID")
