@@ -3713,7 +3713,7 @@ impl LocalBackend {
         }
 
         let session_refs: Vec<&SessionInfo> = sessions.iter().collect();
-        let tz = chrono::Local::now().format("%Z").to_string();
+        let tz = crate::daily_report::local_tz_tag(date);
         let report =
             crate::daily_report::generate_report_from_sessions(date, &tz, &session_refs);
 

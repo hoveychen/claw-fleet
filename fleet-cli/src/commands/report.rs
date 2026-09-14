@@ -4,7 +4,7 @@ use crate::fmt::*;
 
 pub(crate) fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool, gen_lessons: bool, gen_summary: bool, as_json: bool, lang: &str) {
     use claw_fleet_core::daily_report::{
-        ReportStore, generate_report_from_sessions, scan_sessions_for_date,
+        ReportStore, generate_report_from_sessions, local_tz_tag, scan_sessions_for_date,
         generate_lessons_routed, generate_ai_summary_routed,
     };
     use claw_fleet_core::llm_provider::LlmConfig;
@@ -26,7 +26,7 @@ pub(crate) fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool,
                 continue;
             }
             let session_refs: Vec<_> = sessions.iter().collect();
-            let tz = chrono::Local::now().format("%Z").to_string();
+            let tz = local_tz_tag(&date);
             let report = generate_report_from_sessions(&date, &tz, &session_refs);
             store.save_report(&report).ok();
             println!(
@@ -53,7 +53,7 @@ pub(crate) fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool,
             std::process::exit(1);
         }
         let session_refs: Vec<_> = sessions.iter().collect();
-        let tz = chrono::Local::now().format("%Z").to_string();
+        let tz = local_tz_tag(&target_date);
         let report = generate_report_from_sessions(&target_date, &tz, &session_refs);
         store.save_report(&report).ok();
         println!("Regenerated report for {}", target_date);
