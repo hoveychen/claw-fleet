@@ -293,17 +293,6 @@ successor is attributed automatically.\n\
 does nothing** — only the actual command spawns a successor. Never use \
 scheduled-wakeup / cron to \"continue later\"; they no-op inside Fleet.\n\
 \n\
-**You do not have to judge \"running long\" by feel.** Fleet measures your \
-context from this thread's rollout and prepends one `[Fleet] 上下文已用 …K` \
-line to a turn's prompt each time you cross 250K / 500K / 750K input tokens \
-(once per tier; a compaction re-arms them). **Treat the first one as the cue \
-to prepare a handoff** — past ~250K a model starts to blur: it forgets \
-constraints it set itself, redoes investigations, quotes its own summary as \
-the original. A relay buys back a clear head; it is not a loss, so do not read \
-those lines as a remaining-budget meter. Because a Codex turn has no mid-turn \
-channel, the line arrives at the *start* of a turn — the reading is from when \
-that turn was launched, so by the time you notice it you are already past it.\n\
-\n\
 ## Rule 6 — Waiting on an external condition (`fleet watch`)\n\
 \n\
 Handoff continues *work*; `fleet watch` waits for an *event* — a CI run \

@@ -49,11 +49,6 @@ pub const TIERS: [u64; 3] = [250_000, 500_000, 750_000];
 /// suppresses the reminder rather than inventing a number.
 const TAIL_BYTES: u64 = 1024 * 1024;
 
-/// How much of a Codex rollout's head to inspect for the thread's model. The
-/// `session_meta` and the first `turn_context` sit within the first few lines,
-/// but `session_meta` carries the full base instructions — hence not 4 KB.
-const HEAD_BYTES: u64 = 64 * 1024;
-
 const STATE_FILE_NAME: &str = "ctx-reminders.json";
 
 /// Live context occupancy of one session.
@@ -167,133 +162,6 @@ pub fn parse_pressure(tail: &str) -> Option<ContextPressure> {
     None
 }
 
-/// Live context occupancy of a Codex thread, read from its rollout tail.
-///
-/// The Codex analogue of [`read_pressure`]. Same tiers, same bookkeeping — only
-/// the evidence differs, because a rollout records occupancy explicitly instead
-/// of leaving it to be summed from a usage block.
-pub fn read_codex_pressure(rollout_path: &Path) -> Option<ContextPressure> {
-    let tail = read_tail(rollout_path)?;
-    let mut pressure = parse_codex_pressure(&tail)?;
-    if pressure.model.is_empty() {
-        // Codex writes `turn_context` once per turn, and a long thread's tool
-        // output pushes every one of them out of the inspected tail: measured
-        // across 481 local rollouts, only a handful still carried one. The
-        // model is fixed for a thread in practice, so the head has it.
-        pressure.model = head_model(rollout_path).unwrap_or_default();
-    }
-    Some(pressure)
-}
-
-/// The model named by the first `turn_context` in a rollout's head.
-fn head_model(rollout_path: &Path) -> Option<String> {
-    let mut file = fs::File::open(rollout_path).ok()?;
-    let mut head = vec![0u8; HEAD_BYTES as usize];
-    let read = std::io::Read::read(&mut file, &mut head).ok()?;
-    head.truncate(read);
-    let head = String::from_utf8_lossy(&head);
-    for line in head.lines() {
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        if value.get("type").and_then(|t| t.as_str()) != Some("turn_context") {
-            continue;
-        }
-        if let Some(m) = value
-            .get("payload")
-            .and_then(|p| p.get("model"))
-            .and_then(|m| m.as_str())
-        {
-            return Some(m.to_string());
-        }
-    }
-    None
-}
-
-/// The Codex scan, split out so tests can drive it from a string.
-///
-/// Mirrors [`crate::codex_source::extract_context_percent`]: the newest
-/// `event_msg` / `token_count` carries `info.last_token_usage.input_tokens`,
-/// which is that turn's *whole* prompt — i.e. the current window occupancy —
-/// and `info.model_context_window`. Codex's `input_tokens` already contains the
-/// cached portion, so unlike Claude nothing is added to it.
-///
-/// A `compacted` record newer than that event means Codex just summarised the
-/// thread and the recorded occupancy is stale, so this reports nothing rather
-/// than a number that is about to be wrong.
-pub fn parse_codex_pressure(tail: &str) -> Option<ContextPressure> {
-    let mut used: Option<u64> = None;
-    let mut window: Option<u64> = None;
-    let mut model = String::new();
-
-    for line in tail.lines().rev() {
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        let kind = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        // Newest-first, so a compaction seen before any token_count is newer.
-        if used.is_none() && kind == "compacted" {
-            return None;
-        }
-        // `turn_context` is written once per turn and is the only place the
-        // rollout names the model; it may sit outside the inspected tail, in
-        // which case the reminder simply omits the model name.
-        if kind == "turn_context" && model.is_empty() {
-            if let Some(m) = value
-                .get("payload")
-                .and_then(|p| p.get("model"))
-                .and_then(|m| m.as_str())
-            {
-                model = m.to_string();
-            }
-        }
-        if used.is_some() {
-            // Keep scanning only until the model is known.
-            if !model.is_empty() {
-                break;
-            }
-            continue;
-        }
-        if kind != "event_msg" {
-            continue;
-        }
-        let Some(payload) = value.get("payload") else {
-            continue;
-        };
-        if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
-            continue;
-        }
-        let Some(info) = payload.get("info") else {
-            continue;
-        };
-        let usage = info
-            .get("last_token_usage")
-            .or_else(|| info.get("total_token_usage"));
-        let input = usage
-            .and_then(|u| u.get("input_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        if input == 0 {
-            continue;
-        }
-        used = Some(input);
-        window = info
-            .get("model_context_window")
-            .and_then(|w| w.as_u64())
-            .filter(|w| *w > 0);
-    }
-
-    let used = used?;
-    // The rollout usually states the window outright; fall back to the model
-    // catalogue, and report nothing when neither knows it.
-    let window = window.or_else(|| context_window_for_model(&model, used))?;
-    Some(ContextPressure {
-        used,
-        window,
-        model,
-    })
-}
-
 // ── Per-session tier bookkeeping ────────────────────────────────────────
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -383,8 +251,9 @@ pub fn reminder_text(pressure: &ContextPressure, tier: u64) -> String {
     // Deliberately no percentage and no "x / 1000K" framing: those read as "还
     // 早，才用了四分之一" when the truth is the opposite. Past ~250K the model's
     // judgement is already degrading, whatever fraction of the window that is.
-    // A Codex rollout can state the occupancy without naming the model (its
-    // `turn_context` may sit outside the inspected tail); say the number anyway.
+    // dsh names the model on `request/context` and Claude on every assistant
+    // turn, but neither is guaranteed — say the number rather than an empty
+    // pair of parens.
     let head = if pressure.model.is_empty() {
         format!("[Fleet] 上下文已用 {}K。", pressure.used / 1000)
     } else {
@@ -538,97 +407,18 @@ mod tests {
         }
     }
 
-    // ── Codex rollouts ──────────────────────────────────────────────────
-
-    fn token_count(input: u64, window: Option<u64>) -> String {
-        let mut info = serde_json::json!({
-            "last_token_usage": {"input_tokens": input, "cached_input_tokens": input / 2},
-            "total_token_usage": {"input_tokens": input * 9},
-        });
-        if let Some(w) = window {
-            info["model_context_window"] = serde_json::json!(w);
-        }
-        serde_json::json!({"type": "event_msg", "payload": {"type": "token_count", "info": info}})
-            .to_string()
-    }
-
-    fn turn_context(model: &str) -> String {
-        serde_json::json!({"type": "turn_context", "payload": {"model": model}}).to_string()
-    }
-
-    /// The window is normally stated by the rollout itself, and `input_tokens`
-    /// is taken as-is — Codex already counts the cached portion inside it, so
-    /// adding `cached_input_tokens` would double-count.
+    /// `fleet dsh-context --ctx-model` is optional, so an unnamed model must
+    /// still produce readable copy rather than a dangling "（）".
     #[test]
-    fn codex_reads_the_newest_token_count_and_its_stated_window() {
-        let tail = format!(
-            "{}\n{}\n{}\n",
-            turn_context("gpt-6-astra"),
-            token_count(40_000, Some(258_400)),
-            token_count(260_000, Some(258_400)),
-        );
-        let p = parse_codex_pressure(&tail).expect("pressure");
-        assert_eq!(p.used, 260_000);
-        assert_eq!(p.window, 258_400);
-        assert_eq!(p.model, "gpt-6-astra");
-        assert_eq!(p.tier(), Some(250_000));
-    }
-
-    /// `total_token_usage` is cumulative across turns and would pin any long
-    /// thread to the top tier, so it is only the fallback.
-    #[test]
-    fn codex_prefers_the_per_turn_usage_over_the_cumulative_one() {
-        let tail = format!("{}\n", token_count(60_000, Some(272_000)));
-        let p = parse_codex_pressure(&tail).expect("pressure");
-        assert_eq!(p.used, 60_000, "must not be the 540_000 cumulative figure");
-        assert_eq!(p.tier(), None);
-    }
-
-    /// A rollout whose `turn_context` scrolled out of the inspected tail still
-    /// yields a reading, and the copy drops the model name instead of printing
-    /// an empty pair of parens.
-    #[test]
-    fn codex_without_a_model_name_still_reports_the_number() {
-        let tail = format!("{}\n", token_count(300_000, Some(1_000_000)));
-        let p = parse_codex_pressure(&tail).expect("pressure");
-        assert_eq!(p.model, "");
+    fn an_unnamed_model_still_reports_the_number() {
+        let p = ContextPressure {
+            used: 300_000,
+            window: 1_000_000,
+            model: String::new(),
+        };
         let text = reminder_text(&p, 250_000);
         assert!(text.contains("已用 300K"), "{text}");
         assert!(!text.contains("（）"), "{text}");
-    }
-
-    /// Codex's own compaction is the same event Claude's `isCompactSummary`
-    /// marks: whatever occupancy was last recorded no longer describes the
-    /// window.
-    #[test]
-    fn codex_compaction_after_the_last_count_reads_as_fresh() {
-        let tail = format!(
-            "{}\n{}\n",
-            token_count(260_000, Some(272_000)),
-            serde_json::json!({"type": "compacted", "payload": {"message": "…"}}),
-        );
-        assert_eq!(parse_codex_pressure(&tail), None);
-        // …but a compaction *older* than the newest count is already accounted
-        // for by that count, so it must not suppress the reading.
-        let tail = format!(
-            "{}\n{}\n",
-            serde_json::json!({"type": "compacted", "payload": {"message": "…"}}),
-            token_count(260_000, Some(272_000)),
-        );
-        assert_eq!(parse_codex_pressure(&tail).map(|p| p.used), Some(260_000));
-    }
-
-    #[test]
-    fn codex_falls_back_to_the_model_catalogue_for_the_window() {
-        let tail = format!(
-            "{}\n{}\n",
-            turn_context("gpt-6-astra"),
-            token_count(260_000, None),
-        );
-        let p = parse_codex_pressure(&tail).expect("pressure");
-        assert!(p.window > 0, "window came from the catalogue");
-        // Neither a window nor a known model is no evidence at all.
-        assert_eq!(parse_codex_pressure(&format!("{}\n", token_count(260_000, None))), None);
     }
 
     #[test]

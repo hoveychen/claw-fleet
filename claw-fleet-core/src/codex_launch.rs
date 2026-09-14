@@ -1046,43 +1046,7 @@ fn maybe_prepend_active_plans(
     let reminder =
         crate::prd_tasks::render_active_plans_reminder(Path::new(workspace_path), session_id);
     let rollout = session_id.and_then(crate::codex_source::find_codex_rollout);
-    let prompt = prepend_reminder(reminder.as_deref(), rollout.as_deref(), prompt);
-    prepend_context_pressure(session_id, rollout.as_deref(), prompt)
-}
-
-/// Prepend the context-pressure reminder when this thread has just crossed one
-/// of [`crate::context_pressure::TIERS`].
-///
-/// The Codex arm of the reminder Claude gets from the `fleet ctx-reminder`
-/// PostToolUse hook. **It is not equivalent**: Claude's hook fires after every
-/// tool call, so a session that climbs mid-turn hears about it inside that turn.
-/// Codex exposes no mid-turn channel Fleet uses (its hooks are experimental and
-/// were ruled out when the guidance injection was designed), so a Codex thread
-/// is told at the *start* of the next turn instead — which is still before the
-/// handoff decision has to be made, just coarser.
-///
-/// Sits outside [`prepend_reminder`]'s dedup on purpose: `claim_tier` already
-/// guarantees one announcement per tier per session, and unlike the plan block
-/// this text is meant to be repeated when a later tier is crossed.
-fn prepend_context_pressure(
-    session_id: Option<&str>,
-    rollout: Option<&Path>,
-    prompt: String,
-) -> String {
-    let (Some(session_id), Some(rollout)) = (session_id, rollout) else {
-        // A fresh spawn has no thread and no occupancy yet.
-        return prompt;
-    };
-    let Some(pressure) = crate::context_pressure::read_codex_pressure(rollout) else {
-        return prompt;
-    };
-    let Some(tier) = crate::context_pressure::claim_tier(session_id, &pressure) else {
-        return prompt;
-    };
-    format!(
-        "{}\n\n{prompt}",
-        crate::context_pressure::reminder_text(&pressure, tier)
-    )
+    prepend_reminder(reminder.as_deref(), rollout.as_deref(), prompt)
 }
 
 /// Decide the final prompt from the rendered reminder and the thread's rollout.
@@ -1561,64 +1525,6 @@ pub fn resume_codex_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Crossing a tier prepends once; the next turn at the same occupancy says
-    /// nothing, because the thread has already been told.
-    #[test]
-    fn context_pressure_rides_the_next_turn_once_per_tier() {
-        let _guard = crate::session::fleet_home_lock();
-        let home = tempfile::tempdir().expect("tempdir");
-        let prev = std::env::var_os("FLEET_HOME");
-        unsafe { std::env::set_var("FLEET_HOME", home.path()) };
-
-        let dir = tempfile::tempdir().unwrap();
-        let rollout = dir.path().join("rollout.jsonl");
-        let count = |input: u64| {
-            serde_json::json!({
-                "type": "event_msg",
-                "payload": {"type": "token_count", "info": {
-                    "last_token_usage": {"input_tokens": input},
-                    "model_context_window": 1_000_000u64,
-                }},
-            })
-            .to_string()
-        };
-        std::fs::write(&rollout, format!("{}\n", count(260_000))).unwrap();
-
-        let out = prepend_context_pressure(Some("t1"), Some(&rollout), "go".into());
-        assert!(out.contains("已用 260K"), "{out}");
-        assert!(out.ends_with("\n\ngo"), "the prompt still trails it: {out}");
-        assert_eq!(
-            prepend_context_pressure(Some("t1"), Some(&rollout), "go".into()),
-            "go",
-            "same tier, already announced"
-        );
-
-        // A later tier re-enters.
-        std::fs::write(&rollout, format!("{}\n", count(520_000))).unwrap();
-        assert!(prepend_context_pressure(Some("t1"), Some(&rollout), "go".into())
-            .contains("已用 520K"));
-
-        // Below the first tier, a fresh spawn, and an unreadable rollout are all
-        // silent rather than guesses.
-        std::fs::write(&rollout, format!("{}\n", count(100_000))).unwrap();
-        assert_eq!(
-            prepend_context_pressure(Some("t2"), Some(&rollout), "go".into()),
-            "go"
-        );
-        assert_eq!(prepend_context_pressure(None, Some(&rollout), "go".into()), "go");
-        assert_eq!(
-            prepend_context_pressure(Some("t3"), Some(&dir.path().join("absent.jsonl")), "go".into()),
-            "go"
-        );
-
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("FLEET_HOME", v),
-                None => std::env::remove_var("FLEET_HOME"),
-            }
-        }
-    }
 
     /// The reminder rides at the head of the prompt, and only a rollout that
     /// already holds identical text may hold it back — every evidence-free case
