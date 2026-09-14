@@ -8,6 +8,7 @@ import {
   recentWorkspaces,
   recentWorkspaceRows,
   resumeConfigChips,
+  resumeConfigOverrides,
 } from "./Composer";
 import { effortChoicesFor, modelChoicesFor } from "../useModelCatalog";
 import type { PickerHarness } from "../generated/types";
@@ -407,5 +408,29 @@ describe("composerInset", () => {
   it("入参是布局值，transform 进不来 —— 亚像素也按整数收敛", () => {
     // 这条锁住的是取值口径：换回 getBoundingClientRect 就会被 transform 污染。
     expect(composerInset(196.4, "21.6px")).toBe(218);
+  });
+});
+
+describe("resumeConfigOverrides", () => {
+  // 2026-09-13 的真实故障：桌面用 gpt-6-astra 起的 codex 会话，从手机发一条
+  // 追问，relay 收到 model=None → `codex exec resume` 不带 -m → codex 回落到
+  // ~/.codex/config.toml 的 gpt-5.6-sol，此后整个线程都换了模型。
+  it("用户没动过配置就一个字段都不发 —— 让桌面侧去 launch-spec 取权威值", () => {
+    // 初值来自快照（会话当前跑在 astra 上），但没被亲手改过。
+    expect(resumeConfigOverrides({ touched: false, model: "gpt-6-astra", effort: "high" })).toEqual(
+      {},
+    );
+  });
+
+  it("亲手改过就照发，这是用户明确的中途换模型", () => {
+    expect(resumeConfigOverrides({ touched: true, model: "gpt-5.6-sol", effort: "" })).toEqual({
+      model: "gpt-5.6-sol",
+    });
+  });
+
+  it("改成「默认」（空串）不发该字段，别把空串当成一个模型 id 传下去", () => {
+    expect(resumeConfigOverrides({ touched: true, model: "", effort: "medium" })).toEqual({
+      effort: "medium",
+    });
   });
 });
