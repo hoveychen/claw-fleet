@@ -1233,7 +1233,24 @@ struct PersistedEntry {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PersistedCache {
     version: u32,
+    /// The IANA timezone the cells were bucketed under (`America/New_York`).
+    /// Every cell key is a **local** calendar date, so a machine that moves to
+    /// another timezone must re-fold: the fingerprint only notices new activity,
+    /// and a session that already ended never gets one again — its cells would
+    /// stay pinned to the old day boundary forever. Absent in files written
+    /// before this field existed; those re-fold once, like a version bump.
+    #[serde(default)]
+    tz: String,
     entries: std::collections::HashMap<String, PersistedEntry>,
+}
+
+/// The machine's IANA timezone name, or its current UTC offset when the name is
+/// unavailable. Deliberately the *name*, not the offset: an offset flips at every
+/// DST boundary without moving any cell, and flushing this cache costs a full
+/// re-fold of every transcript.
+fn local_tz_id() -> String {
+    iana_time_zone::get_timezone()
+        .unwrap_or_else(|_| chrono::Local::now().format("%z").to_string())
 }
 
 impl UsageBreakdownCache {
@@ -1267,6 +1284,7 @@ impl UsageBreakdownCache {
             .collect();
         PersistedCache {
             version: CACHE_SCHEMA_VERSION,
+            tz: local_tz_id(),
             entries,
         }
     }
@@ -1274,7 +1292,9 @@ impl UsageBreakdownCache {
     fn from_persisted(p: PersistedCache) -> Self {
         // Version mismatch → start empty so every session re-folds under the
         // current semantics instead of trusting an incompatible projection.
-        if p.version != CACHE_SCHEMA_VERSION {
+        // Timezone mismatch → likewise: the cells are keyed by local date, so a
+        // move re-draws every day boundary under them.
+        if p.version != CACHE_SCHEMA_VERSION || p.tz != local_tz_id() {
             return Self::default();
         }
         let entries = p
@@ -2555,6 +2575,58 @@ mod range_breakdown_tests {
         assert!(
             UsageBreakdownCache::load_from(&path).entries.is_empty(),
             "version mismatch must invalidate the whole cache"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every cell is keyed by a **local** calendar date, and the fingerprint —
+    /// `(last_activity_ms, input, output)` — never changes again once a session
+    /// ends. So without this check, moving the machine to another timezone would
+    /// leave finished sessions' usage pinned to the old day boundary forever,
+    /// and the sidebar's "today" badge would keep billing turns to the wrong day.
+    #[test]
+    fn disk_cache_is_discarded_when_the_machine_changed_timezone() {
+        let mut cache = UsageBreakdownCache::default();
+        let mut cells = SessionCells::new();
+        let mut acc = LineAcc::default();
+        acc.add(100, 5, 3, 50, 20, 1.5);
+        cells.insert(("2026-07-21".to_string(), "m".to_string()), acc);
+        cache.entries.insert(
+            "s1".to_string(),
+            CacheEntry {
+                fingerprint: (9, 8, 7),
+                cells,
+            },
+        );
+
+        let dir = std::env::temp_dir().join("fleet-usage-cache-tz");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cache.json");
+
+        // Same timezone → the cache is trusted (no needless full re-fold).
+        cache.store_to(&path);
+        assert!(
+            UsageBreakdownCache::load_from(&path).entries.contains_key("s1"),
+            "an unmoved machine must keep its cache"
+        );
+
+        // Written elsewhere → every cell's day boundary moved → drop it all.
+        let mut persisted = cache.to_persisted();
+        persisted.tz = "Antarctica/Troll".to_string();
+        std::fs::write(&path, serde_json::to_vec(&persisted).unwrap()).unwrap();
+        assert!(
+            UsageBreakdownCache::load_from(&path).entries.is_empty(),
+            "a timezone move must invalidate the whole cache"
+        );
+
+        // A file from before the tz field existed carries no timezone; we cannot
+        // tell where it was folded, so it re-folds once rather than lying.
+        persisted.tz = String::new();
+        std::fs::write(&path, serde_json::to_vec(&persisted).unwrap()).unwrap();
+        assert!(
+            UsageBreakdownCache::load_from(&path).entries.is_empty(),
+            "a pre-tz cache file must re-fold once"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
