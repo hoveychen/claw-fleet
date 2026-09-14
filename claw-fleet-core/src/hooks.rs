@@ -1294,6 +1294,132 @@ fn fleet_hook_group() -> Value {
     })
 }
 
+// ── Binary-path drift ────────────────────────────────────────────────────────
+
+/// The `(fleet binary, subcommand)` a hook entry names, for either shape
+/// [`fleet_subcommand_hook_with`] writes. `None` for anything that is not a
+/// `fleet <subcommand>` hook — notably the `cat >> ~/.fleet/hooks.jsonl`
+/// one-liner, which names no binary and therefore cannot drift.
+fn hook_fleet_invocation(hook: &Value) -> Option<(String, String)> {
+    let cmd = hook.get("command").and_then(|c| c.as_str())?;
+
+    // Unix sh-wrapper: `sh -c 'if [ -x "{bin}" ]; then exec "{bin}" {sub}; else exit 0; fi'`
+    if let Some(rest) = cmd.split_once("then exec \"").map(|(_, r)| r) {
+        let (bin, rest) = rest.split_once('"')?;
+        let sub = rest.split_once(';')?.0.trim();
+        if bin.is_empty() || sub.is_empty() {
+            return None;
+        }
+        return Some((bin.to_string(), sub.to_string()));
+    }
+
+    // Windows exec form: `command` is the binary, `args` are the subcommand
+    // tokens. Split the basename by hand — `Path::file_stem` only treats `\`
+    // as a separator on Windows, and a Windows-written settings.json has to be
+    // recognized when this runs on any host.
+    let base = cmd
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(cmd)
+        .to_ascii_lowercase();
+    if base != "fleet" && base != "fleet.exe" {
+        return None;
+    }
+    let args: Vec<&str> = hook
+        .get("args")?
+        .as_array()?
+        .iter()
+        .map(|v| v.as_str().unwrap_or(""))
+        .collect();
+    if args.is_empty() || args.iter().any(|a| a.is_empty()) {
+        return None;
+    }
+    Some((cmd.to_string(), args.join(" ")))
+}
+
+/// Rewrite every Fleet hook in `hooks_obj` to name `fleet_bin`, returning how
+/// many entries actually changed. Pure, so the drift logic is testable without
+/// touching a real `settings.json`.
+fn repoint_fleet_hooks_in(hooks_obj: &mut Map<String, Value>, fleet_bin: &str) -> usize {
+    let mut changed = 0;
+    for (_event, groups) in hooks_obj.iter_mut() {
+        let Some(groups) = groups.as_array_mut() else {
+            continue;
+        };
+        for group in groups.iter_mut() {
+            let Some(entries) = group.get_mut("hooks").and_then(|h| h.as_array_mut()) else {
+                continue;
+            };
+            for entry in entries.iter_mut() {
+                let Some((bin, sub)) = hook_fleet_invocation(entry) else {
+                    continue;
+                };
+                if bin == fleet_bin {
+                    continue;
+                }
+                // Keep the shape already on disk: a Windows settings.json
+                // carries exec form, a unix one the sh wrapper, and a machine
+                // must not be handed the other platform's shape just because
+                // the path drifted.
+                let was_exec_form = entry.get("args").is_some();
+                let mut fresh = fleet_subcommand_hook_with(was_exec_form, fleet_bin, &sub);
+                // Preserve per-entry settings the appliers add (`timeout`,
+                // `async`) — this rewrites the path, nothing else.
+                if let (Some(fresh_obj), Some(old_obj)) = (fresh.as_object_mut(), entry.as_object())
+                {
+                    for (k, v) in old_obj {
+                        if k != "command" && k != "args" && k != "type" {
+                            fresh_obj.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+                *entry = fresh;
+                changed += 1;
+            }
+        }
+    }
+    changed
+}
+
+/// Point every Fleet hook in `settings.json` at the fleet binary this machine
+/// resolves *now*, and report how many entries moved.
+///
+/// Hook commands bake an absolute path, and nothing ever rewrote it: the
+/// appliers replace a hook wholesale, but they only run when a feature is
+/// installed or toggled, and `control_plane::heal` skips anything already
+/// present — a check that reads the *subcommand*, never the path. So a hook
+/// installed by a `./target/debug/fleet` keeps naming that build forever,
+/// and a machine ends up with its hooks split across several binaries of
+/// different ages. Measured on the author's Mac on 2026-09-14: eight Fleet
+/// hooks across three different binaries, one of which no longer knew the
+/// subcommand it was pointed at.
+///
+/// Path-only: which features are installed is not this function's business, so
+/// it adds and removes nothing. Safe and cheap to run on every startup — it
+/// writes only when something actually changed.
+pub fn repoint_fleet_hooks() -> Result<usize, String> {
+    let Some(fleet_bin) = resolve_fleet_binary() else {
+        // Nothing to point at. Leaving the existing paths alone is strictly
+        // better than rewriting them to a guess.
+        return Ok(0);
+    };
+    let Some(mut settings) = read_settings() else {
+        return Ok(0);
+    };
+    let Some(hooks_obj) = settings
+        .get_mut("hooks")
+        .and_then(|h| h.as_object_mut())
+    else {
+        return Ok(0);
+    };
+    let changed = repoint_fleet_hooks_in(hooks_obj, &fleet_bin);
+    if changed == 0 {
+        return Ok(0);
+    }
+    write_settings(&settings)?;
+    Ok(changed)
+}
+
 /// Check whether a given event already has a Fleet hook group.
 fn has_fleet_hook(hooks_obj: &Map<String, Value>, event: &str) -> bool {
     hooks_obj
@@ -1620,6 +1746,94 @@ mod fleet_subcommand_hook_tests {
             "hooks": [fleet_subcommand_hook_with(true, r"C:\x\fleet.exe", "guard")]
         });
         assert!(is_guard_group(&group));
+    }
+
+    #[test]
+    fn repoint_moves_every_shape_onto_the_current_binary_and_spares_the_rest() {
+        // A settings.json in the state this Mac was actually found in on
+        // 2026-09-14: Fleet hooks spread over three binaries of different ages,
+        // in both shapes, next to a user's own hook and the `cat >>` event
+        // logger (which names no binary and must not be touched).
+        let mut hooks_obj = json!({
+            "PreToolUse": [
+                {"matcher": "Bash|PowerShell", "hooks": [{
+                    "type": "command",
+                    "command": fault_tolerant_command("/old/path/fleet", "guard"),
+                    "timeout": 120000
+                }]},
+                {"matcher": "ScheduleWakeup", "hooks": [{
+                    "type": "command",
+                    "command": "C:\\Users\\x\\.fleet\\bin\\fleet.exe",
+                    "args": ["wakeup-guard"]
+                }]},
+                {"matcher": "Bash", "hooks": [{
+                    "type": "command",
+                    "command": "my-own-linter --check"
+                }]}
+            ],
+            "Stop": [
+                {"hooks": [{"type": "command", "command": FLEET_HOOK_COMMAND, "async": true}]},
+                {"hooks": [{
+                    "type": "command",
+                    "command": fault_tolerant_command("/new/fleet", "session idle")
+                }]}
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let moved = repoint_fleet_hooks_in(&mut hooks_obj, "/new/fleet");
+        // guard + wakeup-guard moved; `session idle` was already current, the
+        // user's linter and the `cat >>` logger are not ours.
+        assert_eq!(moved, 2, "moved the wrong number of hooks");
+
+        let pre = &hooks_obj["PreToolUse"];
+        let guard = &pre[0]["hooks"][0];
+        assert_eq!(
+            guard["command"].as_str().unwrap(),
+            fault_tolerant_command("/new/fleet", "guard"),
+            "the unix wrapper should be rewritten in place"
+        );
+        assert_eq!(
+            guard["timeout"], 120000,
+            "rewriting the path must not drop the entry's timeout"
+        );
+
+        let wakeup = &pre[1]["hooks"][0];
+        assert_eq!(
+            wakeup["command"], "/new/fleet",
+            "a Windows exec-form entry must stay exec form, just repointed"
+        );
+        assert_eq!(wakeup["args"], json!(["wakeup-guard"]));
+
+        assert_eq!(
+            pre[2]["hooks"][0]["command"], "my-own-linter --check",
+            "a hook that is not Fleet's must be left alone"
+        );
+        assert_eq!(
+            hooks_obj["Stop"][0]["hooks"][0]["command"], FLEET_HOOK_COMMAND,
+            "the `cat >>` event logger names no binary and cannot drift"
+        );
+
+        // Idempotent: a second pass has nothing left to do.
+        assert_eq!(repoint_fleet_hooks_in(&mut hooks_obj, "/new/fleet"), 0);
+    }
+
+    #[test]
+    fn hook_fleet_invocation_reads_back_what_the_appliers_write() {
+        // Round-trip guard: if the emitted shape ever changes, the drift
+        // parser must change with it or repointing silently stops working.
+        for sub in ["guard", "prd-context", "session idle", "hook-event"] {
+            for windows in [false, true] {
+                let hook = fleet_subcommand_hook_with(windows, "/some/fleet", sub);
+                assert_eq!(
+                    hook_fleet_invocation(&hook),
+                    Some(("/some/fleet".to_string(), sub.to_string())),
+                    "could not read back {sub} (windows={windows})"
+                );
+            }
+        }
     }
 
     #[test]

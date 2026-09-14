@@ -1376,6 +1376,23 @@ pub fn run() {
                 claw_fleet_core::log_debug(&format!("apply_idle_hooks failed: {e}"));
             }
 
+            // Point every Fleet hook at the binary this launch resolves to.
+            // Hook commands bake an absolute path and nothing ever rewrote it —
+            // the appliers only run on install/toggle, and `control_plane::heal`
+            // (which the desktop does not run) decides "installed" from the
+            // subcommand, never the path. So a hook written by a dev build kept
+            // naming it forever, and this Mac ended up with eight Fleet hooks
+            // spread over three binaries of different ages. Must come after
+            // `ensure_fleet_cli_link` above, which is what makes
+            // `~/.fleet/bin/fleet` the current one.
+            match claw_fleet_core::hooks::repoint_fleet_hooks() {
+                Ok(0) => {}
+                Ok(n) => claw_fleet_core::log_debug(&format!(
+                    "repoint_fleet_hooks: moved {n} hook(s) onto the current fleet binary"
+                )),
+                Err(e) => claw_fleet_core::log_debug(&format!("repoint_fleet_hooks failed: {e}")),
+            }
+
             // One-time migration: port/token/bin and the defunct event log all
             // moved to ~/.fleet, so the old ~/.claude/fleet directory is now
             // pure legacy — remove it. Best-effort; a failure is not fatal.
