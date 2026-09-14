@@ -225,7 +225,13 @@ fn read_rollout_meta_payload(rollout_path: &Path) -> Option<Value> {
     let file = fs::File::open(rollout_path).ok()?;
     let mut first_line = String::new();
     BufReader::new(file).read_line(&mut first_line).ok()?;
-    let v: Value = serde_json::from_str(first_line.trim()).ok()?;
+    session_meta_payload(&first_line)
+}
+
+/// The `session_meta` payload carried by one raw rollout line, or `None` when
+/// the line is not a `session_meta` (or not JSON at all).
+fn session_meta_payload(line: &str) -> Option<Value> {
+    let v: Value = serde_json::from_str(line.trim()).ok()?;
     if v.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
         return None;
     }
@@ -3995,6 +4001,79 @@ mod tests {
         assert_eq!(tail100.len(), 10, "tail(100) should return every message");
     }
 
+    /// A Codex subagent's rollout is a FORK: it opens with its own
+    /// `session_meta`, then the parent's, then the parent's entire conversation
+    /// replayed, and only then its own work. Rendering the file from the top is
+    /// what made "点进子代理看到的还是主会话" — both `get_messages` and the tail
+    /// must start at the fork's own first row.
+    #[test]
+    fn codex_fork_rollout_drops_replayed_parent_conversation() {
+        use super::CodexSource;
+        use crate::agent_source::AgentSource;
+        use std::io::Write as _;
+
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(f, r#"{{"type":"session_meta","payload":{{"id":"child","forked_from_id":"parent","originator":"fleet"}}}}"#).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","payload":{{"id":"parent","originator":"fleet"}}}}"#
+        )
+        .unwrap();
+        for i in 0..8 {
+            writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"parent turn {i}"}}]}}}}"#).unwrap();
+        }
+        writeln!(f, r#"{{"type":"event_msg","payload":{{"type":"thread_settings_applied","thread_id":"child"}}}}"#).unwrap();
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"subagent reply"}}]}}}}"#).unwrap();
+        f.flush().unwrap();
+
+        let uri = format!("codex://{}", f.path().display());
+        let src = CodexSource::new();
+
+        let all = src.get_messages(&uri).unwrap();
+        let texts = format!("{all:?}");
+        assert!(
+            texts.contains("subagent reply"),
+            "the subagent's own turn must survive: {texts}"
+        );
+        assert!(
+            !texts.contains("parent turn"),
+            "the replayed parent conversation must be dropped: {texts}"
+        );
+
+        // The tail path reads a window that never includes line 1, so it must
+        // pick the fork marker up from the meta read it does separately.
+        let tail = src.get_messages_tail(&uri, 50).unwrap();
+        assert_eq!(tail.len(), all.len(), "tail(50) returns the whole fork body");
+        assert!(!format!("{tail:?}").contains("parent turn"));
+    }
+
+    /// The trim is keyed on the fork marker, so an ordinary rollout — and an
+    /// older fork with no `thread_settings_applied` row (cli 0.116, 2026-03) —
+    /// must come back untouched rather than lose its opening turns to a guess.
+    #[test]
+    fn codex_trim_forked_replay_leaves_non_forks_and_markerless_forks_alone() {
+        let rows: Vec<serde_json::Value> = vec![
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"thread_settings_applied","thread_id":"someone-else"}}),
+        ];
+
+        let plain = serde_json::json!({"id": "solo"});
+        assert_eq!(
+            super::trim_forked_replay(rows.clone(), Some(&plain)).len(),
+            rows.len(),
+            "a non-fork rollout is never trimmed"
+        );
+
+        let markerless = serde_json::json!({"id": "child", "forked_from_id": "parent"});
+        assert_eq!(
+            super::trim_forked_replay(rows.clone(), Some(&markerless)).len(),
+            rows.len(),
+            "a fork whose boundary marker is absent keeps every row"
+        );
+
+        assert_eq!(super::trim_forked_replay(rows.clone(), None).len(), rows.len());
+    }
+
     /// The live-follow path: `tail_incremental` must return *normalized* codex
     /// messages (each with the stable `uuid`) when the rollout grows, and an
     /// empty batch when it hasn't. This is what makes a mobile/desktop reply to
@@ -5357,6 +5436,62 @@ fn codex_turn_error_text(payload: &Value) -> Option<String> {
     (!text.is_empty()).then(|| text.to_string())
 }
 
+/// Codex spawns a subagent by FORKING the parent thread, and the fork's rollout
+/// opens with a **verbatim replay of the parent conversation**: its own
+/// `session_meta` (carrying `forked_from_id`), then the parent's `session_meta`,
+/// then every parent turn re-serialized with the fork's creation timestamp. On
+/// a real file (`kid-english`, 2026-09-13) that was rows 0–78 of 90 — so a
+/// reader that renders the file from the top shows the parent's whole
+/// conversation and the subagent's own 11 rows scroll off the bottom. That is
+/// the "点进子代理看到的还是主会话" bug, and it hit every client at once because
+/// nothing in Fleet trimmed the prefix.
+///
+/// The fork's own timeline starts at the `thread_settings_applied` event
+/// stamped with its **own** thread id (Codex writes it right after the replay,
+/// immediately following the `<multi_agent_role>` briefing). This returns the
+/// index of that row, or `None` when the window holds no boundary — older
+/// rollouts (cli 0.116, 2026-03) have neither marker, and there we keep the
+/// replay rather than guess a cut point and silently eat real content.
+fn fork_replay_boundary(lines: &[Value], own_thread_id: &str) -> Option<usize> {
+    lines.iter().position(|line| {
+        let payload = line.get("payload");
+        let is_settings = payload
+            .and_then(|p| p.get("type"))
+            .and_then(|t| t.as_str())
+            == Some("thread_settings_applied");
+        is_settings
+            && payload.and_then(|p| p.get("thread_id")).and_then(|t| t.as_str())
+                == Some(own_thread_id)
+    })
+}
+
+/// The fork marker from a rollout's first `session_meta`: `Some(own_thread_id)`
+/// when this file is a fork of another thread (a Codex subagent), `None` for an
+/// ordinary rollout. Callers pass the id to [`fork_replay_boundary`].
+fn forked_thread_id(meta: &Value) -> Option<String> {
+    meta.get("forked_from_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?;
+    meta.get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Drop the replayed-parent prefix from a fork's raw rollout lines (no-op for a
+/// non-fork or when the boundary marker is absent). `meta` is the file's first
+/// `session_meta` payload; it is read separately because a tail window does not
+/// contain line 1.
+fn trim_forked_replay(lines: Vec<Value>, meta: Option<&Value>) -> Vec<Value> {
+    let Some(own) = meta.and_then(forked_thread_id) else {
+        return lines;
+    };
+    match fork_replay_boundary(&lines, &own) {
+        Some(cut) => lines[cut..].to_vec(),
+        None => lines,
+    }
+}
+
 fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
     // Codex persists every finalized assistant turn TWICE in the rollout:
     //   - as an `event_msg/agent_message` (the UI event-timeline mirror), and
@@ -6367,6 +6502,11 @@ impl AgentSource for CodexSource {
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect();
 
+        // A subagent's rollout opens with the parent conversation replayed in
+        // full; the meta is right here in `parsed[0]` (see `trim_forked_replay`).
+        let meta = parsed.first().and_then(|l| l.get("payload")).cloned();
+        let parsed = trim_forked_replay(parsed, meta.as_ref());
+
         Ok(normalize_messages(parsed))
     }
 
@@ -6411,11 +6551,30 @@ impl AgentSource for CodexSource {
         // messages or we've consumed the whole file, then return the last `n`.
         // This mirrors Claude's raw-record tail semantics in normalized space:
         // `len < n` ⟺ the entire file fit ⟺ genuinely fully loaded.
+        // A subagent's rollout replays the whole parent conversation before its
+        // own first row (see `trim_forked_replay`), so the fork marker lives in
+        // line 1 — outside every tail window. Read it once, up front: it is a
+        // few hundred bytes, and for a non-fork it just comes back `None`. An
+        // archived rollout has no readable line 1 until it is decompressed, so
+        // that variant pays one extra `read_zst_file`.
+        let meta = if is_zst {
+            read_zst_file(&file_path)
+                .ok()
+                .and_then(|c| session_meta_payload(c.lines().next().unwrap_or_default()))
+        } else {
+            read_rollout_meta_payload(&file_path)
+        };
+
         let mut k = n.max(1);
         loop {
             let parsed = read_raw_tail(k)?;
-            let reached_start = parsed.len() < k;
-            let messages = normalize_messages(parsed);
+            let whole_file = parsed.len() < k;
+            let trimmed = trim_forked_replay(parsed, meta.as_ref());
+            // Cutting the replay means the window already reaches this
+            // subagent's first row: growing `k` can only re-read parent rows we
+            // then drop again, so treat it as the start of the transcript.
+            let reached_start = whole_file || trimmed.len() < k;
+            let messages = normalize_messages(trimmed);
             if messages.len() >= n || reached_start {
                 let start = messages.len().saturating_sub(n);
                 return Ok(messages[start..].to_vec());
