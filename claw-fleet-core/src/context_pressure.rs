@@ -248,22 +248,27 @@ pub fn forget(session_id: &str) {
 /// The 75% copy names `fleet handoff` explicitly, because "your context is
 /// long" without the command is exactly the nudge that has been failing.
 pub fn reminder_text(pressure: &ContextPressure, tier: u64) -> String {
-    let used_k = pressure.used / 1000;
-    let window_k = pressure.window / 1000;
-    let head = format!(
-        "[Fleet] 上下文压力 {}K / {}K（{}%，{}）。",
-        used_k,
-        window_k,
-        pressure.percent(),
-        pressure.model
-    );
+    // Deliberately no percentage and no "x / 1000K" framing: those read as "还
+    // 早，才用了四分之一" when the truth is the opposite. Past ~250K the model's
+    // judgement is already degrading, whatever fraction of the window that is.
+    let head = format!("[Fleet] 上下文已用 {}K（{}）。", pressure.used / 1000, pressure.model);
     let body = match tier {
-        250_000 => "还早，照常推进。顺手用 fleet__notes 把目标、已定决策和下一步落一份 checkpoint——压缩会摘掉这些，笔记不会。",
-        500_000 => "已过 500K。现在开始收敛：把进度写进 checkpoint 笔记、把做完的 P-task 用 fleet__plan check 勾掉，别把长尾调查留到后半程。",
+        250_000 => {
+            "超过 250K 之后模型开始变钝——记不住早先的约束、重复已经做过的调查、把摘要当原话。\
+接力换回来的是一个清醒的头脑，不是一次损失：手上这段做完就跑 \
+`fleet handoff --note \"<做完了什么/在飞什么/关键文件/下一步>\" --plan <plan-id> --next <P>`。\
+如果确实马上就收尾，至少先用 fleet__notes 落一份 checkpoint。"
+        }
+        500_000 => {
+            "你已经在退化区里干活了：这个长度上漏掉自己刚定过的决策是常态，不是意外。\
+除非只差最后一两步，现在就交接——先提交 worktree 进度，再跑 \
+`fleet handoff --note \"...\" --plan <plan-id> --next <P>`，等它回 `ok: handoff registered`。"
+        }
         _ => {
-            "这是接力窗口。不要硬扛到自动压缩——压缩会把宏观状态摘成摘要，计划常在那里悄悄死掉。\
-先提交 worktree 进度，然后跑 `fleet handoff --note \"<做完了什么/在飞什么/关键文件/下一步>\" --plan <plan-id> --next <P>`，\
-等它回 `ok: handoff registered` 再干净地结束回合。如果确实只差最后几步，就直接干完再收——但别无声地继续爬。"
+            "别再往上爬了。硬扛到自动压缩不会让你更省事——压缩把宏观状态摘成摘要，计划常在那里悄悄死掉，\
+而接力是把它完整交出去。立刻提交 worktree 进度，然后跑 \
+`fleet handoff --note \"<做完了什么/在飞什么/关键文件/下一步>\" --plan <plan-id> --next <P>`，\
+等它回 `ok: handoff registered` 再干净地结束回合。"
         }
     };
     format!("{head}{body}")
@@ -367,8 +372,28 @@ mod tests {
         };
         let text = reminder_text(&p, 750_000);
         assert!(text.contains("fleet handoff"), "{text}");
-        assert!(text.contains("780K / 1000K"), "{text}");
-        assert!(text.contains("78%"), "{text}");
+        assert!(text.contains("已用 780K"), "{text}");
+    }
+
+    /// Every tier names the handoff, and none of them frames the number as a
+    /// fraction of the window: "250K / 1000K (25%)" reads as "plenty of room
+    /// left" exactly when the model has already started to degrade.
+    #[test]
+    fn no_tier_frames_the_number_as_a_fraction() {
+        for tier in TIERS {
+            let p = ContextPressure {
+                used: tier + 10_000,
+                window: 1_000_000,
+                model: "claude-fable-5-1".into(),
+            };
+            let text = reminder_text(&p, tier);
+            assert!(text.contains("fleet handoff"), "[{tier}] {text}");
+            assert!(!text.contains('%'), "[{tier}] must not show a percentage: {text}");
+            assert!(
+                !text.contains("1000K"),
+                "[{tier}] must not show the window size: {text}"
+            );
+        }
     }
 
     #[test]

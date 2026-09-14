@@ -476,12 +476,13 @@ Fleet 的 Stop hook 就消费这个登记，并在同一 workspace spawn 一个�
 你一旦逮到自己在想「上下文长了，我该收尾了」——那个冲动本身就是信号。去登记\
 交接并接力，而不是收尾。\n\
 \n\
-**你不必靠体感判断这件事。** Fleet 在每次工具调用后测一次你的上下文占用，\
-并在 250K / 500K / 750K token 三个档位各注入一次 `[Fleet] 上下文压力 …` 提示\
-（同一档只说一次；被压缩后重新爬上来会再说）。看到 750K 那条就是接力窗口到了：\
-它是量出来的事实，不是提醒你「考虑一下」——除非确实只差最后几步，否则照它说的\
-登记交接。一条都没看到，就是你还没到 250K（200K 窗口的模型够不到第一档，永远\
-不会收到）。\n\
+**你不必靠体感判断这件事。** Fleet 在每次工具调用后测一次你的上下文用量，\
+并在 250K / 500K / 750K token 三个档位各注入一次 `[Fleet] 上下文已用 …K` 提示\
+（同一档只说一次；被压缩后重新爬上来会再说）。**收到第一条就该准备交接了**——\
+超过 250K 模型就开始变钝：记不住早先的约束、重复已经做过的调查、把自己的摘要\
+当成原话。接力换回来的是一个清醒的头脑，不是一次损失，所以别把这些提示读成\
+「还剩多少额度」。一条都没看到，就是你还没到 250K（200K 窗口的模型够不到第一\
+档，永远不会收到）。\n\
 \n\
 **叙述一次交接不等于登记一次。**在你的回复文本里写「接下来我起下一棒」/\
 「handing off to the next session」/「剩下的我接力」什么都不做：Fleet 的 Stop\
@@ -1164,14 +1165,16 @@ The moment you catch yourself thinking \"I should wrap up because context \
 is getting long\" — that impulse IS the signal. Register the handoff and \
 relay instead of wrapping up.\n\
 \n\
-**You do not have to feel this one out.** Fleet measures your context \
-occupancy after every tool call and injects a `[Fleet] 上下文压力 …` notice \
-once at each of 250K / 500K / 750K tokens (once per tier; a compaction \
-re-arms them as you climb back). The 750K notice IS the handoff window — it \
-is a measured fact, not a suggestion to consider one. Unless you are \
-genuinely a step or two from done, register the handoff when it arrives. No \
-notice at all means you are still under 250K (a 200K-window model never \
-reaches the first tier and is never notified).\n\
+**You do not have to feel this one out.** Fleet measures your context usage \
+after every tool call and injects a `[Fleet] 上下文已用 …K` notice once at \
+each of 250K / 500K / 750K tokens (once per tier; a compaction re-arms them \
+as you climb back). **The first notice already means start preparing to hand \
+off** — past 250K a model dulls: it loses constraints set earlier, redoes \
+investigations it already did, and mistakes its own summaries for the \
+original words. A relay buys back a clear head; it is not a loss. So do not \
+read these notices as \"how much budget is left\". No notice at all means you \
+are still under 250K (a 200K-window model never reaches the first tier and \
+is never notified).\n\
 \n\
 **Narrating a handoff is NOT registering one.** Writing \"接下来我起下一棒\" \
 / \"handing off to the next session\" / \"I'll relay the rest\" in your reply \
