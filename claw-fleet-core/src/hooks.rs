@@ -342,6 +342,25 @@ pub(crate) fn resolve_fleet_binary() -> Option<String> {
     crate::fleet_cli::resolve_fleet_binary().map(|p| p.to_string_lossy().to_string())
 }
 
+/// The fleet binary to bake into `settings.json`, refusing one that Rule 3's
+/// worktree cleanup is about to delete.
+///
+/// `settings.json` outlives this process by design, so a hook naming a
+/// worktree build is a hook that stops existing at merge time. The MCP injector
+/// has refused that since 2026-09-06; hooks never did, which is how a machine
+/// ends up with a `guard` hook — the gate for *every* shell command — pointing
+/// into a directory that was deleted weeks ago.
+fn resolve_publishable_fleet_binary() -> Result<String, String> {
+    let bin = resolve_fleet_binary().ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    if !crate::fleet_cli::may_publish_self(&bin) {
+        return Err(crate::fleet_cli::ephemeral_publish_refused(
+            &bin,
+            "settings.json hooks",
+        ));
+    }
+    Ok(bin)
+}
+
 /// PreToolUse matcher for the guard hook. Pipe alternation fires the group for
 /// **either** shell tool Claude Code can drive — `Bash` and `PowerShell` — so
 /// both are audited by the single guard group. See [`apply_guard_hook`] for why
@@ -371,8 +390,7 @@ pub fn apply_guard_hook() -> Result<(), String> {
 }
 
 fn apply_guard_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -464,8 +482,7 @@ pub fn apply_elicitation_hook() -> Result<(), String> {
 }
 
 fn apply_elicitation_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -555,8 +572,7 @@ pub fn apply_plan_approval_hook() -> Result<(), String> {
 }
 
 fn apply_plan_approval_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -649,8 +665,7 @@ pub fn apply_prd_context_hook() -> Result<(), String> {
 }
 
 fn apply_prd_context_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -844,8 +859,7 @@ pub fn apply_wakeup_guard_hook() -> Result<(), String> {
 }
 
 fn apply_wakeup_guard_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -941,8 +955,7 @@ pub fn apply_idle_hooks() -> Result<(), String> {
 }
 
 fn apply_idle_hooks_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -1398,9 +1411,10 @@ fn repoint_fleet_hooks_in(hooks_obj: &mut Map<String, Value>, fleet_bin: &str) -
 /// it adds and removes nothing. Safe and cheap to run on every startup — it
 /// writes only when something actually changed.
 pub fn repoint_fleet_hooks() -> Result<usize, String> {
-    let Some(fleet_bin) = resolve_fleet_binary() else {
-        // Nothing to point at. Leaving the existing paths alone is strictly
-        // better than rewriting them to a guess.
+    // Nothing publishable to point at — including a worktree build, which would
+    // move every hook onto a path that disappears at merge. Leaving the
+    // existing paths alone is strictly better than rewriting them to a guess.
+    let Ok(fleet_bin) = resolve_publishable_fleet_binary() else {
         return Ok(0);
     };
     let Some(mut settings) = read_settings() else {

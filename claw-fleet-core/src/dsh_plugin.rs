@@ -169,7 +169,20 @@ pub fn reconcile_dsh_patch(enabled: bool, user_title: &str, locale: &str) -> Res
 
     let next = if enabled {
         let entry = materialize()?;
-        let fleet_bin = crate::fleet_cli::resolve_fleet_binary();
+        // Same gate the MCP injector and the hook appliers use: this file
+        // outlives the process, so a `fleetBin` inside a worktree build becomes
+        // a dangling path the moment that plan merges — and the plugin's only
+        // symptom is that Fleet's context silently stops being injected.
+        let fleet_bin = crate::fleet_cli::resolve_fleet_binary().filter(|p| {
+            let publishable = crate::fleet_cli::may_publish_self(&p.to_string_lossy());
+            if !publishable {
+                crate::log_debug(&crate::fleet_cli::ephemeral_publish_refused(
+                    &p.to_string_lossy(),
+                    "cordis.patch.yml",
+                ));
+            }
+            publishable
+        });
         let block = render_block(&entry, fleet_bin.as_deref(), user_title, locale);
         if has_user_entries(&user) {
             format!("{}\n{block}", user.trim_end())
