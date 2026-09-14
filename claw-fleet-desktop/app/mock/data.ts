@@ -4,6 +4,7 @@
  * statuses, and workspaces to showcase all core features.
  */
 
+import { localDateKey } from "../localDate";
 import type { AuditEvent, AuditRuleInfo, AuditSummary, DailyMetrics, DailyReport, DailyReportStats, HandoffChain, Lesson, PlanForest, PlanNode, RawMessage, SessionInfo, SkillInvocation, TaskPlanDetail, WaitingAlert } from "../types";
 
 const NOW = Date.now();
@@ -3263,8 +3264,7 @@ export const MOCK_DETECTED_TOOLS = [
 // ── Daily Report ───────────────────────────────────────────────────────────
 
 function dateStr(daysAgo: number): string {
-  const d = new Date(NOW - daysAgo * DAY);
-  return d.toISOString().slice(0, 10);
+  return localDateKey(new Date(NOW - daysAgo * DAY));
 }
 
 const YESTERDAY = dateStr(1);
@@ -3467,7 +3467,7 @@ function generateHeatmapStats(): DailyReportStats[] {
     const totalProjects = Math.min(totalSessions, Math.round(1 + jitter * 5));
 
     stats.push({
-      date: d.toISOString().slice(0, 10),
+      date: localDateKey(d),
       totalTokens,
       totalSessions,
       totalToolCalls,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useReportStore } from "../../store";
+import { localDateKey, localDateKeyDaysAgo } from "../../localDate";
 import type { DailyReport } from "../../types";
 import { ContributionsHeatmap } from "./ContributionsHeatmap";
 import { HourlyActivityChart } from "./HourlyActivityChart";
@@ -58,8 +59,8 @@ export function ReportView() {
     // immediately for snappy feedback, then reconcile against the freshly
     // loaded heatmap (which sets the true latest date).
     markReportSeen();
-    const to = new Date().toISOString().slice(0, 10);
-    const from = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    const to = localDateKey();
+    const from = localDateKeyDaysAgo(365);
     loadHeatmap(from, to).then(() => markReportSeen());
   }, [loadHeatmap, markReportSeen]);
 

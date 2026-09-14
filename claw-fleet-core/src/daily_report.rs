@@ -1939,16 +1939,54 @@ fn lock_store(
     })
 }
 
+/// The timezone tag stored on a report: the UTC offset that `date`'s **local
+/// midnight** had, e.g. `-0400`. This is the thing that actually decides which
+/// turns land in the day, so it is what a cached report must be checked against.
+///
+/// Deliberately not `%Z` (the abbreviation, `EDT` / `CST`), which the field used
+/// to hold: an abbreviation flips twice a year at every DST boundary without the
+/// bucketing changing at all (`chrono::Local` resolves each historical timestamp
+/// with *that day's* offset), so comparing abbreviations would re-scan 90 days of
+/// transcripts every spring and autumn for nothing. An offset pinned to the day
+/// changes only when the machine really moves to another timezone.
+pub fn local_tz_tag(date: &str) -> String {
+    use chrono::TimeZone;
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).earliest())
+        .map(|dt| dt.format("%z").to_string())
+        .unwrap_or_else(|| chrono::Local::now().format("%z").to_string())
+}
+
 /// Whether a **past** day's report must be (re)generated during backfill.
 ///
-/// Regenerate when there is no cached report, **or** when the cached one was
-/// computed under an older metrics口径 ([`DailyMetrics::metrics_version`] <
+/// Regenerate when there is no cached report, when the cached one was computed
+/// under an older metrics口径 ([`DailyMetrics::metrics_version`] <
 /// [`CURRENT_METRICS_VERSION`]) — otherwise a口径 change (e.g. switching token
 /// totals to cumulative-incl-cache) would never reach historical reports, which
-/// are skipped on every pass once cached. `days_ago == 0` (today) is handled by
+/// are skipped on every pass once cached — **or** when the machine's timezone
+/// moved since that report was written, which shifts the day boundary and so
+/// changes which turns belong to the day. `days_ago == 0` (today) is handled by
 /// its own always-regenerate path and never routed through here.
-pub(crate) fn past_report_needs_regen(existing: Option<&DailyReport>) -> bool {
-    existing.map_or(true, |r| r.metrics.metrics_version < CURRENT_METRICS_VERSION)
+///
+/// Reports written before the tz field held an offset carry an abbreviation
+/// (`EDT`) or a placeholder (`local`); those are treated as unknown and left
+/// alone, so introducing this check does not trigger one full 90-day re-scan.
+pub(crate) fn past_report_needs_regen(existing: Option<&DailyReport>, expected_tz: &str) -> bool {
+    let Some(r) = existing else { return true };
+    if r.metrics.metrics_version < CURRENT_METRICS_VERSION {
+        return true;
+    }
+    is_tz_offset_tag(&r.timezone) && r.timezone != expected_tz
+}
+
+/// `+0800` / `-0400` — the shape [`local_tz_tag`] writes. Anything else is a
+/// legacy value we cannot compare against.
+fn is_tz_offset_tag(s: &str) -> bool {
+    s.len() == 5
+        && matches!(s.as_bytes()[0], b'+' | b'-')
+        && s[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
 fn run_backfill_check(
@@ -1974,11 +2012,14 @@ fn run_backfill_check(
             store.get_report(&date).ok().flatten()
         };
 
+        let tz = local_tz_tag(&date);
+
         // For today, always regenerate (new sessions keep arriving). For past
-        // days, regenerate only when there's no cached report OR the cached one
+        // days, regenerate only when there's no cached report, the cached one
         // was computed under an older metrics口径 (so a口径 change backfills
-        // into history instead of stopping at today).
-        if days_ago > 0 && !past_report_needs_regen(existing.as_ref()) {
+        // into history instead of stopping at today), or the machine's timezone
+        // moved (which moves the day boundary under the cached numbers).
+        if days_ago > 0 && !past_report_needs_regen(existing.as_ref(), &tz) {
             continue;
         }
 
@@ -1997,7 +2038,6 @@ fn run_backfill_check(
             continue;
         }
         let session_refs: Vec<&crate::session::SessionInfo> = sessions.iter().collect();
-        let tz = chrono::Local::now().format("%Z").to_string();
         let mut r = generate_report_from_sessions(&date, &tz, &session_refs);
         // Preserve the (expensive, LLM-generated) AI summary and lessons from a
         // stale report we're re-scanning purely to refresh token metrics —
@@ -2164,13 +2204,16 @@ mod tests {
         // never got backfilled to the new cumulative口径.
 
         // No cached report → must generate.
-        assert!(past_report_needs_regen(None), "missing report must generate");
+        assert!(
+            past_report_needs_regen(None, "-0400"),
+            "missing report must generate"
+        );
 
         // Cached under the current口径 → leave it alone (no needless re-scan).
         let mut current = make_test_report("2026-07-10");
         current.metrics.metrics_version = CURRENT_METRICS_VERSION;
         assert!(
-            !past_report_needs_regen(Some(&current)),
+            !past_report_needs_regen(Some(&current), "-0400"),
             "up-to-date report must NOT be regenerated"
         );
 
@@ -2180,9 +2223,60 @@ mod tests {
         let mut stale = make_test_report("2026-07-09");
         stale.metrics.metrics_version = CURRENT_METRICS_VERSION - 1;
         assert!(
-            past_report_needs_regen(Some(&stale)),
+            past_report_needs_regen(Some(&stale), "-0400"),
             "stale-口径 report must be regenerated"
         );
+    }
+
+    #[test]
+    fn timezone_move_regenerates_history_but_dst_and_legacy_do_not() {
+        // A report's day boundary is the local midnight of the machine that
+        // wrote it. Move the machine to another timezone and the boundary moves
+        // with it, so every cached day is bucketing turns by a rule that no
+        // longer holds — those days must be re-scanned.
+        let mut moved = make_test_report("2026-07-09");
+        moved.metrics.metrics_version = CURRENT_METRICS_VERSION;
+        moved.timezone = "+0800".to_string();
+        assert!(
+            past_report_needs_regen(Some(&moved), "-0400"),
+            "a report written in another timezone must be regenerated"
+        );
+
+        // Same offset → nothing moved, no re-scan.
+        moved.timezone = "-0400".to_string();
+        assert!(
+            !past_report_needs_regen(Some(&moved), "-0400"),
+            "same offset must NOT trigger a re-scan"
+        );
+
+        // Legacy reports stored the %Z abbreviation (or a placeholder). We
+        // cannot tell whether the boundary moved, and re-scanning all of them
+        // once would cost a full 90-day transcript sweep for nothing — leave
+        // them until some other口径 change picks them up.
+        for legacy in ["EDT", "UTC", "local", "CST", ""] {
+            moved.timezone = legacy.to_string();
+            assert!(
+                !past_report_needs_regen(Some(&moved), "-0400"),
+                "legacy tz value {legacy:?} must not trigger a re-scan"
+            );
+        }
+    }
+
+    #[test]
+    fn local_tz_tag_is_pinned_to_that_days_offset() {
+        // Whatever the machine's timezone is, the tag must be a fixed-shape
+        // offset (so `past_report_needs_regen` can compare it) and must be the
+        // offset *of that date*, not of today — otherwise every DST boundary
+        // would look like a timezone move.
+        let january = local_tz_tag("2026-01-15");
+        let july = local_tz_tag("2026-07-15");
+        assert!(is_tz_offset_tag(&january), "got {january:?}");
+        assert!(is_tz_offset_tag(&july), "got {july:?}");
+        // Recomputing is stable — the value depends only on the date.
+        assert_eq!(january, local_tz_tag("2026-01-15"));
+
+        // A malformed date still yields a usable tag rather than panicking.
+        assert!(is_tz_offset_tag(&local_tz_tag("not-a-date")));
     }
 
     fn make_test_report(date: &str) -> DailyReport {
