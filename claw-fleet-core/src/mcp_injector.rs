@@ -254,9 +254,12 @@ const WORKTREE_DIR: &str = ".worktrees";
 /// compiled from a `.worktrees/<plan>/` checkout whenever Rule 3 is in play, so
 /// an `env!`-reading predicate would answer differently depending on which
 /// checkout built the test binary.
+/// Now a thin alias: hooks and the dsh plugin bake the same kind of path into
+/// the same kind of long-lived file, so the predicate moved to
+/// [`crate::fleet_cli`] where all three can share it. Kept as a local name so
+/// this module's tests (which pin the shared-target-dir cases) stay readable.
 fn is_ephemeral_worktree_binary_built_at(fleet_path: &str, build_dir: &str) -> bool {
-    let under_worktree = |p: &str| p.split(['/', '\\']).any(|seg| seg == WORKTREE_DIR);
-    under_worktree(fleet_path) || under_worktree(build_dir)
+    crate::fleet_cli::is_ephemeral_binary_built_at(fleet_path, build_dir)
 }
 
 /// Whether a fleet binary at `fleet_path` may write its own path into the
@@ -280,7 +283,7 @@ fn may_publish_built_at(fleet_path: &str, isolated_config: bool, build_dir: &str
 /// `CLAUDE_CONFIG_DIR` deliberately does **not** count: a user who relocates
 /// their Claude config permanently still has exactly one real config to protect.
 fn config_is_isolated() -> bool {
-    std::env::var_os("FLEET_HOME").is_some_and(|v| !v.is_empty())
+    crate::fleet_cli::config_is_isolated()
 }
 
 /// The error both write paths return when [`may_publish`] says no.

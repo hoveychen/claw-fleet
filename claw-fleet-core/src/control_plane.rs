@@ -120,15 +120,29 @@ pub fn install_all(s: &Settings) -> Vec<Step> {
 ///   [`crate::control_plane_prefs`] when something called the remove path).
 ///   Installing it here would override that choice on every restart.
 pub fn heal(s: &Settings) -> Vec<Step> {
+    // Before deciding what is *missing*, fix what is merely *misaddressed*.
+    // The installed-checks below read the subcommand, not the path, so a hook
+    // left naming a long-gone `./target/debug/fleet` looks installed forever.
+    // Reported only when it moved something, to keep heal silent on a whole
+    // host.
+    let mut steps: Vec<Step> = match crate::hooks::repoint_fleet_hooks() {
+        Ok(0) => vec![],
+        other => vec![Step {
+            name: "repoint_fleet_hooks",
+            result: other.map(|_| ()),
+        }],
+    };
+
     let plan = crate::hooks::plan_hook_setup();
-    let mut steps: Vec<Step> = Feature::ALL
-        .iter()
-        .filter(|&&f| !is_installed(f, &plan) && !is_disabled(f))
-        .map(|&f| Step {
-            name: f.key(),
-            result: apply(f, s),
-        })
-        .collect();
+    steps.extend(
+        Feature::ALL
+            .iter()
+            .filter(|&&f| !is_installed(f, &plan) && !is_disabled(f))
+            .map(|&f| Step {
+                name: f.key(),
+                result: apply(f, s),
+            }),
+    );
 
     // Applied outside the missing/disabled filter because it has no installed
     // state to compare against — and it is a no-op unless a model was named.

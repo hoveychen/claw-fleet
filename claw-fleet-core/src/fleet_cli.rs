@@ -147,9 +147,108 @@ pub fn resolve_fleet_binary() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+// ── Publishing this binary's own path ────────────────────────────────────────
+
+/// Directory the worktree workflow checks plans out under, matched as a whole
+/// path segment. Same literal `session::workspace_name` folds on.
+const WORKTREE_DIR: &str = ".worktrees";
+
+/// True when this fleet binary is ephemeral by construction — either because it
+/// *sits* inside `<repo>/.worktrees/<task-id>/`, or because it was *built*
+/// there. Rule 3 deletes that directory the moment the plan merges, so baking
+/// such a path into a config file that outlives the process guarantees either a
+/// dangling reference or an in-flight feature branch serving the whole machine.
+///
+/// Both halves are load-bearing, and the second only became so on 2026-09-06:
+/// a shared `build.target-dir` now lands every worktree's artifacts in one
+/// `~/.cargo/shared-target/` outside the repo, so the artifact path alone no
+/// longer reveals which worktree produced it. The build directory does, and
+/// rustc freezes it in at compile time.
+///
+/// The main checkout's own dev build is deliberately *not* covered by either
+/// half: it survives merges, and blocking it would strip Fleet's tools from
+/// every ordinary `cargo tauri dev` run.
+///
+/// `build_dir` is where this binary was *compiled* from, not where it now sits;
+/// production callers pass `env!("CARGO_MANIFEST_DIR")`. Taking it as an
+/// argument rather than reading the `env!` here is what keeps tests
+/// deterministic — this crate is itself compiled from a `.worktrees/<plan>/`
+/// checkout whenever Rule 3 is in play, so an `env!`-reading predicate would
+/// answer differently depending on which checkout built the test binary.
+pub fn is_ephemeral_binary_built_at(fleet_path: &str, build_dir: &str) -> bool {
+    let under_worktree = |p: &str| p.split(['/', '\\']).any(|seg| seg == WORKTREE_DIR);
+    under_worktree(fleet_path) || under_worktree(build_dir)
+}
+
+/// True when the config this process resolves is a throwaway rather than the
+/// real user's, so publishing an ephemeral path into it harms nobody.
+///
+/// `FLEET_HOME` is the one isolation lever — the test suite and every local
+/// `fleet serve` verification run set it, and production code never does.
+/// `CLAUDE_CONFIG_DIR` deliberately does **not** count: a user who relocates
+/// their Claude config permanently still has exactly one real config to
+/// protect.
+pub fn config_is_isolated() -> bool {
+    std::env::var_os("FLEET_HOME").is_some_and(|v| !v.is_empty())
+}
+
+/// Whether `fleet_path` may be written into a config file that outlives this
+/// process (`settings.json` hook commands, `~/.claude.json`'s MCP entry, dsh's
+/// `cordis.patch.yml`).
+///
+/// One predicate for all three because they fail the same way: the MCP injector
+/// learned this first (a worktree build published there left every session
+/// naming a deleted binary), and hooks and the dsh plugin bake the same kind of
+/// path into the same kind of long-lived file.
+pub fn may_publish_self(fleet_path: &str) -> bool {
+    config_is_isolated() || !is_ephemeral_binary_built_at(fleet_path, env!("CARGO_MANIFEST_DIR"))
+}
+
+/// The sentence every refusal shares. `target` names the file that would have
+/// recorded the path.
+pub fn ephemeral_publish_refused(fleet_path: &str, target: &str) -> String {
+    format!(
+        "refusing to record {fleet_path} in {target}: it lives under {WORKTREE_DIR}/ and will be \
+         deleted when its plan merges, leaving that config naming a binary that no longer exists. \
+         Run this build with FLEET_HOME set to a temp dir to verify it in isolation."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ephemeral_covers_both_where_it_sits_and_where_it_was_built() {
+        let main_build = "/repo/claw-fleet-core";
+        let wt_build = "/repo/.worktrees/some-plan/claw-fleet-core";
+
+        // Lives in a worktree.
+        assert!(is_ephemeral_binary_built_at(
+            "/repo/.worktrees/p/target/debug/fleet",
+            main_build
+        ));
+        // Built in a worktree but the shared target-dir hides it from the path.
+        assert!(is_ephemeral_binary_built_at(
+            "/Users/x/.cargo/shared-target/debug/fleet",
+            wt_build
+        ));
+        // The main checkout's own dev build stays publishable on purpose —
+        // blocking it would break `cargo tauri dev`.
+        assert!(!is_ephemeral_binary_built_at(
+            "/repo/target/debug/fleet",
+            main_build
+        ));
+        assert!(!is_ephemeral_binary_built_at(
+            "/Applications/Claw Fleet.app/Contents/MacOS/fleet",
+            main_build
+        ));
+        // `.worktrees` must match as a whole segment, not a substring.
+        assert!(!is_ephemeral_binary_built_at(
+            "/repo/my.worktrees-backup/fleet",
+            main_build
+        ));
+    }
 
     /// The whole point of `~/.fleet/bin` is that a spawned agent can run
     /// `fleet plan check`. That only works if something actually puts the binary
