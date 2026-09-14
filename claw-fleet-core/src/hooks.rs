@@ -1623,6 +1623,17 @@ mod fleet_subcommand_hook_tests {
     }
 
     #[test]
+    fn unknown_subcommand_fails_open_for_hooks_and_keeps_erroring_for_humans() {
+        // A hook: Claude Code pipes the event JSON in, so stdin is not a tty.
+        // Exit 0 or PreToolUse denies the tool / UserPromptSubmit eats the
+        // prompt / Stop never lets the session end.
+        assert_eq!(unknown_subcommand_exit_code(false), 0);
+        // A person who typo'd a subcommand still gets clap's usage error —
+        // failing open there would hide real mistakes.
+        assert_eq!(unknown_subcommand_exit_code(true), 2);
+    }
+
+    #[test]
     fn is_fleet_group_accepts_the_hook_event_exec_shape() {
         let group = json!({
             "hooks": [{
