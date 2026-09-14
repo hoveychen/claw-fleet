@@ -702,6 +702,26 @@ fn apply_prd_context_hook_inner() -> Result<(), String> {
         hooks_obj.insert("SessionStart".to_string(), json!([notes_hint_group]));
     }
 
+    // Companion: the context-pressure PostToolUse hook. Same feature for the
+    // same reason — it exists so a session notices the window filling *before*
+    // a compaction summarises its macro state away. It hangs off PostToolUse
+    // rather than UserPromptSubmit because the sessions that fill a window
+    // never come back for another prompt: a headless `-p` turn can run for
+    // hours, and a tool call is the only event that recurs inside one.
+    let mut ctx_reminder_hook = fleet_subcommand_hook(&fleet_bin, "ctx-reminder");
+    ctx_reminder_hook["timeout"] = json!(10000);
+    let ctx_reminder_group = json!({
+        "hooks": [ctx_reminder_hook]
+    });
+    if let Some(existing) = hooks_obj.get_mut("PostToolUse") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.retain(|group| !is_ctx_reminder_group(group));
+            arr.push(ctx_reminder_group);
+        }
+    } else {
+        hooks_obj.insert("PostToolUse".to_string(), json!([ctx_reminder_group]));
+    }
+
     write_settings(&settings)
 }
 
@@ -748,6 +768,15 @@ fn remove_prd_context_hook_inner() -> Result<(), String> {
             hooks_obj.remove("SessionStart");
         }
     }
+    if let Some(arr) = hooks_obj
+        .get_mut("PostToolUse")
+        .and_then(|v| v.as_array_mut())
+    {
+        arr.retain(|group| !is_ctx_reminder_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("PostToolUse");
+        }
+    }
 
     if hooks_obj.is_empty() {
         obj.remove("hooks");
@@ -756,11 +785,11 @@ fn remove_prd_context_hook_inner() -> Result<(), String> {
     write_settings(&settings)
 }
 
-/// Both halves must be present: the UserPromptSubmit injection *and* its
-/// SessionStart companion. A settings.json from a build that predates the
-/// companion therefore reads as "not installed", which is what makes
-/// `control_plane::heal` add the missing group instead of leaving upgraded
-/// hosts without post-compaction notes forever.
+/// All three parts must be present: the UserPromptSubmit injection, its
+/// SessionStart companion, and the PostToolUse context-pressure reminder. A
+/// settings.json from a build that predates a companion therefore reads as
+/// "not installed", which is what makes `control_plane::heal` add the missing
+/// group instead of leaving upgraded hosts without it forever.
 fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
     hooks_obj
         .get("UserPromptSubmit")
@@ -768,6 +797,19 @@ fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
         .map(|arr| arr.iter().any(|group| is_prd_context_group(group)))
         .unwrap_or(false)
         && has_notes_hint_hook(hooks_obj)
+        && has_ctx_reminder_hook(hooks_obj)
+}
+
+fn has_ctx_reminder_hook(hooks_obj: &Map<String, Value>) -> bool {
+    hooks_obj
+        .get("PostToolUse")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(is_ctx_reminder_group))
+        .unwrap_or(false)
+}
+
+fn is_ctx_reminder_group(group: &Value) -> bool {
+    group_invokes_fleet_subcommand(group, "ctx-reminder")
 }
 
 fn is_prd_context_group(group: &Value) -> bool {
@@ -1640,8 +1682,38 @@ mod tests {
         start_arr.retain(|g| !is_notes_hint_group(g));
         assert_eq!(start_arr, vec![user_start.clone()]);
         hooks.insert("SessionStart".into(), json!([user_start, hint]));
-        assert!(has_prd_context_hook(&hooks));
         assert!(has_notes_hint_hook(&hooks));
+        assert!(
+            !has_prd_context_hook(&hooks),
+            "still not installed until the PostToolUse companion exists"
+        );
+
+        // Current shape: all three. The PostToolUse array already carries
+        // Fleet's own logging group; the retain must spare it.
+        let ctx = ctx_reminder_group_for(bin);
+        let logging = json!({"hooks": [{"type": "command", "command": "cat >> log"}]});
+        let mut post_arr = vec![
+            logging.clone(),
+            ctx_reminder_group_for("/old/fleet"),
+            ctx.clone(),
+        ];
+        post_arr.retain(|g| !is_ctx_reminder_group(g));
+        assert_eq!(post_arr, vec![logging.clone()]);
+        assert!(!is_ctx_reminder_group(&hint));
+        assert!(!is_ctx_reminder_group(&prd));
+        hooks.insert("PostToolUse".into(), json!([logging, ctx]));
+        assert!(has_ctx_reminder_hook(&hooks));
+        assert!(has_prd_context_hook(&hooks));
+    }
+
+    fn ctx_reminder_group_for(bin: &str) -> Value {
+        json!({
+            "hooks": [{
+                "type": "command",
+                "command": fault_tolerant_command(bin, "ctx-reminder"),
+                "timeout": 10000
+            }]
+        })
     }
 
     fn idle_stop_group_for(bin: &str) -> Value {

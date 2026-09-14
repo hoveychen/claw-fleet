@@ -241,6 +241,9 @@ enum Commands {
     /// [internal] PRD-context hook — re-injects the workspace's TASKS.md on every UserPromptSubmit
     #[command(hide = true)]
     PrdContext,
+    /// [internal] Context-pressure hook — on PostToolUse, announces 25/50/75% window occupancy
+    #[command(name = "ctx-reminder", hide = true)]
+    CtxReminder,
     /// [internal] Notes-hint hook — on SessionStart (compact/resume/startup)
     /// injects a bounded summary of the session's private notes
     #[command(name = "notes-hint", hide = true)]
@@ -1234,6 +1237,7 @@ fn main() {
         }
         Commands::PlanApproval => commands::guard::cmd_plan_approval(),
         Commands::PrdContext => commands::prd::cmd_prd_context(),
+        Commands::CtxReminder => commands::prd::cmd_ctx_reminder(),
         Commands::NotesHint => commands::notes::cmd_notes_hint(),
         Commands::DshContext {
             cwd,
