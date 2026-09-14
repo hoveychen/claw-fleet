@@ -15,12 +15,15 @@
 //!
 //! # Policy
 //!
-//! Tiers are **fractions of the window** (25% / 50% / 75%), which is exactly
-//! 250K / 500K / 750K on the 1M models this was written for and still means
-//! something on a 200K one. A tier fires once per session per crossing; when
-//! usage drops below the recorded tier — which is what a compaction looks like
-//! from here — the record decays to the current tier so the climb back up
-//! re-arms every tier above it.
+//! Tiers are **absolute token counts** — 250K / 500K / 750K — as specified.
+//! A window-relative reading (25/50/75 %) was built first and rejected: these
+//! are the figures 老板 asked for. The accepted cost is that a 200K-window
+//! model (every Haiku, Opus/Sonnet ≤4.5) can never reach the first tier and so
+//! is never reminded at all; the sessions this exists for run on 1M models.
+//!
+//! A tier fires once per session per crossing; when usage drops below the
+//! recorded tier — which is what a compaction looks like from here — the record
+//! decays to the current tier so the climb back up re-arms every tier above it.
 //!
 //! Reading is a bounded backwards scan of the transcript tail, mirroring
 //! [`crate::session::parse::extract_last_context_usage`]: the newest non-sidechain
@@ -37,10 +40,9 @@ use serde_json::Value;
 
 use crate::session::stats::context_window_for_model;
 
-/// Tiers, as percent of the model's context window. 25/50/75 % is 250K/500K/750K
-/// on a 1M model — the figures this was specified in — and stays meaningful on
-/// a 200K one, where absolute thresholds would simply never fire.
-pub const TIERS_PERCENT: [u8; 3] = [25, 50, 75];
+/// Tiers, in absolute input tokens. A 200K-window model never reaches the
+/// first one — see the module docs for why that is the accepted trade.
+pub const TIERS: [u64; 3] = [250_000, 500_000, 750_000];
 
 /// How much of the transcript tail to inspect. One turn of tool output can be
 /// megabytes; a window that finds no assistant usage yields `None`, which
@@ -71,9 +73,8 @@ impl ContextPressure {
     }
 
     /// The highest tier this occupancy has reached, if any.
-    pub fn tier(&self) -> Option<u8> {
-        let pct = self.percent();
-        TIERS_PERCENT.iter().rev().copied().find(|t| pct >= *t)
+    pub fn tier(&self) -> Option<u64> {
+        TIERS.iter().rev().copied().find(|t| self.used >= *t)
     }
 }
 
@@ -165,9 +166,9 @@ pub fn parse_pressure(tail: &str) -> Option<ContextPressure> {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct State {
-    /// session id → highest tier already announced.
+    /// session id → highest tier (in tokens) already announced.
     #[serde(default)]
-    sessions: BTreeMap<String, u8>,
+    sessions: BTreeMap<String, u64>,
 }
 
 fn state_path() -> Option<PathBuf> {
@@ -202,7 +203,7 @@ fn save_state(state: &State) {
 /// Returns the tier to announce, or `None` when the session has already been
 /// told about this tier. A drop below the recorded tier (a compaction) decays
 /// the record, so the climb back up announces every tier again.
-pub fn claim_tier(session_id: &str, pressure: &ContextPressure) -> Option<u8> {
+pub fn claim_tier(session_id: &str, pressure: &ContextPressure) -> Option<u64> {
     let current = pressure.tier();
     let mut state = load_state();
     let announced = state.sessions.get(session_id).copied();
@@ -246,19 +247,19 @@ pub fn forget(session_id: &str) {
 ///
 /// The 75% copy names `fleet handoff` explicitly, because "your context is
 /// long" without the command is exactly the nudge that has been failing.
-pub fn reminder_text(pressure: &ContextPressure, tier: u8) -> String {
+pub fn reminder_text(pressure: &ContextPressure, tier: u64) -> String {
     let used_k = pressure.used / 1000;
     let window_k = pressure.window / 1000;
     let head = format!(
-        "[Fleet] 上下文压力 {}%（{}K / {}K，{}）。",
-        pressure.percent(),
+        "[Fleet] 上下文压力 {}K / {}K（{}%，{}）。",
         used_k,
         window_k,
+        pressure.percent(),
         pressure.model
     );
     let body = match tier {
-        25 => "还早，照常推进。顺手用 fleet__notes 把目标、已定决策和下一步落一份 checkpoint——压缩会摘掉这些，笔记不会。",
-        50 => "过半了。现在开始收敛：把进度写进 checkpoint 笔记、把做完的 P-task 用 fleet__plan check 勾掉，别把长尾调查留到后半程。",
+        250_000 => "还早，照常推进。顺手用 fleet__notes 把目标、已定决策和下一步落一份 checkpoint——压缩会摘掉这些，笔记不会。",
+        500_000 => "已过 500K。现在开始收敛：把进度写进 checkpoint 笔记、把做完的 P-task 用 fleet__plan check 勾掉，别把长尾调查留到后半程。",
         _ => {
             "这是接力窗口。不要硬扛到自动压缩——压缩会把宏观状态摘成摘要，计划常在那里悄悄死掉。\
 先提交 worktree 进度，然后跑 `fleet handoff --note \"<做完了什么/在飞什么/关键文件/下一步>\" --plan <plan-id> --next <P>`，\
@@ -298,7 +299,7 @@ mod tests {
         assert_eq!(p.used, 750_000);
         assert_eq!(p.window, 1_000_000);
         assert_eq!(p.percent(), 75);
-        assert_eq!(p.tier(), Some(75));
+        assert_eq!(p.tier(), Some(750_000));
     }
 
     /// The case the feature exists for: after a compaction the pre-compact
@@ -334,16 +335,17 @@ mod tests {
         assert_eq!(parse_pressure(&tail), None);
     }
 
+    /// Tiers are absolute, by decision: a 200K-window model sits at 75% of its
+    /// window and still says nothing, because 150K is below the 250K tier.
     #[test]
-    fn tiers_are_window_relative() {
-        // 150K on a 200K model is 75%, the handoff tier — absolute 250K/500K/750K
-        // thresholds would never fire there at all.
+    fn tiers_are_absolute_so_a_200k_model_stays_silent() {
         let p = ContextPressure {
             used: 150_000,
             window: 200_000,
             model: "claude-haiku-4-5-20251001".into(),
         };
-        assert_eq!(p.tier(), Some(75));
+        assert_eq!(p.percent(), 75);
+        assert_eq!(p.tier(), None);
     }
 
     #[test]
@@ -363,8 +365,9 @@ mod tests {
             window: 1_000_000,
             model: "claude-fable-5-1".into(),
         };
-        let text = reminder_text(&p, 75);
+        let text = reminder_text(&p, 750_000);
         assert!(text.contains("fleet handoff"), "{text}");
+        assert!(text.contains("780K / 1000K"), "{text}");
         assert!(text.contains("78%"), "{text}");
     }
 
@@ -381,22 +384,22 @@ mod tests {
             model: "claude-fable-5-1".into(),
         };
 
-        assert_eq!(claim_tier("s1", &at(260_000)), Some(25));
+        assert_eq!(claim_tier("s1", &at(260_000)), Some(250_000));
         assert_eq!(claim_tier("s1", &at(300_000)), None, "same tier is silent");
-        assert_eq!(claim_tier("s1", &at(510_000)), Some(50));
-        assert_eq!(claim_tier("s1", &at(760_000)), Some(75));
-        assert_eq!(claim_tier("s1", &at(930_000)), None, "no tier above 75");
+        assert_eq!(claim_tier("s1", &at(510_000)), Some(500_000));
+        assert_eq!(claim_tier("s1", &at(760_000)), Some(750_000));
+        assert_eq!(claim_tier("s1", &at(930_000)), None, "no tier above 750K");
 
         // A compaction drops the window back to ~180K; every tier must re-arm.
         assert_eq!(claim_tier("s1", &at(180_000)), None);
-        assert_eq!(claim_tier("s1", &at(260_000)), Some(25));
-        assert_eq!(claim_tier("s1", &at(760_000)), Some(75));
+        assert_eq!(claim_tier("s1", &at(260_000)), Some(250_000));
+        assert_eq!(claim_tier("s1", &at(760_000)), Some(750_000));
 
         // Sessions are independent.
-        assert_eq!(claim_tier("s2", &at(260_000)), Some(25));
+        assert_eq!(claim_tier("s2", &at(260_000)), Some(250_000));
 
         forget("s1");
-        assert_eq!(claim_tier("s1", &at(260_000)), Some(25));
+        assert_eq!(claim_tier("s1", &at(260_000)), Some(250_000));
 
         unsafe {
             match prev {
