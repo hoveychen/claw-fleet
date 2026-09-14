@@ -100,7 +100,7 @@ function deepFreeze(value) {
  * log; the CLI owns the tier policy and the wording, as it does for Claude and
  * Codex. Omitted when unreadable, which simply yields no reminder.
  *
- * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string}} config
+ * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string, fleetVersion?: string}} config
  * @param {string} cwd - the session's working directory
  * @param {string} sessionId
  * @param {{used: number, window: number, model: string}} [pressure]
@@ -116,11 +116,34 @@ export async function fetchContext(config, cwd, sessionId, pressure) {
   // Retrying without the pressure flags costs one process on such a machine
   // and keeps the older contract intact until Fleet catches up.
   if (result === undefined) {
-    return pressure
-      ? ((await runFleet(config, cwd, sessionId, undefined)) ?? NOTHING)
-      : NOTHING
+    const retried = pressure ? await runFleet(config, cwd, sessionId, undefined) : undefined
+    if (retried === undefined) {
+      // Both attempts failed, so this machine's `fleetBin` cannot answer at all
+      // — most likely a build too old to know `dsh-context`. Everything below
+      // degrades to injecting nothing, which is the right behaviour and also a
+      // perfectly silent one: before this line, a dsh session simply ran
+      // without any Fleet context and nothing said so. `fleetVersion` is the
+      // build that materialized this file; printing both names the mismatched
+      // pair outright.
+      warnOnce(
+        `[fleet] no context injected: '${config.fleetBin}' could not answer ` +
+          `'fleet dsh-context' (this plugin was installed by Fleet ` +
+          `${config.fleetVersion ?? 'unknown'}). The two halves are out of sync.`,
+      )
+    }
+    return retried ?? NOTHING
   }
   return result
+}
+
+/** Warnings already printed, so a long session says each thing exactly once. */
+const warned = new Set()
+
+/** Print `message` to stderr the first time it is seen in this process. */
+function warnOnce(message) {
+  if (warned.has(message)) return
+  warned.add(message)
+  console.error(message)
 }
 
 /** What a CLI that could not answer yields: inject nothing, fail nothing. */
@@ -183,7 +206,7 @@ function runFleet(config, cwd, sessionId, pressure) {
 /**
  * The sections alone, for callers that do not care about the sandbox decision.
  *
- * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string}} config
+ * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string, fleetVersion?: string}} config
  * @param {string} cwd - the session's working directory
  * @param {string} sessionId
  * @param {{used: number, window: number, model: string}} [pressure]
@@ -363,11 +386,15 @@ function sectionMessage(section) {
  * Register the pre-step listener for the lifetime of `ctx`.
  *
  * @param {any} ctx - plugin context; the listener is disposed with it
- * @param {{fleetBin?: string, timeoutMs?: number}} [config]
+ * @param {{fleetBin?: string, timeoutMs?: number, fleetVersion?: string}} [config]
  */
 export function apply(ctx, config) {
   const resolved = {
     fleetBin: config?.fleetBin ?? 'fleet',
+    // The Fleet build that materialized this file. Diagnostic only — it is
+    // never sent to `fleetBin`, because a flag an older build rejects takes the
+    // whole invocation down with it.
+    fleetVersion: config?.fleetVersion,
     timeoutMs: config?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     userTitle: config?.userTitle,
     locale: config?.locale,
