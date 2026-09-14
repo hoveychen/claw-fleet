@@ -49,6 +49,11 @@ pub const TIERS: [u64; 3] = [250_000, 500_000, 750_000];
 /// suppresses the reminder rather than inventing a number.
 const TAIL_BYTES: u64 = 1024 * 1024;
 
+/// How much of a Codex rollout's head to inspect for the thread's model. The
+/// `session_meta` and the first `turn_context` sit within the first few lines,
+/// but `session_meta` carries the full base instructions — hence not 4 KB.
+const HEAD_BYTES: u64 = 64 * 1024;
+
 const STATE_FILE_NAME: &str = "ctx-reminders.json";
 
 /// Live context occupancy of one session.
@@ -169,7 +174,40 @@ pub fn parse_pressure(tail: &str) -> Option<ContextPressure> {
 /// of leaving it to be summed from a usage block.
 pub fn read_codex_pressure(rollout_path: &Path) -> Option<ContextPressure> {
     let tail = read_tail(rollout_path)?;
-    parse_codex_pressure(&tail)
+    let mut pressure = parse_codex_pressure(&tail)?;
+    if pressure.model.is_empty() {
+        // Codex writes `turn_context` once per turn, and a long thread's tool
+        // output pushes every one of them out of the inspected tail: measured
+        // across 481 local rollouts, only a handful still carried one. The
+        // model is fixed for a thread in practice, so the head has it.
+        pressure.model = head_model(rollout_path).unwrap_or_default();
+    }
+    Some(pressure)
+}
+
+/// The model named by the first `turn_context` in a rollout's head.
+fn head_model(rollout_path: &Path) -> Option<String> {
+    let mut file = fs::File::open(rollout_path).ok()?;
+    let mut head = vec![0u8; HEAD_BYTES as usize];
+    let read = std::io::Read::read(&mut file, &mut head).ok()?;
+    head.truncate(read);
+    let head = String::from_utf8_lossy(&head);
+    for line in head.lines() {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value.get("type").and_then(|t| t.as_str()) != Some("turn_context") {
+            continue;
+        }
+        if let Some(m) = value
+            .get("payload")
+            .and_then(|p| p.get("model"))
+            .and_then(|m| m.as_str())
+        {
+            return Some(m.to_string());
+        }
+    }
+    None
 }
 
 /// The Codex scan, split out so tests can drive it from a string.
