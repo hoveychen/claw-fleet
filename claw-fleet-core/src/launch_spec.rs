@@ -116,6 +116,41 @@ pub fn record_with_entrypoint(
     }
 }
 
+/// The effective `(model, effort)` for a **resume**, re-recording the note.
+///
+/// Explicit overrides win; where the caller passes none, the values the session
+/// was launched with stand in — so a follow-up keeps running the model the user
+/// picked no matter which client sent it. The note is rewritten with the
+/// effective pair (and the recorded `entrypoint` preserved), which is also what
+/// keeps a no-override resume from **blanking** it.
+///
+/// That blanking was a real bug, not a hypothetical: both resume paths called
+/// [`record`] with the caller's raw `Option`s under a comment claiming "no
+/// overrides → leaves the original note standing". [`record`] writes
+/// unconditionally, so a mobile follow-up (which sends no model — the phone's
+/// composer left it blank) rewrote the note to `{}`. On 2026-09-13 that turned a
+/// `gpt-6-astra` Codex thread into `gpt-5.6-sol`: the resume ran without `-m`,
+/// codex fell back to `~/.codex/config.toml`, and the wiped note meant even the
+/// desktop's queued-message drain could no longer find the original model.
+pub fn resume_spec(
+    session_id: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let clean = |v: Option<&str>| v.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let recorded = get(session_id);
+    let model = clean(model).or_else(|| recorded.as_ref().and_then(|s| s.model.clone()));
+    let effort = clean(effort).or_else(|| recorded.as_ref().and_then(|s| s.effort.clone()));
+    let entrypoint = recorded.and_then(|s| s.entrypoint);
+    record_with_entrypoint(
+        session_id,
+        model.as_deref(),
+        effort.as_deref(),
+        entrypoint.as_deref(),
+    );
+    (model, effort)
+}
+
 /// What Fleet launched this session with, or `None` for a session Fleet didn't
 /// spawn (or one spawned before this note existed).
 pub fn get(session_id: &str) -> Option<LaunchSpec> {
@@ -287,6 +322,43 @@ mod tests {
         record("s4", Some("claude-fable-5"), None);
         assert_eq!(model_of("s4").as_deref(), Some("claude-fable-5"));
         assert_eq!(effort_of("s4"), None);
+    }
+
+    /// The 2026-09-13 regression: a phone follow-up sends no model/effort, and
+    /// the old code handed those raw `None`s to `record`, which writes
+    /// unconditionally — the note became `{}` and the Codex resume ran with no
+    /// `-m`, dropping a `gpt-6-astra` thread onto config.toml's default.
+    #[test]
+    fn a_no_override_resume_inherits_the_launch_model_instead_of_blanking_it() {
+        let _home = TmpHome::new("resume-inherit");
+        record_with_entrypoint("r1", Some("gpt-6-astra"), Some("high"), Some("fleet-desktop"));
+        let (model, effort) = resume_spec("r1", None, None);
+        assert_eq!(model.as_deref(), Some("gpt-6-astra"), "resume must keep the launch model");
+        assert_eq!(effort.as_deref(), Some("high"));
+        // …and the note still says so for the next resume / queued-message drain.
+        assert_eq!(model_of("r1").as_deref(), Some("gpt-6-astra"));
+        assert_eq!(effort_of("r1").as_deref(), Some("high"));
+        assert_eq!(entrypoint_of("r1").as_deref(), Some("fleet-desktop"));
+    }
+
+    /// An explicit override is still the user changing model mid-session, and it
+    /// becomes what the note (and every later resume) reports.
+    #[test]
+    fn an_explicit_resume_override_wins_and_sticks() {
+        let _home = TmpHome::new("resume-override");
+        record("r2", Some("gpt-6-astra"), Some("high"));
+        let (model, effort) = resume_spec("r2", Some("gpt-5.6-sol"), None);
+        assert_eq!(model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(effort.as_deref(), Some("high"), "an unset flag still inherits");
+        assert_eq!(model_of("r2").as_deref(), Some("gpt-5.6-sol"));
+    }
+
+    /// A session Fleet never spawned has nothing to inherit — resume stays on the
+    /// CLI/config default rather than inventing a model.
+    #[test]
+    fn resume_of_an_unknown_session_invents_nothing() {
+        let _home = TmpHome::new("resume-unknown");
+        assert_eq!(resume_spec("r3", None, None), (None, None));
     }
 
     /// A session id is a filename here; it must never be able to climb out.
