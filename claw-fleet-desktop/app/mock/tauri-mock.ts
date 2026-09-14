@@ -7,6 +7,7 @@
 
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
+import { localDateKey } from "../localDate";
 import type { RawMessage, SessionInfo } from "../types";
 import type { LiveThinking } from "../generated/types";
 import type { PromoScene } from "./promo-scene";
@@ -1042,7 +1043,7 @@ async function handleIPC(
     // ── Today's cumulative spend (sidebar badge) ──
     case "today_usage":
       return {
-        date: new Date().toISOString().slice(0, 10),
+        date: localDateKey(),
         outputTokens: 1_284_500,
         costUsd: 23.87,
         agentCostUsd: 23.87,
@@ -1053,7 +1054,7 @@ async function handleIPC(
     // ── Per-model receipt behind the sidebar badge ──
     case "today_usage_breakdown":
       return {
-        date: new Date().toISOString().slice(0, 10),
+        date: localDateKey(),
         lines: [
           {
             model: "claude-opus-4-8",
