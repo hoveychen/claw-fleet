@@ -1079,6 +1079,60 @@ fn codex_cost_and_input(lines: &[Value], model: Option<&str>) -> (f64, u64) {
     (0.0, 0)
 }
 
+/// Price one `token_count` event's **incremental** usage — the `last_token_usage`
+/// block, i.e. what that single turn cost, not the running total.
+///
+/// [`codex_cost_and_input`] answers "what has this session cost so far" by
+/// pricing the last event's *cumulative* `total_token_usage`. A cost *rate*
+/// needs the opposite: per-event deltas it can sum over a time window. Codex
+/// already reports that delta itself (`last_token_usage`), so the rate needs no
+/// differencing of cumulative counters — which matters because Codex resends
+/// the whole prompt every turn, so the cumulative input counter climbs by the
+/// entire context each time and a naive diff would be indistinguishable from
+/// real new input.
+///
+/// The billing rules are deliberately identical to [`codex_cost_and_input`] so a
+/// session's rate and its total can never disagree about what a token costs:
+/// `cached_input_tokens` is a subset of `input_tokens` (so full-price input is
+/// `input - cached`, clamped against underflow), Codex rollouts carry no cache
+/// writes at all, and an absent model falls back to `"gpt"` → the GPT Sol tier.
+///
+/// Returns `None` when the event carries no `last_token_usage`, or when that
+/// block is all zeros — a `token_count` emitted at a turn boundary with nothing
+/// billed is not a zero-cost data point, it is not a data point at all, and
+/// letting it into the window would drag the measured rate toward zero.
+fn codex_event_incremental_cost(payload: &Value, model: Option<&str>) -> Option<f64> {
+    let usage = payload.get("info")?.get("last_token_usage")?;
+    let input = usage
+        .get("input_tokens")
+        .and_then(|t| t.as_u64())
+        .unwrap_or(0);
+    let cached = usage
+        .get("cached_input_tokens")
+        .and_then(|t| t.as_u64())
+        .unwrap_or(0)
+        .min(input);
+    let output = usage
+        .get("output_tokens")
+        .and_then(|t| t.as_u64())
+        .unwrap_or(0);
+    if input == 0 && output == 0 {
+        return None;
+    }
+    let turn = crate::model_cost::TurnUsage {
+        input_tokens: input - cached,
+        output_tokens: output,
+        cache_read_tokens: cached,
+        cache_creation_tokens: 0,
+        cache_creation_1h_tokens: 0,
+        web_search_requests: 0,
+    };
+    Some(crate::model_cost::turn_cost_usd(
+        model.unwrap_or("gpt"),
+        &turn,
+    ))
+}
+
 /// Extract context utilization from the latest token_count event.
 fn extract_context_percent(lines: &[Value], model: Option<&str>) -> Option<f64> {
     for line in lines.iter().rev() {
@@ -2478,6 +2532,78 @@ mod tests {
             S::WaitingInput
         );
         assert_eq!(clamp_dead_session_status(S::Idle, false), S::Idle);
+    }
+
+    #[test]
+    fn incremental_event_cost_prices_last_token_usage_not_the_running_total() {
+        use super::codex_event_incremental_cost;
+        // gpt-5.6-sol: $5/Mtok input, $30/Mtok output, $0.50/Mtok cache read.
+        // 60k full-price input ($0.30) + 40k cached ($0.02) + 10k output ($0.30).
+        let payload = json!({
+            "type": "token_count",
+            "info": {
+                // The cumulative block must be ignored entirely — pricing it
+                // would re-bill the whole session on every event.
+                "total_token_usage": {
+                    "input_tokens": 9_000_000u64,
+                    "output_tokens": 9_000_000u64
+                },
+                "last_token_usage": {
+                    "input_tokens": 100_000,
+                    "cached_input_tokens": 40_000,
+                    "output_tokens": 10_000
+                }
+            }
+        });
+        let cost = codex_event_incremental_cost(&payload, Some("gpt-5.6-sol"))
+            .expect("a priced turn must yield a cost");
+        assert!(
+            (cost - 0.62).abs() < 1e-9,
+            "expected $0.62 for the incremental turn, got {cost}"
+        );
+    }
+
+    #[test]
+    fn incremental_event_cost_skips_events_with_nothing_billed() {
+        use super::codex_event_incremental_cost;
+        // No `last_token_usage` at all: an older rollout shape.
+        let no_last = json!({
+            "type": "token_count",
+            "info": { "total_token_usage": { "input_tokens": 500, "output_tokens": 500 } }
+        });
+        assert!(codex_event_incremental_cost(&no_last, Some("gpt-5.6-sol")).is_none());
+
+        // Present but all zeros: a turn-boundary event with nothing billed. This
+        // is not a $0 data point — it is not a data point, and admitting it
+        // would drag the measured rate toward zero.
+        let zeroed = json!({
+            "type": "token_count",
+            "info": { "last_token_usage": { "input_tokens": 0, "output_tokens": 0 } }
+        });
+        assert!(codex_event_incremental_cost(&zeroed, Some("gpt-5.6-sol")).is_none());
+    }
+
+    #[test]
+    fn incremental_event_cost_clamps_cached_over_input() {
+        use super::codex_event_incremental_cost;
+        // Defensive: a rollout reporting cached > input must not underflow the
+        // `input - cached` subtraction (it is u64). Everything bills as cached.
+        let payload = json!({
+            "type": "token_count",
+            "info": {
+                "last_token_usage": {
+                    "input_tokens": 1_000_000,
+                    "cached_input_tokens": 5_000_000u64,
+                    "output_tokens": 0
+                }
+            }
+        });
+        let cost = codex_event_incremental_cost(&payload, Some("gpt-5.6-sol"))
+            .expect("clamped usage still prices");
+        assert!(
+            (cost - 0.50).abs() < 1e-9,
+            "1M tokens all billed at the cache-read rate = $0.50, got {cost}"
+        );
     }
 
     #[test]
