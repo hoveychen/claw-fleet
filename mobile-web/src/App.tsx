@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { Inbox, ListChecks, MoreHorizontal, Package, Plus } from "lucide-react";
+import { Inbox, ListChecks, MoreHorizontal, Package, Plus, X } from "lucide-react";
 import styles from "./App.module.css";
 import {
   disablePush,
@@ -64,10 +64,11 @@ import {
   type DeviceBook,
   type PairedDevice,
 } from "./devices";
-import { isNativeShell, onPairingLink } from "./deepLink";
+import { onPairingLink } from "./deepLink";
 import type { PairedLink } from "./pairingLink";
 import { PairPasteForm } from "./views/PairPasteForm";
 import { PairScanner } from "./views/PairScanner";
+import { scanAvailability } from "./scanAvailability";
 import { clearCachedSessions } from "./sessionCache";
 import { AUTH_WAIT_MS, waitAuthed } from "./transportWait";
 import { DeviceScopeProvider, scopedKey } from "./deviceScope";
@@ -98,6 +99,8 @@ import { WikiView } from "./views/WikiView";
 import { WikiDocView } from "./views/WikiDocView";
 
 const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
+/** 通知横幅被撵走时**当时那个 PushState**。存状态而不是布尔位，见横幅处的注释。 */
+const PUSH_NOTICE_DISMISSED_KEY = "fleet-push-notice-dismissed";
 
 /** Compact token count: 1.2M / 34.5K / 780. */
 function fmtTokens(n: number): string {
@@ -220,6 +223,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [a2hsDismissed, setA2hsDismissed] = useState(
     () => localStorage.getItem(A2HS_DISMISSED_KEY) === "1",
   );
+  /** 上次被撵走的那条通知横幅说的是哪个状态（`null` = 没撵过）。 */
+  const [pushNoticeDismissed, setPushNoticeDismissed] = useState<string | null>(() =>
+    localStorage.getItem(PUSH_NOTICE_DISMISSED_KEY),
+  );
+  const dismissPushNotice = useCallback((state: PushState) => {
+    localStorage.setItem(PUSH_NOTICE_DISMISSED_KEY, state);
+    setPushNoticeDismissed(state);
+  }, []);
 
   // localStorage wiped (iOS 7-day eviction, cache clear) but the IDB copy may
   // have survived — re-hydrate before declaring the pairing lost.
@@ -893,12 +904,23 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, []);
 
   if (!paired) {
-    // 原生壳限定的两条入口。系统相机扫出来的链接由 App Link 决定交给谁，而
-    // App Link 只认 manifest 里编译期写死的 host —— 自建 relay 的 host 编译期
-    // 不可知，那条路对它结构上不可用（扫出来只会打开浏览器）。app 内扫码拿到的
-    // 是二维码原文，粘贴更是不依赖任何 host 声明。
-    // PWA 两条都不需要：它本来就是被那条链接打开的。
-    const nativeEntries = idbProbed && isNativeShell();
+    // 两条不依赖地址栏的配对入口。它们本来是原生壳限定的：壳从 rawfile 启动，
+    // 没有「打开一条带 #k= 的链接」这回事；系统相机扫出来的链接由 App Link 决定
+    // 交给谁，而 App Link 只认 manifest 里编译期写死的 host，自建 relay 的 host
+    // 编译期不可知，那条路对它结构上不可用。app 内扫码拿到的是二维码原文，粘贴
+    // 更是不依赖任何 host 声明。
+    //
+    // PWA 同样需要它们，而且是**唯一**的出路。iOS 把「添加到主屏幕」装出来的
+    // web app 放进独立的存储分区：Safari 标签页里刚落盘的那份配对不会跟过去，
+    // 而 A2HS 存的是 manifest 的 start_url（`/`），fragment 里的密钥也一并丢掉。
+    // 于是用户第一次点主屏幕图标就落在这张门上 —— 主屏幕 app 没有地址栏，没法
+    // 再开一次带 #k= 的链接，而门上一个按钮都没有，人就彻底卡死（老板 2026-09-15
+    // 反馈）。
+    //
+    // 扫码那条按能力出：地址不是 https 时浏览器根本不暴露 getUserMedia，摆一个点
+    // 了必然失败的按钮不如当场说清原因，把人直接引到粘贴（scanAvailability.ts）。
+    const pairEntries = idbProbed;
+    const scan = scanAvailability();
     if (scanning) {
       return <PairScanner onPaired={adoptPaired} onClose={() => setScanning(false)} />;
     }
@@ -908,14 +930,22 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <h1>{t("Fleet 移动端")}</h1>
         <p>
           {idbProbed
-            ? t("请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。")
+            ? t("扫描桌面端 Fleet「移动端」板块里的二维码完成配对。")
             : t("正在恢复配对…")}
         </p>
-        {nativeEntries && (
+        {pairEntries && (
           <>
-            <button className={styles.gateButton} onClick={() => setScanning(true)}>
-              {t("扫码配对")}
-            </button>
+            {scan === "ok" ? (
+              <button className={styles.gateButton} onClick={() => setScanning(true)}>
+                {t("扫码配对")}
+              </button>
+            ) : (
+              <p className={styles.gateNote}>
+                {scan === "insecure-origin"
+                  ? t("这个地址不是 HTTPS，浏览器不允许网页调用摄像头，扫码这条路走不了。请用下面的粘贴。")
+                  : t("这台设备用不了摄像头，扫不了码。请用下面的粘贴。")}
+              </p>
+            )}
             <PairPasteForm onPaired={adoptPaired} />
           </>
         )}
@@ -1007,14 +1037,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </span>
       </header>
 
-      {/* 这条横幅讲的是「iOS 7 天不用会抹掉本地配对，得重新扫码」——同源形态
-          根本没有配对可丢（后端就是发出这张页面的那个进程），显示它纯属误导。
-          用 NEEDS_PAIRING 而不是 SUPPORTS_PUSH：这条说的是配对，不是推送。 */}
+      {/* 这条横幅讲的是「iOS 7 天不用会抹掉本地配对」——同源形态根本没有配对可丢
+          （后端就是发出这张页面的那个进程），显示它纯属误导。用 NEEDS_PAIRING
+          而不是 SUPPORTS_PUSH：这条说的是配对，不是推送。
+
+          文案里那句「首次打开需要再扫一次码」不是免责声明，是这条路的实情：iOS 把
+          主屏幕 web app 的存储单独分区，Safari 里的配对不会跟过去，而 A2HS 存的是
+          manifest 的 start_url，fragment 里的密钥也带不走。不先说明，用户点开图标
+          撞上配对门只会以为坏了（见配对门的注释）。 */}
       {NEEDS_PAIRING && !MOCK && needsA2hsForDurableStorage() && !a2hsDismissed && (
         <div className={styles.pushBanner}>
           <span>
             {t(
-              "用 Safari 分享菜单「添加到主屏幕」后从主屏幕打开——否则 7 天不访问，iOS 会清掉本机配对，需重新扫码。",
+              "建议用 Safari 分享菜单「添加到主屏幕」：留在 Safari 里 7 天不访问，iOS 会清掉本机配对。主屏幕 app 的存储是独立的一份，首次打开需再扫一次码。",
             )}
           </span>
           <button
@@ -1029,7 +1064,16 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </div>
       )}
 
-      {!MOCK && push !== "granted" && push !== "unsupported" && push !== "unsupported-harmony" && (
+      {/* 这条横幅以前关不掉：`ios-needs-a2hs` 与 `denied` 两个分支连个按钮都没有，
+          而 iOS 上前者恰恰是**常驻**的（用 Safari 看就一直满足），于是每一屏顶上
+          都挂着一条撵不走的告示。关掉记的是**当时那个状态**而不是一个布尔位：
+          「先添加到主屏幕」被撵走之后，后来真的变成「权限被拒绝」时那条新消息仍
+          该出来说话。 */}
+      {!MOCK &&
+        push !== "granted" &&
+        push !== "unsupported" &&
+        push !== "unsupported-harmony" &&
+        pushNoticeDismissed !== push && (
         <div className={styles.pushBanner}>
           {push === "ios-needs-a2hs" ? (
             <span>{t("要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。")}</span>
@@ -1043,6 +1087,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               </button>
             </>
           )}
+          <button
+            className={styles.bannerClose}
+            aria-label={t("关闭提示")}
+            title={t("关闭提示")}
+            onClick={() => dismissPushNotice(push)}
+          >
+            <X size={16} />
+          </button>
         </div>
       )}
 
@@ -1089,6 +1141,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onRemoveDevice={(d) => void removeDeviceEntry(d)}
             deviceMuted={(id) => pushMuted[id] ?? true}
             onMuteDevice={(d, muted) => void handleMuteDevice(d, muted)}
+            onAddDevice={adoptPaired}
             onUnpairAll={unpairAll}
             supportsPush={SUPPORTS_PUSH}
             connected={connected}

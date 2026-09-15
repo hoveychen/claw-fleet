@@ -119,6 +119,29 @@
   color: var(--color-text-secondary);
 }
 
+/* 文案吃掉剩余宽度，把右侧的动作按钮与关闭叉顶到边上去。 */
+.pushBanner > span {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 横幅右上角的关闭叉。命中区按 44px 给足（iOS HIG 的最小可点面积），视觉上靠
+   负 margin 收回来，免得它把横幅撑高一圈。 */
+.bannerClose {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -12px -10px -12px -4px;
+  color: var(--color-text-dim);
+}
+
+.bannerClose:active {
+  opacity: 0.6;
+}
+
 .pushButton {
   flex-shrink: 0;
   background: var(--color-accent);
@@ -253,6 +276,13 @@
   color: var(--color-text-secondary);
   max-width: 300px;
   font-size: var(--t-ui, 14px);
+}
+
+/* 扫不了码时顶掉「扫码配对」按钮的那行说明。占位与按钮一致（.gateButton 的
+   margin-top），免得两种形态下门里的间距各不相同。 */
+.gateNote {
+  margin-top: 12px;
+  font-size: var(--t-aux, 12px);
 }
 
 .gateLogo {
