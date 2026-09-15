@@ -20,7 +20,10 @@ import type { RttSplit } from "../connQuality";
 import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
 import type { PairedDevice } from "../devices";
+import type { PairedLink } from "../pairingLink";
 import { canScanPairing, scanPairing } from "../nativeScan";
+import { PairPasteForm } from "./PairPasteForm";
+import { PairScanner } from "./PairScanner";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
 import { useConfirm } from "../confirmDialog";
@@ -77,6 +80,9 @@ interface Props {
   deviceMuted: (deviceId: string) => boolean;
   /** 只开/只关某一台的通知。整部手机的总开关在上面「连接与通知」那一块。 */
   onMuteDevice: (device: PairedDevice, muted: boolean) => void;
+  /** 再加一台。与配对门共用 App 的 adoptPaired —— 去重、保留改过的名字、焦点
+   *  转移那三条规则只有一份实现。 */
+  onAddDevice: (paired: PairedLink) => void;
   /** 清除全部配对并重载。 */
   onUnpairAll: () => void;
 }
@@ -107,6 +113,7 @@ export function MoreView({
   onRemoveDevice,
   deviceMuted,
   onMuteDevice,
+  onAddDevice,
   onUnpairAll,
 }: Props) {
   const { lang, setLang, t } = useI18n();
@@ -115,6 +122,9 @@ export function MoreView({
   // 未必可用，而这里没有任何理由依赖它）。
   const [editingId, setEditingId] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
+  // 「扫码添加设备」的取景器。鸿蒙壳走它自己那条（scanPairing 会重载 WebView 并
+  // 注入 #k=），其余形态都用页面里这个。
+  const [scanning, setScanning] = useState(false);
   const { setting, setTheme } = useTheme();
   const wakeLock = useWakeLock();
   // Task-list handoff grouping — same "tasks:groupHandoff" draft the task page
@@ -148,6 +158,20 @@ export function MoreView({
     : agentOnline
       ? t("桌面端在线")
       : t("桌面端离线");
+
+  // 取景器整屏盖住（position: fixed），所以放在最外层而不是设备那一块里面 ——
+  // 它一出现，「更多」页在它底下原样留着，取消就回到原处。
+  if (scanning) {
+    return (
+      <PairScanner
+        onPaired={(paired) => {
+          setScanning(false);
+          onAddDevice(paired);
+        }}
+        onClose={() => setScanning(false)}
+      />
+    );
+  }
 
   return (
     <div className={styles.view}>
@@ -577,29 +601,36 @@ export function MoreView({
               </div>
             ))}
           </div>
-          {/* 原生壳里没有「打开一个带密钥的网址」这条路(它从 rawfile 启动,
-              地址栏不存在),而壳自己的配对页只在尚未配对时可达 —— 于是装了 app
-              的用户加不了第二台机器。这一行把壳的扫码能力接出来。 */}
-          {canScanPairing() && (
-            <div className={styles.card} style={{ marginTop: 8 }}>
-              <button className={styles.navRow} onClick={scanPairing}>
-                <span className={styles.navIcon}>
-                  <QrCode size={18} />
+          {/* 「加第二台」要么开一个带 #k= 的网址,要么在 app 里扫码。前者对三种
+              形态都不成立:原生壳从 rawfile 启动没有地址栏;iOS 的主屏幕 web app
+              同样没有地址栏,而且它的存储与 Safari 分区隔离,回 Safari 开链接加进
+              去的那台它也看不见。所以这两行对**所有**形态都必须在。
+
+              扫码优先用壳自己的(鸿蒙壳会重载 WebView 并注入 #k=,相机由系统接管);
+              没有那座桥就用页面里的取景器。粘贴是相机被拒/不可用时的兜底,也是
+              自建 relay 的唯一入口(二维码扫出来的链接系统交不到 app 手上)。 */}
+          <div className={styles.card} style={{ marginTop: 8 }}>
+            <button
+              className={styles.navRow}
+              onClick={() => (canScanPairing() ? scanPairing() : setScanning(true))}
+            >
+              <span className={styles.navIcon}>
+                <QrCode size={18} />
+              </span>
+              <span className={styles.navText}>
+                <span className={styles.navLabel}>{t("扫码添加设备")}</span>
+                <span className={styles.navSub}>
+                  {t("扫另一台桌面端「移动端」面板里的二维码")}
                 </span>
-                <span className={styles.navText}>
-                  <span className={styles.navLabel}>{t("扫码添加设备")}</span>
-                  <span className={styles.navSub}>
-                    {t("扫另一台桌面端「移动端」面板里的二维码")}
-                  </span>
-                </span>
-                <ChevronRight size={16} className={styles.navChevron} />
-              </button>
-            </div>
-          )}
+              </span>
+              <ChevronRight size={16} className={styles.navChevron} />
+            </button>
+          </div>
           <div className={styles.rowNote}>
-            {canScanPairing()
-              ? t("每台桌面端各出一张码;扫过的会留在上面这个列表里。")
-              : t("在另一台桌面端 Fleet 的「移动端」板块扫码，即可把它一并加进这个列表。")}
+            {t("每台桌面端各出一张码;扫过的会留在上面这个列表里。")}
+          </div>
+          <div className={styles.pasteRow}>
+            <PairPasteForm onPaired={onAddDevice} />
           </div>
         </div>
       )}

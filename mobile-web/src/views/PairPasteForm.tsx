@@ -5,6 +5,9 @@
 // 那条路对它结构上不可用——扫码只会打开浏览器,永远进不了 app。粘贴不依赖任何
 // host 声明,是自建 relay 用户进得来的那一条。
 //
+// iOS 的主屏幕 web app 也走它:那里没有地址栏,没法再开一次带 #k= 的链接(见
+// App.tsx 配对门的注释)。
+//
 // 它同时是相机被拒/不可用时扫码的兜底。
 
 import { useState } from "react";
@@ -38,7 +41,7 @@ export function PairPasteForm({ onPaired }: { onPaired: (paired: PairedLink) => 
   return (
     <div className={styles.form}>
       <p className={styles.hint}>
-        {t("在桌面端「移动端」板块点「复制配对链接」，把它贴到这里。自建 relay 只能走这条路——二维码扫出来的链接系统交不到 app 手上。")}
+        {t("在桌面端「移动端」板块点「复制配对链接」，把它贴到这里。摄像头用不了、或链接是从别的设备发过来的，都走这条。")}
       </p>
       <textarea
         className={styles.input}

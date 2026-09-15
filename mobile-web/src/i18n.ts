@@ -143,8 +143,6 @@ const DICT: Record<string, string> = {
   保存: "Save",
   "移除「{0}」？它的通知会停掉，本机为它缓存的任务与草稿一并清除。":
     "Remove \u201c{0}\u201d? Its notifications stop, and the tasks and drafts cached for it on this phone are cleared.",
-  "在另一台桌面端 Fleet 的「移动端」板块扫码，即可把它一并加进这个列表。":
-    "Scan the QR code in another desktop Fleet's Mobile panel to add it to this list.",
   "清除本机全部配对密钥？需回到桌面端重新扫码才能再连接。":
     "Clear every pairing secret on this phone? You'll need to scan again from the desktop to reconnect.",
   "重新配对 / 清除全部密钥": "Re-pair / clear all secrets",
@@ -160,10 +158,11 @@ const DICT: Record<string, string> = {
   "{0} 条": "{0} items",
   // ── App shell / 配对 gate ──
   "Fleet 移动端": "Fleet Mobile",
-  "请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。":
-    "Open this page by scanning the QR code in the desktop Fleet's Mobile panel (the link carries the pairing secret).",
+  "扫描桌面端 Fleet「移动端」板块里的二维码完成配对。":
+    "Scan the QR code in the desktop Fleet's Mobile panel to pair.",
   "正在恢复配对…": "Restoring pairing…",
-  // 应用内扫码 + 粘贴配对（原生壳限定）——系统相机扫出来的链接进不了 app。
+  // 应用内扫码 + 粘贴配对。原生壳（系统相机扫出来的链接进不了 app）与 iOS 主屏幕
+  // web app（没有地址栏，Safari 的存储分区也不共享）都只有这两条路。
   扫码配对: "Scan to pair",
   "正在打开摄像头…": "Opening the camera…",
   "对准桌面端「移动端」板块里的二维码。": "Point at the QR code in the desktop's Mobile panel.",
@@ -174,8 +173,8 @@ const DICT: Record<string, string> = {
   "这台设备用不了摄像头。请改用粘贴配对链接。":
     "This device has no usable camera. Paste a pairing link instead.",
   改为粘贴配对链接: "Paste a pairing link instead",
-  "在桌面端「移动端」板块点「复制配对链接」，把它贴到这里。自建 relay 只能走这条路——二维码扫出来的链接系统交不到 app 手上。":
-    "Click “Copy pairing link” in the desktop's Mobile panel and paste it here. A self-hosted relay can only be paired this way — the system won't hand a scanned link for it to the app.",
+  "在桌面端「移动端」板块点「复制配对链接」，把它贴到这里。摄像头用不了、或链接是从别的设备发过来的，都走这条。":
+    "Click “Copy pairing link” in the desktop's Mobile panel and paste it here. Use this when the camera is unavailable, or when the link reached you from another device.",
   "这不像一条配对链接。它应该形如 https://<你的 relay>/#k=<密钥>。":
     "That doesn't look like a pairing link. It should look like https://<your relay>/#k=<secret>.",
   配对失败: "Pairing failed",
@@ -202,9 +201,10 @@ const DICT: Record<string, string> = {
   手机: "Phone",
   桌面链路: "Desktop link",
   处理: "Handling",
-  "用 Safari 分享菜单「添加到主屏幕」后从主屏幕打开——否则 7 天不访问，iOS 会清掉本机配对，需重新扫码。":
-    "Use Safari's share menu \"Add to Home Screen\" and open from there — otherwise iOS wipes the local pairing after 7 days of inactivity and you'll need to re-scan.",
+  "建议用 Safari 分享菜单「添加到主屏幕」：留在 Safari 里 7 天不访问，iOS 会清掉本机配对。主屏幕 app 的存储是独立的一份，首次打开需再扫一次码。":
+    "Add to Home Screen via Safari's share menu is recommended: left in Safari, iOS wipes the local pairing after 7 idle days. The home-screen app has its own storage, so scan once more on first open.",
   知道了: "Got it",
+  关闭提示: "Dismiss",
   "要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。":
     "To receive notifications, first use Safari's share menu \"Add to Home Screen\", then open from the home screen.",
   "通知权限已被拒绝，请在系统设置中为本站点重新开启。":
