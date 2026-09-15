@@ -883,11 +883,81 @@ fn clamp_dead_session_status(
     }
 }
 
-/// Compute token speed and total output tokens from parsed JSONL lines.
-fn compute_token_stats(lines: &[Value]) -> (f64, u64, u64) {
+/// Whether this session's live rates (`token_speed`, `cost_speed_usd_per_min`)
+/// must be dropped because it is demonstrably generating nothing.
+///
+/// [`clamp_dead_session_status`] already decided that a dead process means the
+/// turn is over — but it only rewrites the *status*. Both rates are measured
+/// over a 300-second window on the rollout's `token_count` events (see
+/// [`compute_token_stats_at`]), so the burst emitted just before the process
+/// died stays inside that window and keeps inflating the fleet-wide totals
+/// after the turn ended. The desktop sums `tokenSpeed` and `costSpeedUsdPerMin`
+/// across every session with no per-source filter (`store.ts`), so a handful of
+/// killed Codex turns read as phantom tok/s and phantom $/min — the same ghost
+/// `session::age_out_status` was written to kill for Claude's rate-limited
+/// sessions.
+///
+/// Claude closes this twice: `claude_source::reconcile_claude_liveness` zeroes
+/// the rates alongside its status downgrade, and `session::age_out_status`
+/// zeroes them for aged-out states. Neither runs over a *freshly scanned* Codex
+/// session (age-out is applied only to cache-retained ones, and the Claude
+/// reconciler filters on `agent_source`), so the ghost survived on both Codex
+/// build paths.
+///
+/// Two independent reasons a session contributes nothing:
+///
+/// 1. **Blocked by the API.** `RateLimited` / `ServerErrored` means the turn
+///    ended against a wall with a burst still inside the window, and unlike an
+///    idle session there is no age at which it resumes generating on its own —
+///    so the rates go immediately, regardless of whether a process is still
+///    around. The *status* is preserved either way: auto-resume keys on it.
+///    This is verbatim the rule `session::age_out_status` applies to Claude
+///    (whose comment records ~21 rate-limited agents contributing thousands of
+///    ghost tok/s), and Codex needs it stated here because a freshly scanned
+///    Codex session never reaches `age_out_status` — that runs only over
+///    cache-retained ones. `ServerErrored` is included for symmetry even though
+///    no Codex path currently produces it, so the rule holds if one ever does.
+///
+/// 2. **Process gone.** Asked of the status clamp itself — "would you rewrite
+///    this status?" — rather than re-listing the in-flight set, so the two
+///    can't drift apart. Wherever the clamp already fires, the rates now go
+///    with it, and nowhere else, so this adds no new false-positive case.
+fn dead_turn_silences_rates(status: &crate::session::SessionStatus, proc_alive: bool) -> bool {
+    use crate::session::SessionStatus as S;
+    if matches!(status, S::RateLimited | S::ServerErrored) {
+        return true;
+    }
+    clamp_dead_session_status(status.clone(), proc_alive) != *status
+}
+
+/// Live rates and cumulative output counts for one Codex session.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct CodexTokenStats {
+    /// Output tokens per second over the trailing 5-minute window.
+    token_speed: f64,
+    /// USD per minute over that same window. Codex sessions used to report a
+    /// hard-coded `0.0` here, which silently excluded them from the fleet-wide
+    /// cost-rate chart (`store.ts` sums `costSpeedUsdPerMin` across all
+    /// sessions) — only Claude and dsh were ever in that total.
+    cost_speed_usd_per_min: f64,
+    total_output_tokens: u64,
+    reasoning_output_tokens: u64,
+}
+
+/// Compute token/cost rates and cumulative output counts from parsed rollout
+/// lines, measuring the window against `now_secs`.
+///
+/// `now_secs` is a parameter (rather than read from the clock inside) so the
+/// window is testable without freezing the system clock — same reason
+/// `session::stats::finish_at` takes one.
+///
+/// `model` prices the cost rate; see [`codex_event_incremental_cost`] for the
+/// billing rules and the `"gpt"` fallback.
+fn compute_token_stats_at(lines: &[Value], model: Option<&str>, now_secs: f64) -> CodexTokenStats {
     let mut total_output: u64 = 0;
     let mut total_reasoning: u64 = 0;
-    let mut timed_tokens: Vec<(f64, u64)> = Vec::new();
+    // (timestamp, incremental output tokens, incremental USD)
+    let mut timed_tokens: Vec<(f64, u64, f64)> = Vec::new();
 
     for line in lines {
         let line_type = line.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -914,15 +984,22 @@ fn compute_token_stats(lines: &[Value]) -> (f64, u64, u64) {
                         .and_then(|t| t.as_u64())
                         .unwrap_or(total_reasoning);
 
-                    let incremental_output = info
-                        .get("last_token_usage")
+                    let last_usage = info.get("last_token_usage");
+                    let incremental_output = last_usage
                         .and_then(|u| u.get("output_tokens"))
                         .and_then(|t| t.as_u64())
                         .unwrap_or(0);
                     if incremental_output > 0 {
                         if let Some(ts_str) = line.get("timestamp").and_then(|t| t.as_str()) {
                             if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str) {
-                                timed_tokens.push((dt.timestamp() as f64, incremental_output));
+                                let cost = last_usage
+                                    .and_then(|u| codex_event_incremental_cost(u, model))
+                                    .unwrap_or(0.0);
+                                timed_tokens.push((
+                                    dt.timestamp() as f64,
+                                    incremental_output,
+                                    cost,
+                                ));
                             }
                         }
                     }
@@ -940,7 +1017,9 @@ fn compute_token_stats(lines: &[Value]) -> (f64, u64, u64) {
 
                     if let Some(ts_str) = line.get("timestamp").and_then(|t| t.as_str()) {
                         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str) {
-                            timed_tokens.push((dt.timestamp() as f64, output));
+                            let cost =
+                                codex_event_incremental_cost(usage, model).unwrap_or(0.0);
+                            timed_tokens.push((dt.timestamp() as f64, output, cost));
                         }
                     }
                 }
@@ -948,34 +1027,61 @@ fn compute_token_stats(lines: &[Value]) -> (f64, u64, u64) {
         }
     }
 
-    let speed = if timed_tokens.len() >= 2 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64();
-        let window_start = now - 300.0;
+    // Rates over the trailing 5-minute window.
+    //
+    // Divide by `now - first_ts`, not `last_ts - first_ts`. The inter-event gap
+    // version makes a rate a step function that holds the old value until the
+    // oldest sample slides out of the window — so a session that burned $2 in a
+    // 20-second burst four minutes ago still reports that burst's rate, and it
+    // lands in the source-agnostic fleet totals (`store.ts` sums both speeds
+    // across every session). Measuring against "now" lets the rate decay
+    // smoothly as the idle tail grows. This is verbatim the reasoning behind
+    // `session::stats::finish_at`, which Claude sessions have used all along;
+    // Codex was the odd one out until the cost rate forced the question.
+    let (token_speed, cost_speed_usd_per_min) = if timed_tokens.len() >= 2 {
+        let window_start = now_secs - 300.0;
         let recent: Vec<_> = timed_tokens
             .iter()
-            .filter(|(ts, _)| *ts > window_start)
+            .filter(|(ts, _, _)| *ts > window_start)
             .collect();
         if recent.len() >= 2 {
-            let total_recent: u64 = recent.iter().map(|(_, t)| t).sum();
-            let first_ts = recent.first().map(|(ts, _)| *ts).unwrap_or(0.0);
-            let last_ts = recent.last().map(|(ts, _)| *ts).unwrap_or(0.0);
-            let duration = last_ts - first_ts;
+            let total_recent_tokens: u64 = recent.iter().map(|(_, t, _)| t).sum();
+            let total_recent_cost: f64 = recent.iter().map(|(_, _, c)| c).sum();
+            let first_ts = recent.first().map(|(ts, _, _)| *ts).unwrap_or(0.0);
+            let duration = now_secs - first_ts;
             if duration > 0.0 {
-                total_recent as f64 / duration
+                (
+                    total_recent_tokens as f64 / duration,
+                    total_recent_cost * 60.0 / duration,
+                )
             } else {
-                0.0
+                (0.0, 0.0)
             }
         } else {
-            0.0
+            (0.0, 0.0)
         }
     } else {
-        0.0
+        (0.0, 0.0)
     };
 
-    (speed, total_output, total_reasoning)
+    CodexTokenStats {
+        token_speed,
+        cost_speed_usd_per_min,
+        total_output_tokens: total_output,
+        reasoning_output_tokens: total_reasoning,
+    }
+}
+
+/// [`compute_token_stats_at`] against the wall clock.
+fn compute_token_stats(lines: &[Value], model: Option<&str>) -> CodexTokenStats {
+    compute_token_stats_at(
+        lines,
+        model,
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64(),
+    )
 }
 
 /// Compute USD cost and cumulative input tokens for a Codex session from its
@@ -1040,6 +1146,62 @@ fn codex_cost_and_input(lines: &[Value], model: Option<&str>) -> (f64, u64) {
         return (cost, input);
     }
     (0.0, 0)
+}
+
+/// Price one `token_count` event's **incremental** usage — the `last_token_usage`
+/// block, i.e. what that single turn cost, not the running total.
+///
+/// [`codex_cost_and_input`] answers "what has this session cost so far" by
+/// pricing the last event's *cumulative* `total_token_usage`. A cost *rate*
+/// needs the opposite: per-event deltas it can sum over a time window. Codex
+/// already reports that delta itself (`last_token_usage`), so the rate needs no
+/// differencing of cumulative counters — which matters because Codex resends
+/// the whole prompt every turn, so the cumulative input counter climbs by the
+/// entire context each time and a naive diff would be indistinguishable from
+/// real new input.
+///
+/// The billing rules are deliberately identical to [`codex_cost_and_input`] so a
+/// session's rate and its total can never disagree about what a token costs:
+/// `cached_input_tokens` is a subset of `input_tokens` (so full-price input is
+/// `input - cached`, clamped against underflow), Codex rollouts carry no cache
+/// writes at all, and an absent model falls back to `"gpt"` → the GPT Sol tier.
+///
+/// Takes the usage block itself (not the enclosing event) so both incremental
+/// shapes can share it: `token_count`'s `info.last_token_usage` and
+/// `turn_complete` / `task_complete`'s `usage`.
+///
+/// Returns `None` when the block is all zeros — a usage report with nothing
+/// billed is not a zero-cost data point, it is not a data point at all, and
+/// letting it into the window would drag the measured rate toward zero.
+fn codex_event_incremental_cost(usage: &Value, model: Option<&str>) -> Option<f64> {
+    let input = usage
+        .get("input_tokens")
+        .and_then(|t| t.as_u64())
+        .unwrap_or(0);
+    let cached = usage
+        .get("cached_input_tokens")
+        .and_then(|t| t.as_u64())
+        .unwrap_or(0)
+        .min(input);
+    let output = usage
+        .get("output_tokens")
+        .and_then(|t| t.as_u64())
+        .unwrap_or(0);
+    if input == 0 && output == 0 {
+        return None;
+    }
+    let turn = crate::model_cost::TurnUsage {
+        input_tokens: input - cached,
+        output_tokens: output,
+        cache_read_tokens: cached,
+        cache_creation_tokens: 0,
+        cache_creation_1h_tokens: 0,
+        web_search_requests: 0,
+    };
+    Some(crate::model_cost::turn_cost_usd(
+        model.unwrap_or("gpt"),
+        &turn,
+    ))
 }
 
 /// Extract context utilization from the latest token_count event.
@@ -1572,6 +1734,7 @@ fn build_session_from_sqlite(
     let (
         status,
         token_speed,
+        cost_speed_usd_per_min,
         total_output_tokens,
         reasoning_output_tokens,
         last_message_preview,
@@ -1623,9 +1786,16 @@ fn build_session_from_sqlite(
                     } else {
                         st
                     };
-                    let (spd, tok, reasoning) = compute_token_stats(&all_parsed);
                     let preview = extract_last_text(last_n);
+                    // Resolved before the stats: the cost rate has to price each
+                    // turn, so the model has to be known first.
                     let mdl = extract_model(&all_parsed).or_else(|| thread.model.clone());
+                    let stats = compute_token_stats(&all_parsed, mdl.as_deref());
+                    let (spd, tok, reasoning) = (
+                        stats.token_speed,
+                        stats.total_output_tokens,
+                        stats.reasoning_output_tokens,
+                    );
 
                     let has_reasoning = last_n.iter().any(|v| {
                         v.get("type").and_then(|t| t.as_str()) == Some("response_item")
@@ -1657,11 +1827,25 @@ fn build_session_from_sqlite(
                     // can show (see `SessionInfo::out_of_credits`).
                     let ooc = codex_out_of_credits(&all_parsed);
                     (
-                        st, spd, tok, reasoning, preview, mdl, tl, eff, ctx, rl, cost, input, ooc,
+                        st,
+                        spd,
+                        stats.cost_speed_usd_per_min,
+                        tok,
+                        reasoning,
+                        preview,
+                        mdl,
+                        tl,
+                        eff,
+                        ctx,
+                        rl,
+                        cost,
+                        input,
+                        ooc,
                     )
                 } else {
                     (
                         determine_status_from_age(file_age.as_secs_f64()),
+                        0.0,
                         0.0,
                         thread.tokens_used as u64,
                         0,
@@ -1683,6 +1867,7 @@ fn build_session_from_sqlite(
                 (
                     determine_status_from_age(age_secs),
                     0.0,
+                    0.0,
                     thread.tokens_used as u64,
                     0,
                     None,
@@ -1702,6 +1887,7 @@ fn build_session_from_sqlite(
         } else {
             (
                 determine_status_from_age(age_secs),
+                0.0,
                 0.0,
                 thread.tokens_used as u64,
                 0,
@@ -1731,6 +1917,7 @@ fn build_session_from_sqlite(
         (
             determine_status_from_age(age_secs),
             0.0,
+            0.0,
             thread.tokens_used as u64,
             0,
             preview,
@@ -1759,6 +1946,15 @@ fn build_session_from_sqlite(
     // PID resolution: prefer thread-id match, fall back to workspace path match.
     let (pid, pid_precise) = resolve_pid(codex_processes, &thread.id, &thread.cwd);
     let proc_alive = codex_proc_alive(codex_processes, &thread.id);
+    // Drop the rates for a session that is generating nothing — blocked by the
+    // API, or its process gone (see `dead_turn_silences_rates`). Evaluated on
+    // the pre-clamp status, and after the rate-limit override above, so both
+    // reasons are visible to it.
+    let (token_speed, cost_speed_usd_per_min) = if dead_turn_silences_rates(&status, proc_alive) {
+        (0.0, 0.0)
+    } else {
+        (token_speed, cost_speed_usd_per_min)
+    };
     // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
     // the composer offers resume (not enqueue) once the turn is over.
     let status = clamp_dead_session_status(status, proc_alive);
@@ -1828,7 +2024,7 @@ fn build_session_from_sqlite(
         total_input_tokens,
         total_cost_usd: codex_cost,
         agent_total_cost_usd: codex_cost,
-        cost_speed_usd_per_min: 0.0,
+        cost_speed_usd_per_min,
         last_message_preview,
         last_activity_ms,
         agent_last_activity_ms: last_activity_ms,
@@ -2439,6 +2635,216 @@ mod tests {
             S::WaitingInput
         );
         assert_eq!(clamp_dead_session_status(S::Idle, false), S::Idle);
+    }
+
+    #[test]
+    fn incremental_event_cost_prices_last_token_usage_not_the_running_total() {
+        use super::codex_event_incremental_cost;
+        // gpt-5.6-sol: $5/Mtok input, $30/Mtok output, $0.50/Mtok cache read.
+        // 60k full-price input ($0.30) + 40k cached ($0.02) + 10k output ($0.30).
+        // The caller hands over the incremental block itself; the cumulative
+        // `total_token_usage` never reaches this function, because pricing it
+        // would re-bill the whole session on every event.
+        let last_token_usage = json!({
+            "input_tokens": 100_000,
+            "cached_input_tokens": 40_000,
+            "output_tokens": 10_000
+        });
+        let cost = codex_event_incremental_cost(&last_token_usage, Some("gpt-5.6-sol"))
+            .expect("a priced turn must yield a cost");
+        assert!(
+            (cost - 0.62).abs() < 1e-9,
+            "expected $0.62 for the incremental turn, got {cost}"
+        );
+    }
+
+    #[test]
+    fn incremental_event_cost_skips_events_with_nothing_billed() {
+        use super::codex_event_incremental_cost;
+        // All zeros: a turn-boundary event with nothing billed. This is not a
+        // $0 data point — it is not a data point, and admitting it would drag
+        // the measured rate toward zero.
+        let zeroed = json!({ "input_tokens": 0, "output_tokens": 0 });
+        assert!(codex_event_incremental_cost(&zeroed, Some("gpt-5.6-sol")).is_none());
+
+        // A block missing the fields entirely reads the same way.
+        let empty = json!({});
+        assert!(codex_event_incremental_cost(&empty, Some("gpt-5.6-sol")).is_none());
+    }
+
+    #[test]
+    fn incremental_event_cost_clamps_cached_over_input() {
+        use super::codex_event_incremental_cost;
+        // Defensive: a rollout reporting cached > input must not underflow the
+        // `input - cached` subtraction (it is u64). Everything bills as cached.
+        let last_token_usage = json!({
+            "input_tokens": 1_000_000,
+            "cached_input_tokens": 5_000_000u64,
+            "output_tokens": 0
+        });
+        let cost = codex_event_incremental_cost(&last_token_usage, Some("gpt-5.6-sol"))
+            .expect("clamped usage still prices");
+        assert!(
+            (cost - 0.50).abs() < 1e-9,
+            "1M tokens all billed at the cache-read rate = $0.50, got {cost}"
+        );
+    }
+
+    /// Two turns 20s apart, each billing 10k output tokens on gpt-5.6-sol
+    /// ($30/Mtok → $0.30 a turn, $0.60 total). The window runs from the first
+    /// sample to *now*, so both rates must fall as the session idles instead of
+    /// holding the burst value until the sample ages out.
+    fn two_turn_burst() -> Vec<serde_json::Value> {
+        // `total_token_usage` is cumulative, `last_token_usage` is this turn's
+        // delta — the rates must be built from the latter.
+        let usage = |cumulative: u64, delta: u64| {
+            json!({
+                "total_token_usage": { "output_tokens": cumulative },
+                "last_token_usage": { "input_tokens": 0, "output_tokens": delta }
+            })
+        };
+        vec![
+            json!({
+                "timestamp": "2026-03-27T08:00:00.000Z",
+                "type": "event_msg",
+                "payload": { "type": "token_count", "info": usage(10_000, 10_000) }
+            }),
+            json!({
+                "timestamp": "2026-03-27T08:00:20.000Z",
+                "type": "event_msg",
+                "payload": { "type": "token_count", "info": usage(20_000, 10_000) }
+            }),
+        ]
+    }
+
+    /// Epoch seconds for the first sample in [`two_turn_burst`].
+    fn burst_start_secs() -> f64 {
+        chrono::DateTime::parse_from_rfc3339("2026-03-27T08:00:00.000Z")
+            .unwrap()
+            .timestamp() as f64
+    }
+
+    #[test]
+    fn cost_speed_is_measured_over_the_window() {
+        use super::compute_token_stats_at;
+        // Measured right at the second sample: $0.60 over 20s = $1.80/min, and
+        // 20k output tokens over 20s = 1000 tok/s.
+        let stats = compute_token_stats_at(
+            &two_turn_burst(),
+            Some("gpt-5.6-sol"),
+            burst_start_secs() + 20.0,
+        );
+        assert!(
+            (stats.cost_speed_usd_per_min - 1.80).abs() < 1e-6,
+            "expected $1.80/min, got {}",
+            stats.cost_speed_usd_per_min
+        );
+        assert!(
+            (stats.token_speed - 1000.0).abs() < 1e-6,
+            "expected 1000 tok/s, got {}",
+            stats.token_speed
+        );
+    }
+
+    #[test]
+    fn both_rates_decay_against_now_not_the_last_sample() {
+        use super::compute_token_stats_at;
+        // Four minutes after the burst ended, nothing has been generated since.
+        // Dividing by `last_ts - first_ts` (the old Codex denominator) would
+        // still report the full burst rate here — a step function that only
+        // collapses when the oldest sample leaves the 300s window. Against
+        // `now - first_ts` the same numerator spreads over 260s instead of 20s,
+        // so both rates read exactly 1/13th of their peak.
+        let stats = compute_token_stats_at(
+            &two_turn_burst(),
+            Some("gpt-5.6-sol"),
+            burst_start_secs() + 260.0,
+        );
+        assert!(
+            (stats.cost_speed_usd_per_min - 1.80 / 13.0).abs() < 1e-6,
+            "cost rate must decay with the idle tail, got {}",
+            stats.cost_speed_usd_per_min
+        );
+        assert!(
+            (stats.token_speed - 1000.0 / 13.0).abs() < 1e-6,
+            "token rate must decay with the idle tail, got {}",
+            stats.token_speed
+        );
+    }
+
+    #[test]
+    fn rates_are_zero_once_the_window_has_emptied() {
+        use super::compute_token_stats_at;
+        // Past 300s both samples are out of the window — nothing to measure.
+        let stats = compute_token_stats_at(
+            &two_turn_burst(),
+            Some("gpt-5.6-sol"),
+            burst_start_secs() + 400.0,
+        );
+        assert_eq!(stats.cost_speed_usd_per_min, 0.0);
+        assert_eq!(stats.token_speed, 0.0);
+    }
+
+    #[test]
+    fn dead_codex_turn_drops_its_frozen_speed() {
+        use super::dead_turn_silences_rates;
+        // A killed mid-turn session still carries the tok/s its last burst left
+        // in the 300s window. The status clamp fires, so the speed must go too —
+        // otherwise it keeps inflating the source-agnostic fleet total for up to
+        // five minutes after the process is gone.
+        for st in [
+            S::Thinking,
+            S::Executing,
+            S::Streaming,
+            S::Delegating,
+            S::Processing,
+            S::Active,
+        ] {
+            assert!(
+                dead_turn_silences_rates(&st, false),
+                "{st:?} with a dead process must contribute no rates"
+            );
+        }
+    }
+
+    #[test]
+    fn live_codex_turn_keeps_its_speed() {
+        use super::dead_turn_silences_rates;
+        // The zeroing must never touch a running turn — that would blank the
+        // speed chart for exactly the sessions it exists to show.
+        assert!(!dead_turn_silences_rates(&S::Streaming, true));
+        assert!(!dead_turn_silences_rates(&S::Active, true));
+    }
+
+    #[test]
+    fn blocked_codex_session_drops_its_rates_even_while_the_process_lives() {
+        use super::dead_turn_silences_rates;
+        // A rate-limited turn ended against the API with a burst still inside
+        // the 300s window, and no amount of waiting makes it resume on its own.
+        // Unlike the dead-process case this does not depend on liveness at all,
+        // so both spellings must silence the rates. The RateLimited *status*
+        // survives regardless — auto-resume keys on it.
+        for alive in [true, false] {
+            assert!(
+                dead_turn_silences_rates(&S::RateLimited, alive),
+                "RateLimited must contribute no rates (proc_alive={alive})"
+            );
+            assert!(
+                dead_turn_silences_rates(&S::ServerErrored, alive),
+                "ServerErrored must contribute no rates (proc_alive={alive})"
+            );
+        }
+    }
+
+    #[test]
+    fn settled_codex_session_keeps_its_rates() {
+        use super::dead_turn_silences_rates;
+        // Idle / WaitingInput are ordinary terminal display states, not blocked
+        // ones: whatever the window still holds is real and `age_out_status`
+        // will retire it on the normal schedule. Zeroing here would blank a
+        // session that just finished a turn a second ago.
+        assert!(!dead_turn_silences_rates(&S::Idle, false));
+        assert!(!dead_turn_silences_rates(&S::WaitingInput, false));
     }
 
     #[test]
@@ -3747,6 +4153,11 @@ mod tests {
             s.agent_source = source.into();
             s.proc_alive = true;
             s.status = SessionStatus::Executing;
+            // Every session enters with a live speed reading so the assertions
+            // below can tell "zeroed because dead" from "was never set".
+            s.token_speed = 812.0;
+            s.agent_token_speed = 812.0;
+            s.cost_speed_usd_per_min = 4.5;
             s
         };
 
@@ -3779,15 +4190,34 @@ mod tests {
             SessionStatus::WaitingInput,
             "dead session status clamped to WaitingInput"
         );
+        assert_eq!(
+            (
+                sessions[0].token_speed,
+                sessions[0].agent_token_speed,
+                sessions[0].cost_speed_usd_per_min
+            ),
+            (0.0, 0.0, 0.0),
+            "both rates frozen in the dead turn's 300s window must go with the status"
+        );
         assert!(sessions[1].proc_alive, "live codex session left untouched");
         assert_eq!(
             sessions[1].status,
             SessionStatus::Executing,
             "live codex session status preserved"
         );
+        assert_eq!(
+            (sessions[1].token_speed, sessions[1].cost_speed_usd_per_min),
+            (812.0, 4.5),
+            "a running codex turn must keep contributing both rates"
+        );
         assert!(
             sessions[2].proc_alive,
             "non-codex session must be ignored by codex reconcile"
+        );
+        assert_eq!(
+            (sessions[2].token_speed, sessions[2].cost_speed_usd_per_min),
+            (812.0, 4.5),
+            "codex reconcile must not zero a Claude session's rates"
         );
     }
 
@@ -4726,9 +5156,9 @@ mod tests {
             }),
         ];
 
-        let (_, total_output, reasoning_output) = compute_token_stats(&lines);
-        assert_eq!(total_output, 815);
-        assert_eq!(reasoning_output, 175);
+        let stats = compute_token_stats(&lines, Some("gpt-5.6-sol"));
+        assert_eq!(stats.total_output_tokens, 815);
+        assert_eq!(stats.reasoning_output_tokens, 175);
     }
 
     #[test]
@@ -4744,8 +5174,8 @@ mod tests {
             }
         })];
 
-        let (_, total_output, _) = compute_token_stats(&lines);
-        assert_eq!(total_output, 123);
+        let stats = compute_token_stats(&lines, Some("gpt-5.6-sol"));
+        assert_eq!(stats.total_output_tokens, 123);
     }
 
     #[test]
@@ -4902,6 +5332,13 @@ fn reconcile_codex_liveness(
             continue;
         }
         s.proc_alive = false;
+        // Same pairing as the two build paths: the speed frozen in the dead
+        // turn's 300s window goes out with the in-flight status.
+        if dead_turn_silences_rates(&s.status, false) {
+            s.token_speed = 0.0;
+            s.agent_token_speed = 0.0;
+            s.cost_speed_usd_per_min = 0.0;
+        }
         s.status = clamp_dead_session_status(s.status.clone(), false);
         changed = true;
     }
@@ -5237,10 +5674,17 @@ fn parse_codex_session(
     // Full parse, not `last_n` — see the SQLite path: a >100-line turn scrolls
     // `task_started` past the tail window and misreads as Idle when silent.
     let status = determine_status(&all_parsed, age.as_secs_f64());
-    let (token_speed, total_output_tokens, reasoning_output_tokens) =
-        compute_token_stats(&all_parsed);
     let last_message_preview = extract_last_text(last_n);
+    // Resolved before the stats: the cost rate has to price each turn, so the
+    // model has to be known first.
     let model = extract_model(&all_parsed);
+    let stats = compute_token_stats(&all_parsed, model.as_deref());
+    let (token_speed, total_output_tokens, reasoning_output_tokens) = (
+        stats.token_speed,
+        stats.total_output_tokens,
+        stats.reasoning_output_tokens,
+    );
+    let cost_speed_usd_per_min = stats.cost_speed_usd_per_min;
     let context_percent = extract_context_percent(&all_parsed, model.as_deref());
     let (codex_cost, total_input_tokens) = codex_cost_and_input(&all_parsed, model.as_deref());
 
@@ -5304,6 +5748,15 @@ fn parse_codex_session(
     // An exhausted account is a different animal: no reset time, so no status
     // change and no auto-resume — just an advisory for the card.
     let out_of_credits = codex_out_of_credits(&all_parsed);
+    // Drop the rates for a session that is generating nothing — blocked by the
+    // API, or its process gone (see `dead_turn_silences_rates`). Evaluated on
+    // the pre-clamp status, and after the rate-limit override above, so both
+    // reasons are visible to it.
+    let (token_speed, cost_speed_usd_per_min) = if dead_turn_silences_rates(&status, proc_alive) {
+        (0.0, 0.0)
+    } else {
+        (token_speed, cost_speed_usd_per_min)
+    };
     // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
     // the composer offers resume (not enqueue) once the turn is over.
     let status = clamp_dead_session_status(status, proc_alive);
@@ -5335,7 +5788,7 @@ fn parse_codex_session(
         total_input_tokens,
         total_cost_usd: codex_cost,
         agent_total_cost_usd: codex_cost,
-        cost_speed_usd_per_min: 0.0,
+        cost_speed_usd_per_min,
         last_message_preview,
         last_activity_ms,
         agent_last_activity_ms: last_activity_ms,
