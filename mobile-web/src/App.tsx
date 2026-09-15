@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { Inbox, ListChecks, MoreHorizontal, Package, Plus } from "lucide-react";
+import { Inbox, ListChecks, MoreHorizontal, Package, Plus, X } from "lucide-react";
 import styles from "./App.module.css";
 import {
   disablePush,
@@ -97,6 +97,8 @@ import { WikiView } from "./views/WikiView";
 import { WikiDocView } from "./views/WikiDocView";
 
 const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
+/** 通知横幅被撵走时**当时那个 PushState**。存状态而不是布尔位，见横幅处的注释。 */
+const PUSH_NOTICE_DISMISSED_KEY = "fleet-push-notice-dismissed";
 
 /** Compact token count: 1.2M / 34.5K / 780. */
 function fmtTokens(n: number): string {
@@ -219,6 +221,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [a2hsDismissed, setA2hsDismissed] = useState(
     () => localStorage.getItem(A2HS_DISMISSED_KEY) === "1",
   );
+  /** 上次被撵走的那条通知横幅说的是哪个状态（`null` = 没撵过）。 */
+  const [pushNoticeDismissed, setPushNoticeDismissed] = useState<string | null>(() =>
+    localStorage.getItem(PUSH_NOTICE_DISMISSED_KEY),
+  );
+  const dismissPushNotice = useCallback((state: PushState) => {
+    localStorage.setItem(PUSH_NOTICE_DISMISSED_KEY, state);
+    setPushNoticeDismissed(state);
+  }, []);
 
   // localStorage wiped (iOS 7-day eviction, cache clear) but the IDB copy may
   // have survived — re-hydrate before declaring the pairing lost.
@@ -1036,7 +1046,16 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </div>
       )}
 
-      {!MOCK && push !== "granted" && push !== "unsupported" && push !== "unsupported-harmony" && (
+      {/* 这条横幅以前关不掉：`ios-needs-a2hs` 与 `denied` 两个分支连个按钮都没有，
+          而 iOS 上前者恰恰是**常驻**的（用 Safari 看就一直满足），于是每一屏顶上
+          都挂着一条撵不走的告示。关掉记的是**当时那个状态**而不是一个布尔位：
+          「先添加到主屏幕」被撵走之后，后来真的变成「权限被拒绝」时那条新消息仍
+          该出来说话。 */}
+      {!MOCK &&
+        push !== "granted" &&
+        push !== "unsupported" &&
+        push !== "unsupported-harmony" &&
+        pushNoticeDismissed !== push && (
         <div className={styles.pushBanner}>
           {push === "ios-needs-a2hs" ? (
             <span>{t("要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。")}</span>
@@ -1050,6 +1069,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               </button>
             </>
           )}
+          <button
+            className={styles.bannerClose}
+            aria-label={t("关闭提示")}
+            title={t("关闭提示")}
+            onClick={() => dismissPushNotice(push)}
+          >
+            <X size={16} />
+          </button>
         </div>
       )}
 

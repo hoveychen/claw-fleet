@@ -206,6 +206,7 @@ const DICT: Record<string, string> = {
   "用 Safari 分享菜单「添加到主屏幕」，以后都从图标打开——留在 Safari 里 7 天不访问，iOS 会清掉本机配对。主屏幕 app 的存储是独立的一份，首次打开需要再扫一次码。":
     "Use Safari's share menu \"Add to Home Screen\" and open from the icon from now on — left in Safari, iOS wipes the local pairing after 7 days of inactivity. The home-screen app keeps its own separate storage, so you'll need to scan once more the first time you open it.",
   知道了: "Got it",
+  关闭提示: "Dismiss",
   "要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。":
     "To receive notifications, first use Safari's share menu \"Add to Home Screen\", then open from the home screen.",
   "通知权限已被拒绝，请在系统设置中为本站点重新开启。":
