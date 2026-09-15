@@ -44,7 +44,7 @@ import { timeAgo } from "./TasksView";
 import { useFollowTail, useVoiceRecorder } from "../useVoiceRecorder";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
-import { AttachmentThumbs } from "./AttachmentThumb";
+import { AttachmentThumbs, type PendingAttachmentUpload } from "./AttachmentThumb";
 import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 
 // 模型与努力度清单曾经硬编码在这里，并与桌面端的 modelChoices.ts 手工互抄。
@@ -203,35 +203,51 @@ export interface UploadedAttachment extends Attachment {
  *  the files came from somewhere without one — e.g. a share from another app,
  *  whose content:// URIs are fetched into `File`s (see shareTarget.ts). Both
  *  are handled by the `Array.from` below. */
+/** Monotonic id for an in-flight upload; the store path it will get does not
+ *  exist yet, so it cannot be the key. */
+let uploadSeq = 0;
+
+export async function uploadAttachmentFile(
+  client: FleetTransport,
+  file: File,
+  /** Already-made local preview, so the caller can show the picture before the
+   *  upload rather than after it. */
+  previewUrl?: string,
+): Promise<UploadedAttachment | null> {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    window.alert(t("「{0}」超过 10 MB 上限，已跳过", file.name));
+    return null;
+  }
+  const b64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result ?? "");
+      resolve(url.slice(url.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  const { path } = await client.request<{ path: string }>(
+    "upload_attachment",
+    { name: file.name, base64: b64 },
+    UPLOAD_REQUEST_TIMEOUT_MS,
+  );
+  return {
+    name: file.name,
+    path,
+    previewUrl:
+      previewUrl ?? (file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined),
+  };
+}
+
 export async function uploadAttachmentFiles(
   client: FleetTransport,
   files: FileList | File[],
 ): Promise<UploadedAttachment[]> {
   const out: UploadedAttachment[] = [];
   for (const file of Array.from(files)) {
-    if (file.size > MAX_UPLOAD_BYTES) {
-      window.alert(t("「{0}」超过 10 MB 上限，已跳过", file.name));
-      continue;
-    }
-    const b64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const url = String(reader.result ?? "");
-        resolve(url.slice(url.indexOf(",") + 1));
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-    const { path } = await client.request<{ path: string }>(
-      "upload_attachment",
-      { name: file.name, base64: b64 },
-      UPLOAD_REQUEST_TIMEOUT_MS,
-    );
-    out.push({
-      name: file.name,
-      path,
-      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
-    });
+    const one = await uploadAttachmentFile(client, file);
+    if (one) out.push(one);
   }
   return out;
 }
@@ -247,6 +263,9 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
     [],
   );
   const [uploading, setUploading] = useState(false);
+  // Uploads in flight, shown as chips in the same strip as the settled ones.
+  // Not persisted with the draft: the bytes only exist in this page's life.
+  const [pending, setPending] = useState<PendingAttachmentUpload[]>([]);
   // path → `blob:` URL for files picked in *this* page life. Not state: it is
   // only ever read during a render that `attachments` already triggered, and
   // deliberately not persisted — a restored draft has no bytes here, so those
@@ -276,20 +295,42 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
   const addFiles = useCallback(
     async (files: FileList | File[] | null) => {
       if (!client || !files || files.length === 0) return;
+      // The bytes go to the desktop over the relay — a network hop, not a local
+      // copy — so the chip has to exist before the upload, or the strip stays
+      // empty for seconds and the pick looks like it was ignored. Everything in
+      // this first pass is free: a name, and an object URL for a picture.
+      const queued = Array.from(files).map((file) => ({
+        id: `upload-${++uploadSeq}`,
+        file,
+        name: file.name,
+        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+      }));
+      setPending((cur) => [...cur, ...queued]);
       setUploading(true);
       try {
-        const uploaded = await uploadAttachmentFiles(client, files);
-        setAttachments((prev) => {
-          const next = [...prev];
-          for (const { previewUrl, ...a } of uploaded) {
-            // The blob URL is held aside, never in the persisted draft.
-            if (previewUrl) previews.current.set(a.path, previewUrl);
-            if (!next.some((x) => x.path === a.path)) next.push(a);
+        for (const item of queued) {
+          try {
+            const a = await uploadAttachmentFile(client, item.file, item.previewUrl);
+            if (!a) {
+              // Skipped (oversize) — nothing will ever key this preview.
+              if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+              continue;
+            }
+            const { previewUrl, ...entry } = a;
+            setAttachments((prev) => {
+              // The blob URL is held aside, never in the persisted draft.
+              if (previewUrl) previews.current.set(entry.path, previewUrl);
+              return prev.some((x) => x.path === entry.path) ? prev : [...prev, entry];
+            });
+          } catch (e) {
+            // Per file, not per batch: one refused upload used to take every
+            // file behind it down with it.
+            if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+            window.alert(e instanceof Error ? e.message : t("附件上传失败"));
+          } finally {
+            setPending((cur) => cur.filter((p) => p.id !== item.id));
           }
-          return next;
-        });
-      } catch (e) {
-        window.alert(e instanceof Error ? e.message : t("附件上传失败"));
+        }
       } finally {
         setUploading(false);
       }
@@ -312,6 +353,7 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
   return {
     attachments,
     uploading,
+    pending,
     addFiles,
     remove,
     reset: clearAttachments,
@@ -697,7 +739,7 @@ export function NewSessionSheet({
     },
     [],
   );
-  const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
+  const { attachments, uploading, pending, addFiles, remove, reset, previews } = useAttachments(
     client,
     NEW_SESSION_ATTACH_KEY,
   );
@@ -954,10 +996,11 @@ export function NewSessionSheet({
               {configSummary.title}
             </button>
           </div>
-          {attachments.length > 0 && !voice.active && (
+          {(attachments.length > 0 || pending.length > 0) && !voice.active && (
             <div className={styles.resumeThumbs}>
               <AttachmentThumbs
                 paths={attachments.map((a) => a.path)}
+                pending={pending}
                 client={client}
                 previews={previews}
                 onRemove={remove}
@@ -1253,7 +1296,7 @@ export function ResumeComposer({
   useEffect(() => {
     setCancelledKeys((prev) => (prev.size === 0 ? prev : new Set()));
   }, [pendingKey]);
-  const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
+  const { attachments, uploading, pending, addFiles, remove, reset, previews } = useAttachments(
     client,
     `resume:${session.id}:attachments`,
   );
@@ -1436,10 +1479,11 @@ export function ResumeComposer({
       )}
       {/* 缩略图单独一行，只在真有附件时才占高度 —— 原来它和 📎/🎤 挤在一条
           常驻 44px 的 attachRow 里，空着也占位。 */}
-      {attachments.length > 0 && !voice.active && (
+      {(attachments.length > 0 || pending.length > 0) && !voice.active && (
         <div className={styles.resumeThumbs}>
           <AttachmentThumbs
             paths={attachments.map((a) => a.path)}
+            pending={pending}
             client={client}
             previews={previews}
             onRemove={remove}

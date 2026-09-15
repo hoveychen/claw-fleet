@@ -9,7 +9,7 @@
 // only when tapped — the stored bytes for the lightbox.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Paperclip, X } from "lucide-react";
+import { LoaderCircle, Paperclip, X } from "lucide-react";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import {
@@ -54,6 +54,23 @@ export function __clearAttachmentCache(): void {
 }
 
 /**
+ * A file the composer is still pushing through the relay.
+ *
+ * The bytes are here, on the phone, but the path the chip is keyed by only
+ * exists once the desktop's store has written them — and that is a network
+ * round trip away. So the composer hands these over and the row shows them in
+ * the same tap as the pick, rather than an empty strip and a spinner in a
+ * corner.
+ */
+export interface PendingAttachmentUpload {
+  id: string;
+  name: string;
+  /** `blob:` URL for an image picked on this device — free, and available long
+   *  before the upload finishes. */
+  previewUrl?: string;
+}
+
+/**
  * The attachments on one turn. Images in the store become thumbnails; anything
  * else becomes a filename chip carrying the full path in its tooltip — a file
  * the user *picked* keeps its own path, and the desktop has no license to read
@@ -61,12 +78,15 @@ export function __clearAttachmentCache(): void {
  */
 export function AttachmentThumbs({
   paths,
+  pending,
   client,
   previews,
   onRemove,
   compact,
 }: {
   paths: string[];
+  /** Composer only: uploads in flight, rendered after the settled ones. */
+  pending?: PendingAttachmentUpload[];
   client: FleetTransport | null;
   /** Local `blob:` previews keyed by path, for files this device just picked —
    *  the bytes are already here, so the composer shows them without a round
@@ -77,7 +97,8 @@ export function AttachmentThumbs({
   /** Half-size tiles, for the cramped composer strip. */
   compact?: boolean;
 }) {
-  if (paths.length === 0) return null;
+  const inFlight = pending ?? [];
+  if (paths.length === 0 && inFlight.length === 0) return null;
   return (
     <div className={compact ? `${styles.row} ${styles.compact}` : styles.row}>
       {paths.map((path) => {
@@ -113,6 +134,21 @@ export function AttachmentThumbs({
           </span>
         );
       })}
+      {inFlight.map((p) =>
+        p.previewUrl ? (
+          <span key={p.id} className={styles.tile} aria-busy="true" title={p.name}>
+            <img src={p.previewUrl} alt="" className={`${styles.img} ${styles.uploadingImg}`} />
+            <span className={styles.busy}>
+              <LoaderCircle size={14} className={styles.spin} aria-label={t("上传中…")} />
+            </span>
+          </span>
+        ) : (
+          <span key={p.id} className={styles.chip} aria-busy="true" title={p.name}>
+            <LoaderCircle size={12} className={`${styles.chipIcon} ${styles.spin}`} />
+            <span className={styles.chipName}>{p.name}</span>
+          </span>
+        ),
+      )}
     </div>
   );
 }
