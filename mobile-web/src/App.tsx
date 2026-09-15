@@ -1031,7 +1031,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <div className={styles.pushBanner}>
           <span>
             {t(
-              "用 Safari 分享菜单「添加到主屏幕」，以后都从图标打开——留在 Safari 里 7 天不访问，iOS 会清掉本机配对。主屏幕 app 的存储是独立的一份，首次打开需要再扫一次码。",
+              "建议用 Safari 分享菜单「添加到主屏幕」：留在 Safari 里 7 天不访问，iOS 会清掉本机配对。主屏幕 app 的存储是独立的一份，首次打开需再扫一次码。",
             )}
           </span>
           <button

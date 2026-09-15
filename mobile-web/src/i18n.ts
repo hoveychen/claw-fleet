@@ -203,8 +203,8 @@ const DICT: Record<string, string> = {
   手机: "Phone",
   桌面链路: "Desktop link",
   处理: "Handling",
-  "用 Safari 分享菜单「添加到主屏幕」，以后都从图标打开——留在 Safari 里 7 天不访问，iOS 会清掉本机配对。主屏幕 app 的存储是独立的一份，首次打开需要再扫一次码。":
-    "Use Safari's share menu \"Add to Home Screen\" and open from the icon from now on — left in Safari, iOS wipes the local pairing after 7 days of inactivity. The home-screen app keeps its own separate storage, so you'll need to scan once more the first time you open it.",
+  "建议用 Safari 分享菜单「添加到主屏幕」：留在 Safari 里 7 天不访问，iOS 会清掉本机配对。主屏幕 app 的存储是独立的一份，首次打开需再扫一次码。":
+    "Add to Home Screen via Safari's share menu is recommended: left in Safari, iOS wipes the local pairing after 7 idle days. The home-screen app has its own storage, so scan once more on first open.",
   知道了: "Got it",
   关闭提示: "Dismiss",
   "要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。":
