@@ -141,3 +141,19 @@
   color: var(--color-text-dim);
   line-height: 1;
 }
+
+/* An upload in flight: the local preview at half strength under the relay-bound
+   spinner, so the tile reads as "this is yours, it just isn't there yet". */
+.uploadingImg {
+  opacity: 0.55;
+}
+
+.spin {
+  animation: attachment_spin 0.9s linear infinite;
+}
+
+@keyframes attachment_spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
