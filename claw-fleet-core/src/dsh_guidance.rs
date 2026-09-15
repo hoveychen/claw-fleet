@@ -453,8 +453,12 @@ done, user abandoned it\" is its strongest signal.\n\
 - **Session-end exemption:** when the tool returns `TASK FINISHED` or `TASK \
 ABANDONED` (the terminal button), or {title} says in free text that you are \
 done (\"收工\", \"done\"), end with a one-line plain-text \
-acknowledgement instead of another card. This is the only case where a \
-terminal turn is plain text.\n\
+acknowledgement instead of another card.\n\
+- **Handoff-registered exemption:** once `fleet handoff` has returned `ok` this \
+turn, raise NO card — not even a decision-free wrap-up. The relay fires when \
+the turn *ends*, and a card holds the turn open waiting for a click, so the \
+successor never spawns; the note froze at registration, so the answer would be \
+dropped anyway. End the turn with one line of plain text.\n\
 - **Plan mode is the exception dsh already enforces:** when you are in plan \
 mode, present the plan through `exit_plan_mode`, not through \
 `ask_user_question`. Do not ask \"should I proceed?\" as a card there.",

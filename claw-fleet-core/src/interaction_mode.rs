@@ -203,6 +203,16 @@ footer 会明确标注这是「无人值守」的自动触发——背后没有�
 同理，无需点出冲突。注意：`fleet schedule`/`fleet loop` 的**手动**「立即运行」\
 有真人在场，footer 不含该标注，不在此豁免内，照常出决策卡。\n\
 \n\
+**接力登记豁免。**当你本回合跑过 `fleet handoff`（或 `fleet__handoff` 的 \
+`action=\"register\"`）并拿到 ok 之后，本回合**一张卡都不要再发**——连不带决策的\
+收尾卡也不要。接力靠回合*结束*触发（Stop hook 消费登记并 spawn 后继者），\
+而决策卡恰恰把回合挂住等人点：卡不点，后继者就不会起来。而且 note 在登记那一刻\
+已冻结，老板在这张卡上的任何回答都到不了后继者、也改不了 note，只会被静默丢弃——\
+换来的只有一次纯粹多余的点击和一段等待。所以登记之后直接用一行纯文本收尾结束回合。\
+要问的事就**先问、拿到答案、再按答案写 note 去登记**。这同样是「每回合都要问」\
+规则的字面豁免，无需点出冲突。`fleet__ask` 与 `fleet__render_a2ui` 在服务端\
+也会拒掉这种调用，那道门是安全网、不是许可。\n\
+\n\
 ## `fleet__ask` schema（参考）\n\
 \n\
 顶层：`{{ \"questions\": Question[] }}`——每次调用 1 到 4 个问题。因为它经 MCP \
@@ -620,6 +630,20 @@ footing as the session-end exemption, with no conflict to surface. Note: a \
 **manual** \"run now\" of a schedule/loop has a human present, its footer \
 omits that mark, and it is NOT exempt — card as usual.\n\
 \n\
+**Handoff-registered exemption.** Once you have run `fleet handoff` (or \
+`fleet__handoff` with `action=\"register\"`) this turn and got its ok, raise \
+**no card at all** for the rest of the turn — not even a decision-free wrap-up \
+card. The relay fires when the turn *ends* (the Stop hook consumes the \
+registration and spawns the successor), and a card is exactly what holds the \
+turn open waiting for a click: no click, no successor. The note was frozen at \
+registration too, so any answer on that card reaches neither the successor nor \
+the note and is silently dropped — all it buys is one pointless click and a \
+wait. So after registering, end the turn with a single line of plain text. If \
+something needs asking, ask **first**, take the answer, then write the note and \
+register. This is likewise a literal exemption to the every-turn-asks rule, \
+with no conflict to surface. `fleet__ask` and `fleet__render_a2ui` also refuse \
+such calls server-side; that gate is a safety net, not a licence.\n\
+\n\
 ## `fleet__ask` schema (reference)\n\
 \n\
 Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call. \
@@ -1011,6 +1035,31 @@ mod tests {
             "en guidance must carry the unattended schedule/loop exemption"
         );
         assert!(e.contains("fleet schedule") && e.contains("fleet loop"));
+    }
+
+    /// A card raised after `fleet handoff` holds the turn open, and the turn
+    /// ending is what fires the relay — so the successor waits on a click whose
+    /// answer can no longer reach it (the note froze at registration). The
+    /// every-turn-asks rule has to say so explicitly, or agents keep shipping a
+    /// wrap-up card and 老板 pays a pointless click per baton.
+    #[test]
+    fn render_embeds_handoff_registered_exemption() {
+        let z = render_guidance("老板", "zh");
+        assert!(
+            z.contains("接力登记豁免") && z.contains("一张卡都不要再发"),
+            "zh guidance must exempt a registered handoff from the every-turn card"
+        );
+        let e = render_guidance("Boss", "en");
+        assert!(
+            e.contains("Handoff-registered exemption") && e.contains("no card at all"),
+            "en guidance must exempt a registered handoff from the every-turn card"
+        );
+        for (locale, g) in [("zh", &z), ("en", &e)] {
+            assert!(
+                g.contains("fleet handoff"),
+                "[{locale}] the exemption must name the registration that triggers it"
+            );
+        }
     }
 
     #[test]
