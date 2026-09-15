@@ -884,7 +884,7 @@ fn clamp_dead_session_status(
 }
 
 /// Whether this session's live rates (`token_speed`, `cost_speed_usd_per_min`)
-/// must be dropped because its process is gone.
+/// must be dropped because it is demonstrably generating nothing.
 ///
 /// [`clamp_dead_session_status`] already decided that a dead process means the
 /// turn is over — but it only rewrites the *status*. Both rates are measured
@@ -904,12 +904,29 @@ fn clamp_dead_session_status(
 /// reconciler filters on `agent_source`), so the ghost survived on both Codex
 /// build paths.
 ///
-/// The predicate is exactly the status clamp's own — it asks the clamp whether
-/// it would rewrite this status rather than re-listing the in-flight set, so
-/// the two can't drift apart. That means it adds no new false-positive case:
-/// wherever the status clamp already fires, the rates now go with it, and
-/// nowhere else.
+/// Two independent reasons a session contributes nothing:
+///
+/// 1. **Blocked by the API.** `RateLimited` / `ServerErrored` means the turn
+///    ended against a wall with a burst still inside the window, and unlike an
+///    idle session there is no age at which it resumes generating on its own —
+///    so the rates go immediately, regardless of whether a process is still
+///    around. The *status* is preserved either way: auto-resume keys on it.
+///    This is verbatim the rule `session::age_out_status` applies to Claude
+///    (whose comment records ~21 rate-limited agents contributing thousands of
+///    ghost tok/s), and Codex needs it stated here because a freshly scanned
+///    Codex session never reaches `age_out_status` — that runs only over
+///    cache-retained ones. `ServerErrored` is included for symmetry even though
+///    no Codex path currently produces it, so the rule holds if one ever does.
+///
+/// 2. **Process gone.** Asked of the status clamp itself — "would you rewrite
+///    this status?" — rather than re-listing the in-flight set, so the two
+///    can't drift apart. Wherever the clamp already fires, the rates now go
+///    with it, and nowhere else, so this adds no new false-positive case.
 fn dead_turn_silences_rates(status: &crate::session::SessionStatus, proc_alive: bool) -> bool {
+    use crate::session::SessionStatus as S;
+    if matches!(status, S::RateLimited | S::ServerErrored) {
+        return true;
+    }
     clamp_dead_session_status(status.clone(), proc_alive) != *status
 }
 
@@ -1929,14 +1946,17 @@ fn build_session_from_sqlite(
     // PID resolution: prefer thread-id match, fall back to workspace path match.
     let (pid, pid_precise) = resolve_pid(codex_processes, &thread.id, &thread.cwd);
     let proc_alive = codex_proc_alive(codex_processes, &thread.id);
-    // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
-    // the composer offers resume (not enqueue) once the turn is over, and drop
-    // the speed frozen in its 300s window with it.
+    // Drop the rates for a session that is generating nothing — blocked by the
+    // API, or its process gone (see `dead_turn_silences_rates`). Evaluated on
+    // the pre-clamp status, and after the rate-limit override above, so both
+    // reasons are visible to it.
     let (token_speed, cost_speed_usd_per_min) = if dead_turn_silences_rates(&status, proc_alive) {
         (0.0, 0.0)
     } else {
         (token_speed, cost_speed_usd_per_min)
     };
+    // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
+    // the composer offers resume (not enqueue) once the turn is over.
     let status = clamp_dead_session_status(status, proc_alive);
 
     // Prefer: source-embedded nickname > SQLite agent_nickname
@@ -2797,15 +2817,34 @@ mod tests {
     }
 
     #[test]
-    fn dead_codex_session_keeps_speed_on_non_inflight_status() {
+    fn blocked_codex_session_drops_its_rates_even_while_the_process_lives() {
         use super::dead_turn_silences_rates;
-        // Mirror of `dead_codex_session_preserves_non_inflight_status`: the speed
-        // is gated on the status clamp firing, so a status the clamp leaves alone
-        // keeps its speed. RateLimited ghost speed is a separate hole (Claude
-        // kills it in `session::age_out_status`, which never runs over a freshly
-        // scanned Codex session) — deliberately NOT closed here.
-        assert!(!dead_turn_silences_rates(&S::RateLimited, false));
+        // A rate-limited turn ended against the API with a burst still inside
+        // the 300s window, and no amount of waiting makes it resume on its own.
+        // Unlike the dead-process case this does not depend on liveness at all,
+        // so both spellings must silence the rates. The RateLimited *status*
+        // survives regardless — auto-resume keys on it.
+        for alive in [true, false] {
+            assert!(
+                dead_turn_silences_rates(&S::RateLimited, alive),
+                "RateLimited must contribute no rates (proc_alive={alive})"
+            );
+            assert!(
+                dead_turn_silences_rates(&S::ServerErrored, alive),
+                "ServerErrored must contribute no rates (proc_alive={alive})"
+            );
+        }
+    }
+
+    #[test]
+    fn settled_codex_session_keeps_its_rates() {
+        use super::dead_turn_silences_rates;
+        // Idle / WaitingInput are ordinary terminal display states, not blocked
+        // ones: whatever the window still holds is real and `age_out_status`
+        // will retire it on the normal schedule. Zeroing here would blank a
+        // session that just finished a turn a second ago.
         assert!(!dead_turn_silences_rates(&S::Idle, false));
+        assert!(!dead_turn_silences_rates(&S::WaitingInput, false));
     }
 
     #[test]
@@ -5709,14 +5748,17 @@ fn parse_codex_session(
     // An exhausted account is a different animal: no reset time, so no status
     // change and no auto-resume — just an advisory for the card.
     let out_of_credits = codex_out_of_credits(&all_parsed);
-    // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
-    // the composer offers resume (not enqueue) once the turn is over, and drop
-    // the speed frozen in its 300s window with it.
+    // Drop the rates for a session that is generating nothing — blocked by the
+    // API, or its process gone (see `dead_turn_silences_rates`). Evaluated on
+    // the pre-clamp status, and after the rate-limit override above, so both
+    // reasons are visible to it.
     let (token_speed, cost_speed_usd_per_min) = if dead_turn_silences_rates(&status, proc_alive) {
         (0.0, 0.0)
     } else {
         (token_speed, cost_speed_usd_per_min)
     };
+    // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
+    // the composer offers resume (not enqueue) once the turn is over.
     let status = clamp_dead_session_status(status, proc_alive);
 
     let uri = build_uri(rollout_path)?;
