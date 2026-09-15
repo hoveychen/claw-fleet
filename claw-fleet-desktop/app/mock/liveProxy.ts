@@ -122,6 +122,20 @@ function pastedAttachmentName(extension: string): string {
 }
 
 /**
+ * Pasted bytes reach this shim base64-encoded, because that is how they cross
+ * the desktop's JSON IPC without being spelled out as an array of integers.
+ * HTTP has no such constraint, so they are decoded straight back to bytes and
+ * posted as the raw body.
+ */
+function base64ToBytes(b64: string): Uint8Array {
+  if (!b64) return new Uint8Array();
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
  * Two host preferences the guidance routes need in their request body.
  *
  * The desktop reads them off `AppState` — which the frontend itself populated
@@ -1308,7 +1322,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
       name: pastedAttachmentName(String(a.extension ?? "bin")),
       from_clipboard: "1",
     },
-    rawBody: new Uint8Array((a.bytes as number[] | undefined) ?? []),
+    rawBody: base64ToBytes(String(a.bytesB64 ?? "")),
     pick: "path",
   }),
 

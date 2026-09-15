@@ -53,6 +53,28 @@ function readImageDimensions(url: string): Promise<{ width: number; height: numb
   });
 }
 
+/**
+ * A file's bytes as base64, without the data-URL prefix.
+ *
+ * The transport for pasted bytes, and deliberately *not* `Array.from(new
+ * Uint8Array(await f.arrayBuffer()))`: that shape crosses the IPC boundary as a
+ * JSON array of integers, which turns a 3 MB screenshot into 10.7 MB of text to
+ * print on one side and parse on the other. The same bytes as base64 are 4 MB,
+ * and `readAsDataURL` does the encoding natively instead of in a JS loop.
+ */
+function fileToBase64(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result ?? "");
+      const comma = url.indexOf(",");
+      resolve(comma >= 0 ? url.slice(comma + 1) : "");
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("could not read the pasted file"));
+    reader.readAsDataURL(file);
+  });
+}
+
 function basename(p: string): string {
   const normalized = p.replace(/\\/g, "/");
   const slash = normalized.lastIndexOf("/");
@@ -580,10 +602,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         let previewUrl = item.previewUrl;
         try {
           const dims = previewUrl ? await readImageDimensions(previewUrl) : null;
-          const buf = await item.file.arrayBuffer();
-          const bytes = Array.from(new Uint8Array(buf));
           const stagedPath = await invoke<string>("stage_pasted_attachment", {
-            bytes,
+            bytesB64: await fileToBase64(item.file),
             extension: item.ext,
           });
           await onAddAttachment({
