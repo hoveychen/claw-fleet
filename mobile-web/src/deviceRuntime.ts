@@ -356,9 +356,25 @@ export function worstCongestion(states: DeviceStates, order: string[]): Congesti
   return level;
 }
 
-/** 首屏骨架屏的闸门:每台都还没收到过首份快照时才算「还在等」。 */
+/** 首屏骨架屏的闸门:还有设备**有可能**回快照、但还没回过时才算「还在等」。
+ *
+ *  只有 `connected && agentOnline` 的设备才守着这道闸门。一台配过但此刻离线的
+ *  设备永远不会回快照,让它守闸门等于让骨架屏永远转下去——多设备且其中一台离线
+ *  时,决策卡页就是这样卡在骨架屏、连「桌面端离线 / 没有待处理的决策」的提示都
+ *  出不来的。 */
 export function allDecisionsLoaded(states: DeviceStates, order: string[]): boolean {
-  return order.length > 0 && order.every((id) => states[id]?.decisionsLoaded);
+  if (order.length === 0) return false;
+  return !order.some((id) => {
+    const s = states[id];
+    if (!s || s.decisionsLoaded) return false;
+    return s.connected && s.agentOnline;
+  });
+}
+
+/** 桌面端不在线的设备数。合并收件箱只会显示在线设备的卡,所以「都答完了」这句
+ *  话在有设备离线时是不完整的 —— 这个数就是补上那半句用的。 */
+export function offlineDeviceCount(states: DeviceStates, order: string[]): number {
+  return order.filter((id) => !states[id]?.agentOnline).length;
 }
 
 export function anySessionsLoaded(states: DeviceStates, order: string[]): boolean {

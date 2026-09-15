@@ -1397,6 +1397,14 @@ pub fn resume_codex_session(
     ]);
     // Turn-end relay (see spawn): route codex `notify` to `fleet session
     // codex-notify` so a pending handoff fires when this resumed turn ends.
+    // A resume may carry its own `--model` / `--effort`; where it carries none,
+    // fall back to what this thread was launched with — a phone follow-up sends
+    // neither, and `codex exec resume` with no `-m` silently falls back to
+    // `~/.codex/config.toml`'s default model, switching the thread mid-flight.
+    // This also re-records the note (see `launch_spec::resume_spec`).
+    let (eff_model, eff_effort) = crate::launch_spec::resume_spec(session_id, model, effort);
+    let model = eff_model.as_deref();
+    let effort = eff_effort.as_deref();
     let mut pre_prompt = decision_args;
     pre_prompt.extend(fleet_notify_args());
     // Skip Codex's flaky WebSocket transport on ChatGPT logins (no-op otherwise).
@@ -1406,11 +1414,6 @@ pub fn resume_codex_session(
     let prompt = maybe_prepend_active_plans(&workspace_path, Some(session_id), prompt);
     pre_prompt.extend(codex_image_args(images));
     let args = build_codex_resume_args(session_id, &prompt, model, effort, &pre_prompt);
-
-    // A resume may carry its own `--model` / `--effort`; record them so the
-    // launch note describes what the session is running *now* (same as the
-    // Claude resume path). No overrides → leaves the original note standing.
-    crate::launch_spec::record(session_id, model, effort);
 
     crate::log_debug(&format!(
         "resume_codex_session: {} exec resume {} (cwd={}, prompt=<{} chars>, model={:?}, effort={:?})",

@@ -7,9 +7,17 @@ import { memberDisplayStatus, type SessionInfo } from "../types";
 import styles from "./SessionDetail.module.css";
 
 /** The header identity label for one session in the family: ◈ main, or ⎇ its
- *  agent type (falling back to the generic "subagent" word when untyped). */
+ *  agent type (falling back to the generic "subagent" word when untyped).
+ *
+ *  Codex subagents are almost always untyped — their `thread_spawn` records
+ *  `agent_role: null` and it is `agent_nickname` (Kuhn / Ohm / Bohr) that tells
+ *  them apart. Core puts that nickname on `aiTitle` (it is the first choice
+ *  there in `codex_source`), so a codex subagent falls back to it rather than
+ *  rendering three identical "subagent" rows. */
 function agentLabel(s: SessionInfo, t: TFunction): string {
-  return s.isSubagent ? `⎇ ${s.agentType ?? t("subagent")}` : `◈ ${t("main")}`;
+  if (!s.isSubagent) return `◈ ${t("main")}`;
+  const codexNickname = s.agentSource === "codex" ? s.aiTitle : null;
+  return `⎇ ${s.agentType ?? codexNickname ?? t("subagent")}`;
 }
 
 /** Distinguishing tail of a subagent id, so two same-type subagents

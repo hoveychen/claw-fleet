@@ -1526,6 +1526,38 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
         d.insert("todoDone".into(), done.into());
         d.insert("todoTotal".into(), (todos.len() as u64).into());
     }
+    // TaskStop: the command of the background task that was killed. Its *input*
+    // is only the opaque `task_id`, so without this the phone's row says nothing
+    // about what was stopped. `task_type` gates it so a foreign payload with a
+    // stray `command` key doesn't match; multi-line commands keep their first
+    // line, which is all a phone-width row can show anyway.
+    if obj.get("task_type").and_then(Value::as_str).is_some() {
+        if let Some(cmd) = obj.get("command").and_then(Value::as_str) {
+            let first = cmd.trim().lines().next().unwrap_or("").trim();
+            if !first.is_empty() {
+                d.insert(
+                    "stoppedCommand".into(),
+                    truncate_chars(first, ASK_SUMMARY_MAX_CHARS).into(),
+                );
+            }
+        }
+    }
+    // TaskOutput: which background task is being read. Same problem as TaskStop
+    // — the input is an opaque `task_id` — and the readable handle is the
+    // description the task was launched with, nested under `task`.
+    if let Some(desc) = obj
+        .get("task")
+        .and_then(Value::as_object)
+        .and_then(|t| t.get("description"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        d.insert(
+            "taskDescription".into(),
+            truncate_chars(desc, ASK_SUMMARY_MAX_CHARS).into(),
+        );
+    }
     if d.is_empty() { None } else { Some(Value::Object(d)) }
 }
 
@@ -5780,6 +5812,38 @@ mod tests {
     }
 
     #[test]
+    fn tool_result_digest_carries_stopped_command() {
+        // TaskStop's input is only `{task_id}`; the command it killed lives in
+        // the result, so the phone's row has nothing to show without this.
+        let meta = json!({
+            "message": "Successfully stopped task: b3t (until ! pgrep -f go; do sleep 5; done)",
+            "task_id": "b3t",
+            "task_type": "local_bash",
+            "command": "until ! pgrep -f go; do sleep 5; done\necho done"
+        });
+        let d = tool_result_digest(&meta).expect("digest");
+        assert_eq!(d["stoppedCommand"], "until ! pgrep -f go; do sleep 5; done");
+        // An agent task carries no command → no field (the phone shows the
+        // plain 「停止后台任务」 label).
+        let agent = json!({"task_id": "b5v", "task_type": "local_agent"});
+        assert!(tool_result_digest(&agent).is_none());
+    }
+
+    #[test]
+    fn tool_result_digest_carries_task_description() {
+        // TaskOutput: the readable handle is nested under `task`.
+        let meta = json!({
+            "retrieval_status": "success",
+            "task": {
+                "task_id": "byf", "task_type": "local_bash",
+                "status": "completed", "description": "Run core test suite"
+            }
+        });
+        let d = tool_result_digest(&meta).expect("digest");
+        assert_eq!(d["taskDescription"], "Run core test suite");
+    }
+
+    #[test]
     fn slim_snapshot_caps_session_count() {
         use crate::session_launch::NEW_SESSION_ENTRYPOINT;
         let total = SNAPSHOT_MAX_SESSIONS + 100;
@@ -6207,6 +6271,22 @@ mod tests {
     /// these existed). The catalogue/breakdown parsing is tested in `dsh_source`.
     #[test]
     fn dsh_reads_are_dispatched_even_when_dsh_is_unreachable() {
+        // These three methods reach `DshSource::with_client`, which may start a
+        // real `dsh web` and *register* it — so this test writes to the dsh
+        // registry under whatever FLEET_HOME is current. Without a home of its
+        // own under the shared lock, that is a neighbouring test's temp
+        // registry. Traced at `--test-threads=16` on 2026-09-13: this test
+        // registered a live server (pid 9261, port 52573) into
+        // `dsh_server::tests::a_restarted_server_comes_back_on_the_same_port`'s
+        // home, and that test then failed asserting its registry was empty
+        // after stopping its own server.
+        let _lock = fleet_home_lock();
+        let home = std::env::temp_dir().join(format!("fleet-relay-dsh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &home);
+
         for (method, params) in [
             ("dsh_models", json!({})),
             ("dsh_token_breakdown", json!({ "uri": "dsh://nonexistent" })),
@@ -6219,6 +6299,12 @@ mod tests {
                 );
             }
         }
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// The phone's repo-level 计划 page needs the *forest*, not `task_plans`'s

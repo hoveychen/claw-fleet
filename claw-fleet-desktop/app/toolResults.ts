@@ -114,6 +114,21 @@ export interface TodoWriteToolResult {
   newTodos: TodoItem[];
 }
 
+/**
+ * `TaskStop` — killing a background task. The *input* is only `{ task_id }`,
+ * an opaque handle ("bsx9m7b94") that tells a reader nothing about what was
+ * stopped; the answer lives here, in the result: `command` for a background
+ * shell (`task_type: "local_bash"`, which is what 836 of the 837 background
+ * tasks on this machine's transcripts were). A subagent task (`local_agent`)
+ * carries no `command`; it falls back to the plain label.
+ */
+export interface TaskStopToolResult {
+  taskId?: string;
+  taskType?: string;
+  command?: string;
+  message?: string;
+}
+
 /** `Glob` and `Grep` — the two shapes overlap enough to share a reader. */
 export interface FileSearchToolResult {
   filenames: string[];
@@ -196,6 +211,54 @@ export function asBashResult(v: unknown): BashToolResult | null {
     interrupted: v.interrupted === true,
     isImage: v.isImage === true,
     noOutputExpected: v.noOutputExpected === true,
+  };
+}
+
+/**
+ * `TaskStop`. `task_id` is the load-bearing key — it is the one field every
+ * payload has, and requiring it keeps a same-shaped foreign payload out. The
+ * rest is optional because only shell tasks carry a `command`.
+ */
+export function asTaskStopResult(v: unknown): TaskStopToolResult | null {
+  const obj = asObject(v);
+  if (!obj) return null;
+  const taskId = str(obj.task_id);
+  if (taskId === undefined) return null;
+  return {
+    taskId,
+    taskType: str(obj.task_type),
+    command: str(obj.command),
+    message: str(obj.message),
+  };
+}
+
+/**
+ * `TaskOutput` — reading (or waiting on) a background task. Like `TaskStop`,
+ * the input names only the opaque `task_id`; the readable handle is here, as
+ * `task.description` — the model-written summary line the task was launched
+ * with ("Run core test suite"). Measured across this machine's 300 newest
+ * transcripts: 75 of 76 payloads were this object shape and all 75 carried a
+ * description (the 76th was an older string-shaped payload, which returns null
+ * and falls back to the plain label).
+ */
+export interface TaskOutputToolResult {
+  taskId?: string;
+  taskType?: string;
+  status?: string;
+  description?: string;
+}
+
+export function asTaskOutputResult(v: unknown): TaskOutputToolResult | null {
+  if (!isRecord(v)) return null;
+  const task = isRecord(v.task) ? v.task : null;
+  if (!task) return null;
+  const taskId = str(task.task_id);
+  if (taskId === undefined) return null;
+  return {
+    taskId,
+    taskType: str(task.task_type),
+    status: str(task.status),
+    description: str(task.description),
   };
 }
 

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useReportStore } from "../../store";
+import { localDateKey } from "../../localDate";
 import type { DailyReportStats } from "../../types";
 import styles from "./ContributionsHeatmap.module.css";
 
@@ -28,7 +29,7 @@ function generateDateGrid(): string[][] {
     const week: string[] = [];
     for (let d = 0; d < 7; d++) {
       if (current <= today) {
-        week.push(current.toISOString().slice(0, 10));
+        week.push(localDateKey(current));
       }
       current.setDate(current.getDate() + 1);
     }

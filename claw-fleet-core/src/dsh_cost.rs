@@ -791,13 +791,34 @@ pub struct SessionSpend {
     pub unpriced_calls: u32,
     /// The roster's `updatedAt` at the moment this was computed.
     ///
-    /// This is the staleness marker, and it has to come from the roster rather
-    /// than from the ledger: the roster is the only clock the *scan* can read
-    /// without an RPC, so comparing like with like is what makes "has this
+    /// This is half the staleness marker, and it has to come from the roster
+    /// rather than from the ledger: the roster is the only clock the *scan* can
+    /// read without an RPC, so comparing like with like is what makes "has this
     /// session moved since we priced it?" answerable for free. Comparing against
     /// the last call's own timestamp would mark every session stale forever,
     /// since a session is always persisted after its last call.
     pub priced_at_updated_ms: i64,
+    /// The roster's cumulative output-token count at the same moment.
+    ///
+    /// The other half, and the one that makes a *running* session's price move.
+    /// `updatedAt` is a persistence clock: dsh stamps it when a prompt goes in
+    /// and does not touch it again until the turn settles. So a session priced
+    /// at the instant its turn started — which is exactly when the roster first
+    /// sees it move — was priced across zero model calls, and on `updatedAt`
+    /// alone it stays "current" at `usd: None` for the entire turn. Measured
+    /// 2026-09-13 on two live sessions: both cached as `usd: null,
+    /// pricedCalls: 0` while a direct re-price of the same ids answered $0.154
+    /// over 36 calls and $0.593 over 85.
+    ///
+    /// Output tokens are the cheapest signal that says "more has been generated
+    /// since": the roster already carries them, and unlike `updatedAt` they
+    /// advance with every assembled message inside the turn.
+    ///
+    /// `#[serde(default)]` so an entry written before this field existed reads
+    /// back as 0 — which makes it stale against any session that has generated
+    /// anything, and re-prices it once. That is the intended migration.
+    #[serde(default)]
+    pub priced_at_output_tokens: u64,
 }
 
 fn load_cache() -> CostCache {
@@ -1085,9 +1106,18 @@ pub fn all_session_spend() -> BTreeMap<String, SessionSpend> {
 ///
 /// This is the expensive half — a full history walk, and possibly receipt
 /// lookups — so callers are expected to invoke it for **one** session at a time
-/// and only when [`SessionSpend::priced_at_updated_ms`] says the session has
-/// moved since it was last priced.
-pub fn refresh_session_spend(uri: &str, updated_ms: i64) -> Result<SessionSpend, String> {
+/// and only when [`spend_is_current`] says the session has moved since it was
+/// last priced.
+///
+/// `updated_ms` and `output_tokens` are the roster's two readings at the moment
+/// of the call; they are written down alongside the figure so the next scan can
+/// tell whether anything has happened since — see
+/// [`SessionSpend::priced_at_output_tokens`].
+pub fn refresh_session_spend(
+    uri: &str,
+    updated_ms: i64,
+    output_tokens: u64,
+) -> Result<SessionSpend, String> {
     let calls = dsh_session_calls_for_pricing(uri)?;
     let cost = fold_session_cost(&calls);
     let spend = SessionSpend {
@@ -1097,6 +1127,7 @@ pub fn refresh_session_spend(uri: &str, updated_ms: i64) -> Result<SessionSpend,
         // the card has one line to say so, and the panel has the detail.
         unpriced_calls: cost.unpriced_calls + cost.unpriceable_calls,
         priced_at_updated_ms: updated_ms,
+        priced_at_output_tokens: output_tokens,
     };
     if let Some(id) = crate::dsh_source::DshSource::session_id_of(uri) {
         store_cache(&BTreeMap::new(), &BTreeMap::new(), Some((id, spend)));
@@ -1104,11 +1135,22 @@ pub fn refresh_session_spend(uri: &str, updated_ms: i64) -> Result<SessionSpend,
     Ok(spend)
 }
 
-/// Is `spend` still current for a session the roster reports at `updated_ms`?
+/// Is `spend` still current for a session the roster reports at `updated_ms`
+/// with `output_tokens` generated so far?
+///
+/// Both readings have to be unmoved. `updatedAt` alone misses everything that
+/// happens *inside* a turn (it is stamped once, when the prompt goes in), and
+/// output tokens alone would miss a turn that generated nothing at all.
 ///
 /// Absent means never priced, which is stale by definition.
-pub fn spend_is_current(spend: Option<&SessionSpend>, updated_ms: i64) -> bool {
-    spend.is_some_and(|s| s.priced_at_updated_ms >= updated_ms)
+pub fn spend_is_current(
+    spend: Option<&SessionSpend>,
+    updated_ms: i64,
+    output_tokens: u64,
+) -> bool {
+    spend.is_some_and(|s| {
+        s.priced_at_updated_ms >= updated_ms && s.priced_at_output_tokens >= output_tokens
+    })
 }
 
 /// Real spend for a `dsh://` session URI — the ledger, folded.

@@ -46,7 +46,7 @@ pub struct FleetLlmUsageEntry {
     pub timestamp_ms: u64,
     /// Scenario tag — one of the `SCENARIO_*` constants above.
     pub scenario: String,
-    /// Provider name: "claude", "codex".
+    /// Provider name: "claude", "codex", "dsh".
     pub provider: String,
     /// Model alias as passed to `provider.complete()` ("haiku", "sonnet", "opus",
     /// or a codex model id).

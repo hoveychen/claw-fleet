@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   claudeToolSummary,
+  dshToolSummary,
   codexToolSummary,
   fleetToolSummary,
   parseExecCommand,
@@ -203,6 +204,85 @@ describe("claudeToolSummary", () => {
     );
   });
 
+  it("TaskStop → the command it stopped, read from the result", () => {
+    const meta = {
+      message: 'Successfully stopped task: b3ttmyto5 (tail -f /tmp/build.log)',
+      task_id: "b3ttmyto5",
+      task_type: "local_bash",
+      command: "tail -f /tmp/build.log",
+    };
+    expect(claudeToolSummary("TaskStop", { task_id: "b3ttmyto5" }, t, meta)).toBe(
+      'detail.tool_task_stop_cmd|{"cmd":"tail -f /tmp/build.log"}',
+    );
+    // Multi-line command → first line only, like the Bash row.
+    expect(
+      claudeToolSummary(
+        "TaskStop",
+        { task_id: "b7ak0qaqz" },
+        t,
+        { task_id: "b7ak0qaqz", command: "until ! pgrep -f go >/dev/null; do sleep 20; done\necho done" },
+      ),
+    ).toBe('detail.tool_task_stop_cmd|{"cmd":"until ! pgrep -f go >/dev/null; do sleep 20; done"}');
+    // Still running (no result yet), or an agent task with no command → the
+    // plain label rather than the raw {"task_id":…} JSON dump.
+    expect(claudeToolSummary("TaskStop", { task_id: "b5v3jiba2" }, t)).toBe(
+      "detail.tool_task_stop",
+    );
+    expect(
+      claudeToolSummary("TaskStop", { task_id: "b5v3jiba2" }, t, {
+        task_id: "b5v3jiba2",
+        task_type: "local_agent",
+      }),
+    ).toBe("detail.tool_task_stop");
+  });
+
+  it("TaskOutput → names the task when the result carries its description", () => {
+    const meta = {
+      retrieval_status: "success",
+      task: {
+        task_id: "byfs0uivv",
+        task_type: "local_bash",
+        status: "completed",
+        description: "Run core test suite",
+      },
+    };
+    expect(claudeToolSummary("TaskOutput", { task_id: "byfs0uivv" }, t, meta)).toBe(
+      'detail.tool_task_output_named|{"name":"Run core test suite"}',
+    );
+    expect(
+      claudeToolSummary(
+        "TaskOutput",
+        { task_id: "byfs0uivv", block: true, timeout: 600000 },
+        t,
+        meta,
+      ),
+    ).toBe('detail.tool_task_output_named_timed|{"name":"Run core test suite","secs":"600"}');
+    // Older string-shaped payload (1 of 76 measured) → the plain labels.
+    expect(claudeToolSummary("TaskOutput", { task_id: "abc" }, t, "<task_id>abc</task_id>")).toBe(
+      "detail.tool_task_output",
+    );
+  });
+
+  it("SendMessage / ListAgents / Monitor → readable rows instead of raw JSON", () => {
+    expect(
+      claudeToolSummary(
+        "SendMessage",
+        { to: "af6ecc", summary: "Correct B1's lineage rule", message: "…long body…" },
+        t,
+      ),
+    ).toBe('detail.tool_send_message_gist|{"gist":"Correct B1\'s lineage rule"}');
+    expect(claudeToolSummary("SendMessage", { to: "af6ecc" }, t)).toBe(
+      'detail.tool_send_message_to|{"to":"af6ecc"}',
+    );
+    expect(claudeToolSummary("ListAgents", {}, t)).toBe("detail.tool_list_agents");
+    // The condition form gets a label; the shell form (14 of 15 calls) returns
+    // null so formatInput can show the command itself.
+    expect(
+      claudeToolSummary("Monitor", { target: "bymbrfi4h", wait_for: "Vitest summary appears" }, t),
+    ).toBe('detail.tool_monitor_until|{"until":"Vitest summary appears"}');
+    expect(claudeToolSummary("Monitor", { command: "until ls; do sleep 5; done" }, t)).toBeNull();
+  });
+
   it("returns null for any other tool (falls back to formatInput)", () => {
     expect(claudeToolSummary("Bash", { command: "ls" }, t)).toBeNull();
     expect(claudeToolSummary("Read", { file_path: "a.ts" }, t)).toBeNull();
@@ -401,9 +481,58 @@ describe("fleetToolSummary", () => {
     expect(fleetToolSummary("fleet__image", { description: "   " }, t)).toBe("detail.fleet_sum.image");
   });
 
+  it("matches the older one-level-shallower wire name too", () => {
+    // An older Fleet build registered these as `mcp__fleet__ask`; a foreign
+    // server's same-named tool must still fall through.
+    expect(fleetToolSummary("mcp__fleet__ask", { questions: "[]" }, t)).toBe(
+      "detail.fleet_sum.ask",
+    );
+    expect(fleetToolSummary("mcp__dayday__ask", { questions: [] }, t)).toBeNull();
+  });
+
   it("returns null for control tools (FleetToolCard owns those) and foreign tools", () => {
     expect(fleetToolSummary("mcp__fleet__fleet__plan", { action: "check" }, t)).toBeNull();
     expect(fleetToolSummary("mcp__fleet__fleet__inspect", { action: "list" }, t)).toBeNull();
     expect(fleetToolSummary("Bash", { command: "ls" }, t)).toBeNull();
+  });
+});
+
+// dsh's residue: the tools with no Claude counterpart, which keep their own
+// names through `dsh_messages.rs` and so used to dump their whole args object
+// into the collapsed row.
+describe("dshToolSummary", () => {
+  it("labels background jobs and persistent terminals instead of dumping args", () => {
+    expect(dshToolSummary("job_output", { job_id: "796215df" }, t)).toBe(
+      "detail.tool_dsh_job_output",
+    );
+    expect(dshToolSummary("job_list", {}, t)).toBe("detail.tool_dsh_job_list");
+    expect(dshToolSummary("terminal_open", { type: "shell" }, t)).toBe(
+      "detail.tool_dsh_terminal_open",
+    );
+  });
+
+  it("leads terminal_send with the text it sent, clipped to one line", () => {
+    expect(dshToolSummary("terminal_send", { sessionId: "t1", text: "cargo test\nnext" }, t)).toBe(
+      'detail.tool_stdin|{"text":"cargo test"}',
+    );
+    expect(dshToolSummary("terminal_send", { sessionId: "t1", text: "  " }, t)).toBe(
+      "detail.tool_dsh_terminal_send",
+    );
+  });
+
+  // These two were the worst rows in a dsh transcript: the whole message /
+  // report body, unwrapped, as the one-line summary.
+  it("clips send_message and report to their first line", () => {
+    expect(
+      dshToolSummary("send_message", { agent_id: "a6278d05", message: "把结论交给我\n细节…" }, t),
+    ).toBe('detail.tool_dsh_send_message_text|{"text":"把结论交给我"}');
+    expect(dshToolSummary("report", { output: "已定位根因" }, t)).toBe(
+      'detail.tool_dsh_report_text|{"text":"已定位根因"}',
+    );
+  });
+
+  it("returns null for tools it does not handle (falls back to formatInput)", () => {
+    expect(dshToolSummary("Bash", { command: "ls" }, t)).toBeNull();
+    expect(dshToolSummary("cordis_run", { name: "x" }, t)).toBeNull();
   });
 });

@@ -280,6 +280,39 @@ fn create_in(
     Ok(rec)
 }
 
+/// Put a watch on disk in an explicit dir — test-only door for other modules'
+/// tests (handoff's relay test needs a watch to carry without touching the real
+/// `~/.fleet/watches`).
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_in_for_test(
+    dir: &Path,
+    session_id: &str,
+    workspace_path: &str,
+    until_cmd: &str,
+    capture_cmd: Option<&str>,
+    note: Option<&str>,
+    id: &str,
+    now: u64,
+) -> WatchRecord {
+    create_in(
+        dir,
+        session_id,
+        workspace_path,
+        until_cmd,
+        capture_cmd,
+        note,
+        DEFAULT_POLL_SECS,
+        DEFAULT_TIMEOUT_SECS,
+        None,
+        None,
+        None,
+        id,
+        now,
+    )
+    .expect("test watch")
+}
+
 pub fn get(id: &str) -> Option<WatchRecord> {
     get_in(&watches_dir()?, id)
 }
@@ -383,6 +416,80 @@ pub(crate) fn enrich_sessions_in(dir: &Path, sessions: &mut [crate::session::Ses
             s.watches = w.clone();
         }
     }
+}
+
+/// Every active watch owned by `session_id`, soonest-deadline first.
+pub fn for_session(session_id: &str) -> Vec<WatchRecord> {
+    let Some(dir) = watches_dir() else {
+        return Vec::new();
+    };
+    for_session_in(&dir, session_id)
+}
+
+pub(crate) fn for_session_in(dir: &Path, session_id: &str) -> Vec<WatchRecord> {
+    list_in(dir)
+        .into_iter()
+        .filter(|r| r.session_id == session_id)
+        .collect()
+}
+
+/// Re-point every watch owned by `from` at `to`, returning the moved records.
+///
+/// A watch names the session it will reanimate, so a session that hands its
+/// baton off leaves behind a timer that resumes *itself* — a retired hop gets
+/// resurrected minutes later and edits the same worktree its successor is
+/// working in (observed 2026-09-14: hop 72 woke at 13:55:05 behind hop 73,
+/// both holding the same "merge it if green" instruction). Stopping the watch
+/// instead would be safe but lossy: the thing it waits for still matters, and
+/// the successor would have to notice and re-arm by hand. So the watch moves
+/// with the baton, along with the launch knobs the resume will need — the
+/// successor's model/effort/source, not the predecessor's.
+///
+/// Any timer already napping re-reads the record on its next wake, so the move
+/// needs no process signalling. Idempotent: an empty result means there was
+/// nothing to move.
+pub fn transfer_session(
+    from: &str,
+    to: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    agent_source: Option<&str>,
+) -> Vec<WatchRecord> {
+    let Some(dir) = watches_dir() else {
+        return Vec::new();
+    };
+    transfer_session_in(&dir, from, to, model, effort, agent_source)
+}
+
+pub(crate) fn transfer_session_in(
+    dir: &Path,
+    from: &str,
+    to: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    agent_source: Option<&str>,
+) -> Vec<WatchRecord> {
+    if from == to || to.trim().is_empty() {
+        return Vec::new();
+    }
+    let blank = |s: &str| s.trim().is_empty();
+    let mut moved = Vec::new();
+    for mut rec in for_session_in(dir, from) {
+        rec.session_id = to.to_string();
+        if let Some(m) = model.filter(|m| !blank(m)) {
+            rec.model = Some(m.to_string());
+        }
+        if let Some(e) = effort.filter(|e| !blank(e)) {
+            rec.effort = Some(e.to_string());
+        }
+        if let Some(a) = agent_source.filter(|a| !blank(a)) {
+            rec.agent_source = Some(a.to_string());
+        }
+        if write_record(dir, &rec).is_ok() {
+            moved.push(rec);
+        }
+    }
+    moved
 }
 
 /// Stop a watch. Idempotent — returns whether a record was actually removed.
@@ -810,6 +917,94 @@ mod tests {
             now,
         )
         .unwrap()
+    }
+
+    /// A watch names the session it reanimates, so a session that hands its
+    /// baton off and leaves its watch behind gets resurrected by its own timer
+    /// — concurrently with the successor working the same tree. The baton must
+    /// carry the wait: after a transfer the fire wakes the successor, on the
+    /// successor's launch knobs, and the predecessor owns nothing.
+    #[test]
+    fn transfer_moves_watches_to_the_successor_with_its_launch_knobs() {
+        let d = dir();
+        make(d.path(), "w1", 1_000);
+        make(d.path(), "w2", 1_100);
+        create_in(
+            d.path(),
+            "other-session",
+            "/ws",
+            "true",
+            None,
+            None,
+            30,
+            DEFAULT_TIMEOUT_SECS,
+            None,
+            None,
+            None,
+            "w3",
+            1_200,
+        )
+        .unwrap();
+
+        let moved = transfer_session_in(
+            d.path(),
+            "sess-1",
+            "sess-2",
+            Some("claude-opus-5"),
+            Some("high"),
+            Some("claude-code"),
+        );
+
+        assert_eq!(moved.len(), 2, "both of sess-1's watches move");
+        assert!(
+            for_session_in(d.path(), "sess-1").is_empty(),
+            "the retired session owns no watch any more — nothing can resurrect it"
+        );
+        let now_owned = for_session_in(d.path(), "sess-2");
+        assert_eq!(now_owned.len(), 2);
+        for rec in &now_owned {
+            assert_eq!(rec.model.as_deref(), Some("claude-opus-5"));
+            assert_eq!(rec.effort.as_deref(), Some("high"));
+            assert_eq!(rec.agent_source.as_deref(), Some("claude-code"));
+        }
+        assert_eq!(
+            for_session_in(d.path(), "other-session").len(),
+            1,
+            "an unrelated session's watch is untouched"
+        );
+    }
+
+    /// The transfer preserves the wait itself — condition, capture, note and
+    /// deadline are what the successor inherits. Re-deriving any of them (say,
+    /// restarting the deadline clock) would silently extend a wait the
+    /// predecessor had already half-spent.
+    #[test]
+    fn transfer_preserves_the_condition_and_deadline() {
+        let d = dir();
+        let before = make(d.path(), "w1", 1_000);
+
+        let moved = transfer_session_in(d.path(), "sess-1", "sess-2", None, None, None);
+
+        let after = &moved[0];
+        assert_eq!(after.id, before.id);
+        assert_eq!(after.until_cmd, before.until_cmd);
+        assert_eq!(after.capture_cmd, before.capture_cmd);
+        assert_eq!(after.note, before.note);
+        assert_eq!(after.deadline_at, before.deadline_at);
+        assert_eq!(after.generation, before.generation);
+        assert_eq!(get_in(d.path(), "w1").unwrap(), *after, "persisted, not just returned");
+    }
+
+    /// Relaying to yourself (or to a blank id) must not rewrite records — a
+    /// no-op transfer is the one case where "move everything" would instead
+    /// point live watches at nothing.
+    #[test]
+    fn transfer_to_self_or_blank_is_a_noop() {
+        let d = dir();
+        make(d.path(), "w1", 1_000);
+        assert!(transfer_session_in(d.path(), "sess-1", "sess-1", None, None, None).is_empty());
+        assert!(transfer_session_in(d.path(), "sess-1", "  ", None, None, None).is_empty());
+        assert_eq!(for_session_in(d.path(), "sess-1").len(), 1);
     }
 
     #[test]

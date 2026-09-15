@@ -342,6 +342,25 @@ pub(crate) fn resolve_fleet_binary() -> Option<String> {
     crate::fleet_cli::resolve_fleet_binary().map(|p| p.to_string_lossy().to_string())
 }
 
+/// The fleet binary to bake into `settings.json`, refusing one that Rule 3's
+/// worktree cleanup is about to delete.
+///
+/// `settings.json` outlives this process by design, so a hook naming a
+/// worktree build is a hook that stops existing at merge time. The MCP injector
+/// has refused that since 2026-09-06; hooks never did, which is how a machine
+/// ends up with a `guard` hook — the gate for *every* shell command — pointing
+/// into a directory that was deleted weeks ago.
+fn resolve_publishable_fleet_binary() -> Result<String, String> {
+    let bin = resolve_fleet_binary().ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    if !crate::fleet_cli::may_publish_self(&bin) {
+        return Err(crate::fleet_cli::ephemeral_publish_refused(
+            &bin,
+            "settings.json hooks",
+        ));
+    }
+    Ok(bin)
+}
+
 /// PreToolUse matcher for the guard hook. Pipe alternation fires the group for
 /// **either** shell tool Claude Code can drive — `Bash` and `PowerShell` — so
 /// both are audited by the single guard group. See [`apply_guard_hook`] for why
@@ -371,8 +390,7 @@ pub fn apply_guard_hook() -> Result<(), String> {
 }
 
 fn apply_guard_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -464,8 +482,7 @@ pub fn apply_elicitation_hook() -> Result<(), String> {
 }
 
 fn apply_elicitation_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -555,8 +572,7 @@ pub fn apply_plan_approval_hook() -> Result<(), String> {
 }
 
 fn apply_plan_approval_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -649,8 +665,7 @@ pub fn apply_prd_context_hook() -> Result<(), String> {
 }
 
 fn apply_prd_context_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -702,6 +717,26 @@ fn apply_prd_context_hook_inner() -> Result<(), String> {
         hooks_obj.insert("SessionStart".to_string(), json!([notes_hint_group]));
     }
 
+    // Companion: the context-pressure PostToolUse hook. Same feature for the
+    // same reason — it exists so a session notices the window filling *before*
+    // a compaction summarises its macro state away. It hangs off PostToolUse
+    // rather than UserPromptSubmit because the sessions that fill a window
+    // never come back for another prompt: a headless `-p` turn can run for
+    // hours, and a tool call is the only event that recurs inside one.
+    let mut ctx_reminder_hook = fleet_subcommand_hook(&fleet_bin, "ctx-reminder");
+    ctx_reminder_hook["timeout"] = json!(10000);
+    let ctx_reminder_group = json!({
+        "hooks": [ctx_reminder_hook]
+    });
+    if let Some(existing) = hooks_obj.get_mut("PostToolUse") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.retain(|group| !is_ctx_reminder_group(group));
+            arr.push(ctx_reminder_group);
+        }
+    } else {
+        hooks_obj.insert("PostToolUse".to_string(), json!([ctx_reminder_group]));
+    }
+
     write_settings(&settings)
 }
 
@@ -748,6 +783,15 @@ fn remove_prd_context_hook_inner() -> Result<(), String> {
             hooks_obj.remove("SessionStart");
         }
     }
+    if let Some(arr) = hooks_obj
+        .get_mut("PostToolUse")
+        .and_then(|v| v.as_array_mut())
+    {
+        arr.retain(|group| !is_ctx_reminder_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("PostToolUse");
+        }
+    }
 
     if hooks_obj.is_empty() {
         obj.remove("hooks");
@@ -756,11 +800,11 @@ fn remove_prd_context_hook_inner() -> Result<(), String> {
     write_settings(&settings)
 }
 
-/// Both halves must be present: the UserPromptSubmit injection *and* its
-/// SessionStart companion. A settings.json from a build that predates the
-/// companion therefore reads as "not installed", which is what makes
-/// `control_plane::heal` add the missing group instead of leaving upgraded
-/// hosts without post-compaction notes forever.
+/// All three parts must be present: the UserPromptSubmit injection, its
+/// SessionStart companion, and the PostToolUse context-pressure reminder. A
+/// settings.json from a build that predates a companion therefore reads as
+/// "not installed", which is what makes `control_plane::heal` add the missing
+/// group instead of leaving upgraded hosts without it forever.
 fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
     hooks_obj
         .get("UserPromptSubmit")
@@ -768,6 +812,19 @@ fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
         .map(|arr| arr.iter().any(|group| is_prd_context_group(group)))
         .unwrap_or(false)
         && has_notes_hint_hook(hooks_obj)
+        && has_ctx_reminder_hook(hooks_obj)
+}
+
+fn has_ctx_reminder_hook(hooks_obj: &Map<String, Value>) -> bool {
+    hooks_obj
+        .get("PostToolUse")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(is_ctx_reminder_group))
+        .unwrap_or(false)
+}
+
+fn is_ctx_reminder_group(group: &Value) -> bool {
+    group_invokes_fleet_subcommand(group, "ctx-reminder")
 }
 
 fn is_prd_context_group(group: &Value) -> bool {
@@ -802,8 +859,7 @@ pub fn apply_wakeup_guard_hook() -> Result<(), String> {
 }
 
 fn apply_wakeup_guard_hook_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -899,8 +955,7 @@ pub fn apply_idle_hooks() -> Result<(), String> {
 }
 
 fn apply_idle_hooks_inner() -> Result<(), String> {
-    let fleet_bin = resolve_fleet_binary()
-        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+    let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
     let obj = settings.as_object_mut().ok_or("settings is not an object")?;
@@ -1252,6 +1307,133 @@ fn fleet_hook_group() -> Value {
     })
 }
 
+// ── Binary-path drift ────────────────────────────────────────────────────────
+
+/// The `(fleet binary, subcommand)` a hook entry names, for either shape
+/// [`fleet_subcommand_hook_with`] writes. `None` for anything that is not a
+/// `fleet <subcommand>` hook — notably the `cat >> ~/.fleet/hooks.jsonl`
+/// one-liner, which names no binary and therefore cannot drift.
+fn hook_fleet_invocation(hook: &Value) -> Option<(String, String)> {
+    let cmd = hook.get("command").and_then(|c| c.as_str())?;
+
+    // Unix sh-wrapper: `sh -c 'if [ -x "{bin}" ]; then exec "{bin}" {sub}; else exit 0; fi'`
+    if let Some(rest) = cmd.split_once("then exec \"").map(|(_, r)| r) {
+        let (bin, rest) = rest.split_once('"')?;
+        let sub = rest.split_once(';')?.0.trim();
+        if bin.is_empty() || sub.is_empty() {
+            return None;
+        }
+        return Some((bin.to_string(), sub.to_string()));
+    }
+
+    // Windows exec form: `command` is the binary, `args` are the subcommand
+    // tokens. Split the basename by hand — `Path::file_stem` only treats `\`
+    // as a separator on Windows, and a Windows-written settings.json has to be
+    // recognized when this runs on any host.
+    let base = cmd
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(cmd)
+        .to_ascii_lowercase();
+    if base != "fleet" && base != "fleet.exe" {
+        return None;
+    }
+    let args: Vec<&str> = hook
+        .get("args")?
+        .as_array()?
+        .iter()
+        .map(|v| v.as_str().unwrap_or(""))
+        .collect();
+    if args.is_empty() || args.iter().any(|a| a.is_empty()) {
+        return None;
+    }
+    Some((cmd.to_string(), args.join(" ")))
+}
+
+/// Rewrite every Fleet hook in `hooks_obj` to name `fleet_bin`, returning how
+/// many entries actually changed. Pure, so the drift logic is testable without
+/// touching a real `settings.json`.
+fn repoint_fleet_hooks_in(hooks_obj: &mut Map<String, Value>, fleet_bin: &str) -> usize {
+    let mut changed = 0;
+    for (_event, groups) in hooks_obj.iter_mut() {
+        let Some(groups) = groups.as_array_mut() else {
+            continue;
+        };
+        for group in groups.iter_mut() {
+            let Some(entries) = group.get_mut("hooks").and_then(|h| h.as_array_mut()) else {
+                continue;
+            };
+            for entry in entries.iter_mut() {
+                let Some((bin, sub)) = hook_fleet_invocation(entry) else {
+                    continue;
+                };
+                if bin == fleet_bin {
+                    continue;
+                }
+                // Keep the shape already on disk: a Windows settings.json
+                // carries exec form, a unix one the sh wrapper, and a machine
+                // must not be handed the other platform's shape just because
+                // the path drifted.
+                let was_exec_form = entry.get("args").is_some();
+                let mut fresh = fleet_subcommand_hook_with(was_exec_form, fleet_bin, &sub);
+                // Preserve per-entry settings the appliers add (`timeout`,
+                // `async`) — this rewrites the path, nothing else.
+                if let (Some(fresh_obj), Some(old_obj)) = (fresh.as_object_mut(), entry.as_object())
+                {
+                    for (k, v) in old_obj {
+                        if k != "command" && k != "args" && k != "type" {
+                            fresh_obj.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+                *entry = fresh;
+                changed += 1;
+            }
+        }
+    }
+    changed
+}
+
+/// Point every Fleet hook in `settings.json` at the fleet binary this machine
+/// resolves *now*, and report how many entries moved.
+///
+/// Hook commands bake an absolute path, and nothing ever rewrote it: the
+/// appliers replace a hook wholesale, but they only run when a feature is
+/// installed or toggled, and `control_plane::heal` skips anything already
+/// present — a check that reads the *subcommand*, never the path. So a hook
+/// installed by a `./target/debug/fleet` keeps naming that build forever,
+/// and a machine ends up with its hooks split across several binaries of
+/// different ages. Measured on the author's Mac on 2026-09-14: eight Fleet
+/// hooks across three different binaries, one of which no longer knew the
+/// subcommand it was pointed at.
+///
+/// Path-only: which features are installed is not this function's business, so
+/// it adds and removes nothing. Safe and cheap to run on every startup — it
+/// writes only when something actually changed.
+pub fn repoint_fleet_hooks() -> Result<usize, String> {
+    // Nothing publishable to point at — including a worktree build, which would
+    // move every hook onto a path that disappears at merge. Leaving the
+    // existing paths alone is strictly better than rewriting them to a guess.
+    let Ok(fleet_bin) = resolve_publishable_fleet_binary() else {
+        return Ok(0);
+    };
+    let Some(mut settings) = read_settings() else {
+        return Ok(0);
+    };
+    let Some(hooks_obj) = settings
+        .get_mut("hooks")
+        .and_then(|h| h.as_object_mut())
+    else {
+        return Ok(0);
+    };
+    let changed = repoint_fleet_hooks_in(hooks_obj, &fleet_bin);
+    if changed == 0 {
+        return Ok(0);
+    }
+    write_settings(&settings)?;
+    Ok(changed)
+}
+
 /// Check whether a given event already has a Fleet hook group.
 fn has_fleet_hook(hooks_obj: &Map<String, Value>, event: &str) -> bool {
     hooks_obj
@@ -1280,10 +1462,54 @@ fn is_fleet_group(group: &Value) -> bool {
     cat_shape || group_invokes_fleet_subcommand(group, "hook-event")
 }
 
+/// What a `fleet` build should exit with when handed a subcommand it has never
+/// heard of. `true` means the caller is a human at a terminal.
+///
+/// [`fault_tolerant_command`] guards against the fleet binary being *missing*.
+/// It cannot guard against the binary being merely *older* than the
+/// `settings.json` that names it — that binary exists, runs, and dies on
+/// clap's usage error (exit 2). And exit 2 from a hook is not cosmetic.
+/// Measured on Claude Code 2.1.263 (temp dir + a `settings.local.json` hook
+/// that just `exit 2`s, driven by `claude -p --output-format stream-json`):
+///
+/// - **PreToolUse** — the tool call is *denied* and lands in the result's
+///   `permission_denials`. Fleet's `guard` matches `Bash|PowerShell`, so this
+///   refuses every shell command on the machine.
+/// - **UserPromptSubmit** — the prompt never reaches the model at all (zero
+///   turns), yet the run still reports `subtype: "success", is_error: false`.
+///   Two Fleet hooks live here (`prd-context`, `session resume`), and a
+///   headless spawn — a handoff successor, a `fleet loop` tick — looks like it
+///   succeeded while having done nothing.
+/// - **Stop** — the session can never end: the failure is fed back to the
+///   model as `Stop hook feedback` forever, bounded only by `--max-turns`.
+/// - PostToolUse / SessionStart — harmless.
+///
+/// So an unknown subcommand must fail *open* when it arrived from a hook.
+/// Piped stdin is the discriminator: Claude Code always feeds hook JSON on
+/// stdin and a person at a terminal never does. Known subcommands never reach
+/// here, so a deliberate `echo … | fleet guard` is untouched — and the human
+/// typo (`fleet agnts`) still gets clap's error.
+///
+/// This cannot be solved in the wrapper string instead: `guard`,
+/// `elicitation`, `plan-approval` and `wakeup-guard` all use exit 2 as their
+/// *intended* "block this" signal, so a wrapper that swallows exit 2 would
+/// disarm them. Only the binary itself knows which of the two it meant.
+pub fn unknown_subcommand_exit_code(stdin_is_terminal: bool) -> i32 {
+    if stdin_is_terminal {
+        2
+    } else {
+        0
+    }
+}
+
 /// Build a fault-tolerant shell command that silently exits 0 when the fleet
 /// binary is missing (e.g. after uninstall), so Claude Code is not blocked.
 /// When the binary exists, it `exec`s into it — propagating its exit code and
 /// stdout/stderr as normal.
+///
+/// Note this only covers a *missing* binary; a stale one that no longer knows
+/// the subcommand is handled inside the binary, by
+/// [`unknown_subcommand_exit_code`].
 fn fault_tolerant_command(fleet_bin: &str, subcommand: &str) -> String {
     // Use `test -x` so it works even if the binary was removed from PATH but
     // the absolute path is stale.  `exec` avoids an extra shell process.
@@ -1537,6 +1763,105 @@ mod fleet_subcommand_hook_tests {
     }
 
     #[test]
+    fn repoint_moves_every_shape_onto_the_current_binary_and_spares_the_rest() {
+        // A settings.json in the state this Mac was actually found in on
+        // 2026-09-14: Fleet hooks spread over three binaries of different ages,
+        // in both shapes, next to a user's own hook and the `cat >>` event
+        // logger (which names no binary and must not be touched).
+        let mut hooks_obj = json!({
+            "PreToolUse": [
+                {"matcher": "Bash|PowerShell", "hooks": [{
+                    "type": "command",
+                    "command": fault_tolerant_command("/old/path/fleet", "guard"),
+                    "timeout": 120000
+                }]},
+                {"matcher": "ScheduleWakeup", "hooks": [{
+                    "type": "command",
+                    "command": "C:\\Users\\x\\.fleet\\bin\\fleet.exe",
+                    "args": ["wakeup-guard"]
+                }]},
+                {"matcher": "Bash", "hooks": [{
+                    "type": "command",
+                    "command": "my-own-linter --check"
+                }]}
+            ],
+            "Stop": [
+                {"hooks": [{"type": "command", "command": FLEET_HOOK_COMMAND, "async": true}]},
+                {"hooks": [{
+                    "type": "command",
+                    "command": fault_tolerant_command("/new/fleet", "session idle")
+                }]}
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let moved = repoint_fleet_hooks_in(&mut hooks_obj, "/new/fleet");
+        // guard + wakeup-guard moved; `session idle` was already current, the
+        // user's linter and the `cat >>` logger are not ours.
+        assert_eq!(moved, 2, "moved the wrong number of hooks");
+
+        let pre = &hooks_obj["PreToolUse"];
+        let guard = &pre[0]["hooks"][0];
+        assert_eq!(
+            guard["command"].as_str().unwrap(),
+            fault_tolerant_command("/new/fleet", "guard"),
+            "the unix wrapper should be rewritten in place"
+        );
+        assert_eq!(
+            guard["timeout"], 120000,
+            "rewriting the path must not drop the entry's timeout"
+        );
+
+        let wakeup = &pre[1]["hooks"][0];
+        assert_eq!(
+            wakeup["command"], "/new/fleet",
+            "a Windows exec-form entry must stay exec form, just repointed"
+        );
+        assert_eq!(wakeup["args"], json!(["wakeup-guard"]));
+
+        assert_eq!(
+            pre[2]["hooks"][0]["command"], "my-own-linter --check",
+            "a hook that is not Fleet's must be left alone"
+        );
+        assert_eq!(
+            hooks_obj["Stop"][0]["hooks"][0]["command"], FLEET_HOOK_COMMAND,
+            "the `cat >>` event logger names no binary and cannot drift"
+        );
+
+        // Idempotent: a second pass has nothing left to do.
+        assert_eq!(repoint_fleet_hooks_in(&mut hooks_obj, "/new/fleet"), 0);
+    }
+
+    #[test]
+    fn hook_fleet_invocation_reads_back_what_the_appliers_write() {
+        // Round-trip guard: if the emitted shape ever changes, the drift
+        // parser must change with it or repointing silently stops working.
+        for sub in ["guard", "prd-context", "session idle", "hook-event"] {
+            for windows in [false, true] {
+                let hook = fleet_subcommand_hook_with(windows, "/some/fleet", sub);
+                assert_eq!(
+                    hook_fleet_invocation(&hook),
+                    Some(("/some/fleet".to_string(), sub.to_string())),
+                    "could not read back {sub} (windows={windows})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_subcommand_fails_open_for_hooks_and_keeps_erroring_for_humans() {
+        // A hook: Claude Code pipes the event JSON in, so stdin is not a tty.
+        // Exit 0 or PreToolUse denies the tool / UserPromptSubmit eats the
+        // prompt / Stop never lets the session end.
+        assert_eq!(unknown_subcommand_exit_code(false), 0);
+        // A person who typo'd a subcommand still gets clap's usage error —
+        // failing open there would hide real mistakes.
+        assert_eq!(unknown_subcommand_exit_code(true), 2);
+    }
+
+    #[test]
     fn is_fleet_group_accepts_the_hook_event_exec_shape() {
         let group = json!({
             "hooks": [{
@@ -1640,8 +1965,38 @@ mod tests {
         start_arr.retain(|g| !is_notes_hint_group(g));
         assert_eq!(start_arr, vec![user_start.clone()]);
         hooks.insert("SessionStart".into(), json!([user_start, hint]));
-        assert!(has_prd_context_hook(&hooks));
         assert!(has_notes_hint_hook(&hooks));
+        assert!(
+            !has_prd_context_hook(&hooks),
+            "still not installed until the PostToolUse companion exists"
+        );
+
+        // Current shape: all three. The PostToolUse array already carries
+        // Fleet's own logging group; the retain must spare it.
+        let ctx = ctx_reminder_group_for(bin);
+        let logging = json!({"hooks": [{"type": "command", "command": "cat >> log"}]});
+        let mut post_arr = vec![
+            logging.clone(),
+            ctx_reminder_group_for("/old/fleet"),
+            ctx.clone(),
+        ];
+        post_arr.retain(|g| !is_ctx_reminder_group(g));
+        assert_eq!(post_arr, vec![logging.clone()]);
+        assert!(!is_ctx_reminder_group(&hint));
+        assert!(!is_ctx_reminder_group(&prd));
+        hooks.insert("PostToolUse".into(), json!([logging, ctx]));
+        assert!(has_ctx_reminder_hook(&hooks));
+        assert!(has_prd_context_hook(&hooks));
+    }
+
+    fn ctx_reminder_group_for(bin: &str) -> Value {
+        json!({
+            "hooks": [{
+                "type": "command",
+                "command": fault_tolerant_command(bin, "ctx-reminder"),
+                "timeout": 10000
+            }]
+        })
     }
 
     fn idle_stop_group_for(bin: &str) -> Value {

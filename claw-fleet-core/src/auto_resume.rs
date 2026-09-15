@@ -429,6 +429,13 @@ pub fn spawn_resume_tracked_prompt(
 ) -> Result<(), String> {
     let prompt = prompt.trim();
     let prompt = if prompt.is_empty() { "continue" } else { prompt };
+    // A resume may carry its own `--model` / `--effort`; where it carries none,
+    // fall back to what this session was launched with, so a follow-up never
+    // silently drops back to the CLI default — and, for an `opus[1m]` session,
+    // never loses the `[1m]` suffix. Also re-records the note; see
+    // `launch_spec::resume_spec` for why that is not `record`.
+    let (eff_model, eff_effort) = crate::launch_spec::resume_spec(session_id, model, effort);
+    let (model, effort) = (eff_model.as_deref(), eff_effort.as_deref());
     // Validate overrides (permission mode) before any CLI/filesystem checks so
     // the frontend gets a stable error regardless of the host environment.
     let mut override_args = Vec::new();
@@ -443,11 +450,6 @@ pub fn spawn_resume_tracked_prompt(
         return Err("Claude CLI not found on PATH".to_string());
     }
     let claude = claude_path.unwrap_or_else(|| "claude".to_string());
-    // A resume may carry its own `--model` / `--effort`; record them so the note
-    // describes what the session is running *now*, not only what it first
-    // launched with. A resume with no overrides records nothing and leaves the
-    // original note standing.
-    crate::launch_spec::record(session_id, model, effort);
     let stderr_log = crate::session::get_fleet_dir()
         .map(|d| d.join("auto_resume_stderr.log"))
         .ok_or_else(|| "no fleet dir".to_string())?;

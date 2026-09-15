@@ -139,6 +139,31 @@ export function resumeConfigChips({
 }
 
 /**
+ * 一条续写要不要覆盖会话的 model / effort。
+ *
+ * 规则只有一条：**用户亲手改过才发**。胶囊里显示的初值来自快照的
+ * `session.model`，那是从 transcript 解析出来的，会丢 `[1m]` 这类 spec 后缀
+ * （见 memory `model-suffix-not-in-jsonl`）；把它原样回传，等于拿一个降级的
+ * spec 覆盖桌面侧 launch-spec 里记着的权威值。没改就一个字段都不发，让
+ * `resume_codex_session` / `claude --resume` 那侧去 launch-spec 取。
+ */
+export function resumeConfigOverrides({
+  touched,
+  model,
+  effort,
+}: {
+  touched: boolean;
+  model: string;
+  effort: string;
+}): { model?: string; effort?: string } {
+  if (!touched) return {};
+  return {
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+  };
+}
+
+/**
  * 回复胶囊占住的下边界，供转录区补底部留白用。
  *
  * 只吃布局值：`offsetHeight` 是元素自身的布局高度，`bottomCss` 是
@@ -1199,9 +1224,22 @@ export function ResumeComposer({
   // 设备作用域:会话 id 只在单机内唯一,不分家两台机器上同号的会话会共用一份
   // 半截输入。
   const [prompt, setPrompt, clearPrompt] = useDeviceDraft(`resume:${session.id}`, "");
-  const [model, setModel] = useState("");
-  const [effort, setEffort] = useState("");
+  // 续写的模型/努力度以会话当前值起步，而不是空串——空串会让胶囊显示成
+  // 「默认」，看不出这条追问其实会跑在哪个模型上。
+  const [model, setModel] = useState(session.model ?? "");
+  const [effort, setEffort] = useState(session.effort ?? "");
+  // 用户有没有在选择器里亲手改过。**只有改过才把 model/effort 发上线**：没改
+  // 时留空，让桌面侧从 launch-spec 取权威值(它带 `[1m]` 这类后缀，而快照里的
+  // `session.model` 是从 transcript 解析的、丢后缀)，别让一次「我没动配置」的
+  // 追问反倒把会话钉死在一个降级的 model spec 上。
+  const [configTouched, setConfigTouched] = useState(false);
   const [permissionMode, setPermissionMode] = useState("");
+  // 切到别的会话：重新以那个会话的当前配置起步，并清掉「改过」标记。
+  useEffect(() => {
+    setModel(session.model ?? "");
+    setEffort(session.effort ?? "");
+    setConfigTouched(false);
+  }, [session.id]);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   // Optimistically hide a cancelled chip until the next sessions snapshot drops
@@ -1349,8 +1387,7 @@ export function ResumeComposer({
           // The relay routes the resume by source (blank → claude); a Codex
           // thread resumed as claude would fail, so always send it.
           agentSource: session.agentSource ?? "",
-          ...(model ? { model } : {}),
-          ...(effort ? { effort } : {}),
+          ...resumeConfigOverrides({ touched: configTouched, model, effort }),
           // Codex / dsh 都没有 --permission-mode 的对应物；只给 Claude 发。
           ...(tool === "claude" && permissionMode ? { permissionMode } : {}),
         };
@@ -1515,8 +1552,14 @@ export function ResumeComposer({
                 permissionMode={permissionMode}
                 permissionDefaultLabel="沿用权限"
                 onChange={(p) => {
-                  if (p.model !== undefined) setModel(p.model);
-                  if (p.effort !== undefined) setEffort(p.effort);
+                  if (p.model !== undefined) {
+                    setModel(p.model);
+                    setConfigTouched(true);
+                  }
+                  if (p.effort !== undefined) {
+                    setEffort(p.effort);
+                    setConfigTouched(true);
+                  }
                   if (p.permissionMode !== undefined) setPermissionMode(p.permissionMode);
                 }}
               />

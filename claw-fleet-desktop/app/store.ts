@@ -11,6 +11,7 @@ import { getItem, removeItem, resolveFeature, setItem } from "./storage";
 import { appendTailDelta } from "./tailDelta";
 import i18n, { isSupportedLanguage } from "./i18n";
 import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
+import { localDateKey, localDateKeyDaysAgo } from "./localDate";
 import { singleFlight } from "./singleFlight";
 
 /** Open the in-app Settings overlay.
@@ -1276,9 +1277,7 @@ interface ReportState {
 }
 
 function yesterday(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
+  return localDateKeyDaysAgo(1);
 }
 
 /** Newest date among stats that actually have activity, or "" when none. */
@@ -1360,8 +1359,8 @@ export const useReportStore = create<ReportState>((set, get) => ({
 
   refreshNewReportFlag: async () => {
     try {
-      const to = new Date().toISOString().slice(0, 10);
-      const from = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+      const to = localDateKey();
+      const from = localDateKeyDaysAgo(90);
       const stats = await invoke<DailyReportStats[]>("list_daily_report_stats", { from, to });
       const latest = latestDateWithData(stats);
       set((s) => ({

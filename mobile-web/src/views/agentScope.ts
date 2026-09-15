@@ -10,9 +10,16 @@ import { t } from "../i18n";
 import type { SessionInfo } from "../types";
 
 /** 一个家族成员的身份标签：◈ 主进程，或 ⎇ 加它的 agentType（没记到类型时退回
- *  笼统的「子代理」）。 */
+ *  笼统的「子代理」）。
+ *
+ *  codex 的子代理几乎都没有 agentType —— 它的 `thread_spawn` 里 `agent_role`
+ *  基本是 null，真正能区分它们的是 `agent_nickname`（Kuhn / Ohm / Bohr），而
+ *  core 把那个昵称放在了 aiTitle 上（`codex_source` 里它是 ai_title 的首选来
+ *  源）。所以 codex 子代理退到 aiTitle，否则三行子代理读起来一模一样。 */
 export function agentLabel(s: SessionInfo): string {
-  return s.isSubagent ? `⎇ ${s.agentType || t("子代理")}` : `◈ ${t("主进程")}`;
+  if (!s.isSubagent) return `◈ ${t("主进程")}`;
+  const codexNickname = s.agentSource === "codex" ? s.aiTitle : null;
+  return `⎇ ${s.agentType || codexNickname || t("子代理")}`;
 }
 
 /** 子代理 id 的尾巴，用来区分两个同类型的子代理（比如两个 `general-purpose`

@@ -3,6 +3,7 @@ mod fmt;
 mod webui_embed;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use std::io::IsTerminal;
 
 // ── CLI definition ─────────────────────────────────────────────────────────────
 
@@ -241,6 +242,9 @@ enum Commands {
     /// [internal] PRD-context hook — re-injects the workspace's TASKS.md on every UserPromptSubmit
     #[command(hide = true)]
     PrdContext,
+    /// [internal] Context-pressure hook — on PostToolUse, announces 250K/500K/750K context use
+    #[command(name = "ctx-reminder", hide = true)]
+    CtxReminder,
     /// [internal] Notes-hint hook — on SessionStart (compact/resume/startup)
     /// injects a bounded summary of the session's private notes
     #[command(name = "notes-hint", hide = true)]
@@ -260,6 +264,16 @@ enum Commands {
         /// Guidance locale: `en` or `zh`.
         #[arg(long, default_value = "en")]
         locale: String,
+        /// Context tokens the session's last request used, measured by the
+        /// plugin off the dsh session log (`inputTokens + cacheReadTokens`).
+        #[arg(long)]
+        ctx_used: Option<u64>,
+        /// That request's context window, from the log's `request/context`.
+        #[arg(long)]
+        ctx_window: Option<u64>,
+        /// The model that request went to, named in the reminder.
+        #[arg(long)]
+        ctx_model: Option<String>,
     },
     /// [internal] Wakeup guard — denies ScheduleWakeup/CronCreate in Fleet sessions
     #[command(hide = true)]
@@ -278,6 +292,11 @@ enum Commands {
         /// Target process id (the root claude/codex CLI process).
         pid: u32,
     },
+    /// [internal] Any subcommand this build does not know. Exists so an older
+    /// `fleet` named by a newer `settings.json` fails *open* instead of dying
+    /// with clap's exit 2 — see [`claw_fleet_core::hooks::unknown_subcommand_exit_code`].
+    #[command(external_subcommand)]
+    Unknown(Vec<String>),
     /// Manage the current fleet-managed session (called from inside a Claude session)
     Session {
         #[command(subcommand)]
@@ -1234,13 +1253,25 @@ fn main() {
         }
         Commands::PlanApproval => commands::guard::cmd_plan_approval(),
         Commands::PrdContext => commands::prd::cmd_prd_context(),
+        Commands::CtxReminder => commands::prd::cmd_ctx_reminder(),
         Commands::NotesHint => commands::notes::cmd_notes_hint(),
         Commands::DshContext {
             cwd,
             session,
             title,
             locale,
-        } => commands::dsh::cmd_dsh_context(cwd, session, &title, &locale),
+            ctx_used,
+            ctx_window,
+            ctx_model,
+        } => commands::dsh::cmd_dsh_context(
+            cwd,
+            session,
+            &title,
+            &locale,
+            ctx_used,
+            ctx_window,
+            ctx_model,
+        ),
         Commands::WakeupGuard => commands::guard::cmd_wakeup_guard(),
         // Best-effort like the unix `cat >>` hook it replaces: a failed append
         // must not surface as a hook error to Claude Code.
@@ -1260,6 +1291,28 @@ fn main() {
                 eprintln!("win-interrupt {pid}: Windows-only helper");
                 std::process::exit(1);
             }
+        }
+        // A subcommand this build has never heard of. Hooks and the dsh plugin
+        // bake an absolute fleet path into files that outlive the binary they
+        // named, so this is the skew arrival point, not a typo arrival point.
+        Commands::Unknown(argv) => {
+            let name = argv.first().map(String::as_str).unwrap_or("");
+            let code = claw_fleet_core::hooks::unknown_subcommand_exit_code(
+                std::io::stdin().is_terminal(),
+            );
+            if code == 0 {
+                claw_fleet_core::log_debug(&format!(
+                    "fleet: ignoring unknown subcommand '{name}' from a non-interactive \
+                     caller — this binary is older than the config that names it"
+                ));
+            } else {
+                eprintln!(
+                    "error: unrecognized subcommand '{name}'\n\n\
+                     Usage: fleet <COMMAND>\n\n\
+                     For more information, try '--help'."
+                );
+            }
+            std::process::exit(code);
         }
         Commands::Session { action } => match action {
             SessionCommands::Idle => commands::session::cmd_session_idle(),

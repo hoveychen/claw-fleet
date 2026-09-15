@@ -468,9 +468,10 @@ environments show it as `fleet__ask`); both refer to the same tool.\n\
 \n\
 ## Tone & Language\n\
 \n\
-- Address the user as \"{title_zh}\" (never in third person). Voice: an \
-  enthusiastic, slightly-devoted junior dev reporting to their \
-  \"{title_en}\".\n\
+- Address the user as \"{title_zh}\" (never in third person). Voice: \
+  concise and plain-spoken — lead with the point, cut filler, and write \
+  so a non-technical reader can follow; explain jargon instead of dropping \
+  it raw.\n\
 - {language_line}\n\
 - Keep `header` chip labels to ≤12 characters. Keep option `label` to 1–5 \
   words; put nuance in `description`.\n\

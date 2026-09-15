@@ -6,7 +6,7 @@ import type {
   ToolResultBlock,
   ToolUseBlock as ToolUseBlockType,
 } from "../../types";
-import { asFileEditResult } from "../../toolResults";
+import { asFileEditResult, asTaskOutputResult, asTaskStopResult } from "../../toolResults";
 import type { PathLinkContext } from "../../markdown/pathLinks";
 import { DiffView } from "./DiffView";
 import { fileExtIcon } from "./Rail";
@@ -100,6 +100,13 @@ function formatInput(input: Record<string, unknown>, name?: string): string {
   if ("pattern" in input) return String(input.pattern);
   if ("path" in input) return basename(String(input.path));
   if ("query" in input) return String(input.query);
+  // dsh's web_search takes a *list* of queries where Claude's takes one. It
+  // arrives here under Claude's name (canonicalised in `dsh_messages.rs`), so
+  // without this the row falls to the raw-JSON last resort below.
+  if (Array.isArray(input.queries)) {
+    const qs = input.queries.filter((q): q is string => typeof q === "string");
+    if (qs.length > 0) return qs.join(" · ");
+  }
   if ("url" in input) return String(input.url);
   // Last resort (unhandled MCP tools, etc.): a compact single-line object, not a
   // multi-line pretty-print — the collapsed row is a one-line flex cell, so
@@ -224,7 +231,11 @@ export function fleetToolSummary(
   input: Record<string, unknown>,
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string | null {
-  const is = (tail: string) => name === `fleet__${tail}` || name.endsWith(`fleet__fleet__${tail}`);
+  // `mcp__fleet__fleet__ask` is the current wire name, but an older Fleet build
+  // registered the tools one namespace shallower (`mcp__fleet__ask`); match both
+  // so those rows don't fall through to the raw-JSON dump. A foreign server's
+  // same-named tool (`mcp__dayday__ask`) still doesn't match.
+  const is = (tail: string) => name === `fleet__${tail}` || name.endsWith(`__fleet__${tail}`);
   // { title } — the one field, and it reads as the summary itself.
   if (is("set_session_title")) {
     const title = snippet(input.title);
@@ -356,6 +367,7 @@ export function claudeToolSummary(
   name: string,
   input: Record<string, unknown>,
   t: (key: string, opts?: Record<string, unknown>) => string,
+  meta?: unknown,
 ): string | null {
   switch (name) {
     // { skill: "game-pilot", args?: "…" }
@@ -381,11 +393,50 @@ export function claudeToolSummary(
       return t("detail.tool_bash_output");
     // { task_id, block, timeout? } — reads or waits for any Claude background
     // task. A blocking call can sit for minutes, so keep its timeout visible.
+    // Which task is being read lives in the result, as the description the task
+    // was launched with ("Run core test suite"); the input's `task_id` alone
+    // told the reader nothing.
     case "TaskOutput": {
       const secs = input.block === true ? timeoutMsToSecs(input.timeout) : null;
+      const name = asTaskOutputResult(meta)?.description?.trim();
+      if (name) {
+        return secs
+          ? t("detail.tool_task_output_named_timed", { name, secs })
+          : t("detail.tool_task_output_named", { name });
+      }
       return secs
         ? t("detail.tool_task_output_timed", { secs })
         : t("detail.tool_task_output");
+    }
+    // { task_id } — kills a background task. The input names only the opaque
+    // handle ("bsx9m7b94"), so the row used to say nothing about what was
+    // stopped. The answer is in the result: a shell task carries the `command`
+    // it was running. Multi-line commands collapse to their first line, the
+    // same shape the Bash row shows.
+    case "TaskStop": {
+      const stopped = asTaskStopResult(meta);
+      const cmd = stopped?.command?.trim().split("\n")[0].trim();
+      return cmd ? t("detail.tool_task_stop_cmd", { cmd }) : t("detail.tool_task_stop");
+    }
+    // { to, summary, message } — a message to another agent. `summary` is the
+    // one-line gist the sender writes for exactly this purpose; the full
+    // message stays in the expanded body.
+    case "SendMessage": {
+      const gist = snippet(input.summary) || snippet(input.message);
+      const to = typeof input.to === "string" ? input.to.trim() : "";
+      if (gist) return t("detail.tool_send_message_gist", { gist });
+      return to ? t("detail.tool_send_message_to", { to }) : t("detail.tool_send_message");
+    }
+    // {} — takes no parameters, so it would render the bare "{}" fallback.
+    case "ListAgents":
+      return t("detail.tool_list_agents");
+    // { command } | { target, wait_for } — the shell form (14 of 15 calls
+    // measured) reads best as its command, which formatInput already does, so
+    // only the condition form is relabelled here.
+    case "Monitor": {
+      if ("command" in input) return null;
+      const until = snippet(input.wait_for);
+      return until ? t("detail.tool_monitor_until", { until }) : t("detail.tool_monitor");
     }
     // { shell_id | bash_id } — kills a background shell (KillBash is the older name).
     case "KillShell":
@@ -410,6 +461,94 @@ export function claudeToolSummary(
       }
       return t("detail.tool_search_query", { query });
     }
+    default:
+      return null;
+  }
+}
+
+/** First line of a multi-line body, clipped — the collapsed row is one line,
+ *  so a whole report or chat message pasted into it is worse than nothing. */
+function firstLine(text: string, max = 60): string {
+  const line = text.trim().split("\n", 1)[0].trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/**
+ * Collapsed one-liner for the dsh tools that have no Claude counterpart and so
+ * are *not* renamed in `dsh_messages.rs` — background jobs, persistent
+ * terminals, subagent control, goals, schedules, session search.
+ *
+ * They need this more than the renamed ones did: none of their inputs carries a
+ * key `formatInput` recognises, so every one of them dumped its whole args
+ * object into the row. `send_message` and `report` were the worst — the row was
+ * the entire message body, unwrapped.
+ *
+ * Borrowing codex's cards was considered and rejected: codex's `write_stdin`
+ * keys on `chars` where dsh's `terminal_send` keys on `sessionId`/`text`, and
+ * codex's `exec` is a JS harness where dsh's `run_code` is not. A wrong card is
+ * worse than a generic one, so these get their own labels.
+ */
+export function dshToolSummary(
+  name: string,
+  input: Record<string, unknown>,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string | null {
+  const str = (key: string) => (typeof input[key] === "string" ? (input[key] as string).trim() : "");
+  switch (name) {
+    // Background jobs: a `bash(run_in_background)` / `terminal_send` handle.
+    case "job_output":
+      return t("detail.tool_dsh_job_output");
+    case "job_kill":
+      return t("detail.tool_dsh_job_kill");
+    case "job_list":
+      return t("detail.tool_dsh_job_list");
+    // Persistent terminals. `terminal_send`'s text is the whole point of the
+    // call, so it leads — same reasoning as codex's `write_stdin`.
+    case "terminal_open":
+      return t("detail.tool_dsh_terminal_open");
+    case "terminal_list":
+      return t("detail.tool_dsh_terminal_list");
+    case "terminal_read":
+      return t("detail.tool_dsh_terminal_read");
+    case "terminal_send": {
+      const text = str("text");
+      return text ? t("detail.tool_stdin", { text: firstLine(text) }) : t("detail.tool_dsh_terminal_send");
+    }
+    case "terminal_close":
+      return t("detail.tool_dsh_terminal_close");
+    case "terminal_signal":
+      return t("detail.tool_dsh_terminal_signal");
+    // Subagent control. The message body belongs in the expanded card, not the
+    // row — but its first line is what tells the reader which errand this was.
+    case "send_message": {
+      const msg = str("message");
+      return msg ? t("detail.tool_dsh_send_message_text", { text: firstLine(msg) }) : t("detail.tool_dsh_send_message");
+    }
+    case "list_agents":
+      return t("detail.tool_dsh_list_agents");
+    case "interrupt_agent":
+      return t("detail.tool_dsh_interrupt_agent");
+    // A subagent's result handed back to its parent.
+    case "report": {
+      const out = str("output");
+      return out ? t("detail.tool_dsh_report_text", { text: firstLine(out) }) : t("detail.tool_dsh_report");
+    }
+    // Goals and schedules: dsh-only surfaces with no Claude analogue.
+    case "create_goal":
+    case "update_goal":
+    case "get_goal":
+      return t(name === "get_goal" ? "detail.tool_dsh_get_goal" : "detail.tool_dsh_set_goal");
+    case "schedule_create":
+    case "schedule_delete":
+    case "schedule_list":
+      return t("detail.tool_dsh_schedule");
+    // Searching the session's own transcript.
+    case "session_search":
+    case "session_trace":
+    case "session_event_read":
+    case "session_event_search":
+    case "session_event_trace":
+      return t("detail.tool_dsh_session_query");
     default:
       return null;
   }
@@ -839,7 +978,12 @@ function GlobInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLink
 /** Expanded body for `WebSearch`: the query as the headline over any allowed /
  *  blocked domain chips (`+example.com` / `−spam.com`). */
 function WebSearchInput({ block }: { block: ToolUseBlockType }) {
-  const query = typeof block.input.query === "string" ? block.input.query : "";
+  // `queries` is dsh's plural form of the same field (see `formatInput`).
+  const queries = Array.isArray(block.input.queries)
+    ? block.input.queries.filter((q): q is string => typeof q === "string")
+    : [];
+  const query =
+    typeof block.input.query === "string" ? block.input.query : queries.join(" · ");
   if (!query) return <ParamsBody block={block} />;
   const allow = Array.isArray(block.input.allowed_domains) ? block.input.allowed_domains : [];
   const deny = Array.isArray(block.input.blocked_domains) ? block.input.blocked_domains : [];
@@ -1139,7 +1283,8 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   const namedSummary =
     fleetToolSummary(block.name, block.input, t) ??
     codexToolSummary(block.name, block.input, t) ??
-    claudeToolSummary(block.name, block.input, t);
+    claudeToolSummary(block.name, block.input, t, meta) ??
+    dshToolSummary(block.name, block.input, t);
   const summary = namedSummary ?? formatInput(block.input, block.name);
   const summaryIsProse = namedSummary !== null;
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);

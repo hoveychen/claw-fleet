@@ -2,8 +2,27 @@
 //!
 //! The plugin source lives in this repo at `dsh-plugin/` and is compiled into
 //! the binary with [`include_str!`], so a Fleet build carries the exact plugin
-//! it expects — no npm registry, no network, no version skew between the two
-//! halves of the contract (`dsh-plugin/index.js` ⇄ `fleet dsh-context`).
+//! it expects — no npm registry, no network.
+//!
+//! # The two halves can still skew
+//!
+//! This comment used to claim `include_str!` ruled out version skew between
+//! `dsh-plugin/index.js` and `fleet dsh-context`. It does not, and the claim
+//! cost real debugging time. [`materialize`] writes the `index.js` carried by
+//! **the binary currently running**, while the `fleetBin` in the registered
+//! entry comes from [`crate::fleet_cli::resolve_fleet_binary`] — which searches
+//! `~/.fleet/bin`, `/usr/local/bin` and `PATH` and routinely lands on a
+//! *different* build. `include_str!` pins the plugin to the writer, not to the
+//! binary the plugin will go on to execute.
+//!
+//! That is not hypothetical: a `fleetBin` predating `--ctx-used` rejected the
+//! whole invocation and took the plan and guidance sections down with the
+//! reminder, which is why `index.js` retries without the pressure flags. So:
+//!
+//! - never add a *required* new flag to the `fleet dsh-context` call — an older
+//!   `fleetBin` rejects the whole invocation, not just the flag;
+//! - the block records `fleetVersion` (the build that materialized `index.js`)
+//!   next to `fleetBin`, so a skewed pair can be read straight off the file.
 //!
 //! Installing means two things:
 //!
@@ -116,6 +135,19 @@ fn render_block(
             yaml_scalar(&bin.to_string_lossy())
         ));
     }
+    // Breadcrumb, not a wire flag: the version of the build whose `include_str!`
+    // produced the `index.js` at `name` above. `fleetBin` is resolved
+    // separately and need not be the same build, so when the plugin cannot get
+    // an answer out of `fleetBin` this is the one line that tells a human (or
+    // an agent reading this file) which two halves are actually in play.
+    //
+    // Deliberately *not* passed to `fleet dsh-context` as an argument: a new
+    // flag is exactly what an older `fleet` rejects, which is the failure this
+    // whole area exists to stop.
+    out.push_str(&format!(
+        "        fleetVersion: {}\n",
+        yaml_scalar(env!("CARGO_PKG_VERSION"))
+    ));
     out.push_str(&format!("        userTitle: {}\n", yaml_scalar(user_title)));
     out.push_str(&format!("        locale: {}\n", yaml_scalar(locale)));
     out.push_str(SENTINEL_END);
@@ -169,7 +201,20 @@ pub fn reconcile_dsh_patch(enabled: bool, user_title: &str, locale: &str) -> Res
 
     let next = if enabled {
         let entry = materialize()?;
-        let fleet_bin = crate::fleet_cli::resolve_fleet_binary();
+        // Same gate the MCP injector and the hook appliers use: this file
+        // outlives the process, so a `fleetBin` inside a worktree build becomes
+        // a dangling path the moment that plan merges — and the plugin's only
+        // symptom is that Fleet's context silently stops being injected.
+        let fleet_bin = crate::fleet_cli::resolve_fleet_binary().filter(|p| {
+            let publishable = crate::fleet_cli::may_publish_self(&p.to_string_lossy());
+            if !publishable {
+                crate::log_debug(&crate::fleet_cli::ephemeral_publish_refused(
+                    &p.to_string_lossy(),
+                    "cordis.patch.yml",
+                ));
+            }
+            publishable
+        });
         let block = render_block(&entry, fleet_bin.as_deref(), user_title, locale);
         if has_user_entries(&user) {
             format!("{}\n{block}", user.trim_end())
@@ -230,6 +275,10 @@ mod tests {
         assert!(block.contains(&format!("- id: {ENTRY_ID}")));
         assert!(block.contains("name: \"/home/u/.fleet/dsh-plugin/index.js\""));
         assert!(block.contains("fleetBin: \"/usr/local/bin/fleet\""));
+        // `fleetBin` and the materialized `index.js` come from two different
+        // resolutions and need not be the same build, so the block records
+        // which one wrote the plugin. Without it a skewed pair is unreadable.
+        assert!(block.contains(&format!("fleetVersion: \"{}\"", env!("CARGO_PKG_VERSION"))));
     }
 
     /// No `fleet` on disk drops only that key — the plugin then falls back to

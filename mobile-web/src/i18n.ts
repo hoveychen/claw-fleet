@@ -375,7 +375,6 @@ const DICT: Record<string, string> = {
   "加载中…": "Loading…",
   "渲染中…（正在拉取页面资源）": "Rendering… (fetching page assets)",
   最新: "Latest",
-  未归类: "Ungrouped",
   "知识库加载失败：{0}": "Failed to load wiki: {0}",
   "加载失败：{0}": "Load failed: {0}",
   "还没有归档的文档": "No archived docs yet",
@@ -498,6 +497,31 @@ const DICT: Record<string, string> = {
   "编辑 {0} 个文件": "Patching {0} files",
   "加载工具 {0}": "Loading tools {0}",
   "搜索工具：{0}": "Searching tools: {0}",
+  停止后台任务: "Stopping background task",
+  "停止后台任务：{0}": "Stopping background task: {0}",
+  "读取后台任务输出：{0}": "Reading background task: {0}",
+  // dsh's own tools (no Claude counterpart) — see views/toolSummary.ts. The
+  // bare 停止后台任务 above is shared with Claude's TaskStop row; do not re-add
+  // it here, a duplicate key silently overrides the first.
+  "读取后台任务输出": "Reading background job output",
+  "列出后台任务": "Listing background jobs",
+  "打开常驻终端": "Opening a persistent terminal",
+  "列出常驻终端": "Listing persistent terminals",
+  "读取终端输出": "Reading terminal output",
+  "输入：{0}": "Sending input: {0}",
+  "向终端发送输入": "Sending input to a terminal",
+  "关闭常驻终端": "Closing a persistent terminal",
+  "向终端发送信号": "Signalling a terminal",
+  "发给子代理：{0}": "To subagent: {0}",
+  "给子代理发消息": "Messaging a subagent",
+  "列出子代理": "Listing subagents",
+  "打断子代理": "Interrupting a subagent",
+  "向上级汇报：{0}": "Reporting: {0}",
+  "向上级汇报": "Reporting to the parent agent",
+  "更新目标": "Updating the goal",
+  "读取目标": "Reading the goal",
+  "管理定时任务": "Managing scheduled work",
+  "检索会话记录": "Searching the session record",
   // Fleet MCP tool labels for the ToolSearch load line. 决策卡/计划/交接/知识库
   // already exist in this dict (reused here — do NOT re-add, duplicate keys
   // silently override existing translations); only the new ones are declared.
@@ -586,6 +610,8 @@ const DICT: Record<string, string> = {
   "没有待处理的决策": "No pending decisions",
   "所有决策卡都已作答，收工。有新决策时会自动出现在这里。":
     "Every decision card is answered — you're all caught up. New ones will appear here automatically.",
+  "在线设备的决策卡都已作答。另有 {0} 台设备离线，它们的卡暂时同步不过来。":
+    "Every card from the online devices is answered. {0} device(s) are offline — their cards can't sync over yet.",
   "暂时收不到新决策，等桌面端重新上线就会同步过来。":
     "No new decisions for now — they'll sync over once the desktop reconnects.",
   "AI 风险分析": "AI risk analysis",

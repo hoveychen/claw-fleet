@@ -85,3 +85,63 @@ pub(crate) fn cmd_prd_context() {
     });
     println!("{out}");
 }
+
+// ── Context-pressure CLI (hook entrypoint for PostToolUse) ─────────────────
+
+/// Announce context-window occupancy at 25% / 50% / 75%, and name `fleet
+/// handoff` at the last one.
+///
+/// **Why PostToolUse and not UserPromptSubmit.** The sessions that most need
+/// this are the ones that never come back for another prompt: a headless `-p`
+/// turn can run for hours, fill the window, get silently auto-compacted and
+/// keep going, and a prompt-time hook fires exactly zero times in all of that.
+/// A tool call is the only event that recurs inside such a turn.
+///
+/// Silent unless a tier is newly crossed ([`claw_fleet_core::context_pressure::claim_tier`]),
+/// so the per-tool-call cost is a tail read and nothing in context.
+pub(crate) fn cmd_ctx_reminder() {
+    use std::io::Read;
+    use std::path::PathBuf;
+
+    let mut input = String::new();
+    let _ = std::io::stdin().read_to_string(&mut input);
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&input) else {
+        return;
+    };
+
+    let Some(transcript) = parsed
+        .get("transcript_path")
+        .and_then(|t| t.as_str())
+        .map(PathBuf::from)
+    else {
+        return;
+    };
+    let Some(session_id) = parsed.get("session_id").and_then(|s| s.as_str()) else {
+        return;
+    };
+    // A subagent's tool calls carry the parent's session id, but its context is
+    // a different window; announcing the parent's tier inside it would be both
+    // wrong and unactionable (a subagent cannot hand off).
+    if parsed
+        .get("isSidechain")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let Some(pressure) = claw_fleet_core::context_pressure::read_pressure(&transcript) else {
+        return;
+    };
+    let Some(tier) = claw_fleet_core::context_pressure::claim_tier(session_id, &pressure) else {
+        return;
+    };
+
+    let out = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": claw_fleet_core::context_pressure::reminder_text(&pressure, tier),
+        }
+    });
+    println!("{out}");
+}

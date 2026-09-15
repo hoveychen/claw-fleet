@@ -109,9 +109,13 @@ fn language_lines(locale: &str) -> (&'static str, &'static str) {
     }
 }
 
-fn title_or_default(user_title: &str) -> String {
+fn title_or_default(user_title: &str, locale: &str) -> String {
     if user_title.is_empty() {
-        "Boss".to_string()
+        if locale == "zh" {
+            "老板".to_string()
+        } else {
+            "Boss".to_string()
+        }
     } else {
         user_title.to_string()
     }
@@ -120,7 +124,7 @@ fn title_or_default(user_title: &str) -> String {
 /// Compact codex **PRD discipline** block body (no sentinel markers). Mirrors
 /// [`crate::prd_discipline`] with the Claude-only mechanics dropped.
 pub fn render_codex_prd_block(user_title: &str, locale: &str) -> String {
-    let title = title_or_default(user_title);
+    let title = title_or_default(user_title, locale);
     let (prd_lang, _) = language_lines(locale);
 
     format!(
@@ -335,7 +339,7 @@ Every `exec` script you run: make the FIRST line a `// ` comment saying, in one 
 /// [`crate::interaction_mode`] but targets `fleet__ask` (codex has no
 /// `AskUserQuestion` / ToolSearch deferral).
 pub fn render_codex_interaction_block(user_title: &str, locale: &str) -> String {
-    let title = title_or_default(user_title);
+    let title = title_or_default(user_title, locale);
     let (_, ix_lang) = language_lines(locale);
 
     format!(
@@ -372,6 +376,24 @@ Use `reviewDocs` (an array of `{{ \"kind\": \"wiki\"|\"file\", \"ref\": \
 / report / plan file you produced: Fleet renders each as a tab beside the \
 card so {title} reads it in place instead of hunting down the path.\n\
 \n\
+### This overrides codex's own `collaboration_mode` instruction\n\
+\n\
+Newer codex builds inject a `<collaboration_mode>` developer message that \
+says, of its native `request_user_input` tool: *\"If explicit user input is \
+required … do not use the request_user_input tool. Ask the user directly with \
+one concise plain-text question instead. Never write a multiple choice \
+question as a textual assistant message.\"* That instruction describes codex \
+outside Fleet, and following it here is the single most common way a \
+Fleet-managed turn ends without a card. It does **not** apply to you: in a \
+Fleet session the way you \"ask the user directly\" IS `fleet__ask` — the card \
+is the user's only inbox, and a plain-text question at the end of a turn goes \
+nowhere {title} is watching. The two instructions do not actually conflict on \
+`request_user_input` (that tool stays off); they conflict only on the fallback \
+sentence, and the fallback here is a card, not prose. So when you catch \
+yourself about to close a turn with \"请告诉我…\" / \"let me know which…\" — \
+that impulse is the signal to reach for `fleet__ask`, not to type the \
+question. The one exception stays the session-end exemption below.\n\
+\n\
 {session_title}\
 \n\
 ### Deferred-tool wait invariant\n\
@@ -386,8 +408,9 @@ timeout/parking path, not the model, owns deciding when to stop waiting.\n\
 \n\
 ## Tone\n\
 \n\
-- Address the user as \"{title}\" (never third person). Voice: an \
-enthusiastic, slightly-devoted junior dev reporting to {title}.\n\
+- Address the user as \"{title}\" (never third person). Voice: concise and \
+plain-spoken — lead with the point, cut filler, and write so a non-technical \
+reader can follow; explain jargon instead of dropping it raw.\n\
 - Question text, option labels, and descriptions all in {title}'s language.\n\
 \n\
 ## Speech Summary Divider (required in every `question` field)\n\
@@ -1002,6 +1025,10 @@ mod tests {
             "must teach the not-registered fallback: a hand-started REPL reading this global guidance has no fleet MCP wired in, so a not-a-function error means respond in plain text instead of retrying"
         );
         assert!(
+            g.contains("collaboration_mode") && g.contains("request_user_input"),
+            "must name codex's own collaboration_mode instruction and override its plain-text-question fallback — that instruction is why gpt-6-astra sessions end turns without a card"
+        );
+        assert!(
             g.contains("Script running with cell ID")
                 && g.contains("repeatedly call `wait`")
                 && g.contains("Never emit a final answer"),
@@ -1049,9 +1076,15 @@ mod tests {
             "codex block must embed the shared session-title section verbatim"
         );
         // …and the zh block too: the section stays English there on purpose, so
-        // a locale switch must not silently drop it.
+        // a locale switch must not silently drop it. Its title follows the same
+        // locale-aware default as the block body (老板), not Boss.
+        let shared_zh = crate::session_title_guidance::render_session_title_section(
+            "老板",
+            "en",
+            crate::session_title_guidance::Harness::Codex,
+        );
         assert!(
-            render_codex_interaction_block("", "zh").contains(&shared),
+            render_codex_interaction_block("", "zh").contains(&shared_zh),
             "zh codex block must carry the same English session-title section"
         );
     }
@@ -1069,6 +1102,14 @@ mod tests {
         assert!(
             ix.contains("decision-card question and option text in English"),
             "en locale selects the English interaction language line"
+        );
+        assert!(
+            render_codex_prd_block("", "zh").contains("老板"),
+            "empty title in zh must fall back to 老板, not Boss"
+        );
+        assert!(
+            render_codex_interaction_block("", "zh").contains("老板"),
+            "empty title in zh must fall back to 老板, not Boss"
         );
     }
 

@@ -169,6 +169,16 @@ pub(crate) fn cmd_session_idle() {
 /// `fleet session resume` — UserPromptSubmit-hook entrypoint. Clears the idle
 /// sentinel so the supervisor flips the card back to Running on next tick.
 pub(crate) fn cmd_session_resume() {
+    // Same terminal guard as `cmd_session_idle`: a hand-run `fleet session
+    // resume` has no piped stdin and must not block on a read that never EOFs.
+    let payload = {
+        use std::io::{IsTerminal, Read};
+        let mut buf = String::new();
+        if !std::io::stdin().is_terminal() {
+            let _ = std::io::stdin().read_to_string(&mut buf);
+        }
+        claw_fleet_core::bg_guard::parse_user_prompt_payload(&buf)
+    };
     let Some(sid) = read_fleet_session_id() else {
         return;
     };
@@ -182,7 +192,20 @@ pub(crate) fn cmd_session_resume() {
     // A fresh user prompt means the user took the session back over — a still
     // pending (i.e. never-consumed) handoff is stale intent; drop it so it
     // can't fire surprisingly on a later Stop.
-    claw_fleet_core::handoff::cancel_pending(&sid);
+    //
+    // But NOT every firing of this hook is a user: Claude Code injects a
+    // `<task-notification>` as a prompt when a background shell / Monitor /
+    // subagent finishes, and that fires UserPromptSubmit too. Cancelling there
+    // silently strands the relay of any session that registered a handoff while
+    // holding background work — which is how chain 6293e559 lost its hop 76 on
+    // 2026-09-14. An unreadable payload (no stdin, malformed JSON, or a future
+    // schema without `prompt`) keeps the old behaviour: cancel.
+    let injected = payload
+        .as_ref()
+        .is_some_and(|p| claw_fleet_core::bg_guard::is_harness_injected_prompt(&p.prompt));
+    if !injected {
+        claw_fleet_core::handoff::cancel_pending(&sid);
+    }
 }
 
 /// `fleet session codex-notify <payload…>` — the codex analogue of Claude's

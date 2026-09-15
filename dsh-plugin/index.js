@@ -44,6 +44,11 @@ const DEFAULT_TIMEOUT_MS = 5000
  * the step they are noticed. Everything else (the static guidance, the session
  * id) still enters as soon as it differs — those only change when Fleet itself
  * is updated, so there is nothing to throttle.
+ *
+ * `fleet-ctx`, the context-pressure reminder, is deliberately absent: the CLI
+ * emits it at most once per tier per session, so it cannot repeat the way the
+ * plan block did, and a session that crosses a tier mid-turn is precisely the
+ * one that should not have to wait for its next prompt to be told.
  */
 export const TURN_SCOPED_SECTIONS = new Set(['fleet-prd'])
 
@@ -90,23 +95,84 @@ function deepFreeze(value) {
  * left to the CLI's defaults, which would render English guidance addressing the
  * user as "Boss".
  *
- * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string}} config
+ * `pressure` is this session's context occupancy (see {@link readContextPressure}).
+ * It is measured here and passed in because only this process holds the session
+ * log; the CLI owns the tier policy and the wording, as it does for Claude and
+ * Codex. Omitted when unreadable, which simply yields no reminder.
+ *
+ * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string, fleetVersion?: string}} config
  * @param {string} cwd - the session's working directory
  * @param {string} sessionId
+ * @param {{used: number, window: number, model: string}} [pressure]
  * @returns {Promise<{sections: Array<{name: string, text: string}>, sandboxMode: string | undefined}>}
  */
-export function fetchContext(config, cwd, sessionId) {
+export async function fetchContext(config, cwd, sessionId, pressure) {
+  const result = await runFleet(config, cwd, sessionId, pressure)
+  // Version skew: this plugin is installed from `~/.fleet/dsh-plugin`, but
+  // `fleetBin` points at whichever Fleet build is on the machine, and the two
+  // update independently. A build predating `--ctx-used` rejects the whole
+  // invocation, which would take the plan and guidance sections down with the
+  // reminder — the sections that were working before this feature existed.
+  // Retrying without the pressure flags costs one process on such a machine
+  // and keeps the older contract intact until Fleet catches up.
+  if (result === undefined) {
+    const retried = pressure ? await runFleet(config, cwd, sessionId, undefined) : undefined
+    if (retried === undefined) {
+      // Both attempts failed, so this machine's `fleetBin` cannot answer at all
+      // — most likely a build too old to know `dsh-context`. Everything below
+      // degrades to injecting nothing, which is the right behaviour and also a
+      // perfectly silent one: before this line, a dsh session simply ran
+      // without any Fleet context and nothing said so. `fleetVersion` is the
+      // build that materialized this file; printing both names the mismatched
+      // pair outright.
+      warnOnce(
+        `[fleet] no context injected: '${config.fleetBin}' could not answer ` +
+          `'fleet dsh-context' (this plugin was installed by Fleet ` +
+          `${config.fleetVersion ?? 'unknown'}). The two halves are out of sync.`,
+      )
+    }
+    return retried ?? NOTHING
+  }
+  return result
+}
+
+/** Warnings already printed, so a long session says each thing exactly once. */
+const warned = new Set()
+
+/** Print `message` to stderr the first time it is seen in this process. */
+function warnOnce(message) {
+  if (warned.has(message)) return
+  warned.add(message)
+  console.error(message)
+}
+
+/** What a CLI that could not answer yields: inject nothing, fail nothing. */
+const NOTHING = { sections: [], sandboxMode: undefined }
+
+/**
+ * One `fleet dsh-context` invocation.
+ *
+ * @returns {Promise<{sections: Array<{name: string, text: string}>, sandboxMode: string | undefined} | undefined>}
+ *   `undefined` when the process itself failed — the signal {@link fetchContext}
+ *   retries on. A process that ran but said nothing useful resolves to empty
+ *   sections instead, because re-running it would say the same thing.
+ */
+function runFleet(config, cwd, sessionId, pressure) {
   const args = ['dsh-context', '--cwd', cwd, '--session', sessionId]
   if (config.userTitle) args.push('--title', config.userTitle)
   if (config.locale) args.push('--locale', config.locale)
-  const nothing = { sections: [], sandboxMode: undefined }
+  if (pressure) {
+    args.push('--ctx-used', String(pressure.used), '--ctx-window', String(pressure.window))
+    if (pressure.model) args.push('--ctx-model', pressure.model)
+  }
+  const nothing = NOTHING
   return new Promise((resolve) => {
     execFile(
       config.fleetBin,
       args,
       { timeout: config.timeoutMs, maxBuffer: 4 * 1024 * 1024 },
       (error, stdout) => {
-        if (error) return resolve(nothing)
+        if (error) return resolve(undefined)
         let parsed
         try {
           parsed = JSON.parse(stdout)
@@ -140,13 +206,14 @@ export function fetchContext(config, cwd, sessionId) {
 /**
  * The sections alone, for callers that do not care about the sandbox decision.
  *
- * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string}} config
+ * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string, fleetVersion?: string}} config
  * @param {string} cwd - the session's working directory
  * @param {string} sessionId
+ * @param {{used: number, window: number, model: string}} [pressure]
  * @returns {Promise<Array<{name: string, text: string}>>}
  */
-export async function fetchSections(config, cwd, sessionId) {
-  return (await fetchContext(config, cwd, sessionId)).sections
+export async function fetchSections(config, cwd, sessionId, pressure) {
+  return (await fetchContext(config, cwd, sessionId, pressure)).sections
 }
 
 /**
@@ -200,6 +267,60 @@ export function latestInjectedText(agent, sectionName) {
     const section = source.sections?.find((s) => s.name === sectionName)
     if (section !== undefined) return section.text
   }
+}
+
+/**
+ * This session's live context occupancy, read from its own event log.
+ *
+ * dsh records the usage of every model call on the `assistant/message` it
+ * produced: `inputTokens` is the uncached part of that request's prompt and
+ * `cacheReadTokens` the cached part, so their sum is the whole prompt — i.e.
+ * how full the window was on the last step. The window itself is on
+ * `request/context`, which dsh writes once per request with the resolved
+ * provider/model.
+ *
+ * Reading the log is what makes this free. The same numbers are available over
+ * RPC (`session/list` → `projections.values.contextPressure`), but that is one
+ * round trip against a server holding every session on the machine, paid on
+ * every step of every session. The log is already in memory here.
+ *
+ * There is no compaction special case, unlike the Claude and Codex readers:
+ * those read a *recorded* occupancy that a compaction invalidates, while this
+ * reads the request dsh actually just made — the first `assistant/message`
+ * after a compaction reports the smaller prompt on its own.
+ *
+ * Defensive like {@link sessionEvents}: this runs inside `agent/pre-step`,
+ * where a `TypeError` ends the turn rather than degrading the reading.
+ *
+ * @param {any} agent
+ * @returns {{used: number, window: number, model: string} | undefined}
+ */
+export function readContextPressure(agent) {
+  const events = sessionEvents(agent?.session)
+  let used
+  let window
+  let model = ''
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]
+    const data = event?.data
+    if (used === undefined && event?.type === 'assistant/message') {
+      const usage = data?.usage
+      const input = Number(usage?.inputTokens)
+      const cached = Number(usage?.cacheReadTokens)
+      const total = (Number.isFinite(input) ? input : 0) + (Number.isFinite(cached) ? cached : 0)
+      if (total > 0) used = total
+    }
+    if (window === undefined && event?.type === 'request/context') {
+      const w = Number(data?.contextWindow)
+      if (Number.isFinite(w) && w > 0) {
+        window = w
+        if (typeof data?.model === 'string') model = data.model
+      }
+    }
+    if (used !== undefined && window !== undefined) break
+  }
+  if (used === undefined || window === undefined) return undefined
+  return { used, window, model }
 }
 
 /**
@@ -265,11 +386,15 @@ function sectionMessage(section) {
  * Register the pre-step listener for the lifetime of `ctx`.
  *
  * @param {any} ctx - plugin context; the listener is disposed with it
- * @param {{fleetBin?: string, timeoutMs?: number}} [config]
+ * @param {{fleetBin?: string, timeoutMs?: number, fleetVersion?: string}} [config]
  */
 export function apply(ctx, config) {
   const resolved = {
     fleetBin: config?.fleetBin ?? 'fleet',
+    // The Fleet build that materialized this file. Diagnostic only — it is
+    // never sent to `fleetBin`, because a flag an older build rejects takes the
+    // whole invocation down with it.
+    fleetVersion: config?.fleetVersion,
     timeoutMs: config?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     userTitle: config?.userTitle,
     locale: config?.locale,
@@ -284,7 +409,12 @@ export function apply(ctx, config) {
       const cwd = agent.session.header.cwd
       if (typeof cwd !== 'string' || cwd.length === 0) return decision
 
-      const { sections, sandboxMode } = await fetchContext(resolved, cwd, agent.session.id)
+      const { sections, sandboxMode } = await fetchContext(
+        resolved,
+        cwd,
+        agent.session.id,
+        readContextPressure(agent),
+      )
 
       // Before the early return below: on a steady-state step every section is
       // unchanged and we return without injecting, so a switch gated behind that

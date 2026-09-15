@@ -246,6 +246,49 @@ pub fn block_reason(payload: &StopPayload, is_headless: bool) -> Option<String> 
     Some(out.trim_end().to_string())
 }
 
+// ── UserPromptSubmit: real prompt vs. harness-injected notification ──────────
+//
+// The same background tasks this guard exists for come back through the *other*
+// end of the turn as well: when a background shell, a Monitor or a subagent
+// finishes, Claude Code queues a `<task-notification>` envelope and injects it
+// as a prompt — which fires the `UserPromptSubmit` hook exactly as a typed
+// prompt does. `fleet session resume` reads that firing as "the boss took the
+// session back over" and cancels a registered handoff, so a session that
+// registered a relay while holding a background task silently loses its
+// successor. Observed 2026-09-14 on session 55254694 (chain 6293e559, hop 75):
+// registered at 10:48:10, two notifications absorbed mid-turn at 11:08:31 (the
+// turn-start stamp this hook writes proves the firing), Stop at 11:08:35 with
+// `handoff_fired: false`, and hop 76 never spawned.
+
+/// The subset of the `UserPromptSubmit` hook payload we need.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UserPromptPayload {
+    #[serde(default)]
+    pub session_id: String,
+    /// The prompt text as submitted — typed by the user, or injected by the
+    /// harness (see [`is_harness_injected_prompt`]).
+    #[serde(default)]
+    pub prompt: String,
+}
+
+/// Parse the JSON the `UserPromptSubmit` hook receives on stdin. `None` for
+/// anything unparseable — a hook must never fail the session over a payload it
+/// cannot read.
+pub fn parse_user_prompt_payload(stdin_json: &str) -> Option<UserPromptPayload> {
+    serde_json::from_str(stdin_json).ok()
+}
+
+/// True when this prompt was injected by the harness rather than submitted by
+/// the user: the `<task-notification>` envelope Claude Code queues when a
+/// background shell / Monitor / subagent finishes.
+///
+/// Deliberately narrow. Anything this returns `false` for keeps the old
+/// take-over semantics (a pending handoff is dropped), so a misread here can
+/// only fail in the safe direction — an extra cancel, never a surprise relay.
+pub fn is_harness_injected_prompt(prompt: &str) -> bool {
+    prompt.trim_start().starts_with("<task-notification>")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,5 +515,53 @@ mod tests {
         let reason = block_reason(&p, true).expect("must block");
         assert!(reason.contains("watch CI"), "{reason}");
         assert!(reason.contains("re-check"), "{reason}");
+    }
+
+    /// Verbatim envelope observed on 2026-09-14 (CC 2.1.263) when a background
+    /// Bash finished mid-turn — the shape that must NOT read as a take-over.
+    const REAL_TASK_NOTIFICATION: &str = "<task-notification>\n<task-id>b8jw97lkm</task-id>\n\
+         <tool-use-id>toolu_017jDnvnNEdCBeXufrMUPn3A</tool-use-id>\n\
+         <status>completed</status>\n\
+         <summary>Background command \"起一个短后台任务以触发完成通知\" completed (exit code 0)</summary>\n\
+         </task-notification>";
+
+    #[test]
+    fn task_notification_reads_as_harness_injected() {
+        assert!(is_harness_injected_prompt(REAL_TASK_NOTIFICATION));
+        // Monitor events ride the same envelope.
+        assert!(is_harness_injected_prompt(
+            "<task-notification>\n<summary>Monitor event: \"run 2 milestones\"</summary>\n</task-notification>"
+        ));
+        // Leading whitespace must not defeat it.
+        assert!(is_harness_injected_prompt("\n  <task-notification></task-notification>"));
+    }
+
+    #[test]
+    fn a_typed_prompt_is_not_harness_injected() {
+        assert!(!is_harness_injected_prompt("继续下一个 P-task"));
+        assert!(!is_harness_injected_prompt(""));
+        // Merely *mentioning* the envelope is a real prompt — the boss asking
+        // about this very bug must still count as a take-over.
+        assert!(!is_harness_injected_prompt(
+            "为什么 <task-notification> 会取消接力？"
+        ));
+    }
+
+    #[test]
+    fn parses_the_prompt_out_of_a_user_prompt_payload() {
+        let json = serde_json::json!({
+            "session_id": "s1",
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": REAL_TASK_NOTIFICATION,
+        })
+        .to_string();
+        let p = parse_user_prompt_payload(&json).expect("parses");
+        assert_eq!(p.session_id, "s1");
+        assert!(is_harness_injected_prompt(&p.prompt));
+        // Unparseable stdin must not panic or half-parse.
+        assert!(parse_user_prompt_payload("not json").is_none());
+        // A payload without `prompt` degrades to "typed", i.e. the old behaviour.
+        let p = parse_user_prompt_payload(r#"{"session_id":"s1"}"#).expect("parses");
+        assert!(!is_harness_injected_prompt(&p.prompt));
     }
 }

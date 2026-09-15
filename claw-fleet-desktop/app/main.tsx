@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { stampHostClasses } from "./hostClass";
 import { markWebBuild } from "./hostEnv";
+import { localDateKey } from "./localDate";
 import { primePromoStorage, promoSceneFromSearch } from "./mock/promo-scene";
 
 const params = new URLSearchParams(window.location.search);
@@ -24,7 +25,7 @@ if (isMockMode && demoMode) {
 
 if (isMockMode && params.has("website")) {
   markWebBuild();
-  window.localStorage.setItem("mock-store:daily-report-last-popped", new Date().toISOString().slice(0, 10));
+  window.localStorage.setItem("mock-store:daily-report-last-popped", localDateKey());
   const seen = JSON.parse(window.localStorage.getItem("mock-store:onboarding-seen-features") || "[]");
   window.localStorage.setItem("mock-store:onboarding-seen-features", JSON.stringify([...seen, "nav_modes"]));
   window.localStorage.setItem("mock-store:wizard-completed", "1");

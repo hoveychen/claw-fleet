@@ -22,6 +22,7 @@ import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type Onboarding
 import { runControlPlaneSelfHeal, type ControlPlaneInstallState } from "./controlPlaneSelfHeal";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
+import { localDateKeyDaysAgo } from "./localDate";
 import { useRemoteWorkspacesSync } from "./hooks/useRemoteWorkspaces";
 import { useWaitingAlertSound } from "./hooks/useWaitingAlertSound";
 
@@ -135,10 +136,9 @@ function App() {
   // we ask directly whether yesterday's report is finished; `maybePopupReport`
   // is idempotent per date, so this never double-fires with the event.
   useEffect(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
+    const d = localDateKeyDaysAgo(1);
     const t = window.setTimeout(() => {
-      void useReportStore.getState().maybePopupReport(d.toISOString().slice(0, 10));
+      void useReportStore.getState().maybePopupReport(d);
     }, 1500);
     return () => window.clearTimeout(t);
   }, []);

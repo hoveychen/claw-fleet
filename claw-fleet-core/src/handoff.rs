@@ -657,6 +657,32 @@ pub fn compose_successor_prompt(p: &PendingHandoff, prior: Option<&HandoffChain>
     out
 }
 
+/// The paragraph appended to the successor's prompt for each watch that moved
+/// with the baton, so it doesn't re-arm a duplicate of a wait it already owns.
+///
+/// Empty when nothing moved — the common case, and the prompt must not grow a
+/// dangling header for zero watches.
+fn carried_watch_notice(carried: &[crate::watch::WatchRecord]) -> String {
+    if carried.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "\n\n上一棒挂的 watch 已随接力棒转到**你**名下（条件满足时叫醒的是你，不是它）：\n",
+    );
+    for r in carried {
+        out.push_str(&format!(
+            "- `{}` —— 等的是：{}\n",
+            r.id,
+            r.note.as_deref().unwrap_or(&r.until_cmd)
+        ));
+    }
+    out.push_str(
+        "别重挂一个条件相同的 watch（会变成两个 watch 叫醒同一个你）；\
+         确定不再需要就 `fleet__watch` 传 action=\"stop\" 停掉。\n",
+    );
+    out
+}
+
 /// Stamp the successor's plan attribution in the `task_progress` side-channel.
 ///
 /// Fleet spawns the successor, so it alone knows both the new session id and the
@@ -700,6 +726,7 @@ pub fn consume_and_spawn(session_id: &str) -> Result<Option<String>, String> {
         &pdir,
         &cdir,
         progress.as_deref(),
+        crate::watch::watches_dir().as_deref(),
         session_id,
         now_ms(),
         spawn_successor_by_source,
@@ -746,6 +773,7 @@ fn consume_and_spawn_in<S>(
     pending_dir: &Path,
     chain_dir: &Path,
     progress_dir: Option<&Path>,
+    watches_dir: Option<&Path>,
     session_id: &str,
     now: u64,
     spawn: S,
@@ -782,7 +810,14 @@ where
             return Ok(None);
         }
     }
-    let prompt = compose_successor_prompt(&pending, prior.as_ref());
+    // Watches the predecessor armed move to the successor below, once the spawn
+    // has actually produced an id. Read them here, before the spawn, so the
+    // successor's opening prompt can name what it inherited.
+    let carried: Vec<crate::watch::WatchRecord> = watches_dir
+        .map(|d| crate::watch::for_session_in(d, session_id))
+        .unwrap_or_default();
+    let mut prompt = compose_successor_prompt(&pending, prior.as_ref());
+    prompt.push_str(&carried_watch_notice(&carried));
     // Link before spawn when the id is ours to assign. The successor's first
     // act is its SessionStart hook, and Fleet's notes-hint hook answers "whose
     // notes may this session read?" by finding the session on a chain — so the
@@ -826,6 +861,31 @@ where
     };
     if let Some(dir) = progress_dir {
         attribute_successor_in(dir, &pending, &to_sid);
+    }
+    // The baton carries the waits with it: whatever the predecessor was
+    // watching for now resumes the successor instead. Without this the retired
+    // session gets resurrected by its own timer and works the same tree as its
+    // successor (see `watch::transfer_session`).
+    if let Some(dir) = watches_dir {
+        let moved = crate::watch::transfer_session_in(
+            dir,
+            session_id,
+            &to_sid,
+            pending.model.as_deref(),
+            pending.effort.as_deref(),
+            Some(&pending.agent_source),
+        );
+        if !moved.is_empty() {
+            crate::log_debug(&format!(
+                "handoff: moved {} watch(es) from {session_id} to {to_sid}: {}",
+                moved.len(),
+                moved
+                    .iter()
+                    .map(|r| r.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
     }
     match pre_assigned.as_deref() {
         Some(id) if id == to_sid => {}
@@ -887,6 +947,7 @@ mod tests {
         let to = consume_and_spawn_in(
             &pdir,
             &cdir,
+            None,
             None,
             "pred-thread",
             now_ms(),
@@ -951,6 +1012,116 @@ mod tests {
         )
     }
 
+    /// Observed 2026-09-14 on the mslug3 chain: hop 72 armed a watch, handed
+    /// off to hop 73, and 17 seconds after hop 73 woke and started merging, hop
+    /// 72's own watch fired and resurrected it — two hops alive in one
+    /// workspace, both holding the same "merge it if green" instruction. The
+    /// relay must take the watch with it, and tell the successor it now owns
+    /// it so it doesn't arm a duplicate the way hop 73 was told to.
+    #[test]
+    fn relay_moves_the_predecessors_watch_to_the_successor() {
+        let (root, pdir, cdir) = fresh_dirs("watch-carry");
+        let wdir = root.join("watches");
+        fs::create_dir_all(&wdir).unwrap();
+        crate::watch::create_in_for_test(
+            &wdir,
+            "s1",
+            "/ws",
+            "! pgrep -f run_gates.sh >/dev/null",
+            None,
+            Some("套件跑完"),
+            "w-carry",
+            1000,
+        );
+        register_in(
+            &pdir,
+            &cdir,
+            "s1",
+            "/ws",
+            None,
+            "note",
+            None,
+            None,
+            Some("claude-opus-5"),
+            Some("high"),
+            "claude-code",
+            1000,
+        )
+        .unwrap();
+
+        let seen_prompt = std::cell::RefCell::new(String::new());
+        let to = consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            Some(&wdir),
+            "s1",
+            1001,
+            |_src, _w, prompt, _m, _e, _pm, _ep, sid| {
+                *seen_prompt.borrow_mut() = prompt.to_string();
+                Ok(crate::session_launch::SpawnSessionResponse {
+                    pid: 1,
+                    session_id: sid.map(str::to_string),
+                })
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(
+            crate::watch::for_session_in(&wdir, "s1").is_empty(),
+            "the retired hop keeps no watch — nothing can wake it behind its successor"
+        );
+        let carried = crate::watch::for_session_in(&wdir, &to);
+        assert_eq!(carried.len(), 1, "the wait moved to the successor");
+        assert_eq!(carried[0].id, "w-carry");
+        assert_eq!(
+            carried[0].model.as_deref(),
+            Some("claude-opus-5"),
+            "it will resume on the successor's model, not a default"
+        );
+        let prompt = seen_prompt.borrow();
+        assert!(
+            prompt.contains("w-carry") && prompt.contains("套件跑完"),
+            "the successor is told which wait it inherited: {prompt}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The far more common relay has no watch at all; the prompt must not grow
+    /// a dangling "你继承了这些 watch" header for an empty list.
+    #[test]
+    fn relay_without_watches_adds_nothing_to_the_prompt() {
+        let (root, pdir, cdir) = fresh_dirs("watch-none");
+        let wdir = root.join("watches");
+        fs::create_dir_all(&wdir).unwrap();
+        register_simple(&pdir, &cdir, "s1", "note", 1000).unwrap();
+
+        let seen_prompt = std::cell::RefCell::new(String::new());
+        consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            Some(&wdir),
+            "s1",
+            1001,
+            |_src, _w, prompt, _m, _e, _pm, _ep, sid| {
+                *seen_prompt.borrow_mut() = prompt.to_string();
+                Ok(crate::session_launch::SpawnSessionResponse {
+                    pid: 1,
+                    session_id: sid.map(str::to_string),
+                })
+            },
+        )
+        .unwrap();
+
+        assert!(
+            !seen_prompt.borrow().contains("watch"),
+            "no watch section when nothing was inherited"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// Launch flags the injected spawner observed, so a test can assert on what
     /// the successor would actually have been started with.
     #[derive(Default)]
@@ -988,6 +1159,7 @@ mod tests {
         let to = consume_and_spawn_in(
             &pdir,
             &cdir,
+            None,
             None,
             "s1",
             1001,
@@ -1037,6 +1209,7 @@ mod tests {
             &pdir,
             &cdir,
             None,
+            None,
             "t1",
             1001,
             |agent_source, _ws, _prompt, _model, _effort, _perm, _entrypoint, _sid| {
@@ -1068,6 +1241,7 @@ mod tests {
         let to = consume_and_spawn_in(
             &pdir,
             &cdir,
+            None,
             None,
             "s1",
             1001,
@@ -1104,7 +1278,7 @@ mod tests {
         let (root, pdir, cdir) = fresh_dirs("link-rollback");
         register_simple(&pdir, &cdir, "s1", "note", 1000).unwrap();
 
-        let err = consume_and_spawn_in(&pdir, &cdir, None, "s1", 1001, |_, _, _, _, _, _, _, _| {
+        let err = consume_and_spawn_in(&pdir, &cdir, None, None, "s1", 1001, |_, _, _, _, _, _, _, _| {
             Err("claude binary missing".to_string())
         })
         .unwrap_err();
@@ -1128,7 +1302,7 @@ mod tests {
             &pdir, &cdir, "t1", "/ws", None, "note", None, None, None, None, "codex", 1000,
         )
         .unwrap();
-        let to = consume_and_spawn_in(&pdir, &cdir, None, "t1", 1001, |_, _, _, _, _, _, _, sid| {
+        let to = consume_and_spawn_in(&pdir, &cdir, None, None, "t1", 1001, |_, _, _, _, _, _, _, sid| {
             assert!(sid.is_none(), "Codex cannot take a pre-assigned id");
             assert!(chain_containing_in(&cdir, "t1").is_none(), "nothing linked before spawn");
             Ok(crate::session_launch::SpawnSessionResponse {
@@ -1170,6 +1344,7 @@ mod tests {
         consume_and_spawn_in(
             &pdir,
             &cdir,
+            None,
             None,
             "s1",
             1001,
@@ -1401,7 +1576,7 @@ mod tests {
         record_link_in(&cdir, &rec, "s2", 1001).unwrap();
 
         let spawned = std::cell::Cell::new(false);
-        let out = consume_and_spawn_in(&pdir, &cdir, None, "s1", 1002, |_, _, _, _, _, _, _, _| {
+        let out = consume_and_spawn_in(&pdir, &cdir, None, None, "s1", 1002, |_, _, _, _, _, _, _, _| {
             spawned.set(true);
             Ok(crate::session_launch::SpawnSessionResponse {
                 pid: 1,

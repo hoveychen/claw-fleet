@@ -90,7 +90,7 @@ pub(crate) fn route_daily_report_generate(
                     );
                 } else {
                     let session_refs: Vec<&SessionInfo> = sessions.iter().collect();
-                    let tz = chrono::Local::now().format("%Z").to_string();
+                    let tz = crate::daily_report::local_tz_tag(&date);
                     let report = generate_report_from_sessions(&date, &tz, &session_refs);
                     report_store.lock().unwrap().save_report(&report).ok();
                     let body = serde_json::to_string(&report).unwrap_or_default();

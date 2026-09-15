@@ -472,9 +472,27 @@ Fleet 的 Stop hook 就消费这个登记，并在同一 workspace spawn 一个�
 `find ~/.claude/projects -name \"<session id>.jsonl\"`。\n\
 - 给你会话的一个新用户 prompt 会取消你待定的交接——{title}接管永远优先。链最多\
 100 跳；重新登记会覆盖你之前的便条。\n\
+- **登记就是把便条定稿了。**从 `register` 返回 ok 的那一刻起，note 的内容已经冻结，\
+后继者拿到的就是那一份。所以登记之后**不要再发方向性的决策卡**（「下一棒该先做\
+哪一面？」「要不要换个顺序？」）——决策卡的答案走的是 tool_result，既**不**取消\
+待定的交接，也**进不了**已冻结的 note，{title}的选择会被静默丢弃，而他还以为自己\
+改了方向。要问就**先问、拿到答案、再按答案写 note 去登记**；已经登记了就只发不带\
+决策的收尾卡。\n\
+- **你挂的 `fleet watch` 会跟着棒一起转给后继者**（含它的条件、deadline 和你的 \
+model/effort）。所以交接前不用特地去 stop 它，也不要在便条里叮嘱后继者「重挂一个」\
+——那会变成两个 watch 叫醒同一个人。反过来，你作为后继者若在开场 prompt 里读到\
+「你继承了 watch X」，那就是你的了，别再创建条件相同的第二个。\n\
 \n\
 你一旦逮到自己在想「上下文长了，我该收尾了」——那个冲动本身就是信号。去登记\
 交接并接力，而不是收尾。\n\
+\n\
+**你不必靠体感判断这件事。** Fleet 在每次工具调用后测一次你的上下文用量，\
+并在 250K / 500K / 750K token 三个档位各注入一次 `[Fleet] 上下文已用 …K` 提示\
+（同一档只说一次；被压缩后重新爬上来会再说）。**收到第一条就该准备交接了**——\
+超过 250K 模型就开始变钝：记不住早先的约束、重复已经做过的调查、把自己的摘要\
+当成原话。接力换回来的是一个清醒的头脑，不是一次损失，所以别把这些提示读成\
+「还剩多少额度」。一条都没看到，就是你还没到 250K（200K 窗口的模型够不到第一\
+档，永远不会收到）。\n\
 \n\
 **叙述一次交接不等于登记一次。**在你的回复文本里写「接下来我起下一棒」/\
 「handing off to the next session」/「剩下的我接力」什么都不做：Fleet 的 Stop\
@@ -553,6 +571,29 @@ Fleet 托管、durable，每个 interval spawn 一个全新的**本地** detache
 每 12h 跑一条 `limit:0` 廉价探测，只有真检测到新数据（探测退出 0）才起 LLM 会话去\
 处理。别默认每个 tick 都起一个 LLM 会话。纯粹等一个外部事件、之后要接着干活的，\
 仍用上面的 `fleet watch`。\n\
+\n\
+### 绝不用空转命令保活回合\n\
+\n\
+**别为了「撑住这个回合」去发一条什么都不做的命令**——`echo waiting`、`true`、\
+`:`、裸 `sleep 30`，以及它们用 `;` / `&&` 串起来的组合。一次空转不比一次真工作\
+便宜：你每个回合都要重读整个上下文。实测一个会话连发 57 次 `echo waiting`，\
+重读了 1163 万 cache token，换回 57 遍「waiting」，约 $17.80——而它当时\
+**已经 armed 了 `Monitor`**，正确答案就在手边，它还是在旁边空转。\n\
+\n\
+你会这么干，是因为你知道「后台 shell 会随回合结束而死」。这句是对的，但撑住回合\
+的办法不是空转。按你在等什么挑一条：\n\
+\n\
+- **等一个能前台跑的命令**（编译、测试、脚本）→ 直接前台跑它，把 Bash 的 \
+`timeout` 调大（上限 600000 毫秒）。一次调用等到底，只花一个 round trip。\n\
+- **等一个已经在跑的条件** → 用 `Monitor` 的 until 轮询。它在回合*内*阻塞，\
+轮询本身不花 round trip。已经 armed 了就等它，别在旁边另开空转。\n\
+- **等的事跨回合**（CI、构建产物、部署上线）→ `fleet watch`（见上），然后干净地\
+结束回合。\n\
+- **真的无事可等** → 直接结束回合。\n\
+\n\
+划清一条界：`sleep 45; <真正的检查命令>` **不**是空转——一次 round trip 换一次\
+真观察，那是划算的，随便用。被禁的只有零信息量的那种。Fleet 的 Bash PreToolUse \
+hook 会 deny 它们并把上面四条回给你；hook 是安全网，不是许可。\n\
 \n\
 ## Rule 6 —— 需求保真：别把不存在的需求写进计划\n\
 \n\
@@ -1129,10 +1170,35 @@ plan automatically.\n\
 - A new user prompt to your session cancels your pending handoff — {title} \
 taking over always wins. Chains are capped at 100 hops; re-registering \
 overwrites your previous note.\n\
+- **Registering freezes the note.** From the `ok` onwards, what the successor \
+will read is fixed. So after registering, do **not** raise a directional \
+decision card (\"which side should the next hop start on?\", \"should we \
+reorder?\") — a card's answer arrives as a tool_result, which neither cancels \
+the pending handoff nor reaches the frozen note, so {title}'s choice is \
+silently dropped while they believe they changed course. Ask **first**, write \
+the note from the answer, then register; once registered, only raise a \
+decision-free wrap-up card.\n\
+- **A `fleet watch` you armed moves to the successor with the baton** (its \
+condition, deadline, and your model/effort). So do not stop it before handing \
+off, and do not tell the successor to re-arm one in your note — that just puts \
+two watches on one session. Conversely, when your own opening prompt says you \
+inherited watch X, it is yours: do not create a second one for the same \
+condition.\n\
 \n\
 The moment you catch yourself thinking \"I should wrap up because context \
 is getting long\" — that impulse IS the signal. Register the handoff and \
 relay instead of wrapping up.\n\
+\n\
+**You do not have to feel this one out.** Fleet measures your context usage \
+after every tool call and injects a `[Fleet] 上下文已用 …K` notice once at \
+each of 250K / 500K / 750K tokens (once per tier; a compaction re-arms them \
+as you climb back). **The first notice already means start preparing to hand \
+off** — past 250K a model dulls: it loses constraints set earlier, redoes \
+investigations it already did, and mistakes its own summaries for the \
+original words. A relay buys back a clear head; it is not a loss. So do not \
+read these notices as \"how much budget is left\". No notice at all means you \
+are still under 250K (a 200K-window model never reaches the first tier and \
+is never notified).\n\
 \n\
 **Narrating a handoff is NOT registering one.** Writing \"接下来我起下一棒\" \
 / \"handing off to the next session\" / \"I'll relay the rest\" in your reply \
@@ -1238,6 +1304,36 @@ is real work: e.g. a loop that runs a cheap `limit:0` probe every 12h and only \
 spawns an LLM session when it actually detects new data (probe exits 0). Do \
 NOT default to spawning an LLM session every tick. For purely waiting on an \
 event then continuing, use `fleet watch` above.\n\
+\n\
+### Never spin a no-op command to hold the turn open\n\
+\n\
+**Don't issue a command that does nothing just to \"keep this turn alive\"** — \
+`echo waiting`, `true`, `:`, a bare `sleep 30`, or any of them chained with \
+`;` / `&&`. A spin is no cheaper than real work: every turn re-reads your whole \
+context. Measured on one session that fired `echo waiting` 57 times: 11.6M \
+cached tokens re-read to produce 57 copies of the word \"waiting\", roughly \
+$17.80 — and that session **had already armed a `Monitor`**. The right answer \
+was in its hand and it spun anyway.\n\
+\n\
+You do this because you know background shells die when the turn ends. That \
+part is true; holding the turn open with a spin is not the fix. Pick by what \
+you're waiting on:\n\
+\n\
+- **A command you can run in the foreground** (a build, tests, a script) → just \
+run it in the foreground and raise the Bash `timeout` (max 600000 ms). One call \
+waits it out, for one round trip.\n\
+- **A condition already in flight** → `Monitor` with an until-loop. It blocks \
+*inside* the turn; the polling itself costs no round trips. If you've already \
+armed one, wait on it instead of spinning beside it.\n\
+- **Something that outlives the turn** (CI, a build artifact, a deploy) → \
+`fleet watch` (above), then end the turn cleanly.\n\
+- **Genuinely nothing to wait for** → just end the turn.\n\
+\n\
+One line to keep straight: `sleep 45; <a real probe>` is **not** a spin — one \
+round trip buys one real observation, which is a good trade; use it freely. \
+Only zero-information commands are off-limits. Fleet's Bash PreToolUse hook \
+denies them and hands you the four options above; the hook is a safety net, not \
+permission.\n\
 \n\
 ## Rule 6 — Requirement fidelity: don't plan hallucinated scope\n\
 \n\
@@ -1468,6 +1564,34 @@ mod tests {
             g.contains("UserPromptSubmit"),
             "guidance must mention the hook so the agent knows where the auto-injection comes from"
         );
+    }
+
+    /// Two failure modes seen on one relay (mslug3 chain, 2026-09-14): hop 73
+    /// registered its handoff and *then* asked 老板 which side the next hop
+    /// should prioritise — an answer that can no longer reach the frozen note —
+    /// while hop 72 had told its successor to re-arm a watch, leaving two
+    /// watches for one condition. Rule 5 has to say both out loud, in both
+    /// locales, or the next hop repeats them.
+    #[test]
+    fn rule_5_freezes_the_note_and_carries_the_watch_in_both_locales() {
+        for locale in ["zh", "en"] {
+            let g = render_guidance("Boss", locale);
+            assert!(
+                g.contains("登记就是把便条定稿了") || g.contains("Registering freezes the note"),
+                "[{locale}] Rule 5 must say registering freezes the note"
+            );
+            assert!(
+                g.contains("不要再发方向性的决策卡")
+                    || g.contains("do **not** raise a directional \\\ndecision card")
+                    || g.contains("raise a directional"),
+                "[{locale}] it must ban the post-register directional card"
+            );
+            assert!(
+                g.contains("跟着棒一起转给后继者")
+                    || g.contains("moves to the successor with the baton"),
+                "[{locale}] it must say a watch transfers with the baton"
+            );
+        }
     }
 
     #[test]
@@ -1757,6 +1881,47 @@ mod tests {
     /// Checking both is the point: `render_guidance` early-returns an entirely
     /// separate Chinese body for `locale == "zh"`, so editing the English half
     /// alone leaves a zh session — the common case here — with none of it.
+    #[test]
+    fn render_forbids_no_op_spins_in_both_locales() {
+        // Prevention half of the idle-spin guard (see `crate::idle_spin`). The
+        // ban alone is not enough — an agent spins because it correctly fears
+        // losing backgrounded work, so both locales must also carry the four
+        // replacements and the `sleep N; <probe>` carve-out. Without those, the
+        // text reads as "don't" and the agent has nowhere to go but back.
+        let en = render_guidance("Boss", "en");
+        assert!(
+            en.contains("Never spin a no-op command to hold the turn open")
+                && en.contains("echo waiting"),
+            "[en] the no-op spin ban must be documented"
+        );
+        for replacement in ["timeout", "Monitor", "fleet watch", "just end the turn"] {
+            assert!(
+                en.contains(replacement),
+                "[en] the ban must point at {replacement}"
+            );
+        }
+        assert!(
+            en.contains("sleep 45"),
+            "[en] the cheaper sleep-then-probe neighbour must stay explicitly allowed"
+        );
+
+        let zh = render_guidance("老板", "zh");
+        assert!(
+            zh.contains("绝不用空转命令保活回合") && zh.contains("echo waiting"),
+            "[zh] the no-op spin ban must be documented"
+        );
+        for replacement in ["timeout", "Monitor", "fleet watch", "直接结束回合"] {
+            assert!(
+                zh.contains(replacement),
+                "[zh] the ban must point at {replacement}"
+            );
+        }
+        assert!(
+            zh.contains("sleep 45"),
+            "[zh] the cheaper sleep-then-probe neighbour must stay explicitly allowed"
+        );
+    }
+
     #[test]
     fn render_documents_the_plan_tree_mechanisms_in_both_locales() {
         let en = render_guidance("Boss", "en");

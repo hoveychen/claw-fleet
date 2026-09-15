@@ -417,11 +417,30 @@ function LazyMarkdown({ text, bare }: { text: string; bare?: boolean }) {
 // ── Rail steps (mirrors the desktop's de-chromed work-block language) ────────
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch"]);
-const SHELL_TOOLS = new Set(["Bash", "exec", "exec_command", "write_stdin"]);
+// The dsh names below are the tools with no Claude counterpart, so they are
+// not renamed upstream in `dsh_messages.rs` and need their glyph here. Kept in
+// step with the desktop's Rail.tsx.
+const SHELL_TOOLS = new Set([
+  "Bash", "exec", "exec_command", "write_stdin",
+  "job_output", "job_kill", "job_list", "run_code",
+  "terminal_open", "terminal_list", "terminal_read", "terminal_send",
+  "terminal_close", "terminal_signal",
+]);
 const WEB_TOOLS = new Set(["WebSearch", "WebFetch"]);
-const SEARCH_TOOLS = new Set(["Grep", "Glob", "Explore", "LSP"]);
-const AGENT_TOOLS = new Set(["Agent", "spawn_agent", "wait_agent"]);
-const PLAN_TOOLS = new Set(["TodoWrite", "TodoRead", "update_plan"]);
+const SEARCH_TOOLS = new Set([
+  "Grep", "Glob", "Explore", "LSP",
+  "session_search", "session_trace",
+  "session_event_read", "session_event_search", "session_event_trace",
+]);
+const AGENT_TOOLS = new Set([
+  "Agent", "spawn_agent", "wait_agent",
+  "subagent", "list_agents", "send_message", "interrupt_agent", "report",
+]);
+const PLAN_TOOLS = new Set([
+  "TodoWrite", "TodoRead", "update_plan",
+  "create_goal", "update_goal", "get_goal",
+  "schedule_create", "schedule_delete", "schedule_list",
+]);
 
 function railToolIcon(name: string): ReactNode {
   if (SHELL_TOOLS.has(name)) return <Terminal />;
@@ -593,7 +612,16 @@ function ToolStep({
     ? fleetSummary(fleetTool, b.input ?? {})
     : isDecisionTool(name)
       ? decisionSummary(b)
-      : toolSummary(b);
+      : name === "TaskStop"
+        ? // TaskStop 的 input 只有一个不可读的 task_id，「停掉了什么」只存在于
+          // 结果里（relay 把命令首行放进 digest.stoppedCommand）。
+          meta?.digest?.stoppedCommand
+          ? t("停止后台任务：{0}", meta.digest.stoppedCommand)
+          : t("停止后台任务")
+        : // TaskOutput 同理：读的是哪个任务只在结果里（digest.taskDescription）。
+          name === "TaskOutput" && meta?.digest?.taskDescription
+          ? t("读取后台任务输出：{0}", meta.digest.taskDescription)
+          : toolSummary(b);
   const expandable = !!b.id && !!client && !!jsonlPath;
   // "打开子代理": an Agent tool whose result carries the subagent's id and whose
   // transcript the snapshot has surfaced (`agent-<id>` row present).

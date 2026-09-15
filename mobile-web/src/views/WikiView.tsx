@@ -30,13 +30,19 @@ const KIND_BADGE: Record<WikiDoc["kind"], string> = {
   htmlDir: "DIR",
 };
 
-/** 文档所属虚拟目录：slug 去掉最后一段。无 `/` 的归到根组。 */
+/** 文档所属虚拟目录：slug 去掉最后一段。无 `/` 的返回空串。 */
 function folderOf(slug: string): string {
   const i = slug.lastIndexOf("/");
   return i < 0 ? "" : slug.slice(0, i);
 }
 
-/** slug 最后一段，用作组内显示名的兜底（当 title 缺失时）。 */
+/** 浏览态的排序：整份清单按 updatedMs 一条直线倒序，不再按 slug 虚拟目录分组。
+ *  分组时组间只能按目录名字典序排，「未归类」永远钉在页首，于是打开永远先看到老文档。 */
+export function sortDocsByRecency(docs: WikiDoc[]): WikiDoc[] {
+  return [...docs].sort((a, b) => (b.updatedMs || 0) - (a.updatedMs || 0) || a.slug.localeCompare(b.slug));
+}
+
+/** slug 最后一段，用作显示名的兜底（当 title 缺失时）。 */
 function leafOf(slug: string): string {
   const i = slug.lastIndexOf("/");
   return i < 0 ? slug : slug.slice(i + 1);
@@ -87,18 +93,10 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
     [workspace],
   );
 
-  // Empty/short query → grouped-by-folder browse view.
-  const groups = useMemo(() => {
+  // Empty/short query → flat browse list, newest first.
+  const browse = useMemo(() => {
     if (!docs || searchActive) return [];
-    const byFolder = new Map<string, WikiDoc[]>();
-    for (const d of docs) {
-      if (!matchesWorkspace(d)) continue;
-      const key = folderOf(d.slug);
-      const arr = byFolder.get(key);
-      if (arr) arr.push(d);
-      else byFolder.set(key, [d]);
-    }
-    return [...byFolder.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return sortDocsByRecency(docs.filter(matchesWorkspace));
   }, [docs, searchActive, matchesWorkspace]);
 
   // Active query → flat relay-search results (resolved to docs, workspace-filtered).
@@ -122,6 +120,8 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
           <span className={styles.docSnippet}>{snippet}</span>
         ) : (
           <span className={styles.docMeta}>
+            {/* 平铺清单没有目录分组头了，虚拟目录改在这一行露出。 */}
+            {folderOf(doc.slug) && `${folderOf(doc.slug)} · `}
             {doc.workspaceName} · {fmtDate(doc.updatedMs)}
           </span>
         )}
@@ -207,15 +207,10 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
           !searchActive &&
           docs !== null &&
           total > 0 &&
-          (groups.length === 0 ? (
+          (browse.length === 0 ? (
             <EmptyState compact icon={FileQuestion} title={t("该项目下没有文档。")} />
           ) : (
-            groups.map(([folder, items]) => (
-              <div key={folder || "__root__"} className={styles.group}>
-                <div className={styles.groupLabel}>{folder || t("未归类")}</div>
-                {items.map((doc) => renderDoc(doc))}
-              </div>
-            ))
+            <div className={styles.group}>{browse.map((doc) => renderDoc(doc))}</div>
           ))}
       </div>
     </div>

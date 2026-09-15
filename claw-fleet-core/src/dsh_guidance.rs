@@ -113,9 +113,13 @@ fn language_lines(locale: &str) -> (&'static str, &'static str) {
     }
 }
 
-fn title_or_default(user_title: &str) -> String {
+fn title_or_default(user_title: &str, locale: &str) -> String {
     if user_title.is_empty() {
-        "Boss".to_string()
+        if locale == "zh" {
+            "老板".to_string()
+        } else {
+            "Boss".to_string()
+        }
     } else {
         user_title.to_string()
     }
@@ -128,7 +132,7 @@ fn title_or_default(user_title: &str) -> String {
 /// no Fleet MCP), and Rule 2 states the attribution caveat that follows from dsh
 /// running every session inside one shared server process.
 pub fn render_dsh_prd_block(user_title: &str, locale: &str) -> String {
-    let title = title_or_default(user_title);
+    let title = title_or_default(user_title, locale);
     let (prd_lang, _) = language_lines(locale);
 
     format!(
@@ -297,6 +301,15 @@ successor is attributed automatically.\n\
 `ok: handoff registered`, then end the turn. **Narrating a handoff in prose \
 does nothing** — only the actual command spawns a successor.\n\
 \n\
+**You do not have to judge \"running long\" by feel.** Fleet measures your \
+context from this session's own log and injects one `[Fleet] 上下文已用 …K` \
+message each time you cross 250K / 500K / 750K prompt tokens (once per tier; a \
+compaction re-arms them). **Treat the first one as the cue to prepare a \
+handoff** — past ~250K a model starts to blur: it forgets constraints it set \
+itself, redoes investigations, quotes its own summary as the original. A relay \
+buys back a clear head; it is not a loss, so do not read those messages as a \
+remaining-budget meter.\n\
+\n\
 ## Rule 6 — Waiting on an external condition (`fleet watch`)\n\
 \n\
 Handoff continues *work*; `fleet watch` waits for an *event* — a CI run \
@@ -338,7 +351,7 @@ when there is real work. Do NOT default to an LLM session every tick.",
 /// `fleet__set_session_title` is absent here, and the card's field vocabulary is
 /// the narrower one `ask_user_question` actually accepts.
 pub fn render_dsh_interaction_block(user_title: &str, locale: &str) -> String {
-    let title = title_or_default(user_title);
+    let title = title_or_default(user_title, locale);
     let (_, ix_lang) = language_lines(locale);
 
     format!(
@@ -375,8 +388,9 @@ truncates a long one.\n\
 \n\
 ## Tone\n\
 \n\
-- Address the user as \"{title}\" (never third person). Voice: an \
-enthusiastic, slightly-devoted junior dev reporting to {title}.\n\
+- Address the user as \"{title}\" (never third person). Voice: concise and \
+plain-spoken — lead with the point, cut filler, and write so a non-technical \
+reader can follow; explain jargon instead of dropping it raw.\n\
 - Question text, option labels, and descriptions all in {title}'s language.\n\
 \n\
 ## Speech Summary Divider (required in every `question` field)\n\
@@ -1271,6 +1285,14 @@ mod tests {
         assert!(
             ix.contains("decision-card question and option text in English"),
             "en locale selects the English interaction language line"
+        );
+        assert!(
+            render_dsh_prd_block("", "zh").contains("老板"),
+            "empty title in zh must fall back to 老板, not Boss"
+        );
+        assert!(
+            render_dsh_interaction_block("", "zh").contains("老板"),
+            "empty title in zh must fall back to 老板, not Boss"
         );
     }
 
