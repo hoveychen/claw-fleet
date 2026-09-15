@@ -84,6 +84,24 @@ export interface ChatComposerAttachment {
   height?: number;
 }
 
+/**
+ * One attachment whose bytes are still moving — pasted but not yet staged,
+ * picked but not yet copied into the store, dropped but not yet uploaded.
+ *
+ * It exists because every one of those paths has a gap of seconds (a 4 MB
+ * screenshot crosses the IPC boundary as a JSON number array) in which the old
+ * composer showed *nothing at all*: the paste looked like it had been swallowed
+ * and the feature looked broken. The chip is the receipt.
+ */
+interface PendingAttachment {
+  /** Local, monotonic; the staged path doesn't exist yet so it can't be the key. */
+  id: string;
+  name: string;
+  /** Object URL for a pasted image — free to make, so the thumbnail is up
+   *  before the bytes have gone anywhere. */
+  previewUrl?: string;
+}
+
 export interface ChatComposerAddMenuItem {
   id: string;
   label: string;
@@ -154,6 +172,33 @@ function AttachmentChip({
       >
         ×
       </button>
+    </div>
+  );
+}
+
+/**
+ * The in-flight twin of `AttachmentChip`: same box, same slot in the row, but
+ * with a spinner where the remove button goes — so when the real chip lands it
+ * reads as the same object settling, not as a second thing appearing.
+ */
+function PendingChip({ pending }: { pending: PendingAttachment }) {
+  const { t } = useTranslation();
+  const label = t("composer.attachment_loading", "Adding…");
+  return (
+    <div
+      className={`${styles.chip} ${styles.chip_pending} ${pending.previewUrl ? styles.chip_image : ""}`}
+      title={pending.name}
+      aria-busy="true"
+      role="status"
+    >
+      {pending.previewUrl && (
+        <img src={pending.previewUrl} alt="" className={styles.thumb} draggable={false} />
+      )}
+      <div className={styles.meta}>
+        <span className={styles.name}>{pending.name}</span>
+        <span className={styles.dims}>{label}</span>
+      </div>
+      <span className={styles.spinner} aria-label={label} />
     </div>
   );
 }
@@ -242,6 +287,21 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   onDropFilesRef.current = onDropFiles;
   const disabledRef = useRef(disabled);
   disabledRef.current = disabled;
+
+  // Attachments whose bytes are still in flight. Every add path below opens one
+  // *before its first await* — that synchronous first render is the entire
+  // point, since what the user perceives as "broken" is the silence between the
+  // paste and the chip.
+  const [pending, setPending] = useState<PendingAttachment[]>([]);
+  const pendingSeq = useRef(0);
+  const beginPending = useCallback((name: string, previewUrl?: string): string => {
+    const id = `pending-${++pendingSeq.current}`;
+    setPending((cur) => [...cur, { id, name, previewUrl }]);
+    return id;
+  }, []);
+  const endPending = useCallback((id: string) => {
+    setPending((cur) => cur.filter((p) => p.id !== id));
+  }, []);
 
   useImperativeHandle(
     ref,
@@ -402,6 +462,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       // callback is what the paths are for.
       const files = [...(e.dataTransfer?.files ?? [])];
       if (files.length === 0) return;
+      // The upload is the slow part of a browser drop, so the chips go up first.
+      const ids = files.map((f) => beginPending(f.name || t("composer.attachment_file", "File")));
       try {
         // Lazily, unlike `webTransport`'s static import of the same module:
         // there is no user-activation window to protect here (the drop already
@@ -413,9 +475,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         reportError(`${t("composer.attach_failed", "Attachment upload failed")}: ${detail}`);
+      } finally {
+        for (const id of ids) endPending(id);
       }
     },
-    [webDrop, acceptsDrop, reportError, t],
+    [webDrop, acceptsDrop, beginPending, endPending, reportError, t],
   );
 
   const handlePickFiles = useCallback(async () => {
@@ -425,16 +489,33 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         title: t("composer.attach_title", "Choose files or images"),
       });
       if (result == null) return;
-      const picked = Array.isArray(result) ? result : [result];
-      for (const p of picked) {
-        const path = typeof p === "string" ? p : String(p);
-        await onAddAttachment({ path, name: basename(path), fromClipboard: false });
+      const picked = (Array.isArray(result) ? result : [result]).map((p) =>
+        typeof p === "string" ? p : String(p),
+      );
+      // All the chips first, then the adds: a multi-file pick resolves one file
+      // at a time, and the later ones should not look like they were dropped.
+      const ids = picked.map((path) => beginPending(basename(path)));
+      try {
+        for (let i = 0; i < picked.length; i++) {
+          try {
+            await onAddAttachment({
+              path: picked[i],
+              name: basename(picked[i]),
+              fromClipboard: false,
+            });
+          } finally {
+            endPending(ids[i]);
+          }
+        }
+      } finally {
+        // One file failing must not strand the chips of the ones after it.
+        for (const id of ids) endPending(id);
       }
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
       reportError(`${t("composer.attach_failed", "Attachment upload failed")}: ${detail}`);
     }
-  }, [onAddAttachment, reportError, t]);
+  }, [onAddAttachment, beginPending, endPending, reportError, t]);
 
   const handlePaste = useCallback(
     async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -476,35 +557,38 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       }
       if (files.length === 0) return;
       e.preventDefault();
-      for (const f of files) {
-        let previewUrl: string | null = null;
+
+      // Two passes on purpose. The first is synchronous with the paste event and
+      // does only free work — name, object URL, chip — so the user sees the
+      // attachment land in the same frame they pressed ⌘V. The second does the
+      // seconds-long part (read the bytes, hand them over the IPC boundary,
+      // stage them) behind that chip.
+      const staging = files.map((f) => {
+        if (f.size > MAX_ATTACHMENT_BYTES) {
+          reportError(t("composer.attach_too_large", "Attachment is too large (max 50 MiB)"));
+          return null;
+        }
+        const mime = f.type || "application/octet-stream";
+        const ext = mimeToExtension(mime);
+        const previewUrl = mime.startsWith("image/") ? URL.createObjectURL(f) : null;
+        const name = isDefaultClipboardName(f.name) ? timestampedPasteName(ext) : f.name;
+        return { file: f, ext, name, previewUrl, id: beginPending(name, previewUrl ?? undefined) };
+      });
+
+      for (const item of staging) {
+        if (!item) continue;
+        let previewUrl = item.previewUrl;
         try {
-          if (f.size > MAX_ATTACHMENT_BYTES) {
-            reportError(t("composer.attach_too_large", "Attachment is too large (max 50 MiB)"));
-            continue;
-          }
-          const buf = await f.arrayBuffer();
+          const dims = previewUrl ? await readImageDimensions(previewUrl) : null;
+          const buf = await item.file.arrayBuffer();
           const bytes = Array.from(new Uint8Array(buf));
-          const mime = f.type || "application/octet-stream";
-          const ext = mimeToExtension(mime);
-          const isImage = mime.startsWith("image/");
-
-          let dims: { width: number; height: number } | null = null;
-          if (isImage) {
-            previewUrl = URL.createObjectURL(f);
-            dims = await readImageDimensions(previewUrl);
-          }
-
           const stagedPath = await invoke<string>("stage_pasted_attachment", {
             bytes,
-            extension: ext,
+            extension: item.ext,
           });
-          const displayName = isDefaultClipboardName(f.name)
-            ? timestampedPasteName(ext)
-            : f.name;
           await onAddAttachment({
             path: stagedPath,
-            name: displayName,
+            name: item.name,
             fromClipboard: true,
             preview: previewUrl && dims
               ? { previewUrl, width: dims.width, height: dims.height }
@@ -515,10 +599,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           if (previewUrl) URL.revokeObjectURL(previewUrl);
           const detail = err instanceof Error ? err.message : String(err);
           reportError(`${t("composer.attach_failed", "Attachment upload failed")}: ${detail}`);
+        } finally {
+          endPending(item.id);
         }
       }
     },
-    [onAddAttachment, onChange, reportError, t, value],
+    [onAddAttachment, onChange, beginPending, endPending, reportError, t, value],
   );
 
   const handleKeyDown = useCallback(
@@ -679,7 +765,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       )}
       {mentions.menu}
       {contextSlot && <div className={styles.context_row}>{contextSlot}</div>}
-      {attachments.length > 0 && (
+      {(attachments.length > 0 || pending.length > 0) && (
         <div className={styles.chips}>
           {attachments.map((a) => (
             <AttachmentChip
@@ -689,6 +775,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               onZoom={setPreviewing}
               onRemove={onRemoveAttachment}
             />
+          ))}
+          {pending.map((p) => (
+            <PendingChip key={p.id} pending={p} />
           ))}
         </div>
       )}

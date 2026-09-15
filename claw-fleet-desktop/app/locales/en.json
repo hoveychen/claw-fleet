@@ -2298,6 +2298,8 @@
     "attachment_pasted": "Pasted",
     "attachment_remove": "Remove attachment",
     "attachment_zoom": "Click to enlarge",
+    "attachment_loading": "Adding…",
+    "attachment_file": "File",
     "lightbox_close": "Close",
     "attach_failed": "Attachment upload failed",
     "attach_too_large": "Attachment is too large (max 50 MiB)",

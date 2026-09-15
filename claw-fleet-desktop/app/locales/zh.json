@@ -2295,6 +2295,8 @@
     "attachment_pasted": "粘贴",
     "attachment_remove": "移除附件",
     "attachment_zoom": "点击放大",
+    "attachment_loading": "添加中…",
+    "attachment_file": "文件",
     "lightbox_close": "关闭",
     "attach_failed": "附件上传失败",
     "attach_too_large": "附件过大（上限 50 MiB）",

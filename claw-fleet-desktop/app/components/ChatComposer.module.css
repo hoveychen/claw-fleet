@@ -142,6 +142,39 @@
   letter-spacing: 0.4px;
 }
 
+/* In-flight attachment: same box as a settled chip, dimmed, with a spinner in
+   the slot the remove button will take once the bytes have landed. */
+.chip_pending {
+  border-style: dashed;
+  color: var(--color-text-secondary);
+}
+
+.chip_pending .thumb {
+  opacity: 0.6;
+}
+
+.spinner {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(var(--color-accent-rgb), 0.25);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: chip_spin 0.7s linear infinite;
+}
+
+@keyframes chip_spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}
+
 .chip_remove {
   display: inline-flex;
   align-items: center;
