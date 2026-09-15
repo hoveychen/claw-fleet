@@ -883,6 +883,43 @@ fn clamp_dead_session_status(
     }
 }
 
+/// Zero a Codex session's speed contribution when its process is gone.
+///
+/// [`clamp_dead_session_status`] already decided that a dead process means the
+/// turn is over — but it only rewrites the *status*. `token_speed` comes from a
+/// 300-second window over the rollout's `token_count` events (see
+/// [`compute_token_stats`]), so the burst of output tokens emitted just before
+/// the process died stays frozen in that window and keeps inflating the
+/// fleet-wide total for up to five minutes after the turn ended. The desktop
+/// sums `tokenSpeed` across every session with no per-source filter
+/// (`store.ts`), so a handful of killed Codex turns read as thousands of
+/// phantom tok/s on the speed chart — the same ghost `session::age_out_status`
+/// was written to kill for Claude's rate-limited sessions.
+///
+/// Claude closes this twice: `claude_source::reconcile_claude_liveness` zeroes
+/// the speeds alongside its status downgrade, and `session::age_out_status`
+/// zeroes them for aged-out states. Neither runs over a *freshly scanned* Codex
+/// session (age-out is applied only to cache-retained ones, and the Claude
+/// reconciler filters on `agent_source`), so the ghost survived on both Codex
+/// build paths.
+///
+/// Gated on exactly the predicate the status clamp itself uses — asking the
+/// clamp whether it would rewrite this status rather than re-listing the
+/// in-flight set, so the two can't drift apart. That means it adds no new
+/// false-positive case: wherever the status clamp already fires, the speed now
+/// goes with it, and nowhere else.
+fn clamp_dead_session_speed(
+    status: &crate::session::SessionStatus,
+    proc_alive: bool,
+    token_speed: f64,
+) -> f64 {
+    if clamp_dead_session_status(status.clone(), proc_alive) == *status {
+        token_speed
+    } else {
+        0.0
+    }
+}
+
 /// Compute token speed and total output tokens from parsed JSONL lines.
 fn compute_token_stats(lines: &[Value]) -> (f64, u64, u64) {
     let mut total_output: u64 = 0;
@@ -1760,7 +1797,9 @@ fn build_session_from_sqlite(
     let (pid, pid_precise) = resolve_pid(codex_processes, &thread.id, &thread.cwd);
     let proc_alive = codex_proc_alive(codex_processes, &thread.id);
     // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
-    // the composer offers resume (not enqueue) once the turn is over.
+    // the composer offers resume (not enqueue) once the turn is over, and drop
+    // the speed frozen in its 300s window with it.
+    let token_speed = clamp_dead_session_speed(&status, proc_alive, token_speed);
     let status = clamp_dead_session_status(status, proc_alive);
 
     // Prefer: source-embedded nickname > SQLite agent_nickname
@@ -2439,6 +2478,53 @@ mod tests {
             S::WaitingInput
         );
         assert_eq!(clamp_dead_session_status(S::Idle, false), S::Idle);
+    }
+
+    #[test]
+    fn dead_codex_turn_drops_its_frozen_speed() {
+        use super::clamp_dead_session_speed;
+        // A killed mid-turn session still carries the tok/s its last burst left
+        // in the 300s window. The status clamp fires, so the speed must go too —
+        // otherwise it keeps inflating the source-agnostic fleet total for up to
+        // five minutes after the process is gone.
+        for st in [
+            S::Thinking,
+            S::Executing,
+            S::Streaming,
+            S::Delegating,
+            S::Processing,
+            S::Active,
+        ] {
+            assert_eq!(
+                clamp_dead_session_speed(&st, false, 812.0),
+                0.0,
+                "{st:?} with a dead process must contribute no speed"
+            );
+        }
+    }
+
+    #[test]
+    fn live_codex_turn_keeps_its_speed() {
+        use super::clamp_dead_session_speed;
+        // The zeroing must never touch a running turn — that would blank the
+        // speed chart for exactly the sessions it exists to show.
+        assert_eq!(clamp_dead_session_speed(&S::Streaming, true, 812.0), 812.0);
+        assert_eq!(clamp_dead_session_speed(&S::Active, true, 812.0), 812.0);
+    }
+
+    #[test]
+    fn dead_codex_session_keeps_speed_on_non_inflight_status() {
+        use super::clamp_dead_session_speed;
+        // Mirror of `dead_codex_session_preserves_non_inflight_status`: the speed
+        // is gated on the status clamp firing, so a status the clamp leaves alone
+        // keeps its speed. RateLimited ghost speed is a separate hole (Claude
+        // kills it in `session::age_out_status`, which never runs over a freshly
+        // scanned Codex session) — deliberately NOT closed here.
+        assert_eq!(
+            clamp_dead_session_speed(&S::RateLimited, false, 812.0),
+            812.0
+        );
+        assert_eq!(clamp_dead_session_speed(&S::Idle, false, 812.0), 812.0);
     }
 
     #[test]
@@ -3747,6 +3833,10 @@ mod tests {
             s.agent_source = source.into();
             s.proc_alive = true;
             s.status = SessionStatus::Executing;
+            // Every session enters with a live speed reading so the assertions
+            // below can tell "zeroed because dead" from "was never set".
+            s.token_speed = 812.0;
+            s.agent_token_speed = 812.0;
             s
         };
 
@@ -3779,15 +3869,28 @@ mod tests {
             SessionStatus::WaitingInput,
             "dead session status clamped to WaitingInput"
         );
+        assert_eq!(
+            (sessions[0].token_speed, sessions[0].agent_token_speed),
+            (0.0, 0.0),
+            "the speed frozen in the dead turn's 300s window must go with the status"
+        );
         assert!(sessions[1].proc_alive, "live codex session left untouched");
         assert_eq!(
             sessions[1].status,
             SessionStatus::Executing,
             "live codex session status preserved"
         );
+        assert_eq!(
+            sessions[1].token_speed, 812.0,
+            "a running codex turn must keep contributing its speed"
+        );
         assert!(
             sessions[2].proc_alive,
             "non-codex session must be ignored by codex reconcile"
+        );
+        assert_eq!(
+            sessions[2].token_speed, 812.0,
+            "codex reconcile must not zero a Claude session's speed"
         );
     }
 
@@ -4902,6 +5005,10 @@ fn reconcile_codex_liveness(
             continue;
         }
         s.proc_alive = false;
+        // Same pairing as the two build paths: the speed frozen in the dead
+        // turn's 300s window goes out with the in-flight status.
+        s.token_speed = clamp_dead_session_speed(&s.status, false, s.token_speed);
+        s.agent_token_speed = s.token_speed;
         s.status = clamp_dead_session_status(s.status.clone(), false);
         changed = true;
     }
@@ -5305,7 +5412,9 @@ fn parse_codex_session(
     // change and no auto-resume — just an advisory for the card.
     let out_of_credits = codex_out_of_credits(&all_parsed);
     // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
-    // the composer offers resume (not enqueue) once the turn is over.
+    // the composer offers resume (not enqueue) once the turn is over, and drop
+    // the speed frozen in its 300s window with it.
+    let token_speed = clamp_dead_session_speed(&status, proc_alive, token_speed);
     let status = clamp_dead_session_status(status, proc_alive);
 
     let uri = build_uri(rollout_path)?;
