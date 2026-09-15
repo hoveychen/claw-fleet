@@ -22,6 +22,7 @@ import type { PushState } from "../push";
 import type { PairedDevice } from "../devices";
 import type { PairedLink } from "../pairingLink";
 import { canScanPairing, scanPairing } from "../nativeScan";
+import { scanAvailability } from "../scanAvailability";
 import { PairPasteForm } from "./PairPasteForm";
 import { PairScanner } from "./PairScanner";
 import { useTheme, type ThemeSetting } from "../theme";
@@ -125,6 +126,10 @@ export function MoreView({
   // 「扫码添加设备」的取景器。鸿蒙壳走它自己那条（scanPairing 会重载 WebView 并
   // 注入 #k=），其余形态都用页面里这个。
   const [scanning, setScanning] = useState(false);
+  /** 壳有没有自带扫码桥（鸿蒙）——有的话相机归系统管，不受页面的安全上下文限制。 */
+  const shellScan = canScanPairing();
+  /** 没有壳桥时，页面自己能不能开摄像头。 */
+  const scan = scanAvailability();
   const { setting, setTheme } = useTheme();
   const wakeLock = useWakeLock();
   // Task-list handoff grouping — same "tasks:groupHandoff" draft the task page
@@ -606,28 +611,36 @@ export function MoreView({
               同样没有地址栏,而且它的存储与 Safari 分区隔离,回 Safari 开链接加进
               去的那台它也看不见。所以这两行对**所有**形态都必须在。
 
-              扫码优先用壳自己的(鸿蒙壳会重载 WebView 并注入 #k=,相机由系统接管);
-              没有那座桥就用页面里的取景器。粘贴是相机被拒/不可用时的兜底,也是
-              自建 relay 的唯一入口(二维码扫出来的链接系统交不到 app 手上)。 */}
-          <div className={styles.card} style={{ marginTop: 8 }}>
-            <button
-              className={styles.navRow}
-              onClick={() => (canScanPairing() ? scanPairing() : setScanning(true))}
-            >
-              <span className={styles.navIcon}>
-                <QrCode size={18} />
-              </span>
-              <span className={styles.navText}>
-                <span className={styles.navLabel}>{t("扫码添加设备")}</span>
-                <span className={styles.navSub}>
-                  {t("扫另一台桌面端「移动端」面板里的二维码")}
+              扫码优先用壳自己的(鸿蒙壳会重载 WebView 并注入 #k=,相机由系统接管,
+              所以它不受下面那条 https 限制);没有那座桥就用页面里的取景器,而那条
+              要 getUserMedia —— 非 https 的地址上浏览器压根不给,于是整行不画,由
+              下面那句说清原因。粘贴是相机被拒/不可用时的兜底,也是自建 relay 的
+              唯一入口(二维码扫出来的链接系统交不到 app 手上)。 */}
+          {(shellScan || scan === "ok") && (
+            <div className={styles.card} style={{ marginTop: 8 }}>
+              <button
+                className={styles.navRow}
+                onClick={() => (shellScan ? scanPairing() : setScanning(true))}
+              >
+                <span className={styles.navIcon}>
+                  <QrCode size={18} />
                 </span>
-              </span>
-              <ChevronRight size={16} className={styles.navChevron} />
-            </button>
-          </div>
+                <span className={styles.navText}>
+                  <span className={styles.navLabel}>{t("扫码添加设备")}</span>
+                  <span className={styles.navSub}>
+                    {t("扫另一台桌面端「移动端」面板里的二维码")}
+                  </span>
+                </span>
+                <ChevronRight size={16} className={styles.navChevron} />
+              </button>
+            </div>
+          )}
           <div className={styles.rowNote}>
-            {t("每台桌面端各出一张码;扫过的会留在上面这个列表里。")}
+            {shellScan || scan === "ok"
+              ? t("每台桌面端各出一张码;扫过的会留在上面这个列表里。")
+              : scan === "insecure-origin"
+                ? t("这个地址不是 HTTPS，浏览器不允许网页调用摄像头，扫码这条路走不了。请用下面的粘贴。")
+                : t("这台设备用不了摄像头，扫不了码。请用下面的粘贴。")}
           </div>
           <div className={styles.pasteRow}>
             <PairPasteForm onPaired={onAddDevice} />
