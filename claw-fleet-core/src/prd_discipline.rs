@@ -472,12 +472,14 @@ Fleet 的 Stop hook 就消费这个登记，并在同一 workspace spawn 一个�
 `find ~/.claude/projects -name \"<session id>.jsonl\"`。\n\
 - 给你会话的一个新用户 prompt 会取消你待定的交接——{title}接管永远优先。链最多\
 100 跳；重新登记会覆盖你之前的便条。\n\
-- **登记就是把便条定稿了。**从 `register` 返回 ok 的那一刻起，note 的内容已经冻结，\
-后继者拿到的就是那一份。所以登记之后**不要再发方向性的决策卡**（「下一棒该先做\
-哪一面？」「要不要换个顺序？」）——决策卡的答案走的是 tool_result，既**不**取消\
-待定的交接，也**进不了**已冻结的 note，{title}的选择会被静默丢弃，而他还以为自己\
-改了方向。要问就**先问、拿到答案、再按答案写 note 去登记**；已经登记了就只发不带\
-决策的收尾卡。\n\
+- **登记就是把便条定稿了，也是本回合最后一个动作。**从 `register` 返回 ok 的那一刻起，\
+note 的内容已经冻结，后继者拿到的就是那一份。所以登记之后**一张决策卡都不要再发**——\
+方向性的（「下一棒该先做哪一面？」）固然不行，不带决策的收尾卡同样不行。两个理由：\
+接力靠回合*结束*触发（Stop hook 消费登记并 spawn 后继者），卡会把回合挂住等人点，\
+卡不点后继者就不起来；而卡上的答案走的是 tool_result，既**不**取消待定的交接，\
+也**进不了**已冻结的 note，{title}的选择会被静默丢弃，而他还以为自己改了方向。\
+要问就**先问、拿到答案、再按答案写 note 去登记**；登记完直接用一行纯文本收尾结束回合。\
+`fleet__ask` 与 `fleet__render_a2ui` 在服务端也会拒掉登记之后的调用。\n\
 - **你挂的 `fleet watch` 会跟着棒一起转给后继者**（含它的条件、deadline 和你的 \
 model/effort）。所以交接前不用特地去 stop 它，也不要在便条里叮嘱后继者「重挂一个」\
 ——那会变成两个 watch 叫醒同一个人。反过来，你作为后继者若在开场 prompt 里读到\
@@ -1170,14 +1172,18 @@ plan automatically.\n\
 - A new user prompt to your session cancels your pending handoff — {title} \
 taking over always wins. Chains are capped at 100 hops; re-registering \
 overwrites your previous note.\n\
-- **Registering freezes the note.** From the `ok` onwards, what the successor \
-will read is fixed. So after registering, do **not** raise a directional \
-decision card (\"which side should the next hop start on?\", \"should we \
-reorder?\") — a card's answer arrives as a tool_result, which neither cancels \
-the pending handoff nor reaches the frozen note, so {title}'s choice is \
-silently dropped while they believe they changed course. Ask **first**, write \
-the note from the answer, then register; once registered, only raise a \
-decision-free wrap-up card.\n\
+- **Registering freezes the note, and is the last move of the turn.** From the \
+`ok` onwards, what the successor will read is fixed. So after registering, \
+raise **no decision card at all** — not a directional one (\"which side should \
+the next hop start on?\"), and not a decision-free wrap-up card either. Two \
+reasons: the relay fires when the turn *ends* (the Stop hook consumes the \
+registration and spawns the successor), and a card holds the turn open waiting \
+for a click — no click, no successor; and a card's answer arrives as a \
+tool_result, which neither cancels the pending handoff nor reaches the frozen \
+note, so {title}'s choice is silently dropped while they believe they changed \
+course. Ask **first**, write the note from the answer, then register; once \
+registered, end the turn with a single line of plain text. `fleet__ask` and \
+`fleet__render_a2ui` also refuse post-registration calls server-side.\n\
 - **A `fleet watch` you armed moves to the successor with the baton** (its \
 condition, deadline, and your model/effort). So do not stop it before handing \
 off, and do not tell the successor to re-arm one in your note — that just puts \
@@ -1580,11 +1586,16 @@ mod tests {
                 g.contains("登记就是把便条定稿了") || g.contains("Registering freezes the note"),
                 "[{locale}] Rule 5 must say registering freezes the note"
             );
+            // The ban is now total — a decision-free wrap-up card is barred too,
+            // because the card is what keeps the Stop hook (and hence the
+            // successor) from firing, not just a place to lose an answer.
             assert!(
-                g.contains("不要再发方向性的决策卡")
-                    || g.contains("do **not** raise a directional \\\ndecision card")
-                    || g.contains("raise a directional"),
-                "[{locale}] it must ban the post-register directional card"
+                g.contains("一张决策卡都不要再发") || g.contains("raise **no decision card at all**"),
+                "[{locale}] it must ban every post-register card, wrap-up included"
+            );
+            assert!(
+                g.contains("接力靠回合*结束*触发") || g.contains("the relay fires when the turn *ends*"),
+                "[{locale}] it must say why: a card holds the turn open, stranding the successor"
             );
             assert!(
                 g.contains("跟着棒一起转给后继者")

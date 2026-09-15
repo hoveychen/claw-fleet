@@ -233,6 +233,36 @@ fn refuse_if_subagent(name: &str, effect: &str, args: &Value) -> Option<Value> {
     Some(tool_error(crate::subagent_caller::subagent_tool_refusal(name, effect, &agent_type)))
 }
 
+/// Handed back when a session that has already registered a `fleet handoff`
+/// tries to raise one more Decision Card.
+///
+/// A registered relay fires from the **Stop** hook — i.e. the successor is
+/// spawned by the turn *ending*. A card is precisely what stops the turn from
+/// ending, so the relay sits frozen behind a click the boss has no reason to
+/// make: `handoff::register` already froze the note, so whatever they answer
+/// can no longer reach the successor (it comes back as a `tool_result` to a
+/// session that is about to be replaced) and is silently dropped. The only
+/// effect left is the wait and the click.
+///
+/// The interaction-mode guidance says all of this in prose — and agents kept
+/// shipping a 收尾卡 after registering anyway, which is the same failure shape
+/// as the hand-rolled terminal option above: prose alone does not hold. Refuse
+/// the call so the agent's only remaining move is the correct one, ending the
+/// turn in plain text.
+const PENDING_HANDOFF_ASK_REFUSAL: &str = "你已登记 fleet handoff，接力就绪 —— \
+它靠本回合*结束*触发（Stop hook），而决策卡恰恰会把回合挂住等人点。note 在 register 那一刻已冻结，\
+老板在这张卡上的回答既到不了后继者、也改不了 note，只会被静默丢弃。\
+所以不要发这张卡：用一行纯文本收尾结束本回合，后继者会立刻起来。";
+
+/// Refuse a card when this session has a relay registered and waiting to fire.
+fn refuse_if_handoff_pending(session_id: &str) -> Option<Value> {
+    if session_id.is_empty() {
+        return None;
+    }
+    crate::handoff::read_pending(session_id)?;
+    Some(tool_error(PENDING_HANDOFF_ASK_REFUSAL.to_string()))
+}
+
 /// True when the invoking session was spawned by Fleet — the gate for exposing
 /// and running the control tools. Reads the session id from the same env the UI
 /// tools use ([`current_session_id`]); an unresolvable id is treated as
@@ -707,6 +737,15 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         }
     }
 
+    // Handoff guard: see `PENDING_HANDOFF_ASK_REFUSAL`. Ahead of the heartbeat
+    // check — with a relay registered there is no card to raise regardless of
+    // whether a consumer is up, and the fall-back hint that check hands back
+    // ("use AskUserQuestion instead") is exactly the wrong next move here.
+    let session_id = current_session_id();
+    if let Some(refusal) = refuse_if_handoff_pending(&session_id) {
+        return Ok(refusal);
+    }
+
     // Heartbeat check — if no Fleet consumer is alive, refuse the call so
     // Claude Code's agent can choose to fall back to AskUserQuestion.
     let status = crate::consumer_heartbeat::consumer_status(heartbeat_window());
@@ -721,7 +760,6 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     // parent and the terminal button on that card closes the *parent's* task —
     // see `subagent_caller` for the 2026-09-08 case that motivated this. Refuse
     // it and tell the agent to hand its report back to the parent as text.
-    let session_id = current_session_id();
     let first_question = questions.first().map(|q| q.question.as_str()).unwrap_or_default();
     if let Some(agent_type) = crate::subagent_caller::detect_ask_caller(&session_id, first_question)
     {
@@ -944,6 +982,14 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
         }
     };
 
+    // Same handoff guard as fleet__ask, in the same slot (ahead of the
+    // heartbeat): a registered relay fires when the turn ends, and a card is
+    // exactly what stops the turn from ending.
+    let session_id = current_session_id();
+    if let Some(refusal) = refuse_if_handoff_pending(&session_id) {
+        return Ok(refusal);
+    }
+
     // Heartbeat — same fall-back hint as fleet__ask so the agent can pick
     // AskUserQuestion or a degraded text response when no consumer is up.
     let status = crate::consumer_heartbeat::consumer_status(heartbeat_window());
@@ -954,7 +1000,6 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 
     // Same re-entry guard as fleet__ask: one parked question per session.
-    let session_id = current_session_id();
     if crate::parked::has_parked_for_session(&session_id) {
         return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
     }
@@ -1509,6 +1554,101 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// A registered relay fires from the Stop hook, i.e. from the turn ending —
+    /// so a card raised afterwards freezes the successor behind a click whose
+    /// answer can no longer reach it. Both card tools must refuse.
+    #[test]
+    fn cards_are_refused_once_a_handoff_is_registered() {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir()
+            .join(format!("fleet-mcp-handoff-card-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let previous_home = std::env::var_os("FLEET_HOME");
+        let previous_session = std::env::var_os("CLAUDE_CODE_SESSION_ID");
+        // SAFETY: serialised by `fleet_home_lock` (matches sibling tests).
+        unsafe {
+            std::env::set_var("FLEET_HOME", &tmp);
+            std::env::set_var("CLAUDE_CODE_SESSION_ID", "handoff-card-test");
+        }
+
+        crate::handoff::register(
+            "handoff-card-test",
+            "/tmp/ws",
+            None,
+            "next stint: finish P3",
+            None,
+            None,
+            None,
+            None,
+            "claude",
+        )
+        .expect("register handoff");
+
+        let ask = call(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "tools/call",
+                "params": {
+                    "name": "fleet__ask",
+                    "arguments": { "questions": [{
+                        "question": "交接已登记。\n---\n还要我做点别的吗？",
+                        "header": "收尾",
+                        "multiSelect": false,
+                        "options": [
+                            {"label": "再跑一遍全量测试", "description": "合并前复查"},
+                            {"label": "先看 diff", "description": "逐文件过一遍"}
+                        ]
+                    }] }
+                }
+            })
+            .to_string(),
+        )
+        .expect("ask response");
+
+        let a2ui = call(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 31,
+                "method": "tools/call",
+                "params": {
+                    "name": "fleet__render_a2ui",
+                    "arguments": { "messageTree": { "surfaceUpdate": {} } }
+                }
+            })
+            .to_string(),
+        )
+        .expect("a2ui response");
+
+        // SAFETY: restore prior state under the same lock.
+        unsafe {
+            match previous_home {
+                Some(value) => std::env::set_var("FLEET_HOME", value),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+            match previous_session {
+                Some(value) => std::env::set_var("CLAUDE_CODE_SESSION_ID", value),
+                None => std::env::remove_var("CLAUDE_CODE_SESSION_ID"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        for (label, resp) in [("fleet__ask", ask), ("fleet__render_a2ui", a2ui)] {
+            assert!(resp.get("error").is_none(), "{label}: expected ok envelope, got {resp}");
+            assert_eq!(resp["result"]["isError"], true, "{label}: must refuse, got {resp}");
+            let text = resp["result"]["content"][0]["text"].as_str().unwrap_or_default();
+            assert!(
+                text.contains("fleet handoff"),
+                "{label}: refusal must name the registered relay, got {text}"
+            );
+            assert!(
+                !text.contains("Fleet consumer not running"),
+                "{label}: the handoff refusal must win over the heartbeat hint, got {text}"
+            );
+        }
+    }
+
     #[test]
     fn set_session_title_rejects_blank_title() {
         let req = json!({
@@ -1987,11 +2127,16 @@ mod tests {
     /// SessionDetail side column (DecisionPanel.tsx `PastHistoryStrip` only
     /// renders when `active.request.sessionId` is truthy).
     ///
-    /// `set_var`/`remove_var` mutate process-global state; no other test reads
-    /// `CLAUDE_CODE_SESSION_ID`, so this stays self-contained. The wrong-name
-    /// var is also cleared to prove the value comes from the right source.
+    /// `set_var`/`remove_var` mutate process-global state, and sibling tests DO
+    /// read `CLAUDE_CODE_SESSION_ID` now (the title and handoff-guard tests
+    /// drive handlers through `current_session_id`), so this takes the same
+    /// process-wide `fleet_home_lock` they do — without it, clearing the var
+    /// mid-flight makes those tests resolve an empty session id and fall
+    /// through their guards. The wrong-name var is also cleared to prove the
+    /// value comes from the right source.
     #[test]
     fn current_session_id_reads_claude_code_session_id() {
+        let _guard = crate::session::fleet_home_lock();
         unsafe {
             std::env::remove_var("CLAUDE_SESSION_ID");
             std::env::set_var("CLAUDE_CODE_SESSION_ID", "sess-abc-123");
