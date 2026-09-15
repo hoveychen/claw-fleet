@@ -16,12 +16,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import type { PairedLink } from "../pairingLink";
 import { readPairingFromFrame } from "../scanFrame";
+import { scanAvailability } from "../scanAvailability";
 import styles from "./PairScanner.module.css";
 
 /** 解码节流：逐帧解码在低端机上会把主线程吃满，而二维码不会在 100ms 内跑掉。 */
 const DECODE_INTERVAL_MS = 100;
 
-type Status = "starting" | "scanning" | "denied" | "unavailable";
+type Status = "starting" | "scanning" | "denied" | "unavailable" | "insecure";
 
 export function PairScanner({
   onPaired,
@@ -74,8 +75,12 @@ export function PairScanner({
     };
 
     const start = async () => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setStatus("unavailable");
+      // 非 https 的地址上 mediaDevices 整个不存在,那不是「这台设备没有摄像头」——
+      // 说成后者会把用户支使去系统设置里找一个根本不存在的开关。调用方通常已经
+      // 按 scanAvailability() 把入口收起来了,这里是直达这个组件时的同一句话。
+      const avail = scanAvailability();
+      if (avail !== "ok") {
+        setStatus(avail === "insecure-origin" ? "insecure" : "unavailable");
         return;
       }
       try {
@@ -128,6 +133,8 @@ export function PairScanner({
           {status === "denied" &&
             t("没有摄像头权限，扫不了码。可以到系统设置里允许，或改用粘贴配对链接。")}
           {status === "unavailable" && t("这台设备用不了摄像头。请改用粘贴配对链接。")}
+          {status === "insecure" &&
+            t("这个地址不是 HTTPS，浏览器不允许网页调用摄像头。请改用粘贴配对链接。")}
         </p>
         <button className={styles.close} onClick={close}>
           {t("取消")}

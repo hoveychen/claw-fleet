@@ -172,6 +172,14 @@ const DICT: Record<string, string> = {
     "No camera permission, so scanning is unavailable. Allow it in system settings, or paste a pairing link instead.",
   "这台设备用不了摄像头。请改用粘贴配对链接。":
     "This device has no usable camera. Paste a pairing link instead.",
+  // 非 https 地址上 getUserMedia 不存在。与「没有摄像头」分开说：后者会把用户
+  // 支使去系统设置里找一个根本不存在的开关。
+  "这个地址不是 HTTPS，浏览器不允许网页调用摄像头。请改用粘贴配对链接。":
+    "This address isn't HTTPS, so the browser won't let the page use the camera. Paste a pairing link instead.",
+  "这个地址不是 HTTPS，浏览器不允许网页调用摄像头，扫码这条路走不了。请用下面的粘贴。":
+    "This address isn't HTTPS, so the browser won't let the page use the camera — scanning isn't available. Use the paste option below.",
+  "这台设备用不了摄像头，扫不了码。请用下面的粘贴。":
+    "This device has no usable camera, so scanning isn't available. Use the paste option below.",
   改为粘贴配对链接: "Paste a pairing link instead",
   "在桌面端「移动端」板块点「复制配对链接」，把它贴到这里。摄像头用不了、或链接是从别的设备发过来的，都走这条。":
     "Click “Copy pairing link” in the desktop's Mobile panel and paste it here. Use this when the camera is unavailable, or when the link reached you from another device.",

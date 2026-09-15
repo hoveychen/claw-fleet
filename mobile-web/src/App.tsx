@@ -67,6 +67,7 @@ import { onPairingLink } from "./deepLink";
 import type { PairedLink } from "./pairingLink";
 import { PairPasteForm } from "./views/PairPasteForm";
 import { PairScanner } from "./views/PairScanner";
+import { scanAvailability } from "./scanAvailability";
 import { clearCachedSessions } from "./sessionCache";
 import { AUTH_WAIT_MS, waitAuthed } from "./transportWait";
 import { DeviceScopeProvider, scopedKey } from "./deviceScope";
@@ -908,9 +909,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     // 而 A2HS 存的是 manifest 的 start_url（`/`），fragment 里的密钥也一并丢掉。
     // 于是用户第一次点主屏幕图标就落在这张门上 —— 主屏幕 app 没有地址栏，没法
     // 再开一次带 #k= 的链接，而门上一个按钮都没有，人就彻底卡死（老板 2026-09-15
-    // 反馈）。摄像头被拒时 PairScanner 自己会把人引到粘贴那条路，所以这两条一起
-    // 给，不做能力探测。
+    // 反馈）。
+    //
+    // 扫码那条按能力出：地址不是 https 时浏览器根本不暴露 getUserMedia，摆一个点
+    // 了必然失败的按钮不如当场说清原因，把人直接引到粘贴（scanAvailability.ts）。
     const pairEntries = idbProbed;
+    const scan = scanAvailability();
     if (scanning) {
       return <PairScanner onPaired={adoptPaired} onClose={() => setScanning(false)} />;
     }
@@ -925,9 +929,17 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </p>
         {pairEntries && (
           <>
-            <button className={styles.gateButton} onClick={() => setScanning(true)}>
-              {t("扫码配对")}
-            </button>
+            {scan === "ok" ? (
+              <button className={styles.gateButton} onClick={() => setScanning(true)}>
+                {t("扫码配对")}
+              </button>
+            ) : (
+              <p className={styles.gateNote}>
+                {scan === "insecure-origin"
+                  ? t("这个地址不是 HTTPS，浏览器不允许网页调用摄像头，扫码这条路走不了。请用下面的粘贴。")
+                  : t("这台设备用不了摄像头，扫不了码。请用下面的粘贴。")}
+              </p>
+            )}
             <PairPasteForm onPaired={adoptPaired} />
           </>
         )}

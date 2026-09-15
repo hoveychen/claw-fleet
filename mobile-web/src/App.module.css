@@ -278,6 +278,13 @@
   font-size: var(--t-ui, 14px);
 }
 
+/* 扫不了码时顶掉「扫码配对」按钮的那行说明。占位与按钮一致（.gateButton 的
+   margin-top），免得两种形态下门里的间距各不相同。 */
+.gateNote {
+  margin-top: 12px;
+  font-size: var(--t-aux, 12px);
+}
+
 .gateLogo {
   width: 64px;
   height: 64px;
