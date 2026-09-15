@@ -85,6 +85,25 @@ fn main() {
          miss_bytes={:.1} MB",
         miss_bytes as f64 / 1e6
     );
+    // Steady-state miss count under the P2 rule (dsh gates on token counters
+    // only). The persisted file still carries the old dsh fingerprints, so the
+    // very first run after P2 re-folds every dsh session once; this is what it
+    // costs from the second run on.
+    let mut miss_new_rule = 0usize;
+    for s in &sessions {
+        let same = persisted
+            .get(&s.id)
+            .is_some_and(|p| if s.agent_source == "dsh" {
+                (p.1, p.2) == (s.total_input_tokens, s.total_output_tokens)
+            } else {
+                *p == (s.last_activity_ms, s.total_input_tokens, s.total_output_tokens)
+            });
+        if !same {
+            miss_new_rule += 1;
+        }
+    }
+    println!("fingerprint misses under the P2 rule (steady state): {miss_new_rule}");
+
     miss_list.sort_by(|a, b| b.0.cmp(&a.0));
     for (bytes, src, why) in miss_list.iter().take(15) {
         println!("  {:>9.1} MB  {:<8} {}", *bytes as f64 / 1e6, src, why);
