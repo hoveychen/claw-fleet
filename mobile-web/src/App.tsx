@@ -63,7 +63,7 @@ import {
   type DeviceBook,
   type PairedDevice,
 } from "./devices";
-import { isNativeShell, onPairingLink } from "./deepLink";
+import { onPairingLink } from "./deepLink";
 import type { PairedLink } from "./pairingLink";
 import { PairPasteForm } from "./views/PairPasteForm";
 import { PairScanner } from "./views/PairScanner";
@@ -887,12 +887,20 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, []);
 
   if (!paired) {
-    // 原生壳限定的两条入口。系统相机扫出来的链接由 App Link 决定交给谁，而
-    // App Link 只认 manifest 里编译期写死的 host —— 自建 relay 的 host 编译期
-    // 不可知，那条路对它结构上不可用（扫出来只会打开浏览器）。app 内扫码拿到的
-    // 是二维码原文，粘贴更是不依赖任何 host 声明。
-    // PWA 两条都不需要：它本来就是被那条链接打开的。
-    const nativeEntries = idbProbed && isNativeShell();
+    // 两条不依赖地址栏的配对入口。它们本来是原生壳限定的：壳从 rawfile 启动，
+    // 没有「打开一条带 #k= 的链接」这回事；系统相机扫出来的链接由 App Link 决定
+    // 交给谁，而 App Link 只认 manifest 里编译期写死的 host，自建 relay 的 host
+    // 编译期不可知，那条路对它结构上不可用。app 内扫码拿到的是二维码原文，粘贴
+    // 更是不依赖任何 host 声明。
+    //
+    // PWA 同样需要它们，而且是**唯一**的出路。iOS 把「添加到主屏幕」装出来的
+    // web app 放进独立的存储分区：Safari 标签页里刚落盘的那份配对不会跟过去，
+    // 而 A2HS 存的是 manifest 的 start_url（`/`），fragment 里的密钥也一并丢掉。
+    // 于是用户第一次点主屏幕图标就落在这张门上 —— 主屏幕 app 没有地址栏，没法
+    // 再开一次带 #k= 的链接，而门上一个按钮都没有，人就彻底卡死（老板 2026-09-15
+    // 反馈）。摄像头被拒时 PairScanner 自己会把人引到粘贴那条路，所以这两条一起
+    // 给，不做能力探测。
+    const pairEntries = idbProbed;
     if (scanning) {
       return <PairScanner onPaired={adoptPaired} onClose={() => setScanning(false)} />;
     }
@@ -902,10 +910,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <h1>{t("Fleet 移动端")}</h1>
         <p>
           {idbProbed
-            ? t("请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。")
+            ? t("扫描桌面端 Fleet「移动端」板块里的二维码完成配对。")
             : t("正在恢复配对…")}
         </p>
-        {nativeEntries && (
+        {pairEntries && (
           <>
             <button className={styles.gateButton} onClick={() => setScanning(true)}>
               {t("扫码配对")}
