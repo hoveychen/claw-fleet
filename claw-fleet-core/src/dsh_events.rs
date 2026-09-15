@@ -514,6 +514,20 @@ pub struct LiveView {
     /// the socket is legitimately mid-handshake, and a read that gave up on that
     /// would fail every first transcript open.
     unreachable: AtomicBool,
+    /// Sessions whose follow stream **this generation of the socket refused**.
+    ///
+    /// A refusal is not a slow answer: dsh answers `session/agent-busy:
+    /// subagent Sessions require their durable parent address` for a session
+    /// that can never be followed under its own id, and nothing further will
+    /// arrive on that stream. Without this, [`Self::cursor_for_history`] waits
+    /// out the full budget for such a session on every single read — measured
+    /// 2026-09-14, four refused sessions cost 20s of the 48s a full dsh usage
+    /// fold took, every pass, forever.
+    ///
+    /// Scoped to one socket generation and cleared on reconnect: whether a
+    /// session is addressable is the server's call, and a later generation
+    /// (or a later dsh) may answer differently.
+    follow_refused: Mutex<HashSet<String>>,
 }
 
 /// Handle shared between the socket follower and its owner.
@@ -621,8 +635,34 @@ impl LiveView {
     }
 
     /// Record the outcome of one attempt to reach the mux socket.
+    ///
+    /// Connecting also clears [`Self::follow_refused`]: those refusals belong to
+    /// the generation that collected them.
     pub fn set_unreachable(&self, unreachable: bool) {
         self.unreachable.store(unreachable, Ordering::SeqCst);
+        if !unreachable {
+            self.follow_refused
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+        }
+    }
+
+    /// Remember that the server refused this session's follow stream — see
+    /// [`Self::follow_refused`].
+    pub fn mark_follow_refused(&self, session_id: &str) {
+        self.follow_refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(session_id.to_string());
+    }
+
+    /// Whether this session's follow stream was refused by the live generation.
+    pub fn is_follow_refused(&self, session_id: &str) -> bool {
+        self.follow_refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(session_id)
     }
 
     /// Whether the socket that publishes cursors and phases has proven
@@ -659,11 +699,26 @@ impl LiveView {
         if self.is_unreachable() {
             return None;
         }
+        // Same reasoning, one session narrower: the server has already told this
+        // generation it will not follow *this* session, so the stream that would
+        // carry the cursor is never going to open. Waiting out the budget here
+        // is the difference between a usage fold that costs milliseconds and one
+        // that costs five seconds per refused session.
+        if self.is_follow_refused(session_id) {
+            return None;
+        }
         follow(session_id);
         let deadline = std::time::Instant::now() + budget;
         while std::time::Instant::now() < deadline {
             if let Some(seq) = self.cursor_of(session_id) {
                 return Some(seq);
+            }
+            // The refusal usually lands here, a few ms into the wait: the stream
+            // we just opened is the one the server declines. Checking it inside
+            // the loop is what makes even the *first* read of a refused session
+            // cheap, instead of only the ones after it.
+            if self.is_follow_refused(session_id) {
+                return None;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -1106,6 +1161,15 @@ async fn pump(
                                     // A follow that failed is no longer wanted
                                     // under this generation's id; the next
                                     // reconnect reopens it from `wanted`.
+                                    //
+                                    // Until then, record it: a history read that
+                                    // needs this session's cursor would otherwise
+                                    // block for its whole budget waiting on a
+                                    // stream the server has already declined to
+                                    // open.
+                                    if let StreamKind::Follow(session_id) = &kind {
+                                        states.mark_follow_refused(session_id);
+                                    }
                                 }
                             }
                             MuxEnvelope::Ignored => {}
@@ -1728,6 +1792,41 @@ mod tests {
             "must not burn the budget waiting on a socket that is down: {:?}",
             started.elapsed()
         );
+    }
+
+    /// Narrower than the case above and far more common in practice: the socket
+    /// is healthy, but the server refused *this session's* follow stream (dsh
+    /// answers `session/agent-busy` for a subagent session addressed under its
+    /// own id). Nothing will ever arrive on that stream, so a read must fail at
+    /// once — four such sessions were costing 20s of every dsh usage fold.
+    #[test]
+    fn a_refused_follow_fails_a_history_read_immediately() {
+        use std::sync::atomic::AtomicUsize;
+
+        let live = LiveView::default();
+        live.mark_follow_refused("session-a");
+        let asked = AtomicUsize::new(0);
+        let started = std::time::Instant::now();
+        let got = live.cursor_for_history("session-a", Duration::from_secs(5), |_| {
+            asked.fetch_add(1, Ordering::SeqCst);
+        });
+
+        assert_eq!(got, None, "a refused follow has no cursor to give");
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            0,
+            "must not re-ask for a stream the server already declined"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "must not burn the budget on a refused follow: {:?}",
+            started.elapsed()
+        );
+
+        // A refusal belongs to one socket generation: reconnecting clears it, so
+        // a session that becomes addressable is retried rather than written off.
+        live.set_unreachable(false);
+        assert!(!live.is_follow_refused("session-a"));
     }
 
     /// The same read on a socket that is merely still connecting *does* wait and

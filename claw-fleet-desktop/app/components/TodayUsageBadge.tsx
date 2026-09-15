@@ -54,6 +54,13 @@ export function TodayUsageBadge({
     };
   }, []);
 
+  // `null` means the first `today_usage` has not come back yet — it does NOT
+  // mean today cost nothing. Rendering it as `$0.00` made a cold launch look
+  // like a broken counter: on 2026-09-14 the first invoke took 64s (a dsh usage
+  // fold, since fixed) and the sidebar read `$0.00 · 0 tok` the whole time,
+  // right next to a live spend rate of $7/min. A day that genuinely cost zero
+  // still reads `$0.00`, because by then `usage` is a real payload.
+  const loaded = usage !== null;
   const cost = usage?.costUsd ?? 0;
   // Total tokens = input + output, cumulative across every turn (cache re-reads
   // included), on the same口径 as cost — so a heavy day reads large. Agent
@@ -64,9 +71,12 @@ export function TodayUsageBadge({
   const outputTokens = usage?.outputTokens ?? 0;
   const tokens = inputTokens + outputTokens;
   const label = t("today_usage.title", "今日累计");
+  const loadingText = t("today_usage.loading", "统计中…");
   const tokenBreakdown =
     usage && tokens > 0 ? `\nin ${fmtTokens(inputTokens)} + out ${fmtTokens(outputTokens)}` : "";
-  const title = `${label}: $${cost.toFixed(2)} · ${fmtTokens(tokens)} tok${tokenBreakdown}`;
+  const title = loaded
+    ? `${label}: $${cost.toFixed(2)} · ${fmtTokens(tokens)} tok${tokenBreakdown}`
+    : `${label}: ${loadingText}`;
 
   const receipt = showReceipt ? (
     <TokenReceiptModal onClose={() => setShowReceipt(false)} />
@@ -79,7 +89,7 @@ export function TodayUsageBadge({
         {/* Rail tile: `$3.2k`, not `$3165.41` — the exact figure lives in the
             tooltip and in the receipt this opens. */}
         <RailStatTile
-          value={fmtRailMoney(cost)}
+          value={loaded ? fmtRailMoney(cost) : "—"}
           label={label}
           title={`${title}\n${openHint}`}
           onClick={() => setShowReceipt(true)}
@@ -99,8 +109,10 @@ export function TodayUsageBadge({
         title={openHint}
         onClick={() => setShowReceipt(true)}
       >
-        <span className={styles.cost}>${cost.toFixed(2)}</span>
-        <span className={styles.tokens}>{fmtTokens(tokens)} tok</span>
+        <span className={styles.cost}>{loaded ? `$${cost.toFixed(2)}` : "—"}</span>
+        <span className={styles.tokens}>
+          {loaded ? `${fmtTokens(tokens)} tok` : loadingText}
+        </span>
       </button>
       {receipt}
     </section>

@@ -790,7 +790,8 @@
   },
   "today_usage": {
     "title": "今日累计",
-    "open_receipt": "查看今日花费明细"
+    "open_receipt": "查看今日花费明细",
+    "loading": "统计中…"
   },
   "token_receipt": {
     "title": "花费明细",

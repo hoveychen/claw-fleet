@@ -793,7 +793,8 @@
   },
   "today_usage": {
     "title": "Today",
-    "open_receipt": "View today's spend breakdown"
+    "open_receipt": "View today's spend breakdown",
+    "loading": "Tallying…"
   },
   "token_receipt": {
     "title": "Spend breakdown",

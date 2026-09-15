@@ -1098,6 +1098,26 @@ fn sum_cells_window(
 // (P3) validate a persisted entry against a fresh scan without touching the
 // transcript. Codex rollouts (a `codex://` URI, not a stat-able path) ride the
 // same fingerprint.
+//
+// **dsh is the exception**: its `last_activity_ms` is dsh's `updatedAt`, a
+// *persistence* clock (see `dsh_events::last_event_at_ms`), overlaid further by
+// whatever the live event socket saw this run. It moves without the session
+// having spent anything, and two processes observing the same ended session
+// disagree about it — so it is not a usage fingerprint at all, it is noise. Left
+// in, every dsh session re-folds on every pass, and a dsh fold is a **network
+// round trip** (`fold_dsh_session_cells` → `session/page`), not a file read.
+// Measured 2026-09-14 on a 980-session machine: 94 dsh sessions whose token
+// counts were byte-identical re-folded anyway, and folding dsh cost 48.4s
+// against 1.3s to read and parse all 938 MB of local transcripts. So dsh pins
+// the timestamp slot to 0 and gates purely on its token counters, which move
+// exactly when it spends.
+fn fingerprint_activity_ms(s: &SessionInfo) -> u64 {
+    if s.agent_source == "dsh" {
+        0
+    } else {
+        s.last_activity_ms
+    }
+}
 
 /// Fingerprint gating a cached projection: changes iff the session's usage did.
 type Fingerprint = (u64, u64, u64);
@@ -1121,18 +1141,38 @@ struct UsageBreakdownCache {
 impl UsageBreakdownCache {
     fn fingerprint(s: &SessionInfo) -> Fingerprint {
         (
-            s.last_activity_ms,
+            fingerprint_activity_ms(s),
             s.total_input_tokens,
             s.total_output_tokens,
         )
     }
 
+    /// Whether a stored fingerprint still describes `s`.
+    ///
+    /// Not plain equality, because of the dsh carve-out above: an entry written
+    /// before that change stored dsh's persistence clock in slot 0, and
+    /// comparing it against the 0 we write now would call **every** dsh entry
+    /// stale exactly once — one ~30s full re-fold on the first launch after the
+    /// upgrade, for sessions whose projections are provably unchanged. Ignoring
+    /// the slot we no longer gate on lets the old file keep validating.
+    fn fingerprint_matches(s: &SessionInfo, stored: Fingerprint) -> bool {
+        let fp = Self::fingerprint(s);
+        if s.agent_source == "dsh" {
+            (fp.1, fp.2) == (stored.1, stored.2)
+        } else {
+            fp == stored
+        }
+    }
+
     /// Cells for `s`, folding its JSONL/rollout only on a miss or a fingerprint
-    /// change. The fold (disk read + JSON parse) is the expensive step this
-    /// cache exists to skip.
+    /// change. The fold (disk read + JSON parse — or, for dsh, a network round
+    /// trip) is the expensive step this cache exists to skip.
     fn cells(&mut self, s: &SessionInfo) -> &SessionCells {
         let fp = Self::fingerprint(s);
-        let stale = self.entries.get(&s.id).map_or(true, |e| e.fingerprint != fp);
+        let stale = self
+            .entries
+            .get(&s.id)
+            .map_or(true, |e| !Self::fingerprint_matches(s, e.fingerprint));
         if stale {
             let cells = fold_session_cells(s);
             self.entries.insert(
@@ -1791,6 +1831,60 @@ mod tests {
         .expect("construct SessionInfo");
         s.created_at_ms = created_at_ms;
         s
+    }
+
+    /// dsh's `last_activity_ms` is a persistence clock, so it must not gate the
+    /// projection cache: a dsh session whose token counters did not move is the
+    /// same projection even when the timestamp jumped, and re-folding it costs a
+    /// `session/page` round trip rather than a file read. Every other source
+    /// keeps the timestamp — for them it changes exactly when usage does, and
+    /// dropping it would stop catching a transcript that grew.
+    #[test]
+    fn dsh_fingerprint_ignores_the_persistence_clock() {
+        let mut a = session_with_input(0, 1.0, 100, 10, false);
+        let mut b = session_with_input(0, 1.0, 100, 10, false);
+        a.agent_source = "dsh".into();
+        b.agent_source = "dsh".into();
+        a.last_activity_ms = 1_789_102_807_254;
+        b.last_activity_ms = 1_789_434_868_369; // same session, later observation
+        assert_eq!(
+            UsageBreakdownCache::fingerprint(&a),
+            UsageBreakdownCache::fingerprint(&b),
+            "a dsh session that spent nothing must not re-fold"
+        );
+
+        // …but a dsh session that actually spent does re-fold.
+        let mut spent = b.clone();
+        spent.total_output_tokens += 1;
+        assert_ne!(
+            UsageBreakdownCache::fingerprint(&b),
+            UsageBreakdownCache::fingerprint(&spent)
+        );
+
+        // A cache file written *before* this change stored dsh's persistence
+        // clock in slot 0. It must keep validating, or the upgrade costs one
+        // full dsh re-fold (~30s of round trips) for nothing.
+        let legacy = (1_789_102_807_254u64, 100u64, 10u64);
+        assert!(
+            UsageBreakdownCache::fingerprint_matches(&b, legacy),
+            "a pre-change dsh entry must survive the upgrade"
+        );
+        let legacy_spent = (1_789_102_807_254u64, 100u64, 11u64);
+        assert!(
+            !UsageBreakdownCache::fingerprint_matches(&b, legacy_spent),
+            "…but only while its token counters agree"
+        );
+
+        // …and the timestamp still gates every file-backed source.
+        let mut c = a.clone();
+        let mut d = b.clone();
+        c.agent_source = "claude-code".into();
+        d.agent_source = "claude-code".into();
+        assert_ne!(
+            UsageBreakdownCache::fingerprint(&c),
+            UsageBreakdownCache::fingerprint(&d),
+            "a transcript that grew must still re-fold"
+        );
     }
 
     #[test]
