@@ -306,7 +306,9 @@ describe("live proxy route table", () => {
    * the body verbatim.
    */
   it("posts pasted bytes into the persistent store, not as JSON", () => {
-    const req = LIVE_ROUTES.stage_pasted_attachment({ bytes: [1, 2, 3], extension: "png" });
+    // The composer sends base64 (the desktop's IPC is JSON); over HTTP it goes
+    // back to being bytes.
+    const req = LIVE_ROUTES.stage_pasted_attachment({ bytesB64: "AQID", extension: "png" });
     expect(req.method).toBe("POST");
     expect(req.path).toBe("/elicitation/upload");
     expect(req.query?.from_clipboard).toBe("1");

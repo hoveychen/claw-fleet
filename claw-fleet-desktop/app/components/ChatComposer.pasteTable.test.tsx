@@ -87,6 +87,15 @@ function pasteEvent({ html, text, files = [] }: Flavors): Event {
   return ev;
 }
 
+/** The attach path base64-encodes the file through a `FileReader`, which
+ *  resolves on a task rather than a microtask — awaiting promises alone never
+ *  reaches `onAddAttachment`. */
+async function flushAttach() {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+}
+
 async function mount(props: Partial<Parameters<typeof ChatComposer>[0]> = {}) {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -173,6 +182,8 @@ describe("ChatComposer paste — spreadsheet selection", () => {
       textarea.dispatchEvent(ev);
     });
 
+    await flushAttach();
+
     expect(ev.defaultPrevented).toBe(true);
     expect(onChange).not.toHaveBeenCalled();
     expect(onAddAttachment).toHaveBeenCalledTimes(1);
@@ -223,6 +234,7 @@ describe("ChatComposer paste — spreadsheet selection", () => {
     await act(async () => {
       textarea.dispatchEvent(ev);
     });
+    await flushAttach();
 
     expect(onAddAttachment).toHaveBeenCalledTimes(1);
   });

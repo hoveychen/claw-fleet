@@ -106,6 +106,14 @@ async function mount(props: Partial<Parameters<typeof ChatComposer>[0]> = {}) {
   return { onAddAttachment, textarea };
 }
 
+/** Let the `FileReader` that base64-encodes the paste run — it resolves on a
+ *  task, not a microtask, so awaiting promises alone never reaches `invoke`. */
+async function flushFileReader() {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+}
+
 function pendingChips(): Element[] {
   return [...(container?.querySelectorAll('[aria-busy="true"]') ?? [])];
 }
@@ -118,13 +126,23 @@ describe("pasted attachment progress", () => {
       textarea.dispatchEvent(pasteEvent([pngFile()]));
     });
 
-    // Staging has not resolved, so the real attachment cannot exist yet — the
-    // only thing standing between the user and an apparently dead ⌘V.
-    expect(invokeMock).toHaveBeenCalledWith("stage_pasted_attachment", expect.anything());
+    // Up before a single byte has been read — that is the whole point.
     const chips = pendingChips();
     expect(chips).toHaveLength(1);
     // The object URL is free, so the thumbnail is up before the bytes move.
     expect(chips[0].querySelector("img")?.getAttribute("src")).toBe("blob:stub");
+
+    await flushFileReader();
+
+    // Staging has not resolved, so the real attachment cannot exist yet — the
+    // chip is the only thing between the user and an apparently dead ⌘V.
+    // Base64, not an array of integers: the latter is what made a 3 MB
+    // screenshot cost 10.7 MB of JSON across the IPC boundary.
+    expect(invokeMock).toHaveBeenCalledWith("stage_pasted_attachment", {
+      bytesB64: expect.any(String),
+      extension: "png",
+    });
+    expect(pendingChips()).toHaveLength(1);
   });
 
   it("drops the chip once the attachment has been handed to the host", async () => {
@@ -135,6 +153,7 @@ describe("pasted attachment progress", () => {
       textarea.dispatchEvent(pasteEvent([pngFile()]));
     });
     expect(pendingChips()).toHaveLength(1);
+    await flushFileReader();
 
     await act(async () => {
       releaseStage?.("/tmp/staged.png");
@@ -152,8 +171,13 @@ describe("pasted attachment progress", () => {
       textarea.dispatchEvent(pasteEvent([pngFile("a.png"), pngFile("b.png")]));
     });
 
-    // The staging loop is sequential, so only the first file has called invoke —
-    // the second file's chip must not wait on it.
+    // Both chips are up in the paste's own frame, before any byte has been
+    // read; the staging loop that follows is sequential, so the second file
+    // must not wait on the first to show its receipt.
+    expect(invokeMock).toHaveBeenCalledTimes(0);
+    expect(pendingChips()).toHaveLength(2);
+
+    await flushFileReader();
     expect(invokeMock).toHaveBeenCalledTimes(1);
     expect(pendingChips()).toHaveLength(2);
   });

@@ -226,11 +226,29 @@ pub(crate) fn upload_elicitation_attachment(
 
 /// Writes clipboard/drag-drop bytes to the OS temp dir and returns the absolute
 /// path so the caller can feed it to `upload_elicitation_attachment`.
+///
+/// The bytes arrive base64-encoded rather than as a JSON array of integers:
+/// Tauri's IPC is JSON, and `[137,80,78,71,…]` costs ~3.6 bytes of text per byte
+/// of image — a 3 MB screenshot printed as 10.7 MB of JSON for the webview to
+/// serialize and serde to parse. Base64 is 1.33x, and both ends encode it in
+/// native code (`FileReader.readAsDataURL` / the `base64` crate).
 // Threadpool: writes up to `MAX_ATTACHMENT_BYTES` to disk. The filename carries
 // nanos + pid, so concurrent pastes cannot collide on a destination path.
 #[tauri::command(async)]
-pub(crate) fn stage_pasted_attachment(bytes: Vec<u8>, extension: String) -> Result<String, String> {
+pub(crate) fn stage_pasted_attachment(
+    bytes_b64: String,
+    extension: String,
+) -> Result<String, String> {
+    use base64::Engine as _;
     use std::time::{SystemTime, UNIX_EPOCH};
+    // Checked before decoding too: base64 never shrinks, so an over-budget
+    // payload can be refused without materializing it.
+    if (bytes_b64.len() as u64) > claw_fleet_core::ui_types::MAX_ATTACHMENT_BYTES * 2 {
+        return Err("attachment too large".to_string());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(bytes_b64.as_bytes())
+        .map_err(|e| format!("pasted attachment was not valid base64: {e}"))?;
     if (bytes.len() as u64) > claw_fleet_core::ui_types::MAX_ATTACHMENT_BYTES {
         return Err(format!(
             "attachment too large: {} bytes (max {})",
