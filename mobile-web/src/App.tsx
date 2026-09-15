@@ -1122,6 +1122,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onRemoveDevice={(d) => void removeDeviceEntry(d)}
             deviceMuted={(id) => pushMuted[id] ?? true}
             onMuteDevice={(d, muted) => void handleMuteDevice(d, muted)}
+            onAddDevice={adoptPaired}
             onUnpairAll={unpairAll}
             supportsPush={SUPPORTS_PUSH}
             connected={connected}

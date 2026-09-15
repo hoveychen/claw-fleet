@@ -68,6 +68,13 @@
   padding: 0 14px 12px;
 }
 
+/* 「扫码添加设备」下面那条粘贴入口。PairPasteForm 自带一张卡的排版（收起时是
+   一行链接，展开是提示 + 输入框 + 两个按钮），这里只负责给它对齐设备列表的
+   左右留白。 */
+.pasteRow {
+  padding: 0 14px;
+}
+
 .segment {
   display: flex;
   gap: 4px;
