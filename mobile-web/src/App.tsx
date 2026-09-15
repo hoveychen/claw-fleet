@@ -1009,14 +1009,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </span>
       </header>
 
-      {/* 这条横幅讲的是「iOS 7 天不用会抹掉本地配对，得重新扫码」——同源形态
-          根本没有配对可丢（后端就是发出这张页面的那个进程），显示它纯属误导。
-          用 NEEDS_PAIRING 而不是 SUPPORTS_PUSH：这条说的是配对，不是推送。 */}
+      {/* 这条横幅讲的是「iOS 7 天不用会抹掉本地配对」——同源形态根本没有配对可丢
+          （后端就是发出这张页面的那个进程），显示它纯属误导。用 NEEDS_PAIRING
+          而不是 SUPPORTS_PUSH：这条说的是配对，不是推送。
+
+          文案里那句「首次打开需要再扫一次码」不是免责声明，是这条路的实情：iOS 把
+          主屏幕 web app 的存储单独分区，Safari 里的配对不会跟过去，而 A2HS 存的是
+          manifest 的 start_url，fragment 里的密钥也带不走。不先说明，用户点开图标
+          撞上配对门只会以为坏了（见配对门的注释）。 */}
       {NEEDS_PAIRING && !MOCK && needsA2hsForDurableStorage() && !a2hsDismissed && (
         <div className={styles.pushBanner}>
           <span>
             {t(
-              "用 Safari 分享菜单「添加到主屏幕」后从主屏幕打开——否则 7 天不访问，iOS 会清掉本机配对，需重新扫码。",
+              "用 Safari 分享菜单「添加到主屏幕」，以后都从图标打开——留在 Safari 里 7 天不访问，iOS 会清掉本机配对。主屏幕 app 的存储是独立的一份，首次打开需要再扫一次码。",
             )}
           </span>
           <button
