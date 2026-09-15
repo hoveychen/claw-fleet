@@ -156,9 +156,38 @@ fn main() {
         all_bytes as f64 / 1e6
     );
 
-    // ── the suspect: dsh sessions fold over RPC, one round trip each ──────
     let dsh: Vec<_> = sessions.iter().filter(|s| s.agent_source == "dsh").collect();
     println!("\ndsh sessions in scan: {}", dsh.len());
+
+    // ── the same fold, N threads wide ─────────────────────────────────────
+    //
+    // Measured BEFORE the serial pass on purpose: `dsh_cost` memoises prices to
+    // disk, so whichever pass runs second inherits a warmer cache and would look
+    // artificially fast.
+    //
+    // `with_client` drops the server lock before the request goes out, so these
+    // round trips can overlap. This is the ceiling a parallel fold would buy for
+    // the cache-invalid case (schema bump, tz move, first run after a fingerprint
+    // change) — the only case that still folds all 424.
+    for width in [8usize] {
+        let t = Instant::now();
+        let queue = std::sync::Mutex::new(dsh.clone());
+        std::thread::scope(|scope| {
+            for _ in 0..width {
+                scope.spawn(|| loop {
+                    let Some(s) = queue.lock().unwrap().pop() else { break };
+                    let _ = claw_fleet_core::dsh_cost::dsh_session_calls(&s.jsonl_path);
+                });
+            }
+        });
+        println!(
+            "dsh fold of all {} sessions, {width} threads: {:.1}s",
+            dsh.len(),
+            t.elapsed().as_secs_f64()
+        );
+    }
+
+    // ── the suspect: dsh sessions fold over RPC, one round trip each ──────
     let t = Instant::now();
     let mut slow: Vec<(u128, String)> = Vec::new();
     for s in &dsh {

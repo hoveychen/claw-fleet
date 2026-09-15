@@ -1147,12 +1147,32 @@ impl UsageBreakdownCache {
         )
     }
 
+    /// Whether a stored fingerprint still describes `s`.
+    ///
+    /// Not plain equality, because of the dsh carve-out above: an entry written
+    /// before that change stored dsh's persistence clock in slot 0, and
+    /// comparing it against the 0 we write now would call **every** dsh entry
+    /// stale exactly once — one ~30s full re-fold on the first launch after the
+    /// upgrade, for sessions whose projections are provably unchanged. Ignoring
+    /// the slot we no longer gate on lets the old file keep validating.
+    fn fingerprint_matches(s: &SessionInfo, stored: Fingerprint) -> bool {
+        let fp = Self::fingerprint(s);
+        if s.agent_source == "dsh" {
+            (fp.1, fp.2) == (stored.1, stored.2)
+        } else {
+            fp == stored
+        }
+    }
+
     /// Cells for `s`, folding its JSONL/rollout only on a miss or a fingerprint
-    /// change. The fold (disk read + JSON parse) is the expensive step this
-    /// cache exists to skip.
+    /// change. The fold (disk read + JSON parse — or, for dsh, a network round
+    /// trip) is the expensive step this cache exists to skip.
     fn cells(&mut self, s: &SessionInfo) -> &SessionCells {
         let fp = Self::fingerprint(s);
-        let stale = self.entries.get(&s.id).map_or(true, |e| e.fingerprint != fp);
+        let stale = self
+            .entries
+            .get(&s.id)
+            .map_or(true, |e| !Self::fingerprint_matches(s, e.fingerprint));
         if stale {
             let cells = fold_session_cells(s);
             self.entries.insert(
@@ -1839,6 +1859,20 @@ mod tests {
         assert_ne!(
             UsageBreakdownCache::fingerprint(&b),
             UsageBreakdownCache::fingerprint(&spent)
+        );
+
+        // A cache file written *before* this change stored dsh's persistence
+        // clock in slot 0. It must keep validating, or the upgrade costs one
+        // full dsh re-fold (~30s of round trips) for nothing.
+        let legacy = (1_789_102_807_254u64, 100u64, 10u64);
+        assert!(
+            UsageBreakdownCache::fingerprint_matches(&b, legacy),
+            "a pre-change dsh entry must survive the upgrade"
+        );
+        let legacy_spent = (1_789_102_807_254u64, 100u64, 11u64);
+        assert!(
+            !UsageBreakdownCache::fingerprint_matches(&b, legacy_spent),
+            "…but only while its token counters agree"
         );
 
         // …and the timestamp still gates every file-backed source.
