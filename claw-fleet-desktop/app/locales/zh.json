@@ -6,7 +6,14 @@
       "handoff": "Fleet 接力",
       "loop": "Fleet 循环",
       "schedule": "Fleet 定时任务",
-      "status": { "fired": "已触发", "timeout": "已超时", "successor": "接力已启动", "manual": "手动运行" }
+      "decision": "Fleet 决策卡答复",
+      "status": {
+        "fired": "已触发",
+        "timeout": "已超时",
+        "successor": "接力已启动",
+        "manual": "手动运行",
+        "answered": "老板已回复"
+      }
     },
     "kind": {
       "plan": "计划",
@@ -1901,6 +1908,7 @@
     "working_streaming": "回复中…",
     "working_processing": "处理中…",
     "turn_failed": "这一轮失败了",
+    "interrupted": "已中断",
     "working_delegating": "子代理执行中…",
     "tasks_anonymous": "(匿名计划)",
     "tasks_status_active": "进行中",

@@ -14,6 +14,7 @@ import {
   daysAgo,
   findMatches,
   formatMsgTime,
+  isInterruptMarker,
   isRenderableRow,
   messageSearchText,
   messageToText,
@@ -132,6 +133,19 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     return (
       <div className={styles.compact_row} data-msg-idx={msgIdx}>
         <CompactSummaryBlock summary={summaryText} />
+      </div>
+    );
+  }
+
+  // A turn the user (or Fleet, on a Decision Card timeout) cut short. Worth a
+  // trace — it explains why the turn above stops mid-sentence — but not a
+  // full-width user bubble, which is all the row used to be.
+  if (isInterruptMarker(msg)) {
+    return (
+      <div className={styles.interrupt_rule} data-msg-idx={msgIdx} data-testid="interrupt-rule">
+        <span className={styles.interrupt_rule_label}>
+          {t("detail.interrupted", "已中断")}
+        </span>
       </div>
     );
   }

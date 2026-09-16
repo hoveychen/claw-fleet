@@ -353,8 +353,8 @@ export interface RawMessage {
   isTurnError?: boolean;
   /** Fleet-owned automation prompt persisted by the harness as role=user. */
   fleetEvent?: {
-    kind: "watch" | "handoff" | "loop" | "schedule";
-    status: "fired" | "timeout" | "successor" | "manual";
+    kind: "watch" | "handoff" | "loop" | "schedule" | "decision";
+    status: "fired" | "timeout" | "successor" | "manual" | "answered";
     id?: string | null;
   };
   sourceToolUseID?: string;

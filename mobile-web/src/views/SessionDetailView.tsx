@@ -181,6 +181,35 @@ function userText(msg: RawMessage): string {
   return parts.join("\n\n").trim();
 }
 
+const INTERRUPT_MARKERS = new Set([
+  "[Request interrupted by user]",
+  "[Request interrupted by user for tool use]",
+]);
+
+/** The sole text a record carries, or null when it has none / carries more.
+ *  Mirrors the desktop's `messageRows.soleText`. */
+function soleText(msg: RawMessage): string | null {
+  const blocks = blocksOf(msg);
+  if (blocks.length !== 1 || blocks[0].type !== "text") return null;
+  return blocks[0].text ?? null;
+}
+
+/** Claude persists Esc/interrupt — and Fleet's SIGINT when a Decision Card
+ *  times out — as a synthetic user turn. A terminal marker for the turn above,
+ *  not a prompt anyone typed, so it renders as a hairline rule. */
+export function isInterruptMarker(msg: RawMessage): boolean {
+  if (msg.type !== "user") return false;
+  const text = soleText(msg);
+  return text !== null && INTERRUPT_MARKERS.has(text);
+}
+
+/** Filler Claude writes when a turn is aborted before it said anything. Other
+ *  `<synthetic>` records (a 403 auth failure) carry real news and stay. */
+export function isNoResponseFiller(msg: RawMessage): boolean {
+  if (msg.type !== "assistant" || msg.message?.model !== "<synthetic>") return false;
+  return soleText(msg)?.trim() === "No response requested.";
+}
+
 /** data: URI for a block's server-side thumbnail, if the relay shipped one. */
 function thumbSrc(b: ContentBlock): string | null {
   if (!b._thumb || !b.source?.data) return null;
@@ -872,6 +901,14 @@ const MessageRow = memo(function MessageRow({
   client,
   jsonlPath,
 }: MessageRowProps) {
+  if (isNoResponseFiller(msg)) return null;
+  if (isInterruptMarker(msg)) {
+    return (
+      <div className={styles.interruptRule} data-testid="interrupt-rule">
+        <span className={styles.interruptRuleLabel}>{t("已中断")}</span>
+      </div>
+    );
+  }
   if (msg.type === "user") {
     // Automation payloads must travel through the harness's user-prompt
     // channel, but they are Fleet events rather than user-authored turns.

@@ -309,6 +309,8 @@ const DICT: Record<string, string> = {
   已超时: "Timed out",
   接力已启动: "Successor started",
   手动运行: "Manual run",
+  "Fleet 决策卡答复": "Decision card reply",
+  老板已回复: "Answered",
   "{0} 棒": "{0} hops",
 
   // ── 设置 / 更多 tab ──
