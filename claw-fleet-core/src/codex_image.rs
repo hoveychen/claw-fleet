@@ -664,8 +664,8 @@ pub fn generate_image(
             None => format!("codex never printed thread.started; output: {}", tail(&stdout)),
         })?;
 
-    // Claim the thread as internal before anything else can read it as a
-    // session — see the internal-thread section above.
+    // `run_turn` already claimed it off the `thread.started` line; re-assert so
+    // the claim does not depend on that parse having gone the way we expect.
     mark_internal_thread(&thread_id);
 
     // Fresh thread: everything in the directory is this turn's output.
@@ -777,33 +777,91 @@ fn resolve_codex() -> Result<PathBuf, String> {
     })
 }
 
-/// Spawn the turn and capture its `--json` stdout.
+/// Spawn the turn and capture its `--json` stdout, claiming the thread as
+/// internal the instant Codex names it.
+///
+/// Reads stdout line by line rather than taking `Command::output()`, purely so
+/// the `thread.started` line — Codex's first — can mark the thread while the
+/// turn is still running. Buffering to exit would leave the thread unmarked for
+/// the whole turn, and a turn that then fails produces no `generated_images`
+/// directory either, so nothing would identify it as internal until the call
+/// returned: a window in which a scan could mint it as a `SessionInfo` and the
+/// turn-completion card could fire on it. Marking off the first line closes it.
+///
+/// **stderr must be drained on its own thread.** It is piped (the failure path
+/// below reports it) and Fleet sets `RUST_LOG` on every Codex child, so the
+/// transport trace alone can fill the pipe buffer — a child blocked writing
+/// stderr never closes stdout, and this function would wait forever.
 fn run_turn(
     program: &Path,
     args: &[String],
     rca_envs: &[(String, String)],
     workspace_path: &str,
 ) -> Result<String, String> {
+    use std::io::{BufRead, Read};
+
     let mut cmd = crate::process_util::command(program);
     cmd.args(args)
         .current_dir(workspace_path)
         // MUST be null: `codex exec` otherwise blocks reading stdin forever.
-        .stdin(std::process::Stdio::null());
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     crate::codex_launch::apply_codex_launch_env(&mut cmd);
     for (k, v) in rca_envs {
         cmd.env(k, v);
     }
-    let out = cmd
-        .output()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("spawn {}: {e}", program.display()))?;
-    if !out.status.success() && out.stdout.is_empty() {
+
+    let mut stderr_pipe = child.stderr.take();
+    let stderr_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = stderr_pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let mut stdout = String::new();
+    if let Some(pipe) = child.stdout.take() {
+        let mut reader = std::io::BufReader::new(pipe);
+        let mut marked = false;
+        let mut raw = Vec::new();
+        loop {
+            raw.clear();
+            // Bytes, not `read_line`: the previous `output()` call decoded the
+            // whole stream with `from_utf8_lossy`, and a `read_line` that hit
+            // invalid UTF-8 would error and silently truncate the turn's events
+            // instead. Decoding per line keeps the old tolerance.
+            match reader.read_until(b'\n', &mut raw) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+            let line = String::from_utf8_lossy(&raw);
+            if !marked {
+                if let Some(id) = crate::codex_launch::parse_thread_started(&line) {
+                    mark_internal_thread(&id);
+                    marked = true;
+                }
+            }
+            stdout.push_str(&line);
+        }
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("wait {}: {e}", program.display()))?;
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if !status.success() && stdout.is_empty() {
         return Err(format!(
             "codex exited {:?}: {}",
-            out.status.code(),
-            tail(&String::from_utf8_lossy(&out.stderr))
+            status.code(),
+            tail(&String::from_utf8_lossy(&stderr))
         ));
     }
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    Ok(stdout)
 }
 
 /// Last few hundred chars — enough to identify a failure without pasting a whole
@@ -910,6 +968,68 @@ mod tests {
             build_edit_prompt("make it blue", 0).starts_with(IMAGE_PROMPT_PREFIX),
             "edit prompt must open with the prefix the recogniser looks for"
         );
+    }
+
+    /// `run_turn` must claim the thread off the `thread.started` line *while the
+    /// turn runs*, and must not deadlock when the child floods stderr — Fleet
+    /// sets `RUST_LOG` on every Codex child, so a full stderr pipe with no
+    /// reader is the realistic failure, not a hypothetical one.
+    #[cfg(unix)]
+    #[test]
+    fn run_turn_marks_the_thread_mid_turn_and_survives_a_stderr_flood() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-run-turn-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let thread_id = "01a0a794-3dcd-7d90-9ea1-fbe5bb453386";
+        // 4 MiB of stderr, far past any pipe buffer, written *before* the child
+        // finishes its stdout — the exact shape that hangs an undrained pipe.
+        let script = tmp.join("fake-codex.sh");
+        let mut f = std::fs::File::create(&script).unwrap();
+        writeln!(
+            f,
+            "#!/bin/sh\n\
+             echo '{{\"type\":\"thread.started\",\"thread_id\":\"{thread_id}\"}}'\n\
+             i=0; while [ $i -lt 4096 ]; do\n\
+               head -c 1024 /dev/zero | tr '\\0' 'x' >&2; echo >&2; i=$((i+1));\n\
+             done\n\
+             echo '{{\"type\":\"item.completed\",\"item\":{{\"type\":\"agent_message\",\"text\":\"ok\"}}}}'\n"
+        )
+        .unwrap();
+        drop(f);
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let out = run_turn(&script, &[], &[], tmp.to_str().unwrap())
+            .expect("a child that floods stderr must still complete");
+
+        assert!(out.contains("thread.started"), "stdout must be captured: {out}");
+        assert!(
+            out.contains("agent_message"),
+            "stdout written after the stderr flood must survive: {out}"
+        );
+        assert!(
+            internal_thread_path(thread_id).unwrap().exists(),
+            "the thread must be claimed off its thread.started line"
+        );
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// The marker path is built from an id that reaches us through an MCP tool
