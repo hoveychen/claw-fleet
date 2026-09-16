@@ -41,6 +41,22 @@ const FUTURE_SUBCOMMANDS: &[&str] = &[
     "prd-context-v2",
 ];
 
+/// Feed a child's stdin and close it, tolerating `BrokenPipe`.
+///
+/// Fail-open is precisely the case where the child exits *without* draining
+/// stdin, so losing the race and getting EPIPE is the expected behaviour under
+/// test, not a failure — what we assert is the exit code the hook observes.
+fn feed_stdin(child: &mut std::process::Child, bytes: &[u8]) {
+    let mut stdin = child.stdin.take().expect("stdin piped");
+    if let Err(e) = stdin.write_all(bytes) {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "unexpected error writing hook JSON to stdin: {e}"
+        );
+    }
+}
+
 /// Run the binary with hook-shaped stdin (Claude Code always pipes the event
 /// JSON in) and return `(exit code, stderr)`.
 fn run_with_piped_stdin(args: &[&str], stdin_json: &str) -> (i32, String) {
@@ -51,12 +67,7 @@ fn run_with_piped_stdin(args: &[&str], stdin_json: &str) -> (i32, String) {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn fleet-cli");
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(stdin_json.as_bytes())
-        .unwrap();
+    feed_stdin(&mut child, stdin_json.as_bytes());
     let out = child.wait_with_output().unwrap();
     (
         out.status.code().unwrap_or(-1),
@@ -118,12 +129,10 @@ fn the_settings_json_wrapper_as_written_exits_zero_on_a_stale_binary() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn sh");
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(br#"{"hook_event_name":"PreToolUse","tool_name":"Bash"}"#)
-        .unwrap();
+    feed_stdin(
+        &mut child,
+        br#"{"hook_event_name":"PreToolUse","tool_name":"Bash"}"#,
+    );
     let out = child.wait_with_output().unwrap();
     assert_eq!(
         out.status.code(),
