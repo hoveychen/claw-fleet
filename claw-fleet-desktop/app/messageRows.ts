@@ -9,6 +9,39 @@
 
 import type { RawMessage } from "./types";
 
+const INTERRUPT_MARKERS = new Set([
+  "[Request interrupted by user]",
+  "[Request interrupted by user for tool use]",
+]);
+
+/** The one text block a message carries, or null when it has none / has more. */
+function soleText(msg: RawMessage | undefined): string | null {
+  if (!msg?.message) return null;
+  const { content } = msg.message;
+  if (typeof content === "string") return content;
+  if (content.length !== 1 || content[0]?.type !== "text") return null;
+  return (content[0] as { type: "text"; text: string }).text;
+}
+
+/** Claude persists Esc/interrupt as a synthetic user turn. It is a terminal
+ * marker for the previous turn, never a freshly submitted resume prompt. */
+export function isInterruptMarker(msg: RawMessage | undefined): boolean {
+  if (msg?.type !== "user") return false;
+  const text = soleText(msg);
+  return text !== null && INTERRUPT_MARKERS.has(text);
+}
+
+/**
+ * The filler assistant record Claude writes when a turn is aborted before it
+ * said anything. Pure scaffolding — `session/parse.rs` already excludes it from
+ * session summaries for the same reason. Other `<synthetic>` records are *not*
+ * covered: "Failed to authenticate. API Error: 403" carries real news.
+ */
+function isNoResponseFiller(msg: RawMessage): boolean {
+  if (msg.type !== "assistant" || msg.message?.model !== "<synthetic>") return false;
+  return soleText(msg)?.trim() === "No response requested.";
+}
+
 /**
  * Whether this record renders anything.
  *
@@ -21,6 +54,7 @@ import type { RawMessage } from "./types";
 export function isRenderableRow(msg: RawMessage): boolean {
   if (msg.type !== "user" && msg.type !== "assistant") return false;
   if (!msg.message) return false;
+  if (isNoResponseFiller(msg)) return false;
   if (msg.type === "user" && !msg.isCompactSummary) {
     const content = msg.message.content;
     if (Array.isArray(content) && !content.some((b) => b.type !== "tool_result")) {

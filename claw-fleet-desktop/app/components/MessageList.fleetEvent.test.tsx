@@ -29,4 +29,56 @@ describe("MessageList Fleet automation events", () => {
     expect(container.querySelector('[class*="user_text"]')).toBeNull();
     expect(container.textContent).toContain("w1");
   });
+
+  // The three records a timed-out Decision Card leaves behind, in transcript
+  // order. Together they used to occupy a bubble, a filler row and a wall of
+  // text; the assertions below pin what each collapses to.
+  it("collapses the decision-timeout trio into a rule plus one card", () => {
+    const msgs: RawMessage[] = [
+      { type: "user", message: { role: "user", content: "[Request interrupted by user]" } },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          model: "<synthetic>",
+          content: [{ type: "text", text: "No response requested." }],
+        },
+      },
+      {
+        type: "user",
+        fleetEvent: { kind: "decision", status: "answered" },
+        message: { role: "user", content: "[Fleet] 你上一轮通过决策卡向老板提问…\n\n【问题 1】发版？" },
+      },
+    ];
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root.render(<MessageList messages={msgs} isLoading={false} />));
+
+    expect(container.querySelector('[data-testid="interrupt-rule"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("[Request interrupted by user]");
+    expect(container.textContent).not.toContain("No response requested.");
+    // Collapsed by default: the header shows, the answer body does not.
+    expect(container.querySelector('[data-kind="decision"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("【问题 1】发版？");
+  });
+
+  it("keeps other <synthetic> assistant records, which carry real news", () => {
+    const msgs: RawMessage[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          model: "<synthetic>",
+          content: [{ type: "text", text: "Failed to authenticate. API Error: 403" }],
+        },
+      },
+    ];
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root.render(<MessageList messages={msgs} isLoading={false} />));
+
+    expect(container.textContent).toContain("API Error: 403");
+  });
 });

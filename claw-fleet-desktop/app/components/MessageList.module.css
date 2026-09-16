@@ -239,6 +239,30 @@
   padding: 2px 10px;
 }
 
+/* Interrupt marker. A hairline rule with a centred label rather than a user
+   bubble: the fact a turn was cut short is worth one line, not a paragraph. */
+.interrupt_rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--color-text-dim);
+}
+
+.interrupt_rule::before,
+.interrupt_rule::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-soft, var(--color-border));
+}
+
+.interrupt_rule_label {
+  font-size: var(--t-meta, 10px);
+  letter-spacing: 0.03em;
+  opacity: 0.75;
+}
+
 .message.assistant {
   justify-content: flex-start;
 }

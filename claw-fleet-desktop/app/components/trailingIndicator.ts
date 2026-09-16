@@ -1,4 +1,5 @@
 import type { RawMessage } from "../types";
+import { isInterruptMarker } from "../messageRows";
 
 /** Session statuses that mean the agent is actively doing something right now
  *  (as opposed to waiting for the user). Mirrors the scanner's working set. */
@@ -12,21 +13,6 @@ export const WORKING_STATUSES = new Set([
 ]);
 
 export type TrailingIndicator = "working" | "waiting" | null;
-
-const INTERRUPT_MARKERS = new Set([
-  "[Request interrupted by user]",
-  "[Request interrupted by user for tool use]",
-]);
-
-/** Claude persists Esc/interrupt as a synthetic user turn. It is a terminal
- * marker for the previous turn, never a freshly submitted resume prompt. */
-function isInterruptMarker(msg: RawMessage | undefined): boolean {
-  if (msg?.type !== "user" || !msg.message) return false;
-  const { content } = msg.message;
-  if (typeof content === "string") return INTERRUPT_MARKERS.has(content);
-  if (content.length !== 1 || content[0]?.type !== "text") return false;
-  return INTERRUPT_MARKERS.has((content[0] as { type: "text"; text: string }).text);
-}
 
 /** How long a trailing user prompt may sit unanswered before it stops reading
  *  as a resume gap. The gap itself is seconds; a genuinely in-flight turn keeps

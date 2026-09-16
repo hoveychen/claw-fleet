@@ -11,6 +11,7 @@ const ICON: Record<FleetEvent["kind"], string> = {
   handoff: "↗",
   loop: "↻",
   schedule: "◴",
+  decision: "☑",
 };
 
 export function FleetEventBlock({ event, text }: { event: FleetEvent; text: string }) {
@@ -22,6 +23,7 @@ export function FleetEventBlock({ event, text }: { event: FleetEvent; text: stri
       handoff: "Fleet handoff",
       loop: "Fleet loop",
       schedule: "Fleet schedule",
+      decision: "Decision card reply",
     }[event.kind],
   });
   const status = t(`fleet.event.status.${event.status}`, {
@@ -30,6 +32,7 @@ export function FleetEventBlock({ event, text }: { event: FleetEvent; text: stri
       timeout: "已超时",
       successor: "接力已启动",
       manual: "手动运行",
+      answered: "老板已回复",
     }[event.status],
   });
 
