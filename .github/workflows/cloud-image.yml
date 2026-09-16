@@ -5,10 +5,13 @@ name: Cloud Image
 # pre-built image instead of compiling Rust on a deploy node.
 #
 # The muvee "fleet-cloud" project is an image-type project pointed at this
-# repository package. main pushes :latest; a prd/fleet-cloud-** branch pushes
-# :preview, so a deployment can be verified against the real vault before the
-# branch merges (GitHub only offers workflow_dispatch for workflows that already
-# live on the default branch, which a brand-new branch cannot use).
+# repository package, with auto-deploy on: it redeploys when the `:latest`
+# digest changes. So **only a release tag pushes `:latest`** (see the metadata
+# step) — a main push builds the image but publishes only its sha tag, which
+# keeps the live container off the merge cadence. A prd/fleet-cloud-** branch
+# pushes :preview, so a deployment can be verified against the real vault before
+# the branch merges (GitHub only offers workflow_dispatch for workflows that
+# already live on the default branch, which a brand-new branch cannot use).
 
 on:
   push:
@@ -117,15 +120,23 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
-          # A tag ref must land on `:latest` too — it is the same tree as the
-          # main push that preceded it, only with a correct version string. The
-          # old `enable={{is_default_branch}}` is false for a tag ref, and the
-          # old preview condition (`ref_name != default_branch`) is true for it,
-          # so a tag build would have quietly published itself as `:preview` and
-          # left `:latest` on the `-dev` image forever. Both conditions are now
-          # spelled out against `github.ref` instead of `ref_name`.
+          # `:latest` is the deploy trigger, so only a release tag (or a
+          # deliberate manual dispatch) may move it. 2026-09-16: the muvee
+          # `fleet-cloud` project has `auto_deploy_enabled`, which redeploys
+          # whenever the `:latest` digest changes — and a redeploy *replaces the
+          # container*, killing whatever turn its agents are mid-way through. If
+          # main pushes still published `:latest`, every merge would recycle the
+          # live container. Tag cadence is the cadence 老板 asked for.
+          #
+          # Main pushes still build (they keep the gha cache warm for the tag
+          # build and catch a broken image early) — they just publish nothing
+          # but `type=sha`, which nothing tracks. A tag ref must be spelled
+          # against `github.ref`, not `ref_name`: the old
+          # `enable={{is_default_branch}}` is false for a tag ref while the
+          # preview condition below (`ref_name != default_branch`) was true for
+          # it, so a tag build would have quietly published itself as `:preview`.
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
             type=raw,value=preview,enable=${{ startsWith(github.ref, 'refs/heads/prd/') }}
             type=sha,format=long
 
