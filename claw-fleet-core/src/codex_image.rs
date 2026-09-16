@@ -989,6 +989,12 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
+        // `FLEET_HOME` is process-global and the child here runs for seconds
+        // (4 MiB of stderr), so a sibling test flipping the var mid-turn would
+        // land the marker in *its* temp dir and this test would fail looking
+        // for a file that was written elsewhere. Every other FLEET_HOME test in
+        // the crate serialises on this lock; this one used to be the exception.
+        let _env_guard = crate::session::fleet_home_lock();
         let prev = std::env::var_os("FLEET_HOME");
         unsafe { std::env::set_var("FLEET_HOME", &tmp) };
 

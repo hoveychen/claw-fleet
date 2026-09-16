@@ -4342,6 +4342,11 @@ mod tests {
     /// drain all act on. Real threads alongside it must be untouched.
     #[test]
     fn scan_drops_internal_image_threads_and_keeps_real_ones() {
+        // Same reason as every other FLEET_HOME test in the crate: the var is
+        // process-global, so a sibling test flipping it between the marker
+        // write and the scan makes this one look for a file in a dir it never
+        // wrote to.
+        let _env_guard = crate::session::fleet_home_lock();
         let tmp = std::env::temp_dir().join(format!(
             "fleet-internal-thread-{}-{}",
             std::process::id(),
