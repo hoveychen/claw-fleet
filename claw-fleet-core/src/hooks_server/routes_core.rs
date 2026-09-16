@@ -1028,16 +1028,23 @@ pub(crate) fn route_search(
 mod tests {
     use super::*;
 
-    /// Both env tests below mutate the process environment, which every other
-    /// test thread shares.
+    /// The env tests below mutate the process environment, which every other
+    /// test thread shares — including this file's `/health` test, which only
+    /// *reads* those vars but reads them twice and compares the results.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// `/health` is the browser build's only source for the version and commit
     /// it shows in settings, and the body is hand-formatted — a stray quote in
     /// either value would make it unparseable, which the caller sees as "no
     /// version" with nothing pointing at why.
+    ///
+    /// Takes `ENV_LOCK` despite setting nothing: it reads `build_commit()` once
+    /// inside `health_body()` and once for the comparison, and a sibling test
+    /// flipping `FLEET_COMMIT` between the two made this fail intermittently
+    /// (seen 2026-09-15: `left: "1961dad", right: "0123456"`, green on a rerun).
     #[test]
     fn health_body_is_json_carrying_version_commit_and_status() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let v: serde_json::Value = serde_json::from_str(&health_body())
             .expect("/health must answer parseable JSON");
         assert_eq!(v["version"], server_version());
