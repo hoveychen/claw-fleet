@@ -129,6 +129,9 @@ describe("classifySyntheticError", () => {
     // leads with the switch.
     expect(win?.quota?.resetsAt).toBe(1788691800);
     expect(win?.titleKey).toBe("detail.api_error.rate_limit");
+    // Even the window shape leads with the switch: until the reset passes, a
+    // retry is the one action guaranteed to fail.
+    expect(win?.actions).toEqual(["switchModel", "retry"]);
     expect(model?.quota).toBeUndefined();
     expect(model?.actions[0]).toBe("switchModel");
     expect(model?.titleKey).toBe("detail.api_error.model_quota");

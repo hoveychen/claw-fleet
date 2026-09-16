@@ -129,6 +129,16 @@ describe("ApiErrorBlock", () => {
     expect(draw({ info: auth }).querySelector("[data-testid=api-error-countdown]")).toBeNull();
   });
 
+  it("holds the retry shut while the quota window is still counting down", () => {
+    const el = draw({ info: rateLimited, onAction: vi.fn() });
+    const retry = el.querySelector<HTMLButtonElement>('[data-action="retry"]')!;
+    const swap = el.querySelector<HTMLButtonElement>('[data-action="switchModel"]')!;
+    // Spending a resume to earn the same error back is not a retry, it is a
+    // second failure. The sibling model is available right now.
+    expect(retry.disabled).toBe(true);
+    expect(swap.disabled).toBe(false);
+  });
+
   it("carries the severity so a rate limit can stop looking like a failure", () => {
     const el = draw({ info: rateLimited });
     expect(el.querySelector("[data-testid=api-error-card]")?.getAttribute("data-severity")).toBe("wait");

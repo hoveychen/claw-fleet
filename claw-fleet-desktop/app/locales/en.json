@@ -1978,7 +1978,8 @@
       "pick_model": "Switch to",
       "no_models": "Loading models…",
       "failed": "Couldn't run it: {{err}}",
-      "resumed": "Resumed — waiting for the session to pick up…"
+      "resumed": "Resumed — waiting for the session to pick up…",
+      "retry_blocked": "Retry once the quota resets"
     }
   },
   "settings": {

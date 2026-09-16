@@ -1975,7 +1975,8 @@
       "pick_model": "换成",
       "no_models": "模型列表加载中…",
       "failed": "没能执行：{{err}}",
-      "resumed": "已重新拉起，等会话接上…"
+      "resumed": "已重新拉起，等会话接上…",
+      "retry_blocked": "配额恢复后再重试"
     }
   },
   "settings": {

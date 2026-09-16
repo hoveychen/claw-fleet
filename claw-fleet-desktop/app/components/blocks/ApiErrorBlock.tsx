@@ -40,6 +40,11 @@ export function ApiErrorBlock({
 
   const title = t(info.titleKey, { defaultValue: TITLE_FALLBACK[info.titleKey] ?? "请求失败" });
   const actions = onAction ? info.actions : [];
+  // While a quota window is still counting down, a retry is the one action
+  // guaranteed to fail — it would spend a resume to earn the same error back.
+  // Held shut rather than hidden, so the card still says retry is the move once
+  // the clock runs out.
+  const waiting = countdown != null && countdown !== "0";
 
   return (
     <div
@@ -73,7 +78,8 @@ export function ApiErrorBlock({
               key={a}
               type="button"
               className={i === 0 ? styles.primary : styles.secondary}
-              disabled={busy != null}
+              disabled={busy != null || (waiting && a === "retry")}
+              title={waiting && a === "retry" ? t("detail.api_error.retry_blocked", { defaultValue: "配额恢复后再重试" }) : undefined}
               onClick={() => onAction?.(a, info)}
               data-action={a}
             >

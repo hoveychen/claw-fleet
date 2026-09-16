@@ -217,7 +217,13 @@ export function classifySyntheticError(
             ...base,
             severity: "wait",
             titleKey: "detail.api_error.rate_limit",
-            actions: ["retry", "switchModel"],
+            // Switch leads, retry follows. A window limit has a reset time, and
+            // until it passes a retry is the one action guaranteed to fail —
+            // it was the primary button until a screenshot showed it sitting
+            // above its own "resets in 1:31:52" badge. The sibling models are
+            // available now; the UI additionally holds the retry button shut
+            // while the countdown runs.
+            actions: ["switchModel", "retry"],
           };
 
     case "authentication_failed":
