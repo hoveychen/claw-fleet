@@ -794,3 +794,28 @@
 .parentCrumb:not(:disabled):active {
   opacity: 0.6;
 }
+
+/* Interrupt marker: a hairline rule with a centred label. The fact a turn was
+   cut short (Esc, or Fleet's SIGINT on a Decision Card timeout) is worth one
+   line — it explains why the turn above stops mid-sentence — not a bubble. */
+.interruptRule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--color-text-dim);
+}
+
+.interruptRule::before,
+.interruptRule::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.interruptRuleLabel {
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  opacity: 0.75;
+}

@@ -15,4 +15,14 @@ describe("FleetEventCard", () => {
     expect(html).toContain("w7");
     expect(html).not.toContain("large captured output");
   });
+
+  it("labels a decision-card reply and keeps the boss's answer folded", () => {
+    const html = renderToStaticMarkup(
+      <FleetEventCard event={{ kind: "decision", status: "answered" }} text="【回答】发版" />,
+    );
+    expect(html).toContain('data-kind="decision"');
+    expect(html).toContain("Decision card reply");
+    expect(html).toContain("Answered");
+    expect(html).not.toContain("【回答】发版");
+  });
 });

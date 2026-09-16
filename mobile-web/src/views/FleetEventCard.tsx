@@ -11,6 +11,7 @@ const ICON: Record<FleetEvent["kind"], string> = {
   handoff: "↗",
   loop: "↻",
   schedule: "◴",
+  decision: "☑",
 };
 
 function kindLabel(kind: FleetEvent["kind"]): string {
@@ -19,6 +20,7 @@ function kindLabel(kind: FleetEvent["kind"]): string {
     handoff: "Fleet handoff",
     loop: "Fleet loop",
     schedule: "Fleet schedule",
+    decision: t("Fleet 决策卡答复"),
   }[kind];
 }
 
@@ -28,6 +30,7 @@ function statusLabel(status: FleetEvent["status"]): string {
     timeout: t("已超时"),
     successor: t("接力已启动"),
     manual: t("手动运行"),
+    answered: t("老板已回复"),
   }[status];
 }
 
