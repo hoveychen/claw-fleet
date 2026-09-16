@@ -819,3 +819,102 @@
   letter-spacing: 0.03em;
   opacity: 0.75;
 }
+
+/* ── Failed-turn card ──────────────────────────────────────────────────────
+   Three severities, three accents. A rate limit is not a failure anyone caused
+   and usually clears itself, so it takes the neutral accent and a countdown
+   rather than the same red as a revoked token — painting both red teaches the
+   eye to skim both. */
+.apiErrorCard {
+  max-width: 100%;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--api-error-accent) 34%, var(--color-border));
+  border-left: 3px solid var(--api-error-accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--api-error-accent) 7%, var(--color-bg-secondary));
+
+  --api-error-accent: var(--color-error);
+}
+
+.apiErrorCard[data-severity="transient"] {
+  --api-error-accent: var(--color-warning);
+}
+
+.apiErrorCard[data-severity="wait"] {
+  --api-error-accent: var(--color-accent);
+}
+
+.apiErrorHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.apiErrorIcon {
+  color: var(--api-error-accent);
+}
+
+.apiErrorTitle {
+  font-weight: 650;
+  color: var(--color-text);
+}
+
+.apiErrorCountdown {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--api-error-accent) 15%, transparent);
+  color: var(--api-error-accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.apiErrorText {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.apiErrorActions,
+.apiErrorPicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Touch targets, not desktop chips: these sit inside a scrolling transcript on
+   a phone, where a 28px button is a mis-tap waiting to happen. */
+.apiErrorPrimary,
+.apiErrorSecondary {
+  min-height: 34px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.apiErrorPrimary {
+  border: 1px solid transparent;
+  background: var(--api-error-accent);
+  color: var(--color-bg);
+  font-weight: 600;
+}
+
+.apiErrorSecondary {
+  border: 1px solid color-mix(in srgb, var(--api-error-accent) 34%, var(--color-border));
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.apiErrorPrimary:disabled,
+.apiErrorSecondary:disabled {
+  opacity: 0.55;
+}
+
+.apiErrorNote {
+  margin-top: 8px;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}

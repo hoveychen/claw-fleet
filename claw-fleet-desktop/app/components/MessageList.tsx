@@ -38,6 +38,8 @@ import { ReaderModal } from "./ReaderModal";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import { MetaFoldBlock } from "./blocks/MetaFoldBlock";
 import { FleetEventBlock } from "./blocks/FleetEventBlock";
+import { ApiErrorActions, type ApiErrorContext } from "./blocks/ApiErrorActions";
+import { classifySyntheticError } from "../../../shared-ts/syntheticError";
 import { groupMetaRuns } from "./metaGrouping";
 import { groupWorkRuns } from "./workRuns";
 import { trailingIndicator, WORKING_STATUSES } from "./trailingIndicator";
@@ -102,9 +104,10 @@ interface MsgProps {
    *  null on mid-turn rows, which render no usage line at all (that line
    *  repeating under every record was the loudest noise in tool-heavy turns). */
   turnUsage?: TurnUsage | null;
+  apiErrorCtx?: ApiErrorContext | null;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch, paths, turnUsage }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch, paths, turnUsage, apiErrorCtx }: MsgProps) {
   const { t } = useTranslation();
   // Declared before the early returns below so the hook order stays fixed
   // across the compact-summary / meta-fold branches.
@@ -191,6 +194,20 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
           </div>
           <div className={styles.turn_error_text}>{messageToText(msg)}</div>
         </div>
+      </div>
+    );
+  }
+
+  // A turn Claude Code failed out of: it persists the failure as an assistant
+  // record whose model is `<synthetic>`, tagged with a machine-readable `error`
+  // enum. That is not something the model said, and — unlike an assistant
+  // bubble — it usually has exactly one way out (log in again, retry, switch
+  // model), so it gets a card that offers it. See `shared-ts/syntheticError`.
+  const apiError = classifySyntheticError(msg);
+  if (apiError) {
+    return (
+      <div className={styles.compact_row} data-msg-idx={msgIdx}>
+        <ApiErrorActions info={apiError} ctx={apiErrorCtx} />
       </div>
     );
   }
@@ -417,6 +434,10 @@ interface Props {
    *  the tail payload truncated (`get_tool_result_full`). Omit and truncated
    *  cards show only their inline preview. */
   jsonlPath?: string;
+  /** Session identity behind a failed-turn card's buttons (retry / switch model
+   *  / sign in). Omit — an InspectModal, an imported transcript — and the card
+   *  still renders, without buttons it could not honour. */
+  apiErrorCtx?: ApiErrorContext | null;
 }
 
 /** Messages revealed per click, and the initial size of the render window. */
@@ -440,6 +461,7 @@ export function MessageList({
   isLoadingEarlier = false,
   paths,
   jsonlPath,
+  apiErrorCtx,
 }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
@@ -836,6 +858,7 @@ export function MessageList({
               isActiveMatch={globalStart === searchMatchIndex}
               paths={paths}
               turnUsage={turnUsage.get(globalStart) ?? null}
+              apiErrorCtx={apiErrorCtx}
             />
           </Fragment>
         );

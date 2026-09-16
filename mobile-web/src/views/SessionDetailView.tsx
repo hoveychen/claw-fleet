@@ -90,6 +90,8 @@ import { filterMainRows } from "./mainRows";
 import styles from "./SessionDetailView.module.css";
 import { AppHeader } from "./AppHeader";
 import { FleetEventCard } from "./FleetEventCard";
+import { ApiErrorCard } from "./ApiErrorCard";
+import { classifySyntheticError } from "../../../shared-ts/syntheticError";
 
 const TAIL_POLL_MS = 2500;
 const TAIL_INITIAL = 120;
@@ -872,6 +874,10 @@ interface MessageRowProps {
   /** For the tap-to-expand tool_detail fetch; both are stable per session. */
   client?: FleetTransport | null;
   jsonlPath?: string;
+  /** Identity behind a failed-turn card's buttons (retry / switch model / sign
+   *  in). Absent for a transcript with no live session; the card then renders
+   *  its classification without buttons it could not honour. */
+  session?: { id: string; workspacePath: string; agentSource?: string | null } | null;
 }
 
 /** Content equality for the per-row tool metadata — reference equality would
@@ -900,8 +906,22 @@ const MessageRow = memo(function MessageRow({
   turnUsage,
   client,
   jsonlPath,
+  session,
 }: MessageRowProps) {
   if (isNoResponseFiller(msg)) return null;
+  // A turn Claude Code failed out of — an expired token, a quota, a 529. It
+  // carries a machine-readable `error` enum and usually exactly one way out, so
+  // it gets a card with that way out on it instead of a grey assistant bubble.
+  // Same classification the desktop uses (`shared-ts/syntheticError`).
+  const apiError = classifySyntheticError(msg);
+  if (apiError) {
+    return (
+      <div className={styles.assistantRow}>
+        <ApiErrorCard info={apiError} session={session} client={client} />
+        <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
+      </div>
+    );
+  }
   if (isInterruptMarker(msg)) {
     return (
       <div className={styles.interruptRule} data-testid="interrupt-rule">
@@ -1557,6 +1577,7 @@ export function SessionDetailView({
                 turnUsage={turnUsage.get(unit.startLocal)}
                 client={client}
                 jsonlPath={detailPath}
+                session={session}
               />
             );
           });

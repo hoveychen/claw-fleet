@@ -1,0 +1,194 @@
+/* Three severities, three accents. A rate limit is not a failure the user
+   caused and usually resolves itself, so painting it the same red as a revoked
+   token taught the eye to skim both; it gets the neutral accent and a
+   countdown instead. */
+.root {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-fill);
+  font-size: var(--t-ui, 12px);
+  line-height: 1.5;
+
+  --accent: var(--color-error-fg);
+  --accent-line: rgba(var(--color-error-rgb), 0.35);
+  --accent-fill: var(--color-error-bg);
+}
+
+.root[data-severity="transient"] {
+  --accent: var(--color-warning);
+  --accent-line: rgba(var(--color-warning-rgb), 0.35);
+  --accent-fill: var(--color-warning-bg);
+}
+
+.root[data-severity="wait"] {
+  --accent: var(--color-accent);
+  --accent-line: color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+  --accent-fill: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-secondary));
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon {
+  flex: none;
+  color: var(--accent);
+  font-size: var(--t-body, 13px);
+}
+
+.title {
+  font-weight: 650;
+  color: var(--color-text);
+}
+
+.countdown {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: var(--t-meta, 10px);
+  /* Digits must not reflow the badge once a second. */
+  font-variant-numeric: tabular-nums;
+}
+
+.text {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.primary,
+.secondary {
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--t-ui, 12px);
+  cursor: pointer;
+}
+
+.primary {
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--color-bg);
+  font-weight: 600;
+}
+
+/* The wait accent is the app accent, which already pairs with on-accent ink. */
+.root[data-severity="wait"] .primary {
+  color: var(--color-on-accent, var(--color-bg));
+}
+
+.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.secondary {
+  border: 1px solid var(--accent-line);
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--color-text);
+}
+
+.primary:disabled,
+.secondary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.foldToggle {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: var(--t-meta, 10px);
+  cursor: pointer;
+}
+
+.foldToggle:hover {
+  color: var(--color-text-secondary);
+}
+
+.raw {
+  max-height: 260px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+  font-size: var(--t-meta, 10px);
+  white-space: pre-wrap;
+}
+
+/* Follow-ups the action bar opens: the model list, the login shell, and the
+   one-line outcome note. They hang under the card rather than inside it so the
+   card keeps its own fixed anatomy (head / prose / actions / fold). */
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+.pickerLabel {
+  color: var(--color-text-dim);
+  font-size: var(--t-meta, 10px);
+}
+
+.pickerItem {
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--t-ui, 12px);
+  cursor: pointer;
+}
+
+.pickerItem:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.pickerItem:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.login {
+  margin: -4px 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.note {
+  margin: -2px 0 8px;
+  color: var(--color-text-dim);
+  font-size: var(--t-meta, 10px);
+  overflow-wrap: anywhere;
+}

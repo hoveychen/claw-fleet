@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CreditCard, FileWarning, Play, Server, ServerOff } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import { HandoffChainRow } from "./HandoffChainRow";
@@ -10,6 +9,7 @@ import styles from "./SessionCard.module.css";
 import { BG_TASK_KINDS } from "../bgTaskKinds";
 import { isKeyboardActivationKey } from "../keyboard";
 import { PlanProgressRow } from "./PlanProgressRow";
+import { canResumeSession, resumeErrorText, resumeSession } from "./sessionResume";
 import { findRemoteWorkspace, useRemoteWorkspacesStore } from "../hooks/useRemoteWorkspaces";
 
 // ── Rate-limit countdown ──────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
     setResuming(true);
     setError(null);
     try {
-      await invoke("resume_rate_limited_session", {
+      await resumeSession({
         sessionId: session.id,
         workspacePath: session.workspacePath,
         agentSource: session.agentSource,
@@ -80,11 +80,7 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
   //    gates on source (M2 dismantled the claude-code-only door); resume is
   //    dispatched by `agentSource` (claude → `claude --resume`, codex →
   //    `codex exec resume`), so both are resumable.
-  const RESUMABLE_SOURCES = ["claude-code", "codex"];
-  const canResume =
-    !session.isSubagent &&
-    !session.ideName &&
-    RESUMABLE_SOURCES.includes(session.agentSource);
+  const canResume = canResumeSession(session);
   return (
     <>
       <RateLimitCountdown state={session.rateLimit} />
@@ -107,18 +103,6 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
   );
 }
 
-/**
- * A resume that fails never starts a process, so nothing downstream will ever
- * show the user why — the card is the only surface left. Tauri rejects a command
- * with the plain string the Rust side returned (e.g. "Workspace directory not
- * found: …"); anything else gets stringified as-is.
- */
-function resumeErrorText(err: unknown): string {
-  if (typeof err === "string") return err;
-  const msg = (err as { message?: unknown } | null)?.message;
-  return typeof msg === "string" ? msg : String(err);
-}
-
 // ── Server-error controls (auto-retry indicator + manual retry) ─────────────
 
 export function ServerErrorControls({ session }: { session: SessionInfo }) {
@@ -132,7 +116,7 @@ export function ServerErrorControls({ session }: { session: SessionInfo }) {
     setResuming(true);
     setError(null);
     try {
-      await invoke("resume_rate_limited_session", {
+      await resumeSession({
         sessionId: session.id,
         workspacePath: session.workspacePath,
         agentSource: session.agentSource,
@@ -146,11 +130,7 @@ export function ServerErrorControls({ session }: { session: SessionInfo }) {
   // Same resumability gate as the auto-retry scheduler
   // (`auto_resume.rs::should_retry_server_error`): not a subagent, not attached
   // to an interactive IDE, and a source that supports headless resume.
-  const RESUMABLE_SOURCES = ["claude-code", "codex"];
-  const canResume =
-    !session.isSubagent &&
-    !session.ideName &&
-    RESUMABLE_SOURCES.includes(session.agentSource);
+  const canResume = canResumeSession(session);
   return (
     <>
       <span className={styles.rate_limit_countdown}>{t("serverError.retrying")}</span>
@@ -213,7 +193,7 @@ export function RemoteDisconnectNotice({ session }: { session: SessionInfo }) {
     setResuming(true);
     setError(null);
     try {
-      await invoke("resume_rate_limited_session", {
+      await resumeSession({
         sessionId: session.id,
         workspacePath: session.workspacePath,
         agentSource: session.agentSource,
@@ -224,10 +204,8 @@ export function RemoteDisconnectNotice({ session }: { session: SessionInfo }) {
       setResuming(false);
     }
   };
-  // Same resumability gate as the other two controls.
-  const RESUMABLE_SOURCES = ["claude-code", "codex"];
-  const canReopen =
-    !session.isSubagent && !session.ideName && RESUMABLE_SOURCES.includes(session.agentSource);
+  // Same resumability gate as the other controls.
+  const canReopen = canResumeSession(session);
   return (
     <>
       <span
@@ -328,7 +306,7 @@ export function OutOfCreditsNotice({
     setResuming(true);
     setError(null);
     try {
-      await invoke("resume_rate_limited_session", {
+      await resumeSession({
         sessionId: session.id,
         workspacePath: session.workspacePath,
         agentSource: session.agentSource,
@@ -339,10 +317,8 @@ export function OutOfCreditsNotice({
       setResuming(false);
     }
   };
-  // Same resumability gate as the other three controls.
-  const RESUMABLE_SOURCES = ["claude-code", "codex"];
-  const canResume =
-    !session.isSubagent && !session.ideName && RESUMABLE_SOURCES.includes(session.agentSource);
+  // Same resumability gate as the other controls.
+  const canResume = canResumeSession(session);
   return (
     <>
       <span className={styles.out_of_credits} title={t("outOfCredits.tip", { message })}>

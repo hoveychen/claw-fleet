@@ -1058,6 +1058,76 @@ export const MOCK_PLAN_FOREST: PlanForest = {
 // ── Messages (for session detail view) ──────────────────────────────────────
 
 export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
+  // A session that failed three ways in a row. Deliberately hung on
+  // `sess-quiet-alive`: it is one of the two mock sessions that is neither a
+  // subagent nor IDE-attached, so it is the only place the resume-backed
+  // buttons are honest — everywhere else the card correctly hides them.
+  "sess-quiet-alive": [
+    {
+      type: "user",
+      uuid: "quiet-msg-1",
+      timestamp: new Date(NOW - 12 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: "Snapshot the canvas with ImageBitmap and diff it against the golden frame.",
+      },
+    },
+    // The three failure shapes Claude Code writes when a turn dies. Copied from
+    // real transcripts (see `shared-ts/syntheticError`), `error` enum and all,
+    // because a mock that never fails is how the failure card ends up being the
+    // one surface nobody ever looked at.
+    {
+      type: "assistant",
+      uuid: "api-msg-err-1",
+      timestamp: new Date(NOW - 8 * MIN).toISOString(),
+      error: "server_error",
+      isApiErrorMessage: true,
+      message: {
+        role: "assistant",
+        model: "<synthetic>",
+        content: [
+          {
+            type: "text",
+            text: "API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check https://status.claude.com.",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "api-msg-err-2",
+      timestamp: new Date(NOW - 6 * MIN).toISOString(),
+      error: "rate_limit",
+      isApiErrorMessage: true,
+      quotaLimits: {
+        status: "rejected",
+        resetsAt: Math.floor((NOW + 92 * MIN) / 1000),
+        rateLimitType: "five_hour",
+        overageStatus: "rejected",
+        isUsingOverage: false,
+      },
+      message: {
+        role: "assistant",
+        model: "<synthetic>",
+        content: [{ type: "text", text: "You've hit your session limit · resets 3:50am (America/Los_Angeles)" }],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "api-msg-err-3",
+      timestamp: new Date(NOW - 4 * MIN).toISOString(),
+      error: "authentication_failed",
+      isApiErrorMessage: true,
+      message: {
+        role: "assistant",
+        model: "<synthetic>",
+        content: [
+          { type: "text", text: "Failed to authenticate: OAuth session expired and could not be refreshed" },
+        ],
+      },
+    },
+  ],
+
   // Main fleet session — rich conversation
   "sess-fleet-main": [
     {
