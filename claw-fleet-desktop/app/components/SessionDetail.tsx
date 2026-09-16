@@ -33,6 +33,7 @@ import { HandoffChainRow } from "./HandoffChainRow";
 import { PlanProgressRow } from "./PlanProgressRow";
 import { WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
+import type { ApiErrorContext } from "./blocks/ApiErrorActions";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
 import { WikiLinksProvider } from "../markdown/wikiLinksContext";
@@ -801,6 +802,22 @@ export function SessionDetail({
       openInFiles: (absPath) => openAuxDoc("file", absPath),
     };
   }, [workspacePath, openAuxDoc]);
+
+  // What a failed-turn card needs to act: the same live-refreshed session the
+  // rest of this pane reads, narrowed to the four fields the card uses.
+  // Memoised for the same reason `pathLinks` is — MessageRow is memo'd, and a
+  // fresh object every render would re-render every row in the transcript.
+  const apiErrorCtx = useMemo<ApiErrorContext | null>(() => {
+    const s = liveSession ?? session;
+    if (!s?.id || !s.workspacePath) return null;
+    return {
+      sessionId: s.id,
+      workspacePath: s.workspacePath,
+      agentSource: s.agentSource,
+      isSubagent: s.isSubagent,
+      ideName: s.ideName,
+    };
+  }, [liveSession, session]);
 
   // `[[slug]]` refs the agent wrote become links. Agents are told to publish
   // findings to the wiki and to cross-reference them that way, so the refs were
@@ -1606,6 +1623,9 @@ export function SessionDetail({
                       // stale object the drawer was opened with, whose jsonlPath
                       // can be absent for sessions opened from a partial shape.
                       jsonlPath={liveSession?.jsonlPath ?? session?.jsonlPath}
+                      // Identity behind a failed-turn card's buttons. Same
+                      // live-refreshed session the rest of this pane reads.
+                      apiErrorCtx={apiErrorCtx}
                     />
                     {simplifiedMode && pendingDecisions.filter((d) => d.request.sessionId === liveSession?.id).map((decision) => (
                       <div key={decision.id} className={styles.inline_fleet_ask} data-testid="inline-task-decision">

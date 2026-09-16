@@ -1974,7 +1974,11 @@
         "switchModel": "Switch model",
         "compact": "Compact, then continue",
         "openUrl": "Open page"
-      }
+      },
+      "pick_model": "Switch to",
+      "no_models": "Loading models…",
+      "failed": "Couldn't run it: {{err}}",
+      "resumed": "Resumed — waiting for the session to pick up…"
     }
   },
   "settings": {

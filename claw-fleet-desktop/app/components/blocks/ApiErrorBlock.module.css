@@ -138,3 +138,57 @@
   font-size: var(--t-meta, 10px);
   white-space: pre-wrap;
 }
+
+/* Follow-ups the action bar opens: the model list, the login shell, and the
+   one-line outcome note. They hang under the card rather than inside it so the
+   card keeps its own fixed anatomy (head / prose / actions / fold). */
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+.pickerLabel {
+  color: var(--color-text-dim);
+  font-size: var(--t-meta, 10px);
+}
+
+.pickerItem {
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--t-ui, 12px);
+  cursor: pointer;
+}
+
+.pickerItem:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.pickerItem:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.login {
+  margin: -4px 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.note {
+  margin: -2px 0 8px;
+  color: var(--color-text-dim);
+  font-size: var(--t-meta, 10px);
+  overflow-wrap: anywhere;
+}
