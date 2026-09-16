@@ -43,8 +43,18 @@ use std::path::{Path, PathBuf};
 /// paths bind it per-`Command`, which is local to that child).
 const GUARDED_VARS: &[&str] = &["FLEET_HOME", "CODEX_HOME", "DSH_HOME"];
 
-/// The lock every mutator must be under, directly or through its helper.
-const LOCK: &str = "fleet_home_lock";
+/// The ways a body can claim the lock, directly or through its helper.
+///
+/// `fleet_home_guard` covers `fleet_home_guard_with` too (substring), and both
+/// take `fleet_home_lock` internally — they are the preferred shape because the
+/// guard also restores the env from `Drop`, which a hand-rolled restore on the
+/// test's last line skips whenever an assert unwinds past it.
+const CLAIMS: &[&str] = &["fleet_home_lock", "fleet_home_guard"];
+
+/// Does this body claim the lock in any of the accepted ways?
+fn holds_claim(body: &str) -> bool {
+    CLAIMS.iter().any(|c| body.contains(c))
+}
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -188,7 +198,7 @@ fn every_test_that_repoints_a_fleet_home_holds_the_lock() {
         // pattern this guard wants everyone to use.
         let guarded_names: HashSet<&str> = items
             .iter()
-            .filter(|it| !it.is_test && it.body.contains(LOCK))
+            .filter(|it| !it.is_test && holds_claim(&it.body))
             .map(|it| it.name.as_str())
             .collect();
         let unguarded_helpers: HashSet<&str> = items
@@ -207,7 +217,7 @@ fn every_test_that_repoints_a_fleet_home_holds_the_lock() {
             if !direct && !via_helper {
                 continue;
             }
-            if test.body.contains(LOCK) {
+            if holds_claim(&test.body) {
                 guarded_tests += 1;
                 continue;
             }
@@ -225,9 +235,10 @@ fn every_test_that_repoints_a_fleet_home_holds_the_lock() {
         "these tests perturb FLEET_HOME/CODEX_HOME/DSH_HOME without holding \
          `crate::session::fleet_home_lock()`, so they race every other test that \
          reads a Fleet home:\n{}\n\nFix by taking the lock for the whole test \
-         (`let _lock = crate::session::fleet_home_lock();` as the first line), or \
-         — better — by moving the mutation into a helper that holds the lock for \
-         the caller, the way `codex_guidance::with_temp_codex_home` does.",
+         (`let _home = crate::paths::fleet_home_guard(&dir);` as the first line \
+         — it takes the lock and restores the env even if an assert panics), or \
+         — better — by moving the mutation into a helper that holds it for the \
+         caller, the way `codex_guidance::with_temp_codex_home` does.",
         offenders.join("\n")
     );
 
