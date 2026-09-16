@@ -755,14 +755,19 @@ fn record_resolution(card: &ParkedCard, response: &Value, dismissed: bool) {
     }
 }
 
+/// Opening line of every timeout-resume prompt. Shared with
+/// [`crate::fleet_event::classify`], which folds the turn into a collapsed
+/// `decision` event card instead of a user bubble — the two must not drift, or
+/// the card silently reverts to a wall of text.
+pub(crate) const RESUME_PROMPT_HEADER: &str =
+    "[Fleet] 你上一轮通过决策卡向老板提问，等待超时，那一轮已被中断。老板现在回复了：\n\n";
+
 /// Render "here is what you asked, here is what the boss said" for the resume
 /// prompt. The agent reads this as a fresh user turn, so it has to carry enough
 /// context to stand alone — the tool call it came from was interrupted and never
 /// produced a result.
 fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
-    let mut out = String::from(
-        "[Fleet] 你上一轮通过决策卡向老板提问，等待超时，那一轮已被中断。老板现在回复了：\n\n",
-    );
+    let mut out = String::from(RESUME_PROMPT_HEADER);
     match card.kind {
         ParkedKind::FleetAsk | ParkedKind::Elicitation => {
             render_question_answers(&mut out, &card.request, response);
