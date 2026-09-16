@@ -125,6 +125,80 @@ pub mod paths {
             Err(p) => p.into_inner(),
         }
     }
+
+    /// The whole `FLEET_HOME` claim in one value: takes [`fleet_home_lock`],
+    /// points `FLEET_HOME` at `dir`, and puts the previous value back when it
+    /// drops.
+    ///
+    /// Prefer this over calling [`fleet_home_lock`] and `set_var` by hand. Two
+    /// bugs keep coming back from the hand-rolled version, and this type is
+    /// immune to both:
+    ///
+    /// 1. **A forgotten lock.** `FLEET_HOME` is process-global, so a test that
+    ///    sets it without the lock silently redirects whatever a sibling test
+    ///    is doing in parallel. That is what turned CI red on
+    ///    `codex_image::…survives_a_stderr_flood` (2026-09-16): its marker
+    ///    file landed in a neighbour's temp dir.
+    /// 2. **A restore that a panic skips.** A test that restores `FLEET_HOME`
+    ///    on its last line never runs that line when an assert fires, leaving
+    ///    every later test in the process pointed at a deleted temp dir. A
+    ///    `Drop` impl runs during unwind, so the claim is released either way.
+    ///
+    /// Not `#[cfg(test)]`: integration tests are separate crates and need it
+    /// too. Production code must never construct one.
+    pub struct FleetHomeGuard {
+        home: std::path::PathBuf,
+        prev: Option<std::ffi::OsString>,
+        // Released only after this type's `Drop` has put `prev` back, so the
+        // next waiter never observes the temp value.
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl FleetHomeGuard {
+        /// The directory this guard pointed `FLEET_HOME` at.
+        pub fn home(&self) -> &std::path::Path {
+            &self.home
+        }
+    }
+
+    /// Claim `FLEET_HOME` for `dir` until the returned guard drops.
+    pub fn fleet_home_guard(dir: impl AsRef<std::path::Path>) -> FleetHomeGuard {
+        let dir = dir.as_ref().to_path_buf();
+        fleet_home_guard_with(|| dir)
+    }
+
+    /// Same, but `make_home` runs **after** the lock is taken.
+    ///
+    /// Use this whenever the directory is minted per call from a clock, a pid
+    /// or a counter: the repo's usual `format!("…-{pid}-{nanos}")` temp name
+    /// is only unique because the lock happens to serialise the two tests
+    /// racing to build it. Mint it before the lock and two tests can land on
+    /// the same path — then one removes the directory the other is still
+    /// writing into, and the victim fails with whatever errno the next syscall
+    /// happens to produce (EEXIST, EINVAL, …), never with anything that names
+    /// the real cause. Observed 2026-09-16 in `injector_watchdog`.
+    pub fn fleet_home_guard_with(
+        make_home: impl FnOnce() -> std::path::PathBuf,
+    ) -> FleetHomeGuard {
+        let lock = fleet_home_lock();
+        let home = make_home();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by the lock this guard holds.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+        FleetHomeGuard { home, prev, _lock: lock }
+    }
+
+    impl Drop for FleetHomeGuard {
+        fn drop(&mut self) {
+            // SAFETY: still inside the critical section — `_lock` outlives this.
+            unsafe {
+                match &self.prev {
+                    Some(v) => std::env::set_var("FLEET_HOME", v),
+                    None => std::env::remove_var("FLEET_HOME"),
+                }
+            }
+        }
+    }
 }
 pub mod plan_approval;
 pub mod plan_forest;
@@ -207,6 +281,10 @@ mod log_debug_tests {
     /// trip over lines an older (pre-fix) run leaked into the real file.
     #[test]
     fn test_build_log_debug_stays_out_of_the_real_fleet_log() {
+        // Pins FLEET_HOME for the duration: without the lock a sibling test can
+        // have it redirected at a temp dir, and then this assert inspects a
+        // file the probe was never meant to reach — a false green.
+        let _env_guard = crate::paths::fleet_home_lock();
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())

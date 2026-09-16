@@ -76,29 +76,28 @@ mod tests {
     use std::fs;
 
     fn with_temp_home<F: FnOnce()>(f: F) {
-        let _guard = fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet-watchdog-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        let _ = fs::create_dir_all(&tmp);
         // FLEET_HOME shadows the real user home for *both* injectors —
         // claude_dir (~/.claude) and fleet_dir (~/.fleet) both resolve via
         // real_home_dir(), so one env var is enough.
-        let prev_fleet = std::env::var_os("FLEET_HOME");
-        // SAFETY: serialised by fleet_home_lock.
-        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+        // `_with`, so the name is minted under the lock: `{pid}-{nanos}` is
+        // only unique because the lock serialises the two tests racing to
+        // build it. And a guard rather than a hand-rolled restore, because an
+        // assert inside `f` unwinds past any restore written after the call.
+        let guard = crate::paths::fleet_home_guard_with(|| {
+            let tmp = std::env::temp_dir().join(format!(
+                "fleet-watchdog-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            let _ = fs::create_dir_all(&tmp);
+            tmp
+        });
+        let tmp = guard.home().to_path_buf();
         f();
-        unsafe {
-            match prev_fleet {
-                Some(p) => std::env::set_var("FLEET_HOME", p),
-                None => std::env::remove_var("FLEET_HOME"),
-            }
-        }
+        drop(guard);
         let _ = fs::remove_dir_all(&tmp);
     }
 

@@ -480,6 +480,10 @@ mod tests {
         // returned Command must declare a HOME env binding pointing at
         // the user's real home directory.
         use std::ffi::OsStr;
+        // Reads real_home_dir() here and again inside build_claude_command;
+        // a sibling test flipping FLEET_HOME between the two makes them
+        // disagree, so the read needs the same lock a write does.
+        let _env_guard = crate::session::fleet_home_lock();
         let expected_home = crate::session::real_home_dir()
             .expect("self has a home dir");
         let cmd = build_claude_command(

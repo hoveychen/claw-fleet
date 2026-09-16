@@ -1183,35 +1183,9 @@ mod tests {
         std::fs::remove_file(p).ok();
     }
 
-    // real_home_dir() reads $FLEET_HOME, so tests must serialize and override it.
-    // Uses the crate-wide `crate::session::fleet_home_lock` so tests in
-    // different modules don't race on the global env. The shared lock is
-    // poison-tolerant: panics inside the critical section don't cascade.
-
-    struct FleetHomeOverride {
-        prev: Option<std::ffi::OsString>,
-    }
-
-    impl FleetHomeOverride {
-        fn new(tmp: &std::path::Path) -> Self {
-            let prev = std::env::var_os("FLEET_HOME");
-            // SAFETY: tests serialize via FLEET_HOME_LOCK
-            unsafe { std::env::set_var("FLEET_HOME", tmp) };
-            FleetHomeOverride { prev }
-        }
-    }
-
-    impl Drop for FleetHomeOverride {
-        fn drop(&mut self) {
-            unsafe {
-                if let Some(p) = &self.prev {
-                    std::env::set_var("FLEET_HOME", p);
-                } else {
-                    std::env::remove_var("FLEET_HOME");
-                }
-            }
-        }
-    }
+    // real_home_dir() reads $FLEET_HOME, so tests must serialise and override
+    // it. `crate::paths::fleet_home_guard` does both in one value — see its
+    // docs for why hand-rolling the pair keeps going wrong.
 
     fn temp_dir(name: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
@@ -1302,9 +1276,8 @@ mod tests {
 
     #[test]
     fn append_then_list_roundtrips() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("roundtrip");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         let req = sample_request("session-xyz", "req-1");
         let mut answers = HashMap::new();
@@ -1424,9 +1397,8 @@ mod tests {
 
     #[test]
     fn sync_user_prompts_appends_and_dedups() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("syncprompts");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         // Write a tiny fake session jsonl with two real prompts and one
         // ide_selection injection that must be skipped.
@@ -1455,9 +1427,8 @@ mod tests {
 
     #[test]
     fn list_with_jsonl_merges_sorted() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("merge");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         // Persist a decision card with timestamp BETWEEN two user prompts.
         let req = sample_request("ssn", "card-1");
@@ -1491,9 +1462,8 @@ mod tests {
 
     #[test]
     fn malformed_line_is_skipped() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("malformed");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         let req = sample_request("ssn", "req-1");
         let rec = build_elicitation_record(
@@ -1613,9 +1583,8 @@ mod tests {
 
     #[test]
     fn fleet_ask_record_persists_and_lists() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("fleet-ask-persist");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         let req = sample_fleet_ask_request("ssn-v2", "card-9");
         let mut answers = BTreeMap::new();
@@ -1642,9 +1611,8 @@ mod tests {
     /// would otherwise count one card as two.
     #[test]
     fn a_re_recorded_card_reads_as_its_latest_outcome_only() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("fleet-ask-supersede");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         let req = sample_fleet_ask_request("ssn-sup", "card-sup");
         append_record(&DecisionHistoryRecord::FleetAsk(build_fleet_ask_record(
@@ -1677,9 +1645,8 @@ mod tests {
 
     #[test]
     fn fleet_ask_record_mixes_with_other_kinds_on_timeline() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("fleet-ask-mixed");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         // v1 elicitation first, then a v2 fleet-ask later — both should
         // come back oldest-first from list_session_records().
@@ -1957,9 +1924,8 @@ mod tests {
 
     #[test]
     fn collect_other_picks_only_grabs_other_answers() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("collect-other");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         // Card 1: user typed a free-text answer via "Other" → should be collected.
         let req_other = recommended_request("sess-collect", "other-1");
@@ -2000,9 +1966,8 @@ mod tests {
 
     #[test]
     fn collect_other_picks_grabs_rejected_plan() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("collect-reject");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         let req = PlanApprovalRequest {
             parked: false,
@@ -2059,9 +2024,8 @@ mod tests {
     /// must still not append the same user prompt twice.
     #[test]
     fn concurrent_sync_does_not_duplicate_user_prompts() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("concurrent-sync");
-        let _home = FleetHomeOverride::new(&tmp);
+        let _home = crate::paths::fleet_home_guard(&tmp);
 
         let session = "sess-concurrent";
         let jsonl = tmp.join("transcript.jsonl");

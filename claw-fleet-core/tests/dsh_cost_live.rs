@@ -35,35 +35,33 @@ impl Drop for ServerGuard {
 /// reads live there. Both are set before anything resolves them.
 struct Homes {
     _temp: tempfile::TempDir,
-    prev_fleet: Option<std::ffi::OsString>,
     prev_dsh: Option<std::ffi::OsString>,
+    // Both live tests here run in one process under `--ignored`, so the
+    // FLEET_HOME claim has to be serialised like every other one in the repo.
+    // Declared last: released only after DSH_HOME is restored.
+    _fleet: claw_fleet_core::paths::FleetHomeGuard,
 }
 
 impl Homes {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
-        let prev_fleet = std::env::var_os("FLEET_HOME");
         let prev_dsh = std::env::var_os("DSH_HOME");
         let real_dsh = prev_dsh.clone().unwrap_or_else(|| {
             let home = std::env::var_os("HOME").expect("HOME");
             std::path::Path::new(&home).join(".dsh").into_os_string()
         });
-        std::env::set_var("FLEET_HOME", temp.path());
+        let fleet = claw_fleet_core::paths::fleet_home_guard(temp.path());
         std::env::set_var("DSH_HOME", &real_dsh);
         Self {
             _temp: temp,
-            prev_fleet,
             prev_dsh,
+            _fleet: fleet,
         }
     }
 }
 
 impl Drop for Homes {
     fn drop(&mut self) {
-        match self.prev_fleet.take() {
-            Some(v) => std::env::set_var("FLEET_HOME", v),
-            None => std::env::remove_var("FLEET_HOME"),
-        }
         match self.prev_dsh.take() {
             Some(v) => std::env::set_var("DSH_HOME", v),
             None => std::env::remove_var("DSH_HOME"),

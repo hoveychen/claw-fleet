@@ -210,37 +210,33 @@ mod tests {
     /// developer's real `~/.claude` / `~/.fleet`.
     struct HomeGuard {
         dir: std::path::PathBuf,
-        prev: Option<std::ffi::OsString>,
-        _lock: std::sync::MutexGuard<'static, ()>,
+        // Released only after the temp dir is gone, so the next test never
+        // scans this one's leftovers.
+        _fleet: crate::paths::FleetHomeGuard,
     }
 
     impl HomeGuard {
         fn new(tag: &str) -> Self {
-            let lock = crate::paths::fleet_home_lock();
-            let dir = std::env::temp_dir().join(format!(
-                "fleet-cpheal-{tag}-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            std::fs::create_dir_all(&dir).unwrap();
-            let prev = std::env::var_os("FLEET_HOME");
-            // SAFETY: serialised by fleet_home_lock.
-            unsafe { std::env::set_var("FLEET_HOME", &dir) };
-            Self { dir, prev, _lock: lock }
+            // Minted under the lock (`_with`): `{pid}-{nanos}` is only unique
+            // because the lock serialises the tests racing to build it.
+            let fleet = crate::paths::fleet_home_guard_with(|| {
+                let dir = std::env::temp_dir().join(format!(
+                    "fleet-cpheal-{tag}-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
+                std::fs::create_dir_all(&dir).unwrap();
+                dir
+            });
+            Self { dir: fleet.home().to_path_buf(), _fleet: fleet }
         }
     }
 
     impl Drop for HomeGuard {
         fn drop(&mut self) {
-            unsafe {
-                match &self.prev {
-                    Some(v) => std::env::set_var("FLEET_HOME", v),
-                    None => std::env::remove_var("FLEET_HOME"),
-                }
-            }
             let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
