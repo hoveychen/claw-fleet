@@ -845,6 +845,9 @@ mod claude_config_dir_tests {
     // nothing else reads it — so cross-test interference is effectively nil.
     #[test]
     fn resolves_config_dir_and_json_with_and_without_env() {
+        // Every assert below compares a getter against a fresh real_home_dir()
+        // read, so FLEET_HOME must hold still across the whole test.
+        let _env_guard = crate::paths::fleet_home_lock();
         let _g = CfgGuard(std::env::var_os("CLAUDE_CONFIG_DIR"));
 
         // Set → used verbatim; .claude.json sits at the config-dir root.

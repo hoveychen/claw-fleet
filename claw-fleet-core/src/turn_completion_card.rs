@@ -329,6 +329,12 @@ mod tests {
 
     #[test]
     fn chat_workspace_is_not_a_task() {
+        // Reads the chat path, then has `is_task_session` read it again — and
+        // that path is derived from FLEET_HOME. Without the lock, a sibling
+        // test redirecting FLEET_HOME between the two reads makes them
+        // disagree. Tests that only *read* a FLEET_HOME-derived path need the
+        // lock just as much as the ones that set it.
+        let _env_guard = crate::session::fleet_home_lock();
         // A project path is always a task; the chat workspace is not.
         let mut s = session("/definitely/not/chat/project");
         assert!(is_task_session(&s));
@@ -340,6 +346,10 @@ mod tests {
 
     #[test]
     fn maybe_raise_skips_chat_and_parked_sessions() {
+        // Same reason as `chat_workspace_is_not_a_task`: the chat path is read
+        // once here and again inside `maybe_raise`. Observed failing under
+        // `--test-threads=16` before this lock, at the chat assert.
+        let _env_guard = crate::session::fleet_home_lock();
         // A session whose process is still alive at WaitingInput is parked on a
         // decision card (or interactive) — never wrap it again.
         let mut parked = session("/p");

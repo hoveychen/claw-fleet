@@ -147,19 +147,45 @@ pub mod paths {
     /// Not `#[cfg(test)]`: integration tests are separate crates and need it
     /// too. Production code must never construct one.
     pub struct FleetHomeGuard {
+        home: std::path::PathBuf,
         prev: Option<std::ffi::OsString>,
         // Released only after this type's `Drop` has put `prev` back, so the
         // next waiter never observes the temp value.
         _lock: std::sync::MutexGuard<'static, ()>,
     }
 
+    impl FleetHomeGuard {
+        /// The directory this guard pointed `FLEET_HOME` at.
+        pub fn home(&self) -> &std::path::Path {
+            &self.home
+        }
+    }
+
     /// Claim `FLEET_HOME` for `dir` until the returned guard drops.
     pub fn fleet_home_guard(dir: impl AsRef<std::path::Path>) -> FleetHomeGuard {
+        let dir = dir.as_ref().to_path_buf();
+        fleet_home_guard_with(|| dir)
+    }
+
+    /// Same, but `make_home` runs **after** the lock is taken.
+    ///
+    /// Use this whenever the directory is minted per call from a clock, a pid
+    /// or a counter: the repo's usual `format!("…-{pid}-{nanos}")` temp name
+    /// is only unique because the lock happens to serialise the two tests
+    /// racing to build it. Mint it before the lock and two tests can land on
+    /// the same path — then one removes the directory the other is still
+    /// writing into, and the victim fails with whatever errno the next syscall
+    /// happens to produce (EEXIST, EINVAL, …), never with anything that names
+    /// the real cause. Observed 2026-09-16 in `injector_watchdog`.
+    pub fn fleet_home_guard_with(
+        make_home: impl FnOnce() -> std::path::PathBuf,
+    ) -> FleetHomeGuard {
         let lock = fleet_home_lock();
+        let home = make_home();
         let prev = std::env::var_os("FLEET_HOME");
         // SAFETY: serialised by the lock this guard holds.
-        unsafe { std::env::set_var("FLEET_HOME", dir.as_ref()) };
-        FleetHomeGuard { prev, _lock: lock }
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+        FleetHomeGuard { home, prev, _lock: lock }
     }
 
     impl Drop for FleetHomeGuard {
@@ -255,6 +281,10 @@ mod log_debug_tests {
     /// trip over lines an older (pre-fix) run leaked into the real file.
     #[test]
     fn test_build_log_debug_stays_out_of_the_real_fleet_log() {
+        // Pins FLEET_HOME for the duration: without the lock a sibling test can
+        // have it redirected at a temp dir, and then this assert inspects a
+        // file the probe was never meant to reach — a false green.
+        let _env_guard = crate::paths::fleet_home_lock();
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())

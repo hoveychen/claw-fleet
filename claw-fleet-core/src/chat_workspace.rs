@@ -318,15 +318,11 @@ mod tests {
     /// `FLEET_HOME` is process-global; serialize against the other suites that
     /// repoint it.
     fn with_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
-        let _guard = crate::session::fleet_home_lock();
-        let prev = std::env::var_os("FLEET_HOME");
-        unsafe { std::env::set_var("FLEET_HOME", home) };
-        let out = f();
-        match prev {
-            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
-            None => unsafe { std::env::remove_var("FLEET_HOME") },
-        }
-        out
+        // Guard, not a hand-rolled restore: an assert inside `f` unwinds past
+        // any restore written after the call, leaving every later test in this
+        // process pointed at a home that no longer exists.
+        let _guard = crate::paths::fleet_home_guard(home);
+        f()
     }
 
     /// Point `CLAUDE_CONFIG_DIR` at a temp dir for the duration of `f`, so the

@@ -233,17 +233,21 @@ mod tests {
 
     impl HomeGuard {
         fn new(tag: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "fleet-cpprefs-{tag}-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            fs::create_dir_all(&dir).unwrap();
-            let fleet = crate::paths::fleet_home_guard(&dir);
-            Self { dir, _fleet: fleet }
+            // Minted under the lock (`_with`): `{pid}-{nanos}` is only unique
+            // because the lock serialises the tests racing to build it.
+            let fleet = crate::paths::fleet_home_guard_with(|| {
+                let dir = std::env::temp_dir().join(format!(
+                    "fleet-cpprefs-{tag}-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
+                fs::create_dir_all(&dir).unwrap();
+                dir
+            });
+            Self { dir: fleet.home().to_path_buf(), _fleet: fleet }
         }
     }
 
