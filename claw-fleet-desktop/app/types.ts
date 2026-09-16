@@ -351,6 +351,15 @@ export interface RawMessage {
    *  failed before producing any reply — expired credentials, a stream error).
    *  Renders as a failure banner, not as an assistant bubble. */
   isTurnError?: boolean;
+  /** Claude Code's own marker for a turn that failed instead of replying. The
+   *  record looks like an assistant turn (`message.model === "<synthetic>"`)
+   *  but carries a machine-readable `error` enum, and for a rate limit a
+   *  structured `quotaLimits`. Classified by `shared-ts/syntheticError`;
+   *  declared here because the fields ride through `get_messages` untouched and
+   *  were previously invisible to the type. */
+  isApiErrorMessage?: boolean;
+  error?: string;
+  quotaLimits?: Record<string, unknown>;
   /** Fleet-owned automation prompt persisted by the harness as role=user. */
   fleetEvent?: {
     kind: "watch" | "handoff" | "loop" | "schedule" | "decision";

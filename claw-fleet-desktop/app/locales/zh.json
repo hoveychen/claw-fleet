@@ -1949,6 +1949,29 @@
       "open_artifact_short": "产出",
       "open_wiki": "在知识库打开",
       "open_rail": "在侧边打开"
+    },
+    "api_error": {
+      "auth": "登录已失效",
+      "rate_limit": "已达用量上限",
+      "model_quota": "该模型额度已用完",
+      "server": "连不上 API",
+      "too_long": "上下文超长",
+      "compaction_blocked": "压缩也被配额挡住了",
+      "billing": "余额不足",
+      "model_not_found": "模型不可用",
+      "safeguards": "被安全策略拦下",
+      "generic": "请求失败",
+      "resets_in": "{{time}} 后恢复",
+      "reset_now": "配额已恢复",
+      "raw": "原始记录",
+      "working": "处理中…",
+      "action": {
+        "retry": "重试本轮",
+        "login": "重新登录",
+        "switchModel": "换模型继续",
+        "compact": "压缩后继续",
+        "openUrl": "打开页面"
+      }
     }
   },
   "settings": {

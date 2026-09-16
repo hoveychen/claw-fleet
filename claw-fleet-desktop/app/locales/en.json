@@ -1952,6 +1952,29 @@
       "open_artifact_short": "Artifacts",
       "open_wiki": "Open in Wiki",
       "open_rail": "Open beside"
+    },
+    "api_error": {
+      "auth": "Sign-in expired",
+      "rate_limit": "Usage limit reached",
+      "model_quota": "Out of quota for this model",
+      "server": "Can't reach the API",
+      "too_long": "Context too long",
+      "compaction_blocked": "Compaction was blocked by the same limit",
+      "billing": "Credit balance too low",
+      "model_not_found": "Model unavailable",
+      "safeguards": "Blocked by safeguards",
+      "generic": "Request failed",
+      "resets_in": "resets in {{time}}",
+      "reset_now": "quota reset",
+      "raw": "Raw record",
+      "working": "Working…",
+      "action": {
+        "retry": "Retry turn",
+        "login": "Sign in again",
+        "switchModel": "Switch model",
+        "compact": "Compact, then continue",
+        "openUrl": "Open page"
+      }
     }
   },
   "settings": {

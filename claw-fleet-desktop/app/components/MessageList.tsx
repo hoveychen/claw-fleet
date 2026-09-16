@@ -38,6 +38,8 @@ import { ReaderModal } from "./ReaderModal";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import { MetaFoldBlock } from "./blocks/MetaFoldBlock";
 import { FleetEventBlock } from "./blocks/FleetEventBlock";
+import { ApiErrorBlock } from "./blocks/ApiErrorBlock";
+import { classifySyntheticError } from "../../../shared-ts/syntheticError";
 import { groupMetaRuns } from "./metaGrouping";
 import { groupWorkRuns } from "./workRuns";
 import { trailingIndicator, WORKING_STATUSES } from "./trailingIndicator";
@@ -191,6 +193,20 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
           </div>
           <div className={styles.turn_error_text}>{messageToText(msg)}</div>
         </div>
+      </div>
+    );
+  }
+
+  // A turn Claude Code failed out of: it persists the failure as an assistant
+  // record whose model is `<synthetic>`, tagged with a machine-readable `error`
+  // enum. That is not something the model said, and — unlike an assistant
+  // bubble — it usually has exactly one way out (log in again, retry, switch
+  // model), so it gets a card that offers it. See `shared-ts/syntheticError`.
+  const apiError = classifySyntheticError(msg);
+  if (apiError) {
+    return (
+      <div className={styles.compact_row} data-msg-idx={msgIdx}>
+        <ApiErrorBlock info={apiError} />
       </div>
     );
   }
