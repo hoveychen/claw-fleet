@@ -118,6 +118,139 @@ pub fn list_thread_images(thread_id: &str) -> Vec<GeneratedImage> {
         .unwrap_or_default()
 }
 
+// ── Internal-thread marking ─────────────────────────────────────────────────
+//
+// A codex_image turn is a *tool invocation*, not a session Boss is having. But
+// its rollout lands in the real `$CODEX_HOME/sessions/` stamped
+// `originator = "fleet"` (see `apply_codex_launch_env`), which is exactly what
+// the scanner uses to recognise a Fleet-owned Codex session. Left unmarked, an
+// image turn is indistinguishable from a real one, and every mechanism that
+// acts on "a Fleet task session whose turn just ended" fires on it.
+//
+// Observed live 2026-09-15 on thread 01a0a794 (mslug3-remake): the five
+// codex_image turns each correctly ended in plain text — `fleet__ask` is not
+// registered on the image launch, so the agent hit `not a function` and fell
+// back, which is the headless behaviour we want. Then
+// `turn_completion_card::maybe_raise` saw a task session whose process had
+// exited without raising a card, put up a 「任务已完成」 card, and on the answer
+// resumed the thread through `agent_source::resume_session` — the *normal*
+// session path, which does register the fleet MCP server and does bypass the
+// sandbox. That sixth turn dutifully produced a decision card, on a headless
+// feature, at a cost of 415K input tokens under `danger-full-access`.
+//
+// So the fix is not to harden the image prompt — it is to stop claiming the
+// thread is a session at all.
+
+/// Marker files naming threads Fleet drove purely as an internal image turn.
+/// One empty file per thread id, written after every generate/edit.
+fn internal_thread_dir() -> Option<PathBuf> {
+    crate::session::get_fleet_dir().map(|d| d.join("codex-internal-threads"))
+}
+
+/// Guards against a thread id escaping the marker directory. Ids are
+/// Codex-minted uuids, so anything with a separator in it is not one.
+fn internal_thread_path(thread_id: &str) -> Option<PathBuf> {
+    let id = thread_id.trim();
+    if id.is_empty() || id.contains('/') || id.contains('\\') || id.contains("..") {
+        return None;
+    }
+    internal_thread_dir().map(|d| d.join(id))
+}
+
+/// Record that `thread_id` belongs to the image tool, not to Boss.
+///
+/// Best-effort: losing the marker degrades to the thread showing up in the
+/// session list, which is what happens today, so a write error is logged rather
+/// than failing a turn that already produced its image.
+pub fn mark_internal_thread(thread_id: &str) {
+    let Some(path) = internal_thread_path(thread_id) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            crate::log_debug(&format!("codex_image: create internal-thread dir: {e}"));
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(&path, b"") {
+        crate::log_debug(&format!("codex_image: mark internal thread {thread_id}: {e}"));
+    }
+}
+
+/// Whether `thread_id` is an internal image thread and must be kept out of the
+/// session list.
+///
+/// Two judges, because the marker only covers turns run after this shipped:
+///
+/// 1. the marker file, which is authoritative and free;
+/// 2. for a thread that has an output directory but no marker — every image
+///    thread generated before this change — the rollout's opening prompt. Only
+///    [`build_image_prompt`] emits [`IMAGE_PROMPT_PREFIX`] as the first thing a
+///    thread ever hears, so this cannot mistake a *real* session that happened
+///    to use the built-in `image_gen` tool for an internal one: that session
+///    opened with whatever Boss typed.
+///
+/// The second judge is gated on the output directory existing precisely so the
+/// rollout read is bounded to the handful of threads that ever produced an
+/// image, rather than every Codex session on the machine.
+pub fn is_internal_thread(thread_id: &str) -> bool {
+    let Some(marker) = internal_thread_path(thread_id) else {
+        return false;
+    };
+    if marker.exists() {
+        return true;
+    }
+    match thread_images_dir(thread_id) {
+        Some(dir) if dir.is_dir() => rollout_opens_with_image_prompt(thread_id),
+        _ => false,
+    }
+}
+
+/// How many rollout lines to read looking for the thread's first user message.
+/// Codex writes it at ordinal ~6, behind the session meta, the skills/plugins
+/// developer messages, the world state and the turn context.
+const ROLLOUT_HEAD_LINES: usize = 40;
+
+/// Does this thread's rollout open with a [`build_image_prompt`] prompt?
+///
+/// Reads only the head of the file — these rollouts reach tens of MB once the
+/// base64 of every attachment is in them, and the answer is always in the first
+/// few lines. A `.jsonl.zst` rollout is reported `false` rather than
+/// decompressed: compression only happens to archived threads, which are long
+/// past being resumed or nagged, so the whole-file decompress buys nothing.
+fn rollout_opens_with_image_prompt(thread_id: &str) -> bool {
+    use std::io::BufRead;
+
+    let Some(path) = crate::codex_source::find_codex_rollout(thread_id) else {
+        return false;
+    };
+    if path.extension().and_then(|e| e.to_str()) == Some("zst") {
+        return false;
+    }
+    let Ok(file) = std::fs::File::open(&path) else {
+        return false;
+    };
+    for line in std::io::BufReader::new(file).lines().take(ROLLOUT_HEAD_LINES) {
+        let Ok(line) = line else { return false };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let payload = v.get("payload");
+        if payload.and_then(|p| p.get("role")).and_then(|r| r.as_str()) != Some("user") {
+            continue;
+        }
+        let texts = payload.and_then(|p| p.get("content")).and_then(|c| c.as_array());
+        for part in texts.into_iter().flatten() {
+            if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                if text.starts_with(IMAGE_PROMPT_PREFIX) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Raw bytes of one generated image, for the `fleet-genimage://` protocol that
 /// renders thumbnails in the desktop.
 ///
@@ -174,6 +307,12 @@ const PROMPT_RULES: &str = "Do not substitute SVG, HTML/CSS, or any code-native 
      not move or copy the generated file anywhere — leave it at its default \
      location and simply report what you made.";
 
+/// Opening words of every prompt codex_image sends. Shared by the two builders
+/// below and by [`rollout_opens_with_image_prompt`], which recognises a
+/// pre-marker image thread by it — keep them one constant so the recogniser
+/// cannot drift away from what the builders actually emit.
+const IMAGE_PROMPT_PREFIX: &str = "Use the built-in `image_gen` tool to ";
+
 /// Wrap the caller's description into a prompt that pins the built-in path.
 ///
 /// `attached` says whether `-i` images ride along; they are references for the
@@ -190,7 +329,7 @@ pub fn build_image_prompt(description: &str, attached: usize) -> String {
         String::new()
     };
     format!(
-        "Use the built-in `image_gen` tool to generate the following image.{refs} {PROMPT_RULES}\n\n{}",
+        "{IMAGE_PROMPT_PREFIX}generate the following image.{refs} {PROMPT_RULES}\n\n{}",
         description.trim()
     )
 }
@@ -211,7 +350,7 @@ pub fn build_edit_prompt(instruction: &str, attached: usize) -> String {
         String::new()
     };
     format!(
-        "Use the built-in `image_gen` tool to revise the image you generated earlier in this \
+        "{IMAGE_PROMPT_PREFIX}revise the image you generated earlier in this \
          conversation. Change only what the instruction below asks for and keep everything else \
          unchanged.{refs} {PROMPT_RULES}\n\n{}",
         instruction.trim()
@@ -494,6 +633,10 @@ pub fn generate_image(
             None => format!("codex never printed thread.started; output: {}", tail(&stdout)),
         })?;
 
+    // Claim the thread as internal before anything else can read it as a
+    // session — see the internal-thread section above.
+    mark_internal_thread(&thread_id);
+
     // Fresh thread: everything in the directory is this turn's output.
     finish_turn(thread_id, &[], &stdout)
 }
@@ -527,6 +670,10 @@ pub fn edit_image(
     // Snapshot BEFORE the turn — the diff is the only way to tell this round's
     // output from earlier rounds' in a shared directory.
     let before = list_thread_images(thread_id);
+
+    // Re-assert on every round: an edit is the one path that can reach a thread
+    // whose marker predates this change, or was cleaned out from under us.
+    mark_internal_thread(thread_id);
 
     let (program, args, rca_envs) =
         build_edit_launch(codex, &workspace_path, thread_id, instruction, images, model)?;
@@ -717,6 +864,35 @@ mod tests {
         // Fleet locates output by thread id; a helpful `mv` would empty the dir.
         assert!(p.contains("not move"), "must forbid moving the output: {p}");
         assert!(p.contains("SVG"), "must forbid the vector substitution: {p}");
+    }
+
+    /// The pre-marker recogniser matches on [`IMAGE_PROMPT_PREFIX`], so a
+    /// builder that stops emitting it would silently put every historical image
+    /// thread back in the session list.
+    #[test]
+    fn both_prompts_open_with_the_recognisable_prefix() {
+        assert!(
+            build_image_prompt("a shiba", 0).starts_with(IMAGE_PROMPT_PREFIX),
+            "generate prompt must open with the prefix the recogniser looks for"
+        );
+        assert!(
+            build_edit_prompt("make it blue", 0).starts_with(IMAGE_PROMPT_PREFIX),
+            "edit prompt must open with the prefix the recogniser looks for"
+        );
+    }
+
+    /// The marker path is built from an id that reaches us through an MCP tool
+    /// argument, so it must not be able to name a file outside the dir.
+    #[test]
+    fn internal_thread_path_rejects_ids_that_could_escape() {
+        for bad in ["", "  ", "../../etc/passwd", "a/b", "a\\b"] {
+            assert!(
+                internal_thread_path(bad).is_none(),
+                "must refuse {bad:?} as a thread id"
+            );
+        }
+        // A real Codex thread id resolves.
+        assert!(internal_thread_path("01a0a794-3dcd-7d90-9ea1-fbe5bb453386").is_some());
     }
 
     #[test]
