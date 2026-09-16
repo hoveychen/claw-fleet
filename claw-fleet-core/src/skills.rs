@@ -592,29 +592,6 @@ mod tests {
         assert_eq!(desc, "Generate images");
     }
 
-    struct FleetHomeOverride {
-        prev: Option<std::ffi::OsString>,
-    }
-
-    impl FleetHomeOverride {
-        fn new(tmp: &Path) -> Self {
-            let prev = std::env::var_os("FLEET_HOME");
-            unsafe { std::env::set_var("FLEET_HOME", tmp) };
-            FleetHomeOverride { prev }
-        }
-    }
-
-    impl Drop for FleetHomeOverride {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.prev {
-                    Some(p) => std::env::set_var("FLEET_HOME", p),
-                    None => std::env::remove_var("FLEET_HOME"),
-                }
-            }
-        }
-    }
-
     fn make_skills_dir(home: &Path) -> PathBuf {
         let d = home.join(".claude").join("skills");
         fs::create_dir_all(&d).unwrap();
@@ -646,9 +623,8 @@ mod tests {
 
     #[test]
     fn scans_codex_user_repo_and_system_scopes() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = FleetHomeOverride::new(temp.path());
+        let _home = crate::paths::fleet_home_guard(temp.path());
         let codex_home = temp.path().join(".codex");
         let _codex = CodexHomeOverride::new(&codex_home);
 
@@ -705,9 +681,8 @@ mod tests {
     /// `SkillItem::source` holds one value, so a shared root cannot say both.
     #[test]
     fn scans_dsh_user_and_repo_roots_without_relabelling_shared_ones() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = FleetHomeOverride::new(temp.path());
+        let _home = crate::paths::fleet_home_guard(temp.path());
         // FLEET_HOME drives real_home_dir(), so ~/.dsh resolves under temp with
         // no DSH_HOME override needed. Point CODEX_HOME somewhere empty so this
         // test does not read the developer's own codex skills.
@@ -785,9 +760,8 @@ mod tests {
 
     #[test]
     fn delete_skill_removes_directory_based_skill() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = tempfile::TempDir::new().unwrap();
-        let _override = FleetHomeOverride::new(tmp.path());
+        let _override = crate::paths::fleet_home_guard(tmp.path());
         let skills_dir = make_skills_dir(tmp.path());
 
         let skill_dir = skills_dir.join("my-skill");
@@ -803,9 +777,8 @@ mod tests {
 
     #[test]
     fn delete_skill_removes_flat_md_file() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = tempfile::TempDir::new().unwrap();
-        let _override = FleetHomeOverride::new(tmp.path());
+        let _override = crate::paths::fleet_home_guard(tmp.path());
         let skills_dir = make_skills_dir(tmp.path());
 
         let flat = skills_dir.join("flat-skill.md");
@@ -818,9 +791,8 @@ mod tests {
 
     #[test]
     fn delete_skill_rejects_path_outside_skills_dir() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = tempfile::TempDir::new().unwrap();
-        let _override = FleetHomeOverride::new(tmp.path());
+        let _override = crate::paths::fleet_home_guard(tmp.path());
         let _skills_dir = make_skills_dir(tmp.path());
 
         // Put a victim file in ~/.claude/ but outside skills/
@@ -837,9 +809,8 @@ mod tests {
 
     #[test]
     fn managed_projections_are_inspectable_but_not_deletable() {
-        let _g = crate::session::fleet_home_lock();
         let tmp = tempfile::TempDir::new().unwrap();
-        let _override = FleetHomeOverride::new(tmp.path());
+        let _override = crate::paths::fleet_home_guard(tmp.path());
         let source = tmp.path().join(".claude/skills/shared");
         fs::create_dir_all(&source).unwrap();
         fs::write(

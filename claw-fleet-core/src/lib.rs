@@ -125,6 +125,54 @@ pub mod paths {
             Err(p) => p.into_inner(),
         }
     }
+
+    /// The whole `FLEET_HOME` claim in one value: takes [`fleet_home_lock`],
+    /// points `FLEET_HOME` at `dir`, and puts the previous value back when it
+    /// drops.
+    ///
+    /// Prefer this over calling [`fleet_home_lock`] and `set_var` by hand. Two
+    /// bugs keep coming back from the hand-rolled version, and this type is
+    /// immune to both:
+    ///
+    /// 1. **A forgotten lock.** `FLEET_HOME` is process-global, so a test that
+    ///    sets it without the lock silently redirects whatever a sibling test
+    ///    is doing in parallel. That is what turned CI red on
+    ///    `codex_image::…survives_a_stderr_flood` (2026-09-16): its marker
+    ///    file landed in a neighbour's temp dir.
+    /// 2. **A restore that a panic skips.** A test that restores `FLEET_HOME`
+    ///    on its last line never runs that line when an assert fires, leaving
+    ///    every later test in the process pointed at a deleted temp dir. A
+    ///    `Drop` impl runs during unwind, so the claim is released either way.
+    ///
+    /// Not `#[cfg(test)]`: integration tests are separate crates and need it
+    /// too. Production code must never construct one.
+    pub struct FleetHomeGuard {
+        prev: Option<std::ffi::OsString>,
+        // Released only after this type's `Drop` has put `prev` back, so the
+        // next waiter never observes the temp value.
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    /// Claim `FLEET_HOME` for `dir` until the returned guard drops.
+    pub fn fleet_home_guard(dir: impl AsRef<std::path::Path>) -> FleetHomeGuard {
+        let lock = fleet_home_lock();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by the lock this guard holds.
+        unsafe { std::env::set_var("FLEET_HOME", dir.as_ref()) };
+        FleetHomeGuard { prev, _lock: lock }
+    }
+
+    impl Drop for FleetHomeGuard {
+        fn drop(&mut self) {
+            // SAFETY: still inside the critical section — `_lock` outlives this.
+            unsafe {
+                match &self.prev {
+                    Some(v) => std::env::set_var("FLEET_HOME", v),
+                    None => std::env::remove_var("FLEET_HOME"),
+                }
+            }
+        }
+    }
 }
 pub mod plan_approval;
 pub mod plan_forest;

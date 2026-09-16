@@ -792,24 +792,26 @@ pub fn auto_reconcile() -> Result<SkillSyncReport, String> {
 mod tests {
     use super::*;
 
+    /// `FLEET_HOME` plus the `CODEX_HOME` pin this module also needs. The
+    /// FLEET_HOME half — lock included — comes from the shared guard; only the
+    /// CODEX_HOME override is local, and it rides the same critical section.
     struct HomeGuard {
-        fleet_home: Option<std::ffi::OsString>,
         codex_home: Option<std::ffi::OsString>,
+        // Declared last so it is released only after CODEX_HOME is restored.
+        _fleet: crate::paths::FleetHomeGuard,
     }
 
     impl HomeGuard {
         fn new(path: &Path) -> Self {
-            let fleet_home = std::env::var_os("FLEET_HOME");
+            let fleet = crate::paths::fleet_home_guard(path);
             let codex_home = std::env::var_os("CODEX_HOME");
-            unsafe {
-                std::env::set_var("FLEET_HOME", path);
-                // Pin CODEX_HOME into the temp home so get_codex_dir() resolves
-                // to <temp>/.codex regardless of the ambient CODEX_HOME.
-                std::env::set_var("CODEX_HOME", path.join(".codex"));
-            }
+            // Pin CODEX_HOME into the temp home so get_codex_dir() resolves
+            // to <temp>/.codex regardless of the ambient CODEX_HOME.
+            // SAFETY: serialised by the FLEET_HOME lock the guard holds.
+            unsafe { std::env::set_var("CODEX_HOME", path.join(".codex")) };
             Self {
-                fleet_home,
                 codex_home,
+                _fleet: fleet,
             }
         }
     }
@@ -817,10 +819,6 @@ mod tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             unsafe {
-                match &self.fleet_home {
-                    Some(old) => std::env::set_var("FLEET_HOME", old),
-                    None => std::env::remove_var("FLEET_HOME"),
-                }
                 match &self.codex_home {
                     Some(old) => std::env::set_var("CODEX_HOME", old),
                     None => std::env::remove_var("CODEX_HOME"),
@@ -838,7 +836,6 @@ mod tests {
 
     #[test]
     fn adopt_projects_to_both_runtimes() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         let source = write_skill(
@@ -863,7 +860,6 @@ mod tests {
 
     #[test]
     fn sync_reports_conflict_without_overwriting() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         write_skill(
@@ -889,7 +885,6 @@ mod tests {
 
     #[test]
     fn unlink_refuses_unmanaged_content() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         write_skill(
@@ -924,7 +919,6 @@ mod tests {
 
     #[test]
     fn adopt_normalizes_a_flat_claude_skill() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         let flat = temp.path().join(".claude/skills/flat.md");
@@ -950,7 +944,6 @@ mod tests {
 
     #[test]
     fn autosync_config_roundtrips() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         assert!(!auto_sync_enabled());
@@ -963,7 +956,6 @@ mod tests {
 
     #[test]
     fn both_runtimes_present_requires_both() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         // Claude only.
@@ -976,7 +968,6 @@ mod tests {
 
     #[test]
     fn auto_reconcile_gated_off_when_single_runtime() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         // Claude has a fresh skill, but no Codex present → gate closed.
@@ -993,7 +984,6 @@ mod tests {
 
     #[test]
     fn auto_reconcile_adopts_new_skill_to_both() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         mark_codex_present(temp.path());
@@ -1017,7 +1007,6 @@ mod tests {
 
     #[test]
     fn auto_reconcile_adopts_incompatible_skill_with_warnings() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         mark_codex_present(temp.path());
@@ -1037,7 +1026,6 @@ mod tests {
 
     #[test]
     fn auto_reconcile_propagates_deletion() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         mark_codex_present(temp.path());
@@ -1060,7 +1048,6 @@ mod tests {
 
     #[test]
     fn auto_reconcile_leaves_conflict_untouched() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         mark_codex_present(temp.path());
@@ -1093,7 +1080,6 @@ mod tests {
     /// legacy `~/.agents/skills`. (Red against the old roots(); green after fix.)
     #[test]
     fn codex_projection_targets_codex_home_not_agents() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         mark_codex_present(temp.path());
@@ -1119,7 +1105,6 @@ mod tests {
     /// config; green after fix triggers a reconcile on enable.)
     #[test]
     fn enabling_autosync_adopts_existing_skills() {
-        let _lock = crate::session::fleet_home_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         mark_codex_present(temp.path());
