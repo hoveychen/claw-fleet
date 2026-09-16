@@ -218,7 +218,38 @@ const ROLLOUT_HEAD_LINES: usize = 40;
 /// few lines. A `.jsonl.zst` rollout is reported `false` rather than
 /// decompressed: compression only happens to archived threads, which are long
 /// past being resumed or nagged, so the whole-file decompress buys nothing.
+/// Memoises [`rollout_opens_with_image_prompt`]. A rollout's opening prompt is
+/// written once and never rewritten, so the answer is immutable for the life of
+/// the thread and both polarities are safe to keep — which matters because a
+/// *negative* costs a `find_codex_rollout` directory walk, and the scan that
+/// asks runs every few seconds. Deliberately not memoising the marker-file
+/// check in [`is_internal_thread`]: that one has to stay live, or a thread
+/// scanned while its image turn is still running would be cached as "not
+/// internal" and stay visible for the rest of the process.
+static ROLLOUT_IS_IMAGE_PROMPT: std::sync::Mutex<
+    Option<std::collections::HashMap<String, bool>>,
+> = std::sync::Mutex::new(None);
+
 fn rollout_opens_with_image_prompt(thread_id: &str) -> bool {
+    if let Some(hit) = ROLLOUT_IS_IMAGE_PROMPT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .and_then(|m| m.get(thread_id))
+        .copied()
+    {
+        return hit;
+    }
+    let answer = read_rollout_opening_prompt(thread_id);
+    ROLLOUT_IS_IMAGE_PROMPT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(thread_id.to_string(), answer);
+    answer
+}
+
+fn read_rollout_opening_prompt(thread_id: &str) -> bool {
     use std::io::BufRead;
 
     let Some(path) = crate::codex_source::find_codex_rollout(thread_id) else {

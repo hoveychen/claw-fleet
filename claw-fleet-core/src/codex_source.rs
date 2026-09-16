@@ -276,6 +276,25 @@ pub(crate) fn find_codex_rollout(thread_id: &str) -> Option<PathBuf> {
     find_rollout_in(&get_sessions_dir()?, thread_id)
 }
 
+/// Drop the threads codex_image drove as an internal tool invocation.
+///
+/// Both scan paths (SQLite and filesystem) funnel through here, because the
+/// point is not "hide these from a list" — it is that a thread Fleet ran as a
+/// *tool call* must not be a `SessionInfo` at all. Everything downstream keys
+/// off that type: the turn-completion card, auto-resume, pending-message drain.
+/// Filtering at the one place they are minted is what makes the exclusion hold
+/// for all of them instead of needing a guard in each.
+///
+/// See [`crate::codex_image::is_internal_thread`] for how a thread is
+/// recognised, and the internal-thread section of that module for the live
+/// 2026-09-15 case this fixes.
+fn drop_internal_threads(sessions: Vec<SessionInfo>) -> Vec<SessionInfo> {
+    sessions
+        .into_iter()
+        .filter(|s| !crate::codex_image::is_internal_thread(&s.id))
+        .collect()
+}
+
 /// Pure filename scan behind [`find_codex_rollout`]: the rollout whose name ends
 /// in `-<thread_id>.jsonl` or `-<thread_id>.jsonl.zst` under `sessions_dir`.
 pub(crate) fn find_rollout_in(sessions_dir: &Path, thread_id: &str) -> Option<PathBuf> {
@@ -4318,6 +4337,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// An image thread must not survive the scan as a `SessionInfo` — that type
+    /// is what the turn-completion card, auto-resume and the pending-message
+    /// drain all act on. Real threads alongside it must be untouched.
+    #[test]
+    fn scan_drops_internal_image_threads_and_keeps_real_ones() {
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-internal-thread-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &tmp);
+
+        let image_id = "01a0a794-3dcd-7d90-9ea1-fbe5bb453386";
+        let real_id = "01a0a79a-f515-7133-950f-a5fb9beb18a9";
+        crate::codex_image::mark_internal_thread(image_id);
+
+        let sessions = vec![
+            crate::SessionInfo { id: image_id.into(), ..Default::default() },
+            crate::SessionInfo { id: real_id.into(), ..Default::default() },
+        ];
+        let kept: Vec<String> = super::drop_internal_threads(sessions)
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(kept, vec![real_id.to_string()], "only the image thread may be dropped");
+
+        match prev {
+            Some(p) => std::env::set_var("FLEET_HOME", p),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     /// A freshly spawned Codex turn has no thread id in argv, but Fleet records
     /// its pid as soon as Codex reports the minted thread id. That note must
     /// make Stop target the one session even when a sibling Codex shares cwd.
@@ -6934,12 +6991,12 @@ impl AgentSource for CodexSource {
         };
 
         // Try SQLite first (fast path).
-        if let Some(sessions) = self.scan_from_sqlite(&codex_processes) {
-            return sessions;
-        }
-
-        // Fallback: filesystem scan.
-        self.scan_from_filesystem(&codex_processes)
+        let sessions = match self.scan_from_sqlite(&codex_processes) {
+            Some(sessions) => sessions,
+            // Fallback: filesystem scan.
+            None => self.scan_from_filesystem(&codex_processes),
+        };
+        drop_internal_threads(sessions)
     }
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
