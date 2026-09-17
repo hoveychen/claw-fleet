@@ -377,6 +377,58 @@ fn session_id_from_args(args: &[String]) -> Option<String> {
         .map(|w| w[1].clone())
 }
 
+/// The session a launch is *resuming*, i.e. `--resume <uuid>` only. Narrower
+/// than [`session_id_from_args`] on purpose: a first run's `--session-id` names
+/// a transcript that does not exist yet.
+fn resume_target_from_args(args: &[String]) -> Option<String> {
+    args.windows(2)
+        .find(|w| w[0] == "--resume")
+        .map(|w| w[1].clone())
+}
+
+/// Heal a broken `parentUuid` chain before the CLI reads the transcript.
+///
+/// Claude Code rebuilds a resumed session's history by walking `parentUuid`
+/// back from the tail, so one link pointing at a row that was never persisted
+/// silently truncates the history to nothing — the resumed agent keeps writing
+/// to the same JSONL but starts from a blank slate. See
+/// [`crate::transcript_chain`] for the 2026-09-17 case that produced this.
+///
+/// Best-effort by design: a failed repair must never block the spawn, so
+/// everything here lands in the stderr log and nothing propagates.
+fn repair_transcript_chain_before_resume(args: &[String], stderr_log: &Path) {
+    let session_id = match resume_target_from_args(args) {
+        Some(id) => id,
+        None => return,
+    };
+    let note = match crate::transcript_chain::repair_session(&session_id) {
+        Ok(None) => return,
+        Ok(Some(r)) => format!(
+            "transcript chain repaired: {} dangling parentUuid(s) relinked{}",
+            r.repaired,
+            match &r.backup {
+                Some(b) => format!(", original saved to {}", b.display()),
+                None => String::new(),
+            }
+        ),
+        Err(e) => format!("transcript chain repair skipped: {e}"),
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(stderr_log)
+    {
+        let _ = writeln!(
+            f,
+            "[{}] {} {}",
+            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+            session_id,
+            note
+        );
+    }
+    eprintln!("[fleet] {session_id} {note}");
+}
+
 pub fn spawn_claude_detached_with_envs(
     claude_path: &str,
     args: &[String],
@@ -426,6 +478,12 @@ pub fn spawn_claude_detached_with_envs(
             workspace_path
         );
     }
+
+    // Before the CLI opens the transcript, not after: a resume reads the whole
+    // parentUuid chain at startup, so a repair that lands late is a repair that
+    // did nothing. Runs at this chokepoint so every resume path (auto-resume,
+    // the sessions page's follow-up, handoff, loop) is covered.
+    repair_transcript_chain_before_resume(args, stderr_log);
 
     // A local agent's stderr goes straight to the log file — nothing reads it
     // live. An rca-wrapped one is piped instead, because rca announces a dead
@@ -1486,6 +1544,22 @@ mod remote_workspace_spawn_tests {
         assert_eq!(super::session_id_from_args(&a(&["-p", "hi"])), None);
         // A trailing flag with no value must not panic or mis-read.
         assert_eq!(super::session_id_from_args(&a(&["-p", "--session-id"])), None);
+    }
+
+    /// The chain repair must fire on a resume and stay away from a first run —
+    /// a `--session-id` launch names a transcript that does not exist yet.
+    #[test]
+    fn only_a_resume_names_a_transcript_to_repair() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            super::resume_target_from_args(&a(&["--resume", "u2", "-p", "continue"])),
+            Some("u2".to_string())
+        );
+        assert_eq!(
+            super::resume_target_from_args(&a(&["-p", "hi", "--session-id", "u1"])),
+            None
+        );
+        assert_eq!(super::resume_target_from_args(&a(&["--resume"])), None);
     }
 
     /// The stop-loss, end to end through the real spawn path: an rca that
