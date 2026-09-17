@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Aggregate the ablation runs and attach exact p-values, so a difference is
+only ever reported as real when the sample actually supports it."""
+import json, math
+from collections import defaultdict
+from pathlib import Path
+
+RUNS = Path.home() / ".guidance-probe" / "runs"
+RULE = {
+    "A": "Rule 3 — 生产代码改动走 worktree",
+    "B": "Rule 2 — 多步任务先写 TASKS.md 计划",
+    "C": "Rule 1 — 计划中途不在 main 上提交",
+    "D": "周期任务用 fleet loop，不用 CronCreate",
+    "E": "跨回合等待用 fleet watch，不空转",
+    "F": "终局回合出一张格式正确的决策卡",
+}
+TOKENS = {"none": 0, "full": 24381, "lite": 14607, "min": 7999}
+
+
+def fisher(a, b, c, d):
+    """Two-sided Fisher exact test on [[a,b],[c,d]]."""
+    def p(a, b, c, d):
+        n = a + b + c + d
+        return (math.comb(a + b, a) * math.comb(c + d, c)) / math.comb(n, a + c)
+    obs = p(a, b, c, d)
+    tot = 0.0
+    for i in range(0, a + b + 1):
+        j, k, l = a + b - i, a + c - i, d - a + i
+        if k < 0 or l < 0:
+            continue
+        pr = p(i, j, k, l)
+        if pr <= obs + 1e-12:
+            tot += pr
+    return min(1.0, tot)
+
+
+cells = defaultdict(lambda: [0, 0])  # (scen, model, cond) -> [pass, total]
+for f in sorted(RUNS.glob("*/record.json")):
+    r = json.loads(f.read_text())
+    if r.get("api_error"):
+        continue
+    k = (r["scenario"], r["model"], r["condition"])
+    cells[k][1] += 1
+    cells[k][0] += bool(r["score"].get("compliant"))
+
+for model in sorted({k[1] for k in cells}):
+    conds = [c for c in ("none", "full", "lite", "min")
+             if any(k[2] == c and k[1] == model for k in cells)]
+    print(f"\n### model = {model}\n")
+    print("| 场景 | 规则 | " + " | ".join(conds) + " |")
+    print("|---|---|" + "---|" * len(conds))
+    tot = {c: [0, 0] for c in conds}
+    for s in sorted({k[0] for k in cells if k[1] == model}):
+        row = []
+        for c in conds:
+            p, n = cells.get((s, model, c), [0, 0])
+            row.append(f"{p}/{n}" if n else "—")
+            tot[c][0] += p
+            tot[c][1] += n
+        print(f"| {s} | {RULE[s]} | " + " | ".join(row) + " |")
+    print("| **合计** | | " + " | ".join(
+        f"**{tot[c][0]}/{tot[c][1]}**" for c in conds) + " |")
+
+    print("\n各条件对 `full` 的差异（Fisher 精确检验，双侧）：")
+    for c in conds:
+        if c == "full":
+            continue
+        for s in sorted({k[0] for k in cells if k[1] == model}):
+            fp, fn = cells.get((s, model, "full"), [0, 0])
+            xp, xn = cells.get((s, model, c), [0, 0])
+            if not fn or not xn or fp == xp and fn == xn:
+                continue
+            pv = fisher(xp, xn - xp, fp, fn - fp)
+            mark = "**显著**" if pv < 0.05 else "不显著"
+            print(f"- {s} {c} {xp}/{xn} vs full {fp}/{fn} → p={pv:.3f} ({mark})")
+
+print("\n### 条件成本（实测 token 增量，对空 CLAUDE.md）\n")
+print("| 条件 | token | 相对 full |")
+print("|---|---|---|")
+for c, t in TOKENS.items():
+    rel = "—" if c == "none" else f"{(t / TOKENS['full'] - 1) * 100:+.1f}%"
+    print(f"| {c} | {t:,} | {rel} |")
+
+# ---- pooled test over the non-saturated scenarios -------------------------
+# A, C and D sit at 100% (or 0%) under every condition that carries the rule,
+# so they can only dilute a comparison. Pool the three that actually vary.
+POOL = ("B", "E", "F")
+print("\n### 非饱和场景 (B,E,F) 合并对比\n")
+pooled = {}
+for c in ("none", "full", "lite", "min"):
+    p = sum(cells.get((s, "sonnet", c), [0, 0])[0] for s in POOL)
+    n = sum(cells.get((s, "sonnet", c), [0, 0])[1] for s in POOL)
+    pooled[c] = (p, n)
+    print(f"- {c}: {p}/{n} = {p / n * 100:.0f}%" if n else f"- {c}: —")
+fp, fn = pooled["full"]
+for c in ("none", "lite", "min"):
+    xp, xn = pooled[c]
+    if not xn:
+        continue
+    pv = fisher(xp, xn - xp, fp, fn - fp)
+    print(f"- {c} vs full → p={pv:.3f} " + ("(**显著**)" if pv < 0.05 else "(不显著)"))

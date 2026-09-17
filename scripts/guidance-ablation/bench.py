@@ -341,6 +341,7 @@ def one_run(scen_id: str, cond: str, model: str, idx: int, force: bool):
     (run_dir / "stderr.txt").write_text(proc.stderr)
 
     tools, result_text, usage, available = [], "", {}, []
+    api_error = False
     for line in proc.stdout.splitlines():
         try:
             ev = json.loads(line)
@@ -355,6 +356,7 @@ def one_run(scen_id: str, cond: str, model: str, idx: int, force: bool):
         if ev.get("type") == "result":
             result_text = ev.get("result", "") or ""
             usage = ev.get("usage", {})
+            api_error = bool(ev.get("is_error")) and not tools
 
     rec = {
         "run_id": run_id, "scenario": scen_id, "condition": cond,
@@ -365,6 +367,7 @@ def one_run(scen_id: str, cond: str, model: str, idx: int, force: bool):
         "available_tools": available,
         "stub": [json.loads(l) for l in stub_log.read_text().splitlines() if l.strip()],
         "cli": [l.split() for l in cli_log.read_text().splitlines() if l.strip()],
+        "api_error": api_error,
         "wall_s": round(time.time() - t0, 1),
         "prompt_tokens": (usage.get("input_tokens", 0)
                           + usage.get("cache_creation_input_tokens", 0)
@@ -425,10 +428,13 @@ def cmd_run(args):
 
 
 def cmd_report(args):
-    rows = {}
+    rows, errs = {}, {}
     for p in sorted(RUNS.glob("*/record.json")):
         r = json.loads(p.read_text())
         key = (r["scenario"], r["model"], r["condition"])
+        if r.get("api_error"):
+            errs[key] = errs.get(key, 0) + 1
+            continue
         rows.setdefault(key, []).append(bool(r["score"].get("compliant")))
     conds, scens, models = [], [], []
     for (s, m, c) in rows:
@@ -447,8 +453,15 @@ def cmd_report(args):
             line = f"{s} ".ljust(10)
             for c in conds:
                 v = rows.get((s, m, c))
-                line += (f"{sum(v)}/{len(v)}" if v else "-").ljust(12)
+                cell = f"{sum(v)}/{len(v)}" if v else "-"
+                e = errs.get((s, m, c))
+                if e:
+                    cell += f" (!{e})"
+                line += cell.ljust(12)
             print(line)
+        if errs:
+            print("  (!n) = n runs dropped: the API returned an error before "
+                  "the probe made a single tool call")
 
 
 def main():
