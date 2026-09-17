@@ -2,6 +2,12 @@
 // two apps are separate vite packages, so the list is duplicated rather than
 // shared. Keep them in step: a message that bolds on the desktop must bold on
 // the phone.
+//
+// "Keep them in step" on its own did not hold: this list silently drifted two
+// plugins behind the desktop (`singleTilde: false` and `remarkCjkAutolinkFix`),
+// and both gaps were user-visible on the phone for as long as they lasted —
+// because the desktop had tests for them and this side had none. plugins.test.ts
+// next to this file now pins both. Add a case there for anything you mirror.
 import type { PluggableList } from "unified";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -10,6 +16,7 @@ import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeKatex from "rehype-katex";
+import { remarkCjkAutolinkFix } from "./cjkAutolinkFix";
 import { rehypeCjkIndent } from "./cjkIndent";
 import "katex/dist/katex.min.css";
 
@@ -71,12 +78,19 @@ const schema = {
  * punctuation, and the fix has to happen in the tokenizer.
  */
 export const mdRemarkPlugins: PluggableList = [
-  remarkGfm,
+  // A bare home path starts with `~`. With remark-gfm's permissive default,
+  // two paths such as `~/.claude/skills` and `~/.codex/skills` can swallow
+  // everything between them into a <del>. GFM's standard `~~text~~` form
+  // remains enabled when the single-tilde extension is disabled.
+  [remarkGfm, { singleTilde: false }],
   // A single `\n` (soft break) renders as a real line break, not a space — handoff
   // notes and chat messages often lean on bare newlines instead of blank lines.
   remarkBreaks,
   remarkCjkFriendly,
   remarkMath,
+  // GFM's autolink literal doesn't stop at CJK, so `见 https://example.com，然后`
+  // swallows the comma and everything after it into the href.
+  remarkCjkAutolinkFix,
 ];
 
 /** raw → sanitize → katex: scrub the model's HTML, then emit KaTeX's trusted DOM. */
