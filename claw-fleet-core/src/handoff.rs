@@ -528,6 +528,22 @@ fn successor_of(chain: &HandoffChain, session_id: &str) -> Option<String> {
         .map(|l| l.to_session_id.clone())
 }
 
+/// [`successor_of`] against the chain store, for callers outside this module
+/// that are about to *resume* a session: a hit means the session is retired and
+/// waking it would run a second agent alongside the successor that owns the
+/// work. Reads the store at call time rather than trusting a
+/// [`crate::session::SessionInfo`] snapshot, whose `handoff` stamp can predate
+/// the link.
+pub fn successor_session_of(session_id: &str) -> Option<String> {
+    let dir = chain_dir()?;
+    successor_session_of_in(&dir, session_id)
+}
+
+fn successor_session_of_in(dir: &Path, session_id: &str) -> Option<String> {
+    let chain = chain_containing_in(dir, session_id)?;
+    successor_of(&chain, session_id)
+}
+
 fn chain_containing_in(dir: &Path, session_id: &str) -> Option<HandoffChain> {
     list_chains_in(dir)
         .into_iter()
@@ -1314,6 +1330,42 @@ mod tests {
         assert_eq!(to.as_deref(), Some("t2"));
         let chain = chain_containing_in(&cdir, "t1").unwrap();
         assert_eq!(successor_of(&chain, "t1").as_deref(), Some("t2"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `successor_session_of` is what callers outside this module ask before
+    /// *resuming* a session — most notably the turn-completion card, whose
+    /// reminder used to wake a retired predecessor alongside the successor that
+    /// owns the work (observed 2026-09-16: hop 8 resumed 2.5 min after hop 9
+    /// spawned, and ran for an hour beside it). It must read the store, not a
+    /// caller's snapshot, so it sees a link written after the card was raised.
+    #[test]
+    fn successor_session_of_reads_the_chain_store() {
+        let (root, _pdir, cdir) = fresh_dirs("successor-of");
+
+        // Nothing on disk yet: a session with no chain is not retired.
+        assert_eq!(successor_session_of_in(&cdir, "hop8"), None);
+
+        let chain = HandoffChain {
+            chain_id: "c1".into(),
+            workspace_path: "/ws".into(),
+            plan_id: None,
+            links: vec![HandoffLink {
+                from_session_id: "hop8".into(),
+                to_session_id: "hop9".into(),
+                note: "n".into(),
+                plan_id: None,
+                next_task: None,
+                handed_at: 1000,
+            }],
+        };
+        fs::write(cdir.join("c1.json"), serde_json::to_string(&chain).unwrap()).unwrap();
+
+        // The predecessor has relayed — retired, must not be resumed.
+        assert_eq!(successor_session_of_in(&cdir, "hop8").as_deref(), Some("hop9"));
+        // The successor owns the work and has not relayed: still resumable.
+        assert_eq!(successor_session_of_in(&cdir, "hop9"), None);
+
         let _ = fs::remove_dir_all(&root);
     }
 

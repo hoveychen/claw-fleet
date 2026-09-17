@@ -263,6 +263,23 @@ fn deliver_reminder(job: &TurnCardJob, resp: &ElicitationResponse) {
     if resp.declined {
         return;
     }
+    // A session that already relayed its baton is retired — its successor owns
+    // the work and is very likely running right now. Resuming it here would put
+    // two agents on the same plan, and the woken predecessor resumes with a
+    // context ending at "I just registered a handoff" (see `handoff.rs`'s
+    // `successor_of`). This card is *especially* likely to land on such a
+    // session: Rule 5 forbids raising a card after registering a handoff, so a
+    // correctly-handed-off turn always ends in the plain text that
+    // `maybe_raise` reads as "forgot to use a card". The card itself still
+    // fires the phone notification; only the resume is suppressed.
+    if let Some(successor) = crate::handoff::successor_session_of(&job.session.id) {
+        crate::log_debug(&format!(
+            "turn card: {} already relayed to {successor}; card answered but not resuming a \
+             retired session",
+            job.session.id
+        ));
+        return;
+    }
     let prompt = reminder_prompt_with_answer(first_answer(resp).as_deref());
 
     let spec = ResumeSpec {
