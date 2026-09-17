@@ -49,13 +49,21 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
         _ => "Speak English throughout — the card's questions, option labels and descriptions, and your mid-turn progress narration alike.",
     };
 
-    // Extended thinking is generated in whatever language the model drifts to, and
-    // its training skews heavily English — so a non-English locale has to ask for it
-    // explicitly. English locales need no line at all (empty string, no bullet).
+    // Extended thinking does NOT follow the language the user writes in, so a
+    // non-English locale has to ask for it outright. Measured 2026-09-17 over
+    // 1076 local Opus 5 transcripts that carry real thinking text: even in the
+    // bucket where the user's own prompts are >70% Chinese, the thinking came
+    // back 2.5% Chinese. The reply language line above never reached it.
+    //
+    // The wording is deliberately unconditional. An earlier draft offered an out
+    // ("drifting back to English while reading English code is fine") and that is
+    // exactly the escape a 97.5%-English prior takes every time; a flat demand is
+    // what actually moved it. English locales need no line at all — empty string,
+    // no bullet.
     let thinking_line = match locale {
-        "zh" => "- 思考过程（extended thinking）也尽量用中文。读英文代码时漂回英文没关系，别为此中断手上的推理。\n",
-        "ja" => "- 思考過程（extended thinking）もできるだけ日本語で。英語のコードを読んでいる最中に英語へ戻っても構いません、そのために推論を中断しないでください。\n",
-        "ko" => "- 사고 과정(extended thinking)도 가능한 한 한국어로. 영어 코드를 읽다가 영어로 돌아가도 괜찮으니 그 때문에 추론을 멈추지는 마세요.\n",
+        "zh" => "- 思考过程（extended thinking）也必须用中文写。读英文代码、英文文档时同样保持中文思考，不要切回英文。\n",
+        "ja" => "- 思考過程（extended thinking）も必ず日本語で書いてください。英語のコードや資料を読んでいる間も日本語のまま考え、英語に戻さないこと。\n",
+        "ko" => "- 사고 과정(extended thinking)도 반드시 한국어로 작성하세요. 영어 코드나 문서를 읽는 동안에도 한국어로 사고하고 영어로 돌아가지 마세요.\n",
         _ => "",
     };
 
@@ -346,9 +354,25 @@ mod tests {
         // Extended thinking defaults to English regardless of the reply language,
         // so each localized guidance has to request it; English needs no line.
         let zh = render_guidance("老板", "zh");
-        assert!(zh.contains("思考过程（extended thinking）也尽量用中文"));
+        assert!(zh.contains("思考过程（extended thinking）也必须用中文写"));
         assert!(render_guidance("", "ja").contains("思考過程（extended thinking）"));
         assert!(render_guidance("", "ko").contains("사고 과정(extended thinking)"));
+
+        // The demand must stay unconditional. Softening it back into "try to" /
+        // "it's fine to drift" hands the 97.5%-English prior the out it wants.
+        for hedge in ["尽量", "没关系", "できるだけ", "構いません", "가능한 한", "괜찮"] {
+            for loc in ["zh", "ja", "ko"] {
+                let g = render_guidance("", loc);
+                let line = g
+                    .lines()
+                    .find(|l| l.contains("extended thinking"))
+                    .expect("localized guidance must carry a thinking-language line");
+                assert!(
+                    !line.contains(hedge),
+                    "{loc} thinking line must not hedge with {hedge:?}: {line}"
+                );
+            }
+        }
 
         let en = render_guidance("Boss", "en");
         assert!(
