@@ -208,6 +208,38 @@ describe("applyHostIdentity", () => {
     expect(applyHostIdentity(book, "d1", { hostname: "old-mac" }).devices[0].label).toBe("old-mac");
   });
 
+  it("heals a device whose stored name is a MAC address, even if flagged as user-named", () => {
+    // What the user's phone had on file: a label written back when the desktop reported its
+    // drifting transient hostname, persisted with `auto: false` so nothing could replace it.
+    const raw = JSON.stringify({
+      devices: [
+        {
+          id: "d1",
+          secret: A,
+          label: "de:e8:92:d6:ca:71",
+          auto: false,
+          relayBase: null,
+          addedAt: 1,
+        },
+      ],
+      activeId: "d1",
+    });
+    const book = parseBook(raw)!;
+    const next = applyHostIdentity(book, "d1", { hostname: "Harry's MacBook Pro" });
+    expect(next.devices[0].label).toBe("Harry's MacBook Pro");
+    expect(next.devices[0].auto).toBe(true);
+  });
+
+  it("refuses a MAC address as a hostname and keeps the default name", () => {
+    const book = addDevice(emptyBook(), { secret: A, label: "设备 1", id: "d1", now: 1 }).book;
+    const next = applyHostIdentity(book, "d1", {
+      hostname: "de:e8:92:d6:ca:71",
+      platform: "macos",
+    });
+    expect(next.devices[0].label).toBe("设备 1");
+    expect(next.devices[0].platform).toBe("macos");
+  });
+
   it("leaves an old book's user-typed name alone", () => {
     const raw = JSON.stringify({
       devices: [{ id: "d1", secret: A, label: "公司 Mac", relayBase: null, addedAt: 1 }],
