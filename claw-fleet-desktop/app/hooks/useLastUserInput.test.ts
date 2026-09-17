@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { answerLabel, findLastUserInput, formatAnswer, stripPromptEnvelope } from "./useLastUserInput";
+import { answerLabel, findLastUserInput, formatAnswer, oneLineSnippet, shouldAutoExpand, stripPromptEnvelope } from "./useLastUserInput";
 import type { RawMessage } from "../types";
 
 function userPrompt(text: string): RawMessage {
@@ -135,5 +135,49 @@ describe("stripPromptEnvelope", () => {
     expect(
       stripPromptEnvelope("<command-name>/loop</command-name>\n手写内容"),
     ).toBe("手写内容");
+  });
+});
+
+describe("oneLineSnippet", () => {
+  it("collapses a multi-line answer into one line", () => {
+    expect(oneLineSnippet("先修 P3\n\n再合并")).toBe("先修 P3 再合并");
+  });
+
+  it("drops fenced code bodies and image syntax", () => {
+    expect(oneLineSnippet("看这个\n```js\nconst a = 1;\n```\n![shot](data:image/png;base64,AAAA)")).toBe(
+      "看这个",
+    );
+  });
+
+  it("keeps link text but not the URL", () => {
+    expect(oneLineSnippet("见 [文档](https://example.com/a/b)")).toBe("见 文档");
+  });
+
+  it("clips a wall of text", () => {
+    expect(oneLineSnippet("x".repeat(300))).toBe(`${"x".repeat(200)}…`);
+  });
+});
+
+describe("shouldAutoExpand", () => {
+  it("opens a short single answer", () => {
+    expect(shouldAutoExpand([{ label: "", value: "先修 P3 再合并" }])).toBe(true);
+  });
+
+  it("stays collapsed for a long one", () => {
+    expect(shouldAutoExpand([{ label: "", value: "长".repeat(200) }])).toBe(false);
+  });
+
+  it("stays collapsed once there is more than one answer", () => {
+    expect(
+      shouldAutoExpand([
+        { label: "q1", value: "是" },
+        { label: "q2", value: "否" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("measures the flattened form, not the raw markdown", () => {
+    const value = `看这个\n\`\`\`js\n${"const a = 1;\n".repeat(20)}\`\`\``;
+    expect(shouldAutoExpand([{ label: "", value }])).toBe(true);
   });
 });

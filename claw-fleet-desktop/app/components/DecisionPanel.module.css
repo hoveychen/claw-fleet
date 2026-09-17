@@ -1583,18 +1583,62 @@
 
 /* ── The user's last input (above a question card) ─────────────────────────
  * The prompt the user typed, or the answer they gave to the previous card —
- * the starting point of this round, kept visible while they answer this one.
- * Bounded height with its own scroll so a long prompt never pushes the
- * question off-screen. */
+ * the starting point of this round. It is context, not the thing being
+ * answered, so it rests as a single-line bar and the question below it always
+ * starts on the first screen. Expanding opens a bounded, independently
+ * scrolling body; nothing inside it may widen the card (see the markdown
+ * containment rules at the end of this block). */
 .preceding {
   margin: 0 0 10px;
-  border-left: 2px solid rgba(var(--color-accent-rgb), 0.35);
-  padding-left: 10px;
+  min-width: 0;
+}
+.preceding_bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-left: 2px solid rgba(var(--color-accent-rgb), 0.55);
+  border-radius: 7px;
+  background: rgba(var(--color-accent-rgb), 0.06);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.preceding_bar:hover {
+  background: rgba(var(--color-accent-rgb), 0.12);
 }
 .preceding_label {
+  flex: 0 0 auto;
   font-size: 11px;
   font-weight: 500;
   color: var(--color-text-dim);
+}
+/* The one-line echo of the last input. `min-width: 0` is what lets it shrink
+ * inside the flex row instead of pushing the bar wider than the card. */
+.preceding_snippet {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* "+N" — how many further answers the expanded body holds. */
+.preceding_count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(var(--color-accent-rgb), 0.18);
+  color: var(--color-text-dim);
+  font-size: 10px;
+  line-height: 16px;
 }
 /* Shared chevron, also used by the options collapse bar in the card footer. */
 .preceding_chevron {
@@ -1606,13 +1650,17 @@
 .preceding_chevron_open {
   transform: rotate(180deg);
 }
-/* Body: bounded height with its own scroll — the card grows up to this cap,
- * then the body scrolls. */
+/* Body: only rendered while expanded. Bounded height with its own scroll — it
+ * grows up to this cap, then scrolls; `overflow-x: hidden` plus the containment
+ * rules below mean no payload can widen the card. */
 .preceding_body {
-  max-height: 22vh;
+  max-height: 30vh;
   overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
   margin-top: 6px;
-  padding-right: 4px;
+  padding: 2px 4px 2px 10px;
+  border-left: 2px solid rgba(var(--color-accent-rgb), 0.35);
 }
 /* One answered question: its clipped title above the value the user picked. */
 .preceding_qa {
@@ -1674,6 +1722,58 @@
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
+}
+/* Containment. This body renders *arbitrary* markdown the agent echoed back —
+ * a table, a pasted screenshot, an h1 — and it is only context, so nothing in
+ * it is allowed to set the card's width or shout over the question below.
+ * Every block is capped at the body width; a table gets its own horizontal
+ * scroll instead of pushing the card; headings render at body weight. */
+.preceding_msg > * {
+  max-width: 100%;
+}
+.preceding_msg img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-xs);
+}
+.preceding_msg table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.preceding_msg th,
+.preceding_msg td {
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  padding: 2px 6px;
+  text-align: left;
+}
+.preceding_msg h1,
+.preceding_msg h2,
+.preceding_msg h3,
+.preceding_msg h4,
+.preceding_msg h5,
+.preceding_msg h6 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0.35em 0 0.2em;
+}
+.preceding_msg ul,
+.preceding_msg ol {
+  margin: 0.2em 0;
+  padding-left: 1.2em;
+}
+.preceding_msg blockquote {
+  margin: 0.3em 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+.preceding_msg hr {
+  margin: 0.4em 0;
+  border: 0;
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 
 /* ── Parked banner ─────────────────────────────────────────────────────────

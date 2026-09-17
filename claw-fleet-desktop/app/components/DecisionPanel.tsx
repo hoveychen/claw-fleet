@@ -12,7 +12,7 @@ import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugin
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
 import { framePreviewSrcDoc } from "../decisionFrame";
-import { useLastUserInput } from "../hooks/useLastUserInput";
+import { oneLineSnippet, shouldAutoExpand, useLastUserInput } from "../hooks/useLastUserInput";
 import type {
   DecisionHistoryRecord,
   ElicitationAttachment,
@@ -465,9 +465,12 @@ function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision
 
 /**
  * What the *user* last said before this question — the prompt they typed, or
- * the answer they gave to the previous decision card. Shown above the question
- * so the round's starting point stays visible while answering. Renders nothing
- * when the transcript holds no earlier user input.
+ * the answer they gave to the previous decision card. Context, not the thing
+ * being answered, so it collapses to a single line by default: a label, a
+ * one-line snippet and a count of any further answers. The question itself
+ * therefore always starts on the first screen of the card no matter how long
+ * the previous round was. Clicking expands a bounded, independently scrolling
+ * body. Renders nothing when the transcript holds no earlier user input.
  */
 function LastUserInputRegion({
   sessionId,
@@ -479,19 +482,66 @@ function LastUserInputRegion({
   const { t } = useTranslation();
   const { input, loading } = useLastUserInput(sessionId, requestId);
   const mdComponents = usePathMarkdown(sessionId);
+  const [expanded, setExpanded] = useState(false);
 
-  if (loading || !input) return null;
+  // One shape for both kinds: an unlabelled single entry for a typed prompt.
+  const entries = useMemo(
+    () =>
+      input
+        ? input.answers?.length
+          ? input.answers
+          : [{ label: "", value: input.text }]
+        : [],
+    [input],
+  );
+  const snippet = useMemo(
+    () => (entries.length ? oneLineSnippet(entries[0].value) : ""),
+    [entries],
+  );
+  // A short single answer opens itself — a click to read one line is a click
+  // too many. A fresh card is a fresh round, so this also resets any manual
+  // toggle the user made on the previous one.
+  const autoExpand = useMemo(() => shouldAutoExpand(entries), [entries]);
+  useEffect(() => {
+    setExpanded(autoExpand);
+  }, [requestId, autoExpand]);
+
+  if (loading || !input || !entries.length) return null;
+
+  const label =
+    input.kind === "answer"
+      ? t("decision.last_answer_label", "Your last answer")
+      : t("decision.last_prompt_label", "Your last message");
 
   return (
     <div className={styles.preceding}>
-      <div className={styles.preceding_label}>
-        {input.kind === "answer"
-          ? t("decision.last_answer_label", "Your last answer")
-          : t("decision.last_prompt_label", "Your last message")}
-      </div>
-      <div className={styles.preceding_body}>
-        {input.answers?.length ? (
-          input.answers.map((a, i) => (
+      <button
+        type="button"
+        className={styles.preceding_bar}
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        title={snippet}
+      >
+        <svg
+          className={`${styles.preceding_chevron} ${expanded ? styles.preceding_chevron_open : ""}`}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+        <span className={styles.preceding_label}>{label}</span>
+        {!expanded && <span className={styles.preceding_snippet}>{snippet}</span>}
+        {entries.length > 1 && (
+          <span className={styles.preceding_count}>+{entries.length - 1}</span>
+        )}
+      </button>
+      {expanded && (
+        <div className={styles.preceding_body}>
+          {entries.map((a, i) => (
             <div key={i} className={styles.preceding_qa}>
               {a.label && <div className={styles.preceding_q} title={a.label}>{a.label}</div>}
               <div className={styles.preceding_msg}>
@@ -500,15 +550,9 @@ function LastUserInputRegion({
                 </ReactMarkdown>
               </div>
             </div>
-          ))
-        ) : (
-          <div className={styles.preceding_msg}>
-            <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
-              {normalizeSvgBlankLines(input.text)}
-            </ReactMarkdown>
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
