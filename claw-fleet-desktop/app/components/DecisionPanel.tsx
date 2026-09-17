@@ -12,7 +12,7 @@ import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugin
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
 import { framePreviewSrcDoc } from "../decisionFrame";
-import { oneLineSnippet, useLastUserInput } from "../hooks/useLastUserInput";
+import { oneLineSnippet, shouldAutoExpand, useLastUserInput } from "../hooks/useLastUserInput";
 import type {
   DecisionHistoryRecord,
   ElicitationAttachment,
@@ -483,10 +483,6 @@ function LastUserInputRegion({
   const { input, loading } = useLastUserInput(sessionId, requestId);
   const mdComponents = usePathMarkdown(sessionId);
   const [expanded, setExpanded] = useState(false);
-  // A fresh card is a fresh round — never inherit the previous card's state.
-  useEffect(() => {
-    setExpanded(false);
-  }, [requestId]);
 
   // One shape for both kinds: an unlabelled single entry for a typed prompt.
   const entries = useMemo(
@@ -502,6 +498,13 @@ function LastUserInputRegion({
     () => (entries.length ? oneLineSnippet(entries[0].value) : ""),
     [entries],
   );
+  // A short single answer opens itself — a click to read one line is a click
+  // too many. A fresh card is a fresh round, so this also resets any manual
+  // toggle the user made on the previous one.
+  const autoExpand = useMemo(() => shouldAutoExpand(entries), [entries]);
+  useEffect(() => {
+    setExpanded(autoExpand);
+  }, [requestId, autoExpand]);
 
   if (loading || !input || !entries.length) return null;
 

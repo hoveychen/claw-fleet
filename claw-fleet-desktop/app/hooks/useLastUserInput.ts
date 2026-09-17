@@ -157,6 +157,20 @@ export function oneLineSnippet(text: string, max = MAX_SNIPPET_CHARS): string {
   return plain.length > max ? `${plain.slice(0, max)}…` : plain;
 }
 
+// A short one-liner costs almost nothing to show and saves a click, so the bar
+// opens itself for it. Anything longer — or more than one answer — stays
+// collapsed, which is the whole point of the bar.
+const AUTO_EXPAND_CHARS = 120;
+
+/**
+ * Should the collapsed bar open itself? Only for a single entry whose one-line
+ * form is short enough that showing it cannot push the question off-screen.
+ */
+export function shouldAutoExpand(entries: AnswerEntry[]): boolean {
+  if (entries.length !== 1) return false;
+  return oneLineSnippet(entries[0].value, AUTO_EXPAND_CHARS + 1).length <= AUTO_EXPAND_CHARS;
+}
+
 /**
  * Walk backwards to the user's last real input and render it: a typed prompt,
  * or their answer to the previous ask-family card. Returns null when the
