@@ -110,11 +110,27 @@ fn epoch_ms_of(rfc3339: &str) -> Option<u64> {
 // ── The card ────────────────────────────────────────────────────────────────
 
 /// The reminder injected into the session after the user answers the card.
+///
+/// It arrives as a *user prompt*, which is the only channel a resumed session
+/// has — and a session that reads a user prompt starts a turn and looks for
+/// work to do. The first version read "下次收尾时请把结论/下一步包装成一张决策卡"
+/// and agents dutifully took it as a brief to keep going: a relay successor was
+/// observed re-planning its whole P-task off the back of it. So the text leads
+/// with what it *is* (a meta-notice about the previous turn's shape, not a new
+/// task) and names the one action it wants, before anything else.
 pub fn reminder_prompt() -> String {
-    "（Fleet 温馨提示）上一轮任务结束时没有用决策卡汇报，老板因此没收到手机通知。\
-     下次收尾时请把结论/下一步包装成一张决策卡（询问用户的 ask 工具），让老板在卡片上直接确认。"
+    "（Fleet 系统提示 —— 这不是新任务，也不是老板给你的指令）\
+     上一轮任务已经结束了。这条只是告诉你：那一轮收尾用的是纯文本、没有决策卡，\
+     所以老板的手机没收到通知。\
+     请不要因为这条消息继续推进、重做或扩展任何工作，也不要重新读代码去找活干。"
         .to_string()
 }
+
+/// What the session should actually do with the reminder when the boss did not
+/// ask for more work: re-send the conclusion as a card, then stop.
+const REMINDER_ACTION: &str = "现在只需做一件事：把上一轮的结论用一张决策卡\
+（询问用户的 ask 工具）重新汇报一次，让老板在卡片上确认，然后结束回合。\
+以后每次收尾都这样做。";
 
 /// Render the completion card for one finished task turn.
 ///
@@ -177,6 +193,16 @@ pub fn maybe_raise(
         return Ok(None);
     }
     if raised_card_since(&session.id, since_epoch_ms) {
+        return Ok(None);
+    }
+    // A registered relay is a legitimate card-less exit, and the *only* correct
+    // one: the interaction-mode guidance forbids a card after `fleet handoff`
+    // (it hangs the turn the Stop hook needs to end) and `mcp_server`'s
+    // `refuse_if_handoff_pending` enforces that on the agent's own cards. This
+    // card has a second producer — Fleet itself — which that refusal never saw,
+    // so it kept firing on exactly the turns the rule exempts. Worse, answering
+    // it resumes a session whose successor already owns the work.
+    if crate::handoff::has_relayed(&session.id) {
         return Ok(None);
     }
     let card = build_turn_card(session, last_text);
@@ -267,15 +293,13 @@ fn deliver_reminder(job: &TurnCardJob, resp: &ElicitationResponse) {
     // the work and is very likely running right now. Resuming it here would put
     // two agents on the same plan, and the woken predecessor resumes with a
     // context ending at "I just registered a handoff" (see `handoff.rs`'s
-    // `successor_of`). This card is *especially* likely to land on such a
-    // session: Rule 5 forbids raising a card after registering a handoff, so a
-    // correctly-handed-off turn always ends in the plain text that
-    // `maybe_raise` reads as "forgot to use a card". The card itself still
-    // fires the phone notification; only the resume is suppressed.
-    if let Some(successor) = crate::handoff::successor_session_of(&job.session.id) {
+    // `successor_of`). `maybe_raise` already refuses to card such a session, so
+    // this is the narrow window it cannot see: the card is raised at turn end
+    // and the answer can land minutes later, with the relay registered in
+    // between.
+    if crate::handoff::has_relayed(&job.session.id) {
         crate::log_debug(&format!(
-            "turn card: {} already relayed to {successor}; card answered but not resuming a \
-             retired session",
+            "turn card: skip reminder for {} — session already relayed",
             job.session.id
         ));
         return;
@@ -303,14 +327,21 @@ fn deliver_reminder(job: &TurnCardJob, resp: &ElicitationResponse) {
 /// Build the reminder prompt, folding in the user's answer when it carries
 /// substance beyond a bare "收到".
 fn reminder_prompt_with_answer(answer: Option<&str>) -> String {
-    let mut prompt = reminder_prompt();
+    let notice = reminder_prompt();
     match answer {
-        // "收到" is a pure acknowledgement — the reminder alone is enough.
-        Some("收到") | None => {}
-        Some("继续") => prompt = format!("{prompt}\n\n请继续推进任务。"),
-        Some(other) => prompt = format!("{prompt}\n\n（老板在确认卡片上的回复：{other}）"),
+        // "收到" is a pure acknowledgement — re-report and stop, nothing else.
+        Some("收到") | None => format!("{notice}\n\n{REMINDER_ACTION}"),
+        // The boss explicitly asked for more work, which is the one thing that
+        // overrides the "do not keep working" line above.
+        Some("继续") => format!(
+            "{notice}\n\n老板在卡片上选了「继续」，所以这一条是例外：请继续推进任务，\
+             并在收尾时用决策卡汇报。"
+        ),
+        Some(other) => format!(
+            "{notice}\n\n老板在卡片上回复了：{other}\n\n请按这句回复办；\
+             如果它没有指派新的工作，就照上面的做法用决策卡重新汇报一次并结束回合。"
+        ),
     }
-    prompt
 }
 
 /// First non-empty answer string off the card's flat answer map.
@@ -396,17 +427,67 @@ mod tests {
     }
 
     #[test]
-    fn reminder_is_a_nonempty_directive() {
-        assert!(!reminder_prompt().is_empty());
-        assert!(reminder_prompt().contains("决策卡"));
+    fn reminder_disclaims_being_a_new_task() {
+        let p = reminder_prompt();
+        assert!(!p.is_empty());
+        // The whole point of the rewrite: it must say up front that it is not a
+        // task and that the session should not go looking for work.
+        assert!(p.contains("不是新任务"));
+        assert!(p.contains("不要"));
     }
 
     #[test]
     fn reminder_folds_in_a_substantive_answer() {
         assert!(reminder_prompt_with_answer(Some("继续")).contains("继续推进"));
-        // A bare acknowledgement adds nothing beyond the reminder itself.
-        assert_eq!(reminder_prompt_with_answer(Some("收到")), reminder_prompt());
+        // A bare acknowledgement asks for the card and nothing else — and must
+        // never read as permission to keep working.
+        let ack = reminder_prompt_with_answer(Some("收到"));
+        assert!(ack.contains("决策卡"));
+        assert!(ack.contains("结束回合"));
+        // The only sentence that licenses more work is the 「继续」 exception.
+        assert!(!ack.contains("这一条是例外"));
+        assert_eq!(reminder_prompt_with_answer(None), ack);
         assert!(reminder_prompt_with_answer(Some("换个方案")).contains("换个方案"));
+    }
+
+    #[test]
+    fn a_session_that_relayed_gets_no_completion_card() {
+        let _env_guard = crate::session::fleet_home_lock();
+        let home = std::env::temp_dir().join(format!("fleet-turncard-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &home);
+
+        let s = session("/p");
+        // Baseline: without a relay this very session does get a card.
+        let card = maybe_raise(&s, "done", 0).expect("raise must not error");
+        assert!(card.is_some(), "a plain card-less task turn still cards");
+        if let Some(id) = card {
+            crate::elicitation::cleanup(&id);
+        }
+
+        // Registering a relay retires the session: the successor owns the work,
+        // so the turn is not a finished task and must raise nothing.
+        crate::handoff::register(
+            &s.id,
+            &s.workspace_path,
+            None,
+            "交接给下一棒",
+            None,
+            None,
+            None,
+            None,
+            "claude-code",
+        )
+        .expect("register must succeed");
+        assert!(crate::handoff::has_relayed(&s.id));
+        assert!(matches!(maybe_raise(&s, "done", 0), Ok(None)));
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

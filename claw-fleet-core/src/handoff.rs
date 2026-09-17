@@ -544,6 +544,25 @@ fn successor_session_of_in(dir: &Path, session_id: &str) -> Option<String> {
     successor_of(&chain, session_id)
 }
 
+/// Whether this session has passed its baton on — either a registration is
+/// still pending (the Stop hook has not fired yet) or a link already records
+/// the successor it spawned.
+///
+/// The wider of the two predicates: [`successor_session_of`] only sees the
+/// second half, which is enough for a caller deciding whether to *resume* a
+/// session (the successor is what it would collide with). A caller deciding
+/// whether the turn should be *reported* as a finished task needs the first
+/// half too — between `register` and the Stop hook firing there is no link yet,
+/// and the turn has already ended in the plain text that the turn-completion
+/// card reads as "forgot to use a card". Either way the task moved; it did not
+/// end.
+pub fn has_relayed(session_id: &str) -> bool {
+    if session_id.is_empty() {
+        return false;
+    }
+    read_pending(session_id).is_some() || successor_session_of(session_id).is_some()
+}
+
 fn chain_containing_in(dir: &Path, session_id: &str) -> Option<HandoffChain> {
     list_chains_in(dir)
         .into_iter()
