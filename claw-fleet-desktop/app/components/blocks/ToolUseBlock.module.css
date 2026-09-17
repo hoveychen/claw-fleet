@@ -87,6 +87,18 @@
   to { transform: rotate(360deg); }
 }
 
+/* A shell that kept running after the turn ended. Reads as a state, not an
+   error, so it borrows the dim meta face rather than a status colour. */
+.bg_badge {
+  font-size: var(--t-meta, 10px);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .error_badge {
   font-size: var(--t-meta, 10px);
   padding: 1px 5px;

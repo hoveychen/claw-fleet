@@ -43,6 +43,7 @@ import { classifySyntheticError } from "../../../shared-ts/syntheticError";
 import { groupMetaRuns } from "./metaGrouping";
 import { groupWorkRuns } from "./workRuns";
 import { trailingIndicator, WORKING_STATUSES } from "./trailingIndicator";
+import { InFlightToolsContext, inFlightToolIds } from "./blocks/inFlightTools";
 import styles from "./MessageList.module.css";
 
 // ── Search highlight ─────────────────────────────────────────────────────────
@@ -709,6 +710,12 @@ export function MessageList({
   // Keeps the trailing work band open while the agent is live in it, so the
   // reader watches tools stream in; it folds itself once the agent moves on.
   const isWorkingNow = !!status && WORKING_STATUSES.has(status);
+  // Which tool calls are executing right now, so their own card says so instead
+  // of leaving the reader to guess from the spinner at the bottom of the list.
+  const inFlightTools = useMemo(
+    () => inFlightToolIds(displayMsgs, resultMap, isWorkingNow),
+    [displayMsgs, resultMap, isWorkingNow],
+  );
 
   // Only take over the panel when there is genuinely nothing to show — see
   // `conversationPlaceholder` for the exact rule (and its unit tests).
@@ -749,6 +756,7 @@ export function MessageList({
 
   return (
     <ToolResultFetchContext.Provider value={toolFetch}>
+    <InFlightToolsContext.Provider value={inFlightTools}>
     <div ref={listRef} className={`${styles.list} ${searchTerms ? styles.list_searching : ""}`}>
       {searchTerms && (
         <div className={styles.search_nav}>
@@ -879,6 +887,7 @@ export function MessageList({
       )}
       <div ref={bottomRef} />
     </div>
+    </InFlightToolsContext.Provider>
     </ToolResultFetchContext.Provider>
   );
 }
