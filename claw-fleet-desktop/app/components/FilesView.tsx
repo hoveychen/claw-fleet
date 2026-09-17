@@ -219,7 +219,7 @@ export function FilesView() {
   // Running workspace-command count per workspace → card badges.
   const runningCounts = useMemo(() => runningProcCounts(procs), [procs]);
 
-  // Poll the workspace-proc registry while the 文件 page is open — drives
+  // Poll the workspace-proc registry while the "文件" (Files) page is open — drives
   // both the per-workspace badges and the ProcPanel lists.
   useEffect(() => {
     void fetchProcs();
@@ -465,7 +465,7 @@ function WorkspaceExplorer({
   );
 
   // A path clicked in agent prose always means "show me the file" — pull the
-  // explorer back to the files tab even if the user left it on 命令.
+  // explorer back to the files tab even if the user left it on "命令" (Commands).
   useEffect(() => {
     if (nav) setTab("files");
   }, [nav]);
@@ -788,7 +788,7 @@ function WorkspaceExplorer({
  * rescue. Two shapes, one component: no match at all, or several.
  *
  * This exists because the alternative — what shipped before — was for the click
- * to open the 仓库 page and then do nothing whatsoever, which reads as a broken
+ * to open the "仓库" (Files) page and then do nothing whatsoever, which reads as a broken
  * app rather than as a path the agent got wrong.
  */
 function RevealMissNotice({

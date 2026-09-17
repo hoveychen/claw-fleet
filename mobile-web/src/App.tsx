@@ -998,12 +998,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     .filter(Boolean)
     .join("|");
 
-  /** 把所有浮层收起来,回到主界面。
+  /** Collapse all overlays and return to the main interface.
    *
-   *  只有渲染兜底用得上:浮层的 `HistoryLayer`(接系统返回键的那个)和浮层内容是
-   *  同一块 JSX,一起被 fallback 替换掉,于是返回键退不掉那个浮层(实测过)。iOS
-   *  PWA 更没有系统返回键,所以 fallback 上必须有一条自己的出路,否则崩一次就把人
-   *  困在那儿。 */
+   *  Used by the error boundary fallback: the overlay's `HistoryLayer` (which handles
+   *  the system back button) and the overlay content are the same JSX block, both replaced
+   *  by the fallback, so back button can't dismiss an errored overlay (tested). iOS PWA
+   *  doesn't have a system back button at all, so the fallback must have its own exit
+   *  path, or else one crash traps the user forever. */
+
   const closeAllOverlays = useCallback(() => {
     setDetailStack([]);
     setShowWiki(false);
@@ -1018,21 +1020,24 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, []);
 
   if (!paired) {
-    // 两条不依赖地址栏的配对入口。它们本来是原生壳限定的：壳从 rawfile 启动，
-    // 没有「打开一条带 #k= 的链接」这回事；系统相机扫出来的链接由 App Link 决定
-    // 交给谁，而 App Link 只认 manifest 里编译期写死的 host，自建 relay 的 host
-    // 编译期不可知，那条路对它结构上不可用。app 内扫码拿到的是二维码原文，粘贴
-    // 更是不依赖任何 host 声明。
+    // Two pairing entry points that don't depend on the URL bar. They started as
+    // native-shell only: the shell launches from a raw file, so there's no "open a link
+    // with #k=" trick. System camera scan results are routed by App Link, which only
+    // recognizes hosts hardcoded in the manifest at compile time. Custom relay hosts are
+    // unknown at compile time, making that path structurally unavailable. In-app scanning
+    // gives the raw QR content; pasting needs no host declaration at all.
     //
-    // PWA 同样需要它们，而且是**唯一**的出路。iOS 把「添加到主屏幕」装出来的
-    // web app 放进独立的存储分区：Safari 标签页里刚落盘的那份配对不会跟过去，
-    // 而 A2HS 存的是 manifest 的 start_url（`/`），fragment 里的密钥也一并丢掉。
-    // 于是用户第一次点主屏幕图标就落在这张门上 —— 主屏幕 app 没有地址栏，没法
-    // 再开一次带 #k= 的链接，而门上一个按钮都没有，人就彻底卡死（老板 2026-09-15
-    // 反馈）。
+    // PWA needs these too, and they're the **only** way out. iOS isolates "Add to Home
+    // Screen" web apps in separate storage: the pairing just saved in Safari doesn't
+    // follow across, and A2HS stores only the manifest's start_url (`/`), losing the
+    // fragment with the secret. So on first home screen tap, the user lands here — and
+    // the home screen app has no URL bar to open an `#k=` link, and this gate has no
+    // buttons, so they're completely stuck (user feedback 2026-09-15).
     //
-    // 扫码那条按能力出：地址不是 https 时浏览器根本不暴露 getUserMedia，摆一个点
-    // 了必然失败的按钮不如当场说清原因，把人直接引到粘贴（scanAvailability.ts）。
+    // QR scanning gates on capability: if the origin isn't HTTPS, the browser won't
+    // expose getUserMedia, so a button that must fail isn't helpful. Better to explain
+    // the reason upfront and guide them to paste (scanAvailability.ts).
+
     const pairEntries = idbProbed;
     const scan = scanAvailability();
     if (scanning) {
@@ -1067,9 +1072,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     );
   }
 
-  // 配对失败的整屏拦截只在**只有一台**设备时成立:多台在册时,一台密钥失效不该
-  // 把其他几台的卡一并挡在外面 —— 那一台的错误由「更多」页的连接状态如实呈现,
-  // 用户可以在设备列表里把它移除或重新扫码。
+  // Full-screen auth error interception only applies when there's **one device**. With
+  // multiple devices, one bad key shouldn't block cards from others — that device's error
+  // appears honestly in the "More" page's connection status, and the user can remove it
+  // or re-scan from the device list.
+
   if (authError && runtimeDevices.length <= 1) {
     return (
       <div className={styles.gate}>
@@ -1091,11 +1098,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }
 
   return (
-    // 整棵树跑在「当前作用域设备」里：里面所有按设备分家的本地存储（草稿、附件、
-    // workspace 记忆）都从这里取命名空间，无需逐个 prop 往下传。
+    // The entire tree runs inside a "current scoped device" context: all local storage
+    // split by device (drafts, attachments, workspace memory) gets its namespace from
+    // here without needing to prop-drill it down.
     <DeviceScopeProvider deviceId={deviceId}>
-    {/* 每台设备一条连接。不渲染任何 DOM：它只是把那条 socket 的生命周期挂在
-        React 树上，设备被移除时 key 消失、清理函数自然把它关掉。 */}
+    {/* One connection per device. No DOM rendering: we're just attaching that socket's
+        lifecycle to the React tree. When the device is removed, the key disappears and
+        the cleanup function naturally closes it. */}
+
     {runtimeDevices.map((d, i) => (
       <DeviceConnection
         key={d.id}
@@ -1117,7 +1127,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     ))}
     <div className={styles.app}>
       <header className={styles.header}>
-        {/* 标题位 = 当前设备。多台在册时它是切换器,一台时退化成那台的名字。 */}
+        {/* Title position = current device. With multiple devices registered, it's a
+            switcher; with one, it's just that device's name. */}
+
         <DeviceSwitcher
           devices={runtimeDevices}
           activeId={activeDeviceId}
@@ -1138,8 +1150,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             </span>
           </span>
         )}
-        {/* 连接状态与强度收成一个图标：状态文案退居 title/aria-label，不再吃掉
-            窄屏 header 的横向空间。 */}
+        {/* Connection status and signal strength merged into one icon: the status text
+            moved to title/aria-label to stop eating horizontal space on narrow screens. */}
+
         <span
           className={styles.connIcon}
           data-kind={connKind}
@@ -1151,14 +1164,17 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </span>
       </header>
 
-      {/* 这条横幅讲的是「iOS 7 天不用会抹掉本地配对」——同源形态根本没有配对可丢
-          （后端就是发出这张页面的那个进程），显示它纯属误导。用 NEEDS_PAIRING
-          而不是 SUPPORTS_PUSH：这条说的是配对，不是推送。
+      {/* This banner warns "iOS erases local pairing after 7 days of disuse" — same-origin
+          mode has no pairing to lose (the backend is the process that served this page),
+          so showing it would be misleading. We check NEEDS_PAIRING, not SUPPORTS_PUSH:
+          this banner is about pairing, not push notifications.
 
-          文案里那句「首次打开需要再扫一次码」不是免责声明，是这条路的实情：iOS 把
-          主屏幕 web app 的存储单独分区，Safari 里的配对不会跟过去，而 A2HS 存的是
-          manifest 的 start_url，fragment 里的密钥也带不走。不先说明，用户点开图标
-          撞上配对门只会以为坏了（见配对门的注释）。 */}
+          The text "first launch needs another scan" is not a disclaimer; it's the reality:
+          iOS isolates home screen web app storage. Pairing saved in Safari won't migrate,
+          and A2HS only stores the manifest's start_url, not the fragment with the secret.
+          Without this warning, users tapping the icon and hitting the pairing gate would
+          think something broke (see the pairing gate comments). */}
+
       {NEEDS_PAIRING && !MOCK && needsA2hsForDurableStorage() && !a2hsDismissed && (
         <div className={styles.pushBanner}>
           <span>
@@ -1178,11 +1194,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </div>
       )}
 
-      {/* 这条横幅以前关不掉：`ios-needs-a2hs` 与 `denied` 两个分支连个按钮都没有，
-          而 iOS 上前者恰恰是**常驻**的（用 Safari 看就一直满足），于是每一屏顶上
-          都挂着一条撵不走的告示。关掉记的是**当时那个状态**而不是一个布尔位：
-          「先添加到主屏幕」被撵走之后，后来真的变成「权限被拒绝」时那条新消息仍
-          该出来说话。 */}
+      {/* This banner used to be non-dismissible: the `ios-needs-a2hs` and `denied` branches
+          had no buttons, and on iOS the former is **persistent** (Safari always meets that
+          condition), so a permanent notice was stuck at the top of every screen. We now
+          remember **which state** it was dismissed in, not just a boolean: after dismissing
+          "add to home screen", if it later actually becomes "permission denied", that new
+          message should still appear. */}
+
       {!MOCK &&
         push !== "granted" &&
         push !== "unsupported" &&
@@ -1212,8 +1230,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </div>
       )}
 
-      {/* 每个 tab 一层。resetKey 是 tab 名 —— 一个 tab 崩了,底部导航还在,切走
-          再切回来自动重试。以前这里任何一处抛异常都是整个 app 变白。 */}
+      {/* One error boundary per tab. resetKey is the tab name — if a tab crashes, the
+          bottom nav stays, and switching away and back retries automatically. Before this,
+          any exception here would blank out the whole app. */}
+
       <main className={styles.main}>
         <ErrorBoundary label={t("{0} 页", t(TAB_LABEL[tab]))} resetKey={tab}>
         {tab === "decisions" ? (
@@ -1276,20 +1296,27 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </ErrorBoundary>
       </main>
 
-      {/* 后退栈的底层：只要不在主页 tab，返回一次先回主页（安卓惯例，反复切 tab
-          也只占一条历史），再返回才轮到栈底的退出确认。挂在浮层之前，保证浮层始终压在它上面。 */}
+      {/* Back stack base: as long as we're not on the decisions tab, one back goes to
+          decisions (Android convention — repeated tab switches only consume one history
+          entry). Then further backs hit the exit confirmation. Rendered before overlays to
+          guarantee they stay on top. */}
       {tab !== "decisions" && <HistoryLayer onBack={() => setTab("decisions")} />}
 
-      {/* 浮层各自一层。tab 层管不到这里(浮层是 main 的兄弟),而根层接住只会
-          让整个 app 变成一张错误页 —— 已知咬过人的 sources_config 异形应答就发生
-          在新会话表单里,它正是一个浮层。resetKey 是栈顶浮层的身份,所以关掉再开
-          自动重试。 */}
+
+      {/* Each overlay gets its own error boundary. The tab layer can't reach here
+          (overlays are siblings of main), and putting it at the root would turn the
+          whole app into an error page — there's a known sources_config malform that hits
+          the new session form, which is an overlay. resetKey is the top overlay's identity,
+          so closing and reopening automatically retries. */}
+
       <ErrorBoundary
         label={t("当前页面")}
         resetKey={overlayKey}
         onDismiss={{ label: t("返回主界面"), run: closeAllOverlays }}
       >
-      {/* 每一层下钻占一层历史，但只渲染栈顶那层详情——底下几层不必挂着重复拉 tail。 */}
+      {/* Each drill-down level gets a history layer, but only render the top one's detail
+          — lower layers don't need to hang around refetching tail. */}
+
       {detailStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setDetailStack((s) => s.slice(0, i))} />
       ))}
@@ -1297,15 +1324,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <SessionDetailView
           key={sessionDetailKey(detailSession.deviceId, detailSession.id)}
           session={detailSession}
-          // 详情页解析子代理/父会话都按 id 找,所以只给它**这条会话所属那一台**的
-          // 列表 —— 混进别台的会话只会让它按同名 id 找到一条自己拉不动的记录。
+          // The detail page resolves subagents/parent sessions by id, so only give it
+          // sessions from **the device this session belongs to** — mixing in others would
+          // let it find a same-numbered id on another device that it can't fetch.
+
           sessions={mergedSessions.filter((s) => s.deviceId === detailSession.deviceId)}
           client={transportFor(detailSession.deviceId)}
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
           onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
-          // 头部那条状态轨上「N 张待决策」要靠这个数。决策卡是跨设备聚合的一个
-          // 收件箱，不挂在 SessionInfo 上，所以按 (设备, 会话) 在这里数——只数
-          // 这一台的卡，免得别台一张同名会话的卡被算进来。
+          // The "N pending decisions" count in the header timeline uses this. Decision cards
+          // are a merged cross-device inbox, not attached to SessionInfo, so we count by
+          // (device, session) here — only this device's cards, so a same-numbered session
+          // on another device doesn't get counted.
+
           pendingDecisions={
             decisions.filter(
               (d) =>
@@ -1316,8 +1347,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         />
       )}
 
-      {/* 知识库列表本身也是一层浮层（从「更多」进来），文档详情再压在它之上——
-          所以它要排在 wikiStack 之前渲染。 */}
+      {/* The wiki list itself is an overlay (entering from "More"), with document details
+          stacked on top — so render it before wikiStack. */}
+
       {showWiki && (
         <>
           <HistoryLayer onBack={() => setShowWiki(false)} />
@@ -1329,7 +1361,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </>
       )}
 
-      {/* 每篇文档占一层，但只渲染栈顶那篇——底下几篇不必挂着重复拉正文/渲 mermaid。 */}
+      {/* Each document gets a layer, but only render the top one — lower docs don't need
+          to stay around refetching content/rendering diagrams. */}
+
       {wikiStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setWikiStack((s) => s.slice(0, i))} />
       ))}
@@ -1366,7 +1400,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </>
       )}
 
-      {/* hostFeatures 默认全关,所以这一层在答案回来之前也不会闪一下 */}
+      {/* hostFeatures defaults to all-off, so this layer won't flicker before the
+          response arrives. */}
+
       {terminal && hostFeatures.terminal && (
         <>
           <HistoryLayer onBack={() => setTerminal(null)} />
@@ -1406,11 +1442,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       {showNewSession && (
         <>
           <HistoryLayer onBack={() => setShowNewSession(false)} />
-          {/* 表单整个跑在**目标设备**的作用域里,而不是当前作用域那台:里面的
-              草稿、附件、上次用的 repo 都是「某一台机器上的东西」。
-              `key` 是必需的而非优化 —— useDraft 只在挂载时读盘(见 draft.ts),
-              光换 provider 的话换设备后表单会顶着 A 的 workspace/附件,还会把
-              它们写进 B 的命名空间。重挂载让每台各自恢复自己的那份。 */}
+          {/* The form runs entirely in the **target device** scope, not the current one:
+              drafts, attachments, last-used repo inside are all "per-machine things".
+              The `key` is required, not optional — useDraft only reads disk on mount
+              (draft.ts), so changing provider alone means switching devices would show
+              A's workspace/attachments but write them to B's namespace. Re-mounting forces
+              each device to restore its own. */}
+
           <DeviceScopeProvider deviceId={newSessionScopeId}>
             <NewSessionSheet
               key={newSessionTargetId}
@@ -1426,8 +1464,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
                 // 下次打开回到「当前作用域那台」,不记住上次挑的那台 —— 记住会
                 // 让人在 A 页面上打开表单却默默开去 B。
                 setNewSessionDeviceId(null);
-                // Consumed by the sheet — don't re-upload them if it reopens.
+                // Consumed by the sheet — don't re-upload on reopen.
                 setSharedFiles([]);
+
               }}
             />
           </DeviceScopeProvider>

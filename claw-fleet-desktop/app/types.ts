@@ -164,7 +164,7 @@ export function resetQuietAliveLatch(): void {
  *  faded green = process alive but the transcript has gone quiet (see
  *  [`isQuietAlive`]). Genuinely ended sessions get nothing (null) — this is a
  *  positive "this one's doing something" signal, not another mark on every row.
- *  Shared by the 启动台 list rows and its detail tab bar so a session wears the
+ *  Shared by the Launchpad list rows and its detail tab bar so a session wears the
  *  same dot in both.
  *
  *  Returns a CSS `var()` reference rather than a hex literal: the value lands in

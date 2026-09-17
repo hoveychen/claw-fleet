@@ -1323,7 +1323,7 @@ fn handle_request(
 
             crate::routes::HANDOFF_CHAIN => route_handoff_chain(ctx, request, &query, json_header, path),
 
-            // ── Artifact store (产出) ────────────────────────────────────────
+            // ── Artifact store ────────────────────────────────────────
             crate::routes::ARTIFACTS => route_artifacts(ctx, request, &query, json_header, path),
 
             crate::routes::ARTIFACT => route_artifact(ctx, request, &query, json_header, path),
@@ -1409,7 +1409,7 @@ fn handle_request(
                 if request.method() == &tiny_http::Method::Post => route_plugins_install(ctx, request, &query, json_header, path),
 
             // Resume a scanned session with an optional follow-up prompt
-            // (history panel's "恢复会话" in the browser build). Detached
+            // (history panel's "Resume session" in the browser build). Detached
             // `claude --resume <sid> -p <prompt>`; the resumed turn appears
             // via the scanner as the JSONL grows.
             crate::routes::RESUME_SESSION if request.method() == &tiny_http::Method::Post => route_resume_session(ctx, request, &query, json_header, path),

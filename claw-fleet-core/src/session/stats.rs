@@ -172,7 +172,7 @@ pub struct SessionStats {
     /// Cumulative input tokens across all finalized assistant turns —
     /// `Σ(input_tokens + cache_creation_input_tokens + cache_read_input_tokens)`.
     /// This is the "tokens actually sent to the API" total (cache re-reads
-    /// included), on the same口径 as `total_cost_usd`, NOT the last-turn
+    /// included), on the same basis as `total_cost_usd`, NOT the last-turn
     /// context-window snapshot. The snapshot lives separately in
     /// `SessionAcc::context_usage` and still drives `context_percent`.
     pub total_input_tokens: u64,

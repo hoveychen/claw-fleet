@@ -7,7 +7,7 @@ import { isKeyboardActivationKey } from "../keyboard";
 import { HandoffChainModal } from "./HandoffChainModal";
 
 /**
- * Chip ("接力 n/N") that opens a scrollable modal listing the full relay
+ * Chip showing the relay chain position (n of N hops) that opens a scrollable modal listing the full relay
  * chain: every leg's session, the relay note it left, and when the baton
  * passed. The chain lazy-loads on first open.
  *

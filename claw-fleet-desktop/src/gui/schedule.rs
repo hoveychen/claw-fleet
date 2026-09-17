@@ -2,7 +2,7 @@ use super::*;
 
 // ── Future-task commands (agent loops + one-shot schedules) ───────────────────
 // Display + cancel for both; schedules additionally support edit (the desktop
-// "编辑" form). Creation stays agent-driven on the CLI (`fleet loop|schedule`).
+// "编辑" (Edit) form). Creation stays agent-driven on the CLI (`fleet loop|schedule`).
 
 #[tauri::command(async)]
 pub(crate) fn list_loops(

@@ -9,7 +9,7 @@
 //! - **as an rca executor** — the agent stays local and only the workspace's
 //!   file I/O is routed there ([`crate::remote_workspace`]).
 //!
-//! They used to be modelled as two unrelated lists, both labelled "远端" in the
+//! They used to be modelled as two unrelated lists, both labelled "remote" in the
 //! UI, so the same machine had to be configured twice and the word meant two
 //! different things on one screen. [`SshHost`] is the single record; the two
 //! capabilities are fields on it. The file is unchanged

@@ -82,7 +82,7 @@ describe("inline SVG blank lines", () => {
   // The blank line closes the type-7 HTML block; the following <text> line is a
   // complete open tag *not* followed by only whitespace, so remark parses it as
   // a paragraph — the resulting <p> severs rehype-raw's re-stitching and the
-  // <svg> auto-closes early. This mirrors the real "写入/擦除" diagram.
+  // <svg> auto-closes early. This mirrors the real "write/erase" diagram.
   const svg = [
     '<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">',
     '  <rect x="0" y="0" width="200" height="100" fill="#fafafa"/>',
@@ -188,7 +188,7 @@ describe("GFM survives the sanitize pass", () => {
   });
 });
 
-// The chat brief promises "内联 HTML/SVG…它会真实渲染出来", and a model asked to
+// The chat brief promises "inline HTML/SVG... will render correctly", and a model asked to
 // diagram a circuit answers with inline <svg>. GitHub's default sanitize schema
 // allows no SVG tags at all, so without widening every <svg>/<rect>/<line>/…
 // is stripped and only the <text> content survives — flowing into a run-on

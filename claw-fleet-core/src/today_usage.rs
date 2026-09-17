@@ -1683,7 +1683,7 @@ fn build_range_breakdown_cached(
     }
 
     // Header `from_date` = the earliest day we actually have data for, not the
-    // raw requested lower bound. The "全部" preset requests `from_ms = 0`, which
+    // raw requested lower bound. The "全部" (All) preset requests `from_ms = 0`, which
     // would otherwise render a misleading `1970-01-01`; the real floor is the
     // first day present in the trend (report-backfilled or live).
     let actual_from_date = by_day
@@ -2989,7 +2989,7 @@ mod range_breakdown_tests {
         assert_eq!(b.daily[0].output_tokens, 2_000);
     }
 
-    /// The sidebar's "今日累计" must not count Fleet's own overhead either. This
+    /// The sidebar's "今日累计" (Today's Total) must not count Fleet's own overhead either. This
     /// one drives the real `today_usage()` (which reads
     /// `$FLEET_HOME/.fleet/fleet_llm_usage.jsonl`) rather than a pure helper, so
     /// it seeds a today-stamped entry under a temp home and asserts the badge

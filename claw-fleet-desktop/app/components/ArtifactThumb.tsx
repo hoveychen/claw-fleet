@@ -1,8 +1,8 @@
 /**
  * Live thumbnail for an Office artifact card.
  *
- * The grid used to be a wall of identical gray file icons: "文档 / 幻灯片 /
- * 文档 / 文档" tells you nothing about which deliverable you are looking for.
+ * The grid used to be a wall of identical gray file icons: "document / slide /
+ * document / document" tells you nothing about which deliverable you are looking for.
  * This renders the document's actual first page into the card's 4:3 well,
  * scaled down — the same renderers the detail stage uses, no second code path.
  *

@@ -3,7 +3,7 @@
 //!
 //! Claude records a `SnapshotEntry` on every `fetch_account_info`; this module
 //! does the equivalent for Codex, persisting each `account/rateLimits/read`
-//! reading so the desktop "占用率历史" chart has continuous 24h coverage even
+//! reading so the desktop "occupancy history" chart has continuous 24h coverage even
 //! when the usage panel isn't actively polling.
 //!
 //! Two deliberate differences from the Claude store:
@@ -23,7 +23,7 @@ use crate::codex_source::CodexUsageItem;
 const HISTORY_RETENTION_MS: i64 = 8 * 24 * 3600 * 1000;
 
 /// One point of the codex usage-occupancy time series consumed by the codex
-/// "占用率历史" chart. `*_pct` are the 0–100 ints (the UI plots them directly).
+/// "occupancy history" chart. `*_pct` are the 0–100 ints (the UI plots them directly).
 /// The window lengths ride along so the chart can label each line the same way
 /// the live bars do (`codexWindowLabel`) — a Team plan reports a single 7-day
 /// window in the primary slot, so the label must be derived from the duration.

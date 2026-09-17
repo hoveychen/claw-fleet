@@ -1,4 +1,4 @@
-// Does the 对话 tab still get its data when dsh is slow?
+// Does the "对话" (Conversation) tab still get its data when dsh is slow?
 //
 // Drives the REAL frontend (vite + `?mock&live`) against a `fleet serve` whose
 // dsh is the delay-injecting fixture, and times the conversation from click to

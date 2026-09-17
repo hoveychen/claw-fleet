@@ -10,7 +10,7 @@ import styles from "./AuxDocBar.module.css";
  * The header every auxiliary-rail reader wears.
  *
  * The four readers (file, wiki doc, web page, deliverable) each used to write
- * their own bar, and the drift showed: the deliverable's said "图片 · 837 KB"
+ * their own bar, and the drift showed: the deliverable's said "image · 837 KB"
  * and offered one button while four backend commands to act on it sat unused;
  * the file's hard-coded `sizeBytes: 0` so the size never rendered at all; the
  * wiki's had a version picker but not the copy/export its own page has. One bar

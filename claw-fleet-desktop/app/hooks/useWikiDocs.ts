@@ -5,13 +5,13 @@ import { useUIStore } from "../store";
 import type { WikiDoc } from "../components/WikiView";
 
 /**
- * The wiki doc list, shared by every surface outside the 知识库 (Wiki) page
+ * The wiki doc list, shared by every surface outside the "知识库" (Wiki) page
  * itself.
  *
  * A wiki tab in the detail column needs it twice over: to resolve its own slug
  * to a doc, and to tell a live `[[slug]]` from a dead one inside that doc. Once
  * session prose gets the same links, every open session tab needs it too — so
- * it lives in one store fetched once, not per component. The 知识库 (Wiki) page
+ * it lives in one store fetched once, not per component. The "知识库" (Wiki) page
  * keeps its own copy: it mutates the list (publish / move / delete) and drives
  * a refresh button, which is a different lifecycle from "read it and render".
  */
@@ -101,7 +101,7 @@ export function useWikiDocs(): {
 }
 
 /**
- * Pass a slug to the 知识库 (Wiki) page and select it. The fallback for prose
+ * Pass a slug to the "知识库" (Wiki) page and select it. The fallback for prose
  * rendered where no tab strip exists (the global drawer), and the escape hatch
  * a wiki tab offers for actions that need that page's dialogs.
  *

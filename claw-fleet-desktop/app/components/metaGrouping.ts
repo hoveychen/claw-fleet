@@ -24,7 +24,7 @@ export type MetaRenderUnit =
 /**
  * Collapse runs of adjacent `isMeta` user turns into single `meta-group` units,
  * leaving every other row as a `single`. N back-to-back injected turns otherwise
- * render as N identical "系统上下文" dividers.
+ * render as N identical "系统上下文" (System Context) dividers.
  *
  * A group needs at least two rows — a lone meta row stays a `single` and renders
  * exactly as before. Runs break at day boundaries so the day-separator invariant

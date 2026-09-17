@@ -58,7 +58,7 @@ export const LIVE_MODE =
 /**
  * `?stall=get_messages_tail,...` — hold those commands pending forever.
  *
- * A wedged agent backend (the condition that produced the eternal 「加载中…」)
+ * A wedged agent backend (the condition that produced the eternal "Loading..." state)
  * can be staged for real by SIGSTOPping the dsh web server, but that also
  * wedges `/sessions`, so the board never loads and there is nothing to click.
  * This knob wedges exactly one command instead, which is what the frontend's
@@ -1936,7 +1936,7 @@ export const FORWARDED_SSE_EVENTS = [
   "permission-prompt-dismissed",
   // A card whose wait timed out. It is NOT dismissed — the backend parked the
   // question and interrupted the turn, and the card stays until answered. Miss
-  // this and the card keeps counting down forever with no 「已超时」 badge.
+  // this and the card keeps counting down forever with no "Timed Out" badge.
   "decision-parked",
 ];
 

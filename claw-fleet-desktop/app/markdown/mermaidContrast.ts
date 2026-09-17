@@ -114,8 +114,8 @@ const LABEL = [
 ].join(",");
 
 /**
- * 就地修一棵已渲染的 mermaid SVG（root 是包着 `<svg>` 的容器或 svg 本身）。
- * 幂等：重复跑只会把同样的颜色再写一遍。
+ * Fix a rendered mermaid SVG in-place (root is the container wrapping `<svg>`
+ * or the svg itself). Idempotent: running again just writes the same colors again.
  */
 export function repairMermaidLabelContrast(root: ParentNode): void {
   for (const group of Array.from(root.querySelectorAll("g.node, g.cluster"))) {

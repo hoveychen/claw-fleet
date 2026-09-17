@@ -13,7 +13,7 @@ interface Props {
 }
 
 /** A thin, full-height clickable strip that replaces a collapsed secondary
- *  sidebar (二级侧边栏). It shows a panel-open glyph so it's visually obvious
+ *  sidebar. It shows a panel-open glyph so it's visually obvious
  *  the pane can be expanded again — click it (or re-click the active nav item)
  *  to restore the sidebar. Shared by every view that owns a secondary sidebar
  *  so the affordance looks identical everywhere, regardless of each view's own

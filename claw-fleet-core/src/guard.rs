@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn truncate_command_does_not_split_multibyte_chars() {
-        // Each '中' is 3 bytes; with max=10 the byte index 10 lands *inside*
+        // Each character is 3 bytes (like the Chinese character 中); with max=10 the byte index 10 lands *inside*
         // the 4th character (bytes 9..12), so a naive `&cmd[..10]` slice panics
         // with "byte index 10 is not a char boundary". This reproduces the
         // crash seen in get_guard_context (gui.rs) on long CJK assistant text.

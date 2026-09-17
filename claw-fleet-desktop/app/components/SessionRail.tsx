@@ -98,7 +98,7 @@ export function WorkspaceRailSection({
 }
 
 /**
- * The grouped session list — the "二级侧边栏" rail shared by the desktop task
+ * The grouped session list — the "secondary sidebar" rail shared by the desktop task
  * page (HistoryView). Renders standalone rows and
  * collapsed handoff-relay chains (a tip header that expands to show earlier
  * hops), owning only the local expand / page-in state; everything data-shaped

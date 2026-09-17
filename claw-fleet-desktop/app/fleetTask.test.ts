@@ -23,8 +23,8 @@ describe("isFleetOwnedTask", () => {
   //
   // It didn't, and the cost was invisible from the backend: the session was
   // created, `dsh web` was healthy, every live test passed — but the
-  // "新建会话" dialog waits for the spawned id to appear in
-  // `sessions.filter(isFleetOwnedTask)`, so it sat on "正在启动会话…" forever.
+  // "New Session" dialog waits for the spawned id to appear in
+  // `sessions.filter(isFleetOwnedTask)`, so it sat on "Starting session..." forever.
   // These two cases pin the predicate that decides it.
   it("includes a dsh session Fleet spawned (both fields backfilled)", () => {
     expect(

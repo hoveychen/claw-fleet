@@ -745,8 +745,8 @@ const SANDBOX_FULL_ACCESS: &str = "danger-full-access";
 /// fallback, and the boundary is the session's immutable cwd), so "let it write
 /// `~/.fleet`" and "turn the file sandbox off" are the same switch.
 ///
-/// That is why the gate is Fleet ownership rather than "all dsh sessions": 老板
-/// took the trade deliberately for the sessions Fleet drives, and a session he
+/// That is why the gate is Fleet ownership rather than "all dsh sessions": the
+/// user took the trade deliberately for the sessions Fleet drives, and a session he
 /// opens in dsh himself must keep dsh's own boundary — including the prompt that
 /// asks him before anything writes outside the workspace.
 ///
@@ -1172,7 +1172,7 @@ mod tests {
     }
 
     /// Only sessions Fleet spawned are escalated out of dsh's sandbox. A session
-    /// 老板 opened in dsh himself keeps dsh's boundary — and the confirmation it
+    /// the user opened in dsh himself keeps dsh's boundary — and the confirmation it
     /// puts in front of him before anything writes outside his workspace.
     #[test]
     fn only_fleet_spawned_sessions_are_escalated() {
@@ -1351,7 +1351,7 @@ mod tests {
     }
 
     /// A dsh session used to be told only about the wiki, so an agent that
-    /// produced a deck had nowhere to put it and the 产出 page stayed empty
+    /// produced a deck had nowhere to put it and the artifact page stayed empty
     /// for every non-Claude agent. The block must name the store (CLI only —
     /// dsh has no Fleet MCP tools), and route by audience rather than by
     /// extension: the artifact store takes any format, so an html report or a

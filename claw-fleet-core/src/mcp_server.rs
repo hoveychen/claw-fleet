@@ -245,7 +245,7 @@ fn refuse_if_subagent(name: &str, effect: &str, args: &Value) -> Option<Value> {
 /// effect left is the wait and the click.
 ///
 /// The interaction-mode guidance says all of this in prose — and agents kept
-/// shipping a 收尾卡 after registering anyway, which is the same failure shape
+/// shipping a wrap-up card after registering anyway, which is the same failure shape
 /// as the hand-rolled terminal option above: prose alone does not hold. Refuse
 /// the call so the agent's only remaining move is the correct one, ending the
 /// turn in plain text.
@@ -598,7 +598,7 @@ impl Drop for InflightGuard {
 /// Labels that mean nothing but "we are done here" — the pre-v3 convention the
 /// card's permanent terminal button replaced. Matched against the *whole*
 /// normalised label, never as a substring: an option like
-/// 「跑完测试再结束任务前的合并」 or "Finish the migration script" is a real next
+/// "Run tests then merge before wrapping up" or "Finish the migration script" is a real next
 /// action that happens to mention finishing, and must stay allowed.
 const END_OPTION_LABELS: &[&str] = &[
     // zh
@@ -714,7 +714,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
 
     // Terminal-option guard: every card already renders a permanent
     // end-the-task button whose wording comes from `taskComplete`, so a
-    // hand-rolled 「收工」/「任务结束」/"Done" option is both a wasted option slot
+    // hand-rolled "wrap up"/"end task"/"Done" option is both a wasted option slot
     // and a terminal press Fleet cannot record (it comes back as an ordinary
     // answer, leaving the session's outcome unset). The ban was stated in prose
     // in four places — this tool's description, the `options` and `taskComplete`
@@ -1842,7 +1842,7 @@ mod tests {
     #[test]
     fn tools_call_with_hand_rolled_end_option_errors() {
         // Every card already carries a permanent terminal button driven by
-        // `taskComplete`; an option labelled 「收工」/「任务结束」/"Done" is the
+        // `taskComplete`; an option labelled "wrap up"/"end task"/"Done" is the
         // pre-v3 convention and records no terminal state. Prose said so in
         // four places and agents kept doing it anyway, so reject it here.
         // FLEET_HOME is forced empty for the same reason as the sibling

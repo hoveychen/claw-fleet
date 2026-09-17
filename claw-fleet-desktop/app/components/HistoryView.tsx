@@ -72,8 +72,8 @@ const OrphanDecisionCard = lazy(() =>
  *  thing that went wrong here is unreachable from a render test: the pane used
  *  to pick its branch inline, and an `openId` naming a session the scan cannot
  *  see fell past every branch into the resting state — the new-session
- *  composer. So 「n 张卡等你回复」 landed on 「新建会话」 with nothing on screen
- *  saying why, which is exactly what Boss hit on fleet-cloud on 2026-09-09. */
+ *  composer. So "n pending decision cards" landed on "new session composer" with nothing on screen
+ *  saying why, which is exactly what the user hit on fleet-cloud on 2026-09-09. */
 export type PanePlan =
   | { kind: "session" }
   /** The card is rendered right here: simplified mode mounts no
@@ -155,7 +155,7 @@ function markBucket(s: SessionInfo): "pending" | "done" {
 // renders the identical row without duplicating it here.
 
 /**
- * The one gate that decides what the 任务 page lists — deliberately taking no
+ * The one gate that decides what the task page lists — deliberately taking no
  * view mode, because it must not vary by mode. Simplified mode originally
  * passed `sessions` through unfiltered, which let every scanned transcript onto
  * the page, including the `subagents/agent-*.jsonl` transcripts `scan.rs`
@@ -203,7 +203,7 @@ export function applyFrozenOrder(
 
 
 /**
- * History page: sessions launched via the "新会话" button, as a master-detail
+ * History page: sessions launched via the "New Session" button, as a master-detail
  * view — left rail lists the sessions (text search + workspace filter),
  * clicking a row renders that session's SessionDetail inline on the right.
  *
@@ -270,7 +270,7 @@ export function HistoryView() {
   // Search highlight (the FTS query that matched that session), keyed by
   // session id — each session was opened by its own click and carries its own.
   const [queryById, setQueryById] = useState<Record<string, string | null>>({});
-  // The "+新会话" flow is the draft the column holds (`openId === DRAFT_ID`):
+  // The "+New Session" flow is the draft the column holds (`openId === DRAFT_ID`):
   // the pane renders the compose form, and once the form spawns a session,
   // `pending` flips it to a "starting…" spinner until the scan surfaces the
   // session and the column switches to it.
@@ -471,7 +471,7 @@ export function HistoryView() {
     setMenuSession(null);
   }, []);
 
-  // Manual title override ("重命名"). Held here so the dialog outlives the
+  // Manual title override ("Rename"). Held here so the dialog outlives the
   // context menu that opened it (the menu closes on select).
   const [renameTarget, setRenameTarget] = useState<SessionInfo | null>(null);
 
@@ -567,12 +567,12 @@ export function HistoryView() {
     setOpenId(null);
   }, []);
 
-  // "+新会话" → put the composer in the pane.
+  // "+New Session" → put the composer in the pane.
   const handleNewSession = () => {
     setOpenId(DRAFT_ID);
   };
 
-  // Schedule page "新建" shortcut: seed the new-session composer with a
+  // Schedule page "Create" shortcut: seed the new-session composer with a
   // scheduling-assistant template, then open (or refocus) the draft tab. The
   // store hop to list/gallery mounts this view; we react to the nonce once.
   const newSessionNav = useUIStore((s) => s.newSessionNav);
@@ -583,8 +583,8 @@ export function HistoryView() {
     if (handledNavNonce.current === newSessionNav.nonce) return;
     handledNavNonce.current = newSessionNav.nonce;
     // Seed the "new" draft with every field the request carried. The schedule
-    // page's "立即运行" fills workspace/model/effort/tool so the draft opens as
-    // a ready-to-send copy of the task; the "新建" shortcut passes only prompt.
+    // page's "Run Now" fills workspace/model/effort/tool so the draft opens as
+    // a ready-to-send copy of the task; the "Create" shortcut passes only prompt.
     const seed: Partial<ComposerDraft> = {};
     if (newSessionNav.prompt) seed.prompt = newSessionNav.prompt;
     if (newSessionNav.workspace) seed.workspace = newSessionNav.workspace;
@@ -825,7 +825,7 @@ export function HistoryView() {
       {/* The detail column: one pane. It holds the session you picked in the
           rail, the new-session composer, or — with nothing picked — the
           composer as its resting state, because the one thing you can do from
-          an empty column is start work. */}
+          an empty column is start a task. */}
       <div className={styles.detail}>
         <div className={styles.detail_body}>
           {pane.kind === "session" && activeSession ? (

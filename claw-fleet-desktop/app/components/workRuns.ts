@@ -30,8 +30,8 @@ export function isWorkRow(msg: RawMessage): boolean {
     if (block.type === "tool_use") {
       const call = block as ToolUseBlock;
       if (isDecisionTool(call.name)) return false;
-      // An ingest — a deliverable filed into 产出, a doc published to the
-      // 知识库 — is the run's *output*, not its scaffolding, and it renders as a
+      // An ingest — a deliverable filed into Artifacts, a doc published to the
+      // Knowledge Base — is the run's *output*, not its scaffolding, and it renders as a
       // preview of the thing itself. Folding it into a band puts the one
       // artifact of the run two clicks away, which is how it went unnoticed.
       if (isIngestCall(call.name, call.input)) return false;
@@ -182,7 +182,7 @@ export function workRunTitle(msgs: RawMessage[]): string | null {
  * which is never the right question: a band is tool-call/thinking records *by
  * construction* (`isWorkRow`), so its last record's stop_reason is `tool_use`
  * on every finished record. That made "Done" appear under a run that was still
- * mid-flight — the reader saw 完成 with 思考中 right below it.
+ * mid-flight — the reader saw "Done" with "Thinking" right below it.
  *
  * Three facts have to hold instead:
  *  - the band is not the live tail (`live` is `isWorkingNow && trailing unit`,

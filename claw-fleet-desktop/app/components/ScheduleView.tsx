@@ -10,7 +10,7 @@ import { useUIStore, useSessionsStore, useDetailStore } from "../store";
 import styles from "./ScheduleView.module.css";
 
 // ── Create shortcut helpers ──────────────────────────────────────────────────
-// The "新建" button is a shortcut, not a form: the user only picks a time, then
+// The "Create" button is a shortcut, not a form: the user only picks a time, then
 // we open a NEW session seeded with a scheduling-assistant template so the agent
 // (not the user) authors the schedule content via `fleet schedule create`.
 
@@ -208,9 +208,9 @@ export function ScheduleView() {
     [load],
   );
 
-  // "立即运行": open a pre-filled new-session draft on the task page, seeded
+  // "Run Now": open a pre-filled new-session draft on the task page, seeded
   // from this task (prompt / workspace / model / effort / agent tool). Same flow
-  // as "新建" — the user reviews and sends — so the spawned session carries the
+  // as "Create" — the user reviews and sends — so the spawned session carries the
   // NEW_SESSION entrypoint and shows up on the task page as its own tab. The
   // schedule/loop record itself is untouched: it still fires on its own timer.
   const runNow = useCallback(
@@ -251,7 +251,7 @@ export function ScheduleView() {
     [tasks],
   );
 
-  // "新建" shortcut: pick a time → open a new session seeded with the template.
+  // "Create" shortcut: pick a time → open a new session seeded with the template.
   const [creating, setCreating] = useState(false);
   const [fireLocal, setFireLocal] = useState("");
   const [newTitle, setNewTitle] = useState("");
@@ -379,7 +379,7 @@ export function ScheduleView() {
 // ── Create modal ─────────────────────────────────────────────────────────────
 // Just a time picker. Confirming hands off to a new session; the agent writes
 // the actual schedule. Deliberately no prompt/model fields here — that content
-// is the agent's job, per the "教育用户内容应由 agent 创建" design.
+// is the agent's job, per the principle that content should be authored by the agent.
 
 function CreateModal({
   fireLocal,

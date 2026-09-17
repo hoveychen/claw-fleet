@@ -10,7 +10,7 @@
 // whole set came out as broken-image placeholders even though every file was on
 // disk. Fleet deliberately has no asset protocol (the backend may be remote), so
 // the bytes have to come back through the Backend — `read_external_file`, which
-// already exists for the 文件 page and is implemented on both transports.
+// already exists for the "文件" (Files) page and is implemented on both transports.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -57,8 +57,8 @@ function imgSrc(): string | null {
   return container!.querySelector("img")?.getAttribute("src") ?? null;
 }
 
-describe("markdown 里的本地图片", () => {
-  it("绝对本地路径经 read_external_file 取回字节，渲成 data URL", async () => {
+describe("local images in markdown", () => {
+  it("absolute local paths fetch bytes via read_external_file and render as data URLs", async () => {
     invoke.mockResolvedValue({ kind: "image", base64: PNG_B64, mime: "image/png", sizeBytes: 11 });
 
     await mount(<TextBlock text="![开场](/Users/me/shots/01-开场.png)" />);
@@ -69,7 +69,7 @@ describe("markdown 里的本地图片", () => {
     expect(imgSrc()).toBe(`data:image/png;base64,${PNG_B64}`);
   });
 
-  it("同样接管共享的 safeMarkdownComponents（决策卡 / 知识库 / 日报都用它）", async () => {
+  it("shared safeMarkdownComponents handler works for decision cards, wiki docs, and daily reports", async () => {
     invoke.mockResolvedValue({ kind: "image", base64: PNG_B64, mime: "image/png", sizeBytes: 11 });
 
     await mount(
@@ -82,7 +82,7 @@ describe("markdown 里的本地图片", () => {
     expect(imgSrc()).toBe(`data:image/png;base64,${PNG_B64}`);
   });
 
-  it("http(s) 图片直通，不去读文件", async () => {
+  it("http(s) images pass through without file read", async () => {
     await mount(<TextBlock text="![web](https://example.com/a.png)" />);
 
     expect(invoke).not.toHaveBeenCalled();
@@ -91,14 +91,14 @@ describe("markdown 里的本地图片", () => {
 
   // Admitted by markdownUrlTransform (see markdown/plugins): it goes straight to
   // <img src>, so there is nothing to read off disk.
-  it("data:image URL 直接内联，不去读文件", async () => {
+  it("data:image URLs inline directly without file read", async () => {
     await mount(<TextBlock text={`![inline](data:image/png;base64,${PNG_B64})`} />);
 
     expect(invoke).not.toHaveBeenCalled();
     expect(imgSrc()).toBe(`data:image/png;base64,${PNG_B64}`);
   });
 
-  it("file:// 也当本地路径读，而不是丢给 webview", async () => {
+  it("file:// URLs read as local paths, not forwarded to webview", async () => {
     invoke.mockResolvedValue({ kind: "image", base64: PNG_B64, mime: "image/png", sizeBytes: 11 });
 
     await mount(<TextBlock text="![f](file:///Users/me/shots/a%20b.png)" />);
@@ -110,7 +110,7 @@ describe("markdown 里的本地图片", () => {
     });
   });
 
-  it("javascript: 之类的 src 仍被拦掉", async () => {
+  it("javascript: and similar schemes are still blocked", async () => {
     await mount(<TextBlock text="![x](javascript:alert(1))" />);
 
     expect(invoke).not.toHaveBeenCalled();
@@ -120,13 +120,13 @@ describe("markdown 里的本地图片", () => {
   // The sanitize schema admits the whole `data:` scheme (it cannot express a
   // mime restriction); markdownUrlTransform is the half that keeps it to images.
   // Assert the composed pipeline, not just the transform in isolation.
-  it("非图片的 data: 文档不会渲染", async () => {
+  it("non-image data: documents do not render", async () => {
     await mount(<TextBlock text="![x](data:text/html,<script>alert(1)</script>)" />);
 
     expect(container!.querySelector("img")).toBeNull();
   });
 
-  it("读取失败时留下可见的降级提示，而不是空盒子", async () => {
+  it("read failures show a visible fallback, not a blank box", async () => {
     invoke.mockRejectedValue("external path: No such file or directory");
 
     await mount(<TextBlock text="![缺图](/Users/me/gone.png)" />);
@@ -135,7 +135,7 @@ describe("markdown 里的本地图片", () => {
     expect(container!.textContent).not.toBe("");
   });
 
-  it("超过预览上限（后端回 Binary）也给可见提示", async () => {
+  it("images exceeding preview size limit (backend returns Binary) show a visible message", async () => {
     invoke.mockResolvedValue({ kind: "binary", sizeBytes: 20 * 1024 * 1024 });
 
     await mount(<TextBlock text="![巨图](/Users/me/huge.png)" />);

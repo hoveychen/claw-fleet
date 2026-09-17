@@ -326,11 +326,11 @@ fn deliver_reminder(job: &TurnCardJob, resp: &ElicitationResponse) {
 }
 
 /// Build the reminder prompt, folding in the user's answer when it carries
-/// substance beyond a bare "acknowledged" (收到 in Chinese).
+/// substance beyond a bare acknowledgement ("收到" in Chinese).
 fn reminder_prompt_with_answer(answer: Option<&str>) -> String {
     let notice = reminder_prompt();
     match answer {
-        // "收到" (acknowledged) is a pure acknowledgement — re-report and stop, nothing else.
+        // "收到" (acknowledged): a pure acknowledgement — re-report and stop, nothing else.
         Some("收到") | None => format!("{notice}\n\n{REMINDER_ACTION}"),
         // The boss explicitly asked for more work, which is the one thing that
         // overrides the "do not keep working" line above.
@@ -445,7 +445,7 @@ mod tests {
         let ack = reminder_prompt_with_answer(Some("收到"));
         assert!(ack.contains("决策卡"));
         assert!(ack.contains("结束回合"));
-        // The only sentence that licenses more work is the "continue" (继续) exception.
+        // The only sentence that licenses more work is the "continue" ("继续") exception.
         assert!(!ack.contains("这一条是例外"));
         assert_eq!(reminder_prompt_with_answer(None), ack);
         assert!(reminder_prompt_with_answer(Some("换个方案")).contains("换个方案"));

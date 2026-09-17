@@ -5,7 +5,7 @@ import type { WikiLinkContext } from "./wikiLinks";
  * Ambient wiki-link resolution for a whole subtree of markdown.
  *
  * `[[slug]]` refs need two things a text block cannot know on its own: whether
- * the slug is published, and where to open it. The 知识库 page hands that down as
+ * the slug is published, and where to open it. The wiki page hands that down as
  * a prop, because it renders one doc. Agent prose can't: between `SessionDetail`
  * and the `TextBlock` that finally draws a paragraph sit MessageList, MessageRow,
  * ContentBlocks, UserContent, the reader modal and the tool-block renderers —

@@ -532,7 +532,7 @@ async function handleIPC(
       return MOCK_EXPLORER_ROOTS;
     case "list_explorer_dir":
       return MOCK_EXPLORER_TREE[(args.relativePath as string) ?? ""] ?? [];
-    // The 仓库 page's fallback when a clicked path reveals nothing. Mock mode
+    // The "仓库" (Repos) page's fallback when a clicked path reveals nothing. Mock mode
     // has no filesystem to search, so nothing matches — which exercises the
     // "no such file" notice rather than pretending to rescue the click.
     case "find_explorer_path":
@@ -1105,7 +1105,7 @@ async function handleIPC(
     case "analyze_guard_command":
       return delay(1400).then(() => guardAnalysisFor((args.command as string) ?? ""));
 
-    // ── Handoff chains (接力 chip + expanded panel) ──
+    // ── Handoff chains ("接力" (Relay) chip + expanded panel) ──
     case "get_handoff_chain": {
       const sid = args.sessionId as string;
       const sess = currentSessions.find((s) => s.id === sid);
@@ -1225,7 +1225,7 @@ async function handleIPC(
 
 // ── Mock workspace procs ─────────────────────────────────────────────────────
 //
-// A scripted pty: one shell that already "ran" a couple of commands, so the 终端
+// A scripted pty: one shell that already "ran" a couple of commands, so the terminal
 // page has a real xterm with real bytes in it. Output is handed out by offset
 // exactly like the backend does, which is what makes ProcTerminal's incremental
 // read loop behave the same here as against a live host.

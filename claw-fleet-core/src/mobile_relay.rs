@@ -1118,7 +1118,7 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
 // bodies, token usage, cwd/sessionId/parentUuid bookkeeping. On one real
 // session that made a single `tail` reply 2.4 MB — 1.7 MB even gzipped — while
 // the client's `RawMessage` doesn't even declare `toolUseResult`, and an
-// `image` block renders as the literal string "[图片]". The phone downloaded
+// `image` block renders as the literal string "[Image]". The phone downloaded
 // megabytes, inflated them, and dropped them on the floor (on a 15s request
 // timeout). Slimming to the rendered field set takes that reply to ~13 KB.
 //
@@ -1569,7 +1569,7 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
 /// sheds its original base64 `source` — the biggest and least compressible part
 /// of a transcript — and carries a server-side ~256px JPEG thumbnail instead
 /// (`_thumb: true`); an undecodable image keeps only its `type` and renders as
-/// the "[图片]" placeholder. A `tool_result` block's body stays stripped, but
+/// the "[Image]" placeholder. A `tool_result` block's body stays stripped, but
 /// any images inside it surface as a capped `_thumbs` list.
 fn slim_tail_block(block: &Value) -> Value {
     let Some(obj) = block.as_object() else {
@@ -3226,7 +3226,7 @@ fn serve_user_attachment(params: &Value) -> Result<Value, String> {
     }))
 }
 
-// ── Repository "仓库" surface ─────────────────────────────────────
+// ── Repository surface ─────────────────────────────────────
 // A loose-ends view over every git repo reachable from a known session
 // workspace: worktrees with commits not merged back into main, and the
 // main branch ahead of its upstream (unpushed). Access envelope matches
@@ -3262,7 +3262,7 @@ fn serve_repo_pull(params: &Value) -> Result<Value, String> {
     serde_json::to_value(res).map_err(|e| e.to_string())
 }
 
-// ── Terminal (mobile / webui 「终端」 panel) ─────────────────────────────────
+// ── Terminal (mobile / webui panel) ─────────────────────────────────
 //
 // Thin wrappers over [`crate::proc_runner`], which is already a full
 // interactive pty host (stdin, resize, killpg, offset-addressed output). The
@@ -4838,7 +4838,7 @@ mod tests {
     /// the shape that made one real session's `tail` reply 2.4 MB (1.7 MB even
     /// after gzip, because base64 doesn't compress). The mobile client renders
     /// none of it: `toolUseResult` isn't in its `RawMessage` at all, and an
-    /// `image` block renders as the literal string "[图片]".
+    /// `image` block renders as the literal string "[Image]".
     fn fat_record() -> Value {
         let blob = "A".repeat(4096); // stands in for base64 image data
         json!({
@@ -4894,7 +4894,7 @@ mod tests {
 
             let blocks = m["message"]["content"].as_array().expect("content blocks");
             assert_eq!(blocks.len(), 3, "block count preserved");
-            // image: type kept (renders as "[图片]"), base64 payload dropped
+            // image: type kept (renders as "[Image]"), base64 payload dropped
             assert_eq!(blocks[0]["type"], "image");
             assert!(blocks[0].get("source").is_none(), "image base64 must be stripped");
             // text: kept verbatim

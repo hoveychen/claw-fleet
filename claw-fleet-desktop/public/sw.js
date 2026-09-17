@@ -67,8 +67,9 @@ self.addEventListener("fetch", (event) => {
       const hit = await cache.match(req);
       if (hit) return hit;
       const res = await fetch(req);
-      // 只存成功的同源响应。opaque（no-cors 跨源）响应的状态码读不到，存进去
-      // 就是把一个可能是 404 的东西永久钉住。
+      // Only store successful same-origin responses. opaque (no-cors cross-origin)
+      // response status code can't be read, so storing it would permanently pin
+      // something that might be a 404.
       if (res.ok && res.type === "basic") {
         cache.put(req, res.clone()).catch(() => {});
       }

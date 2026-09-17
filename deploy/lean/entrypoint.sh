@@ -60,7 +60,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
     # test (a `claude` SDK turn) left its transcript 0600 root:root under
     # claude-projects/. `fleet webui`, unprivileged, could not open it — so that
     # session was absent from every scan while the card it had raised (0644, so
-    # readable) still showed in the pending list. Boss saw 「1 张卡等你回复」
+    # readable) still showed in the pending list. Boss saw "1 pending card"
     # open onto an empty pane.
     #
     # Only the strays are touched, not the whole tree: this dir holds the

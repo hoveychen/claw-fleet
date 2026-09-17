@@ -88,7 +88,7 @@ struct SnapshotEntry {
 /// reads the recent tail, but the 7d comparison genuinely needs the long history.
 const HISTORY_RETENTION_MS: i64 = 8 * 24 * 3600 * 1000;
 
-/// One point of the usage-occupancy time series consumed by the "占用率变化"
+/// One point of the usage-occupancy time series consumed by the "Utilization Trend"
 /// chart. `utilization` values are the 0–1 fraction (the UI multiplies by 100).
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct UsageHistoryPoint {

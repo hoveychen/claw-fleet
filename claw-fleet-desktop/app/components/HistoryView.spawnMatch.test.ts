@@ -1,4 +1,4 @@
-// The "新建会话" dialog swaps its spinner for the session view only once the id
+// The "New Session" dialog swaps its spinner for the session view only once the id
 // it just spawned turns up in `sessions.filter(isFleetOwnedTask)`. That wait had
 // no test, and it is exactly where a dsh spawn hung: the session existed and
 // `dsh web` was healthy, but its SessionInfo came back

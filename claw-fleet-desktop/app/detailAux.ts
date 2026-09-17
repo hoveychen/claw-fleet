@@ -14,8 +14,8 @@
  *    which is how a file / wiki doc / web page is read.
  *
  * 2. **The drawer** — an overlay panel that floats over the transcript and
- *    shows exactly one *session facet* (Skills, 决策, Token, 任务, 后台任务,
- *    临时文件, 笔记, Workflow) picked from the header menu. This is "go look
+ *    shows exactly one *session facet* (Skills, Decisions, Tokens, Tasks, Background Tasks,
+ *    Scratchpad, Notes, Workflow) picked from the header menu. This is "go look
  *    something up" — singular, deliberate, dismissed when you are done.
  *    `active` is that one thing.
  *
@@ -315,7 +315,7 @@ export function closeAux(state: AuxState): AuxState {
 /**
  * Drop drawer content whose subject no longer exists.
  *
- * 后台任务 empties as soon as the session takes another turn, and switching
+ * Background Tasks empties as soon as the session takes another turn, and switching
  * sessions can strand the drawer on a facet the new one doesn't offer.
  */
 export function pruneTab(state: AuxState, exists: (id: string) => boolean): AuxState {

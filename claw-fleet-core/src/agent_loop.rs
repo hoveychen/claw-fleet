@@ -582,7 +582,7 @@ pub fn compose_iteration_prompt(rec: &LoopRecord) -> String {
     out
 }
 
-/// The prompt a **manual run** ("立即运行") uses. Unlike
+/// The prompt a **manual run** ("run now") uses. Unlike
 /// [`compose_iteration_prompt`], a manual run does *not* advance the loop: the
 /// record's `next_fire_at` / `iterations_done` / `generation` are untouched, so
 /// the recurring schedule is unaffected. The footer says so.

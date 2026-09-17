@@ -132,7 +132,7 @@ export function GroupMarkControl({ members }: { members: SessionInfo[] }) {
       aria-pressed={isDone}
     >
       {/* Same hollow-circle / filled-check glyph as a single row's MarkControl —
-          the whole-chain semantics are already carried by the chevron, the 接力
+          the whole-chain semantics are already carried by the chevron, the handoff
           badge and this button's tooltip, so the mark itself stays visually
           identical to every other row's rather than a distinct double-check. */}
       {isDone ? (

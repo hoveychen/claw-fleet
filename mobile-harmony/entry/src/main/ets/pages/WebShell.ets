@@ -610,9 +610,9 @@ struct WebShell {
   onBackPress(): boolean {
     if (this.controller.accessBackward()) {
       this.controller.backward();
-      return true; // 已消费，不要退出 app
+      return true; // Already consumed, do not exit app
     }
-    return false; // 已在根层，交回系统
+    return false; // Already at root level, return to system
   }
 
   build() {

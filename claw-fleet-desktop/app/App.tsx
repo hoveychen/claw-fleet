@@ -83,8 +83,8 @@ function App() {
   // backend confirmation of the OS to apply macOS-only window tweaks
   // (clearing the title, setting [data-platform="macos"] for legacy
   // module-CSS selectors).
-  // Which optional surfaces this backend allows (currently: the 终端 page,
-  // gated by FLEET_TERMINAL). Read once — it is a launch property of the
+  // Which optional surfaces this backend allows (currently: the 「终端」(Terminal)
+  // page, gated by FLEET_TERMINAL). Read once — it is a launch property of the
   // backend process, so polling it would only ever get the same answer.
   useEffect(() => {
     void useUIStore.getState().loadHostFeatures();
@@ -188,8 +188,8 @@ function App() {
   }, [setTheme, setViewMode, setSettingsOpen]);
 
   // Open a session detail when the user clicks an agent in the tray menu.
-  // Fleet-spawned sessions route to the 任务 page's inline detail; others keep
-  // the 会话-page drawer (see navigateToSessionDetail).
+  // Fleet-spawned sessions route to the 「任务」(Tasks) page's inline detail; others
+  // keep the 「会话」(Sessions) page drawer (see navigateToSessionDetail).
   useEffect(() => {
     const unlisten = listen<string>("open-session", (event) => {
       const jsonlPath = event.payload;
@@ -205,15 +205,15 @@ function App() {
     };
   }, []);
 
-  // Push locale + 称呼 to the Rust backend, then self-heal the control plane.
+  // Push locale + user title to the Rust backend, then self-heal the control plane.
   //
   // One effect on purpose: the guidance files are rendered from AppState's
   // locale/title, which still hold the `en` / empty defaults until these two
   // land, so the heal has to run after them. And it has to run *here* — the
   // same list used to live in SettingsPanel's mount effect, which only exists
-  // while 设置 is open, so a newly added default-ON feature was installed by
-  // nobody (that is how `fleet-session-title.md` stayed missing and every
-  // Claude session came out untitled).
+  // while 「设置」(Settings) is open, so a newly added default-ON feature was
+  // installed by nobody (that is how `fleet-session-title.md` stayed missing
+  // and every Claude session came out untitled).
   useEffect(() => {
     const title = getItem("user-title");
     Promise.all([

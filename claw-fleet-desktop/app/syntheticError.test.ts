@@ -17,7 +17,7 @@ import {
   type SyntheticErrorSource,
 } from "../../shared-ts/syntheticError";
 
-/** The auth failure from 老板's screenshot, and the reason this module exists. */
+/** The auth failure from the user's screenshot, and the reason this module exists. */
 const AUTH: SyntheticErrorSource = {
   type: "assistant",
   error: "authentication_failed",
@@ -137,7 +137,7 @@ describe("classifySyntheticError", () => {
     expect(model?.titleKey).toBe("detail.api_error.model_quota");
   });
 
-  it("does not offer 压缩 when it was compaction itself that got rate-limited", () => {
+  it("does not offer compaction when it was compaction itself that got rate-limited", () => {
     const info = classifySyntheticError(COMPACTION_BLOCKED);
     // Code says invalid_request, but the blocker is quota — compaction is a
     // model call too, so the compact button would be a dead end.
@@ -146,7 +146,7 @@ describe("classifySyntheticError", () => {
     expect(info?.titleKey).toBe("detail.api_error.compaction_blocked");
   });
 
-  it("still offers 压缩 for an ordinary over-long prompt", () => {
+  it("still offers compaction for an ordinary over-long prompt", () => {
     const info = classifySyntheticError({
       ...COMPACTION_BLOCKED,
       message: {

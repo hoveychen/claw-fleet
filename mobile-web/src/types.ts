@@ -253,13 +253,13 @@ export interface ContentBlock {
   /** Decision-card gist on a `tool_use` block (AskUserQuestion / fleet__ask /
    *  request_user_input). The card itself lives in `input.questions`, which the
    *  relay's input whitelist drops, so without this every decision chip in a
-   *  session would read the same bare 「决策卡」. */
+   *  session would read the same bare decision card. */
   _ask?: AskSummary;
   /** Base64 JPEG thumbnails of screenshots embedded in a tool_result body. */
   _thumbs?: string[];
   /** Gist of an ingest confirmation (`artifact add` / `wiki publish`) on a
    *  `tool_result` block. Both the id and the title live in text the tail
-   *  strips, so without this the phone can only say 「产出」 (see
+   *  strips, so without this the phone can only say "artifact" (see
    *  `ingest_summary` in mobile_relay.rs). */
   _ingest?: IngestSummary;
   /** Image block whose `source` is a server-side JPEG thumbnail, not the
@@ -304,7 +304,7 @@ export interface ToolDigest {
   interrupted?: boolean;
   agentStatus?: string;
   /** The subagent's session id tail (`agent-<agentId>` in the session array);
-   *  the "打开子代理" button uses it to look the subagent up and drill in. */
+   *  the "open subagent" button uses it to look the subagent up and drill in. */
   agentId?: string;
   durationMs?: number;
   tokens?: number;
@@ -516,7 +516,7 @@ export interface WorktreeHealth {
   /** Commits on this branch not merged back into the main checkout. */
   unmerged: number;
   dirtyCount: number;
-  /** Uncommitted entries (path + status code); expandable from the "脏 N" badge. */
+  /** Uncommitted entries (path + status code); expandable from the "dirty N" badge. */
   dirtyFiles: DirtyFile[];
   lastCommitSummary: string | null;
   /** Tip-commit author date, unix seconds. */

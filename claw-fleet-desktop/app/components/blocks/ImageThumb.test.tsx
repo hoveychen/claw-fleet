@@ -2,7 +2,7 @@
 // A tool-result image that fails to load must leave a *visible* failure state,
 // not vanish. The old behavior (`broken → return null`) rendered every
 // upstream transport fault — a trimmed base64, a missing refetch, a dropped
-// flag — as the same silent empty box, which is how the "Read 图片不显示" bug
+// flag — as the same silent empty box, which is how the "Read image not displaying" bug
 // survived three transport-layer fixes: the frontend erased the evidence.
 import { afterEach, describe, expect, it } from "vitest";
 import { createElement } from "react";

@@ -40,20 +40,20 @@ describe("fitDiagramWidth", () => {
     expect(fitDiagramWidth(800, 560)).toBeNull();
   });
 
-  it("缩放会掉到下限以下 → 钉到下限宽度，溢出容器", () => {
-    // 老板遇到的那张：自然宽 1279.5，容器 524 → 原本 41%。
+  it("scaling would drop below minimum → pin to minimum, allow overflow", () => {
+    // Real case: natural width 1279.5, container 524 would be 41%.
     const w = fitDiagramWidth(1279.546875, 524);
     expect(w).toBeCloseTo(1279.546875 * MIN_DIAGRAM_SCALE);
     expect(w! / 1279.546875).toBeCloseTo(MIN_DIAGRAM_SCALE);
-    expect(w!).toBeGreaterThan(524); // 溢出才有横向滚动
+    expect(w!).toBeGreaterThan(524); // overflow enables horizontal scroll
   });
 
-  it("下限可调", () => {
+  it("minimum is tunable", () => {
     expect(fitDiagramWidth(1000, 300, 0.5)).toBe(500);
     expect(fitDiagramWidth(1000, 300, 1)).toBe(1000);
   });
 
-  it("量不到自然宽或容器还没布局 → 不插手", () => {
+  it("can't measure natural width or container not laid out → don't intervene", () => {
     expect(fitDiagramWidth(null, 524)).toBeNull();
     expect(fitDiagramWidth(1000, 0)).toBeNull();
   });

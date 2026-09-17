@@ -227,7 +227,7 @@ export function setItem(key: string, value: string): void {
 }
 
 /** Delete from both cache and Tauri store (async, fire-and-forget). Used by the
- *  tristate "默认/default" state, which is represented by the ABSENCE of a
+ *  tristate "default" state, which is represented by the ABSENCE of a
  *  stored value so the feature follows FEATURE_DEFAULTS. */
 export function removeItem(key: string): void {
   cache.delete(key);

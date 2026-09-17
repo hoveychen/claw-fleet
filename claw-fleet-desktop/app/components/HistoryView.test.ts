@@ -178,7 +178,7 @@ describe("sessionEq", () => {
 });
 
 /**
- * `taskListSessions` is the single gate for the 任务 page. The regression it
+ * `taskListSessions` is the single gate for the task page. The regression it
  * pins: simplified mode used to skip the filter and hand the raw scan to the
  * list, so the subagent transcripts `scan.rs` collects
  * (`<parent>/subagents/agent-*.jsonl`) showed up as top-level tasks — a

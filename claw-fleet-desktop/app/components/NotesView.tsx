@@ -16,7 +16,7 @@ import skillStyles from "./SkillsView.module.css";
  * These are what the agent writes to survive a context compaction — the store
  * behind the `fleet__notes` tool. Until this panel existed they were reachable
  * only from a terminal (`fleet notes read …`), so a reader watching a long run
- * could see the "追加笔记" tool card scroll past and still have no way to open
+ * could see the "追加笔记" (Append Note) tool card scroll past and still have no way to open
  * the file it had just appended to.
  *
  * The list spans the session *and its handoff predecessors*, matching what the

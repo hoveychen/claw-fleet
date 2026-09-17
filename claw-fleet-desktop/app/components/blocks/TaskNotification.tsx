@@ -58,12 +58,12 @@ export function parseTaskNotification(text: string): ParsedTaskNotification | nu
 const TITLE_MAX = 64;
 
 /**
- * An agent notice's `summary` reads like `Agent "审计露馅硬编码 批次3" finished` —
- * the quoted run is the agent's own label and makes a tighter title than the
- * full sentence. A background *shell* notice has no such label: its `stopped`
- * summary is a whole paragraph explaining that no completion record was found.
- * Running that through the title would be unreadable (one nowrap line, most of
- * it ellipsed away), so it goes to the body instead and the title stays generic.
+ * An agent notice's `summary` reads like `Agent "audit-hardcoded-values-batch-3" finished` —
+ * the quoted run is the agent's own label and makes a tighter title than the full sentence.
+ * A background *shell* notice has no such label: its `stopped` summary is a whole paragraph
+ * explaining that no completion record was found. Running that through the title would be
+ * unreadable (one nowrap line, most of it ellipsed away), so it goes to the body instead
+ * and the title stays generic.
  */
 function splitSummary(summary: string | undefined): { title: string | null; body: string | null } {
   if (!summary) return { title: null, body: null };

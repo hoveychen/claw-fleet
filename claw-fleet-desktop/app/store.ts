@@ -272,7 +272,7 @@ interface UIState {
     view: K,
     patch: Partial<MainViewState[K]>,
   ) => void;
-  /** 计划树's patcher. Separate from updateMainViewState because this slice is
+  /** Plan tree's patcher. Separate from updateMainViewState because this slice is
    *  the one that writes through to disk (see {@link persistPlansView}); going
    *  through the generic setter would silently skip the write. */
   updatePlansView: (patch: Partial<MainViewState["plans"]>) => void;
@@ -364,7 +364,7 @@ interface UIState {
 }
 
 export interface OpenTaskNavRequest {
-  /** Session id to open in the 任务 page's inline tab strip. */
+  /** Session id to open in the Tasks page's inline tab strip. */
   sessionId: string;
   /** Bumped on every request so clicking the same session twice re-navigates
    *  even when the id is unchanged. */
@@ -374,12 +374,12 @@ export interface OpenTaskNavRequest {
 export interface TerminalNavRequest {
   workspacePath: string;
   /** Bumped on every request so asking for the same repo twice re-navigates —
-   *  without it, hopping back to 仓库 and clicking 在终端打开 again would set an
+   *  without it, hopping back to the Files page and clicking "open in terminal" again would set an
    *  identical object and TerminalView's effect would never re-run. */
   nonce: number;
 }
 
-/** "Open this deliverable on the 产出 page", from a transcript's ingest card. */
+/** "Open this deliverable on the Artifacts page", from a transcript's ingest card. */
 export interface ArtifactNavRequest {
   id: string;
   /** Bumped per request, so asking for the same artifact twice re-navigates. */
@@ -404,9 +404,9 @@ export interface NewSessionNavRequest {
   /** Seed text for the new-session composer's prompt field. */
   prompt: string;
   /** Optional seeds for the rest of the new-session draft, used by the schedule
-   *  page's "立即运行" so the draft opens pre-filled with the task's own
+   *  page's "run now" action so the draft opens pre-filled with the task's own
    *  workspace / model / effort / agent tool. Omitted fields keep the draft's
-   *  own defaults (the "新建" shortcut passes only `prompt`). */
+   *  own defaults (the "new" shortcut passes only `prompt`). */
   workspace?: string;
   model?: string;
   effort?: string;
@@ -678,7 +678,7 @@ export const useUIStore = create<UIState>((set) => ({
   requestFileNav: (req) =>
     set((s) => ({
       // Same bookkeeping as setViewMode — a nav that skipped it would snap back
-      // to the previous view on the next launch and leave the 工作 tab's memory
+      // to the previous view on the next launch and leave the Work tab's memory
       // pointing at a page the user has since left.
       ...viewModePatch(s, "files"),
       fileNav: { ...req, nonce: (s.fileNav?.nonce ?? 0) + 1 },
@@ -687,14 +687,14 @@ export const useUIStore = create<UIState>((set) => ({
   terminalNav: null,
   requestTerminalNav: (workspacePath) =>
     set((s) =>
-      // The 命令 panel hides its 在终端打开 button while the surface is off, so
+      // The Command panel hides its "open in terminal" button while the surface is off, so
       // this is the belt to that braces: a nav raised by anything else (a
       // keyboard path, a future caller) must not land on a hidden page.
       !s.hostFeatures.terminal
         ? {}
         : {
             // Same bookkeeping as requestFileNav — see the note there on why a
-            // nav that skipped viewModePatch leaves the 工作 tab's memory stale.
+            // nav that skipped viewModePatch leaves the Work tab's memory stale.
             ...viewModePatch(s, "terminal"),
             terminalNav: { workspacePath, nonce: (s.terminalNav?.nonce ?? 0) + 1 },
           },
@@ -771,7 +771,7 @@ export const useUIStore = create<UIState>((set) => ({
   openTaskNav: null,
   requestOpenTask: (sessionId) =>
     set((s) => ({
-      // Hop to the 任务 (history) page, persisting the view like setViewMode so
+      // Hop to the Tasks (history) page, persisting the view like setViewMode so
       // it survives a relaunch, then bump the nonce for HistoryView to consume.
       ...viewModePatch(s, "history"),
       openTaskNav: { sessionId, nonce: (s.openTaskNav?.nonce ?? 0) + 1 },
@@ -1002,13 +1002,13 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     });
 
     // Any rejection below (bad path, backend error, watcher failure) must still
-    // clear `isLoading` — otherwise the detail view is stuck on "加载中…"
+    // clear `isLoading` — otherwise the detail view is stuck on "loading..."
     // forever. Mirrors the standalone-mode fetch's `.catch` in SessionDetail.
     try {
       // …and neither may a fetch that simply never answers. `get_messages_tail`
       // has no abort and no timeout of its own: with an unresponsive backend
       // (proven by freezing the dsh web server) the promise stays pending and
-      // the pane spun on 「加载中…」 indefinitely. The deadline doesn't cancel
+      // the pane spun on "loading..." indefinitely. The deadline doesn't cancel
       // anything — it just stops the lie; a late result still renders below.
       const rawMessages = await withStallWatch(
         invoke<RawMessage[]>("get_messages_tail", {
@@ -1025,7 +1025,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       // `get_messages_tail` (1.5s) and `read_live_thinking` (700ms) take read
       // locks — so on an *active* session the write lock's wait is set by other
       // pollers, not by this fetch. Awaiting it before this `set` is what left
-      // the pane on 「加载中…」 with the messages already fetched, and it sat
+      // the pane on "loading..." with the messages already fetched, and it sat
       // outside `withStallWatch` (disarmed the moment the fetch landed), so no
       // deadline and no retry button ever fired. See store.test.ts.
       set({
@@ -1128,10 +1128,10 @@ export const useDetailStore = create<DetailState>((set, get) => ({
 }));
 
 /** Route a notification / tray click to the right session detail. A
- *  Fleet-spawned session (the ones the 任务 page lists) opens in that page's
+ *  Fleet-spawned session (the ones the Tasks page lists) opens in that page's
  *  inline tab strip; every other session keeps the old behaviour — the global
- *  detail drawer on the 会话 page. `isFleetOwnedTask` is the exact gate
- *  HistoryView filters `adhocSessions` by, so "would this appear on the 任务
+ *  detail drawer on the Sessions page. `isFleetOwnedTask` is the exact gate
+ *  HistoryView filters `adhocSessions` by, so "would this appear on the Tasks
  *  page" and "route it there" stay in lockstep. */
 export function navigateToSessionDetail(session: SessionInfo) {
   if (useUIStore.getState().simplifiedMode || isFleetOwnedTask(session)) {
@@ -1232,7 +1232,7 @@ interface ReportState {
   taskReviews: TaskReview[];
   taskReviewsDate: string;
 
-  // "New report" red dot on the 每日报告 nav item. `latestReportDate` is the most
+  // "New report" red dot on the Daily Report nav item. `latestReportDate` is the most
   // recent date that has report data; `lastSeenReportDate` is the newest date the
   // user has actually opened the report view at (persisted). A dot shows while the
   // former is newer than the latter.
@@ -1577,7 +1577,7 @@ interface DecisionState {
   /**
    * Resolve a fleet__ask card without answering it. `taskOutcome` is the v3
    * terminal verdict from the card's always-present end-the-task button —
-   * `"completed"` (结束任务) or `"abandoned"` (放弃任务) — which Fleet stamps onto
+   * `"completed"` (finish) or `"abandoned"` (abandon) — which Fleet stamps onto
    * the session. Omit it for a plain dismissal, which records no terminal state.
    */
   cancelFleetAsk: (id: string, taskOutcome?: TaskOutcome | null) => Promise<void>;

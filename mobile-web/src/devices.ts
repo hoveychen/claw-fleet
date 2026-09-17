@@ -18,10 +18,11 @@
 import { parseRelayParam } from "./relayBase";
 import { extractSecretFromUrl, openDb } from "./secretStore";
 
-/** 本机存 book 的键(localStorage 与 IDB 共用同一个名字)。 */
+/** Key for storing the book locally (localStorage and IDB share the same key name). */
 const BOOK_KEY = "fleet-devices";
-/** 单设备时代的键。只在迁移时读一次,之后不再写。 */
+/** Key from single-device era. Read once during migration, never written again. */
 const LEGACY_SECRET_KEY = "fleet-relay-secret";
+
 
 /** How this device connects: via relay pairing, or direct HTTP backend.
  *
@@ -73,8 +74,9 @@ export interface HttpDevice extends DeviceCommon {
   token: string | null;
 }
 
-/** 一台在册的设备。 */
+/** A registered device. */
 export type PairedDevice = RelayDevice | HttpDevice;
+
 
 export interface DeviceBook {
   devices: PairedDevice[];
@@ -176,11 +178,12 @@ export function deviceById(book: DeviceBook, id: string): PairedDevice | null {
   return book.devices.find((d) => d.id === id) ?? null;
 }
 
-/** Does this label look like an auto-generated default (「Device 2」)?
+/** Does this label look like an auto-generated default ("Device 2")?
  *
  *  **Use only when migrating old records**: the `auto` field is new; old books lack it.
  *  This heuristic is the only way to distinguish "never named by user" from "user-chosen name".
  *  Once the field exists, read it directly. */
+
 export function looksAutoLabel(label: string): boolean {
   return label.trim() === "" || /^(设备|Device)\s*\d+$/i.test(label.trim());
 }
@@ -248,8 +251,9 @@ export function nextDeviceLabel(book: DeviceBook, prefix: string): string {
 
 export interface AddDeviceInput {
   secret: string;
-  /** 这份配对指名的 relay;省略/`null` = 用构建默认值。 */
+  /** The relay this pairing targets; omit/`null` = use build default. */
   relayBase?: string | null;
+
   label: string;
   id: string;
   now: number;
@@ -258,9 +262,10 @@ export interface AddDeviceInput {
 export interface AddDeviceResult {
   book: DeviceBook;
   device: PairedDevice;
-  /** 这个 secret 本来就在册 —— 同一张二维码被扫了第二次。 */
+  /** This secret was already registered — the same QR code was scanned again. */
   deduped: boolean;
 }
+
 
 /** Add a device (or recognize it was already paired). Both add and rescan make it active —
  *  the user just scanned, so they want to see that device.

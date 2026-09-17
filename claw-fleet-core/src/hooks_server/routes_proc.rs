@@ -11,7 +11,7 @@ use super::*;
 /// `GET /host_features` — the launch-time feature flags of *this* host.
 ///
 /// Lives beside the proc routes because the only flag so far gates them: a
-/// browser build that shows a 终端 (Terminal) page against a backend started without
+/// browser build that shows a Terminal page against a backend started without
 /// `FLEET_TERMINAL` would offer a shell it cannot open. The answer comes from
 /// the same `feature_flags::terminal_enabled()` that `proc_runner` enforces, so
 /// UI and enforcement cannot disagree.

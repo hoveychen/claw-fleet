@@ -1891,7 +1891,7 @@ export interface StageItem {
  * the feature is doing something it is not.
  *
  * Selecting a row previews *that* version in the stage above without changing
- * what is stored; 恢复 is the separate, explicit act. That split matters:
+ * what is stored; restore is the separate, explicit act. That split matters:
  * looking at an old version is how you decide whether you want it back.
  */
 function ArtifactVersions({

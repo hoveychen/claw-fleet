@@ -62,7 +62,7 @@ interface Props {
    *  `WikiLinksProvider`; leaving both unset keeps refs inert (chat). */
   wiki?: WikiLinkContext;
   /** When set, inline-code spans that parse as filesystem paths become chips
-   *  that open the file in the 文件 page. Needs a workspace root to resolve
+   *  that open the file in the File Explorer page. Needs a workspace root to resolve
    *  relative paths against, so only callers that know one pass it. */
   paths?: PathLinkContext;
 }

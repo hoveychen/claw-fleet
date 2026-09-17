@@ -20,7 +20,7 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
   file: FileText,
   wiki: NotebookText,
   web: Globe,
-  // The same glyph the 产出 page uses for itself (its empty state).
+  // The same glyph the Outputs page uses for itself (its empty state).
   artifact: Package,
 };
 
@@ -42,7 +42,7 @@ const DOC_ICON: Record<AuxDocKind, typeof FileText> = {
  * clear of the band the *collapsed* cards occupy.
  *
  * **Reading happens here too.** Clicking a doc card expands it in place into a
- * wide floating card that carries the same readers the 仓库 / 知识库 / 产出
+ * wide floating card that carries the same readers the repo / wiki / outputs
  * pages use. It used to open the drawer instead, which put the doc's name on
  * screen twice (the drawer's title and the card that had just registered it)
  * and threw a fixed 560px panel over a conversation that, in a narrow pane, was
@@ -103,7 +103,7 @@ export function SessionAuxRail({
   docs: AuxDoc[];
   /** The card expanded into a reader — a doc or an agent — if any. */
   expandedId: string | null;
-  /** The session's repo, for the file card's 在仓库页打开. */
+  /** The session's repo, for the file card's open-in-repo action. */
   workspacePath: string;
   /** Leave for the subagent's own session view (the expanded card's ↗). */
   onOpenAgent: (session: SessionInfo) => void;
@@ -158,7 +158,7 @@ export function SessionAuxRail({
     otherCount: docs.length - 1,
   });
 
-  /** Where a chip's 在…打开 sends this kind. Absent when the destination needs
+  /** Where a chip's "open in..." action sends this kind. Absent when the destination needs
    *  something this rail does not have (a file with no workspace). */
   const openPageFor = (d: AuxDoc): (() => void) | undefined => {
     switch (d.kind) {

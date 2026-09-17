@@ -41,7 +41,7 @@ export interface AsrCallbacks {
   onComplete: () => void;
 }
 
-/// 一次识别的持有者。壳里只需要一个实例。
+/// Holder for a single recognition session. The shell needs only one instance.
 export class SpeechAsr {
   private engine: speechRecognizer.SpeechRecognitionEngine | null = null;
   private sessionId: string = '';

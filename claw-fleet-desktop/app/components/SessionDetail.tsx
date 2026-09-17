@@ -124,10 +124,10 @@ const InlineFleetAskCard = lazy(() =>
   import("./DecisionPanel").then(({ FleetAskCard }) => ({ default: FleetAskCard })),
 );
 
-/** "由计划 X 触发" (Triggered by schedule X) provenance chip. Shown only for sessions
+/** "Triggered by schedule X" provenance chip. Shown only for sessions
  *  a one-shot schedule fired (entrypoint === SCHEDULE_ENTRYPOINT); reverse-maps the
  *  session id back to the schedule via list_schedules' firedSessionId to name the id.
- *  Clicking jumps to the Schedule page. Falls back to a generic "定时触发" (scheduled)
+ *  Clicking jumps to the Schedule page. Falls back to a generic "scheduled"
  *  label if the schedule record was cancelled/forgotten and no id is recoverable. */
 function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
@@ -173,7 +173,7 @@ export function SessionDetail({
   inline?: boolean;
   /** May this pane fold the window's chrome away when a doc reader leaves the
    *  transcript too narrow (see useChromeYield)? True for the two hosts that ARE
-   *  the page—the standalone pane and "任务" (Tasks) detail column. False for the
+   *  the page—the standalone pane and Tasks detail column. False for the
    *  DecisionPanel, an overlay that has no business rearranging the page it
    *  floats over. */
   chromeAdaptive?: boolean;

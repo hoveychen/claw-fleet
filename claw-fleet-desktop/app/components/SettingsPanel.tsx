@@ -1658,7 +1658,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
                 {/* rca remote hosts. The DEV gate that used to wrap this
                     section is gone: the composer-side "pick a host, browse it,
-                    register" flow it was waiting on has shipped (老板 2026-09-02,
+                    register" flow it was waiting on has shipped (as of 2026-09-02,
                     docs/rca-ux-review.md 6.6). */}
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.remote_hosts")}</div>
                 <div className={styles.row}>
@@ -2457,7 +2457,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         on this side reads the stored value;
                       - the permission row asks the Tauri notification plugin,
                         whose browser stand-ins answer "not granted" then
-                        "denied", so it permanently read 「已关闭」 behind a
+                        "denied", so it permanently read "已关闭" (Closed) behind a
                         button that could only reach another no-op
                         (`open_notification_settings`).
                     And there is no sender to enable in the first place: OS

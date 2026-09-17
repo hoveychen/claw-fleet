@@ -1316,7 +1316,7 @@ fn find_script_for_run(session_dir: &Path, run_id: &str) -> Option<String> {
 /// When a Workflow is launched with `{scriptPath}` (or a `name`) instead of an
 /// inline `{script}`, the SDK does NOT persist a copy under
 /// `workflows/scripts/`, so [`find_script_for_run`] finds nothing and the DAG
-/// comes back empty ("无法解析编排结构"). The script's real location is still
+/// comes back empty ("unable to parse the workflow structure"). The script's real location is still
 /// recorded in the parent transcript: every Workflow tool_result prints a
 /// `Transcript dir: …/<run-id>` line and a `Script file: <path>` line. We match
 /// the tool_result to this run by its transcript dir and read that file.
@@ -1778,7 +1778,7 @@ phase('Probe')
 
     #[test]
     fn discover_falls_back_to_script_file_from_transcript() {
-        // Repro for "无法解析编排结构": a `scriptPath`-invoked run leaves NO
+        // Repro for "unable to parse the workflow structure": a `scriptPath`-invoked run leaves NO
         // persisted copy under `workflows/scripts/`. The only pointer to the
         // script is the `Script file: <path>` line the Workflow tool_result
         // records in the parent transcript. Without a fallback, phases+nodes

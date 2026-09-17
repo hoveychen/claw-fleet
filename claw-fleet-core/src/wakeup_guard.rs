@@ -7,7 +7,7 @@
 //!
 //! Observed in session `f5c27989` (2026-07-25, paper-assembly, 4th handoff leg):
 //! while waiting on a background soak test it called `ScheduleWakeup` with
-//! `delaySeconds: 1200` and the reason "兜底心跳" — copied almost verbatim from
+//! `delaySeconds: 1200` and the reason "兜底心跳" (fallback heartbeat) — copied almost verbatim from
 //! the tool's own "the long fallback heartbeat: 1200s+" guidance. That was the
 //! session's last tool call. No successor was spawned and the plan's P1 stayed
 //! unchecked. The tool even accepted a forged `<<autonomous-loop-dynamic>>`

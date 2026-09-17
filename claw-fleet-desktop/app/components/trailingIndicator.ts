@@ -34,12 +34,12 @@ const RESUME_GAP_MAX_MS = 5 * 60_000;
  *   scan cycle behind a fresh submit, and Opus omits the live-thinking sidecar,
  *   so there is nothing else to show. That is a turn *about to run*, NOT a wait
  *   for input, so show the working indicator (this is what the reader expects:
- *   "it's thinking", not "等待输入").
+ *   "it's thinking", not "waiting for input").
  *   for input, so show the working indicator (this is what the reader expects:
- *   "it's thinking", not "等待输入") — but only while the prompt is *fresh*. A
+ *   "it's thinking", not "waiting for input") — but only while the prompt is *fresh*. A
  *   turn that died without writing any terminal record (a killed codex, a
  *   crashed harness) leaves that prompt at the tail forever, and an unbounded
- *   resume gap turned that into a 「处理中…」 spinner that never cleared.
+ *   resume gap turned that into a processing spinner that never cleared.
  * - Otherwise, an assistant turn that closed with `end_turn` and nothing after
  *   it is a genuine wait for the user.
  *
