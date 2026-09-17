@@ -116,6 +116,12 @@ export function isLiveMember(s: SessionInfo): boolean {
  *  theme like the solid green does. */
 export const QUIET_ALIVE_COLOR = "rgba(var(--color-success-rgb), 0.45)";
 
+/** Run-dot hue for a session parked on a `fleet watch` — a third colour beside
+ *  the green (running) and amber (waiting for the user), because it is a third
+ *  thing: nothing is running, but a timer will bring it back. `--color-info` is
+ *  themed, so it re-darkens under the light theme like the other two. */
+export const WATCHING_COLOR = "var(--color-info)";
+
 /**
  * Whether the process is still running while the scan-computed status has aged
  * out to something that reads as "ended".
@@ -176,6 +182,12 @@ export function rowBarColor(s: SessionInfo): string | null {
   // decides between the two greens: a session parked for input wears amber
   // whatever its write cadence, and an ended one wears nothing.
   const sticky = isQuietAliveSticky(s);
+  // A session parked on a `fleet watch` has no process and writes nothing, so it
+  // would otherwise fall into the "ended, no dot" branch below and read as
+  // finished work. It isn't: a Fleet timer resumes it when the condition fires.
+  // Its own hue (violet) rather than a green, because nothing is running — the
+  // dot says "coming back", not "working".
+  if (s.status === "watching") return WATCHING_COLOR;
   if (!LIVE_STATUSES.has(s.status)) {
     return sticky ? QUIET_ALIVE_COLOR : null;
   }

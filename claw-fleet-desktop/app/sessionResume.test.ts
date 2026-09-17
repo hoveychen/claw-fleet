@@ -144,6 +144,15 @@ describe("isQuietAlive / rowBarColor third state", () => {
     expect(rowBarColor(session({ id: "dead", status: "idle", procAlive: false }))).toBe(null);
   });
 
+  it("gives a watch-parked session its own hue instead of no dot", () => {
+    // `watching` has no process and writes nothing, so before it existed the
+    // row fell through to the ended branch — no dot, indistinguishable from
+    // finished work, while a Fleet timer was still going to resume it.
+    expect(rowBarColor(session({ id: "w", status: "watching", procAlive: false }))).toBe(
+      "var(--color-info)",
+    );
+  });
+
   it("does not flick back to solid green on a single sparse write", () => {
     // The flicker: a session parked on one long tool call writes a line every
     // few minutes. Each write pushes the status back to a live one for its hard

@@ -1,5 +1,5 @@
 import type { SessionInfo } from "../types";
-import { QUIET_ALIVE_COLOR, rowBarColor } from "../types";
+import { QUIET_ALIVE_COLOR, WATCHING_COLOR, rowBarColor } from "../types";
 
 /** How many chain members an expanded group shows before "load more"; a relay
  *  chain can run 50 hops deep, so we reveal the most recent few and page in the
@@ -30,7 +30,14 @@ export function chainTip(members: SessionInfo[]): SessionInfo {
  *  same session said 会话运行中. Rank by salience rather than by two hard-coded
  *  strings so any colour `rowBarColor` can return survives the collapse; the
  *  phone's `chainTone` (mobile-web `TasksView`) already does exactly this. */
-const BAR_PRIORITY = ["var(--color-success)", "var(--color-warning)", QUIET_ALIVE_COLOR];
+const BAR_PRIORITY = [
+  "var(--color-success)",
+  "var(--color-warning)",
+  QUIET_ALIVE_COLOR,
+  // Last: a hop parked on a watch is the least urgent of the four — nothing is
+  // running and nobody is being waited on — but it still beats no dot at all.
+  WATCHING_COLOR,
+];
 
 export function chainBarColor(members: SessionInfo[]): string | null {
   let best: string | null = null;

@@ -242,7 +242,8 @@
     "rateLimited": "Rate Limited",
     "serverErrored": "Server Error",
     "remoteDisconnected": "Remote lost",
-    "stuck": "Stuck"
+    "stuck": "Stuck",
+    "watching": "Watching"
   },
   "mirrorWrite": {
     "badge": "{{count}} file(s) left here",
@@ -2464,6 +2465,7 @@
     "untitled": "(untitled)",
     "running": "Running",
     "waiting": "Waiting for input",
+    "watching": "Waiting on a watch condition — Fleet resumes it when the condition fires",
     "quiet_alive": "Running · no new output for {{mins}} min (likely parked on one long tool call)",
     "quiet_sparse": "Running · sparse output (one line every few minutes — likely parked on one long tool call)",
     "decision_pending_chip": "Decision",
