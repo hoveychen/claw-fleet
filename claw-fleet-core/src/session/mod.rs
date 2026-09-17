@@ -650,6 +650,72 @@ mod tests {
         assert!(!detect_server_error(&lines));
     }
 
+    /// The unparseable-tool-call record, verbatim in shape: no `error` enum at
+    /// all, `model: "<synthetic>"`, and the message text Claude Code writes
+    /// after its own retry failed.
+    fn unparseable_tool_call_msg(timestamp: &str) -> Value {
+        json!({
+            "type": "assistant",
+            "timestamp": timestamp,
+            "isApiErrorMessage": true,
+            "message": {
+                "role": "assistant",
+                "model": "<synthetic>",
+                "stop_reason": "stop_sequence",
+                "content": [{
+                    "type": "text",
+                    "text": "The model's tool call could not be parsed (retry also failed).",
+                }],
+            },
+        })
+    }
+
+    #[test]
+    fn unparseable_tool_call_is_retryable() {
+        // Carries NO `error` enum, so the enum whitelist can't see it — this is
+        // the whole reason it needs its own arm. Upstream truncated the
+        // tool_use JSON mid-stream; the call never ran, so a resume re-runs the
+        // turn from the last tool_result exactly like a server_error.
+        let lines = vec![user_msg(), unparseable_tool_call_msg("2026-09-17T19:00:13.510Z")];
+        assert!(
+            detect_server_error(&lines),
+            "an unparseable tool call must be treated as transient"
+        );
+    }
+
+    #[test]
+    fn unparseable_tool_call_stale_when_real_turn_follows() {
+        let lines = vec![
+            user_msg(),
+            unparseable_tool_call_msg("2026-09-17T19:00:13.510Z"),
+            user_msg(),
+            assistant_msg(vec![text_block("recovered")], Some("end_turn")),
+        ];
+        assert!(
+            !detect_server_error(&lines),
+            "a real turn after the error must clear it"
+        );
+    }
+
+    #[test]
+    fn unparseable_tool_call_ignored_when_not_synthetic() {
+        // The model quoting the phrase (this very investigation did, repeatedly)
+        // must not park the session in ServerErrored. Two guards: the record has
+        // to be flagged isApiErrorMessage AND authored by "<synthetic>".
+        let prose = vec![
+            user_msg(),
+            assistant_msg(
+                vec![text_block("The model's tool call could not be parsed (quoted in prose)")],
+                Some("end_turn"),
+            ),
+        ];
+        assert!(!detect_server_error(&prose));
+
+        let mut wrong_model = unparseable_tool_call_msg("2026-09-17T19:00:13.510Z");
+        wrong_model["message"]["model"] = json!("claude-opus-5");
+        assert!(!detect_server_error(&[user_msg(), wrong_model]));
+    }
+
     #[test]
     fn ide_badge_stays_off_fleet_spawned_sessions() {
         // A VS Code lock in the workspace must not decorate (or auto-resume-

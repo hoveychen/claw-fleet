@@ -315,8 +315,19 @@ pub(crate) fn detect_rate_limit(last_lines: &[Value]) -> Option<RateLimitState> 
 /// IS such a `server_error` entry — i.e. no subsequent real turn has started.
 /// Every *other* API error (`authentication_failed`, `invalid_request`,
 /// `oauth_org_not_allowed`, `model_not_found`, …) is permanent and must NOT be
-/// auto-retried, so this returns `false` for them: only `server_error` is
-/// whitelisted.
+/// auto-retried, so this returns `false` for them: only `server_error` and the
+/// unparseable-tool-call record below are whitelisted.
+///
+/// ## The second family: an unparseable tool call
+///
+/// The same transient truncation also reaches the transcript wearing no `error`
+/// enum at all — see [`is_unparseable_tool_call`]. Measured across all 286725
+/// tool calls on this machine (2026-09-17): 17 turns where the tool_use JSON
+/// arrived truncated, 5 of which survived Claude Code's own one-shot retry and
+/// ended the turn. Those 5 are what this arm exists for; without it the session
+/// parks on 「请求失败」 until a human presses 重试本轮, and what it loses is
+/// almost always the report card itself — `fleet__ask` fails this way at
+/// ~1/710 calls versus `Bash` at ~1/67000.
 pub(crate) fn detect_server_error(last_lines: &[Value]) -> bool {
     for v in last_lines.iter().rev() {
         let t = v.get("type").and_then(|t| t.as_str());
@@ -332,11 +343,51 @@ pub(crate) fn detect_server_error(last_lines: &[Value]) -> bool {
             // server_error is stale (the session already resumed past it).
             return false;
         }
-        // Only the transient server_error family is retryable; every other API
-        // error is permanent and must not re-fire spawns forever.
-        return v.get("error").and_then(|e| e.as_str()) == Some("server_error");
+        // Only the transient families are retryable; every other API error is
+        // permanent and must not re-fire spawns forever.
+        return v.get("error").and_then(|e| e.as_str()) == Some("server_error")
+            || is_unparseable_tool_call(v);
     }
     false
+}
+
+/// The synthetic record Claude Code writes when the model's tool call could not
+/// be parsed and its own retry failed too.
+///
+/// Shape (verified against all 5 such records on this machine, `claude`
+/// 2.1.263): `isApiErrorMessage: true`, `message.model == "<synthetic>"`,
+/// `stop_reason: "stop_sequence"`, zero tokens — and **no `error` field**,
+/// which is why it cannot be recognised by the enum like every other API error
+/// and needs its own text match. The upstream stream ended mid-`tool_use`, so
+/// the call never reached the tool; resuming re-runs the turn from the last
+/// tool_result, exactly like a `server_error`.
+///
+/// The text is matched on its distinctive stem rather than in full so a later
+/// Claude Code build can reword the tail without silently turning auto-retry
+/// off; the caller has already established this is an `isApiErrorMessage`
+/// record, so the stem cannot collide with ordinary assistant prose.
+fn is_unparseable_tool_call(v: &Value) -> bool {
+    if v.get("message").and_then(|m| m.get("model")).and_then(|m| m.as_str()) != Some("<synthetic>")
+    {
+        return false;
+    }
+    // An `error` enum present means Claude Code classified it — that path is
+    // the caller's whitelist, not this one.
+    if v.get("error").and_then(|e| e.as_str()).is_some() {
+        return false;
+    }
+    let Some(blocks) = v
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return false;
+    };
+    blocks.iter().any(|b| {
+        b.get("text")
+            .and_then(|t| t.as_str())
+            .is_some_and(|t| t.contains("tool call could not be parsed"))
+    })
 }
 
 /// True iff the last meaningful (user/assistant) record is a synthetic
