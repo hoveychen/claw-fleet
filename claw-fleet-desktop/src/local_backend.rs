@@ -3940,11 +3940,16 @@ const BUSY_STATUSES: &[SessionStatus] = &[
 ///   session re-touches the JSONL and makes it look WaitingInput, but no task
 ///   was actually completed just now.
 /// - WaitingInput → WaitingInput (already waiting, no new transition).
+/// - A session whose process is still alive — it is parked on a decision card
+///   or a permission prompt, which already notifies on its own. (Same reading of
+///   `proc_alive` as `turn_completion_card::maybe_raise`, which has skipped
+///   these all along; a genuine end-of-turn is a headless `-p` that exited.)
 pub(crate) fn should_notify_waiting_transition(
     prev: Option<&SessionStatus>,
     current: &SessionStatus,
+    proc_alive: bool,
 ) -> bool {
-    if current != &SessionStatus::WaitingInput {
+    if current != &SessionStatus::WaitingInput || proc_alive {
         return false;
     }
     match prev {
@@ -3985,7 +3990,7 @@ fn detect_waiting_transitions(
         let is_waiting = sess.status == SessionStatus::WaitingInput;
         let was_waiting = prev == Some(&SessionStatus::WaitingInput);
         let was_busy = prev.map_or(false, |p| BUSY_STATUSES.contains(p));
-        let should_notify = should_notify_waiting_transition(prev, &sess.status);
+        let should_notify = should_notify_waiting_transition(prev, &sess.status, sess.proc_alive);
 
         // Session just transitioned from a busy state into WaitingInput →
         // run semantic analysis. Cold start / --resume (prev == None) is
@@ -4856,7 +4861,7 @@ mod tests {
         // Canonical "task just completed" transitions — all must notify.
         for busy in &[Thinking, Executing, Streaming, Processing, Delegating, Active] {
             assert!(
-                should_notify_waiting_transition(Some(busy), &WaitingInput),
+                should_notify_waiting_transition(Some(busy), &WaitingInput, false),
                 "{:?} → WaitingInput should notify",
                 busy
             );
@@ -4867,7 +4872,7 @@ mod tests {
     fn notify_cold_start_waiting_does_not_fire() {
         // Fleet just started / session was previously absent. We have no
         // evidence the agent was busy, so we must NOT claim "task completed".
-        assert!(!should_notify_waiting_transition(None, &WaitingInput));
+        assert!(!should_notify_waiting_transition(None, &WaitingInput, false));
     }
 
     #[test]
@@ -4875,13 +4880,13 @@ mod tests {
         // `--resume` of a session that had aged out to Idle: opening it can
         // re-touch the JSONL and flip it to WaitingInput, but no task was
         // actually completed right now — suppress the notification.
-        assert!(!should_notify_waiting_transition(Some(&Idle), &WaitingInput));
+        assert!(!should_notify_waiting_transition(Some(&Idle), &WaitingInput, false));
     }
 
     #[test]
     fn notify_waiting_to_waiting_does_not_fire() {
         // Already in WaitingInput — the user hasn't done anything new.
-        assert!(!should_notify_waiting_transition(Some(&WaitingInput), &WaitingInput));
+        assert!(!should_notify_waiting_transition(Some(&WaitingInput), &WaitingInput, false));
     }
 
     #[test]
@@ -4889,16 +4894,26 @@ mod tests {
         // Only transitions *to* WaitingInput are notification triggers.
         for target in &[Thinking, Executing, Streaming, Processing, Delegating, Active, Idle] {
             assert!(
-                !should_notify_waiting_transition(Some(&Streaming), target),
+                !should_notify_waiting_transition(Some(&Streaming), target, false),
                 "Streaming → {:?} should not notify",
                 target
             );
             assert!(
-                !should_notify_waiting_transition(None, target),
+                !should_notify_waiting_transition(None, target, false),
                 "None → {:?} should not notify",
                 target
             );
         }
+    }
+
+
+    #[test]
+    fn notify_skips_a_session_whose_process_is_still_alive() {
+        // A live process at WaitingInput is parked on a decision card or a
+        // permission prompt, not finished: the card raises its own notification,
+        // and the analysis this would kick off costs an LLM call per card.
+        assert!(!should_notify_waiting_transition(Some(&Executing), &WaitingInput, true));
+        assert!(should_notify_waiting_transition(Some(&Executing), &WaitingInput, false));
     }
 
     // ── ScanGate ────────────────────────────────────────────────────────────

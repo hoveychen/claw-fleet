@@ -116,13 +116,33 @@ pub fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
     }
 }
 
+/// Claude-side entrypoints whose spawns always name the session id in argv
+/// (`--session-id` on the first turn, `--resume` after), which is what makes the
+/// pid match below definitive. All of them go through
+/// [`crate::session_launch::spawn_claude_detached_with_envs`].
+///
+/// Deliberately not [`crate::session_launch::is_fleet_owned_entrypoint`]: that
+/// one also accepts Fleet-launched *Codex* sessions, which have no `claude`
+/// process to match against, so the dead-process branch below would wrongly
+/// demote them.
+fn is_argv_pinned_entrypoint(entrypoint: Option<&str>) -> bool {
+    matches!(
+        entrypoint,
+        Some(e) if e == crate::session_launch::NEW_SESSION_ENTRYPOINT
+            || e == crate::handoff::HANDOFF_ENTRYPOINT
+            || e == crate::schedule::SCHEDULE_ENTRYPOINT
+            || e == crate::agent_loop::LOOP_ENTRYPOINT
+    )
+}
+
 /// Hard pid-based liveness override for Fleet-spawned headless sessions.
 ///
-/// Launchpad spawns always carry the session id in argv (`--session-id` on the
-/// first turn, `--resume` on follow-ups), so for sessions whose entrypoint is
-/// [`crate::session_launch::NEW_SESSION_ENTRYPOINT`] the presence/absence of an
-/// exact argv match is definitive — unlike the mtime-age heuristics that govern
-/// every other session:
+/// Fleet spawns always carry the session id in argv (`--session-id` on the
+/// first turn, `--resume` on follow-ups), so for the entrypoints
+/// [`is_argv_pinned_entrypoint`] accepts — the "New Session" button, a handoff
+/// relay, a fired schedule / loop iteration — the presence/absence of an exact
+/// argv match is definitive, unlike the mtime-age heuristics that govern every
+/// other session:
 ///
 /// - **Process alive but transcript quiet** (blocked on an AskUserQuestion /
 ///   permission decision card, or a long-running tool): the age heuristics
@@ -145,9 +165,7 @@ pub fn apply_pid_liveness(
     // the UI needs the raw liveness bit, not just the status it feeds into.
     info.proc_alive = exact_proc_alive;
 
-    if info.is_subagent
-        || info.entrypoint.as_deref() != Some(crate::session_launch::NEW_SESSION_ENTRYPOINT)
-    {
+    if info.is_subagent || !is_argv_pinned_entrypoint(info.entrypoint.as_deref()) {
         return;
     }
     if exact_proc_alive {
@@ -164,11 +182,41 @@ pub fn apply_pid_liveness(
             info.cost_speed_usd_per_min = 0.0;
             return;
         }
+        // Tool-batch anchor: the transcript's last assistant message issued a
+        // non-interactive `tool_use` that still has no `tool_result`, and the
+        // process owning this session id is alive. That is proof the agent is
+        // inside a tool call right now — stronger than any age heuristic, and
+        // it does not expire the way the hook signal does.
+        //
+        // Without it the status flickered out of the working set on every tool
+        // that writes nothing for a minute: `age_out_status` demotes Executing
+        // at 60s, and the only thing that re-promoted it was a ToolExecuting
+        // hook state read from the last 500 lines of the machine-wide
+        // `hooks.jsonl`. On a busy box that window is minutes wide (measured
+        // 2026-09-17: ~56 events/min across 11 sessions ≈ 9 min of history), so
+        // a session parked in a long tool slid out of it, fell back to
+        // WaitingInput, and the desktop's trailing activity band vanished
+        // mid-turn — then came back the moment its next hook event landed.
+        //
+        // Interactive waits (a decision card, a permission prompt) are excluded
+        // upstream by `has_pending_noninteractive_tool_batch`, so a session
+        // parked on a card still reads as WaitingInput. The Stuck branch above
+        // takes over once the batch has been unresolved for 20 minutes.
+        //
+        // Scoped to a status that decayed to Idle: a WaitingInput this scan
+        // derived some other way (an `end_turn` tail, a Stop hook, an Esc
+        // interrupt) is a real terminal signal and must not be overruled.
         if info.status == SessionStatus::Idle {
-            info.status = match hook_state {
-                Some(HookState::ToolExecuting) => SessionStatus::Executing,
-                Some(HookState::ModelProcessing) => SessionStatus::Thinking,
-                _ => SessionStatus::WaitingInput,
+            info.status = if info.pending_tool_batch {
+                SessionStatus::Executing
+            } else {
+                match hook_state {
+                    Some(HookState::ToolExecuting) => SessionStatus::Executing,
+                    Some(HookState::ModelProcessing) => SessionStatus::Thinking,
+                    // AwaitingUserInput lands here too: parked on a card is
+                    // exactly what WaitingInput means.
+                    _ => SessionStatus::WaitingInput,
+                }
             };
         }
     } else if matches!(

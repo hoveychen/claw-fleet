@@ -341,7 +341,7 @@ pub struct SessionInfo {
 
 
 mod paths;
-mod detect;
+pub(crate) mod detect;
 pub mod stats;
 mod parse;
 mod scan;
@@ -2273,6 +2273,88 @@ mod tests {
         let mut s = make_launchpad_session(SessionStatus::Idle);
         apply_pid_liveness(&mut s, true, Some(&HookState::ModelProcessing), 0.0);
         assert_eq!(s.status, SessionStatus::Thinking);
+    }
+
+    #[test]
+    fn pid_liveness_covers_every_argv_pinned_fleet_entrypoint() {
+        // Handoff relays and fired schedule / loop iterations are spawned by the
+        // same `spawn_claude_detached_with_envs` path as the "New Session"
+        // button, so their argv names the session id just as definitively. Only
+        // the new-session entrypoint used to pass this gate, which left a live
+        // handoff session parked in a long tool reading Idle (observed
+        // 2026-09-17: a `claw-fleet-handoff` session, proc alive, unresolved
+        // tool batch, status Idle).
+        for ep in [
+            crate::session_launch::NEW_SESSION_ENTRYPOINT,
+            crate::handoff::HANDOFF_ENTRYPOINT,
+            crate::schedule::SCHEDULE_ENTRYPOINT,
+            crate::agent_loop::LOOP_ENTRYPOINT,
+        ] {
+            let mut s = make_session(SessionStatus::Idle);
+            s.entrypoint = Some(ep.into());
+            s.pending_tool_batch = true;
+            apply_pid_liveness(&mut s, true, None, 120.0);
+            assert_eq!(s.status, SessionStatus::Executing, "entrypoint {ep}");
+        }
+
+        // A Fleet-launched *Codex* session has no `claude` process to match, so
+        // it must stay out of this gate entirely — otherwise the dead-process
+        // branch would demote a perfectly healthy one.
+        let mut codex = make_session(SessionStatus::Executing);
+        codex.entrypoint = Some(crate::codex_launch::CODEX_FLEET_ORIGINATOR.into());
+        apply_pid_liveness(&mut codex, false, None, 120.0);
+        assert_eq!(codex.status, SessionStatus::Executing);
+    }
+
+    #[test]
+    fn pid_liveness_pending_tool_batch_anchors_executing_without_a_hook() {
+        // The flicker this anchor exists to kill: a live Fleet session parked in
+        // a tool that writes nothing for >60s decays to Idle, and its hook state
+        // has aged out of the machine-wide 500-line `hooks.jsonl` window. Before
+        // the anchor this read WaitingInput and the desktop's trailing activity
+        // band disappeared mid-turn.
+        let mut s = make_launchpad_session(SessionStatus::Idle);
+        s.pending_tool_batch = true;
+        apply_pid_liveness(&mut s, true, None, 120.0);
+        assert_eq!(s.status, SessionStatus::Executing);
+
+        // A stale Stopped hook must not win over the unresolved batch either.
+        let mut s = make_launchpad_session(SessionStatus::Idle);
+        s.pending_tool_batch = true;
+        apply_pid_liveness(&mut s, true, Some(&HookState::Stopped), 120.0);
+        assert_eq!(s.status, SessionStatus::Executing);
+    }
+
+    #[test]
+    fn pid_liveness_anchor_leaves_a_real_waiting_input_alone() {
+        // WaitingInput derived by this scan (an `end_turn` tail, a Stop hook, an
+        // Esc interrupt) is a terminal signal — the anchor only rescues a status
+        // that decayed to Idle, never one the status machine just produced.
+        let mut s = make_launchpad_session(SessionStatus::WaitingInput);
+        s.pending_tool_batch = true;
+        apply_pid_liveness(&mut s, true, None, 120.0);
+        assert_eq!(s.status, SessionStatus::WaitingInput);
+    }
+
+    #[test]
+    fn pid_liveness_anchor_does_not_cover_an_interactive_wait() {
+        // A session parked on a decision card has no *non-interactive* pending
+        // batch (`has_pending_noninteractive_tool_batch` filters those out), so
+        // it still reads WaitingInput rather than "running tools".
+        let mut s = make_launchpad_session(SessionStatus::Idle);
+        s.pending_tool_batch = false;
+        apply_pid_liveness(&mut s, true, None, 120.0);
+        assert_eq!(s.status, SessionStatus::WaitingInput);
+    }
+
+    #[test]
+    fn pid_liveness_anchor_needs_a_live_process() {
+        // No live process pinned to this session id: the batch is a leftover of
+        // a dead turn, not a tool in flight.
+        let mut s = make_launchpad_session(SessionStatus::Idle);
+        s.pending_tool_batch = true;
+        apply_pid_liveness(&mut s, false, None, 120.0);
+        assert_eq!(s.status, SessionStatus::Idle);
     }
 
     #[test]
