@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   CloudOff,
   Eye,
@@ -854,12 +853,13 @@ function A2uiCard({
   );
 }
 
-// ── preceding agent narration ────────────────────────────────────────────────
-// Port of the desktop's usePrecedingAgentMessages slicing: the agent's plain
-// prose since the user's last real input, shown collapsed above the question.
+// ── the user's last input ───────────────────────────────────────────────────
+// Port of the desktop's useLastUserInput: what the *user* last said before this
+// question — the prompt they typed, or the answer they gave to the previous
+// card — shown above the question so the round's starting point stays visible.
 
-const NARRATION_TAIL = 200;
-const NARRATION_MAX_CHUNKS = 40;
+const TRANSCRIPT_TAIL = 200;
+const MAX_CHARS = 4000;
 
 function isAskToolName(name: string): boolean {
   return (
@@ -875,73 +875,111 @@ function blocksOf(msg: RawMessage): ContentBlock[] {
   return Array.isArray(content) ? content : [];
 }
 
-function assistantProse(msg: RawMessage): string {
-  if (msg.type !== "assistant" || !msg.message) return "";
-  const content = msg.message.content;
-  if (typeof content === "string") return content.trim();
-  return blocksOf(msg)
-    .filter((b) => b.type === "text" && b.text)
-    .map((b) => b.text)
-    .join("\n")
+/** Strip the machinery Claude Code wraps around a typed prompt — system-reminder
+ *  blocks (hook context, memory recalls) and slash-command envelopes. */
+export function stripPromptEnvelope(text: string): string {
+  return text
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
+    .replace(/<command-(name|message|args)>[\s\S]*?<\/command-\1>/g, "")
+    .replace(/<local-command-std(out|err)>[\s\S]*?<\/local-command-std\1>/g, "")
     .trim();
 }
 
-/** Agent narration since the user's last input (typed prompt or an answer to
- *  an ask-family tool; plain Bash/Read tool_results do NOT end the span). */
-export function slicePrecedingMessages(messages: RawMessage[]): { key: string; text: string }[] {
+/** `fleet__ask` / `AskUserQuestion` answer payloads are
+ *  `{"answers": {<question body>: <value>}}` — the keys are whole reports, so
+ *  only the values are shown. Anything else falls back to the raw text. */
+export function formatAnswer(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") {
+      const answers = (parsed as { answers?: unknown }).answers;
+      if (answers && typeof answers === "object") {
+        const vals = Object.values(answers as Record<string, unknown>)
+          .map((v) => (typeof v === "string" ? v : JSON.stringify(v)))
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (vals.length) return vals.join("\n");
+      }
+    }
+  } catch {
+    // Not JSON — fall through to the raw text.
+  }
+  return raw;
+}
+
+function clampText(text: string): string {
+  return text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}…` : text;
+}
+
+export interface LastUserInput {
+  kind: "prompt" | "answer";
+  text: string;
+}
+
+/** Walk backwards to the user's last real input: a typed prompt, or their
+ *  answer to the previous ask-family card (plain Bash/Read tool_results and
+ *  failed ask calls are NOT user input). */
+export function findLastUserInput(messages: RawMessage[]): LastUserInput | null {
   const toolNameById = new Map<string, string>();
   for (const m of messages) {
     for (const b of blocksOf(m)) {
       if (b.type === "tool_use" && b.id && b.name) toolNameById.set(b.id, b.name);
     }
   }
-  const isUserInput = (msg: RawMessage): boolean => {
-    if (msg.type !== "user" || !msg.message) return false;
-    const content = msg.message.content;
-    if (typeof content === "string") return content.trim().length > 0;
-    const blocks = blocksOf(msg);
-    if (blocks.some((b) => b.type === "text" && b.text?.trim())) return true;
-    return blocks.some((b) => {
-      if (b.type !== "tool_result" || !b.tool_use_id) return false;
-      // A failed ask call (is_error) was never actually answered — it errored
-      // out before the user could respond, so it is NOT user input and must not
-      // end the narration span.
-      if (b.is_error) return false;
-      const name = toolNameById.get(b.tool_use_id);
-      return !!name && isAskToolName(name);
-    });
-  };
-  let boundary = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (isUserInput(messages[i])) {
-      boundary = i;
-      break;
+    const msg = messages[i];
+    if (msg.type !== "user" || !msg.message) continue;
+    const content = msg.message.content;
+    if (typeof content === "string") {
+      const text = stripPromptEnvelope(content);
+      if (text) return { kind: "prompt", text: clampText(text) };
+      continue;
+    }
+    const blocks = blocksOf(msg);
+    const typed = blocks
+      .filter((b) => b.type === "text" && b.text)
+      .map((b) => stripPromptEnvelope(b.text as string))
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    if (typed) return { kind: "prompt", text: clampText(typed) };
+    for (const b of blocks) {
+      if (b.type !== "tool_result" || !b.tool_use_id) continue;
+      // A failed ask call was never actually answered — keep looking further back.
+      if (b.is_error) continue;
+      const name = toolNameById.get(b.tool_use_id);
+      if (!name || !isAskToolName(name)) continue;
+      const content = b.content as ContentBlock[] | string | undefined;
+      const raw =
+        typeof content === "string"
+          ? content.trim()
+          : (Array.isArray(content) ? content : [])
+              .filter((c) => c.type === "text" && c.text)
+              .map((c) => c.text as string)
+              .join("\n")
+              .trim();
+      const text = formatAnswer(raw).trim();
+      if (text) return { kind: "answer", text: clampText(text) };
     }
   }
-  const out: { key: string; text: string }[] = [];
-  for (const [i, m] of messages.slice(boundary + 1).entries()) {
-    const text = assistantProse(m);
-    if (text) out.push({ key: m.uuid ?? String(i), text });
-  }
-  return out.length > NARRATION_MAX_CHUNKS ? out.slice(out.length - NARRATION_MAX_CHUNKS) : out;
+  return null;
 }
 
-function PrecedingNarration({
+function LastUserInputBlock({
   session,
   client,
 }: {
   session: SessionInfo | undefined;
   client: FleetTransport | null;
 }) {
-  const [chunks, setChunks] = useState<{ key: string; text: string }[]>([]);
-  const [expanded, setExpanded] = useState(false);
+  const [input, setInput] = useState<LastUserInput | null>(null);
   useEffect(() => {
     if (!client || !session?.jsonlPath) return;
     let cancelled = false;
     client
-      .request<RawMessage[]>("tail", { path: session.jsonlPath, n: NARRATION_TAIL })
+      .request<RawMessage[]>("tail", { path: session.jsonlPath, n: TRANSCRIPT_TAIL })
       .then((rows) => {
-        if (!cancelled) setChunks(slicePrecedingMessages(rows));
+        if (!cancelled) setInput(findLastUserInput(rows));
       })
       .catch(() => {});
     return () => {
@@ -949,37 +987,23 @@ function PrecedingNarration({
     };
   }, [client, session?.jsonlPath]);
 
-  if (chunks.length === 0) return null;
+  if (!input) return null;
   return (
     <div className={styles.preceding}>
-      <button className={styles.precedingToggle} onClick={() => setExpanded((v) => !v)}>
-        {expanded ? (
-          <>
-            <ChevronDown size={14} />
-            {t("收起提问前的说明")}
-          </>
-        ) : (
-          <>
-            <ChevronRight size={14} />
-            {t("Agent 干活时还说了 {0} 段话", chunks.length)}
-          </>
-        )}
-      </button>
-      {expanded && (
-        <div className={styles.precedingBody}>
-          {chunks.map((c) => (
-            <div key={c.key} className={styles.markdown}>
-              <ReactMarkdown
-                remarkPlugins={mdRemarkPlugins}
+      <div className={styles.precedingLabel}>
+        {input.kind === "answer" ? t("你上一轮的回答") : t("你上一轮说的")}
+      </div>
+      <div className={styles.precedingBody}>
+        <div className={styles.markdown}>
+          <ReactMarkdown
+            remarkPlugins={mdRemarkPlugins}
             rehypePlugins={mdRehypePlugins}
-                components={mdComponents}
-              >
-                {c.text}
-              </ReactMarkdown>
-            </div>
-          ))}
+            components={mdComponents}
+          >
+            {input.text}
+          </ReactMarkdown>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -1180,7 +1204,7 @@ function QuestionsCard({
 
   return (
     <div>
-      <PrecedingNarration session={session} client={client} />
+      <LastUserInputBlock session={session} client={client} />
       {multiQ && (
         <div className={styles.stepBar}>
           <span className={styles.stepLabel}>
