@@ -134,6 +134,29 @@ export function formatAnswer(raw: string): AnswerEntry[] {
   return raw ? [{ label: "", value: raw }] : [];
 }
 
+// The collapsed bar shows one line of the last input. CSS ellipsis handles the
+// visual clip; this cap only stops a megabyte of text reaching the DOM as a
+// single unbreakable node.
+const MAX_SNIPPET_CHARS = 200;
+
+/**
+ * Flatten one input value into a single line for the collapsed bar: markdown
+ * markup, fenced code bodies and image syntax are stripped (a `![](…)` data URI
+ * would otherwise become the whole snippet) and every run of whitespace becomes
+ * one space, so a multi-line answer can never grow the bar past one row.
+ */
+export function oneLineSnippet(text: string, max = MAX_SNIPPET_CHARS): string {
+  const plain = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/[*_`#>|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain.length > max ? `${plain.slice(0, max)}…` : plain;
+}
+
 /**
  * Walk backwards to the user's last real input and render it: a typed prompt,
  * or their answer to the previous ask-family card. Returns null when the
