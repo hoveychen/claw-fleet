@@ -22,8 +22,8 @@ OG_LOCALE = {'en': 'en_US', 'zh': 'zh_CN'}
 LANG_TAG = {'en': 'en', 'zh': 'zh-CN'}
 GITHUB = 'https://github.com/hoveychen/claw-fleet'
 THEME_COLOR = '#ffffff'
-# Search-console ownership proofs, as {meta name: content}. Empty until 老板
-# hands over the codes; kept here rather than in the content files because it
+# Search-console ownership proofs, as {meta name: content}. Empty until the
+# user hands over the codes; kept here rather than in the content files because it
 # is the same proof in every language and has nothing to do with copy.
 # The file-based alternative (a google*.html / baidu_verify_*.html at the site
 # root) is allowed through by stage_pages.VERIFICATION_GLOBS, so either form

@@ -63,7 +63,7 @@ export function TodayUsageBadge({
   const loaded = usage !== null;
   const cost = usage?.costUsd ?? 0;
   // Total tokens = input + output, cumulative across every turn (cache re-reads
-  // included), on the same口径 as cost — so a heavy day reads large. Agent
+  // included), on the same basis as cost — so a heavy day reads large. Agent
   // sessions only (Claude + Codex); Fleet's own LLM calls are deliberately not
   // counted here — see `today_usage` in claw-fleet-core. The daily report card
   // also sums cumulatively, but is Claude-only, so the two need not match.

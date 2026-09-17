@@ -6,16 +6,18 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 const DOMAIN = 0x0000;
 const TAG = 'fleet';
 
-/// 系统分享的接收端。
+/// Receiver end of system sharing.
 ///
-/// 只在 EntryAbility 上声明 sendData skill 是不够的 —— 真机上 utd 确实登记进
-/// 了 bm dump，但分享面板里依旧没有 Fleet。系统分享面板要求接收方提供一个
-/// share 类型的 UIExtension；SDK 里 ShareExtensionAbility 就是为此存在的
-/// （@ohos.app.ability.ShareExtensionAbility，继承 UIExtensionAbility）。
+/// Declaring sendData skill only on EntryAbility is not enough — on real hardware
+/// utd gets registered in bm dump, but Fleet still doesn't appear in the share
+/// panel. System share panels require receivers to provide a share-type UIExtension;
+/// ShareExtensionAbility exists for this in the SDK (@ohos.app.ability.ShareExtensionAbility,
+/// inherits UIExtensionAbility).
 ///
-/// 这里只做转发：把 want 交给面板内的小页面，由它把内容写进与主应用共享的
-/// preferences，然后拉起主应用。分享面板里不做完整交互 —— 用户要的是「把东西
-/// 丢给 Fleet」，而不是在别人的面板里操作 Fleet。
+/// We just forward here: hand the want to the small page inside the panel, which
+/// writes content to preferences shared with the main app, then launches the main
+/// app. No full interaction in the share panel — users mean "throw this at Fleet",
+/// not "operate Fleet in someone else's panel".
 export default class ShareExtAbility extends ShareExtensionAbility {
   onSessionCreate(want: Want, session: UIExtensionContentSession): void {
     hilog.info(DOMAIN, TAG, 'share extension session created');

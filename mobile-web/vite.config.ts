@@ -24,27 +24,28 @@ function buildCommit(): string {
 // Dev-time: point the WS/api at a locally running fleet-relay via
 // `VITE_RELAY_URL=http://127.0.0.1:18080 pnpm dev`; production builds are
 // served by fleet-relay itself, so same-origin needs no config.
-// `--mode webui` 出的是**另一份产物**，不是改默认那份。
+// `--mode webui` produces a **separate artifact**, not a variant of the default.
 //
-// 现有的 `dist/` 有三个消费方都按根路径假设：fleet-relay 镜像发到 `/srv/static`、
-// 鸿蒙壳同步进 rawfile、Capacitor 打进原生包。给默认构建改 base 会一次性弄坏
-// 这三条。所以同源形态另出 `dist-webui/`，挂在 `/m/` 下，三方原样不动。
+// Current `dist/` has three consumers all assuming a root-path deploy: fleet-relay image to `/srv/static`,
+// HarmonyOS shell synced into rawfile, and Capacitor bundled into the native app. Changing the base for
+// the default build breaks all three at once. So the same-origin variant outputs separately to `dist-webui/`,
+// mounted at `/m/`, leaving the three consumers unchanged.
 //
-// `VITE_FLEET_HOST` 是让 hostMode.ts 里那几个常量成为编译期常量的东西 ——
-// relay 客户端进不进 webui 产物，全靠它能被常量折叠（见 main.tsx 的动态 import）。
+// `VITE_FLEET_HOST` lets the constants in hostMode.ts become compile-time constants—
+// whether relay clients see the webui artifact at all depends on it being constant-folded (see main.tsx's dynamic import).
 export default defineConfig(({ mode }) => {
   const webui = mode === "webui";
   return {
     plugins: [react()],
-    // `fs.allow` 里的 ".." 是必需的,不是保险起见:本包 import 了仓库根的
-    // `shared-ts/`(见 src/views/TerminalView.tsx),而 vite dev 默认只放行包目录,
-    // 于是 `pnpm dev` 会对那个文件回 403 Restricted。`vite build` 不看这个设置,
-    // 所以构建是绿的、只有 dev 挂 —— 别把构建绿当成这条不需要。
+    // `fs.allow` ".." is required, not optional: this package imports `shared-ts/` from the repo root
+    // (see src/views/TerminalView.tsx), but vite dev only allows the package dir by default,
+    // so `pnpm dev` returns 403 Restricted for those files. `vite build` ignores this setting,
+    // so build is green while dev breaks—don't mistake a green build for not needing this.
     server: { host: true, fs: { allow: [".."] } },
     test: { setupFiles: ["./vitest.setup.ts"] },
     base: webui ? "/m/" : "/",
     build: webui ? { outDir: "dist-webui" } : {},
-    // Surfaced in the 更多 tab's 关于 section.
+    // Surfaced in the "更多" (More) tab's "关于" (About) section.
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
       __APP_COMMIT__: JSON.stringify(buildCommit()),

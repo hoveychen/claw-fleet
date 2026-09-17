@@ -1,8 +1,10 @@
-// 「占用率变化」曲线的纯几何：把 0–1 的采样点映射成一条 SVG path。
-// 单独拆出来是为了能直接单测——SVG 元素本身没什么好测的，容易出错的是坐标映射。
-// 不引图表库：桌面端那张图用 recharts，手机上只要两条折线，手写更省一个依赖。
+// Pure geometry of the "usage over time" curve: map normalized (0–1) sample
+// points to an SVG path. Extracted separately for direct testing — SVG elements
+// themselves aren't interesting to test, the coordinate mapping is error-prone.
+// No chart library: desktop uses recharts, mobile only needs two polylines, so
+// hand-coding saves a dependency.
 
-/** 画布坐标系（SVG viewBox 的用户单位）与时间窗。 */
+/** Canvas coordinate system (SVG viewBox user units) and time window. */
 export interface ChartBox {
   width: number;
   height: number;
@@ -10,13 +12,15 @@ export interface ChartBox {
   toMs: number;
 }
 
-/** 从一个采样点里取某条曲线的值（**0–1** 归一后）；该窗口当次没数据时返回 null。
- *  泛型化后 Claude（`UsageHistoryPoint`）与 codex（`CodexUsageHistoryPoint`，pick 里 /100）
- *  两种采样点共用同一套几何。 */
+/** Extract a metric value from a sample point (**0–1** normalized); returns
+ *  null if no data for this window. Once generic, both Claude
+ *  (`UsageHistoryPoint`) and codex (`CodexUsageHistoryPoint`, /100 in pick)
+ *  sample types can share the same geometry. */
 export type PickMetric<T extends { ts: number }> = (p: T) => number | null;
 
-/** 折线 path。采样点不足两个（连不成线）返回空串。
- *  null 采样直接跳过、两侧点直连——与桌面端 recharts 的 connectNulls 同行为。 */
+/** Polyline path. Returns empty string if fewer than two sample points (can't
+ *  draw a line). Null samples are skipped and adjacent points are connected
+ *  directly — same behavior as recharts' connectNulls on desktop. */
 export function linePath<T extends { ts: number }>(
   points: T[],
   pick: PickMetric<T>,
@@ -29,7 +33,7 @@ export function linePath<T extends { ts: number }>(
     .sort((a, b) => a.ts - b.ts)
     .map(({ ts, v }) => {
       const x = ((ts - box.fromMs) / span) * box.width;
-      // SVG 的 y 轴朝下：占用率 100% 落在顶边。
+      // SVG y-axis points down: 100% usage lands at the top edge.
       const y = box.height - clamp01(v) * box.height;
       return `${round1(x)},${round1(y)}`;
     });
@@ -37,11 +41,13 @@ export function linePath<T extends { ts: number }>(
   return `M${coords.join("L")}`;
 }
 
-/** 时间轴刻度：窗口内每隔 `stepMs` 一个，返回 [x 坐标, 时间戳]。 */
+/** Time axis ticks: one every `stepMs` within the window. Returns [x coordinate,
+ *  timestamp]. */
 export function timeTicks(box: ChartBox, stepMs: number): Array<[number, number]> {
   const span = Math.max(1, box.toMs - box.fromMs);
   const ticks: Array<[number, number]> = [];
-  // 从窗口右端(现在)往回取整步长，最后一个刻度就总是落在“现在”附近。
+  // Walk back from the window's right edge (now) in full steps; the last tick
+  // always lands near “now”.
   for (let ts = box.toMs; ts >= box.fromMs; ts -= stepMs) {
     ticks.push([round1n(((ts - box.fromMs) / span) * box.width), ts]);
   }

@@ -96,19 +96,19 @@ fn language_lines(locale: &str) -> (&'static str, &'static str) {
     match locale {
         "zh" => (
             "本规则配套的 TASKS.md 用中文书写。",
-            "决策卡的 question 与 option 文案用中文书写。",
+            "决策卡的 question 与 option 文案、以及回合中途的进度叙述，都用中文书写。",
         ),
         "ja" => (
             "本ルールに対応する TASKS.md は日本語で書いてください。",
-            "意思決定カードの question と option は日本語で書いてください。",
+            "意思決定カードの question と option、そしてターン途中の進捗の語りも日本語で書いてください。",
         ),
         "ko" => (
             "이 규칙과 짝을 이루는 TASKS.md는 한국어로 작성하세요.",
-            "결정 카드의 question과 option은 한국어로 작성하세요.",
+            "결정 카드의 question과 option은 물론, 턴 중간의 진행 서술도 한국어로 작성하세요.",
         ),
         _ => (
             "Write the paired TASKS.md in English.",
-            "Write decision-card question and option text in English.",
+            "Write decision-card question and option text — and your mid-turn progress narration — in English.",
         ),
     }
 }
@@ -745,8 +745,8 @@ const SANDBOX_FULL_ACCESS: &str = "danger-full-access";
 /// fallback, and the boundary is the session's immutable cwd), so "let it write
 /// `~/.fleet`" and "turn the file sandbox off" are the same switch.
 ///
-/// That is why the gate is Fleet ownership rather than "all dsh sessions": 老板
-/// took the trade deliberately for the sessions Fleet drives, and a session he
+/// That is why the gate is Fleet ownership rather than "all dsh sessions": the
+/// user took the trade deliberately for the sessions Fleet drives, and a session he
 /// opens in dsh himself must keep dsh's own boundary — including the prompt that
 /// asks him before anything writes outside the workspace.
 ///
@@ -1172,7 +1172,7 @@ mod tests {
     }
 
     /// Only sessions Fleet spawned are escalated out of dsh's sandbox. A session
-    /// 老板 opened in dsh himself keeps dsh's boundary — and the confirmation it
+    /// the user opened in dsh himself keeps dsh's boundary — and the confirmation it
     /// puts in front of him before anything writes outside his workspace.
     #[test]
     fn only_fleet_spawned_sessions_are_escalated() {
@@ -1287,8 +1287,9 @@ mod tests {
         let ix = render_dsh_interaction_block("", "en");
         assert!(ix.contains("Boss"), "empty title falls back to Boss");
         assert!(
-            ix.contains("decision-card question and option text in English"),
-            "en locale selects the English interaction language line"
+            ix.contains("decision-card question and option text")
+                && ix.contains("mid-turn progress narration"),
+            "en locale selects the English interaction language line, which covers narration too"
         );
         assert!(
             render_dsh_prd_block("", "zh").contains("老板"),
@@ -1351,7 +1352,7 @@ mod tests {
     }
 
     /// A dsh session used to be told only about the wiki, so an agent that
-    /// produced a deck had nowhere to put it and the 产出 page stayed empty
+    /// produced a deck had nowhere to put it and the artifact page stayed empty
     /// for every non-Claude agent. The block must name the store (CLI only —
     /// dsh has no Fleet MCP tools), and route by audience rather than by
     /// extension: the artifact store takes any format, so an html report or a

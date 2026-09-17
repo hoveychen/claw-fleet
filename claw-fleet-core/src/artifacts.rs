@@ -1,5 +1,5 @@
 //! Artifact store — the deliverables a task produced, as opposed to its code
-//! (the 仓库 page) or its reusable knowledge (the 知识库 page).
+//! (the Repository page) or its reusable knowledge (the Wiki page).
 //!
 //! A PDF, a slide deck, a spreadsheet, a rendered video: things whose whole
 //! point is to be handed to a person. The wiki cannot hold them — its
@@ -102,7 +102,7 @@ pub struct Artifact {
     pub name: String,
     /// Display name. Falls back to `name` when the ingester had nothing better.
     pub title: String,
-    /// Free-text note from whoever added it ("Q3 收入明细，按季度拆分").
+    /// Free-text note from whoever added it, e.g., "Q3 income statement, broken down by quarter".
     #[serde(default)]
     pub note: String,
     pub mime: String,
@@ -116,7 +116,7 @@ pub struct Artifact {
     /// leading or trailing slash, `""` for "the workspace root".
     ///
     /// This is the one part of an artifact's location the *user* owns. Before
-    /// it existed the 产出 page derived a folder from [`Self::source_path`]
+    /// it existed the Artifacts page derived a folder from [`Self::source_path`]
     /// relative to the workspace, which meant the tree's shape was decided by
     /// wherever the producing agent happened to write the file and could not be
     /// tidied afterwards. An empty `path` still falls back to that derivation
@@ -236,7 +236,7 @@ pub struct StoreUsage {
     /// with the still-present original and so are not all "new" disk.
     pub hardlinked_bytes: u64,
     /// The part of `total_bytes` held by superseded versions, which is the
-    /// part a "清理历史版本" action could actually reclaim.
+    /// part a "clean up old versions" action could actually reclaim.
     #[serde(default)]
     pub version_bytes: u64,
 }
@@ -277,7 +277,7 @@ fn artifact_dir(root: &Path, id: &str) -> Result<PathBuf, String> {
 /// Most nesting levels one artifact path may have.
 pub const MAX_PATH_DEPTH: usize = 16;
 /// Longest one folder name may be, in chars (not bytes — the names are CJK as
-/// often as not and a byte limit would cut a 中文 folder name off at five).
+/// often as not and a byte limit would cut a Chinese folder name off at five).
 pub const MAX_SEGMENT_CHARS: usize = 64;
 
 /// Canonical form of a user-typed virtual directory, or why it was refused.
@@ -678,7 +678,7 @@ fn add_version_in(
     artifact.current_version = version_id;
     artifact.size_bytes = size;
     // `created_ms` tracks the *current* version, so a regenerated deliverable
-    // rises back to the top of 最近加入 — the original ingest time is still on
+    // rises back to the top of the Recently Added list — the original ingest time is still on
     // record as the oldest entry of `versions`.
     artifact.created_ms = now;
     artifact.source_path = source_path;
@@ -957,7 +957,7 @@ pub fn rollback_in(root: &Path, id: &str, version: &str) -> Result<Artifact, Str
     artifact.ingest_len = blob_meta.len();
     artifact.ingest_mtime_ms = mtime_ms(&blob_meta);
     // `created_ms` follows the current version everywhere else, so it does here
-    // too: a rolled-back artifact reads as "changed just now" in 最近加入,
+    // too: a rolled-back artifact reads as "changed just now" in the Recently Added list,
     // which is what actually happened to it.
     artifact.created_ms = now_ms();
     write_meta(&dir, &artifact)?;
@@ -997,8 +997,8 @@ pub struct FolderZip {
 
 /// The artifacts a folder export would contain, in archive order.
 ///
-/// Recursive: exporting `交付` includes `交付/2026Q3`. That is what the tree
-/// already implies — clicking `交付` shows everything underneath — so an
+/// Recursive: exporting a folder includes its subfolders. That is what the tree
+/// already implies — clicking a folder shows everything underneath — so an
 /// export that took only the immediate level would disagree with what the
 /// user was looking at when they asked for it.
 pub fn folder_members(root: &Path, workspace_path: &str, directory: &str) -> Vec<Artifact> {
@@ -1033,8 +1033,8 @@ pub fn folder_members(root: &Path, workspace_path: &str, directory: &str) -> Vec
 /// The fallback is a prefix comparison, so it only fires when the two fields
 /// were written from the same spelling of the path: `workspace_path` goes
 /// through [`crate::wiki::resolve_workspace_path`] at ingest while
-/// `source_path` is recorded verbatim, so an agent whose cwd was a symlink
-/// (`/tmp/...` → `/private/tmp/...` on macOS) yields no derived directory and
+/// `source_path` is recorded verbatim. An agent whose cwd was a symlink
+/// (`/tmp/...` → `/private/tmp/...` on macOS) would yield no derived directory and
 /// the artifact reads as unfiled. That is deliberately left as-is: resolving
 /// here would make the export disagree with the tree, which cannot resolve
 /// anything in the browser — and a wrong folder is worse than none.
@@ -1160,7 +1160,7 @@ fn zip_filename(directory: &str, workspace_path: &str) -> String {
 // One `folders.json` at the store root, unlike the per-artifact `meta.json`.
 // The no-global-index rule exists because several agents ingest concurrently
 // and must never contend on a shared file; folders are the opposite — they are
-// only ever created by a person clicking "新建文件夹", one at a time. And a
+// only ever created by a person clicking "new folder", one at a time. And a
 // folder has nowhere else to live: an empty one has no artifact to hang off.
 // A `.json` file at the root is invisible to [`list_in`], which only descends
 // into directories.
@@ -1170,7 +1170,7 @@ fn folders_path(root: &Path) -> PathBuf {
 }
 
 /// Every folder the user has made. Missing or unreadable file reads as empty —
-/// folders are navigation, and losing one must not blank the 产出 page.
+/// folders are navigation, and losing one must not blank the Artifacts page.
 pub fn list_folders() -> Vec<Folder> {
     match artifacts_dir() {
         Some(root) => list_folders_in(&root),
@@ -1199,7 +1199,7 @@ fn write_folders(root: &Path, folders: &[Folder]) -> Result<(), String> {
 
 /// Register a folder (and every ancestor of it) under `workspace`.
 ///
-/// Ancestors are registered too so that deleting `交付/2026Q3` leaves `交付`
+/// Ancestors are registered too so that deleting a subfolder leaves its parent
 /// standing, the way it would in a file manager. Creating a folder that
 /// already exists is a no-op success — the UI can call this without checking.
 pub fn create_folder(workspace: &Path, path: &str) -> Result<Folder, String> {

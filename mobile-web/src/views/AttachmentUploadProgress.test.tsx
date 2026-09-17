@@ -1,6 +1,6 @@
-// 手机上挑一张图到 chip 出现之间隔着一次 relay 往返（不是本机拷贝），那几秒里
-// 附件条原来是空的，只有「+」变成一个小转圈。这两组测试钉住补上的反馈：占位 chip
-// 在同一次点击里就出现，且一个文件失败不再把后面的文件一起带走。
+// Picking a photo on the phone to chip-appearance goes through one relay round trip (not local copy),
+// during which the attachment row is empty with just a spinning plus. These two test groups lock in the
+// feedback added: placeholder chip appears in the same click, and one file's failure doesn't drag the rest down.
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AttachmentThumbs } from "./AttachmentThumb";
@@ -19,7 +19,7 @@ describe("上传中的占位 chip", () => {
       />,
     );
     expect(html).toContain('aria-busy="true"');
-    // 本机 blob 是免费的，所以缩略图先于字节出现。
+    // Local blob is free, so thumbnail appears before bytes arrive.
     expect(html).toContain("blob:local");
   });
 
@@ -47,7 +47,7 @@ describe("逐文件上传", () => {
     return f;
   }
 
-  // mobile-web 不装 jsdom，这两样是浏览器给的，测试里自己顶上。
+  // mobile-web doesn't use jsdom; these are browser-provided, so tests stub them in.
   const alert = vi.fn();
   vi.stubGlobal("window", { alert });
   vi.stubGlobal(

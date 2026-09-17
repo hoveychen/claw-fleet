@@ -117,7 +117,7 @@ function TaskReviewRow({
         )}
         <span className={styles.tr_meta}>
           {review.workspaceName}
-          {/* Hop count only when the task actually handed off — "· 1 段" on every
+          {/* Hop count only when the task actually handed off — "· 1 hop" on every
               ordinary task would be noise on every row. */}
           {hops > 1 ? ` · ${t("report.task_review_hops", { count: hops })}` : ""}
         </span>

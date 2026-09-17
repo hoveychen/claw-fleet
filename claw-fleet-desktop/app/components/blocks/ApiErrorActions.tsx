@@ -112,9 +112,9 @@ export function ApiErrorActions({
         case "login":
           // `claude auth login` is an OAuth handshake: it prints a URL and then
           // waits for a pasted code, so it needs a real pty and a place to type
-          // — not a fire-and-forget spawn. Fleet already owns both (the 终端
-          // page's proc runner), so the card borrows them inline rather than
-          // sending the user off to find a terminal.
+          // — not a fire-and-forget spawn. Fleet already owns both (the
+          // Terminal page's proc runner), so the card borrows them
+          // inline rather than sending the user off to find a terminal.
           setBusy("login");
           setError(null);
           invoke<ProcRecord>("run_workspace_proc", {

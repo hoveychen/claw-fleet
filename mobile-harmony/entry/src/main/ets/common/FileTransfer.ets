@@ -1,15 +1,14 @@
-/// On-device file transfer for the 元服务 client (feature-gaps P5) — attachment
-/// selection for the composer and wiki-doc export. Both hang off
-/// DocumentViewPicker, whose `select` and `save` are `@atomicservice` (verified
-/// against @ohos.file.picker.d.ts, @since 12), so they work inside the atomic-
-/// service sandbox. There is NO outbound ShareKit / systemShare in this SDK
-/// (only ShareExtensionAbility for *receiving* shares), so the "分享" half of P5
-/// degrades to the platform save dialog — export writes the file to a user-chosen
-/// location instead of raising a share sheet.
+/// On-device file transfer for the atomic service client (feature-gaps P5) — attachment
+/// selection for the composer and wiki-doc export. Both use DocumentViewPicker, whose `select`
+/// and `save` are `@atomicservice` (verified against @ohos.file.picker.d.ts, @since 12), so they
+/// work inside the atomic-service sandbox. There is NO outbound ShareKit / systemShare in this SDK
+/// (only ShareExtensionAbility for *receiving* shares), so the "share" half of P5 degrades to
+/// the platform save dialog — export writes the file to a user-chosen location instead of opening
+/// a share sheet.
 ///
-/// ArkTS shape notes: relay params / picker options are declared interfaces or
-/// SDK classes (never Record literals); base64 goes through util.Base64Helper;
-/// bytes move via the sync fileIo API (files are capped at 10 MiB).
+/// ArkTS shape notes: relay params / picker options are declared interfaces or SDK classes
+/// (never Record literals); base64 goes through util.Base64Helper; bytes move via the sync
+/// fileIo API (files capped at 10 MiB).
 
 import { common } from '@kit.AbilityKit';
 import { picker, fileIo as fs, fileUri } from '@kit.CoreFileKit';
@@ -53,15 +52,12 @@ function baseName(uri: string): string {
 
 
 
-/// Export a wiki-doc version: fetch its bytes via `wiki_export`, let the user pick
-/// a save location (DocumentViewPicker.save), and write the bytes there. Returns
-/// true when saved, false when the user cancelled the save dialog.
-/// 把一段 base64 存成用户选定位置的文件。
+/// Save a base64 string as a file at a user-chosen location.
 ///
-/// 从 exportWikiDoc 里抽出来的后半段：WebShell 下 relay 连接归 web 层，原生
-/// 拿不到 RelayClient，但「让用户挑个位置把字节写下去」这件事仍然只有原生
-/// 能做（WebView 里 <a download> 不会触发系统下载）。web 侧通过
-/// javaScriptProxy 把文件名和 base64 递过来调这里。
+/// The latter half extracted from exportWikiDoc: under WebShell, relay connection belongs to the web
+/// layer, native cannot access RelayClient, but "let user pick a location and write bytes there" is
+/// something only native can do (<a download> in WebView doesn't trigger system download). Web side
+/// passes filename and base64 via javaScriptProxy to call this.
 export async function saveBase64File(
   context: common.UIAbilityContext,
   filename: string,

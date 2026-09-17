@@ -179,7 +179,7 @@ export function SessionOptionPills({
     }
   }, [effort, isCodex, model, onEffortChange, catalog]);
   // In the un-chosen ("") state a pill shows only its bare category name
-  // ("Model" / "模型"), not a "…: default" value: the prefix+value form made the
+  // ("Model"), not a "…: default" value: the prefix+value form made the
   // toolbar too wide to hold one row (English overflowed outright). The menu's
   // own default item still spells out what "no choice" means, and picking a
   // value replaces the label with that value.

@@ -16,7 +16,7 @@
 //! moment from other processes entirely.
 //!
 //! On 2026-09-07 01:13 — the first launch after the self-heal moved to the
-//! startup path — 老板's CLAUDE.md came out 120 bytes long holding a single
+//! startup path — the user's CLAUDE.md came out 120 bytes long holding a single
 //! `fleet:model-guidance` block. The other five `@import`s had been overwritten
 //! away, so every session started after that point silently lost its PRD
 //! discipline, interaction mode, wiki guidance and lessons.

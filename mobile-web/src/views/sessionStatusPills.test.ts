@@ -1,10 +1,10 @@
-// 钉住这条轨的核心取舍：**缺席的东西不占位**。
+// Core design of this row: **absence takes no space**.
 //
-// 旧头部那块面板是固定五行的表格，一个还没记到模型的会话在上面显示「模型 —」；
-// 这条轨反过来——安静的会话上它一颗 pill 都不画，整条不渲染。这不是实现细节，
-// 是老板那三条意见里「信息量」那条能成立的前提：只有让沉默的字段真正消失，
-// 那点横向空间才腾得出来给 watch / 子代理 / 计划进度。所以这里逐条钉的是
-// 「什么时候不出现」，而不只是「出现时长什么样」。
+// Old header panel is a fixed 5-row table; a session with no model yet shows "model —" on it.
+// This row flips it — quiet sessions draw zero pills, whole row unrendered. Not an implementation detail,
+// but a prerequisite for "information density" from the three requirements: only when silent fields truly
+// vanish does that horizontal space free up for watch/subagent/plan progress. So each pill here is pinned
+// on "when NOT to appear", not just "what to look like when appearing".
 
 import { describe, it, expect } from "vitest";
 import { buildStatusPills } from "./sessionStatusPills";
@@ -33,12 +33,12 @@ describe("buildStatusPills", () => {
   });
 
   it("每个字段缺席时它那颗 pill 不出现（不是显示成空值）", () => {
-    // 只给一个字段，逐个确认它只带出自己那一颗。
+    // Give one field at a time, confirm each brings only its own pill.
     expect(keys(session({ status: "thinking" }))).toEqual(["running"]);
     expect(keys(session({ runningSubagentCount: 3 }))).toEqual(["subagents"]);
     expect(keys(session({ taskPlan: { done: 3, total: 5 } as never }))).toEqual(["plan"]);
     expect(keys(session({ contextPercent: 0.4 }))).toEqual(["context"]);
-    // 0 个子代理与 0 个任务的计划都算「没有」，不占位。
+    // 0 subagents and 0-task plans both count as "absent", take no space.
     expect(keys(session({ runningSubagentCount: 0 }))).toEqual([]);
     expect(keys(session({ taskPlan: { done: 0, total: 0 } as never }))).toEqual([]);
     expect(keys(session({ pendingMessages: [] }))).toEqual([]);
@@ -157,7 +157,7 @@ describe("buildStatusPills", () => {
     expect(target("plan")).toBe("plans");
     expect(target("handoff")).toBe("handoff");
     expect(target("context")).toBe("token");
-    // 「运行中」和「N 条排队」是状态陈述，没有对应的详情面，所以不可点。
+    // "running" and "N queued" are status statements with no corresponding detail pane, so not tappable.
     expect(target("running")).toBeUndefined();
     expect(target("queued")).toBeUndefined();
   });

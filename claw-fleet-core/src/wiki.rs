@@ -1,6 +1,6 @@
 //! Wiki knowledge base — agents publish durable HTML reports/demos and
 //! markdown docs into `~/.fleet/wiki/` via `fleet wiki publish`; the desktop
-//! 知识库 board and the `fleet serve` wiki routes list and render them from
+//! knowledge base board and the `fleet serve` wiki routes list and render them from
 //! the same functions here, so every client sees the same content.
 //!
 //! On-disk layout (scan-dir, one `doc.json` per doc — no global index, so
@@ -1103,8 +1103,8 @@ fn strip_html(html: &str) -> String {
             // Skip container blocks whose text content is not prose.
             let block = ["<script", "<style"].iter().find_map(|open| {
                 // Compare as bytes: `rest` may hold a multi-byte char within
-                // the first `open.len()` bytes (`<h1>对…`), and slicing a `str`
-                // off a char boundary panics.
+                // the first `open.len()` bytes (e.g., `<h1>` followed by a multi-byte char),
+                // and slicing a `str` off a char boundary panics.
                 let probe = rest.as_bytes();
                 let open_bytes = open.as_bytes();
                 if probe.len() >= open_bytes.len()
@@ -2040,8 +2040,8 @@ mod tests {
     #[test]
     fn strip_html_survives_multibyte_char_right_after_a_tag() {
         // The `<script`/`<style` probe slices 6–7 bytes off each `<`. In
-        // `<h1>对…` byte 6 lands inside `对` (bytes 4..7), which used to panic
-        // the entire search on any CJK HTML doc.
+        // `<h1>` followed by a multi-byte character like `对` (bytes 4..7), byte 6 lands inside it,
+        // which used to panic the entire search on any CJK HTML doc.
         let text = strip_html("<h1>对话交互状态机</h1><p>渲染 pipeline</p>");
         assert!(text.contains("对话交互状态机"), "got: {text}");
         assert!(text.contains("渲染"), "got: {text}");

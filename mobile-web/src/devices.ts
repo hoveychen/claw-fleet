@@ -1,80 +1,86 @@
-// 设备簿 —— 这台手机配对过的每一台 Fleet。
+// Device registry: every Fleet desktop this phone has paired.
 //
-// 在此之前「配对」是单数:一个 `fleet-relay-secret`,一台桌面端。多设备之所以
-// 不是把那个键存成数组就完事,是因为**每一份配对都自带它的 relay 地址**:一台
-// 自建 relay 上的桌面端和一台默认 relay 上的桌面端必须能同时在册,所以 relay
-// 归属跟着设备走,而不再是一个模块级常量(见 relay.ts 的 RELAY_BASE)。
+// Previously "pairing" was singular: one `fleet-relay-secret` for one desktop. The reason
+// multi-device doesn't simply store the key as an array is that **each pairing carries its own
+// relay address**: a desktop on a self-hosted relay and one on the default relay must coexist,
+// so relay affinity follows the device, not a module-level constant (see RELAY_BASE in relay.ts).
 //
-// 持久化沿用 secretStore.ts 那套双写(localStorage + IndexedDB 镜像)及其理由:
-// iOS Safari 在非 A2HS 的普通标签页下会在 7 天无访问后清掉脚本可写存储,而两
-// 个存储在部分清理路径里是各自独立被回收的,所以哪一份活下来就用哪一份。IDB
-// 复用 secretStore 的同一个库/store,只是换一个 key —— 无 schema 变更。
+// Persistence mirrors secretStore.ts (localStorage + IndexedDB copy) for the same reason:
+// on non-A2HS iOS Safari, script-writable storage gets wiped 7 days after last access, and
+// the two stores are independently garbage-collected, so whichever survives gets used. IDB
+// reuses secretStore's library/store, just under a different key — no schema change.
 //
-// 这里刻意分成两层:**纯函数**(book 的增删改查、迁移判定)与**存储 IO**。测试
-// 环境(node)没有 indexedDB,所以凡是需要断言的语义都在纯函数层;IO 层只负责
-// 把 book 搬进搬出,任何失败都退化成「这一份存储没读到」,绝不抛。
+// Deliberately split into two layers: **pure functions** (book CRUD, migration check) and
+// **storage I/O**. Test environments (Node) have no IndexedDB, so all assertable semantics
+// live in the pure layer; I/O only shuttles the book in/out, any failure degrades to "this
+// store had nothing", never throws.
 
 import { parseRelayParam } from "./relayBase";
 import { extractSecretFromUrl, openDb } from "./secretStore";
 
-/** 本机存 book 的键(localStorage 与 IDB 共用同一个名字)。 */
+/** Key for storing the book locally (localStorage and IDB share the same key name). */
 const BOOK_KEY = "fleet-devices";
-/** 单设备时代的键。只在迁移时读一次,之后不再写。 */
+/** Key from single-device era. Read once during migration, never written again. */
 const LEGACY_SECRET_KEY = "fleet-relay-secret";
 
-/** 一台设备用哪条路接:经中转配对,还是直接问一个 HTTP 后端。
+
+/** How this device connects: via relay pairing, or direct HTTP backend.
  *
- *  `http` 这一种**没有对应的「添加设备」入口** —— 它是同源形态的承载:同源产物
- *  (`fleet webui` / 云容器的 `/m/`)里簿子永远空着,App 用一台 baseUrl 为空的
- *  合成 http 设备代表「就问发出这张页面的那个 origin」(App 的
- *  `SAME_ORIGIN_DEVICE`),于是「按设备种类分派传输层」这条规则同时覆盖了同源
- *  部署,不必为它留特例分支。簿子里若还留着 http 记录,那是手填直连那条路存在
- *  时加的,反序列化仍然认它 —— 老用户已加的那台不该因为入口撤了就连不上。 */
+ *  `http` has **no corresponding "add device" entry** — it carries the same-origin deployment:
+ *  in same-origin products (`fleet webui` / cloud container `/m/`), the book stays empty; the App
+ *  synthesizes an http device with empty baseUrl to mean "ask the origin that served this page"
+ *  (the App's `SAME_ORIGIN_DEVICE`), so "dispatch transport by device kind" covers same-origin
+ *  without a special case. Old http records in the book were added when manual direct connection
+ *  existed; deserialization still accepts them — users who added one shouldn't lose connectivity
+ *  just because the entry point was removed. */
 export type DeviceKind = "relay" | "http";
 
 interface DeviceCommon {
-  /** 本机生成的稳定 id。用它而不是密钥做外键,免得把密钥撒进缓存键、路由参数、
-   *  React key 这些会被日志和 devtools 看见的地方。 */
+  /** Stable id generated locally. Use this instead of the secret as a foreign key, so the
+   *  secret doesn't leak into cache keys, route params, or React keys (visible in logs/devtools). */
   id: string;
-  /** 用户可改的显示名。 */
+  /** User-editable display name. */
   label: string;
-  /** 这个名字是不是自动起的。`true` = 还没人给它取过名,那台桌面端一报上自己的
-   *  主机名就可以顶掉它(`applyHostIdentity`);用户一改名就永久变成 `false`。
+  /** Whether the name was auto-generated. `true` = not yet named by user; when the desktop
+   *  reports its hostname, it can override this (`applyHostIdentity`); once the user renames,
+   *  this becomes permanently `false`.
    *
-   *  存这个布尔位而不是「看看名字长得像不像默认名」,是因为后者会误伤:一个真把
-   *  自己的机器叫「设备 2」的用户,改完名下次连上又被改回主机名。 */
+   *  Store this boolean rather than "check if the name looks like the default", because the
+   *  latter leads to false positives: a user who genuinely named their machine "Device 2"
+   *  would have it reset on reconnect. */
   auto?: boolean;
-  /** 那台主机自报的平台键(`macos` / `windows` / `linux` …,见 core 的
-   *  `host_identity.rs`)。只用来挑图标;没连上过就缺席。 */
+  /** Platform string self-reported by the host (`macos` / `windows` / `linux` etc., see
+   *  `host_identity.rs` in core). Used only for icon selection; absent if never connected. */
   platform?: string;
   addedAt: number;
 }
 
-/** 经中转配对的一台桌面端。 */
+/** Desktop connected via relay pairing. */
 export interface RelayDevice extends DeviceCommon {
   kind: "relay";
-  /** 配对密钥。channelToken 与 encKey 都由它 HKDF 派生(relayCrypto.ts)。 */
+  /** Pairing secret. channelToken and encKey are both HKDF-derived from this (relayCrypto.ts). */
   secret: string;
-  /** 这份配对指名的 relay origin;`null` 表示用构建默认值。 */
+  /** The relay origin this pairing targets; `null` means use build default. */
   relayBase: string | null;
 }
 
-/** 直连的一台 HTTP 主机(`fleet webui` 或云容器)。 */
+/** Direct HTTP host (`fleet webui` or cloud container). */
 export interface HttpDevice extends DeviceCommon {
   kind: "http";
-  /** 主机地址(origin,可含路径前缀)。跨源访问,所以必须是绝对地址。 */
+  /** Host address (origin, may include path prefix). Cross-origin access, so must be absolute. */
   baseUrl: string;
-  /** 访问令牌。服务端同时认 `Authorization: Bearer` 与 `?token=`(后者是给
-   *  EventSource 用的,它不能带 header)。`null` = 那个端点自己没有 token 门。 */
+  /** Access token. Server accepts both `Authorization: Bearer` and `?token=` (the latter for
+   *  EventSource, which can't carry headers). `null` = endpoint has no token gate. */
   token: string | null;
 }
 
-/** 一台在册的设备。 */
+/** A registered device. */
 export type PairedDevice = RelayDevice | HttpDevice;
+
 
 export interface DeviceBook {
   devices: PairedDevice[];
-  /** 当前作用域设备(知识库/用量这些单机页面看的是它)。`null` = 一台都没配对。 */
+  /** Current scoped device (wiki / usage pages show this one). `null` = no devices paired. */
   activeId: string | null;
 }
 
@@ -82,8 +88,9 @@ export function emptyBook(): DeviceBook {
   return { devices: [], activeId: null };
 }
 
-/** 宽容解析。存储里的东西可能是旧版本写的、被别的工具改过的、或者半截的 ——
- *  任何一条不合格的记录只丢它自己,不让整本簿子归零(那等于静默解除全部配对)。 */
+/** Lenient parsing. Storage may contain entries from old versions, modified by other tools,
+ *  or incomplete — any malformed record is dropped alone, not the whole book (that would silently
+ *  wipe all pairings). */
 export function parseBook(raw: unknown): DeviceBook | null {
   let value = raw;
   if (typeof value === "string") {
@@ -104,13 +111,13 @@ export function parseBook(raw: unknown): DeviceBook | null {
     const label = typeof d.label === "string" ? d.label : "";
     const addedAt = typeof d.addedAt === "number" ? d.addedAt : 0;
     const platform = typeof d.platform === "string" && d.platform ? d.platform : undefined;
-    // `auto` 是后加的字段。老记录里没有它,而它们恰恰是这次改动要救的那一批
-    // (清一色叫「设备 1」「设备 2」),所以缺席时按名字回推:长得就是默认名的,
-    // 视作还没人给它取过名。
+    // `auto` is a new field. Old records lack it, but they're exactly the ones this change
+    // rescues (all named "Device 1", "Device 2" etc.), so infer on absence: if it looks like
+    // a default name, treat it as not yet named by the user.
     const auto = typeof d.auto === "boolean" ? d.auto : looksAutoLabel(label);
-    // 没有 `kind` 的记录来自只有中转一条路的年代 —— 它们都是 relay 设备。
-    // 判据用「有没有 secret」而不是「kind 缺席」,这样一条既缺 kind 又缺 secret
-    // 的坏记录仍然被丢掉,而不是变成一台连不上的幽灵设备。
+    // Records without `kind` predate relay-only days — they're all relay devices.
+    // Use "has secret" rather than "kind absent" as the check, so a record missing both kind
+    // and secret is dropped, not turned into an unreachable ghost device.
     if (d.kind === "http") {
       if (typeof d.baseUrl !== "string" || !d.baseUrl) continue;
       devices.push({
@@ -146,7 +153,7 @@ export function parseBook(raw: unknown): DeviceBook | null {
   return { devices, activeId };
 }
 
-/** 单设备时代的一个 secret → 一本单条目的簿子。 */
+/** Single-device-era secret → single-entry book. */
 export function bookFromLegacySecret(secret: string, opts: DeviceMint): DeviceBook {
   const device: PairedDevice = {
     kind: "relay",
@@ -154,8 +161,8 @@ export function bookFromLegacySecret(secret: string, opts: DeviceMint): DeviceBo
     label: opts.label,
     auto: true,
     secret,
-    // 迁移过来的那台没记过 relay:它一直用的就是构建默认值(旧代码里的
-    // RELAY_BASE),所以 null 在这里不是「未知」,而是「就是默认那个」。
+    // The migrated device never recorded a relay: it always used the build default
+    // (RELAY_BASE in old code), so null here means "use default", not "unknown".
     relayBase: null,
     addedAt: opts.now,
   };
@@ -171,33 +178,37 @@ export function deviceById(book: DeviceBook, id: string): PairedDevice | null {
   return book.devices.find((d) => d.id === id) ?? null;
 }
 
-/** 这个名字看着像不像自动起的默认名(「设备 2」/「Device 2」)。
+/** Does this label look like an auto-generated default ("Device 2")?
  *
- *  **只在迁移老记录时用**:`auto` 这个字段是后加的,老簿子里没有,而这条判据是
- *  唯一能把「从没取过名」和「用户取的名」分开的线索。有了字段之后一律读字段。 */
+ *  **Use only when migrating old records**: the `auto` field is new; old books lack it.
+ *  This heuristic is the only way to distinguish "never named by user" from "user-chosen name".
+ *  Once the field exists, read it directly. */
+
 export function looksAutoLabel(label: string): boolean {
   return label.trim() === "" || /^(设备|Device)\s*\d+$/i.test(label.trim());
 }
 
-/** 主机自报的身份里能拿来当名字的那部分。
+/** The naming-usable part of the host-reported identity.
  *
- *  只认主机名:它就是用户在别处认这台机器用的名字(「Harrys-MacBook-Pro」)。平台
- *  与系统版本**不**参与命名 —— 「macOS 设备」并不比「设备 2」好认,两台 Mac 在册
- *  时反而更糊涂;那两个字段留给图标和详情。拿不到主机名就返回 `null`,让默认的
- *  「设备 N」留着,而不是编一个。 */
+ *  Use only hostname: it's the name users know the machine by elsewhere ("Harrys-MacBook-Pro").
+ *  Platform and OS version do **not** participate in naming — "macOS device" is no better than
+ *  "Device 2" when multiple Macs are paired, it just confuses more. Keep those fields for
+ *  icons and details. Return `null` if no hostname, leaving the default "Device N" instead of
+ *  fabricating one. */
 export function hostDisplayName(identity: { hostname?: string | null } | null): string | null {
   const raw = identity?.hostname?.trim();
   return raw ? raw : null;
 }
 
-/** 那台桌面端报上了自己是谁 —— 把它的名字与平台落进簿子。
+/** The desktop reported its identity — store its name and platform in the book.
  *
- *  三条规则:
- *  1. **只顶掉自动名**(`auto !== false`)。用户在「更多」页改过的名字是他明确的
- *     意图,不能被一次重连覆盖掉。
- *  2. **重名要区分**。两台主机名撞车(两台都叫 `mac-mini`)时给后来的那台加序号,
- *     否则设备切换器上会并排出现两个一模一样的条目。
- *  3. **平台照收**,不受第 1 条约束 —— 它只驱动图标,和用户取的名字不冲突。 */
+ *  Three rules:
+ *  1. **Only override auto names** (`auto !== false`). A name the user edited in "More"
+ *     is explicit intent; can't be clobbered by reconnection.
+ *  2. **Disambiguate duplicates**. When two hostnames collide (both "mac-mini"), give
+ *     the later one a number, or the device switcher shows two identical entries.
+ *  3. **Platform always updates**, exempt from rule 1 — it only drives the icon,
+ *     doesn't conflict with user-chosen names. */
 export function applyHostIdentity(
   book: DeviceBook,
   id: string,
@@ -218,7 +229,7 @@ export function applyHostIdentity(
   };
 }
 
-/** `name`,若已被别的设备用掉则 `name 2`、`name 3`…… */
+/** `name`, or `name 2`, `name 3`... if already in use by another device. */
 function uniqueLabel(book: DeviceBook, selfId: string, name: string): string {
   const used = new Set(book.devices.filter((d) => d.id !== selfId).map((d) => d.label));
   if (!used.has(name)) return name;
@@ -228,8 +239,8 @@ function uniqueLabel(book: DeviceBook, selfId: string, name: string): string {
   }
 }
 
-/** 下一台的默认名:`<prefix> N`,N 取「还没被用掉的最小序号」,这样删掉中间
- *  一台再加一台不会撞名。 */
+/** Default name for the next device: `<prefix> N` where N is "smallest unused number",
+ *  so deleting one and adding another doesn't cause collisions. */
 export function nextDeviceLabel(book: DeviceBook, prefix: string): string {
   const used = new Set(book.devices.map((d) => d.label));
   for (let n = 1; ; n++) {
@@ -240,8 +251,9 @@ export function nextDeviceLabel(book: DeviceBook, prefix: string): string {
 
 export interface AddDeviceInput {
   secret: string;
-  /** 这份配对指名的 relay;省略/`null` = 用构建默认值。 */
+  /** The relay this pairing targets; omit/`null` = use build default. */
   relayBase?: string | null;
+
   label: string;
   id: string;
   now: number;
@@ -250,20 +262,21 @@ export interface AddDeviceInput {
 export interface AddDeviceResult {
   book: DeviceBook;
   device: PairedDevice;
-  /** 这个 secret 本来就在册 —— 同一张二维码被扫了第二次。 */
+  /** This secret was already registered — the same QR code was scanned again. */
   deduped: boolean;
 }
 
-/** 新增一台(或认出它本来就在册)。新增/重扫都把它设为当前设备 —— 用户刚扫完
- *  一张码,想看的就是那台。
+
+/** Add a device (or recognize it was already paired). Both add and rescan make it active —
+ *  the user just scanned, so they want to see that device.
  *
- *  去重按 **secret** 而非 channelToken:token 是 secret 的 HKDF 像
- *  (relayCrypto.ts),两者一一对应,而 token 派生是异步的 SubtleCrypto 调用。
- *  拿 secret 比对得到完全相同的判定,且让这个函数保持纯同步。
+ *  Dedup by **secret**, not channelToken: token is HKDF-derived from secret (relayCrypto.ts),
+ *  they're one-to-one, and token derivation is async SubtleCrypto. Comparing secrets gives
+ *  the same result and keeps this function purely synchronous.
  *
- *  重扫时**保留原有 label**(用户可能已经改过名),但更新 relayBase —— 后者
- *  描述的是「这份配对现在挂在哪个 relay」,桌面端换了 relay 地址重出一张码时,
- *  新的那个才是对的。 */
+ *  On rescan **keep the old label** (user may have renamed it), but update relayBase —
+ *  the latter says "which relay this pairing now hangs on"; when the desktop changes relay
+ *  address and re-issues a QR, the new one is correct. */
 export function addDevice(book: DeviceBook, input: AddDeviceInput): AddDeviceResult {
   const existing = book.devices.find(
     (d): d is RelayDevice => d.kind === "relay" && d.secret === input.secret,
@@ -284,8 +297,8 @@ export function addDevice(book: DeviceBook, input: AddDeviceInput): AddDeviceRes
     kind: "relay",
     id: input.id,
     label: input.label,
-    // 刚扫出来的名字一定是「设备 N」——那台桌面端还没机会自报主机名。标成自动名,
-    // 等它连上再顶掉(applyHostIdentity)。
+    // Freshly scanned names are always "Device N" — the desktop hasn't had a chance to report
+    // its hostname yet. Mark as auto, let it be overridden when connected (applyHostIdentity).
     auto: true,
     secret: input.secret,
     relayBase: input.relayBase ?? null,
@@ -298,8 +311,8 @@ export function addDevice(book: DeviceBook, input: AddDeviceInput): AddDeviceRes
   };
 }
 
-/** 移除一台。删掉的正好是当前设备时,焦点落到剩下的第一台(没有剩下的就是
- *  `null`,回到未配对态)。 */
+/** Remove a device. If the deleted device was active, move focus to the first remaining
+ *  device (or `null` if none left, returning to unpaired state). */
 export function removeDevice(book: DeviceBook, id: string): DeviceBook {
   const devices = book.devices.filter((d) => d.id !== id);
   if (devices.length === book.devices.length) return book;
@@ -308,10 +321,10 @@ export function removeDevice(book: DeviceBook, id: string): DeviceBook {
   return { devices, activeId };
 }
 
-/** 改名。空白名被忽略(否则列表里会出现一台没名字的设备)。
+/** Rename a device. Blank names are ignored (otherwise the list shows a nameless device).
  *
- *  同时把 `auto` 落成 `false`:这台从此有主人取的名字,再连上多少次也不会被主机名
- *  顶掉。 */
+ *  Also set `auto` to `false`: this device now has a user-chosen name and won't be
+ *  overridden by hostname on reconnection. */
 export function renameDevice(book: DeviceBook, id: string, label: string): DeviceBook {
   const trimmed = label.trim();
   if (!trimmed) return book;
@@ -321,13 +334,13 @@ export function renameDevice(book: DeviceBook, id: string, label: string): Devic
   };
 }
 
-/** 切换当前设备。不在册的 id 被忽略。 */
+/** Switch active device. Ignores unknown device IDs. */
 export function setActiveDevice(book: DeviceBook, id: string): DeviceBook {
   if (!book.devices.some((d) => d.id === id)) return book;
   return { ...book, activeId: id };
 }
 
-// ── 存储 IO ─────────────────────────────────────────────────────────────────
+// ── Storage I/O ────────────────────────────────────────────────────────────────
 
 function readLocal(key: string): string | null {
   try {
@@ -337,11 +350,12 @@ function readLocal(key: string): string | null {
   }
 }
 
-/** 同步可得的簿子:localStorage 的 book,否则由单设备时代的 secret 迁移一本。
+/** Synchronously available book: localStorage book, or migrated from single-device-era secret.
  *
- *  迁移是**写回的**:迁移出来的簿子当场持久化,这样下一次启动读到的就是新格式。
- *  旧键刻意**不删** —— 万一新格式因为任何原因没写成,旧键还在,用户不至于被
- *  静默解除配对;它只是从此不再被写入。 */
+ *  Migration is **write-back**: the migrated book is persisted immediately, so the next
+ *  startup reads the new format. Old key is deliberately **not deleted** — if the new format
+ *  fails to write for any reason, the old key remains and the user doesn't lose pairing;
+ *  it just won't be written to again. */
 export function loadBookSync(mint: DeviceMint): DeviceBook {
   const parsed = parseBook(readLocal(BOOK_KEY));
   if (parsed) return parsed;
@@ -354,16 +368,16 @@ export function loadBookSync(mint: DeviceMint): DeviceBook {
   return emptyBook();
 }
 
-/** 一台新设备的三个本机字段。调用方（App）负责生成，因为默认名要走 i18n 而
- *  这一层刻意不认识 i18n。 */
+/** Three local fields for a new device. Caller (App) generates them because default names
+ *  go through i18n and this layer deliberately doesn't know about it. */
 export interface DeviceMint {
   id: string;
   label: string;
   now: number;
 }
 
-/** IndexedDB 兜底:localStorage 被清掉而 IDB 活下来的那条路径。同样覆盖旧键
- *  (旧版把 secret 也镜像进了 IDB)。 */
+/** IndexedDB fallback: the path when localStorage is wiped but IDB survives.
+ *  Also covers old keys (old versions mirrored secret into IDB too). */
 export async function loadBookFromIdb(mint: DeviceMint): Promise<DeviceBook | null> {
   const raw = await idbGet(BOOK_KEY);
   const parsed = parseBook(raw);
@@ -389,13 +403,13 @@ function idbGet(key: string): Promise<unknown> {
     .catch(() => null);
 }
 
-/** 双写。localStorage 是同步真相,IDB 是发后不管的镜像。 */
+/** Dual write. localStorage is the synchronous source of truth, IDB is a fire-and-forget mirror. */
 export function persistBook(book: DeviceBook): void {
   const json = JSON.stringify(book);
   try {
     localStorage.setItem(BOOK_KEY, json);
   } catch {
-    // 存储满 / 隐私模式 —— 下面的 IDB 仍可能写成
+    // Storage full / private mode — IDB below might still succeed
   }
   void openDb()
     .then(
@@ -410,13 +424,13 @@ export function persistBook(book: DeviceBook): void {
     .catch(() => {});
 }
 
-/** 一次扫码落地:把 secret 并入簿子并**当场持久化**。
+/** One QR scan landing: merge secret into book and **persist immediately**.
  *
- *  两条配对入口(PWA 的 `#k=…` fragment、原生壳的 Universal/App Link)必须走
- *  同一个函数 —— 它们此前各自写一遍「存下来、设为当前」,而多设备之后这段逻辑
- *  长出了去重、保留用户改名、焦点转移三条规则,复制两份就是等着它们漂移。
+ *  Two pairing entries (PWA's `#k=…` fragment, native shell's Universal/App Link) must use
+ *  the same function — they each had "store and make active" logic, but multi-device added
+ *  dedup, preserve user renames, and focus transfer, so duplicating would let them drift.
  *
- *  返回新簿子;`added` 为 false 表示这张码本来就在册(同一台被扫了第二次)。 */
+ *  Returns the new book; `added` is false if this code was already paired (second scan of same). */
 export function adoptScannedDevice(
   book: DeviceBook,
   secret: string,
@@ -431,21 +445,21 @@ export function adoptScannedDevice(
     label: mint.label,
     now: mint.now,
   });
-  // 原生壳每次启动都把它存的那份配对重新注入一遍(见 mobile-harmony 的
-  // WebShell.ets)。那不是一次「扫码」,所以不该把焦点抢回那一台 —— 否则用户在
-  // 设备列表里切过去的那一台,每次重开 app 都被打回原形。壳用 `&boot=1` 说明
-  // 这是启动重注,而不是刚扫的码。
+  // The native shell reinjects stored pairing on every startup (see mobile-harmony WebShell.ets).
+  // That's not a "scan", so shouldn't grab focus back to that device — otherwise a user who
+  // switched to another device in the list gets reset to it every app restart. Shell uses `&boot=1`
+  // to say "startup reinject, not a fresh scan".
   const keepFocus = opts?.focus === false && deduped;
   const next = keepFocus ? { ...added, activeId: book.activeId ?? added.activeId } : added;
   persistBook(next);
   return { book: next, device, added: !deduped };
 }
 
-/** 地址栏 fragment 里带来的一次「加设备」:`#k=<secret>&relay=<url>` —— 经中转
- *  配对一台桌面端(桌面端二维码就是这个)。
+/** "Add device" from address bar fragment: `#k=<secret>&relay=<url>` — relay-paired desktop
+ *  (this is what desktop QR codes contain).
  *
- *  三种客户端都只有这一条路可走:系统相机打开中转托管的那份 PWA、已装的 PWA、
- *  原生壳内扫码把原文交回页面。 */
+ *  All three clients have only this path: system camera opens relay-hosted PWA, installed PWA
+ *  reopens, or native shell scans and passes the URL to the page. */
 export type HashPairing = {
   kind: "relay";
   secret: string;
@@ -453,15 +467,15 @@ export type HashPairing = {
   boot: boolean;
 };
 
-/** 取走 fragment 里的那次「加设备」,并**立刻把 fragment 从地址栏抹掉** —— 密钥
- *  与 token 不该留在那里被截图、被历史记录带走。
+/** Extract "add device" from fragment and **immediately wipe the fragment from the address bar** —
+ *  secrets and tokens shouldn't stay there to be screenshot or captured in history.
  *
- *  只读一次:调用后 hash 已清空,第二次调用返回 `null`。原生壳走的是 deepLink.ts
- *  与 nativeScan.ts,最终也汇到这条路上。
+ *  Read once only: after calling, hash is cleared; second call returns `null`. Native shell uses
+ *  deepLink.ts and nativeScan.ts, which eventually route here.
  *
- *  一次读完是硬要求而不是顺手:抹掉之后任何模块都再读不到,所以 relay 的
- *  `&relay=` 与壳的 `&boot=1` 必须在这里一并取走(relay.ts 从前
- *  那个模块加载期 `RELAY_BASE` 常量就是为此存在的)。 */
+ *  One-shot read is mandatory, not optional: after wiping, no module can read it again, so relay's
+ *  `&relay=` and shell's `&boot=1` must be extracted here (relay.ts's module-load-time RELAY_BASE
+ *  constant exists for exactly this reason). */
 export function consumeHashPairing(): HashPairing | null {
   const hash = window.location.hash;
   const scrub = () => history.replaceState(null, "", window.location.pathname);
@@ -477,18 +491,20 @@ export function consumeHashPairing(): HashPairing | null {
   return null;
 }
 
-// ── 待办退订 ─────────────────────────────────────────────────────────────────
+// ── Pending unsubscribe ────────────────────────────────────────────────────────
 //
-// 移除一台设备时要顺手告诉它的 relay channel「别再往我推」。这一步可能失败
-// (relay 不可达、手机离线),而失败的后果是用户明明删掉了一台设备,却继续收到
-// 它的通知——点开还找不到对应的卡。所以退订不上就把它记下来,下次启动重试。
+// When removing a device, we should tell its relay channel "stop pushing to me". This
+// can fail (relay unreachable, phone offline), and the consequence is the user deletes
+// a device but keeps getting its notifications — opening them shows no card. So we
+// record failed unsubscribes and retry on next startup.
 //
-// 记的是 secret + relayBase,因为退订必须以那个 channel 的身份连上去(channel
-// token 由 secret 派生)。它们本来就存在同一个存储里(设备簿),没有新增暴露面。
+// We record secret + relayBase because unsubscribe must connect as that channel
+// (channel token is derived from secret). They already exist in the same store
+// (device book), so this adds no new exposure surface.
 
 const PENDING_UNSUB_KEY = "fleet-pending-unsub";
-/** 超过这个时长就放弃重试:那台桌面端可能早就不用了,而一条永远失败的记录不该
- *  在每次启动时都去拨一个连不上的地址。 */
+/** Give up retry after this duration: the desktop may no longer be in use, and a
+ *  permanently failing record shouldn't try unreachable addresses on every startup. */
 const PENDING_UNSUB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface PendingUnsub {
@@ -521,23 +537,23 @@ function savePendingUnsub(list: PendingUnsub[]): void {
     if (list.length === 0) localStorage.removeItem(PENDING_UNSUB_KEY);
     else localStorage.setItem(PENDING_UNSUB_KEY, JSON.stringify(list));
   } catch {
-    // 存储满 / 隐私模式 —— 退订就只能靠用户手动关通知了,不值得让移除失败
+    // Storage full / private mode — unsubscribe falls back to user manual notifications off, not worth failing removal
   }
 }
 
-/** 记一笔没退成的退订。同一个 secret 只留最新一条。 */
+/** Record a failed unsubscribe. Keep only the latest entry per secret. */
 export function addPendingUnsub(entry: PendingUnsub): void {
   const rest = loadPendingUnsub(entry.at).filter((e) => e.secret !== entry.secret);
   savePendingUnsub([...rest, entry]);
 }
 
-/** 退订成功后销账。 */
+/** Clear the entry after successful unsubscribe. */
 export function dropPendingUnsub(secret: string, now: number): void {
   savePendingUnsub(loadPendingUnsub(now).filter((e) => e.secret !== secret));
 }
 
-/** 清空全部配对(「重新配对」入口)。旧键一并清掉,否则下次启动会被上面的迁移
- *  路径原地复活。 */
+/** Clear all pairings ("re-pair" entry point). Also clear old keys, or the migration path
+ *  above would resurrect them on next startup. */
 export function clearBook(): void {
   try {
     localStorage.removeItem(BOOK_KEY);

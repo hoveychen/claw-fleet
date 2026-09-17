@@ -848,7 +848,7 @@ pub fn parse_session_info(
     let ctx_usage = acc.context_usage();
     // Cumulative input across all finalized turns (input + cache_creation +
     // cache_read, cache re-reads included) — the "tokens sent to the API" total,
-    // on the same口径 as `total_cost_usd` and as Codex's cumulative
+    // on the same basis as `total_cost_usd` and as Codex's cumulative
     // `total_token_usage`. NOT the last-turn context-window snapshot: that is
     // `ctx_usage.used`, which still drives `context_percent` just below.
     let total_input_tokens = stats.total_input_tokens;
@@ -999,7 +999,7 @@ mod extract_last_text_tests {
     #[test]
     fn returns_none_when_only_synthetic() {
         // A handoff successor that died immediately: nothing but synthetic
-        // turns. Better to fall through to "（无标题）" than title the card
+        // turns. Better to fall through to "(Untitled)" than title the card
         // with a control message.
         let lines = vec![
             assistant("<synthetic>", "Failed to authenticate. API Error: 403 Request not allowed"),

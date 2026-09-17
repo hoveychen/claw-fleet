@@ -20,9 +20,10 @@ import { AttachmentThumbs } from "./AttachmentThumb";
 import { stripTtsDivider } from "./decisionCall";
 import styles from "./DecisionQa.module.css";
 
-// 链接走共享的组件表：http(s)/mailto 交给系统浏览器（壳里由 Capacitor 的
-// launchIntent / 鸿蒙的 onLoadIntercept 接管），其余 scheme 仍然不可点 —— 后者
-// 才是「一次误触把 webview 从会话上导走」的真实风险，而不是外链本身。
+// Links use the shared component table: http(s)/mailto go to the system browser
+// (in shells, handled by Capacitor's launchIntent or HarmonyOS's onLoadIntercept);
+// other schemes stay inert—that's the real risk ("a mis-tap navigates the webview away
+// from the session"), not external links themselves.
 export const MD_BLOCK: Components = mdComponents;
 export const MD_INLINE: Components = { ...MD_BLOCK, p: ({ children }) => <>{children}</> };
 

@@ -13,7 +13,7 @@ import { WikiTabPane } from "./WikiTabPane";
  * conversation was about. It opens as a card in the auxiliary rail instead,
  * beside the sentence that named it.
  *
- * All four readers reuse the *same body components* the 仓库 / 知识库 / 产出
+ * All four readers reuse the *same body components* the repository / wiki / artifact
  * pages use, so a file, doc or deliverable looks identical wherever it is open;
  * what they share with each other is the chrome — one `AuxDocBar` header and
  * one menu, built by `auxDocMenu` and raised both by the bar's `⋯` and by a
@@ -32,7 +32,7 @@ export function SessionAuxDoc({
   doc: AuxDoc;
   /** The card-management actions, owned by the rail — see `AuxCardTail`. */
   tail: AuxCardTail;
-  /** The session's repo, for the file card's 在仓库页打开. */
+  /** The session's repo, for the file card's "open in repository" action. */
   workspacePath: string;
   onOpenWiki: (slug: string) => void;
 }) {

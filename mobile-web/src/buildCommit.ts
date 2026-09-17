@@ -1,12 +1,12 @@
 /**
- * 这个 bundle 的构建 commit，截前 7 位——`transportRelay` 已经把同一个
- * `__APP_COMMIT__` 放进 hello 帧交给桌面端比对新旧，「关于」页只是把它显示给
- * 人看。没有 git 来源时 vite 的 define 给的是字符串 "unknown"，那不是 commit，
- * 空串让那一行整个不渲染。
+ * This bundle's build commit, first 7 characters—`transportRelay` puts the same
+ * `__APP_COMMIT__` in the hello frame for desktop to compare old vs new; the About page
+ * just displays it to users. With no git source, vite's define provides the string "unknown",
+ * which is not a commit; empty string makes the line not render at all.
  *
- * 单独成模块而不是留在 `MoreView` 里，是因为 `MoreView` 一 import 就拉起
- * `theme.ts`，那里在模块顶层调 `window.matchMedia` —— 一个纯字符串函数不该为了
- * 被测试而要求一个 DOM。
+ * Separate module instead of staying in `MoreView` because importing `MoreView` pulls
+ * `theme.ts`, which calls `window.matchMedia` at module top level—a pure string function
+ * shouldn't require a DOM just to be testable.
  */
 export function shortBuildCommit(raw: string | undefined): string {
   return raw && raw !== "unknown" ? raw.slice(0, 7) : "";

@@ -31,18 +31,18 @@ export { memberDisplayStatus };
 // ── Session launch entrypoints / status helpers ──────────────────────────────
 
 /** `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions launched via the
- *  "新会话" button — mirrors session_launch::NEW_SESSION_ENTRYPOINT. */
+ *  "New Session" button — mirrors session_launch::NEW_SESSION_ENTRYPOINT. */
 export const NEW_SESSION_ENTRYPOINT = "claw-fleet-newsession";
 
 /** `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions spawned by the handoff
  *  relay — mirrors handoff::HANDOFF_ENTRYPOINT. A handoff successor is just a
  *  Fleet-launched continuation of an adhoc session, so the launcher lists it
- *  and it stays resumable, same as a "新会话" spawn. */
+ *  and it stays resumable, same as a "New Session" spawn. */
 export const HANDOFF_ENTRYPOINT = "claw-fleet-handoff";
 
 /** `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions spawned when a one-shot
  *  schedule fires — mirrors schedule::SCHEDULE_ENTRYPOINT. Lets the detail view
- *  badge a session as "由计划触发". */
+ *  badge a session as "spawned by plan". */
 export const SCHEDULE_ENTRYPOINT = "claw-fleet-schedule";
 
 /** `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions spawned by a loop
@@ -60,12 +60,12 @@ export function preferredSessionTitle(s: SessionInfo): string | null {
   return s.titleOverride ?? s.aiTitle ?? null;
 }
 
-/** True for sessions Fleet itself launched (the "新会话" button, the handoff
+/** True for sessions Fleet itself launched (the "New Session" button, the handoff
  *  relay, a fired schedule / loop iteration, or a Fleet-spawned Codex session).
- *  These are the sessions the 启动台 lists and that the detail view can resume;
+ *  These are the sessions the Launchpad lists and that the detail view can resume;
  *  other entrypoints/originators (cli, claude-vscode, codex_exec, …) are
  *  read-only here. Schedule/loop fires are headless `-p` spawns just like the
- *  新会话 button, so they belong here too — otherwise a fired scheduled task
+ *  "New Session" button, so they belong here too — otherwise a fired scheduled task
  *  would run but never show up on the task page. */
 export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
   return (
@@ -77,7 +77,7 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
   );
 }
 
-/** Whether a session belongs on the 启动台 / 任务 list: a Fleet-owned main
+/** Whether a session belongs on the Launchpad / Task list: a Fleet-owned main
  *  session that Fleet *actually spawned*. The entrypoint check alone is not
  *  enough — a plain `claude -p` run inside a Fleet-spawned session inherits
  *  `CLAUDE_CODE_ENTRYPOINT` from its parent's environment, so its transcript
@@ -99,9 +99,9 @@ export const LIVE_STATUSES = new Set([
 
 /**
  * Whether a member of a session family (the parent itself, or one of its
- * subagents) still has something going on — the predicate behind the 运行中的
- * Agent deck, the scope switcher's active-first ordering and the gallery's
- * 活跃 grouping.
+ * subagents) still has something going on — the predicate behind the "Live Agents"
+ * deck, the scope switcher's active-first ordering and the gallery's
+ * "Active" grouping.
  *
  * `LIVE_STATUSES.has(s.status)` is what these sites used to ask, and it is
  * wrong for a subagent: see [`memberDisplayStatus`] (shared with the mobile
@@ -133,7 +133,7 @@ export const WATCHING_COLOR = "var(--color-info)";
  * session parked on ONE long tool call (a build, a `until …; do :; done` wait
  * for a background task) stops writing the transcript and its card decays to
  * `idle` while the CLI process is very much alive — the same session whose
- * composer says 会话运行中 because `canEnqueueSession` reads `procAlive`
+ * detail view says "Session running" because `canEnqueueSession` reads `procAlive`
  * instead. This predicate names that gap so the row can show a third state
  * rather than lying in one direction or the other.
  */
@@ -146,8 +146,8 @@ export function isQuietAlive(s: SessionInfo): boolean {
  *  long tool call writes a line every few minutes, each write pushes the status
  *  back to a live one for its hard window, and the window then decays again. The
  *  latch (shared with the mobile task page, see `shared-ts/quietLatch.ts`) makes
- *  the faded green sticky — a lone sparse write no longer wins the solid green
- *  back; two writes close together do. */
+ *  the faded green sticky — a single sparse write no longer flips it back to solid green;
+ *  two writes close together do. */
 const quietLatch = createQuietLatch();
 
 /** Whether the row should read as quiet-alive *after* the hysteresis. Callers
@@ -170,7 +170,7 @@ export function resetQuietAliveLatch(): void {
  *  faded green = process alive but the transcript has gone quiet (see
  *  [`isQuietAlive`]). Genuinely ended sessions get nothing (null) — this is a
  *  positive "this one's doing something" signal, not another mark on every row.
- *  Shared by the 启动台 list rows and its detail tab bar so a session wears the
+ *  Shared by the Launchpad list rows and its detail tab bar so a session wears the
  *  same dot in both.
  *
  *  Returns a CSS `var()` reference rather than a hex literal: the value lands in
@@ -213,9 +213,9 @@ const IN_FLIGHT_STATUSES = new Set<SessionStatus>([
 
 /**
  * Whether the session detail view should keep live-tailing this session's
- * transcript (the "自动跟随" poller and live-thinking poll). A live process can
+ * transcript (the "auto-follow" poller and live-thinking poll). A live process can
  * produce new transcript writes regardless of what the scan-computed status
- * says — codex long turns have misread as Idle mid-turn (the "codex 假死"
+ * says — codex long turns have misread as Idle mid-turn (the "codex stalled"
  * report) — so `procAlive` keeps the poller armed on its own.
  */
 export function shouldFollowSession(s: SessionInfo): boolean {

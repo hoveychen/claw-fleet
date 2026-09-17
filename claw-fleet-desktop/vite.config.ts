@@ -89,11 +89,12 @@ export default defineConfig(async () => ({
     strictPort: true,
     host: host || false,
     proxy: liveProxy,
-    // `fs.allow` 里的 ".." 是必需的，不是保险起见：本包 import 了仓库根的
-    // `shared-ts/`（见 app/components/procCommandLabel.ts），而 vite dev 默认只放行
-    // 包目录，于是 `tauri dev` / `pnpm dev` 会对那个文件回 403 Restricted。
-    // `vite build` 不看这个设置，所以构建是绿的、只有 dev 挂 —— 别把构建绿当成
-    // 这条不需要。
+    // The ".." in `fs.allow` is required, not optional: this package imports
+    // `shared-ts/` from the repository root (see app/components/procCommandLabel.ts),
+    // and vite dev by default only allows the package directory, so `tauri dev` /
+    // `pnpm dev` returns 403 Restricted for that file. `vite build` doesn't use this
+    // setting, so the build passes but only dev fails — do not assume this is
+    // unnecessary just because the build passes.
     fs: { allow: [".."] },
     hmr: host
       ? {

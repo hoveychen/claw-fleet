@@ -3,9 +3,9 @@ import { useUIStore } from "../store";
 import styles from "./SkillsSourceTabs.module.css";
 
 /**
- * Segmented switch that merges the former standalone 技能 / 插件 nav entries into
- * one page. Plugins are a source of skills, so both now live under the 技能 nav
- * item and toggle here.
+ * Segmented switch that merges the former standalone Skills / Plugins nav
+ * entries into one page. Plugins are a source of skills, so both now live under
+ * the Skills nav item and toggle here.
  *
  * We deliberately keep two distinct ViewModes ("skills" / "plugins"): each page
  * owns its own rail width + secondary sidebar via PageShell, and flipping the

@@ -1,9 +1,11 @@
-// 一个 pty 进程的 xterm 视图。桌面端 ProcTerminal.tsx 的移动版：同样是「轮询增量
-// 输出 + 按键回灌控制套接字」，差别在于这里的每一次读写都走 FleetTransport
-// (同源 HTTP 或 relay)，以及主题色要跟着 app 的亮/暗切换重涂。
+// An xterm view of a pty process. Mobile version of desktop's ProcTerminal.tsx:
+// same pattern of "incremental polling + key input to control socket", but all
+// I/O here goes through FleetTransport (same-origin HTTP or relay), and theme
+// colors must update when the app switches between light and dark modes.
 //
-// 为什么用 xterm 而不是 <pre>：git / curl / pnpm 这类命令靠 `\r` 原地刷新进度条，
-// 纯文本渲染会把一条进度摊成几百行；vim、htop、claude 本身更是完全没法看。
+// Why xterm instead of <pre>: commands like git/curl/pnpm use `\r` to refresh
+// progress bars in place; plain text rendering spreads one progress line across
+// hundreds of lines. vim, htop, and claude itself become unreadable.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, ChevronsDown } from "lucide-react";
@@ -26,10 +28,12 @@ import styles from "./TerminalPane.module.css";
 
 const POLL_MS = 300;
 
-/** 手指要拖过这么多像素才算一次滚动，而不是一次点击(点击是用来叫软键盘的)。 */
+/** Minimum pixels a finger must drag before it counts as scrolling, not a click
+ * (clicks summon the soft keyboard). */
 const TOUCH_SCROLL_SLOP = 8;
 
-/** xterm 画布不吃 CSS 变量，颜色必须显式给。取值对齐 index.css 的两套主题。 */
+/** xterm canvas doesn't use CSS variables; colors must be explicit.
+ * Values align with the two themes in index.css. */
 const THEMES = {
   dark: {
     background: "#0f1011",
@@ -48,22 +52,26 @@ const THEMES = {
 interface Props {
   client: FleetTransport;
   proc: ProcRecord;
-  /** 每次输出轮询都带回来的最新记录 —— 父级据此知道命令退了没、退出码多少，
-   *  不必为此再起第二条轮询(chunk 里本来就有)。 */
+  /** Latest record returned with each output poll. Parent uses this to know if
+   *  the command has exited and its exit code, without needing a separate poll
+   *  (it's already in the chunk). */
   onRecord?: (record: ProcRecord) => void;
-  /** 交出一个「往这个 pty 里塞按键」的函数，给触屏键位条用。组件卸载时以 null
-   *  回调一次，免得键位条握着一个已经没了的终端。 */
+  /** Provides a function to send keypresses to this pty for the on-screen
+   *  keyboard. Calls back with null once on unmount so the keyboard doesn't
+   *  hold a reference to a dead terminal. */
   registerInput?: (send: ((data: string) => void) | null) => void;
-  /** 键位条上的 Ctrl 是否按下(粘滞修饰键)。软键盘上没有 Ctrl，所以它只能由
-   *  外面那一排按钮提供，再在这里作用到下一个敲下去的字符上。 */
+  /** Whether Ctrl on the key bar is pressed (sticky modifier). There is no Ctrl
+   *  on the soft keyboard, so it's provided by the button row and applied here
+   *  to the next character typed. */
   ctrl?: boolean;
-  /** Ctrl 已经作用到一个键上了 —— 由父级把粘滞状态弹回去。 */
+  /** Ctrl has been applied to a key. Parent should reset the sticky state. */
   onCtrlConsumed?: () => void;
 }
 
 
-// 默认导出:整个 xterm(含它的 CSS)只在真的开了终端时才下载,同 OfficePreview
-// 的做法 —— 大多数人一整天都不会打开这个页面,不该让他们为它付首屏体积。
+// Default export: the entire xterm library (including CSS) is only downloaded
+// when the terminal is actually opened, like OfficePreview. Most users won't
+// open this page all day, so they shouldn't pay the initial bundle size cost.
 export default function TerminalPane({
   client,
   proc,
@@ -74,18 +82,22 @@ export default function TerminalPane({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
-  // 刚刚这一下是划动不是点击 —— touchend 置起，紧随其后的 pointerup 消费掉。
+  // This last action was a scroll, not a click. Set by touchend, consumed by
+  // the following pointerup.
   const scrolledRef = useRef(false);
-  // 不在最底部时才给「回到底部」——平时那个位置留空，别挡住输出。
+  // Show "back to bottom" button only when not at bottom; keep that space empty
+  // normally so it doesn't obstruct output.
   const [atBottom, setAtBottom] = useState(true);
   const theme = useResolvedTheme();
 
-  // 放进 ref：父级传内联闭包时不该把整个终端拆了重建(scrollback 会没)。
+  // Store in ref: when parent passes inline closures, don't rebuild the entire
+  // terminal (scrollback would be lost).
   const onRecordRef = useRef(onRecord);
   onRecordRef.current = onRecord;
   const registerInputRef = useRef(registerInput);
   registerInputRef.current = registerInput;
-  // 同理：Ctrl 的开关状态每次都变，但终端只该建一次。
+  // Same reasoning: Ctrl toggle state changes every render, but terminal should
+  // be built only once.
   const ctrlRef = useRef(ctrl);
   ctrlRef.current = ctrl;
   const onCtrlConsumedRef = useRef(onCtrlConsumed);
@@ -110,7 +122,7 @@ export default function TerminalPane({
 
     const sendResize = () => {
       void resizeProc(client, proc.id, term.cols, term.rows).catch(() => {
-        // 已退出的进程没有控制套接字，resize 此时本来就没有意义。
+        // Already-exited processes have no control socket; resize is no-op anyway.
       });
     };
     sendResize();
@@ -118,8 +130,9 @@ export default function TerminalPane({
     const send = (data: string) => {
       void writeProcInput(client, proc.id, encodeInput(data)).catch(() => {});
     };
-    // 软键盘敲进来的字符要过一次粘滞 Ctrl；键位条自己发的是完整序列
-    // (`\x1b[A` 之类)，不该再被折一次，所以它走 send 而不是这里。
+    // Characters from the soft keyboard go through the sticky Ctrl filter;
+    // the key bar sends complete sequences (`\x1b[A` etc.) that shouldn't be
+    // folded again, so it calls send() directly instead of going through onData.
     const onData = term.onData((data) => {
       if (!ctrlRef.current) return send(data);
       send(applyCtrl(data));
@@ -127,8 +140,9 @@ export default function TerminalPane({
     });
     registerInputRef.current?.(send);
 
-    // 增量读的节奏全在 createOutputPump 里(含「上一轮没回来就不发下一轮」的
-    // 在途闸 —— 慢链路上少了它同一段回显会上屏两遍)。
+    // Incremental read timing is all in createOutputPump (including the "don't
+    // send next poll until previous reply arrives" gate — without it on slow
+    // links, the same echo could appear on screen twice).
     const pump = createOutputPump({
       read: (offset) => readProcOutput(client, proc.id, offset),
       write: (bytes) => term.write(bytes),
@@ -137,20 +151,24 @@ export default function TerminalPane({
     void pump.poll();
     const timer = setInterval(() => void pump.poll(), POLL_MS);
 
-    // 「回到底部」按钮的显隐。onScroll 只在滚动位置变时来，够用。
+    // Show/hide the "back to bottom" button. onScroll fires only when scroll
+    // position changes, which is sufficient.
     const onScroll = term.onScroll(() => {
       const buf = term.buffer.active;
       setAtBottom(buf.viewportY >= buf.baseY);
     });
 
-    // ── 手势滚动 ────────────────────────────────────────────────────────
-    // xterm 6 把视口换成了 VS Code 的 ScrollableElement(自绘滚动条)，它只认
-    // wheel 和滚动条拖拽，**完全没有 touch 处理**(node_modules/@xterm/xterm/src/
-    // vs/base/browser/ui/scrollbar/ 里搜不到任何 touch/Gesture)。再加上滚动条是
-    // Auto 可见、手机上没有 hover，结果就是手指怎么划都翻不动历史。所以自己把
-    // 拖动折成 term.scrollLines。
+    // ── Touch scrolling ────────────────────────────────────────────────────
+    // xterm 6 switched the viewport to VS Code's ScrollableElement (custom
+    // scrollbar), which only handles wheel and scrollbar dragging, with **no
+    // touch support at all** (search node_modules/@xterm/xterm/src/vs/base/
+    // browser/ui/scrollbar/ finds zero touch/Gesture code). Plus the scrollbar
+    // is Auto-visibility with no hover on mobile, so finger drags won't scroll
+    // the history. We implement it ourselves by converting drags to
+    // term.scrollLines().
     let touchY: number | null = null;
-    let touchAcc = 0; // 不足一行的余量攒着，否则慢速拖动一行都滚不动
+    let touchAcc = 0; // Accumulate sub-line amounts; without this, slow drags
+                      // wouldn't scroll even one line
     let scrolling = false;
     const cellHeight = () =>
       Math.max(1, el.getBoundingClientRect().height / Math.max(1, term.rows));
@@ -164,7 +182,7 @@ export default function TerminalPane({
     const onTouchMove = (e: TouchEvent) => {
       if (touchY === null || e.touches.length !== 1) return;
       const y = e.touches[0].clientY;
-      const dy = touchY - y; // 手指上移 = 看更新的内容 = 向下滚
+      const dy = touchY - y; // Finger upward = view newer content = scroll down
       if (!scrolling && Math.abs(dy) < TOUCH_SCROLL_SLOP) return;
       scrolling = true;
       touchY = y;
@@ -174,22 +192,24 @@ export default function TerminalPane({
         touchAcc -= lines * cellHeight();
         term.scrollLines(lines);
       }
-      // 不让外层把这一划当成页面滚动/下拉刷新。
+      // Prevent the outer layer from treating this drag as page scroll/pull-to-refresh.
       e.preventDefault();
     };
     const endTouch = () => {
       touchY = null;
-      // 一次划动结束不该顺手把软键盘叫起来 —— 那会顶掉半屏、还把视口拉回底部。
+      // After a drag ends, don't accidentally summon the soft keyboard — it would
+      // take up half the screen and pull the viewport back to the bottom.
       scrolledRef.current = scrolling;
       scrolling = false;
     };
-    // passive:false —— 上面要 preventDefault。
+    // passive:false — we call preventDefault above.
     el.addEventListener("touchstart", onTouchStart, { passive: true });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
     el.addEventListener("touchend", endTouch, { passive: true });
     el.addEventListener("touchcancel", endTouch, { passive: true });
 
-    // 软键盘弹起会改可视高度，所以尺寸变化不只来自旋转屏幕。
+    // Soft keyboard popping up changes the visible height, so size changes aren't
+    // just from screen rotation.
     const observer = new ResizeObserver(() => {
       fit.fit();
       sendResize();
@@ -212,14 +232,16 @@ export default function TerminalPane({
     };
   }, [client, proc.id]);
 
-  /** 翻半屏。整屏一跳容易看丢上下文的接缝，半屏留一半重叠。 */
+  /** Scroll by half screen. Full-screen jumps can lose the seam between
+   *  contexts; half-screen keeps half the content visible for continuity. */
   const pageScroll = useCallback((dir: -1 | 1) => {
     const term = termRef.current;
     if (!term) return;
     term.scrollLines(dir * Math.max(1, Math.floor(term.rows / 2)));
   }, []);
 
-  // 主题翻转只换颜色，不重建终端 —— 重建会把已有输出全丢掉。
+  // Theme switch only changes colors, doesn't rebuild the terminal — that would
+  // lose all existing output.
   useEffect(() => {
     const term = termRef.current;
     if (term) term.options.theme = { ...THEMES[theme] };
@@ -230,8 +252,9 @@ export default function TerminalPane({
       <div
         ref={containerRef}
         className={styles.pane}
-        // 点哪都聚焦，软键盘才会起来：xterm 的输入落在一个隐藏 textarea 上，
-        // 手指点在字符网格上不一定命中它。刚划过一下的那次 pointerup 不算点击。
+        // Click anywhere to focus so the soft keyboard appears. xterm's input is
+        // on a hidden textarea; tapping the character grid doesn't always hit it.
+        // Skip this on pointerup after a recent scroll.
         onPointerUp={() => {
           if (scrolledRef.current) {
             scrolledRef.current = false;
@@ -240,16 +263,17 @@ export default function TerminalPane({
           termRef.current?.focus();
         }}
       />
-      {/* 显式翻页控件。手势那条路在桌面 Chrome 的移动仿真下实测有效，但各家
-          WebView(鸿蒙 ArkWeb、各种壳内 WebView)对 touch 的处理并不一致，而
-          「小屏上翻不回历史」等于这个页面废掉 —— 所以留一条不依赖任何手势的
-          确定通路。半屏一跳，比一行一行划快得多。 */}
+      {/* Explicit pagination controls. Touch scrolling works in desktop Chrome's
+          mobile emulation, but different WebViews (HarmonyOS ArkWeb, various
+          embedded WebViews) handle touch inconsistently. Not scrolling history
+          on small screens breaks this page, so we keep a reliable gesture-free
+          path. Half-screen jumps are faster than line-by-line dragging. */}
       <div className={styles.scrollPad}>
         <button
           className={styles.scrollKey}
           aria-label={t("向上翻页")}
-          // onPointerDown + preventDefault：别把焦点从隐藏 textarea 上挪走，
-          // 焦点一丢软键盘就收起来了(同键位条的做法)。
+          // onPointerDown + preventDefault: keep focus on the hidden textarea,
+          // or the soft keyboard closes (same as the key bar does).
           onPointerDown={(e) => {
             e.preventDefault();
             pageScroll(-1);

@@ -156,7 +156,7 @@ async function copyDocRef(slug: string): Promise<boolean> {
 
 /** Prompts for a destination, then writes `version` of `doc` to it. */
 // Exported for the auxiliary rail's wiki card, which offers the same export the
-// 知识库 page does — reimplementing the kind → extension mapping and the browser
+// wiki page does—reimplementing the kind → extension mapping and the browser
 // build's download fallback in a second place is how those two drift.
 export async function exportWikiDoc(doc: WikiDoc, version: string): Promise<void> {
   // Mirrors core's wiki::export_filename — kind decides the artifact shape,
@@ -297,7 +297,7 @@ export function WikiView() {
       selectedSlug: typeof next === "function" ? next(current) : next,
     });
   }, [updateMainViewState]);
-  // Which virtual folder the grid is scoped to. `null` = 全部 (every doc).
+  // Which virtual folder the grid is scoped to. `null` = all docs.
   // Folder navigation always returns from the document detail to the list;
   // otherwise the hidden grid updates while the old document stays onscreen.
   const selectFolder = (path: string | null) => {
@@ -771,7 +771,7 @@ export function WikiView() {
     </button>
   );
 
-  // The landing = the default resting state: 全部文档, no search, so the grid
+  // The landing = the default resting state: all docs, no search, so the grid
   // leads with a folder overview before the flat doc list. Scoping to a folder
   // or searching drops straight to the plain doc grid.
   const showLanding = selectedFolder === null && !searching;

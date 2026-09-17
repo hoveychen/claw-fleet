@@ -52,7 +52,7 @@ pub(crate) fn export_wiki_doc(
 }
 
 /// Publish markdown the frontend already holds — the full-screen reader's
-/// "发布到 wiki". `mode` `"append"` grows the doc at `slug` into a running note
+/// "Publish to wiki". `mode` `"append"` grows the doc at `slug` into a running note
 /// instead of superseding its body; an empty `title` is derived from the text.
 #[tauri::command(async)]
 pub(crate) fn publish_wiki_text(
@@ -90,7 +90,7 @@ pub(crate) fn delete_wiki_version(
     state.backend.delete_wiki_version(&slug, &version)
 }
 
-/// Re-key a doc — how the 知识库 board drags a doc into another folder.
+/// Re-key a doc — how the knowledge base board drags a doc into another folder.
 #[tauri::command(async)]
 pub(crate) fn move_wiki_doc(
     from: String,

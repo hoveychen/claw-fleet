@@ -132,7 +132,7 @@ fn workspace_root() -> Option<PathBuf> {
 ///
 /// A picker that can only walk an existing tree is unusable on a host where the
 /// tree is empty — a fresh Fleet Cloud container has nothing under `/home/fleet`,
-/// so "选择工作目录" offered no directory to select and no way to make one.
+/// so the "Choose Workspace" dialog offered no directory to select and no way to make one.
 ///
 /// The boundary is [`browse_dir`]'s, unchanged: the parent must canonicalize to
 /// somewhere under the browsable roots. On top of that, `name` must be a single

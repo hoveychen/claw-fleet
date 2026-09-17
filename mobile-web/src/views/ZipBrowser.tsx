@@ -1,13 +1,15 @@
-// 把一份 .zip 产出当文件夹浏览（手机版）。
+// Browse a .zip artifact as a folder (mobile version).
 //
-// 与桌面端同一个解析层（shared-ts/zipDir.ts），但取字节的方式不同，这一点值得
-// 说清楚：桌面端能对产出发 Range 请求，所以能只读压缩包尾部的中央目录、按需
-// 取某一个成员，2GB 也浏览得动；relay 传字节只有「单帧 base64」一种形状，上限
-// 16 MiB（mobile_relay::MAX_ARTIFACT_FRAME_BYTES），所以手机上是整包已经取到
-// 内存里之后，再用 bufferReader 在本地解析。超过上限的压缩包和别的超大产出一
-// 样，停在「到桌面端导出」那张卡上——不是这里新加的限制。
+// Uses the same parsing layer as the desktop (shared-ts/zipDir.ts), but retrieves
+// bytes differently — worth clarifying: desktop can issue Range requests for artifacts,
+// so it can read just the zip's central directory at the tail and fetch individual
+// members on demand; 2GB zips are browsable. Relay has only one byte shape: single-frame
+// base64, capped at 16 MiB (mobile_relay::MAX_ARTIFACT_FRAME_BYTES), so on mobile the
+// entire package is already loaded into memory before bufferReader parses it locally.
+// Zips exceeding the limit and other huge artifacts stop at the "export to desktop"
+// card — not a new limitation added here.
 //
-// 成员的预览交给 PreviewBody，也就是散装产出用的同一个分派。
+// Member previews delegate to PreviewBody, the same dispatcher used for loose artifacts.
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -55,7 +57,7 @@ const KIND_ICON: Record<string, typeof FileText> = {
   text: FileText,
 };
 
-/** 成员还没读出来时喂给 PreviewBody 的空形态——它会直接落到 fallback。 */
+/** Placeholder state fed to PreviewBody when member bytes haven't loaded yet — falls through directly to fallback. */
 const EMPTY_SOURCE: PreviewSource = {
   kind: "none",
   title: "",
@@ -64,8 +66,9 @@ const EMPTY_SOURCE: PreviewSource = {
   text: null,
 };
 
-/** 成员的时间戳，短到能塞进一行。zip 存的是本地时区的 DOS 时间、精度 2 秒，
- *  所以只到分钟；有的写入方压根不写时间戳，那就没有。 */
+/** Member timestamp, short enough to fit in one line. Zip stores DOS time in local
+ *  timezone with 2-second precision, so display only goes to minute granularity;
+ *  some writers don't record a timestamp at all. */
 function rowTime(ms: number | null): string {
   if (ms === null) return "";
   return new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
@@ -89,15 +92,16 @@ function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** 一行文件。手机上宽度不够摆「名字 | 时间 | 大小」三列，所以时间和大小挪到
- *  名字下面那行——这是手机的读法，不是把桌面端那排硬塞进来。 */
+/** One file row. Mobile width doesn't fit "name | time | size" in three columns,
+ *  so time and size move to a second line under the name — this is mobile's layout,
+ *  not a desktop row squeezed into mobile. */
 function FileRow({
   entry,
   label,
   onOpen,
 }: {
   entry: ZipEntry;
-  /** 目录浏览时是文件名，搜索命中时是完整路径。 */
+  /** Directory browse shows filename; search hits show full path. */
   label: string;
   onOpen: (e: ZipEntry) => void;
 }) {
@@ -122,9 +126,9 @@ export function ZipBrowser({
   bytes,
   onShareMember,
 }: {
-  /** 整个压缩包，已经过 relay 取到内存里。 */
+  /** The entire zip package, already fetched into memory via relay. */
   bytes: Uint8Array;
-  /** 把某一个成员交给系统分享面板 / 下载。 */
+  /** Pass a member to the system share panel / download. */
   onShareMember?: (name: string, bytes: Uint8Array) => void;
 }) {
   const [entries, setEntries] = useState<ZipEntry[] | null>(null);
@@ -162,8 +166,9 @@ export function ZipBrowser({
     [entries],
   );
 
-  /** 搜的是整个包而不是当前这层——理由与桌面端同一条：值得搜的正是那个懒得
-   *  走过去的深层文件。命中只给文件，并显示完整路径。 */
+  /** Search covers the entire package, not just the current level — same rationale
+   *  as desktop: the files worth searching for are the deep ones you don't want to
+   *  navigate to. Hits show only files with full paths. */
   const hits = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle || !entries) return null;
@@ -185,9 +190,9 @@ export function ZipBrowser({
         setMemberBytes(out);
         const mime = zipEntryMime(open.name);
         const kind = previewKindFor(zipEntryKind(mime, open.name), mime);
-        // 每一类只做出它自己那一种形态：markdown/html/text 从解出来的字符串
-        // 读，image/pdf 才要 blob URL，Office 三件套要 Blob 本身。多做的那份
-        // 在手机上就是白占内存。
+        // Each kind produces only its own representation: markdown/html/text read
+        // from the decoded string, image/pdf need blob URL, Office suite need Blob
+        // itself. Preparing both wastes memory on mobile.
         if (kind === "image" || kind === "pdf") {
           url = URL.createObjectURL(new Blob([out as BlobPart], { type: mime }));
         }
@@ -233,7 +238,7 @@ export function ZipBrowser({
     );
   }
 
-  // ── 打开了一个成员 ─────────────────────────────────────────────────────────
+  // ── Member opened ─────────────────────────────────────────────────────────────
   if (open) {
     return (
       <div className={styles.root}>
@@ -275,7 +280,7 @@ export function ZipBrowser({
     );
   }
 
-  // ── 目录列表 ───────────────────────────────────────────────────────────────
+  // ── Directory listing ───────────────────────────────────────────────────────
   const crumbs = cwd ? cwd.split("/") : [];
   return (
     <div className={styles.root}>

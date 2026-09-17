@@ -3,13 +3,16 @@ import { fetchDecisionAsset } from "./decisionAsset";
 import type { RelayClient } from "./relay";
 import { fetchWikiFile } from "./wiki";
 
-// relay.ts REQUEST_TIMEOUT_MS 默认 15000。asset/upload 走这个默认值时，慢网下
-// MB 级 base64 传不完就在 15s 早退：pending 被删 → 迟到 reply 被丢 → 决策卡的
-// <img> 静默卡死（浏览器 e2e 已复现，agent 延迟 20s 返回、图永不出、console 0 报错）。
-// 这些资源类请求必须传一个远大于 15s 的窗口。
+// relay.ts REQUEST_TIMEOUT_MS defaults to 15000. When asset/upload uses this
+// default over slow networks, megabyte-scale base64 doesn't finish before the
+// 15s timeout fires: pending gets deleted → late reply is dropped → decision
+// card <img> hangs silently (browser e2e reproduced: agent returns after 20s,
+// image never appears, console silent). Resource requests like this need a
+// window much larger than 15s.
 const DEFAULT_CONTROL_TIMEOUT_MS = 15_000;
 
-/** 捕获 client.request 收到的 (method, timeoutMs) 的假 client。 */
+/** Mock client that captures (method, timeoutMs) pairs passed to
+ *  client.request(). */
 function captor() {
   const calls: Array<{ method: string; timeoutMs?: number }> = [];
   const client = {
@@ -21,7 +24,7 @@ function captor() {
   return { client, calls };
 }
 
-describe("资源/上传类请求用加长超时（防慢网 15s 静默早退）", () => {
+describe("Asset/upload requests use extended timeout (prevent silent 15s timeout on slow networks)", () => {
   it("decision_asset 的超时远大于 15s 控制消息默认值", async () => {
     const { client, calls } = captor();
     await fetchDecisionAsset(client, "ask-img", 0, "chart.png");

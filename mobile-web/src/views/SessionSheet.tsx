@@ -1,26 +1,30 @@
-// 「会话详情」半屏 —— 会话详情页上唯一的元信息面。
+// "Session Details" half-screen — the only metadata panel on the session detail page.
 //
-// 它取代了三样东西：
-//   1. header 下面那块 inline 展开的 `infoPanel`（固定五行静态字段，把正文往下
-//      推 ~90px，且没数据时也占着位）；
-//   2. `SessionHeaderMenu` 那张「会话操作」sheet（复制 id / 路径 / 恢复命令、
-//      切换作用域）；
-//   3. header 下面那条六个 tab 的条（决策/计划/Token/Workflow/接力 —— 每个在
-//      390px 宽的屏上只剩约 46px）。
+// It replaces three things:
+//   1. The inline-expanded `infoPanel` below the header (fixed five static rows,
+//      pushing content down ~90px, and taking up space even when empty);
+//   2. The `SessionHeaderMenu` "Session Actions" sheet (copy id/path/resume command,
+//      switch scope);
+//   3. The six-tab bar below the header (Decisions/Plans/Tokens/Workflow/Handoff —
+//      leaving ~46px per tab on a 390px-wide screen).
 //
-// 三者本来是三个入口指向三堆重叠的信息：tab 条上「计划」页要点两下才知道计划
-// 走到哪，而「走到哪」这个数字（`taskPlan.done/total`）在快照里一直躺着；
-// 「切换作用域」在 ☰ 里，而「有几个子代理在跑」在 header 上完全没有。合成一张
-// 半屏之后，标题点一下 / ☰ 点一下都到这里，每一行既是读数也是入口。
+// These three were three entry points to three overlapping information sets: you had
+// to click "Plans" twice to see where the plan is, but that number (`taskPlan.done/total`)
+// already sat in the snapshot; "Switch scope" was in the ☰ menu, and "how many
+// subagents are running" was missing from the header entirely. Combined into one
+// half-screen, tapping the title or ☰ both lead here, and each row is both a
+// readout and an entry point.
 //
-// 为什么是半屏而不是继续 inline 展开：inline 面板的高度是从正文那里借的，所以
-// 它必须小，所以它只放得下五行静态字段——这正是老板说的「就算展开了也放不进
-// watch、subagent」。半屏借的是**临时**的屏幕，可以占 85vh，于是「此刻在发生
-// 什么」终于有地方摊开。带抓手 + 圆角 + 底部安全区，是移动端原生对这类「拿一次
-// 就走」的面的既定语汇。
+// Why a half-screen instead of continuing with inline expansion: inline panel height
+// borrows from the content, so it must be small—it only fits five static rows. This
+// is exactly what the boss said: "even expanded, won't fit watch and subagent." A
+// half-screen borrows a **temporary** screen space, can use 85vh, so "what's
+// happening now" finally has room to lay out. Handle + rounded corners + bottom
+// safe area are the native mobile idiom for these "grab and go" panes.
 //
-// 桌面端没有对应物：桌面 SessionDetail 的 header 横向排得下一整行 chip，且它
-// 的 tab 条有 1000+ px 可用。这张半屏是手机独有的收敛。
+// Desktop has no equivalent: desktop SessionDetail's header lays out a whole row of
+// chips horizontally, and its tab bar has 1000+ px available. This half-screen is
+// phone-specific consolidation.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -46,35 +50,37 @@ import { buildInfoChips, resumeCommand } from "./sessionInfoRows";
 import type { DetailPane } from "./sessionStatusPills";
 import styles from "./SessionSheet.module.css";
 
-/** 一行「点进去看」的入口：左边名字，右边此刻的读数。
+/** A clickable row: name on the left, current readout on the right.
  *
- *  读数是这张半屏存在的理由。旧 tab 条上「计划 / Token / Workflow / 接力」四个
- *  标签一个数字都不带，所以你得逐个点进去才知道哪个有东西——四次跳转换一次
- *  「哦，Workflow 是空的」。带上读数之后，绝大多数时候扫一眼就够，不用点。 */
+ *  The readout is why this half-screen exists. The old tab bar had "Plans / Tokens /
+ *  Workflow / Handoff" labels with no numbers, so you had to click each one to see
+ *  which had content — four clicks to find out "oh, Workflow is empty." With readouts,
+ *  you can scan most of them at a glance without clicking. */
 interface PaneRow {
   pane: DetailPane;
   label: string;
-  /** 右侧读数。
+  /** Readout on the right.
    *
-   *  三态，别塌成两态：
-   *  - 有字符串 = 快照告诉了我们这一面有什么；
-   *  - `"empty"` = 快照**证明**这一面是空的（没有 taskPlan = 没有计划，没有
-   *    handoff = 不在任何接力链上），显示「无」；
-   *  - `undefined` = 我们不知道（Token 与 Workflow 的内容要点进去才拉，快照里
-   *    没有），什么都不显示。
+   *  Three states, don't collapse to two:
+   *  - A string value = snapshot tells us what's on this pane;
+   *  - `"empty"` = snapshot **proves** this pane is empty (no taskPlan = no plans,
+   *    no handoff = not in any handoff chain), display "none";
+   *  - `undefined` = we don't know (Token and Workflow content is fetched on click,
+   *    not in the snapshot), display nothing.
    *
-   *  第一版把后两态都当成 null 显示「无」，于是一条花了 $4.33 的会话在
-   *  「Token 与花费」那行上写着「无」——把「我不知道」说成「没有」，是这张
-   *  半屏最容易犯也最难被发现的谎。 */
+   *  V1 treated the last two as null and displayed "none", so a $4.33 session
+   *  showed "none" on the "Tokens & Cost" row — saying "I don't know" as "you have
+   *  none" is the easiest and hardest-to-catch lie this half-screen can tell. */
   value?: string | "empty";
-  /** 读数用 accent 强调 —— 只给「它在等你」那种。 */
+  /** Readout gets accent emphasis — only for "it's waiting on you" cases. */
   hot?: boolean;
   progress?: { done: number; total: number };
 }
 
-/** 一条要复制的文本。与旧 ☰ 菜单同一批条目、同一套「await 后再显示结果」纪律：
- *  移动端浏览器在非安全上下文 / 无用户手势时会拒掉 `clipboard.writeText`，
- *  发后不管就会出现「显示已复制、剪贴板里什么都没有」。 */
+/** A text row to copy. Part of the same batch as the old ☰ menu items, following
+ *  the same "await then show result" discipline: mobile browsers reject
+ *  `clipboard.writeText` in non-secure contexts or without user gesture, so fire
+ *  and forget results in "show copied, clipboard is empty." */
 interface CopyRow {
   id: string;
   label: string;
@@ -93,15 +99,19 @@ export function SessionSheet({
   onOpenSession,
 }: {
   session: SessionInfo;
-  /** 主进程 + 各子代理（调用方按桌面端同一套规则组装、排序、封顶）。为空表示
-   *  这是个没有子代理的独会话，那一节整段不出现。 */
+  /** Main process + all subagents (caller assembles, sorts, caps per desktop rules).
+   *  Empty means this is a standalone session with no subagents; that section
+   *  doesn't appear. */
   family: SessionInfo[];
-  /** 归属这条会话的待决策卡张数（决策卡是跨设备聚合的收件箱，不在 SessionInfo
-   *  上，所以由调用方数好传进来）。 */
+  /** Count of pending decision cards for this session (decision cards are an
+   *  aggregated cross-device inbox, not on SessionInfo, so caller counts and
+   *  passes it). */
   pendingDecisions: number;
-  /** 这条会话所属**那一台设备**的 transport —— 停止走 pid / workspacePath，发到
-   *  别台上轻则停不掉，重则按 pid 打到一个毫不相干的进程。`null`（那台设备此刻
-   *  不可达）时这一节整段不出现：给一颗按不动的按钮比没有按钮更难解释。 */
+  /** Transport for **the device** this session belongs to — stop uses pid /
+   *  workspacePath, so routing to the wrong device either fails to stop or kills
+   *  an unrelated process. When `null` (device unreachable), this section
+   *  disappears entirely: an unresponsive button is harder to explain than no
+   *  button. */
   client: FleetTransport | null;
   onClose: () => void;
   onOpenPane: (pane: DetailPane) => void;
@@ -116,17 +126,19 @@ export function SessionSheet({
     try {
       await navigator.clipboard.writeText(row.text);
       setResult({ id: row.id, ok: true });
-      // ✓ 停留一拍。半屏不像旧菜单那样复制完就关——它是个「看板」，人常常还要
-      // 接着看别的行，关掉反而要重开。
+      // ✓ Stay for a beat. Half-screen doesn't close after copy like the old menu —
+      // it's a "dashboard," people often want to look at other rows afterward,
+      // closing would require reopening.
       clearTimer.current = window.setTimeout(() => setResult(null), 1200);
     } catch {
       setResult({ id: row.id, ok: false });
     }
   }, []);
 
-  // ── 停止 / 中断 ──────────────────────────────────────────────────────
-  // 在这张半屏出现之前，会话详情页上没有任何停的办法：你正看着它跑，却得退回
-  // 任务列表把那张卡再找出来。三态与确认文案跟列表卡片共用 sessionStop.ts。
+  // ── Stop / Interrupt ────────────────────────────────────────────────────────
+  // Before this half-screen, there was no way to stop a session from the detail
+  // page: you'd have to go back to the task list and find that card again. The
+  // three states and confirmation text are shared with the list card in sessionStop.ts.
   const confirm = useConfirm();
   const [stopping, setStopping] = useState(false);
   const mode = stopMode(session);
@@ -136,7 +148,8 @@ export function SessionSheet({
     setStopping(true);
     try {
       const done = await runStop(client, session, confirm);
-      // 真停下了就把半屏收掉——留在原地看着一行读数不会自己变，像是没生效。
+      // If truly stopped, close the half-screen — leaving it open with static
+      // readouts won't change, appearing ineffective.
       if (done) onClose();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : t("操作失败"));
@@ -148,11 +161,12 @@ export function SessionSheet({
   const title = session.titleOverride || session.aiTitle || session.slug || t("会话");
   const resume = resumeCommand(session);
 
-  // 静态字段压成一行 chip（模型 / 推理强度 / 工作区 / 上下文 / 花费）。缺席的
-  // 不占位——规则和单测在 sessionInfoRows.ts。
+  // Static fields compressed into chip row (model / reasoning effort / workspace /
+  // context / cost). Missing fields don't take space — rules and unit tests in
+  // sessionInfoRows.ts.
   const chips = buildInfoChips(session);
 
-  // ── 「此刻」──────────────────────────────────────────────────────────
+  // ── Now ──────────────────────────────────────────────────────────────
   const nowRows: PaneRow[] = [];
   if (pendingDecisions > 0) {
     nowRows.push({
@@ -164,7 +178,7 @@ export function SessionSheet({
   }
   const watches = session.watches ?? [];
 
-  // ── 「进度」──────────────────────────────────────────────────────────
+  // ── Progress ─────────────────────────────────────────────────────────
   const progressRows: PaneRow[] = [];
   progressRows.push({
     pane: "plans",
@@ -176,11 +190,11 @@ export function SessionSheet({
       : "empty",
     progress: session.taskPlan ?? undefined,
   });
-  // Token 与 Workflow 的内容不在快照里（点进去才拉），所以这两行不带读数——
-  // 写「无」会把「我不知道」说成「没有」。
+  // Token and Workflow content is not in the snapshot (fetched on click), so these
+  // two rows don't get readouts — saying "none" would be lying about "I don't know."
   progressRows.push({ pane: "token", label: t("Token 与花费") });
   progressRows.push({ pane: "workflow", label: t("Workflow") });
-  // 笔记的份数也不在快照里,同理不带读数。
+  // Note count also not in snapshot, same reasoning — no readout.
   progressRows.push({ pane: "notes", label: t("笔记") });
   progressRows.push({
     pane: "handoff",
@@ -189,13 +203,14 @@ export function SessionSheet({
       ? t("第 {0} 棒 / 共 {1}", session.handoff.hop, session.handoff.chainLen)
       : "empty",
   });
-  // 决策历史即使此刻没有待答的卡也要能进去 —— 这一面装的是**答过的**卡，
-  // 「上次我到底点了哪个」是它最常被用到的问法。
+  // Decision history must be accessible even with no pending cards — this pane
+  // holds **answered** cards, and "which one did I click last time?" is the most
+  // common question.
   if (pendingDecisions === 0) {
     progressRows.push({ pane: "decisions", label: t("决策记录") });
   }
 
-  // ── 「会话」──────────────────────────────────────────────────────────
+  // ── Session ──────────────────────────────────────────────────────────
   const copyRows: CopyRow[] = [
     {
       id: "id",
@@ -262,12 +277,14 @@ export function SessionSheet({
 
   return (
     <>
-      {/* 半屏也算一层：不登记的话返回键弹掉的是整个会话详情页。 */}
+      {/* Half-screen counts as a history layer: without it, back would close the
+          whole session detail page. */}
       <HistoryLayer onBack={onClose} />
       {createPortal(
         <div className={styles.backdrop} onClick={onClose}>
-          {/* 55：必须压过决策抽屉那条常驻底栏（DecisionDrawer 的 45）——它就贴在
-              半屏要展开的位置上。承自 SessionHeaderMenu 的实测结论。 */}
+          {/* z-index 55: must sit above the decision drawer's fixed bottom bar
+              (DecisionDrawer is 45) — it's right where the half-screen expands.
+              Learned from SessionHeaderMenu's testing. */}
           <div
             className={styles.sheet}
             role="dialog"
@@ -295,8 +312,9 @@ export function SessionSheet({
               </div>
             )}
 
-            {/* 挡路的原话。pill 轨上只写得下「远端断开」「额度耗尽」四个字，
-                为什么断、哪台主机、原始报错长什么样，只有这里放得下。 */}
+            {/* Blocking errors in full. The pill row only fits "Remote Disconnected"
+                or "Out of Credits" — why it failed, which host, and the full error
+                all fit here. */}
             {session.outOfCredits && (
               <div className={styles.alert}>
                 <span className={styles.alertLabel}>{t("额度耗尽")}</span>
@@ -343,8 +361,9 @@ export function SessionSheet({
                   <span className={styles.stopLabel}>
                     {mode === "interrupt" ? t("中断当前回合") : t("停止这个会话")}
                   </span>
-                  {/* 两者差别很大，而按钮上那两个字说不清：中断只掐掉手上这一轮，
-                      会话还在，还能接着发下一条；停止是把进程杀掉。 */}
+                  {/* Big difference between the two, but the button labels can't explain
+                      it: interrupt kills only the current turn, session stays and you can
+                      send the next one; stop kills the process. */}
                   <span className={styles.stopSub}>
                     {mode === "interrupt"
                       ? t("只掐掉手上这一轮，会话还在，可以接着发下一条")
@@ -355,8 +374,9 @@ export function SessionSheet({
               </button>
             )}
 
-            {/* watch 没有自己的整页 —— 它的全部内容就是「在等什么、轮询了几次、
-                什么时候放弃」这三句，够放在这里，不值得一次跳转。 */}
+            {/* Watch doesn't have its own full page — its entire content is "what
+                we're waiting for, how many polls, when to give up" — fits here,
+                not worth a separate screen. */}
             {watches.map((w) => (
               <div key={w.id} className={styles.watchRow}>
                 <Timer size={15} className={styles.watchIcon} />
@@ -369,8 +389,9 @@ export function SessionSheet({
               </div>
             ))}
 
-            {/* 作用域切换。旧 ☰ 里的那份清单原样搬来 —— 它本来就属于「此刻这个
-                会话家族里谁在动」，跟复制路径挨在一起是旧菜单的历史包袱。 */}
+            {/* Scope switching. The list from the old ☰ menu moved here as-is —
+                it already belongs to "who's active in this session family right now,"
+                sitting next to copy-path is just old menu baggage. */}
             {family.map((s) => {
               const isCurrent = s.id === session.id;
               return (

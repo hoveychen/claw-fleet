@@ -391,7 +391,7 @@ mod tests {
 
     /// The artifact store is the ONLY ingest path for deliverables — the
     /// desktop has no "add" button — so if this guidance stops naming it, an
-    /// agent that produces a deck has nowhere to put it and the 产出 page
+    /// agent that produces a deck has nowhere to put it and the Output page
     /// silently stays empty. Both locales must steer the binary formats there
     /// and say why the wiki cannot take them.
     #[test]

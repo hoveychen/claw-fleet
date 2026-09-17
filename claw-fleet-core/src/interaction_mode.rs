@@ -43,10 +43,20 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
     };
 
     let language_line = match locale {
-        "zh" => "使用中文回答（question 与 option 的 label、description 皆为中文）。",
-        "ja" => "日本語で回答してください（question と option の label、description は日本語）。",
-        "ko" => "한국어로 답변하세요（question과 option의 label, description은 한국어）.",
-        _ => "Write in English (questions, option labels, and descriptions all in English).",
+        "zh" => "全程用中文说话——决策卡的 question 与 option 的 label、description，以及回合中途的进度叙述，一律用中文。",
+        "ja" => "常に日本語で話してください——カードの question と option の label・description も、ターン途中の進捗の語りも日本語で。",
+        "ko" => "항상 한국어로 말하세요 — 카드의 question과 option의 label·description은 물론, 턴 중간의 진행 서술도 한국어로.",
+        _ => "Speak English throughout — the card's questions, option labels and descriptions, and your mid-turn progress narration alike.",
+    };
+
+    // Extended thinking is generated in whatever language the model drifts to, and
+    // its training skews heavily English — so a non-English locale has to ask for it
+    // explicitly. English locales need no line at all (empty string, no bullet).
+    let thinking_line = match locale {
+        "zh" => "- 思考过程（extended thinking）也尽量用中文。读英文代码时漂回英文没关系，别为此中断手上的推理。\n",
+        "ja" => "- 思考過程（extended thinking）もできるだけ日本語で。英語のコードを読んでいる最中に英語へ戻っても構いません、そのために推論を中断しないでください。\n",
+        "ko" => "- 사고 과정(extended thinking)도 가능한 한 한국어로. 영어 코드를 읽다가 영어로 돌아가도 괜찮으니 그 때문에 추론을 멈추지는 마세요.\n",
+        _ => "",
     };
 
     if locale == "zh" {
@@ -55,7 +65,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 当本会话中 `fleet__ask` 可用时，每一个原本会通过纯文本输出把控制权交回用户的回合，都**必须**改为通过 `fleet__ask` 递交。回合中途仍可用文本汇报进度，但用户在一个回合里最终看到的必须是一张决策卡。\n\
 \n\
-`fleet__ask` 是 Fleet 经 MCP 注册的决策卡工具（~/.claude.json 里的 mcpServers.fleet），规范名 `mcp__fleet__ask`。它**不是** deferred——会话启动就注册好，schema 从第 1 回合起就是活的，无需 `ToolSearch` 预加载。它是本模式的唯一首选；内置 `AskUserQuestion` 只在 `fleet__ask` 缺席时兜底（见文末）。两者都缺席时本文件失效，用纯文本回复。\n\
+`fleet__ask` 是 Fleet 经 MCP 注册的决策卡工具（~/.claude.json 里的 mcpServers.fleet），完整工具名 `mcp__fleet__fleet__ask`（server 名 + 工具名，两段 fleet 都要）。它**可能被列为 deferred**（只列出名字、不预载 schema）——**被延迟列出不等于缺席**，绝不能因此退回纯文本；这种情况下本会话**首次调用前必须**先用 `ToolSearch` 以 `select:mcp__fleet__fleet__ask` 加载 schema（清单里若印的是别的前缀，以清单原文为准），然后照常调用。它是本模式的唯一首选；内置 `AskUserQuestion` 只在 `fleet__ask` 缺席时兜底（见文末）。两者都缺席时本文件失效，用纯文本回复。\n\
 \n\
 `ExitPlanMode` 不走本模式——它有自己的审批面板，别把方案审批塞进 `fleet__ask`。本模式只作用于助手回合的*终端*输出，不要包裹回合中途的叙述。\n\
 \n\
@@ -63,6 +73,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 - 称呼用户为「{title_zh}」（绝不用第三人称）。声线：一个热情、略带忠犬感的初级开发，向他的「{title_zh}」汇报。\n\
 - {language_line}\n\
+{thinking_line}\
 - `header` ≤12 字符；选项 `label` 1–5 词，细节放 `description`。\n\
 \n\
 ## 三种卡\n\
@@ -125,6 +136,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 两者都不在你的工具集里——既没直接列出、也不在延迟工具清单里（例如非 Claude-Code 的 harness）——本文件即失效，你就像没有本指引时那样用纯文本回复。\n",
             title_zh = title_zh,
             language_line = language_line,
+            thinking_line = thinking_line,
         );
     }
 
@@ -133,7 +145,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 When `fleet__ask` is available this session, every turn that would otherwise hand control back to the user as plain text **must** be handed over through `fleet__ask` instead. Mid-turn text is still fine for progress notes, but the last thing the user sees in a turn must be a decision card.\n\
 \n\
-`fleet__ask` is Fleet's MCP-registered decision-card tool (mcpServers.fleet in ~/.claude.json), canonically `mcp__fleet__ask`. It is **NOT deferred** — registered at session start, its schema is live from turn 1, no `ToolSearch` preload. It is this mode's **sole preferred** decision-card tool; the built-in `AskUserQuestion` is a fallback used only when `fleet__ask` is absent (see the end). When both are absent this file is inert and you reply in plain text.\n\
+`fleet__ask` is Fleet's MCP-registered decision-card tool (mcpServers.fleet in ~/.claude.json), whose full tool name is `mcp__fleet__fleet__ask` (server name + tool name — both `fleet` segments). It **may be listed as deferred** (name listed, schema not preloaded) — **a deferred listing does NOT mean absent**, so never fall back to plain text on that basis; when it is deferred you **MUST first load** its schema this session with `ToolSearch` using `select:mcp__fleet__fleet__ask` (if the list prints a different prefix, copy the listed name verbatim), then call it as usual. It is this mode's **sole preferred** decision-card tool; the built-in `AskUserQuestion` is a fallback used only when `fleet__ask` is absent (see the end). When both are absent this file is inert and you reply in plain text.\n\
 \n\
 `ExitPlanMode` is out of scope — it has its own approval panel, so never stuff plan approval into `fleet__ask`. This mode governs the *terminal* output of an assistant turn only; do not wrap mid-turn narration.\n\
 \n\
@@ -141,6 +153,7 @@ When `fleet__ask` is available this session, every turn that would otherwise han
 \n\
 - Address the user as \"{title_zh}\" (never in third person). Voice: an eager, faintly loyal-puppy junior dev reporting to their \"{title_zh}\".\n\
 - {language_line}\n\
+{thinking_line}\
 - `header` ≤12 characters; option `label` 1–5 words, detail goes in `description`.\n\
 \n\
 ## Three Kinds Of Card\n\
@@ -206,6 +219,7 @@ If neither `fleet__ask` nor `AskUserQuestion` is in your toolset this turn — n
         title_en = title_en,
         title_zh = title_zh,
         language_line = language_line,
+        thinking_line = thinking_line,
     )
 }
 
@@ -319,10 +333,30 @@ mod tests {
     fn render_uses_title_and_locale() {
         let g = render_guidance("师父", "zh");
         assert!(g.contains("师父"));
-        assert!(g.contains("使用中文回答"));
+        // The language rule covers mid-turn narration too, not just card copy.
+        assert!(g.contains("全程用中文说话"));
+        assert!(g.contains("回合中途的进度叙述"));
         let g2 = render_guidance("", "en");
         assert!(g2.contains("Boss"));
         assert!(g2.contains("老板"));
+    }
+
+    #[test]
+    fn render_asks_non_english_locales_to_think_in_that_language() {
+        // Extended thinking defaults to English regardless of the reply language,
+        // so each localized guidance has to request it; English needs no line.
+        let zh = render_guidance("老板", "zh");
+        assert!(zh.contains("思考过程（extended thinking）也尽量用中文"));
+        assert!(render_guidance("", "ja").contains("思考過程（extended thinking）"));
+        assert!(render_guidance("", "ko").contains("사고 과정(extended thinking)"));
+
+        let en = render_guidance("Boss", "en");
+        assert!(
+            !en.contains("extended thinking"),
+            "English guidance must not spend tokens asking for a language the model already thinks in"
+        );
+        // The empty thinking_line must not leave a stray blank bullet behind.
+        assert!(!en.contains("\n- \n"));
     }
 
     #[test]
@@ -345,7 +379,7 @@ mod tests {
     /// ending is what fires the relay — so the successor waits on a click whose
     /// answer can no longer reach it (the note froze at registration). The
     /// every-turn-asks rule has to say so explicitly, or agents keep shipping a
-    /// wrap-up card and 老板 pays a pointless click per baton.
+    /// wrap-up card and the user pays a pointless click per baton.
     #[test]
     fn render_embeds_handoff_registered_exemption() {
         let z = render_guidance("老板", "zh");
@@ -454,9 +488,18 @@ mod tests {
             g.contains("through `fleet__ask` instead"),
             "opening mandate must route terminal turns through fleet__ask, not AskUserQuestion"
         );
+        // fleet__ask IS deferred in practice on this harness, so the guidance
+        // must teach the ToolSearch preload under its full double-`fleet` name
+        // instead of claiming the schema is live from turn 1 — an agent that
+        // trusts the old claim reads "not in my toolset" as "absent" and the
+        // absent branch tells it to answer in plain text.
         assert!(
-            g.contains("NOT deferred"),
-            "guidance must state fleet__ask is not deferred (live from turn 1, no ToolSearch)"
+            g.contains("select:mcp__fleet__fleet__ask"),
+            "guidance must name the exact ToolSearch query that preloads fleet__ask"
+        );
+        assert!(
+            g.contains("deferred listing does NOT mean absent"),
+            "guidance must disambiguate a deferred fleet__ask from an absent one"
         );
         assert!(
             g.contains("sole preferred"),
@@ -476,6 +519,14 @@ mod tests {
         assert!(
             z.contains("兜底"),
             "zh guidance must keep AskUserQuestion as a documented fallback (兜底)"
+        );
+        assert!(
+            z.contains("select:mcp__fleet__fleet__ask"),
+            "zh guidance must name the ToolSearch query that preloads fleet__ask"
+        );
+        assert!(
+            z.contains("被延迟列出不等于缺席"),
+            "zh guidance must disambiguate a deferred fleet__ask from an absent one"
         );
     }
 

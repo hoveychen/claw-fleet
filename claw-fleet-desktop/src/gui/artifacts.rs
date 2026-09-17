@@ -45,7 +45,7 @@ pub(crate) fn artifact_response(
     }
 }
 
-// ── Artifact store (产出) ─────────────────────────────────────────────────────
+// ── Artifact store (output) ──────────────────────────────────────────────────────
 //
 // Every command routes through `state.backend`. The bytes themselves reach
 // the webview through the `fleet-artifact://` protocol
@@ -155,7 +155,7 @@ pub(crate) fn artifact_folder_zip_plan(
 
 // ── Folders ──────────────────────────────────────────────────────────────────
 //
-// Folders are records of their own so that "新建文件夹, then drag things in"
+// Folders are records of their own so that "new folder, then drag things in"
 // works — an artifact's `path` alone cannot express an empty folder.
 
 #[tauri::command(async)]
@@ -212,7 +212,7 @@ pub(crate) fn artifact_usage(
     state.backend.artifact_usage()
 }
 
-/// Copy an artifact to `dest` on **this** machine — the 导出 / 另存为 action.
+/// Copy an artifact to `dest` on **this** machine — the export / save-as action.
 ///
 /// The save dialog runs on the frontend (plugin-dialog) and hands us the
 /// chosen path. Mirrors `export_wiki_doc`.
@@ -227,7 +227,7 @@ pub(crate) fn export_artifact(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     // A big deliverable takes real time here, and the log is the only place
-    // that can later say whether a slow-feeling 导出 was the copy or the
+    // that can later say whether a slow-feeling export was the copy or the
     // dialog in front of it.
     let probe = crate::cmd_probe::CmdProbe::start("export_artifact", &id);
     let result = export_artifact_inner(&id, &dest, &state);
@@ -272,7 +272,7 @@ fn export_artifact_inner(
     Ok(())
 }
 
-/// Write bytes the frontend already holds to `dest` — 导出 for one member of a
+/// Write bytes the frontend already holds to `dest` — export for one member of a
 /// zip artifact.
 ///
 /// A member's bytes exist nowhere but the webview: the zip browser reads the
@@ -293,7 +293,7 @@ pub(crate) fn export_bytes(dest: String, bytes: Vec<u8>) -> Result<(), String> {
 /// Resolve an artifact id to its blob path on this machine.
 ///
 /// Shared by the two OS-level actions below. There is deliberately no command
-/// that hands this path to the frontend: the 产出 detail bar used to fetch it
+/// that hands this path to the frontend: the output detail bar used to fetch it
 /// through an `artifact_local_path` invoke and gate both buttons on the answer,
 /// so one slow or failed call erased both of them with nothing on screen to
 /// explain it. The buttons now decide on the host alone (`canRevealPath`) and
@@ -343,7 +343,7 @@ pub(crate) fn reveal_artifact(
 /// needs a non-empty path scope (`scope.rs` ANDs the fs scope with
 /// `allowed.iter().any(..)`). Without that the command answers `ForbiddenPath`,
 /// and a frontend that does not await the promise shows nothing — which is how
-/// 「用系统应用打开」shipped as a dead button next to a working 「在访达中显示」
+/// "open with system app" shipped as a dead button next to a working "show in Finder"
 /// (`reveal_item_in_dir` has no scope check). `OpenerExt::open_path` on this
 /// side is not scope-checked, and resolving the path here means the frontend
 /// hands over an artifact id rather than an arbitrary path.

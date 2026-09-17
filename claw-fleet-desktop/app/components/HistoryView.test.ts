@@ -78,9 +78,9 @@ describe("chainBarColor (collapsed relay-group header liveness)", () => {
     expect(chainBarColor([member("waitingInput", 1), member("executing", 2)])).toBe(SUCCESS);
   });
 
-  // The 老板-reported symptom: a relay chain whose tip is parked on one long
+  // The user-reported symptom: a relay chain whose tip is parked on one long
   // tool call (62000-frame probe) showed NO dot in the task list — reading as
-  // idle — while that same session's composer said 会话运行中. The tip is
+  // idle — while that same session's composer said the session is running. The tip is
   // quiet-alive, which is neither of the two literals the old aggregation
   // matched, so it fell through to null.
   it("keeps the faded quiet-alive dot when a hop's process is alive but quiet", () => {
@@ -180,7 +180,7 @@ describe("sessionEq", () => {
 });
 
 /**
- * `taskListSessions` is the single gate for the 任务 page. The regression it
+ * `taskListSessions` is the single gate for the task page. The regression it
  * pins: simplified mode used to skip the filter and hand the raw scan to the
  * list, so the subagent transcripts `scan.rs` collects
  * (`<parent>/subagents/agent-*.jsonl`) showed up as top-level tasks — a

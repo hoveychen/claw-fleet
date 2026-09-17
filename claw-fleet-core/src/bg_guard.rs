@@ -12,10 +12,11 @@
 //! > shell is terminated about five seconds after Claude has returned its final
 //! > result and stdin has closed.
 //!
-//! So an agent that signs off with "两个监视器守着，等我下一条汇报" is promising a
-//! report that can never arrive: the shells die seconds later and nothing is left
-//! to wake the model. (Observed: a scene-items relay session ended exactly that
-//! way, leaving a 0-byte task output file.)
+//! So an agent that signs off with something like "I have monitors watching —
+//! wait for my next report" is promising a report that can never arrive: the
+//! shells die seconds later and nothing is left to wake the model. (Observed: a
+//! scene-items relay session ended exactly that way, leaving a 0-byte task output
+//! file.)
 //!
 //! The kill-on-exit applies to background **shells and monitors only**. Background
 //! subagents and workflows are exempt: "their result is part of the final output,
@@ -179,7 +180,7 @@ pub fn block_reason(payload: &StopPayload, is_headless: bool) -> Option<String> 
 
     // Only the doomed types block: a running subagent/workflow is waited on by
     // the `-p` exit path and will re-invoke the model when it completes, so the
-    // promised "稍后汇报" actually happens — interrupting there is a false alarm.
+    // promised "I'll report later" actually happens — interrupting there is a false alarm.
     let running: Vec<&BackgroundTask> = running_tasks(payload)
         .into_iter()
         .filter(|t| t.doomed_on_headless_exit())

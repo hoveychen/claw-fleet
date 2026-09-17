@@ -45,7 +45,7 @@ describe("formatBytes", () => {
   it("keeps one decimal only where it carries information", () => {
     expect(formatBytes(512)).toBe("512 B");
     // 1.4 MB must not round to "1 MB" — the difference matters when the number
-    // is the only hint of how big a download will be.
+    // is the only clue to how big a download will be.
     expect(formatBytes(1_468_006)).toBe("1.4 MB");
     // Above 10 the extra digit is noise.
     expect(formatBytes(412_663_296)).toBe("394 MB");
@@ -105,7 +105,7 @@ describe("filterArtifacts", () => {
   const all = { query: "", workspace: "", starredOnly: false };
 
   it("matches the note and the filename, not just the title", () => {
-    // What a user remembers is as often "the one about 架构" as the title.
+    // What a user remembers is as often "the one about architecture" as the title.
     expect(filterArtifacts(items, { ...all, query: "架构" }).map((a) => a.id)).toEqual(["3"]);
     expect(filterArtifacts(items, { ...all, query: "launch" }).map((a) => a.id)).toEqual(["2"]);
   });
@@ -186,7 +186,7 @@ describe("buildArtifactDirectoryTree", () => {
 
   it("files an artifact by its own path, not by where the agent wrote it", () => {
     const tree = buildArtifactDirectoryTree([
-      // Written into src/ by the agent, but filed under 交付 by the user.
+      // Written into src/ by the agent, but filed under "Deliverables" by the user.
       make({ id: "1", path: "交付", sourcePath: "/w/one/src/app.ts" }),
       make({ id: "2", path: "交付/2026Q3", sourcePath: "/w/one/src/app.ts" }),
       // Unfiled: still derived from the source path, as before.
@@ -252,7 +252,7 @@ describe("sortArtifacts direction", () => {
     expect(sortArtifacts(list, "name", "asc").map((a) => a.id)).toEqual(["1", "2"]);
   });
 
-  it("groups by workspace, then folder, for the 来源 column", () => {
+  it("groups by workspace, then folder, for the source column", () => {
     const list = [
       make({ id: "1", workspaceName: "two", path: "a" }),
       make({ id: "2", workspaceName: "one", path: "b" }),
@@ -369,9 +369,9 @@ describe("dropTargetFolder", () => {
   });
 
   it("refuses a drop onto another workspace's folder", () => {
-    // "交付" under repo A is not the same place as "交付" under repo B, and
-    // silently re-homing a deliverable to a repo it never came from would be
-    // the worst possible reading of the gesture.
+    // "Deliverables" folder under repo A is not the same place as "Deliverables"
+    // under repo B, and silently re-homing a deliverable to a repo it never came
+    // from would be the worst possible reading of the gesture.
     expect(dropTargetFolder(dropKey("/w/b", "交付"), inA)).toBeNull();
   });
 

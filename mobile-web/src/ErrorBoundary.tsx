@@ -1,24 +1,34 @@
-// 渲染兜底。一个子组件在 render 里抛异常时,React 会把**整棵树**卸掉 —— 手机上
-// 的表现是页面一片纯白、控制台什么都没有(手机浏览器通常也打不开控制台)。
+// Fallback for render errors. When a child component throws during render, React
+// unmounts the **entire tree** — on mobile, the result is a blank white page with
+// no console (and the mobile browser usually can't open the console anyway).
 //
-// 这已经咬到过两次,两次都是「主机回来的数据形状不对」而不是我们自己的逻辑错:
-//   1. 一张决策卡少了 `riskTags` 数组 → 渲染卡片时抛 → 整个 app 变白;
-//   2. 主机把 `sources_config` 回成对象而不是数组 → `.filter` 不是函数 → 同上。
-// 两次的共性是致命的:**坏的是一个局部,代价是全部**。所以这里的目标不是「把错误
-// 打印出来」,而是把爆炸半径收进出问题的那一块 —— 一张坏卡只坏那张卡,其余卡照答;
-// 一个 tab 崩了,底部导航还在,切走再切回来自动重试。
+// This has bitten us twice, both times due to malformed data from the server,
+// not a logic error:
+//   1. A decision card missing a `riskTags` array → throws during render → entire
+//      app turns white;
+//   2. Server returns `sources_config` as an object instead of an array →
+//      `.filter` is not a function → same result.
+// The pattern in both cases is fatal: **damage is localized, but cost is global**.
+// So the goal here is not just to "log the error", but to contain the blast radius
+// to the broken piece — a bad card only breaks that card, others still work; a
+// broken tab still leaves the bottom nav working, and switching away and back
+// retries automatically.
 //
-// 桌面端有一个同源物(claw-fleet-desktop/app/components/ErrorBoundary.tsx),但它
-// 是给开发者看的整屏红字堆栈、且不可恢复;手机上需要的是面向用户的一句话 + 可恢复
-// + 可展开的技术细节。两边刻意不共用:它们是两个独立的前端包,恢复语义也不同。
+// The desktop has an equivalent component (claw-fleet-desktop/app/components/
+// ErrorBoundary.tsx), but it's a full-screen red stack dump for developers and
+// non-recoverable. Mobile needs user-facing messaging + recovery + expandable
+// technical details. They intentionally don't share code: they're separate
+// frontend packages with different recovery semantics.
 //
-// 样式全部内联 —— CSS / 字体 / 设计系统本身可能正是崩掉的那部分。
+// All styles are inlined — CSS/fonts/design system itself might be what crashed.
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { t } from "./i18n";
 
-/** 崩溃详情的可读文本。抽成纯函数是为了能被单测钉住 —— 这段文本是老板/我事后
- *  唯一能拿到的线索,格式退化(比如丢了 componentStack)不该悄悄发生。 */
+/** Readable text describing the crash. Extracted to a pure function so it can
+ *  be pinned by unit tests — this text is the only clue available afterward to
+ *  diagnose the issue. Format degradation (e.g., losing componentStack) should
+ *  never happen silently. */
 export function formatBoundaryDetail(
   error: Error,
   componentStack: string | null,
@@ -41,22 +51,28 @@ const BUTTON_STYLE = {
 } as const;
 
 interface Props {
-  /** 哪一块崩了。进标题也进 console —— 「决策卡 g1」比「出错了」有用得多。 */
+  /** Which piece crashed. Goes into the title and console — "decision card g1"
+   *  is way more useful than "error occurred". */
   label: string;
-  /** 它变化时自动清掉错误状态并重试渲染。
+  /** When this changes, automatically clear error state and retry rendering.
    *
-   *  这是「可恢复」的全部机制:决策卡传卡 id(翻到下一张自动好),tab 视图传 tab
-   *  名(切走再回来自动重试)。不做成让调用方写 `key=` 是刻意的 —— 那样一旦忘写,
-   *  错误状态就会粘在那儿,而「忘了」不该由用户承担。 */
+   *  This is the entire recovery mechanism: decision cards pass card id
+   *  (advancing to the next card auto-recovers), tab views pass tab name
+   *  (switching away and back auto-retries). We intentionally don't make
+   *  callers write `key=` themselves — if forgotten, the error state would
+   *  persist, and we shouldn't burden the caller with that forgetfulness. */
   resetKey?: string;
-  /** `screen` = 占满可用高度(整页/整 tab);`inline` = 一小块(单张卡片位置)。 */
+  /** `screen` = fill available height (full page/full tab); `inline` = small
+   *  piece (single card location). */
   variant?: "screen" | "inline";
-  /** 一条「离开这里」的出路,fallback 上多一个按钮。
+  /** An escape route — "leave here" — adding an extra button to the fallback.
    *
-   *  浮层那层必须给:浮层的 `HistoryLayer`(负责接系统返回键的那个)和内容是同一
-   *  块 JSX,一起被 fallback 替换掉,于是**返回键退不掉这个浮层** —— 实测过:关掉
-   *  新会话表单那一步,浮层状态没变、兜底一直挂着。而 iOS PWA 连系统返回键都没有,
-   *  只剩「重试」的话崩一次就把人困死在这儿。 */
+   *  Required when wrapping a modal layer: the modal's `HistoryLayer` (which
+   *  handles system back) and its content are the same JSX block, replaced
+   *  together by the fallback, so **the back button can't dismiss the modal**.
+   *  We've verified this: closing the new session form step, the modal state
+   *  doesn't change, the fallback stays. On iOS PWA there's no system back at all,
+   *  so if only "retry" is available, one crash traps the user. */
   onDismiss?: { label: string; run: () => void };
   children: ReactNode;
 }
@@ -64,7 +80,8 @@ interface Props {
 interface State {
   error: Error | null;
   componentStack: string | null;
-  /** 上一次渲染时的 resetKey。用它比对来实现自动恢复。 */
+  /** The resetKey from the previous render. Used to detect changes and
+   *  auto-recover. */
   seenKey?: string;
 }
 
@@ -77,7 +94,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
     if (state.seenKey !== props.resetKey) {
-      // resetKey 变了:换了另一张卡 / 另一个 tab,前一次的失败与这次无关。
+      // resetKey changed: switched to another card/tab, prior failure unrelated.
       return { seenKey: props.resetKey, error: null, componentStack: null };
     }
     return null;
@@ -85,7 +102,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     this.setState({ componentStack: info.componentStack ?? null });
-    // 有 DevTools 的人仍然拿得到原始对象。
+    // People with DevTools can still access the raw objects.
     console.error(`[${this.props.label}] render error:`, error, info);
   }
 
@@ -128,7 +145,8 @@ export class ErrorBoundary extends Component<Props, State> {
             </button>
           )}
         </div>
-        {/* 细节默认折叠:手机屏幕不该被堆栈占满,但它必须能被复制出来给我看。 */}
+        {/* Details collapsed by default: mobile screen shouldn't be consumed by
+            a stack trace, but it must be copyable for diagnosis. */}
         <details style={{ marginTop: 10 }}>
           <summary style={{ cursor: "pointer", fontSize: "12px", opacity: 0.8 }}>
             {t("技术细节")}

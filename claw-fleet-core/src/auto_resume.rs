@@ -378,7 +378,7 @@ pub fn spawn_resume(session_id: &str, workspace_path: &str) -> Result<(), String
 }
 
 /// [`spawn_resume`] with a caller-supplied follow-up prompt (the history
-/// panel's "恢复会话" box). Empty/whitespace prompts fall back to "continue".
+/// panel's "resume session" box). Empty/whitespace prompts fall back to "continue".
 /// `model` / `effort` / `permission_mode` mirror the new-session overrides and
 /// are passed through to the resumed `claude` invocation when non-blank.
 pub fn spawn_resume_prompt(

@@ -1,16 +1,20 @@
-// 一条 workspace proc 的命令怎么显示给桌面端的人看。
+// How to display a workspace proc's command to the desktop user.
 //
-// 独立成模块是因为**两个页面都要它**:终端页的标签条,和仓库页命令面板的执行记录。
-// 下面这两个函数依赖本包的 ProcRecord 与调用方传进来的 i18n 文案,所以留在本包;
-// 它们共同依赖的那个「是不是默认 shell」判断跨包共享给移动端,见 shared-ts/。
+// Separated into a module because **two pages need it**: the terminal page's
+// tab bar and the repo page's command panel execution history. The two functions
+// below depend on this package's ProcRecord and the i18n copy passed by the
+// caller, so they stay in this package; they both depend on a "is this the
+// default shell" check that is cross-package shared to the mobile client (see
+// shared-ts/).
 
 import type { ProcRecord } from "../types";
 import { isDefaultShellCommand } from "../../../shared-ts/procShell";
 
-// 本包内的调用点(和它的测试)不必知道这个判断来自包外。
+// Callers in this package (and their tests) need not know this check comes from outside.
 export { isDefaultShellCommand };
 
-/** 终端页标签用的短名:默认 shell → `shellLabel`,其余取第一个词再截断。 */
+/** Short name for terminal page tabs: default shell → `shellLabel`, others take
+ *  the first word and truncate. */
 export function procLabel(proc: ProcRecord, shellLabel: string): string {
   const cmd = proc.command.trim();
   if (isDefaultShellCommand(cmd)) return shellLabel;
@@ -18,9 +22,9 @@ export function procLabel(proc: ProcRecord, shellLabel: string): string {
   return head.length > 16 ? `${head.slice(0, 15)}…` : head;
 }
 
-/** 命令面板执行记录里显示的命令全文:默认 shell 换成 `shellLabel`,其余原样。
- *
- *  这里**不**截断 —— 命令面板的价值就在于看得见跑的到底是哪条命令。 */
+/** Full command text in the command panel execution history: default shell
+ *  becomes `shellLabel`, others stay as-is. This does NOT truncate here —
+ *  the value of the command panel is seeing exactly which command ran. */
 export function procCommandText(command: string, shellLabel: string): string {
   return isDefaultShellCommand(command) ? shellLabel : command;
 }

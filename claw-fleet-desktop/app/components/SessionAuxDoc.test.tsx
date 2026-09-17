@@ -7,8 +7,8 @@ import "../i18n";
 import { makeAuxDoc, type AuxDoc } from "../detailAux";
 import type { AuxCardTail } from "./auxDocMenu";
 
-// The four readers are the real 仓库 / 知识库 / 产出 panes; they reach for Tauri
-// the moment they mount. What is under test here is the *wiring* — which doc
+// The four readers are the real Files / Wiki / Outputs panes; they
+// reach for Tauri the moment they mount. What is under test here is the *wiring* — which doc
 // kind picks which reader, and that each one is handed the card's own ref and
 // its card-management tail — so stand them in.
 vi.mock("./FileTabPane", () => ({
@@ -81,7 +81,7 @@ describe("SessionAuxDoc", () => {
     expect(el.querySelector('[data-testid="wiki"]')?.textContent).toBe("arch/overview");
   });
 
-  it("gives a deliverable the 产出 reader, addressed by store id", () => {
+  it("gives a deliverable the Outputs reader, addressed by store id", () => {
     const el = render(doc("artifact", "20260909-080326", "9/8 对外更新日志"));
     expect(el.querySelector('[data-testid="artifact"]')?.textContent).toBe("20260909-080326");
   });
@@ -92,8 +92,8 @@ describe("SessionAuxDoc", () => {
   });
 
   // The tail is the rail's, not the reader's: a pane builds its menu from it,
-  // so a pane that never received it would render a card whose 关闭其他 / 全部关闭
-  // silently did nothing.
+  // so a pane that never received it would render a card whose "Close Others" / "Close All"
+  // buttons silently did nothing.
   it("hands the reader the card-management tail", () => {
     const el = render(doc("artifact", "20260909-080326"));
     expect(el.querySelector('[data-testid="artifact"]')?.getAttribute("data-others")).toBe("3");

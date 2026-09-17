@@ -66,8 +66,8 @@ export function DecisionCardsPanel({ stats }: { stats?: DecisionCardStats }) {
                     <span className={styles.dc_rate}>{pct(st.answered, st.triggered)}</span>
                   )}
                 </td>
-                {/* v3 任务终态。只有 fleet-ask 卡带得动终结按钮,别的类型这两个
-                    计数恒为 0 —— 那时候画一个 "0 / 0" 是噪音,留一个破折号。 */}
+                {/* v3 task terminal state. Only fleet-ask cards have the terminal button;
+                    other card types always have 0 for both counts — showing "0 / 0" would be noise. */}
                 <td>
                   {st.taskCompleted + st.taskAbandoned > 0 ? (
                     <>

@@ -14,24 +14,26 @@ export interface RelayPairing {
   secret: string;
 }
 
-/// 扫到的是「直连主机」那张码(桌面端「移动端」面板的第二张)。壳不持久化它 ——
-/// 页面自己有一本设备簿(mobile-web 的 devices.ts),壳只负责把这次扫到的原文
-/// 带进页面一次。
+/// QR code scanned is the "direct host" type (the second code on the desktop's
+/// "Mobile" panel). Shell doesn't persist it — the page keeps its own device book
+/// (mobile-web's devices.ts); shell just brings this scan's raw content into the
+/// page once.
 export interface DirectHostScan {
   baseUrl: string;
   token: string;
 }
 
-/// 一次扫码的结果:配对码,还是直连码。
+/// Result of one QR scan: pairing code or direct-host code.
 export interface ScanResult {
   pairing: RelayPairing | null;
   host: DirectHostScan | null;
 }
 
-/// 解析扫到的二维码。桌面端出两张码,形状都在 fragment 里:
-///   * `#k=<secret>`      —— 经中转配对(fragment 之前那半是 relay origin)
-///   * `#h=<addr>&t=<tok>` —— 直连一台 HTTP 主机
-/// 两者都不进请求行,所以密钥/token 不会落进任何服务端日志。
+/// Parse a scanned QR code. Desktop produces two types, both with shape in the
+/// fragment:
+///   * `#k=<secret>`      —— relay-mediated pairing (part before fragment is relay origin)
+///   * `#h=<addr>&t=<tok>` —— direct connect to HTTP host
+/// Neither enters the request line, so secrets/tokens never reach any server logs.
 export function parseScan(raw: string): ScanResult {
   const pairing = parsePairingUrl(raw);
   if (pairing !== null) {
@@ -40,8 +42,8 @@ export function parseScan(raw: string): ScanResult {
   return { pairing: null, host: parseDirectHostUrl(raw) };
 }
 
-/// 直连码:`…/#h=<encoded baseUrl>&t=<token>`。与 mobile-web 的
-/// `devices.ts::parseHostParam` 认的是同一个格式(那边有冻结向量的单测)。
+/// Direct-host code: `…/#h=<encoded baseUrl>&t=<token>`. Same format that
+/// mobile-web's `devices.ts::parseHostParam` recognizes (frozen-vector tests there).
 export function parseDirectHostUrl(raw: string): DirectHostScan | null {
   const trimmed = raw.trim();
   const hashIdx = trimmed.indexOf('#');
@@ -57,8 +59,8 @@ export function parseDirectHostUrl(raw: string): DirectHostScan | null {
       token = decodeURIComponent(part.substring(2));
     }
   }
-  // 只认绝对 https/http —— 手机上那个页面是 https 的,明文 http 会被浏览器拦掉
-  // (localhost 例外,但那台手机也访问不到)。
+  // Only accept absolute https/http — the page on phone is https, so plain http
+  // gets blocked by the browser (localhost is an exception, but phones can't reach it).
   if (!baseUrl.startsWith('https://') && !baseUrl.startsWith('http://')) {
     return null;
   }

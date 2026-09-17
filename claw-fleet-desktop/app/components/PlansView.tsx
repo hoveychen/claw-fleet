@@ -23,7 +23,7 @@ import styles from "./PlansView.module.css";
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Ordered session ids on a chain, derived from its links — mirrors the Rust
- *  `HandoffChain::session_ids`. Used for the 「接力 n 棒」 count. */
+ *  `HandoffChain::session_ids`. Used for the "relay leg N" count. */
 function chainLegCount(chain: HandoffChain): number {
   const ids: string[] = [];
   for (const l of chain.links) {
@@ -33,7 +33,7 @@ function chainLegCount(chain: HandoffChain): number {
   return ids.length;
 }
 
-/** Total plans in a subtree, for the 「已完成 N 个」 fold's count. */
+/** Total plans in a subtree, for the "Completed N" fold's count. */
 function subtreeSize(node: PlanNode): number {
   return 1 + node.children.reduce((n, c) => n + subtreeSize(c), 0);
 }
@@ -50,7 +50,7 @@ function flatten(roots: PlanNode[], out: PlanNode[] = []): PlanNode[] {
 // ── Root view ────────────────────────────────────────────────────────────────
 
 /**
- * 计划树 — a workspace's plans as a progress matrix: one row per plan, one cell
+ * Plan tree — a workspace's plans as a progress matrix: one row per plan, one cell
  * per P-task, columns aligned so you can read across rows. Server-side join
  * lives in `claw_fleet_core::plan_forest`; this view only orders and paints it.
  *

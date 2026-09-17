@@ -1,7 +1,7 @@
-// 单个仓库详情：main 分支的推送状态(未推 / 落后 / 脏文件)、每个 worktree 的
-// 「漏活」明细(未合并回 main 的提交数、脏文件、最后提交时间)、最近提交列表，
-// 以及 push / pull 按钮(带二次确认，执行后显示 git 输出并刷新)。数据经 relay
-// 的 repo_detail / repo_push / repo_pull 打到 git_ops.rs。
+// Single repository detail view: main branch push status (unpushed / behind /
+// dirty files), per-worktree detail (unmerged commits, dirty files, last commit
+// time), recent commit list, and push / pull buttons (with confirmation, showing
+// git output after). Data flows via relay's repo_detail / repo_push / repo_pull.
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -25,7 +25,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "push" | "pull">(null);
   const [opResult, setOpResult] = useState<{ ok: boolean; output: string } | null>(null);
-  // Whether the main checkout's "脏 N" badge is expanded into its file list.
+  // Whether the main checkout's "dirty N" badge is expanded into its file list.
   const [showMainFiles, setShowMainFiles] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -72,7 +72,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
 
         {!error && detail && (
           <>
-            {/* ── 分支 / 推送状态 ── */}
+            {/* ── Branch / push status ── */}
             <div className={styles.section}>
               <div className={styles.sectionLabel}>{t("当前分支")}</div>
               <div className={styles.card}>
@@ -83,8 +83,9 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
                   </span>
                 </div>
                 <div className={styles.divider} />
-                {/* 远端地址：只读。URL 比这一行宽得多，所以让它自己换行而不是
-                    把右侧挤没（rowValue 是 flex-shrink: 0 的）。 */}
+                {/* Remote URL: read-only. URLs are much wider than this row, so
+                    let it wrap rather than squeeze out the right side
+                    (rowValue has flex-shrink: 0). */}
                 <div className={styles.row}>
                   <span className={styles.rowLabel}>{t("远端地址")}</span>
                   <span className={styles.remoteValue}>
@@ -173,7 +174,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
               )}
             </div>
 
-            {/* ── 最近提交 ── */}
+            {/* ── Recent commits ── */}
             <div className={styles.section}>
               <div className={styles.sectionLabel}>{t("最近提交")}</div>
               {detail.commits.length === 0 ? (
@@ -264,7 +265,7 @@ function WorktreeRow({ wt }: { wt: WorktreeHealth }) {
 }
 
 /** Read-only list of uncommitted files (path + one-char status code). Mobile
- *  has no file tree, so — unlike the desktop 文件 tab — entries are display-only. */
+ *  has no file tree, so — unlike the desktop Files tab — entries are display-only. */
 function DirtyFileList({ files }: { files: DirtyFile[] }) {
   return (
     <ul className={styles.dirtyFiles}>

@@ -1,15 +1,18 @@
-/// 端侧语音识别 —— mobile-web/src/voiceHarmony.ts 的原生一端。
+/// On-device speech recognition — the native side of mobile-web/src/voiceHarmony.ts.
 ///
-/// 走 Core Speech Kit 的 speechRecognizer：模型内置在系统里，离线可用、免费、
-/// 无配额。这是鸿蒙端相对另外两条 provider 的优势（Web Speech 要把音频发去厂商
-/// 服务器，Android 那条依赖 GMS）。
+/// Uses the Core Speech Kit's speechRecognizer: the model is built into the system,
+/// works offline, is free, and has no quota. This is the advantage of HarmonyOS
+/// relative to the other two providers (Web Speech sends audio to vendor servers,
+/// Android depends on GMS).
 ///
-/// 代价是**只识别中文**：Core Speech Kit 官方明确仅支持中文，英文/日文要另接
-/// 第三方云 SDK。而 Fleet 的语音内容天然中英混排（「合一下 worktree」），所以
-/// 英文标识符的识别质量是这条路已知的短板，不是可以修的 bug。
+/// The trade-off is **Chinese only**: Core Speech Kit officially supports Chinese
+/// only; English/Japanese require a third-party cloud SDK. Since Fleet's voice
+/// content is naturally mixed Chinese/English (「merge a worktree」), the recognition
+/// quality of English identifiers is a known limitation, not a bug we can fix.
 ///
-/// `recognitionMode: 0` 让引擎**自己采集麦克风**，我们不必接 AudioCapturer 自己
-/// 喂 PCM（那条路要按 640/1280 字节切块 writeAudio，代码量大得多）。
+/// `recognitionMode: 0` lets the engine **capture the microphone itself**, so we
+/// don't need to hook AudioCapturer and feed PCM manually (that path requires
+/// splitting by 640/1280 bytes per writeAudio call, much more code).
 
 import { speechRecognizer } from '@kit.CoreSpeechKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
@@ -20,50 +23,53 @@ const DOMAIN = 0x0000;
 const TAG = 'fleet-asr';
 const MIC: Permissions = 'ohos.permission.MICROPHONE';
 
-/// 引擎参数。取值来自 SDK 的 @hms.ai.speechRecognizer.d.ts 与官方示例：
-/// audioType 目前只支持 pcm，且必须 16kHz / 16bit / 单声道。
+/// Engine parameters. Values from SDK @hms.ai.speechRecognizer.d.ts and official examples:
+/// audioType currently supports only pcm, and must be 16kHz / 16bit / mono.
 const SAMPLE_RATE = 16000;
 const SAMPLE_BIT = 16;
 const CHANNEL = 1;
-/// online 字段：0 = 在线，1 = 离线。我们要离线那条。
+/// online field: 0 = online, 1 = offline. We want offline.
 const OFFLINE = 1;
 
 export interface AsrCallbacks {
-  /// 引擎真的开始收音了。createEngine 是异步的，这之前用户说的话全丢，
-  /// 所以页面必须等到这一声才敢说「正在听」。
+  /// Engine is actually recording. createEngine is async, so speech before that
+  /// is lost; the page must wait for this callback before saying "listening".
   onReady: () => void;
   onText: (text: string, isFinal: boolean) => void;
   onError: (code: string) => void;
-  /// 引擎自己收工了（VAD 判定说完了、或到了 maxAudioDuration）。
+  /// Engine has finished (VAD determined speech is done, or maxAudioDuration reached).
   onComplete: () => void;
 }
 
-/// 一次识别的持有者。壳里只需要一个实例。
+/// Holder for a single recognition session. The shell needs only one instance.
 export class SpeechAsr {
   private engine: speechRecognizer.SpeechRecognitionEngine | null = null;
   private sessionId: string = '';
-  /// 每次 start / cancel 换一代号。
+  /// A new generation number on each start / cancel call.
   ///
-  /// 不能用一个 `dead` 布尔:start() 里有两段 await(申请权限、创建引擎),而
-  /// **申请权限那段几乎必然会被取消打断** —— 系统权限框一弹就抢走焦点,页面上
-  /// 那次按压随之收到 pointercancel,web 侧于是 cancel()。布尔版本里 cancel 设的
-  /// `dead=true` 会被那个还在 await 的 start() 一行 `dead=false` 重置掉,于是用户
-  /// 点完「允许」引擎照常开录,而页面早已把 `window.__fleetVoice` 拆了,结果推回去
-  /// 只剩 NO_HOOK —— 表现就是「弹过一次权限之后,怎么按都不出字」,而麦克风还占着
-  /// 到 maxAudioDuration。代号是单调递增的,晚到的那一轮改不动它。
+  /// Can't use a single `dead` boolean: start() has two awaits (request permission,
+  /// create engine), and **the permission request will almost certainly be cancelled
+  /// mid-wait** — the system permission dialog takes focus, the page receives
+  /// pointercancel on the press, and the web side calls cancel(). With a boolean,
+  /// cancel() sets `dead=true`, but that still-running start() resets it to
+  /// `dead=false`, so after the user taps "allow" the engine still starts recording
+  /// even though the page already tore down `window.__fleetVoice`, yielding only
+  /// NO_HOOK — the symptom is "after the permission dialog, nothing comes out no
+  /// matter how you tap" while the microphone stays locked until maxAudioDuration.
+  /// Generation numbers are monotonic, so a late round can't change an earlier one.
   ///
-  /// 下面 voice-diag 日志里的 `stale=yes` 就是「这一轮已经被作废」,也即原先那条
-  /// 路径留下的痕迹。
+  /// The `stale=yes` in voice-diag logs below marks "this round is superseded",
+  /// the trail left by the earlier path.
   private gen: number = 0;
-  /// 引擎还没建好就被要求停止。见 stop()。
+  /// Engine not yet built when stop is requested. See stop().
   private pendingStop: boolean = false;
 
-  /// 申请麦克风权限。已授权时直接过，用户拒过则返回 false。
+  /// Request microphone permission. Returns true if already granted; false if user rejected.
   private async ensureMic(ctx: common.UIAbilityContext): Promise<boolean> {
     try {
       const mgr = abilityAccessCtrl.createAtManager();
       const res = await mgr.requestPermissionsFromUser(ctx, [MIC]);
-      // 0 = 已授权。数组与请求的权限一一对应，这里只请求了一个。
+      // 0 = already authorized. Array maps to requested permissions one-to-one; we request one.
       return res.authResults.length > 0 && res.authResults[0] === 0;
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'mic permission request failed: %{public}s', JSON.stringify(e));
@@ -71,16 +77,20 @@ export class SpeechAsr {
     }
   }
 
-  /// 二次授权：用户已经拒过一次，把系统的权限面板重新拉起来。
+  /// Second-time authorization: user already rejected once, so bring up the
+  /// system settings panel again.
   ///
-  /// 为什么需要单独一个入口：`requestPermissionsFromUser` 在用户拒绝过之后
-  /// **不再弹窗**，直接返回拒绝。页面上那句「请在系统设置里允许」于是成了死路
-  /// —— 用户既不知道去哪开，我们也没办法把他送过去。`requestPermissionOnSetting`
-  /// 是官方给的这条路，而且直接在应用内弹系统面板，不用跳出去翻设置。
+  /// Why a separate entry: after user rejection, `requestPermissionsFromUser`
+  /// **stops prompting** and just returns denial. The page's "please allow in
+  /// system settings" becomes a dead end — user doesn't know where to go, and
+  /// we can't send them there. `requestPermissionOnSetting` is the official
+  /// path for this, and it opens the system panel in-app without leaving settings.
   ///
-  /// 两个「异常其实是正常结果」的分支（错误码见 @ohos.abilityAccessCtrl.d.ts）：
-  ///   - 12100011 全部权限都已授权 —— 那就是已经好了，报 true。
-  ///   - 12100012 用户从没拒过 —— 这个 API 不受理，退回普通申请去弹第一次的框。
+  /// Two branches that are "exceptions that are normal results"
+  /// (error codes in @ohos.abilityAccessCtrl.d.ts):
+  ///   - 12100011 all permissions already granted — already ok, return true.
+  ///   - 12100012 user never rejected — API refuses this, fall back to the
+  ///     normal request to prompt the first dialog.
   async requestOnSetting(ctx: common.UIAbilityContext): Promise<boolean> {
     const mgr = abilityAccessCtrl.createAtManager();
     try {
@@ -95,15 +105,17 @@ export class SpeechAsr {
     }
   }
 
-  /// 开始识别。`lang` 形如 `zh-CN`。
+  /// Start recognition. `lang` is like `zh-CN`.
   async start(ctx: common.UIAbilityContext, lang: string, cb: AsrCallbacks): Promise<void> {
-    // 诊断用的时间线（计划 harmony-voice-diag）。「弹了权限却一个字都出不来」有
-    // 四条互相长得一样的可能路径，光看界面分不出来；这几行把它们分开：
-    //   permission 花了多久（>1s 基本就是弹了窗，说明用户那一刻手指必然离开了按钮）
-    //   createEngine 花了多久（用户开口早于引擎就绪，前半句会丢）
-    //   startListening 有没有发出去、之后有没有回调
-    // 开头就占号:这一轮之后的每一次 await 都要拿它跟当前代号比,不一致说明调用方
-    // 已经不要这次识别了。
+    // Timeline for diagnostics (planned as harmony-voice-diag). "Permission dialog
+    // appeared but no text comes out" has four similar possible paths that look the
+    // same on the UI; these lines tell them apart:
+    //   permission cost in ms (>1s basically means dialog appeared, proving the
+    //     user's finger left the button at that moment)
+    //   createEngine cost (user spoke before engine was ready, first part is lost)
+    //   startListening was sent and got a callback
+    // Claim a gen at the start: every subsequent await compares gen to the current
+    // one; mismatch means the caller doesn't want this recognition anymore.
     const gen = ++this.gen;
     this.pendingStop = false;
     const t0 = Date.now();
@@ -116,19 +128,21 @@ export class SpeechAsr {
       cb.onError('PERMISSION_DENIED');
       return;
     }
-    // 等权限的这段时间里被取消了 —— **绝不能**继续往下走。往下一步就是真的开录,
-    // 而页面那边的回调 hook 早已拆掉,录到的东西没有任何出口。
+    // Cancelled while waiting for permission — **must not** continue down.
+    // The next step is actual recording, but the page's callback hook is already torn down,
+    // so there's no outlet for what gets recorded.
     if (gen !== this.gen) {
       hilog.info(DOMAIN, TAG, 'voice-diag abandoned after permission cost=%{public}dms', Date.now() - t0);
       return;
     }
-    // sessionId 每次换新:引擎按它区分回调归属,复用会让上一轮的尾巴混进来。
+    // New sessionId each time: the engine distinguishes callback ownership by it;
+    // reuse would let the tail of the previous round bleed in.
     this.sessionId = `fleet-${Date.now()}`;
     const session = this.sessionId;
 
     try {
-      // 引擎可以复用，但语言是 createEngine 时定死的，而调用方可能换语言，
-      // 所以每次重建。shutdown 在 stop/cancel 里做。
+      // Engine can be reused, but language is fixed at createEngine time; if the caller
+      // changes language, we rebuild. Shutdown happens in stop/cancel.
       if (this.engine !== null) {
         this.engine.shutdown();
         this.engine = null;
@@ -141,8 +155,8 @@ export class SpeechAsr {
       const engine = await speechRecognizer.createEngine(createParams);
       hilog.info(DOMAIN, TAG, 'voice-diag createEngine ok cost=%{public}dms stale=%{public}s',
         Date.now() - tEngine, gen !== this.gen ? 'yes' : 'no');
-      // 端侧模型的加载也要时间,这段里同样可能被取消。引擎已经建出来了,得还回去,
-      // 否则它一直占着麦克风。
+      // On-device model loading takes time too; can be cancelled here as well. Engine
+      // is already built, so we must shut it down, otherwise it keeps the mic locked.
       if (gen !== this.gen) {
         engine.shutdown();
         return;
@@ -150,9 +164,9 @@ export class SpeechAsr {
       this.engine = engine;
 
       engine.setListener({
-        // onStart 是引擎说「麦克风真的开了」的那一刻，页面据此把「准备中」推进
-        // 「正在听」。createEngine 要加载端侧模型，这中间的空窗真实存在，用户在
-        // 那段里说的话不会进任何结果。
+        // onStart is when the engine announces "mic is really on"; the page advances
+        // from "preparing" to "listening". createEngine loads the on-device model,
+        // and there's a real gap; speech during that window won't enter results.
         onStart: (sid: string, _msg: string) => {
           hilog.info(DOMAIN, TAG, 'voice-diag engine onStart cost=%{public}dms', Date.now() - t0);
           if (gen !== this.gen || sid !== session) { return; }
@@ -162,7 +176,7 @@ export class SpeechAsr {
           hilog.info(DOMAIN, TAG, 'voice-diag engine event code=%{public}d', code);
         },
         onResult: (sid: string, result: speechRecognizer.SpeechRecognitionResult) => {
-          // 丢弃也要留痕：dead=yes 正是「页面已放弃、引擎还在录」那条路径的证据。
+          // Discard with breadcrumbs: stale=yes proves "page gave up, engine is still recording".
           hilog.info(DOMAIN, TAG, 'voice-diag result final=%{public}s len=%{public}d stale=%{public}s match=%{public}s',
             result.isFinal ? 'yes' : 'no', result.result.length,
             gen !== this.gen ? 'yes' : 'no', sid === session ? 'yes' : 'no');
@@ -188,12 +202,14 @@ export class SpeechAsr {
         soundChannel: CHANNEL,
         sampleBit: SAMPLE_BIT,
       };
-      // recognitionMode 0 = 引擎自采麦克风。vadEnd 是「静默多久算说完」。
+      // recognitionMode 0 = engine captures mic itself. vadEnd is "how much silence
+      // means speech is done".
       //
-      // 5 秒而不是 3 秒：官方按场景给的建议就是命令词 2 秒、**听写 5 秒**，而
-      // Fleet 的语音是听写 —— 对着手机想下一句话停三秒是常事，短了引擎就自己
-      // 收工，用户接着说的那半段根本没进这次会话。宁可多等两秒（用户随时可以
-      // 按停止），也不要把一段话拦腰截断。
+      // 5 seconds not 3: official guidance per scenario is 2s for commands, **5s for
+      // dictation**, and Fleet's voice is dictation — pausing 3s while thinking of
+      // the next sentence is normal. Too short and the engine finishes on its own,
+      // losing what the user says next. Better to wait an extra 2 seconds (user can
+      // tap stop anytime) than cut a sentence in half.
       const extra: Record<string, Object> = {
         'recognitionMode': 0,
         'vadBegin': 2000,
@@ -207,9 +223,9 @@ export class SpeechAsr {
       };
       engine.startListening(startParams);
       hilog.info(DOMAIN, TAG, 'voice-diag startListening issued cost=%{public}dms', Date.now() - t0);
-      // 引擎还没就绪时用户就按了停止 —— 那一下没有引擎可停,只留了个标记,补在这里。
-      // 少了这一步,那次停止就是空操作:页面已经复位,引擎却刚开始录,一直录到
-      // maxAudioDuration 才收工。
+      // User tapped stop before engine was ready — no engine to stop yet, just left
+      // a flag here. Without this, that stop is a no-op: page resets while engine
+      // just started recording, locks until maxAudioDuration.
       if (this.pendingStop) {
         this.pendingStop = false;
         hilog.info(DOMAIN, TAG, 'voice-diag deferred stop applied');
@@ -222,14 +238,16 @@ export class SpeechAsr {
     }
   }
 
-  /// 正常收尾：让引擎把最后一段定稿吐出来（onResult isFinal）再收工。
+  /// Normal wrap-up: let engine emit the final segment (onResult isFinal) then finish.
   stop(): void {
-    // engine=null 时这一下就是空转 —— 页面以为收了尾，实际引擎要么还没建起来
-    // （随后照样会开始录音），要么早已收工。两种都得看得见。
+    // engine=null is a no-op — page thinks it's wrapped up, but the engine either
+    // hasn't been built yet (will start recording anyway) or already finished.
+    // Both need to be visible.
     hilog.info(DOMAIN, TAG, 'voice-diag stop engine=%{public}s', this.engine === null ? 'null' : 'live');
     if (this.engine === null) {
-      // 引擎还在建(createEngine 要加载端侧模型,不是瞬时的)。记下来,start 走到
-      // 底会替我们停 —— 否则这一下就是空转,页面已经复位而引擎随后照样开录。
+      // Engine still building (createEngine loads the on-device model, not instant).
+      // Mark it; start() will stop for us at the bottom — otherwise this is a no-op:
+      // page resets while engine soon starts recording anyway.
       this.pendingStop = true;
       return;
     }
@@ -240,12 +258,13 @@ export class SpeechAsr {
     }
   }
 
-  /// 丢弃这次识别。之后引擎补的回调都不再上报。
+  /// Discard this recognition. Subsequent engine callbacks are not reported.
   cancel(): void {
-    // 代号一换,进行中的那次 start 走到下一个检查点就会自己放弃(原先它只置一个
-    // dead 布尔,而 start 拿到权限后又把它置回 false —— 那正是「权限弹窗期间页面
-    // 取消了、原生却照常开录」这条路径)。这行日志配上 start 那边的 permission
-    // cost，仍然能在真机上把这条路径认出来。
+    // Bump gen and the in-flight start() abandons at the next checkpoint
+    // (before we only had a dead boolean, and start() reset it to false after
+    // getting permission — that's the "page cancelled during permission dialog,
+    // but recording still starts" path). This log paired with permission cost
+    // from start() still lets us identify the path on real hardware.
     hilog.info(DOMAIN, TAG, 'voice-diag cancel engine=%{public}s', this.engine === null ? 'null' : 'live');
     this.gen++;
     this.pendingStop = false;
@@ -259,7 +278,7 @@ export class SpeechAsr {
     this.engine = null;
   }
 
-  /// 引擎自己收工之后释放资源。留着不放会一直占着麦克风。
+  /// Release resources after engine finishes. Leaving it live keeps the mic locked.
   release(): void {
     if (this.engine === null) { return; }
     try {

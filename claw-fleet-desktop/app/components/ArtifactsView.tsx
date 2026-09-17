@@ -294,10 +294,10 @@ export function dragSet(
  * A folder row's drop-zone key, and how to read one back.
  *
  * The key carries the workspace as well as the path because a folder only
- * exists *within* a workspace — the tree's top level is the workspace, and
- * "交付" under repo A is a different place from "交付" under repo B. Dropping
- * across workspaces is refused (see `dropTargetFolder`) rather than silently
- * re-homing a deliverable to a repo it did not come from.
+ * exists *within* a workspace—the tree's top level is the workspace, and
+ * "Artifacts" under repo A is a different place from "Artifacts" under repo B.
+ * Dropping across workspaces is refused (see `dropTargetFolder`) rather than
+ * silently re-homing a deliverable to a repo it did not come from.
  *
  * Same `data-` attribute mechanism the wiki's folder rail uses: `dropTargetAt`
  * hit-tests for the nearest ancestor carrying it, so a nested row naturally
@@ -340,7 +340,7 @@ export function dropTargetFolder(
  *
  * Shift extends from the anchor and only ever *adds*: a shift-click that
  * silently deselected what you already had checked would be a data-loss
- * gesture right next to a 批量删除 button.
+ * gesture right next to a "Batch Delete" button.
  */
 export function nextSelection(
   current: ReadonlySet<string>,
@@ -599,9 +599,9 @@ export function ArtifactsView() {
   /**
    * Drop anything checked that is no longer on screen.
    *
-   * Otherwise narrowing the filter and hitting 批量删除 would delete artifacts
-   * the user can't see — the checkbox count would say 5 while the list showed
-   * 2. Keyed on the visible ids so it also survives a reload that removed one.
+   * Otherwise narrowing the filter and hitting "Batch Delete" would delete
+   * artifacts the user can't see—the checkbox count would say 5 while the list
+   * showed 2. Keyed on the visible ids so it also survives a reload that removed one.
    */
   const shownIds = useMemo(() => shown.map((a) => a.id), [shown]);
   useEffect(() => {
@@ -677,7 +677,7 @@ export function ArtifactsView() {
     const items = checkedItems;
     // Everything in one batch shares a destination, so one prompt. The path is
     // normalized (and refused) server-side, so a typo comes back as an error
-    // rather than creating a folder named "  交付 / ".
+    // rather than creating a folder named "  deliverables / ".
     const target = window.prompt(
       t("artifacts.batch_move_prompt", "把选中的 {{count}} 份移动到哪个文件夹？（留空＝工作区根目录）", {
         count: items.length,
@@ -697,7 +697,7 @@ export function ArtifactsView() {
     const names = uniqueExportNames(items.map((a) => a.name));
     // A tab cannot be handed a destination directory, so it falls back to the
     // browser's own download folder, one file at a time — same split the
-    // single-artifact 导出 already makes.
+    // single-artifact export already makes.
     if (isWebBuild()) {
       await runBatch(items, (a, i) => downloadArtifact(a.id, names[i]));
       return;
@@ -1891,7 +1891,7 @@ export interface StageItem {
  * the feature is doing something it is not.
  *
  * Selecting a row previews *that* version in the stage above without changing
- * what is stored; 恢复 is the separate, explicit act. That split matters:
+ * what is stored; restore is the separate, explicit act. That split matters:
  * looking at an old version is how you decide whether you want it back.
  */
 function ArtifactVersions({

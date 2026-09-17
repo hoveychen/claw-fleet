@@ -335,7 +335,7 @@ pub fn read_scratchpad_file(
 //
 // Agents constantly name paths that belong to no workspace — `/tmp/report.md`
 // they just wrote, a file under another repo, something in `~/Downloads`. The
-// 文件 page can't show those: its whole navigation model is a workspace root
+// "文件" (File Explorer) page can't show those: its whole navigation model is a workspace root
 // plus a relative path, and `validate_workspace` rejects the rest. Clicking
 // such a path used to do nothing at all.
 //
@@ -386,7 +386,7 @@ pub fn read_external_file(path: &str) -> Result<ExplorerFileContent, String> {
 /// Where a prose path landed, and everywhere it was looked for.
 ///
 /// `tried` exists so a failed preview can say *which* paths came up empty. The
-/// old failure state showed one constructed path and 「读取文件失败」, which
+/// old failure state showed one constructed path and a generic error, which
 /// hid the one fact that explains it: the path on screen was a guess, and it
 /// was the only guess made.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -617,7 +617,7 @@ pub(crate) fn resolve_validated_root(
 
 /// The full set of directories the explorer may browse: the workspaces the
 /// backend derived from session transcripts, plus the ones the user added by
-/// hand or cloned from the 仓库 page ([`crate::browse_paths`]).
+/// hand or cloned from the "仓库" (Repository) page ([`crate::browse_paths`]).
 ///
 /// Backends call this to build the `known_workspaces` argument the entry points
 /// above take, so both halves of the boundary are decided server-side — a
@@ -821,7 +821,7 @@ mod tests {
         assert!(err.contains("not a known session workspace"), "got: {err}");
     }
 
-    /// Regression: a repo cloned from the 仓库 page has no sessions of its own,
+    /// Regression: a repo cloned from the 仓库 (Repository) page has no sessions of its own,
     /// so the session-derived list can never contain it and the file tree
     /// answered "workspace is not a known session workspace" — indistinguishable
     /// from a failed clone. Once the backend has recorded the clone destination
@@ -1008,7 +1008,7 @@ mod tests {
     }
 
     /// Nothing resolves — the caller still gets every path that was looked at,
-    /// which is what turns 「读取文件失败」 into something self-diagnosing.
+    /// which is what turns a generic error into something self-diagnosing.
     #[test]
     fn prose_path_reports_every_candidate_when_none_exist() {
         let (_tmp, ws, _) = prose_fixture();
@@ -1036,7 +1036,7 @@ mod tests {
     /// this reader verbatim (`pathLinks.tsx` deliberately leaves `~` alone,
     /// because the *other* consumer — `reveal_path` — expands it host-side).
     /// So a tilde path arriving here is the normal case, not a malformed one,
-    /// and rejecting it as "not absolute" painted 读取文件失败 on a file that
+    /// and rejecting it as "not absolute" produced an error on a file that
     /// exists and is readable.
     #[test]
     fn external_read_expands_a_leading_tilde_like_reveal_path_does() {

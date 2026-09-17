@@ -869,7 +869,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             .join("\n");
           // Icon + label follow the task type when the session is waiting on a
           // single kind (the common case). A monitor reads as 👁️, a shell as ⏳,
-          // etc. Mixed kinds fall back to the generic ⏳ so a "监视中 2" can never
+          // etc. Mixed kinds fall back to the generic ⏳ so a "watching 2" can never
           // mislabel a monitor+shell pair.
           const kinds = new Set(tasks.map((bt) => bt.type));
           const kind = kinds.size === 1 ? [...kinds][0] : "mixed";

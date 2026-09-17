@@ -15,33 +15,34 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 const DOMAIN_W = 0x0000;
 const TAG_W = 'fleet';
 
-/// 鸿蒙端的 WebView 外壳：把打包进 rawfile 的 mobile-web 跑起来，原生只做
-/// 三件 web 做不到的事（配对密钥注入、安全区、后续的推送）。
+/// Harmony-side WebView shell: runs mobile-web bundled into rawfile; native handles only
+/// three things the web can't (pairing key injection, safe area, push notifications).
 ///
-/// 为什么是假域名而不是 resource://rawfile/ —— 后者 HTML 能加载、相对路径也
-/// 解析对，但子资源取不到内容，且 onInterceptRequest 不接管内置 scheme（两者
-/// 都是真机实测出来的，不是查文档）。https 而非 http 也是硬性的：mobile-web
-/// 的 relayCrypto 依赖 crypto.subtle，Web Crypto 只在安全上下文可用。
+/// Why a fake domain instead of resource://rawfile/ — the latter loads HTML fine and
+/// resolves relative paths correctly, but subresources fail and onInterceptRequest doesn't
+/// intercept built-in schemes (both verified on real devices, not from docs). HTTPS not HTTP
+/// is also mandatory: mobile-web's relayCrypto depends on crypto.subtle, which only works
+/// in secure contexts.
 const ORIGIN = 'https://fleet.local/';
-/// 分享进来的文件挂在这个前缀下，与 rawfile 里的站点资源区分开。
+/// Incoming shared files mounted under this prefix, separated from site resources in rawfile.
 const SHARED_PREFIX = '__shared/';
 
-/// 交给 web 的文件条目，字段名对齐 shareTarget.ts 的 SharedFile。
+/// File entry passed to web, field names aligned with shareTarget.ts::SharedFile.
 interface SharedFileEntry {
   uri: string;
   name: string;
   mimeType: string;
 }
 
-/// __fleetShare 的载荷，形状对齐 shareTarget.ts 的 IncomingShare。
+/// Payload for __fleetShare, shape aligned with shareTarget.ts::IncomingShare.
 interface SharePayload {
   title: string;
   texts: string[];
   files: SharedFileEntry[];
 }
 
-/// __fleetVoice 的载荷，形状对齐 voiceHarmony.ts 的 HarmonyVoiceEvent。
-/// 五种事件走同一个通道:引擎就绪、中间结果、定稿、出错、引擎自己收工。
+/// Payload for __fleetVoice, shape aligned with voiceHarmony.ts::HarmonyVoiceEvent.
+/// Five event types on one channel: ready, partial result, final, error, engine stop.
 interface VoiceEvent {
   kind: string;
   text: string;
@@ -49,17 +50,17 @@ interface VoiceEvent {
 }
 
 
-/// 暴露给页面的原生桥。只放 web 在 WebView 里确实做不到的事——每多一个方法，
-/// mobile-web 就多一分「为鸿蒙写分支」的压力，而那正是我们要消灭的漂移。
+/// Native bridge exposed to the page. Only include what the web truly cannot do in WebView—
+/// every added method pressures mobile-web to write Harmony branches, exactly the drift we want to eliminate.
 class NativeBridge {
   private ctx: common.UIAbilityContext;
-  /// 页面请求扫码时回调进页面组件（扫码要动组件状态:src / pairError）。
+  /// Callback when page requests barcode scan; updates component state (src / pairError).
   private onScanRequested: () => void;
-  /// 语音识别的事件出口。由页面组件传进来 —— 事件要经 controller.runJavaScript
-  /// 送回页面，而 controller 住在组件上。
+  /// Speech recognition event exit. Passed in by page component — events go back to the page
+  /// via controller.runJavaScript, and the controller lives on the component.
   private onVoiceEvent: (json: string) => void;
-  /// 二次授权的结果出口。与 onVoiceEvent 同理:要经 controller.runJavaScript
-  /// 送回页面,而 controller 住在组件上。
+  /// Result exit for re-authorization. Like onVoiceEvent: goes back via controller.runJavaScript,
+  /// controller lives on the component.
   private onVoicePermission: (granted: boolean) => void;
   private asr: SpeechAsr = new SpeechAsr();
 
@@ -75,41 +76,42 @@ class NativeBridge {
     this.onVoicePermission = onVoicePermission;
   }
 
-  /// WebView 里 <a download> / createObjectURL 不会触发系统下载，交给
-  /// DocumentViewPicker 让用户选位置落盘。
+  /// <a download> / createObjectURL in WebView don't trigger system downloads;
+  /// use DocumentViewPicker to let the user choose save location.
   saveFile(filename: string, base64: string): void {
     saveBase64File(this.ctx, filename, base64).catch(() => {});
   }
 
-  /// 唤起扫码添加设备。壳自己的配对页只在**尚未配对**时可达（build() 只在
-  /// src 为空时画它），所以装了 app 的用户没有第二个入口去加第二台机器 ——
-  /// 而那是多设备最主要的入口。这里把扫码暴露给页面，页面在设备列表里给出
-  /// 一行「扫码添加设备」（mobile-web 的 nativeScan.ts）。
+  /// Trigger barcode scan to add device. The shell's pairing page is only reachable when
+  /// **not yet paired** (build() only draws it when src is empty), so installed users have no
+  /// second way to add a second device—which is the main multi-device entry. Here we expose
+  /// scan to the page, which renders "Scan to add device" in its device list (mobile-web::nativeScan.ts).
   ///
-  /// 回调交给随后那次 WebView 重载：扫到之后走 loadPairing(true)，注入新的
-  /// `#k=`，web 侧照常把它收成一台新设备。
+  /// Callback runs on the next WebView reload: after scan, call loadPairing(true) to inject
+  /// a new `#k=`; the web side treats it as a new device as usual.
   scanPairing(): void {
     this.onScanRequested();
   }
 
-  /// navigator.wakeLock 在 ArkWeb 未必可用；不可用时页面回退调这里。
+  /// navigator.wakeLock may not be available in ArkWeb; page falls back to this when it's not.
   keepAwake(on: boolean): void {
     setKeepScreenOn(this.ctx, on);
   }
 
-  /// navigator.share 的原生一端，转调 ShareKit 拉起系统分享面板。
+  /// Native side of navigator.share, calls ShareKit to bring up system share sheet.
   shareContent(filename: string, mimeType: string, base64: string): void {
     shareFile(this.ctx, filename, mimeType, base64).catch(() => {});
   }
 
-  /// 语音输入的原生一端（mobile-web 的 voiceHarmony.ts）。ArkWeb 里 Web Speech
-  /// API 不可用，页面拿不到任何识别能力，只能由壳提供。
+  /// Native side of voice input (voiceHarmony.ts in mobile-web). Web Speech API is unavailable
+  /// in ArkWeb, so the page has no recognition capability and must rely on the shell.
   ///
-  /// 结果**不走返回值**：识别是流式的，一次说话要吐多条中间结果和一条定稿，
-  /// 而 javaScriptProxy 的方法是一问一答。所以这里只管「开始」，结果经
-  /// window.__fleetVoice 推回页面 —— 与 __fleetShare / __fleetPushToken 同一套
-  /// 约定，只是不需要 bootScript 占位：语音事件只在用户按下按钮之后才产生，
-  /// 那时页面的 hook 早就注册好了，不存在冷启动赛跑。
+  /// Results do **not go through return values**: recognition is streaming (one utterance yields
+  /// multiple interim results and one final), but javaScriptProxy methods are request-response.
+  /// Here we only handle "start"; results flow back to the page via window.__fleetVoice—same
+  /// contract as __fleetShare / __fleetPushToken, except no bootScript placeholder needed:
+  /// voice events only happen after the user presses a button, when the page hook is already
+  /// registered, so there's no cold-start race.
   startVoice(lang: string): void {
     this.asr.start(this.ctx, lang, {
       onReady: () => {
@@ -125,8 +127,8 @@ class NativeBridge {
         this.onVoiceEvent(JSON.stringify(ev));
       },
       onComplete: () => {
-        // 引擎自己收工（VAD 判定说完了，或到了 maxAudioDuration）。资源要还，
-        // 否则麦克风一直占着；页面据此把按钮复位。
+        // Engine stops on its own (VAD detects end-of-speech or maxAudioDuration reached).
+        // Must release resources or microphone stays locked; page resets button based on this.
         this.asr.release();
         const ev: VoiceEvent = { kind: 'end', text: '', code: '' };
         this.onVoiceEvent(JSON.stringify(ev));
@@ -137,22 +139,23 @@ class NativeBridge {
     });
   }
 
-  /// 停止收音，但让引擎把最后一段定稿吐出来。
+  /// Stop recording but let engine emit final result for the last segment.
   stopVoice(): void {
     this.asr.stop();
   }
 
-  /// 丢弃这次识别。
+  /// Discard this recognition attempt.
   cancelVoice(): void {
     this.asr.cancel();
   }
 
-  /// 用户拒过麦克风之后的二次授权（web 侧 voiceHarmony.openPermissionSettings）。
+  /// Re-authorization after user denies microphone (web side: voiceHarmony.openPermissionSettings).
   ///
-  /// 页面上「没有麦克风权限」那条提示原本是死路：requestPermissionsFromUser 在
-  /// 拒绝过之后不再弹窗，而页面没有任何办法把用户送到能改的地方去。这个方法把
-  /// 系统的权限面板重新拉起来，结果经 window.__fleetVoicePermission 推回页面，
-  /// 页面据此直接接着开始录音——用户为「我要说话」这一个意图只需操作一次。
+  /// The "no microphone permission" message on-page was a dead-end: requestPermissionsFromUser
+  /// won't pop again after denial, and the page has no way to take the user to settings. This
+  /// method brings up the system permission panel; result flows back to the page via
+  /// window.__fleetVoicePermission, which then starts recording directly—user needs one action
+  /// per "I want to speak" intent.
   openVoiceSettings(): void {
     this.asr.requestOnSetting(this.ctx).then((granted: boolean) => {
       this.onVoicePermission(granted);
@@ -166,34 +169,35 @@ class NativeBridge {
 @Component
 struct WebShell {
   private controller: webview.WebviewController = new webview.WebviewController();
-  /// 安全区由 SafeArea.ets 发布到 AppStorage；mobile-web 把安全区抽象成了
-  /// --safe-top / --safe-bottom 两个 CSS 变量（默认取 env(safe-area-inset-*)，
-  /// 而 WebView 里那个 env 拿不到系统值），所以原生覆盖这两个变量即可，
-  /// web 侧一行都不用改。
+  /// Safe area published to AppStorage by SafeArea.ets; mobile-web abstracts it as
+  /// --safe-top / --safe-bottom CSS variables (default: env(safe-area-inset-*), but WebView
+  /// env can't get system values). Native just overrides these two variables; web needs no changes.
   @StorageProp('safeTop') safeTop: number = 0;
   @StorageProp('safeBottom') safeBottom: number = 0;
-  /// Web 组件默认白底。页面还没绘出来的那一瞬、以及任何页面没铺满的边角，
-  /// 透出来的就是这层白 —— 深色主题下格外扎眼。跟随 resolvedTheme 兜一层底色。
+  /// Web component defaults to white background. The instant before the page renders and any
+  /// uncovered corners show this white—especially jarring in dark theme. Follow resolvedTheme
+  /// to provide a matching backdrop.
   @StorageProp('resolvedTheme') resolvedTheme: string = 'dark';
-  /// EntryAbility 收到系统分享后把内容放这里；nonce 变化即代表「又分享了一次」，
-  /// 哪怕文本和上次一模一样。@Watch 是为了让 app 已经开着时的分享也能送达。
+  /// EntryAbility puts system share content here after receiving it; nonce change means
+  /// "shared again," even if the text is identical. @Watch ensures shares while app is open get delivered.
   @StorageProp('sharedText') sharedText: string = '';
-  /// 分享进来的文件名（换行分隔）。字节由 SharePanel 拷进沙箱，这里只把名字
-  /// 拼成 __shared/ 的 URL 交给 web，取字节的活由 onInterceptRequest 干。
+  /// Incoming share filenames (newline-separated). SharePanel copies bytes into sandbox;
+  /// we just build __shared/ URLs and pass them to web; onInterceptRequest retrieves bytes.
   @StorageProp('sharedFiles') sharedFiles: string = '';
   @StorageProp('sharedNonce') @Watch('onSharedChanged') sharedNonce: number = 0;
-  /// 点推送通知带进来的路由目标(EntryAbility 从 want 里取,见 takeDeepLinkFromWant)。
-  /// nonce 变化即代表「又点了一次」，哪怕目标与上次相同。
+  /// Navigation target from tapping a push notification (EntryAbility reads from want,
+  /// see takeDeepLinkFromWant). Nonce change means "tapped again," even if target is the same.
   @StorageProp('deepLinkUrl') deepLinkUrl: string = '';
   @StorageProp('deepLinkNonce') @Watch('onDeepLinkChanged') deepLinkNonce: number = 0;
   private webReady: boolean = false;
-  /// 设备 push token，取到一次就缓存 —— getToken 会拉起系统通知授权，重复调
-  /// 没意义。空串表示还没取到或这台设备取不到（模拟器/未开通推送权益）。
+  /// Device push token, cached once obtained—getToken brings up system notification auth,
+  /// repeating is pointless. Empty string means not yet fetched or unavailable on this device
+  /// (simulator / push not enabled).
   private pushToken: string = '';
   @State private src: string = '';
-  /// null = 还在读配对状态；'' = 未配对（显示配对入口）；其余 = 已配对的 src。
-  /// 分三态是因为「还没读完」和「读完了没有」必须区别对待 —— 否则冷启动会
-  /// 闪一下配对页再跳走。
+  /// null = still reading pairing state; '' = not paired (show pairing entry); else = paired src.
+  /// Three states because "not yet read" and "read but empty" must be distinguished—otherwise
+  /// cold start would flash the pairing page then navigate away.
   @State private pairChecked: boolean = false;
   @State private pairError: string = '';
   private bridge: NativeBridge = new NativeBridge(
@@ -207,33 +211,33 @@ struct WebShell {
     this.loadPairing();
   }
 
-  /// `fresh` = 这次是刚扫完码(抢焦点到那一台);缺省是启动重注(不抢)。
+  /// `fresh` = just scanned a code (take focus on that device); default is startup re-inject (don't take focus).
   private loadPairing(fresh: boolean = false): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     RelayStore.loadPairing(ctx).then((p: RelayPairing | null) => {
       this.pairChecked = true;
-      // 密钥走 URL fragment：mobile-web 的 consumeHashSecret 本来就从
-      // window.location.hash 读 `#k=`（桌面二维码就是这个形状），所以这里
-      // 复用同一条路径，web 侧无需为鸿蒙加任何分支。fragment 也不会进
-      // 请求行，拦截器按路径取资源不受影响。
-      // 未配对时留空 src，让 build() 走原生配对页。
+      // Secret in URL fragment: mobile-web's consumeHashSecret already reads #k= from
+      // window.location.hash (desktop QR uses this shape), so we reuse the same path and
+      // web needs no Harmony branch. Fragment doesn't enter the request line, so the interceptor
+      // fetching by path works fine.
+      // Leave src empty when unpaired to let build() show the native pairing page.
       //
-      // 早先这里在 p === null 时也给了 ORIGIN + 'index.html'，结果 src 永远
-      // 非空、配对页永远进不去，页面就停在 mobile-web 那张为 PWA 写的引导页
-      // 上（它假设用户是扫码打开带密钥的网址，因此没有扫码按钮）——等于没有
-      // 任何配对入口。
+      // Early on we also sent ORIGIN + 'index.html' when p === null, but that left src
+      // non-empty forever, so the pairing page never opened—the page got stuck on mobile-web's
+      // PWA bootstrap (which assumes user opened a QR-scanned link with a key, so no scan button).
+      // This eliminated all pairing entry points.
       //
-      // relayUrl 也一起交给页面。以前这里只取 secret，relay 永远是打包时
-      // sync-web.sh 烧进 VITE_RELAY_URL 的那个——扫了指向自建 relay 的二维码，
-      // app 照样去连官方 relay，配对必然失败且现象只是「一直连不上」。
-      // mobile-web 的 consumeHashSecret 认 fragment 里的 &relay=，并把它连同密钥
-      // 一起存进那台设备的记录（devices.ts），优先级高于打包值，所以这里给了它
-      // 就生效，web 侧不需要鸿蒙分支。多设备之后 relay 归属是**每台设备各自**的，
-      // 而这个壳每次加载都重新注入一遍，所以自建 relay 也能在升级后自愈。
-      // `boot=1` 说明这是**启动重注**而不是刚扫的码。多设备之后 web 侧把配对
-      // 存成一本设备簿,壳每次启动仍会把它存的那一份重新注入一遍;不区分的话
-      // 用户在设备列表里切过去的那一台,每次重开 app 都会被这次注入抢回焦点。
-      // 刚扫完码那次走 loadPairing(true),不带这个标记 —— 那时抢焦点正是用户要的。
+      // Also pass relayUrl to the page. Previously we only fetched secret; relay always came
+      // from VITE_RELAY_URL baked in by sync-web.sh at build time. Scan a QR for self-hosted
+      // relay, app still connects to the official one, pairing fails silently with "won't connect."
+      // mobile-web's consumeHashSecret reads &relay= in the fragment and stores it with the key
+      // in that device's record (devices.ts), higher priority than baked-in value. We send it here,
+      // it takes effect, web needs no Harmony branch. After multi-device, relay belongs to **each
+      // device individually**; this shell re-injects on every load, so self-hosted relay heals after upgrades.
+      // boot=1 means **startup re-inject**, not a freshly scanned code. After multi-device, web stores
+      // pairing as a device ledger and shell re-injects each startup. Without this distinction, a user
+      // who switched to another device in the list gets pulled back on every app restart—unwanted focus theft.
+      // Fresh scan uses loadPairing(true) without this flag—then taking focus is what the user expects.
       const boot = fresh ? '' : '&boot=1';
       this.src = p === null
         ? ''
@@ -241,10 +245,10 @@ struct WebShell {
     }).catch(() => { this.pairChecked = true; this.src = ''; });
   }
 
-  /// 配对入口。删掉原生 UI 时把 GateView 一起删了，而 mobile-web 的配对页是
-  /// 为 PWA 写的——它假设用户是「扫码打开一个带密钥的网址」，壳里没有那个入口，
-  /// 于是新装的 app 无路可配对。这里补回最小的一个：扫码写进 RelayStore，
-  /// 再让 WebView 带着 #k= 重新加载。
+  /// Pairing entry point. When we removed native UI, we deleted GateView with it; mobile-web's
+  /// pairing page is written for PWA—it assumes "user opened a QR-scanned URL with a key."
+  /// The shell has no such entry, so new app installs have no way to pair. Here we add back the
+  /// minimum: scan barcode, write to RelayStore, reload WebView with #k=.
   private async startPairing(): Promise<void> {
     const ctx = getContext(this) as common.UIAbilityContext;
     try {
@@ -255,9 +259,10 @@ struct WebShell {
       };
       const result = await scanBarcode.startScanForResult(ctx, options);
       const scan = parseScan(result.originalValue);
-      // 直连码:壳不持久化它 —— 页面自己有一本设备簿,壳只把这次扫到的原文带进
-      // 页面一次(`#h=…&t=…`),页面先探再入册。已配对过就在当前那份页面上加,
-      // 没配对过就让页面只带这一台起来(那时它没有中转设备,但直连那台够用)。
+      // Direct-host code: shell doesn't persist it—page maintains its own device ledger.
+      // Shell passes the raw scan result once to the page (#h=…&t=…), page probes then enrols.
+      // If already paired, add to that page's current ledger; if not, start with just this device
+      // (no relay device yet, but direct connect to this one works).
       if (scan.host !== null) {
         const host: DirectHostScan = scan.host;
         this.pairError = '';
@@ -285,9 +290,9 @@ struct WebShell {
     this.deliverDeepLink();
   }
 
-  /// 把点击目标交给页面。走 decisionDeepLink.ts 约定的 window.__fleetDeepLink ——
-  /// 与 __fleetShare / __fleetPushToken 同一套约定,bootScript 已提前占位并排队,
-  /// 所以冷启动(点通知拉起 app)时不必跟 React 的 effect 赛跑。
+  /// Pass tap target to the page via decisionDeepLink.ts contract: window.__fleetDeepLink.
+  /// Same contract as __fleetShare / __fleetPushToken; bootScript pre-registers and queues,
+  /// so cold start (tapping a notification) doesn't race React effects.
   private deliverDeepLink(): void {
     if (!this.webReady || this.deepLinkUrl.length === 0) {
       hilog.info(DOMAIN_W, TAG_W, 'deeplink-diag deliver skipped ready=%{public}s len=%{public}d',
@@ -300,7 +305,7 @@ struct WebShell {
     ).then((r: string) => {
       hilog.info(DOMAIN_W, TAG_W, 'deeplink-diag injected result=%{public}s', r);
       if (r.indexOf('OK') >= 0) {
-        // 投递成功即清掉，避免下次回前台又跳一次同样的卡。
+        // Clear on success to avoid jumping the same card again when returning to foreground.
         this.deepLinkUrl = '';
       }
     }).catch((e: Error) => {
@@ -308,21 +313,21 @@ struct WebShell {
     });
   }
 
-  /// 把一条语音事件交给页面（voiceHarmony.ts 的 window.__fleetVoice）。
+  /// Pass a voice event to the page (voiceHarmony.ts::window.__fleetVoice).
   ///
-  /// 与 deliverShare / deliverDeepLink 不同，这里不需要 bootScript 占位、也不需要
-  /// 投递失败后重投：语音事件只在用户按下按钮之后才产生，那一刻页面的 hook 必然
-  /// 已经注册好了。没有 hook 只可能是页面在识别中途被换掉了，那时这条结果本来
-  /// 就该丢。
+  /// Unlike deliverShare / deliverDeepLink, we don't need bootScript placeholder or retry on
+  /// delivery fail: voice events only happen after the user presses a button, when the page hook
+  /// is definitely registered. No hook means the page was swapped mid-recognition—that result
+  /// should be discarded anyway.
   ///
-  /// **注入结果必须打日志**（与 deliverDeepLink 同）：`NO_HOOK` 是「页面已经放弃
-  /// 这次识别、原生侧却还在往回推」这一类故障的唯一证据。之前这里只 catch 了
-  /// 异常、把返回值扔了，于是真机上「弹了权限却一个字都出不来」查不出任何线索 ——
-  /// 页面侧看起来什么都没发生，壳侧看起来一切正常。
-  /// 把二次授权的结果交给页面（voiceHarmony.ts 的 window.__fleetVoicePermission）。
+  /// **Must log injection result** (like deliverDeepLink): `NO_HOOK` is the only proof of failures
+  /// like "page gave up on recognition but native still pushes results." We used to just catch
+  /// exceptions and discard returns, so "permission prompt appeared but no text comes out" on real
+  /// devices had zero clues—page looked fine, shell looked fine.
+  /// Pass re-authorization result to the page (voiceHarmony.ts::window.__fleetVoicePermission).
   ///
-  /// 同样打日志:这条推不回去的表现是「点了去授权、授权面板也弹了、回来界面却
-  /// 一动不动」,而那正是页面在等这个回调。
+  /// Log it too: delivery fail shows as "tapped to authorize, panel appeared, interface doesn't move,"
+  /// and that's exactly when the page waits for this callback.
   private deliverVoicePermission(granted: boolean): void {
     if (!this.webReady) {
       hilog.info(DOMAIN_W, TAG_W, 'voice-diag permission deliver skipped: web not ready');
@@ -354,15 +359,14 @@ struct WebShell {
     });
   }
 
-  /// 把分享内容交给页面。走 shareTarget.ts 约定的 window.__fleetShare —— 那是
-  /// 给所有原生壳用的通用入口，不是鸿蒙专用分支；Capacitor 侧同样认它。
+  /// Pass share content to the page via shareTarget.ts contract: window.__fleetShare—a generic
+  /// entry for all native shells, not Harmony-specific; Capacitor uses it too.
   ///
-  /// 不再重试：bootScript 已在页面任何脚本之前占好 __fleetShare 的位，早到的
-  /// 内容先进 __fleetSharePending，shareTarget.ts 注册真 hook 时消费。时序
-  /// 依赖因此消失。
+  /// No retry: bootScript pre-registers __fleetShare before any page script, early arrivals queue
+  /// in __fleetSharePending, consumed when shareTarget.ts registers the real hook. Timing dependency gone.
   ///
-  /// 之所以不靠重试：真机日志里只有 attempt=0，setTimeout 在 ArkTS struct
-  /// 方法里根本没回调 —— 那版重试写了等于没写。
+  /// Why no retry: real device logs show only attempt=0; setTimeout in ArkTS struct methods
+  /// doesn't callback at all—that retry code was dead.
   private deliverShare(attempt: number): void {
     if (!this.webReady || (this.sharedText.length === 0 && this.sharedFiles.length === 0)) {
       hilog.info(DOMAIN_W, TAG_W, 'share-diag deliver skipped ready=%{public}s len=%{public}d',
@@ -372,9 +376,9 @@ struct WebShell {
     const fileEntries: SharedFileEntry[] = [];
     for (const name of this.sharedFiles.split('\n')) {
       if (name.length === 0) { continue; }
-      // 给 web 一个它能直接 fetch 的 URL。shareTarget.ts 里的
-      // sharedFilesToFiles 会 fetch 它 → 拦截器从沙箱返回字节 → 变成 File →
-      // 走既有的附件上传链路。web 侧因此一行都不用改。
+      // Give web a URL it can fetch directly. shareTarget.ts::sharedFilesToFiles fetches it
+      // → interceptor returns bytes from sandbox → becomes File → goes through existing
+      // attachment upload flow. Web needs no changes.
       const entry: SharedFileEntry = {
         uri: ORIGIN + SHARED_PREFIX + name,
         name: name,
@@ -396,26 +400,26 @@ struct WebShell {
       hilog.info(DOMAIN_W, TAG_W, 'share-diag injected attempt=%{public}d result=%{public}s',
         attempt, r);
       if (ok) {
-        // 投递成功后清掉，避免下次前台又投一遍同样的内容。
+        // Clear after delivery to avoid re-posting the same content on next foreground.
         this.sharedText = '';
         this.sharedFiles = '';
         return;
       }
-      // 走到这里说明连占位 hook 都不在（bootScript 没跑成），那是别的问题，
-      // 重试也救不回来 —— 留日志比空转有用。
+      // Reach here = no placeholder hook even (bootScript didn't run). Different problem,
+      // retry can't help—logging beats spinning.
       hilog.warn(DOMAIN_W, TAG_W, 'share-diag no hook at all — bootScript may not have run');
     }).catch((e: Error) => {
       hilog.warn(DOMAIN_W, TAG_W, 'share-diag inject failed: %{public}s', e.message);
     });
   }
 
-  /// 取设备 push token 并交给页面。原生只负责「拿到 token」，上报 relay 那半边
-  /// 归 web（nativePush.ts → push.ts）—— 它才握着 relay 连接、channel token 和
-  /// 用户的通知开关状态。元服务时代这里是自己开 WebSocket 报 openId，为此在
-  /// ArkTS 里重写了一份 HKDF，两套实现各自漂移；那两个文件已随本次一起删掉。
+  /// Fetch device push token and pass to page. Native just "gets the token"; reporting to relay
+  /// is web's job (nativePush.ts → push.ts)—it holds the relay connection, channel token, and
+  /// user notification settings. In the Element Services era, native opened WebSocket to report openId,
+  /// requiring a separate HKDF implementation in ArkTS; both implementations drifted and we deleted them with this refactor.
   ///
-  /// 只在已配对时做：未配对时 web 根本没有可注册的 channel，提前弹通知授权
-  /// 也只会打扰用户。
+  /// Only when paired: unpaired web has no channel to register. Prompting for notification auth
+  /// early just annoys the user.
   private deliverPushToken(): void {
     if (!this.webReady) { return; }
     if (this.pushToken.length > 0) {
@@ -435,9 +439,9 @@ struct WebShell {
     });
   }
 
-  /// 与 __fleetShare 同一套约定：bootScript 已提前占位 + 排队，所以这里不需要
-  /// 重试，也不能靠 setTimeout 重试（ArkTS struct 方法里的 setTimeout 不回调，
-  /// 分享那六个坑里已经栽过一次）。
+  /// Same contract as __fleetShare: bootScript pre-registers and queues, so no retry needed
+  /// and can't use setTimeout (ArkTS struct methods' setTimeout doesn't callback—share already
+  /// buried us in that pit once).
   private injectPushToken(): void {
     this.controller.runJavaScript(
       `(function(){ if(!window.__fleetPushToken) return 'NO_HOOK';` +
@@ -450,7 +454,7 @@ struct WebShell {
     });
   }
 
-  /// 从沙箱读一个分享进来的文件，喂给 WebView。
+  /// Read an incoming shared file from sandbox and feed to WebView.
   private serveSharedFile(name: string): WebResourceResponse | null {
     try {
       const ctx = getContext(this) as common.UIAbilityContext;
@@ -505,44 +509,43 @@ struct WebShell {
     return r;
   }
 
-  /// 在页面任何脚本之前跑：安全区要早于首帧写入（否则会看到一次跳动），
-  /// 两个补丁也要早于页面代码注册。全部是运行时补丁，mobile-web 源码不动。
+  /// Run before any page script: safe area must inject before first frame (else visible jank),
+  /// patches too must run before page code registers. All runtime patches; mobile-web source unchanged.
   private bootScript(): string {
     return `(function(){
-      // 先把 __fleetShare 占上位，投递就不必再跟 React 的 useEffect 赛跑。
+      // Pre-register __fleetShare so delivery doesn't race React's useEffect.
       //
-      // 之前靠「注入失败就 setTimeout 重试」，真机日志里只有 attempt=0 ——
-      // ArkTS struct 方法里的 setTimeout 压根没回调，重试等于没写。占位 hook
-      // 把内容先收进队列，等 shareTarget.ts 注册真 hook 时一次性消费，时序
-      // 依赖就整个消失了。
+      // We used to rely on "retry with setTimeout if inject fails"; real logs show only attempt=0—
+      // setTimeout in ArkTS struct methods never callbacks, retry was pointless. Placeholder hook
+      // queues content, consumed once when shareTarget.ts registers the real hook; timing dependency gone.
       if (!window.__fleetShare) {
         window.__fleetSharePending = window.__fleetSharePending || [];
         window.__fleetShare = function(p){ window.__fleetSharePending.push(p); };
       }
 
-      // 推送 token 同理占位：原生取 token 要等系统通知授权，必然晚于首帧，
-      // 而 nativePush.ts 的 hook 又挂在 React effect 里 —— 两头都不确定，
-      // 于是两头都走队列。
+      // Push token placeholder same idea: native fetches token after system auth prompt, always
+      // after first frame; nativePush.ts hook hangs on React effect—both timings uncertain,
+      // so both queue.
       if (!window.__fleetPushToken) {
         window.__fleetPushTokenPending = window.__fleetPushTokenPending || [];
         window.__fleetPushToken = function(t){ window.__fleetPushTokenPending.push(t); };
       }
 
-      // 点通知拉起 app 时,目标必然早于页面脚本 —— 同样先占位排队。
+      // Tap notification to launch app: target arrives before page script—also pre-register and queue.
       if (!window.__fleetDeepLink) {
         window.__fleetDeepLinkPending = window.__fleetDeepLinkPending || [];
         window.__fleetDeepLink = function(u){ window.__fleetDeepLinkPending.push(u); };
       }
 
       var s = document.documentElement.style;
-      // 只给底部。顶部由框架自己 inset 过了 —— SafeArea.ets 的注释记着这笔账:
-      // 2026-07-15 就因为应用侧又加了一次 top inset，导致每个页头被整整推下
-      // 一行。我第一版照抄注入 safeTop，等于把那个已修的 bug 重新引了回来。
-      // safeTop 仍然发布在 AppStorage 里，留作诊断，但不喂给页面。
+      // Only set bottom. Top is already inset by the framework—SafeArea.ets comment records it:
+      // on 2026-07-15 app added top inset again, pushing every page header down a line.
+      // My first version blindly copied safeTop injection, reintroducing that fixed bug.
+      // safeTop still publishes to AppStorage for diagnostics, just not fed to the page.
       s.setProperty('--safe-bottom', '` + this.safeBottom.toString() + `px');
 
-      // 下载：拦 a[download] 的点击，把 blob/data 读成 base64 交给原生落盘。
-      // 用捕获阶段，抢在页面自己的 handler 之前。
+      // Download: intercept a[download] clicks, read blob/data as base64, pass to native to save.
+      // Use capture phase to run before page's own handler.
       document.addEventListener('click', function(ev){
         var a = ev.target && ev.target.closest ? ev.target.closest('a[download]') : null;
         if (!a || !a.href) return;
@@ -561,7 +564,7 @@ struct WebShell {
         }).catch(function(){});
       }, true);
 
-      // 系统分享：ArkWeb 没有 Web Share 时补一个转调 ShareKit 的垫片。
+      // System share: polyfill Web Share with ShareKit call when ArkWeb lacks it.
       if (!navigator.share && window.fleetNative) {
         navigator.canShare = function(d){ return !!(d && d.files && d.files.length); };
         navigator.share = function(d){
@@ -582,8 +585,8 @@ struct WebShell {
         };
       }
 
-      // 保持常亮：ArkWeb 若没有 navigator.wakeLock，就补一个转调原生的垫片，
-      // 这样 wakeLock.ts 的既有逻辑无需知道自己跑在鸿蒙里。
+      // Keep awake: if ArkWeb lacks navigator.wakeLock, polyfill with native call,
+      // so wakeLock.ts code doesn't need to know it's running on Harmony.
       if (!navigator.wakeLock && window.fleetNative) {
         navigator.wakeLock = {
           request: function(){
@@ -601,15 +604,15 @@ struct WebShell {
     })();`;
   }
 
-  /// 系统返回手势不会触发页面的 popstate —— 不接这一步，一返回就直接退出 app
-  /// 而不是退上一层。mobile-web 的 navStack 每开一层都 pushState，所以
-  /// WebView 的历史深度正好等于 UI 层数。
+  /// System back gesture doesn't trigger page popstate—without this, back exits the app instead of
+  /// popping one layer. mobile-web's navStack pushState on every layer open, so WebView history
+  /// depth equals UI layer count.
   onBackPress(): boolean {
     if (this.controller.accessBackward()) {
       this.controller.backward();
-      return true; // 已消费，不要退出 app
+      return true; // Already consumed, do not exit app
     }
-    return false; // 已在根层，交回系统
+    return false; // Already at root level, return to system
   }
 
   build() {
@@ -637,16 +640,16 @@ struct WebShell {
           .databaseAccess(true)
           .mixedMode(MixedMode.All)
           .darkMode(WebDarkMode.Auto)
-          // JS 弹窗必须原生接管。ArkWeb 自己不画 alert/confirm 的弹窗：回调返回
-          // false 时「弹窗的处理结果视为取消」，不注册回调等同于此。于是页面里
-          // `window.confirm(...)` 恒为 false、`window.alert(...)` 无声消失——
-          // 任务页的「停止」按下去没反应，正是因为它的确认框走的这条路。
+          // JS alerts must be handled by native. ArkWeb doesn't draw alert/confirm dialogs:
+          // returning false from callback means "treat as cancelled"; no callback = same.
+          // So `window.confirm(...)` always returns false, `window.alert(...)` silently vanishes—
+          // Task page "Stop" button unresponsive because its confirm goes this route.
           //
-          // 注册后必须调到 handleConfirm / handleCancel 之一，漏掉会阻塞 render
-          // 进程，所以三条出口（确认、取消、点外部/返回键关闭）都要落到 result 上。
+          // After registering, must call handleConfirm / handleCancel; missing it blocks render
+          // thread. All three exits (OK, Cancel, tap outside/back key) must call result.
           //
-          // window.prompt 不接：mobile-web 一处都没用（grep 过），而它需要带
-          // 输入框的自定义弹窗，不是 AlertDialog 能顺手覆盖的。真要用时再补。
+          // Skip window.prompt: mobile-web never uses it (grepped), and it needs custom input
+          // dialog, not just AlertDialog. Add if needed.
           .onAlert((event) => {
             if (!event) return false;
             this.getUIContext().showAlertDialog({
@@ -677,17 +680,17 @@ struct WebShell {
             });
             return true;
           })
-          // 外链交给系统浏览器，别让它顶掉整个 app。
+          // Pass outlinks to system browser, don't let them hijack the whole app.
           //
-          // multiWindowAccess 默认 false，此时 ArkWeb 把 target="_blank" 当
-          // 「打开本地窗口」处理 —— 知识库文档里点一个外链，这唯一的 WebView
-          // 就从 fleet.local 导航走了，Fleet 的界面连同 relay 连接一起被冲掉，
-          // 只能靠返回键退回来。开 multiWindowAccess 要配 onWindowNew 再养一个
-          // WebView，为几个外链不值当；把非本站的主框架导航整个交给系统才是对的。
+          // multiWindowAccess defaults false; ArkWeb then treats target="_blank" as
+          // "open local window"—click an external link in wiki docs, the only WebView
+          // navigates away from fleet.local, Fleet UI and relay connection disappear,
+          // only back key recovers. Enabling multiWindowAccess needs onWindowNew to manage
+          // another WebView, not worth it for a few links; hand off non-site main-frame
+          // navigations to system.
           //
-          // 只拦主框架的 http/https：知识库的 HTML 文档跑在 data: URI 的沙箱
-          // iframe 里（web 侧刻意为之），blob: 则是导出预览在用，两者都必须
-          // 原样放行。
+          // Only intercept main-frame http/https: wiki HTML docs run in data: URI sandbox
+          // iframe (intentional by web side), blob: is for export preview—both must pass through.
           .onLoadIntercept((event) => {
             if (!event) return false;
             const req = event.data;
@@ -711,9 +714,9 @@ struct WebShell {
             name: 'fleetNative',
             methodList: [
               'saveFile', 'keepAwake', 'shareContent', 'scanPairing',
-              // 语音输入。startVoice 的存在与否就是 web 侧 detectVoiceProvider
-              // 的判据 —— 老壳配新 web 时这三个方法不在，页面会自动回落，
-              // 不会调进一条不存在的实现。
+              // Voice input. Web side uses startVoice presence in detectVoiceProvider—
+              // old shell with new web: if these three methods don't exist, page auto-fallsback,
+              // won't call non-existent implementations.
               'startVoice', 'stopVoice', 'cancelVoice', 'openVoiceSettings',
             ],
             controller: this.controller,
@@ -722,7 +725,7 @@ struct WebShell {
             const url: string = event.request.getRequestUrl();
             if (!url.startsWith(ORIGIN)) return null;
             const tail: string = this.strip(url.substring(ORIGIN.length));
-            // 分享进来的文件不在 rawfile 里，而在应用沙箱 files/shared/。
+            // Incoming shared files aren't in rawfile, but in app sandbox files/shared/.
             if (tail.startsWith(SHARED_PREFIX)) {
               return this.serveSharedFile(tail.substring(SHARED_PREFIX.length));
             }
@@ -743,8 +746,8 @@ struct WebShell {
             }
           })
           .onPageEnd(() => {
-            // 页面就绪后再补投一次：分享很可能是冷启动带进来的，那时 web 还没
-            // 加载完，@Watch 早就烧过了。
+            // Re-deliver after page ready: share likely came in cold start when web wasn't
+            // loaded; @Watch already fired.
             this.webReady = true;
             this.deliverShare(0);
             this.deliverPushToken();
@@ -756,14 +759,13 @@ struct WebShell {
     }
     .width('100%')
     .height('100%')
-    // 只向下扩展到手势条那一段。ArkUI 组件默认避开安全区，于是 WebView 的
-    // 底边停在手势条上沿，那条缝显示的是窗口底色（白），而不是网页——网页
-    // 里怎么调 CSS 都够不着它，这正是「导航条是灰的、最下面一条是白的」的
-    // 由来。扩展之后网页自己铺到屏幕底部，--safe-bottom 的内边距继续负责
-    // 让导航条内容避开手势条。
+    // Expand only down to the gesture bar. ArkUI components default-avoid safe area, so WebView's
+    // bottom stops at gesture bar top; that gap shows window background (white), not webpage—no
+    // CSS can reach it, hence "nav bar gray, bottom edge white." After expanding, webpage fills
+    // to screen bottom; --safe-bottom padding keeps nav bar content clear of gesture bar.
     //
-    // 不扩顶部：顶部框架已经 inset 过（见 SafeArea.ets 里 2026-07-15 那笔
-    // 账），再扩会把页头顶到状态栏底下。
+    // Don't expand top: top frame already insets (see SafeArea.ets 2026-07-15 note);
+    // expanding would push page header below status bar.
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 }

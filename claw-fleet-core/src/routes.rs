@@ -21,7 +21,7 @@ pub const APPLY_SESSION_TITLE_GUIDANCE: &str = "/apply_session_title_guidance";
 pub const APPLY_PLAN_APPROVAL_HOOK: &str = "/apply_plan_approval_hook";
 pub const APPLY_PRD_MODE: &str = "/apply_prd_mode";
 pub const APPLY_WIKI_GUIDANCE: &str = "/apply_wiki_guidance";
-/// Artifact store (the 产出 page). `ARTIFACT_BLOB` is the only route here that
+/// Artifact store (the output/deliverables page). `ARTIFACT_BLOB` is the only route here that
 /// answers bytes rather than JSON, and the only one in this file that honours
 /// a `Range` request header — a deliverable can be a video, and a viewer that
 /// cannot seek has to buffer the whole thing first.
@@ -80,7 +80,7 @@ pub const REMOTE_CREATE_DIR: &str = "/remote_create_dir";
 /// is useless on a host whose tree is empty — a fresh cloud container has
 /// nothing under `$HOME` to select.
 pub const CREATE_DIR: &str = "/create_dir";
-/// Directories the user explicitly added to the 仓库 page: list / add / remove.
+/// Directories the user explicitly added to the workspace browser page: list / add / remove.
 /// These widen the explorer's `known_workspaces` beyond session-derived paths,
 /// so registration is a deliberate server-side act rather than a per-read flag.
 pub const BROWSE_PATHS: &str = "/browse_paths";
@@ -220,11 +220,12 @@ pub const PROCS: &str = "/procs";
 /// `GET /host_features` — which optional surfaces this host exposes
 /// ([`crate::feature_flags::HostFeatures`]). Read once at boot by the browser
 /// build so its nav matches what this backend will allow, rather than offering
-/// a 终端 page whose first spawn is refused.
+/// a terminal page whose first spawn is refused.
 pub const HOST_FEATURES: &str = "/host_features";
-/// `GET /host_identity` — 这台主机叫什么、什么平台
-/// ([`crate::host_identity::HostIdentity`])。纯展示:手机端(和同源部署下的浏览
-/// 器构建)拿它给配对设备起一个认得出来的名字,代替「设备 1」「设备 2」。
+/// `GET /host_identity` — what this host is called and its platform
+/// ([`crate::host_identity::HostIdentity`]). Display-only: the phone (and the
+/// same-origin browser build) uses it to give the paired device a recognizable name,
+/// instead of "Device 1", "Device 2".
 pub const HOST_IDENTITY: &str = "/host_identity";
 /// The ssh host book (`remote_host::SshHost`): list / upsert / remove.
 ///

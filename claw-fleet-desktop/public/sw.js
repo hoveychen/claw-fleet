@@ -1,22 +1,27 @@
-/* Fleet 桌面 UI 的浏览器形态（`fleet webui` / fleet-cloud）用的 service worker。
+/* Service worker for the browser form of the Fleet desktop UI (`fleet webui` /
+ * fleet-cloud).
  *
- * 只做一件事：把 vite 产出的 /assets/ 静态块缓存下来，让**跨发版**不必重下没变
- * 的代码。动机是产出页的 Office 预览——docx-preview + read-excel-file +
- * pptx-preview 合计约 1.6 MB，其中 pptx-preview 自带 echarts 就占 1.25 MB。这些
- * 块已经是懒加载的（见 OfficePreview），但没有 SW 的话，每发一次版整份 UI 连同
- * 它们都要重新过网。
+ * Does one thing: cache the /assets/ static chunks vite outputs, so releases
+ * don't need to re-download unchanged code. The motivation is the artifacts
+ * page's Office preview — docx-preview + read-excel-file + pptx-preview total
+ * ~1.6 MB, with pptx-preview alone bundling echarts at 1.25 MB. These chunks
+ * are already lazy-loaded (see OfficePreview), but without this SW, every
+ * release re-fetches the entire UI and all of them over the network.
  *
- * 之所以「跨发版」这句成立：vite 的资源名带内容哈希，所以某个块只要内容没变，
- * URL 就一模一样，cache-first 直接命中；真变了就是另一个 URL，自然回源。这也
- * 正是为什么缓存名**不带**版本号——按版本分桶等于每发一次版全体作废，恰好把
- * 这个机制毁掉。
+ * Why "releases" works: vite's asset names include content hashes, so a chunk
+ * stays at the same URL as long as its content unchanged — cache-first is an
+ * instant hit; if it changes, it's a new URL and automatically re-fetched. That's
+ * why the cache name has no version number — versioning the bucket would void
+ * all of them on each release, defeating the mechanism.
  *
- * 只碰 /assets/ 下的 GET。HTML 一律回源（否则发版后拿到旧 index.html，它引用的
- * 是已经不存在的哈希名），API/SSE 更不能碰——/events 是长连接，塞进缓存层只会
- * 把它挂死。
+ * Only touches GET under /assets/. HTML always re-fetches (else a release would
+ * serve old index.html referencing non-existent hash-named assets), and API/SSE
+ * is never cached — /events is a long connection, and putting it behind a cache
+ * layer just hangs it.
  */
 
-// 换这个名字 = 主动丢弃全部旧资源（例如缓存策略本身改了）。日常发版不要动它。
+// Changing this name = intentionally invalidate all old assets (e.g., if the
+// caching strategy itself changes). Don't touch it for routine releases.
 const ASSET_CACHE = "fleet-assets-v1";
 
 self.addEventListener("install", () => {
@@ -26,8 +31,9 @@ self.addEventListener("install", () => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      // 只清本 SW 自己的旧桶；别的名字可能属于同源下的另一个应用（/m/ 的移动端
-      // UI 就挂在同一个域上）。
+      // Only clear this SW's own old buckets; other names may belong to a
+      // different app on the same origin (e.g., the mobile UI at /m/ shares the
+      // same domain).
       const names = await caches.keys();
       await Promise.all(
         names
@@ -39,7 +45,7 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-/** 哈希命名、不可变、值得缓存的东西。 */
+/** Hash-named, immutable, worth caching. */
 function isImmutableAsset(url) {
   return url.origin === self.location.origin && url.pathname.includes("/assets/");
 }
@@ -61,8 +67,9 @@ self.addEventListener("fetch", (event) => {
       const hit = await cache.match(req);
       if (hit) return hit;
       const res = await fetch(req);
-      // 只存成功的同源响应。opaque（no-cors 跨源）响应的状态码读不到，存进去
-      // 就是把一个可能是 404 的东西永久钉住。
+      // Only store successful same-origin responses. opaque (no-cors cross-origin)
+      // response status code can't be read, so storing it would permanently pin
+      // something that might be a 404.
       if (res.ok && res.type === "basic") {
         cache.put(req, res.clone()).catch(() => {});
       }

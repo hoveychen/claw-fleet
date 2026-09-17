@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
-# 构建上架用的 release `.app` 包(HarmonyOS 应用市场的提交产物)。
+# Build release `.app` package for app store submission (HarmonyOS App Market artifact).
 #
-# 和 install.sh 的分工:
-#   install.sh   → assembleHap,debug 签名,`hdc install` 装真机。装得上、传不上。
-#   build-app.sh → assembleApp,发布签名,上传 AGC。传得上、装不上真机。
+# Division of labor with install.sh:
+#   install.sh   → assembleHap, debug signing, `hdc install` to device. Installs but doesn't upload.
+#   build-app.sh → assembleApp, release signing, upload to AGC. Uploads but doesn't install to device.
 #
-# 后半句不是笔误:发布 profile 的设备列表为空,系统装的时候仍会验签,正式签名
-# 的包只能走应用市场。所以真机验证永远走 install.sh,这个脚本的产物只有一个
-# 去处 —— AGC「软件包管理」上传。
+# The second part is not a typo: the release profile's device list is empty, yet the system still
+# verifies the signature on installation. Release-signed packages can only be distributed via
+# the app market. Device verification always uses install.sh; this script's output has only one
+# destination — upload via AGC "Package Management".
 #
-# 签名走环境变量(见 hvigorfile.ts 顶部注释),因为仓里的 build-profile.json5
-# 不带材料,而 DevEco 写的密文是平台相关的:
+# Signing uses environment variables (see hvigorfile.ts top comment) because the repo's
+# build-profile.json5 lacks credentials, and DevEco-generated secrets are platform-specific:
 #   FLEET_OHOS_STORE_FILE / FLEET_OHOS_CERT_PATH / FLEET_OHOS_PROFILE_PATH
 #   FLEET_OHOS_KEY_ALIAS / FLEET_OHOS_STORE_PASSWORD [/ FLEET_OHOS_KEY_PASSWORD]
 #
-# 用法:
-#   bash scripts/build-app.sh                    # 打生产 relay,要求签名
-#   RELAY_URL=... bash scripts/build-app.sh      # 换 relay
-#   bash scripts/build-app.sh --allow-unsigned   # 只验构建链路,允许未签名产物
-#   bash scripts/build-app.sh --no-web           # 跳过 web 同步(只重编 ArkTS)
+# Usage:
+#   bash scripts/build-app.sh                    # build with production relay, requires signing
+#   RELAY_URL=... bash scripts/build-app.sh      # switch relay URL
+#   bash scripts/build-app.sh --allow-unsigned   # validate build pipeline only, allow unsigned output
+#   bash scripts/build-app.sh --no-web           # skip web sync (recompile ArkTS only)
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -36,29 +37,29 @@ done
 
 fail() { echo "✗ $*" >&2; exit 1; }
 
-# DevEco 自带 Node 18,而 pnpm 要 22+ —— 和 install.sh 同一个坑:先留一份系统
-# PATH 给 web 构建,否则 sync-web 会以 "pnpm requires Node.js v22" 挂掉。
+# DevEco comes with Node 18, but pnpm requires 22+ — same issue as install.sh: preserve the system
+# PATH for web build, otherwise sync-web fails with "pnpm requires Node.js v22".
 SYSTEM_PATH="$PATH"
 
-# 两种工具链布局二选一。CI 上不可能装 DevEco Studio(它是带 GUI 的 IDE,而且
-# macOS 那份 sdk 有 5.1G、也不是 Linux 的构建工具),所以 Linux runner 走华为的
-# command-line-tools 包 —— 它自带 hvigorw / ohpm / sdk / node,布局却和 DevEco
-# 里的 tools 目录不一样,这里必须分开认:
+# Two toolchain layout options. CI cannot install DevEco Studio (GUI IDE, macOS SDK is 5.1G,
+# not a Linux build tool), so Linux runners use Huawei's command-line-tools package — it bundles
+# hvigorw / ohpm / sdk / node, but the layout differs from DevEco's tools directory, so we must
+# distinguish:
 #
 #   command-line-tools/          DevEco-Studio.app/Contents/
-#     bin/hvigorw   (可执行)       tools/hvigor/bin/hvigorw.js  (要 node 跑)
+#     bin/hvigorw   (executable)   tools/hvigor/bin/hvigorw.js  (requires node)
 #     bin/ohpm                    tools/ohpm/bin/ohpm
 #     sdk/                        sdk/
 #     tool/node/bin/node          tools/node/bin/node
 #
-# 用 HARMONY_CLI_TOOLS 指向 command-line-tools 解压后的根目录即可。
+# Point HARMONY_CLI_TOOLS to the root directory of command-line-tools after extraction.
 HVIGOR_CMD=()
 if [ -n "${HARMONY_CLI_TOOLS:-}" ]; then
   CLI="$HARMONY_CLI_TOOLS"
   [ -x "$CLI/bin/hvigorw" ] || fail "HARMONY_CLI_TOOLS=$CLI 下没有可执行的 bin/hvigorw —— 解压路径是否多了一层?"
   export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-$CLI/sdk}"
-  # command-line-tools 不带 JDK,CI 里由 setup-java 提供。缺了不能像 DevEco 那样
-  # 回落到自带 jbr,所以在这儿就要求它。
+  # command-line-tools does not include JDK; CI provides it via setup-java. Without it, we cannot
+  # fall back to the bundled jbr like DevEco, so we require it here.
   [ -n "${JAVA_HOME:-}" ] || fail "用 HARMONY_CLI_TOOLS 时必须自己给 JAVA_HOME(command-line-tools 不含 JDK)"
   export PATH="$CLI/tool/node/bin:$CLI/bin:$JAVA_HOME/bin:$PATH"
   HVIGOR_CMD=("$CLI/bin/hvigorw")
@@ -73,9 +74,9 @@ else
 fi
 [ -d "$DEVECO_SDK_HOME" ] || fail "找不到 HarmonyOS SDK ($DEVECO_SDK_HOME)"
 
-# ------------------------------------------------------------------ 预检 --
-# hvigor 对缺失签名配置的反应是产出 *unsigned* 包而不是报错,所以要么在这里
-# 挡住,要么等上传 AGC 被拒才发现。
+# ---------------------------------------------------------------- Pre-check --
+# hvigor silently produces an *unsigned* package on missing signature config instead of failing,
+# so we must catch it here or discover it when AGC rejects the upload.
 if (( ! ALLOW_UNSIGNED )); then
   for v in FLEET_OHOS_STORE_FILE FLEET_OHOS_CERT_PATH FLEET_OHOS_PROFILE_PATH \
            FLEET_OHOS_KEY_ALIAS FLEET_OHOS_STORE_PASSWORD; do
@@ -92,29 +93,31 @@ if [ ! -d oh_modules ]; then
 fi
 
 if (( SYNC_WEB )); then
-  # 必须在 assembleApp 之前:rawfile 是构建的输入,晚同步就把旧 web 打进包里。
+  # Must run before assembleApp: rawfile is a build input; syncing late bundles stale web.
   PATH="$SYSTEM_PATH" bash scripts/sync-web.sh
 fi
 
-# 换签名后不清 cache 会让 hvigor 报 UP-TO-DATE 直接跳过签名任务,产物仍带旧签名
-# (2026-08-18 实测)。这个脚本每次都换签名来源,所以无条件清。
+# Skipping cache clear after signing change lets hvigor report UP-TO-DATE and skip the signing task,
+# leaving old signatures in the output (verified 2026-08-18). This script switches signing sources
+# each time, so we always clear unconditionally.
 OUT=build/outputs/default
 
-echo "→ 清 .hvigor/cache(不清会跳过签名任务,产物带旧签名)"
+echo "→ clearing .hvigor/cache (skipping causes it to reuse old signatures)"
 rm -rf .hvigor/cache
-# 也清产物目录:下面判"签名有没有生效"靠的是产物文件名,而上一次跑剩下的
-# -signed.app 会让一次没真产出任何东西的构建看起来成功。hvigor 的 clean 任务
-# 通常会带走它,但那前提是 clean 真的跑了 —— 正是不该假设的那件事。
+# Also clear the output directory: the check below for "was signing effective?" relies on artifact
+# filenames, and leftover -signed.app from a previous run would make a build that produced nothing
+# look successful. hvigor's clean task usually removes it, but only if clean actually ran — which
+# we shouldn't assume.
 rm -rf "$OUT"
 
-echo "→ 构建 assembleApp (release) …"
+echo "→ building assembleApp (release) …"
 LOG=/tmp/hvigor-assembleapp.log
-# 日志走文件而不是管道:`hvigorw | grep` 会把退出码换成 grep 的,构建失败也
-# 看起来成功,然后把上一次的旧产物当成新的交出去。
+# Log to file instead of pipe: `hvigorw | grep` swallows the exit code, making build failures
+# look successful, then returns old artifacts as if they were new.
 set +e
-# 不能带 install.sh 那句的 `--mode module`:assembleApp 是工程级任务,加了
-# module 模式它会被静默忽略 —— 只有 clean 真的跑了,hvigor 仍报 BUILD
-# SUCCESSFUL,而 build/ 目录根本没生成。
+# Cannot use the `--mode module` from install.sh: assembleApp is a project-level task. With module
+# mode, it silently ignores the flag — clean runs but hvigor still reports BUILD SUCCESSFUL while
+# the build/ directory is never created.
 "${HVIGOR_CMD[@]}" clean assembleApp -p product=default -p buildMode=release --no-daemon \
   > "$LOG" 2>&1
 BUILD_EXIT=$?
@@ -122,10 +125,11 @@ set -e
 grep -iE "Error Message|ArkTS:ERROR|BUILD FAILED|No signingConfig" "$LOG" | tail -10 || true
 (( BUILD_EXIT == 0 )) || fail "构建失败(exit $BUILD_EXIT),完整日志 $LOG"
 
-# ------------------------------------------------------------------ 产物 --
-# 产物名里带 -signed / -unsigned,这是判断签名有没有真生效的唯一可靠信号 ——
-# 不能只看 hvigor 的退出码。签名成功时两个文件**并存**(unsigned 是中间产物,
-# clean 不会带走它),所以先找 signed,找不到才回落到 unsigned。
+# --------------------------------------------------------------- Artifacts --
+# The -signed / -unsigned suffix in artifact names is the only reliable signal of whether signing
+# succeeded — we cannot rely on hvigor's exit code. On signing success, both files **coexist**
+# (unsigned is an intermediate; clean won't remove it), so look for signed first, fall back to
+# unsigned if not found.
 shopt -s nullglob
 SIGNED=("$OUT"/*-signed.app)
 UNSIGNED=("$OUT"/*-unsigned.app)

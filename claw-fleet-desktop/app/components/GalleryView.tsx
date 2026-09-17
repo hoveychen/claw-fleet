@@ -32,7 +32,7 @@ const ACTIVE_STATUSES: SessionStatus[] = [
 function isActive(s: SessionInfo) {
   // `memberDisplayStatus`, not the raw status: a subagent's `waitingInput` is
   // its final report landing, not a request for input, and counting it here
-  // put finished agents in the group's 活跃 row and its "+N running" badge.
+  // put finished agents in the active row and its "+N running" badge.
   return ACTIVE_STATUSES.includes(memberDisplayStatus(s));
 }
 

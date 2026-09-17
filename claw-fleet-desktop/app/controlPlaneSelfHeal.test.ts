@@ -26,27 +26,27 @@ const ALL_INSTALLED: ControlPlaneInstallState = {
 const allDefault = () => true;
 
 describe("startupSelfHealCommands", () => {
-  it("默认开且磁盘上还没装的新指引会被安装 —— 这正是会话标题指引漏装的那一格", () => {
+  it("new guidance with default-ON that isn't on disk yet gets installed — this is the slot where session-title guidance was missing", () => {
     expect(startupSelfHealCommands(NOTHING_INSTALLED, allDefault)).toContain(
       "apply_session_title_guidance",
     );
   });
 
-  it("老板在设置里关掉的项不会被启动自愈装回来", () => {
+  it("items the user turned off in settings won't be re-installed by startup self-heal", () => {
     const resolve = (key: string) => key !== "session-title-guidance-enabled";
     expect(startupSelfHealCommands(NOTHING_INSTALLED, resolve)).not.toContain(
       "apply_session_title_guidance",
     );
   });
 
-  it("已装好的 hook 不再重复 apply（它们改的是 settings.json，没有可刷新的东西）", () => {
+  it("already-installed hooks don't get re-applied (they modify settings.json, which has nothing to refresh)", () => {
     const cmds = startupSelfHealCommands(ALL_INSTALLED, allDefault);
     expect(cmds).not.toContain("apply_guard_hook");
     expect(cmds).not.toContain("apply_elicitation_hook");
     expect(cmds).not.toContain("apply_plan_approval_hook");
   });
 
-  it("指引类无条件 apply —— apply 幂等，同时兼任升级后刷新称呼/语言的那条路", () => {
+  it("guidance always applies unconditionally — apply is idempotent and also handles post-upgrade refresh of phrasing/language", () => {
     const cmds = startupSelfHealCommands(ALL_INSTALLED, allDefault);
     expect(cmds).toEqual([
       "apply_interaction_mode",
@@ -58,7 +58,7 @@ describe("startupSelfHealCommands", () => {
     ]);
   });
 
-  it("codex 镜像永远在最后跑 —— 它读的是 Claude 侧刚写完的 sentinel", () => {
+  it("codex reconcile always runs last — it reads the sentinel that the Claude side just wrote", () => {
     const cmds = startupSelfHealCommands(NOTHING_INSTALLED, allDefault);
     expect(cmds[cmds.length - 1]).toBe(CODEX_RECONCILE_COMMAND);
   });
@@ -69,7 +69,7 @@ describe("runControlPlaneSelfHeal", () => {
     for (let i = 0; i < 50; i++) await Promise.resolve();
   };
 
-  it("一条失败不拖累其余 —— 每条命令各自 catch", async () => {
+  it("one failure doesn't drag down the rest — each command has its own catch", async () => {
     const seen: string[] = [];
     const invoke = vi.fn((command: string) => {
       seen.push(command);
@@ -89,10 +89,11 @@ describe("runControlPlaneSelfHeal", () => {
   });
 
   /**
-   * 并发触发就是 2026-09-07 把 CLAUDE.md 打成单块的那个动作：六条命令各自
-   * 读-改-写同一个文件。core 侧已经上锁，这里再从源头串起来。
+   * Concurrent triggering is what happened on 2026-09-07 when CLAUDE.md got hammered
+   * into a single block: six commands each read-modify-write the same file. The core
+   * side already has a lock, so we serialize from the source here too.
    */
-  it("串行执行 —— 上一条 settle 之后才发下一条", async () => {
+  it("executes serially — next command only fires after the previous one settles", async () => {
     const inflight: string[] = [];
     let maxConcurrent = 0;
     const resolvers: Array<() => void> = [];
@@ -108,7 +109,7 @@ describe("runControlPlaneSelfHeal", () => {
     });
 
     const planned = runControlPlaneSelfHeal(invoke, NOTHING_INSTALLED, allDefault);
-    // 一条都没 settle 时,只允许有一条在飞。
+    // Only one in flight when none have settled yet.
     await flush();
     expect(invoke).toHaveBeenCalledOnce();
 
@@ -120,7 +121,7 @@ describe("runControlPlaneSelfHeal", () => {
     expect(maxConcurrent).toBe(1);
   });
 
-  it("codex 镜像收尾时,前面的 apply 已经真的落盘（而不是只发出去）", async () => {
+  it("by the time codex reconcile finishes, earlier applies have truly persisted (not just sent)", async () => {
     const settled: string[] = [];
     const invoke = vi.fn(async (command: string) => {
       await Promise.resolve();
@@ -142,17 +143,18 @@ describe("runControlPlaneSelfHeal", () => {
  * the self-heal, and `SettingsPanel` must not keep a second hand-written copy
  * of the apply list that can drift from this module.
  */
-describe("启动路径守门", () => {
+describe("startup path guard", () => {
   const read = (rel: string) => readFileSync(join(__dirname, rel), "utf8");
 
-  it("App shell 在启动时就跑自愈，不再等设置面板 mount", () => {
+  it("App shell runs self-heal on startup, doesn't wait for settings panel to mount", () => {
     const app = read("App.tsx");
     expect(app).toMatch(/runControlPlaneSelfHeal/);
   });
 
-  it("SettingsPanel 的 mount 自愈复用同一份清单，而不是自己再抄一遍", () => {
-    // 单个开关的 apply_* 调用当然要留（老板拨动开关那条路），守的是 mount 时
-    // 那段「默认开就装」的清单不再有第二份手抄。
+  it("SettingsPanel mount self-heal reuses the same list, doesn't copy it again", () => {
+    // Individual toggle apply_* calls should stay (the path when user flips a switch).
+    // What we guard is that the "default-on gets installed" list at mount-time has
+    // no second hand-copied version.
     const panel = read("components/SettingsPanel.tsx");
     expect(panel).toMatch(/runControlPlaneSelfHeal/);
     expect(panel).not.toMatch(/auto-apply session title guidance/);

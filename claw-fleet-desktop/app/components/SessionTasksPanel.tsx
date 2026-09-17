@@ -6,10 +6,10 @@ import { TaskLine } from "./TaskLine";
 import styles from "./SessionTasksPanel.module.css";
 
 /**
- * 任务 facet — the TASKS.md plans this session is working, read beside the
+ * Tasks facet — the TASKS.md plans this session is working on, read beside the
  * transcript.
  *
- * It shows the same data as the 计划树, but answers a narrower question: not
+ * It shows the same data as the plan tree, but answers a narrower question: not
  * "what does this repo's plan forest look like" but "where is *this* session
  * up to". So the shape is one plan per block, ordered as the file has them,
  * with the first pending item marked — and everything that isn't that answer
@@ -23,7 +23,7 @@ import styles from "./SessionTasksPanel.module.css";
  *     they are how you *find* the plan, not what you are reading.
  *
  * P-task prose renders through the shared `TaskLine`, which is also what the
- * 计划树 drawer uses — the two surfaces read the same items and had drifted
+ * plan tree drawer uses — the two surfaces read the same items and had drifted
  * into two different treatments of them.
  */
 export function SessionTasksPanel({ plans }: { plans: TaskPlanDetail[] }) {
@@ -50,7 +50,7 @@ function PlanBlock({ plan }: { plan: TaskPlanDetail }) {
   // title already *is* the id, no need to repeat it.
   const showId = Boolean(plan.title && plan.id);
   // The first still-pending item is "current" for this plan — the visible
-  // answer to 「做到第几个 P 了」.
+  // answer to "which P is the session on".
   const currentIdx = plan.items.findIndex((it) => !it.done);
 
   return (

@@ -1,32 +1,39 @@
-// 会话详情页头部下面那条「活状态轨」的内容，抽成纯函数。
+// Contents of the "live status track" below the session detail page header, extracted
+// as a pure function.
 //
-// 为什么需要它：老板给的三条意见（tab 挤成一行、信息量上不去、像网页不像
-// app）其实是同一段 chrome 的三个症状。旧头部把 200px 花在「头 + 五行静态字段
-// 面板 + 六个各 46px 宽的 tab」上，而这个会话此刻真正在发生的事——它注册了
-// 一个 watch 在等什么、它 fan out 了三个子代理、它的计划走到 P3/5、有两张卡在
-// 等人答——一个都没露。数据早就在 `SessionInfo` 上（relay 的 SNAPSHOT_FIELDS
-// 白名单里全都带着），缺的只是地方。
+// Why we need it: the boss gave three critiques (tabs cramped in one row, not enough
+// info, looks like a webpage not an app) — they're actually three symptoms of the same
+// chrome problem. The old header spent 200px on "title + five-line static fields panel +
+// six tabs ~46px each", while what's actually happening in this session right now —
+// it's registered a watch waiting for something, it fanned out three subagents, its plan
+// is at P3/5, two cards are waiting for someone to answer — none of that showed. The
+// data is already on `SessionInfo` (all of it in relay's SNAPSHOT_FIELDS whitelist),
+// we just needed room.
 //
-// 这条轨的规则是**只显示此刻为真的东西**：没有 watch 就没有 watch pill，没有
-// 子代理就没有子代理 pill，空会话整条轨不渲染（返回空数组，调用方据此不画）。
-// 这跟旧面板「模型 — / 工作区 — 」那种固定行数的表格是相反的取舍：固定表格的
-// 宽度预算被最坏情况占着，而一条只画真相的轨在安静的会话上收缩到零。
+// This track's rule is **only show what's true right now**: no watch → no watch pill,
+// no subagents → no subagent pill, empty session → track doesn't render (returns empty
+// array, caller doesn't draw). This is the opposite trade-off from the old panel's
+// fixed-row table ("Model —", "Workspace —"): the fixed table's width budget is stuck
+// with the worst case, while a track that only draws truth shrinks to zero on a quiet
+// session.
 //
-// 静态字段（模型、推理强度、工作区、会话 id）不在这里——它们不会变，属于
-// 「会话详情半屏」上那一行 chip，见 sessionInfoRows.ts。这里只放会变的。
+// Static fields (model, reasoning strength, workspace, session id) aren't here —
+// they don't change, they belong on the "session detail half-screen" chip row, see
+// sessionInfoRows.ts. This track is only for things that change.
 //
-// 桌面端的对应物是 SessionDetail.tsx 头部那排 chip；桌面横向排得下一整行，
-// 所以它不需要「只画为真的」这条规则。
+// The desktop equivalent is the chip row in SessionDetail.tsx's header; the desktop can
+// fit a full row horizontally, so it doesn't need the "only draw what's true" rule.
 
 import { t } from "../i18n";
 import type { SessionInfo, SessionStatus } from "../types";
 
-/** 会话详情页里能被推上来的整页。
+/** Full-page content that can be pushed from the session detail page.
  *
- *  就是旧 tab 条上那五个标签——它们的内容一点没变（`SessionDetailTabs.tsx` 里
- *  那五个组件原样复用），变的只是入口：从「六个挤在一行、每个约 46px 宽的
- *  tab」改成「从会话详情半屏或状态 pill 推上来的一整页」。一次只看一面，那一
- *  面就拿得到整个屏宽。 */
+ *  These are the five tabs from the old tab bar — their content hasn't changed at all
+ *  (the five components in `SessionDetailTabs.tsx` are reused as-is), only the entry
+ *  point changed: from "six cramped in one row, ~46px each" to "a full page pushed from
+ *  the session detail half-screen or status pill". One pane at a time, and that pane
+ *  gets the full screen width. */
 export type DetailPane =
   | "decisions"
   | "plans"
@@ -35,58 +42,65 @@ export type DetailPane =
   | "notes"
   | "handoff";
 
-/** 头部下面这条轨里，点某个 pill 会推开哪一面。
+/** Which pane clicking a pill in the track below the header pushes open.
  *
- *  `sheet` = 打开「会话详情」半屏（watch 和子代理没有自己的整页，它们的明细
- *  就在半屏上）。 */
+ *  `sheet` = open the "session detail" half-screen (watches and subagents don't have
+ *  their own full pages, their details live in the half-screen). */
 export type PillTarget = DetailPane | "sheet";
 
-/** 三档色调。`alert` 是「这条挡着你了」（要你答的卡、耗尽的额度、断掉的远端），
- *  `live` 是「它此刻在动」，`neutral` 是背景读数。刻意只有三档：一条 pill 轨上
- *  超过三种颜色就不再是分级而是噪音。 */
+/** Three tones. `alert` is "this blocks you" (a card waiting for you, depleted budget,
+ *  disconnected remote), `live` is "it's moving right now", `neutral` is background
+ *  reading. Deliberately only three: more than three colors on a pill track stops being
+ *  hierarchy and becomes noise. */
 export type PillTone = "alert" | "live" | "neutral";
 
 export interface StatusPill {
-  /** 稳定标识。单测按它断言（label 随语言变，数值随数据变），CSS 不依赖它。 */
+  /** Stable identifier. Tests assert on it (label changes with language, numeric values
+   *  change with data), CSS doesn't depend on it. */
   key: string;
   label: string;
   tone: PillTone;
-  /** 画一颗跟着文字颜色的圆点——只给「它此刻在动」那一颗，用来接替旧头部
-   *  右上角那个脉冲状态点。 */
+  /** Draw a dot that tracks the text color — only for the "it's moving right now"
+   *  pill, to replace the old header's pulsing status dot in the top right. */
   dot?: boolean;
-  /** 点它推开哪一面；缺席 = 纯读数，不可点。 */
+  /** Which pane clicking it pushes open; absent = read-only, not clickable. */
   target?: PillTarget;
 }
 
-/** 「它此刻在动」的状态集。与 SessionDetailView 的 WORKING 同一份名单
- *  （waitingInput / active 不算——那是停下来等人，不是在跑）。 */
+/** The set of statuses for "it's moving right now". Same list as SessionDetailView's
+ *  WORKING (waitingInput / active don't count — those are paused waiting for someone,
+ *  not running). */
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
 
 export interface PillInput {
-  /** 归属这条会话的待决策卡张数。不在 `SessionInfo` 上——决策卡是按设备聚合的
-   *  一个收件箱（App.tsx 的 `aggregateDecisions`），所以由调用方按 sessionId
-   *  数好了传进来。 */
+  /** Count of pending decision cards for this session. Not on `SessionInfo` — decision
+   *  cards are a per-device aggregated inbox (App.tsx's `aggregateDecisions`), so the
+   *  caller counts them by sessionId and passes them in. */
   pendingDecisions?: number;
 }
 
 /**
- * 这条轨要画的 pill，按固定顺序。
+ * The pills to draw on this track, in fixed order.
  *
- * 顺序不是按重要性排的，是按**它会不会挡着你**排的：先是挡路的（额度耗尽、
- * 远端断开、等你答的卡），然后是它此刻在动，然后是进度读数。前面几颗是你要
- * 立刻处理的，后面几颗是你扫一眼的——横向滑动时先滑出视野的应该是后者。
+ * Order is not by importance, but by **whether it blocks you**: first the blockers
+ * (depleted budget, remote disconnected, cards waiting for your answer), then what's
+ * moving right now, then progress readings. The first few are what you need to handle
+ * immediately, the last few are what you glance at — when scrolling horizontally,
+ * the latter should slide out of view first.
  */
 export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPill[] {
   const pills: StatusPill[] = [];
 
-  // ── 挡路的 ──────────────────────────────────────────────────────────────
-  // 额度耗尽没有 reset 时刻（等的是有人去充值，不是等时钟），所以它既不改
-  // status 也不进 auto-resume——除了这颗 pill，手机上没有别的地方会说。
+  // ── Blockers ────────────────────────────────────────────────────────────────
+  // Depleted budget has no reset moment (we're waiting for someone to recharge, not a
+  // clock), so it neither changes status nor triggers auto-resume — this pill is the
+  // only place on mobile that will say it.
   if (s.outOfCredits) {
     pills.push({ key: "outOfCredits", label: t("额度耗尽"), tone: "alert" });
   }
-  // 远端 workspace 的 rca-over-ssh 传输断了、Fleet 杀了 agent。status 会说
-  // remoteDisconnected 但不说是哪台主机为什么断——那句原话在半屏上。
+  // Remote workspace's rca-over-ssh transport is broken or Fleet killed the agent.
+  // Status says remoteDisconnected but not which host or why — that detail is in the
+  // half-screen.
   if (s.remoteDisconnect) {
     pills.push({ key: "remoteDisconnect", label: t("远端断开"), tone: "alert", target: "sheet" });
   }
@@ -100,12 +114,13 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
     });
   }
 
-  // ── 它此刻在动 ──────────────────────────────────────────────────────────
+  // ── Moving right now ────────────────────────────────────────────────────────
   if (WORKING.includes(s.status)) {
     pills.push({ key: "running", label: t("运行中"), tone: "live", dot: true });
   }
-  // 轮次进行中排进去的追问，轮次结束时才由 `claude --resume` 送出。旧 UI 里
-  // 这些消息发出去就消失了，人不知道它们还在队里。
+  // Follow-up messages queued during a turn, sent out by `claude --resume` when the
+  // turn ends. In the old UI these messages disappeared once sent, and people didn't
+  // know they were still in the queue.
   if (s.pendingMessages && s.pendingMessages.length > 0) {
     pills.push({
       key: "queued",
@@ -134,8 +149,9 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
         target: "sheet",
       });
     } else {
-      // 一个 watch 时报它轮询了几次——那是「它还活着、还在等」唯一的可见证据；
-      // 多个时报个数，逐个的轮询次数在半屏上。
+      // For one watch, report how many times it has polled — that's the only visible
+      // evidence that "it's alive and still waiting". For multiple, report the count;
+      // each one's poll count is in the half-screen.
       const label =
         s.watches.length === 1
           ? t("watch ×{0}", s.watches[0].pollCount)
@@ -144,7 +160,7 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
     }
   }
 
-  // ── 进度读数 ────────────────────────────────────────────────────────────
+  // ── Progress readings ───────────────────────────────────────────────────────
   if (s.taskPlan && s.taskPlan.total > 0) {
     pills.push({
       key: "plan",
@@ -161,7 +177,7 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
       target: "handoff",
     });
   }
-  // contextPercent 是 0–1 的比值（对齐桌面 SessionDetail 的 `* 100` 用法）。
+  // contextPercent is a 0–1 ratio (aligned with desktop SessionDetail's `* 100` usage).
   if (s.contextPercent != null) {
     pills.push({
       key: "context",
@@ -170,7 +186,8 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
       target: "token",
     });
   }
-  // 半分钱以下显示成 $0.00 等于没说；与桌面端和 sessionInfoRows 同一道门槛。
+  // Half a cent or less showing as $0.00 is the same as saying nothing; same threshold
+  // as desktop and sessionInfoRows.
   if (s.totalCostUsd != null && s.totalCostUsd >= 0.005) {
     pills.push({
       key: "cost",

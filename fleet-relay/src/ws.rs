@@ -1,12 +1,12 @@
 //! WebSocket endpoint: first frame authenticates (role + secret), then frames
 //! are routed per role until the socket closes.
 //!
-//! Under the mobile end-to-end encryption (方案A), the `secret` here is the
-//! HKDF-derived **channel token**, never the pairing secret — and every `msg`
-//! payload is AES-256-GCM ciphertext (`{enc:"box",…}`). The relay is a blind
-//! forwarder: it only ever sees the opaque channel token (which it hashes into
-//! a routing bucket) and sealed bytes it passes through verbatim. It holds no
-//! key and does no crypto; do not add any decrypt/encrypt logic here.
+//! Under mobile end-to-end encryption, the `secret` here is the HKDF-derived
+//! **channel token**, never the pairing secret — and every `msg` payload is
+//! AES-256-GCM ciphertext (`{enc:"box",…}`). The relay is a blind forwarder: it
+//! only ever sees the opaque channel token (which it hashes into a routing bucket)
+//! and sealed bytes it passes through verbatim. It holds no key and does no crypto;
+//! do not add any decrypt/encrypt logic here.
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -220,14 +220,17 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                 }
             }
             InFrame::Notify { title, body, tag, url } if role == Role::Agent => {
-                // 盖上「这条来自哪个 channel」。一部手机可以同时配对多台桌面端,
-                // 而桌面端产出的 url 只带卡 id —— 卡 id 只在单机内唯一,所以两台
-                // 同时有卡时,点开落到哪一张是不确定的。relay 是唯一在扇出时确切
-                // 知道 channel 的一方,而且这样不需要桌面端配合改任何东西。
+                // Stamp which channel this notification came from. One phone can pair with
+                // multiple desktops, and each desktop's URL carries only the card id — but the
+                // card id is unique only within one machine. When two desktops both have a card,
+                // it's unclear which one opens when clicked. The relay is the only place that
+                // knows which channel a message comes from at fan-out time, and this way the
+                // desktop doesn't need to change anything.
                 //
-                // 转发给在线客户端的那份也一起盖:那条路上手机其实能从「帧走的
-                // 哪条 socket」推出设备,但两条路径给出同一个 url 才不会让点击
-                // 行为取决于当时是否在线。
+                // We stamp the version sent to online clients too: on that path, the phone can
+                // actually infer the device from which socket the frame travels, but only if
+                // both paths produce the same URL will click behavior not depend on whether
+                // the client is currently online.
                 let stamped = notify_target::stamp_channel(url.as_deref(), &channel);
                 let out = OutFrame::Notify {
                     title: title.clone(),

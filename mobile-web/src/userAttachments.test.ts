@@ -11,36 +11,36 @@ import type { RelayClient } from "./relay";
 
 const DEFAULT_CONTROL_TIMEOUT_MS = 15_000;
 
-describe("attachmentRef —— 路径 → store 坐标", () => {
-  it("认出 store 里的附件", () => {
+describe("attachmentRef — path to store coordinates", () => {
+  it("recognizes attachment in store", () => {
     expect(attachmentRef("/Users/x/.fleet/user-attachments/ab12cd34/shot.png")).toEqual({
       key: "ab12cd34",
       name: "shot.png",
     });
   });
 
-  it("认出 Windows 反斜杠路径（桌面端在 Windows 上冻进 transcript 的形状）", () => {
+  it("recognizes Windows backslash paths (as stored in transcript on Windows desktop)", () => {
     expect(attachmentRef("C:\\Users\\x\\.fleet\\user-attachments\\ab12\\a.png")).toEqual({
       key: "ab12",
       name: "a.png",
     });
   });
 
-  it("认出 store 之前的 $TMPDIR/fleet-pasted 旧路径", () => {
+  it("recognizes legacy $TMPDIR/fleet-pasted paths from before store", () => {
     expect(attachmentRef("/var/folders/t/fleet-pasted/pasted-1.png")).toEqual({
       key: "_pasted",
       name: "pasted-1.png",
     });
   });
 
-  it("用户自己挑的普通路径不给坐标（不许拿它去读桌面磁盘）", () => {
+  it("user-chosen regular paths return null (prevent desktop disk access)", () => {
     expect(attachmentRef("/Users/x/Desktop/secret.png")).toBeNull();
     expect(attachmentRef("/etc/passwd")).toBeNull();
   });
 });
 
-describe("splitContextFiles —— 剥掉 composer 拼的尾巴", () => {
-  it("正文与路径分离", () => {
+describe("splitContextFiles — strip composer-appended tail", () => {
+  it("separates body and paths", () => {
     const text = "看下这个\n\nContext files:\n- /a/one.png\n- /b/two.pdf";
     expect(splitContextFiles(text)).toEqual({
       body: "看下这个",
@@ -48,48 +48,48 @@ describe("splitContextFiles —— 剥掉 composer 拼的尾巴", () => {
     });
   });
 
-  it("正文里手打的 “Context files:” 不动它", () => {
+  it('preserves manually typed "Context files:" in body', () => {
     const text = "Context files: 你确定吗？\n- 这不是路径";
     expect(splitContextFiles(text).paths).toEqual([]);
     expect(splitContextFiles(text).body).toBe(text);
   });
 
-  it("尾块后面还有正文时不匹配（只认结尾）", () => {
+  it("no match when text follows footer block (only end-of-string counts)", () => {
     const text = "a\n\nContext files:\n- /a/one.png\n\n然后我又打了字";
     expect(splitContextFiles(text).paths).toEqual([]);
   });
 });
 
-describe("splitAnswerAttachments —— 剥掉决策答复里的 @path", () => {
-  it("选项标签与附件路径分离", () => {
+describe("splitAnswerAttachments — strip @path from decision answers", () => {
+  it("separates option label and attachment paths", () => {
     expect(splitAnswerAttachments("好的 @/Users/x/.fleet/user-attachments/k/a.png")).toEqual({
       core: "好的",
       attachments: ["/Users/x/.fleet/user-attachments/k/a.png"],
     });
   });
 
-  it("@~ 开头的家目录路径也认", () => {
+  it("recognizes home directory paths starting with @~", () => {
     expect(splitAnswerAttachments("@~/shot.png").attachments).toEqual(["~/shot.png"]);
   });
 
-  it("没有附件时原样返回", () => {
+  it("returns unchanged when no attachments", () => {
     expect(splitAnswerAttachments("方案 A")).toEqual({ core: "方案 A", attachments: [] });
   });
 
-  it("正文里的 @mention（非路径）不当成附件", () => {
+  it("does not treat @mention (non-path) in body as attachment", () => {
     expect(splitAnswerAttachments("问问 @someone").attachments).toEqual([]);
   });
 });
 
 describe("isRenderableImage / attachmentName", () => {
-  it("按扩展名判断能否内联渲染", () => {
+  it("determines inline renderability by extension", () => {
     expect(isRenderableImage("a.PNG")).toBe(true);
     expect(isRenderableImage("a.jpeg")).toBe(true);
     expect(isRenderableImage("a.pdf")).toBe(false);
     expect(isRenderableImage("a")).toBe(false);
   });
 
-  it("取文件名（正反斜杠都认）", () => {
+  it("extracts filename (both forward and backslash paths)", () => {
     expect(attachmentName("/a/b/c.png")).toBe("c.png");
     expect(attachmentName("C:\\a\\b\\c.png")).toBe("c.png");
   });
@@ -107,7 +107,7 @@ describe("fetchAttachmentImage", () => {
     return { client, calls };
   }
 
-  it("默认取缩略图，full 时显式请求原图", async () => {
+  it("fetches thumbnail by default, explicitly requests full image when full=true", async () => {
     const { client, calls } = captor();
     await fetchAttachmentImage(client, { key: "k", name: "a.png" });
     await fetchAttachmentImage(client, { key: "k", name: "a.png" }, true);
@@ -115,9 +115,9 @@ describe("fetchAttachmentImage", () => {
     expect(calls[1].params).toEqual({ key: "k", name: "a.png", full: true });
   });
 
-  // 与 decision_asset 同源的坑：MB 级图片走 15s 控制默认超时会在慢网下静默早退，
-  // 迟到的 reply 被丢弃，<img> 永远卡在 loading。
-  it("超时远大于 15s 控制消息默认值", async () => {
+  // Same pitfall as decision_asset: MB-sized images over 15s control default timeout
+  // silently exit early on slow networks, late replies get discarded, <img> stays loading forever.
+  it("timeout far exceeds 15s control message default", async () => {
     const { client, calls } = captor();
     await fetchAttachmentImage(client, { key: "k", name: "a.png" }, true);
     expect(calls[0].method).toBe("user_attachment");

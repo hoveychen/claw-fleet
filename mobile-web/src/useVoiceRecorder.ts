@@ -1,108 +1,109 @@
-// 录音条的状态机 —— VoiceButton / VoiceBar 只管画，这里管一次录音的全过程。
+// State machine for the voice recorder bar — VoiceButton / VoiceBar handle rendering, this manages the full recording lifecycle.
 //
-// 与底下那层 useVoiceInput 的分工：那层管 provider 的生命周期（开麦、拿结果、
-// 报错），这层管**用户看到的那次录音**：文字往哪写、写了多少、录了多久、还能不能
-// 反悔。区别体现在两件它必须记住的事上：
+// Division of labor with useVoiceInput below: that layer manages provider lifecycle (open mic, get results,
+// report errors), this layer manages **what the user sees during one recording**: where text goes, how much
+// was written, how long the recording took, whether they can still undo. The distinction shows in two things
+// it must remember:
 //
-//   - `base`：这次录音**开始之前**输入框里的内容。有了它「重录」才可能——否则
-//     用户想重说一遍，只能自己去输入框里手动删掉刚才识别错的那一段。
-//   - `preview`：已定稿的文字 + 还在飘的那一段，合成一条给输入框直接显示。实时
-//     转写就上在真正的输入框里（Gboard / ChatGPT 听写都是这样），而不是塞进一行
-//     会被截断的小字。
+//   - `base`: the input field contents **before this recording started**. With it, "retry" is possible — otherwise
+//     the user wanting to try again would have to manually delete the misrecognized segment from the input field.
+//   - `preview`: finalized text + the floating-in portion, composed into one for direct display in the input field. Real-time
+//     transcription lands in the actual input field (like Gboard / ChatGPT voice input), not crammed into a small line
+//     that gets cut off.
 //
-// 语音的产物是文字，不是音频。所以这一层的每个决定都倒向「文字随时可改、可退」。
+// Voice output is text, not audio. So every decision at this layer biases toward "text can change, can undo anytime".
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { appendVoiceText, type VoiceErrorKind, type VoiceProviderId } from "./voiceInput";
 import { useVoiceInput } from "./useVoiceInput";
 
-/** 松手时长 ≤ 这个数算「点按」——录音继续，手指可以离开屏幕。 */
+/** Hold time ≤ this value counts as a "tap" — recording continues, finger can leave the screen. */
 export const TAP_MS = 500;
 
-/** 一次按压松手之后该怎么办。 */
+/** What to do after pressing and releasing. */
 export type PressIntent =
-  /** 点按：进入（或留在）录音态，手指走开也继续录。 */
+  /** Tap: enter (or stay in) recording mode; continues even if finger leaves. */
   | "keep"
-  /** 长按：按住说话的用法，松手即收。 */
+  /** Long press: press-to-speak style; release to stop. */
   | "stop";
 
 /**
- * 松手时该干什么。只按时长分，没有别的维度。
+ * Determine what to do on release. Only based on hold duration, no other dimensions.
  *
- * 老版本还有个「上滑取消」：盲手势、没有可视落点、用户无从知道滑多远算数
- * （连微信上滑都会浮出「取消 / 转文字」两个看得见的落点让你选）。取消现在是
- * 录音条上一个明确的 ✕。
+ * The old version had a "swipe-up to cancel" gesture: a blind gesture with no visible target, users had no way to know
+ * how far to swipe (even WeChat shows visible "Cancel / Convert to text" targets when swiping). Cancel is now
+ * a clear ✕ button on the recording bar.
  */
 export function pressIntent(heldMs: number): PressIntent {
   return heldMs <= TAP_MS ? "keep" : "stop";
 }
 
-/** 录音时长的读法，`0:07` / `1:03`。 */
+/** Format recording duration as `0:07` / `1:03`. */
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-/** 距离最近一次听到内容多久还算「正在说」——波形靠它决定动不动。 */
+/** How long after hearing the last content to still count as "speaking" — waveform uses this to decide whether to animate. */
 export const SPEAKING_WINDOW_MS = 1200;
 
 /**
- * 「停止并发送」按下之后，等最后一段定稿的时间。
+ * Time to wait after "Stop and Send" is pressed for the final finalized segment.
  *
- * 引擎在 stop 之后**还会再吐一次定稿**（说完最后半句才收工）。立刻发出去的话，
- * 用户说的最后一句就丢了——而且丢得无声无息，人已经把手机放下了。所以这里停顿
- * 一下等它；期间每来一段定稿就重新等，直到安静下来才真的发。
+ * The engine **emits one more finalized segment after stop** (after finishing the last utterance). If sent immediately,
+ * the user's last sentence is lost — and lost silently, after they've already put the phone down. So we pause
+ * here to wait for it; each new finalized segment resets the timer, and we only actually send when it goes quiet.
  */
 export const FINALIZE_MS = 1200;
 
 export interface VoiceRecorderApi {
-  /** 这台设备能不能语音输入。false 时调用方整个不该画语音入口。 */
+  /** Whether this device supports voice input. When false, caller should not render the voice input UI at all. */
   available: boolean;
   recording: boolean;
-  /** 已经开始，但引擎还没说「麦克风真的开了」。这段空窗里说的话不会进任何
-   *  结果，所以录音条不能装作已经在听（不走秒、不画波形）。 */
+  /** Already started, but the engine hasn't yet confirmed "the mic is actually open". Anything spoken during this window
+   *  won't reach any result, so the recorder bar can't pretend to be listening (no elapsed time, no waveform). */
   preparing: boolean;
-  /** 录音条该不该在屏幕上——收音结束后还有一小段等定稿的时间，那时条子不能
-   *  先消失（否则用户按下发送后会看着一个什么都没发生的界面等一秒多）。 */
+  /** Whether the recorder bar should be visible on screen — there's a short wait after audio stops for the final finalized segment,
+   *  during which the bar can't disappear yet (otherwise the user hits send and sees nothing happening for over a second). */
   active: boolean;
-  /** 录音中输入框该显示的内容（已定稿 + 未定稿合成）。不录时等于原值。 */
+  /** Content the input field should display during recording (finalized + unfinalized combined). Equals the original value when not recording. */
   preview: string;
   /**
-   * 输入框现在该显示 `preview` 而不是 `value`。
+   * The input field should display `preview` right now, not `value`.
    *
-   * **不等于 `recording`**：按下停止后还有一小段等最后一句定稿的时间，那段字仍在
-   * `preview` 里而尚未进 `value`。这期间切回 `value`，用户看到的就是「文字消失了」
-   * ——正是这一版要修的那个症状，只是短一点。
+   * **Not the same as `recording`**: after pressing stop, there's a short wait for the final finalized segment. That text
+   * is still in `preview` but hasn't entered `value` yet. Switching back to `value` during this time makes the user see
+   * "text disappeared" — exactly the symptom this version is fixing, just shorter.
    */
   showingPreview: boolean;
-  /** 未定稿的那一段，单独给出来是为了让调用方能把它画成灰的。 */
+  /** The unfinalized portion, exposed separately so the caller can render it in gray. */
   partial: string;
   seconds: number;
-  /** 最近 1.2 秒内听到了新内容。 */
+  /** Heard new content within the last 1.2 seconds. */
   speaking: boolean;
   error: VoiceErrorKind | null;
-  /** 这一轮录音已经往输入框里写进去过东西——决定要不要给「重录」。 */
+  /** This recording session has already written something to the input field — determines whether to offer "retry". */
   dirty: boolean;
-  /** 调用方给了 onSend，录音条上才有「停止并发送」。 */
+  /** The caller provided onSend, so the recorder bar has "Stop and Send". */
   canSend: boolean;
-  /** 正在等最后一段定稿，随后就发出去。 */
+  /** Waiting for the final finalized segment before sending. */
   finalizing: boolean;
   start(): void;
-  /** 收音结束，保留结果。 */
+  /** Stop listening, keep the result. */
   stop(): void;
-  /** 丢弃这次录音：连已经写进输入框的部分一起退回去。 */
+  /** Discard this recording session: revert everything, including what's already in the input field. */
   cancel(): void;
-  /** 退回这次录音开始前的样子，然后重新开始录。 */
+  /** Revert to the state before this recording started, then restart. */
   retry(): void;
-  /** 收工并把内容发出去。等最后一段定稿到齐才真的发。 */
+  /** Stop and send the content. Waits for the final finalized segment to arrive before actually sending. */
   stopAndSend(): void;
-  /** 关掉错误提示回到待命。 */
+  /** Close the error message and return to ready state. */
   dismissError(): void;
-  /** 这个环境能不能把用户直接送去开麦克风权限（壳里能，浏览器不能）。 */
+  /** Whether this environment can take the user directly to open mic permissions (shell can, browser can't). */
   canOpenSettings: boolean;
-  /** 拉起授权入口；授权成功会自动接着开始录音。 */
+  /** Launch the permission dialog; on success, automatically starts recording. */
   openSettings(): Promise<boolean>;
-  /** 当前实现，错误提示靠它说清「权限在哪」。 */
+  /** For the current implementation, error messages use this to clarify "where are the permissions". */
   providerId: VoiceProviderId | null;
 }
 
@@ -113,30 +114,30 @@ export function useVoiceRecorder({
   onSend,
 }: {
   lang?: string;
-  /** 输入框当前的内容。 */
+  /** Current input field content. */
   value: string;
-  /** 语音要改写输入框时调这个。 */
+  /** Call this when voice should update the input field. */
   onChange: (next: string) => void;
-  /** 给了才有「停止并发送」。省掉时录音条只有停止（决策卡里的输入框就是这样，
-   *  那里的发送在卡片自己的按钮上）。 */
+  /** Only when provided does the recorder bar have "Stop and Send". When omitted, the bar only has stop (like decision card
+   *  input fields, where send is on the card's own button). */
   onSend?: () => void;
 }): VoiceRecorderApi {
-  // 识别结果是异步到的，期间用户可能又敲了字；闭包里的 value 是那一刻的旧值，
-  // 拿它拼接会把这几个字覆盖掉。两个都读 ref 里最近一次渲染的值。
+  // Recognition results arrive asynchronously; meanwhile the user might type more. A captured `value` in the closure
+  // is stale, and concatenating with it overwrites the new characters. Both are read from refs holding the latest render values.
   const valueRef = useRef(value);
   valueRef.current = value;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  // 发送是在一个定时器里回调的，那时组件早已重渲染过好几轮；直接用捕获到的那个
-  // 闭包会拿着旧的输入框内容去发 —— 正好丢掉刚等回来的最后一段定稿。
+  // Send happens in a timer callback, after the component has re-rendered several times; using a captured closure
+  // carries stale input field content to send — which silently loses the final finalized segment we just waited for.
   const onSendRef = useRef(onSend);
   onSendRef.current = onSend;
 
-  /** 这次录音开始前输入框里的内容。取消 / 重录都退回它。 */
+  /** Input field contents before this recording started. Cancel / retry both revert to it. */
   const baseRef = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
 
-  /** 「停止并发送」按下之后的等待。null = 没在等。 */
+  /** Timer waiting after "Stop and Send" is pressed. null = not waiting. */
   const finalizeTimerRef = useRef<number | null>(null);
   const [finalizing, setFinalizing] = useState(false);
 
@@ -148,7 +149,7 @@ export function useVoiceRecorder({
     setFinalizing(false);
   }, []);
 
-  /** 重新开始数「安静了多久」。每来一段定稿就重来，直到真的没动静了才发。 */
+  /** Reset the "how long has it been quiet" counter. Each new finalized segment restarts it; only send when truly quiet. */
   const armFinalize = useCallback(() => {
     if (finalizeTimerRef.current !== null) window.clearTimeout(finalizeTimerRef.current);
     setFinalizing(true);
@@ -162,17 +163,17 @@ export function useVoiceRecorder({
   const voice = useVoiceInput(lang, (text) => {
     setDirty(true);
     onChangeRef.current(appendVoiceText(valueRef.current, text));
-    // 还在等着发 —— 这段刚到的定稿说明引擎没说完，再等一轮。
+    // Already waiting to send — this newly arrived finalized segment means the engine isn't done yet, restart the timer.
     if (finalizeTimerRef.current !== null) armFinalize();
   });
 
   const recording = voice.state === "listening";
-  // 收音停了、还在等最后一段定稿的那段时间。输入框在这期间要继续显示那段字
-  // （见 voiceTail.ts），所以它和「正在录」一起决定输入框显示 preview 还是 value。
+  // Audio stopped but still waiting for the final finalized segment. The input field should keep showing that text
+  // during this time (see voiceTail.ts), so it and "recording" together decide whether to show preview or value.
   const settling = voice.settling;
   const preparing = voice.state === "preparing";
 
-  // 计时。只在录音时跑，停下就归零 —— 计时器是「这次录音」的属性。
+  // Elapsed time counter. Only runs while recording, resets on stop — it's a property of "this recording".
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     if (!recording) {
@@ -186,9 +187,9 @@ export function useVoiceRecorder({
     return () => window.clearInterval(id);
   }, [recording]);
 
-  // 「正在说」：靠识别结果的到达时间推断。真正的音量拿不到——Web Speech 不给，
-  // 壳里的引擎自己占着麦克风，我们再开一路 getUserMedia 去测音量有抢麦的风险。
-  // 所以波形是**活性指示**而不是音量表，而它挂靠的是一个真信号：引擎确实在出字。
+  // "Speaking": inferred from when recognition results arrive. Real audio volume is unavailable — Web Speech API doesn't expose it,
+  // and the in-app engine holds the mic; opening another getUserMedia for volume would risk mic contention.
+  // So the waveform is an **activity indicator**, not a volume meter, anchored to a real signal: the engine is actually producing text.
   const [speaking, setSpeaking] = useState(false);
   const heardAtRef = useRef(0);
   useEffect(() => {
@@ -225,14 +226,14 @@ export function useVoiceRecorder({
     armFinalize();
   }, [voice, armFinalize]);
 
-  // 组件被拆掉时别把一个待发送的定时器留在外面：它会对着已经卸载的输入框发送。
+  // Don't leave a pending send timer around after the component unmounts — it would send to an already-unmounted input field.
   useEffect(() => clearFinalize, [clearFinalize]);
 
   const cancel = useCallback(() => {
     clearFinalize();
-    // 取消要连**已经写进输入框的定稿**一起退掉。引擎会把一段长话切成几段陆续
-    // 定稿，只停收音的话，用户按下 ✕ 之前落下的那几句会留在输入框里 —— 那不是
-    // 「取消」，那是「停止」。
+    // Cancel must also revert **the finalized text already written to the input field**. The engine breaks long speech into
+    // multiple segments and finalizes them progressively; if we only stop listening, sentences that arrived before the user
+    // pressed ✕ stay in the field — that's not "cancel", that's "stop".
     const base = baseRef.current;
     baseRef.current = null;
     voice.cancel();
@@ -255,8 +256,8 @@ export function useVoiceRecorder({
     voice.clearError();
   }, [voice]);
 
-  // 授权成功就直接接着录。让用户授权完再自己回来点一次麦克风，是把一次操作
-  // 拆成两次——而他刚刚做的那个动作，本意就是「我要说话」。
+  // On successful permission grant, immediately start recording. Making the user get permission and then come back to tap the mic again
+  // splits one action into two — but what they just did was "I want to talk".
   const grantAndStart = useCallback(async (): Promise<boolean> => {
     const granted = await voice.openSettings();
     if (granted) start();
@@ -290,10 +291,11 @@ export function useVoiceRecorder({
 }
 
 /**
- * 录音时让输入框一直跟着最新的字走。
+ * Keep the input field scrolled to the latest text while recording.
  *
- * 只读的 textarea 不会自己滚。说得长一点，用户就看着一个停在开头的框，以为没在
- * 识别 —— 而实时转写正是这次重做里「它听见了没有」的主要证据，看不见等于没有。
+ * A read-only textarea won't scroll itself. For longer recordings, the user sees the field stuck at the beginning and assumes
+ * it's not listening — but real-time transcription is the main evidence in this redesign that "is it hearing me?", and if they
+ * can't see it, they think it's not.
  */
 export function useFollowTail<T extends HTMLElement>(
   active: boolean,

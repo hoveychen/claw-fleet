@@ -133,7 +133,7 @@ impl AgentSource for ClaudeCodeSource {
         &self,
         spec: &crate::agent_source::SpawnSpec,
     ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
-        // Empty entrypoint → the "新会话" default, so a bare spawn is still
+        // Empty entrypoint → the default "New Session" entry point, so a bare spawn is still
         // classified as Fleet-owned by the scanner.
         let entrypoint = if spec.entrypoint.is_empty() {
             crate::session_launch::NEW_SESSION_ENTRYPOINT
@@ -192,7 +192,7 @@ fn reconcile_claude_liveness(sessions: &mut [SessionInfo], processes: &[CliProce
         s.proc_alive = false;
         // Mirror `apply_pid_liveness`'s dead-process branch: an in-flight status
         // left frozen by the last transcript write is a ghost once the process
-        // is gone — downgrade it so the "会话运行中" UI, the pending-message
+        // is gone — downgrade it so the "Session Running" UI, the pending-message
         // drain, and auto-resume all unstick. RateLimited / ServerErrored /
         // WaitingInput / Idle / Stuck are terminal display states and MUST
         // survive untouched — auto-resume keys on RateLimited, so clobbering it
@@ -226,7 +226,7 @@ fn reconcile_claude_liveness(sessions: &mut [SessionInfo], processes: &[CliProce
 /// session's `proc_alive` only when its fs-watcher sees a write under
 /// `~/.claude/projects/`, so the process death produces no event and `proc_alive`
 /// stays frozen `true`. That jams three time-gated recovery paths that all key on
-/// `!proc_alive`: the "会话运行中" enqueue UI (`canEnqueueSession`), the
+/// `!proc_alive`: the "Session Running" enqueue UI (`canEnqueueSession`), the
 /// pending-message drain, and auto-resume (`select_resume_candidates` filters
 /// `!proc_alive`). Since a rate limit clears at a wall-clock `resets_at` — never a
 /// filesystem event — the session sits stuck until some *unrelated* write happens

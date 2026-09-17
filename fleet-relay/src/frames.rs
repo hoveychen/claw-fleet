@@ -53,8 +53,8 @@ pub enum InFrame {
     /// Client only: remove a previously registered subscription for this
     /// channel. The payload identifies the sub the same way `PushSubscribe`
     /// does — a harmony sub by `platform:"harmony"` plus either a device
-    /// `token` (普通应用 channel) or an `openId` (元服务 channel), a web sub by
-    /// `endpoint`. Removing an absent subscription is a no-op.
+    /// `token` (general app channel) or an `openId` (service app channel),
+    /// a web sub by `endpoint`. Removing an absent subscription is a no-op.
     PushUnsubscribe { subscription: Value },
 }
 

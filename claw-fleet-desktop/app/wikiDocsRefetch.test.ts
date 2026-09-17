@@ -1,7 +1,7 @@
 /**
  * The shared wiki doc list is fetched exactly once per app run, so a doc the
  * session publishes *after* that fetch is absent from it — and a wiki tab for
- * that slug rendered "该文档未发布，或已被删除" for a doc that is perfectly fine.
+ * that slug rendered "document not published or deleted" for a doc that is perfectly fine.
  * These guard the one re-read a miss is allowed to ask for.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// The card's "this tool is running" affordance. Both halves of the bug 老板 hit
+// The card's "this tool is running" affordance. Both halves of the bug the user hit
 // are covered: a finalised `tool_use` record whose Bash has not returned yet
 // (used to render as a silent, finished-looking card), and a background shell
 // whose turn ended while the command kept running.

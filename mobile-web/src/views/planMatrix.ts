@@ -1,4 +1,4 @@
-/* Row model for the phone's 计划 page: one row per plan, one cell per P-task.
+/* Row model for the phone's plan page: one row per plan, one cell per P-task.
    Pure — no React, no DOM.
 
    Deliberate copy of claw-fleet-desktop/app/components/planMatrix.ts (the two

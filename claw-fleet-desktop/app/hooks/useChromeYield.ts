@@ -51,8 +51,8 @@ export function useChromeYield({
       return;
     }
     // Only pages built on PageShell have a secondary sidebar to fold; on the
-    // others (会话, whose list column is the page itself) step 1 is all there
-    // is, and setting the flag would record a collapse nothing performs.
+    // others (Session page, where the list column is the page itself), step 1 is
+    // all there is, and setting the flag would record a collapse nothing performs.
     if (RAILS[view] && !secondaryCollapsed) autoCollapse(view);
   }, [enabled, active, proseW, sidebarCollapsed, secondaryCollapsed, view, autoCollapse]);
 

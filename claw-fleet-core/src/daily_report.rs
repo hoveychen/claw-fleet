@@ -29,12 +29,12 @@ pub struct DailyReport {
     pub lessons_generated_at: Option<u64>,
 }
 
-/// Bump when the token-accounting口径 (or any metrics-fold logic) changes, so
+/// Bump when the token-accounting methodology (or any metrics-fold logic) changes, so
 /// [`run_backfill_check`] knows a cached past-day report was computed under an
 /// older basis and must be re-scanned. History:
 ///   0 — implicit for reports predating this field (last-turn input snapshot).
 ///   1 — cumulative input incl. cache (input + cache_creation + cache_read),
-///       matching cost and the sidebar counter's口径.
+///       matching cost and the sidebar counter's methodology.
 ///   2 — usage attributed by finalized turn timestamp, including sessions that
 ///       crossed midnight and live Claude/Codex sources.
 pub const CURRENT_METRICS_VERSION: u32 = 2;
@@ -43,7 +43,7 @@ pub const CURRENT_METRICS_VERSION: u32 = 2;
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DailyMetrics {
-    /// 口径 version these metrics were computed under. Missing (⇒ 0) in reports
+    /// Accounting methodology version these metrics were computed under. Missing (⇒ 0) in reports
     /// generated before the field existed. See [`CURRENT_METRICS_VERSION`].
     #[serde(default)]
     pub metrics_version: u32,
@@ -77,7 +77,7 @@ pub struct DailyMetrics {
 #[serde(rename_all = "camelCase")]
 pub struct ModelTokens {
     /// **Total** tokens sent to the API: `Σ(input + cache_write + cache_read)`,
-    /// on the same口径 as `cost_usd` — NOT net input. Consumers that itemise
+    /// on the same accounting methodology as `cost_usd` — NOT net input. Consumers that itemise
     /// input separately from the cache rows must subtract the two cache figures
     /// (see `today_usage::fold_report_days`).
     pub input_tokens: u64,
@@ -183,7 +183,7 @@ impl ConversationPair {
 pub struct SessionMetricsRaw {
     /// Cumulative input tokens across all unique assistant turns
     /// (`Σ input + cache_creation + cache_read`, cache re-reads included) — the
-    /// "tokens sent to the API" total, on the same口径 as `cost_usd` and as the
+    /// "tokens sent to the API" total, on the same accounting methodology as `cost_usd` and as the
     /// live scan's `SessionInfo.total_input_tokens`. NOT the last-turn
     /// context-window snapshot.
     pub input_tokens: u64,
@@ -1025,11 +1025,11 @@ fn build_summary_prompt(report: &DailyReport, locale: &str) -> String {
 /// hero title (`AISummaryCard` treats the first paragraph as the headline).
 ///
 /// Conservative by design: only strips the first paragraph when it BOTH looks
-/// like a self-referential announcement (an opener phrase like "generating" /
-/// "here is" / "以下是" / "根据提供的") AND names the summary/report domain, AND
+/// like a self-referential announcement (an opener phrase like "generating",
+/// "here is", or their equivalents in other languages) AND names the summary/report domain, AND
 /// is short, AND real content follows. A legitimate one-line opening paragraph
-/// that describes the day's content (no announcement opener, no "摘要/报告/summary/
-/// report" self-reference) is left untouched.
+/// that describes the day's content (no announcement-style opener, no summary/report
+/// self-reference) is left untouched.
 fn strip_summary_preamble(summary: &str) -> String {
     let trimmed = summary.trim();
 
@@ -1962,8 +1962,8 @@ pub fn local_tz_tag(date: &str) -> String {
 /// Whether a **past** day's report must be (re)generated during backfill.
 ///
 /// Regenerate when there is no cached report, when the cached one was computed
-/// under an older metrics口径 ([`DailyMetrics::metrics_version`] <
-/// [`CURRENT_METRICS_VERSION`]) — otherwise a口径 change (e.g. switching token
+/// under an older metrics methodology ([`DailyMetrics::metrics_version`] <
+/// [`CURRENT_METRICS_VERSION`]) — otherwise a methodology change (e.g. switching token
 /// totals to cumulative-incl-cache) would never reach historical reports, which
 /// are skipped on every pass once cached — **or** when the machine's timezone
 /// moved since that report was written, which shifts the day boundary and so
@@ -2016,7 +2016,7 @@ fn run_backfill_check(
 
         // For today, always regenerate (new sessions keep arriving). For past
         // days, regenerate only when there's no cached report, the cached one
-        // was computed under an older metrics口径 (so a口径 change backfills
+        // was computed under an older metrics methodology (so a methodology change backfills
         // into history instead of stopping at today), or the machine's timezone
         // moved (which moves the day boundary under the cached numbers).
         if days_ago > 0 && !past_report_needs_regen(existing.as_ref(), &tz) {
@@ -2198,10 +2198,10 @@ mod tests {
 
     #[test]
     fn stale_past_report_is_regenerated_but_current_is_kept() {
-        // Regression: after the token-accounting口径 changed, historical daily
+        // Regression: after the token-accounting methodology changed, historical daily
         // reports were never re-scanned because backfill skipped any past day
         // that already had a cached report — so old last-turn-snapshot numbers
-        // never got backfilled to the new cumulative口径.
+        // never got backfilled to the new cumulative methodology.
 
         // No cached report → must generate.
         assert!(
@@ -2209,7 +2209,7 @@ mod tests {
             "missing report must generate"
         );
 
-        // Cached under the current口径 → leave it alone (no needless re-scan).
+        // Cached under the current methodology → leave it alone (no needless re-scan).
         let mut current = make_test_report("2026-07-10");
         current.metrics.metrics_version = CURRENT_METRICS_VERSION;
         assert!(
@@ -2217,7 +2217,7 @@ mod tests {
             "up-to-date report must NOT be regenerated"
         );
 
-        // Cached under the immediately previous口径 (version 1 used whole
+        // Cached under the immediately previous methodology (version 1 used whole
         // creation-day sessions) →
         // must be regenerated so its token totals move to the new basis.
         let mut stale = make_test_report("2026-07-09");
@@ -2252,7 +2252,7 @@ mod tests {
         // Legacy reports stored the %Z abbreviation (or a placeholder). We
         // cannot tell whether the boundary moved, and re-scanning all of them
         // once would cost a full 90-day transcript sweep for nothing — leave
-        // them until some other口径 change picks them up.
+        // them until some other methodology change picks them up.
         for legacy in ["EDT", "UTC", "local", "CST", ""] {
             moved.timezone = legacy.to_string();
             assert!(
@@ -2394,15 +2394,28 @@ mod tests {
         assert!(out.contains("[plan-approval]"));
     }
 
+    /// A db path no other test in this process can collide with.
+    ///
+    /// The counter is what makes that true, and it is not redundant with the
+    /// timestamp: `SystemTime` is only microsecond-granular on macOS (measured:
+    /// the smallest nonzero step between two consecutive `now()` calls is
+    /// 1000ns, and 97% of consecutive calls return the *same* value), so two of
+    /// these tests entering this function in the same microsecond used to get
+    /// byte-identical paths. They then opened the same sqlite file, and
+    /// whichever finished first deleted it in its own cleanup — the other one
+    /// failed its next statement with "disk I/O error". Intermittent, and only
+    /// under the parallelism of a full `cargo test` run.
     fn temp_db_path() -> std::path::PathBuf {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!("fleet_test_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         dir.join(format!(
-            "test_{}.db",
+            "test_{}_{}.db",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ))
     }
 

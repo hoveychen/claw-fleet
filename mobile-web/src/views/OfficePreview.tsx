@@ -1,25 +1,27 @@
 /**
- * 手机上的 Office 预览 —— docx / xlsx / pptx。
+ * Office preview on mobile — docx / xlsx / pptx.
  *
- * 与桌面端同样的三个库、同样的取舍（见 claw-fleet-desktop 的 OfficePreview），
- * 但输入不同：手机的字节是从 relay 的 base64 帧里解出来的 Uint8Array，不是一个
- * 能直接给 <iframe> 的 URL，所以这里收 Blob。
+ * Same three libraries and same trade-offs as desktop (see OfficePreview in claw-fleet-desktop);
+ * but inputs differ. On mobile, bytes are Uint8Array decoded from relay's base64 frames, not a
+ * URL passable directly to <iframe>, so this component takes a Blob.
  *
- * 三个库合计约 1.6 MB（pptx-preview 自带 echarts 占 1.25 MB），对手机网络来说
- * 这是必须推迟的量：整个模块被 lazy 引入，模块内部再对每个库各做一次动态
- * import——看一份 .docx 只会下 docx-preview 那 76 KB，绝不碰 pptx 那份。
+ * The three libraries total ~1.6 MB (pptx-preview includes echarts at 1.25 MB), which for mobile
+ * networks is a payload that must be deferred: the entire module is lazily imported, and inside
+ * each library is dynamically imported — viewing a .docx fetches only docx-preview's 76 KB, never
+ * the pptx bundle.
  *
- * 排版按手机竖屏收窄：pptx 按容器实宽渲染，xlsx 只画表格并允许横向滚动。
+ * Layout adapts to mobile portrait: pptx renders to container width; xlsx draws only the table
+ * and allows horizontal scroll.
  */
 import { useEffect, useRef, useState } from "react";
 
 import { t } from "../i18n";
 import styles from "./OfficePreview.module.css";
 
-/** 一份表格里渲染多少行。手机上再多也是滚不到的。 */
+/** Max rows to render in a sheet; on mobile, anything more won't scroll into view anyway. */
 const MAX_SHEET_ROWS = 500;
 
-/** 16:9，pptx-preview 要显式像素。 */
+/** 16:9; pptx-preview requires explicit pixel dimensions. */
 const SLIDE_RATIO = 9 / 16;
 
 type CellValue = string | number | boolean | Date | null;
@@ -65,16 +67,16 @@ function HostPreview({ kind, blob }: { kind: "docx" | "pptx"; blob: Blob }) {
       } else {
         const { init } = await import("pptx-preview");
         if (!alive) return;
-        // 竖屏下容器很窄；360 是「还没量到宽度」时的兜底，不是目标值。
+        // Container is narrow in portrait; 360 is a fallback when width hasn't been measured yet, not a target value.
         const width = host.clientWidth || 360;
         const previewer = init(host, {
           width,
           height: Math.round(width * SLIDE_RATIO),
-          // 必须是 slide：list 模式下每页都画在同一个偏移上，两页会叠在一起。
+          // Must be slide mode: in list mode, each page is drawn at the same offset, causing pages to overlap.
           mode: "slide",
         });
         await previewer.preview(await blob.arrayBuffer());
-        // 它先画分页再渲染首页，所以刚打开会显示「0/2」。
+        // It draws pagination before rendering the first page, so newly opened files show "0/2".
         previewer.updatePagination();
       }
     })()
@@ -112,7 +114,8 @@ function SheetPreview({ blob }: { blob: Blob }) {
     setErr(null);
     setActive(0);
     (async () => {
-      // `/browser` 而不是包根：read-excel-file 按环境分发,根本没有根导出。
+      // `/browser` rather than the package root: read-excel-file dispatches per
+      // environment and has no root export at all.
       const readXlsxFile = (await import("read-excel-file/browser")).default;
       const parsed = (await readXlsxFile(blob)) as ParsedSheet[];
       if (alive) setSheets(parsed);
@@ -169,13 +172,13 @@ function formatCell(cell: CellValue): string {
 }
 
 /**
- * Word 的列表符号是符号字体私有区里的一个码位（`Symbol` 里的「\u2022」是
- * U+F0B7），docx-preview 会照搬成 `content: "\uF0B7\\9 "; font-family: Symbol`。
- * 手机上没有这些字体，于是每个项目符号都渲染成豆腐块。渲染完把这些码位换成
- * 普通字符即可。
+ * Word's list bullets are codepoints in the Symbol font's private use area (U+2022 in Symbol is
+ * U+F0B7); docx-preview copies them as `content: "\9 "; font-family: Symbol`.
+ * Mobile lacks these fonts, so every bullet renders as a tofu block. After rendering, replace
+ * these codepoints with regular characters.
  *
- * 与桌面端 claw-fleet-desktop/app/officeRender.ts 的同名函数是同一份逻辑 ——
- * 两个包没有共享代码路径，改一处时另一处也要改。
+ * This mirrors the same-named function in claw-fleet-desktop/app/officeRender.ts — the two
+ * packages don't share code, so both must be updated together.
  */
 function fixSymbolBullets(host: HTMLElement): void {
   const PRIVATE_USE = /[\ue000-\uf8ff]/g;
@@ -189,7 +192,7 @@ function fixSymbolBullets(host: HTMLElement): void {
       const replaced = content.replace(PRIVATE_USE, "\u2022");
       if (replaced === content) continue;
       style.content = replaced;
-      // 符号字体本身也要去掉：它正是「装不上」的那个字体。
+      // Also remove the Symbol font itself: it's the one that can't be loaded.
       style.fontFamily = "inherit";
     }
   }

@@ -15,10 +15,11 @@ import {
 } from "./transport";
 import type { DecisionKind, SessionInfo } from "./types";
 
-// 传输层无关的那部分曾经住在本文件里,现在住在 transport.ts —— 因为同源 HTTP
-// 实现也需要它们,而它不能 import 本文件(见 transport.ts 顶部说明)。从这里
-// re-export,是为了让既有的 `from "./relay"` 全部继续有效:这次改动是把接缝
-// 划出来,不是让二十几个调用点跟着改导入路径。
+// The transport-agnostic part used to live in this file, now lives in transport.ts —
+// because the same-origin HTTP implementation also needs it, and it can't import
+// this file (see transport.ts top for details). Re-exporting from here keeps all
+// existing `from "./relay"` imports working: this change carves out the seam without
+// forcing two dozen call sites to update their import paths.
 export {
   ANSWER_MAX_ATTEMPTS,
   ASSET_REQUEST_TIMEOUT_MS,
@@ -26,14 +27,15 @@ export {
   UPLOAD_REQUEST_TIMEOUT_MS,
 } from "./transport";
 export type { FleetTransport, RttSample, TransportHandlers } from "./transport";
-/** 历史名。本体是 `TransportError` —— 它描述的是「请求失败在哪一层」,与是否
- *  经过 relay 无关。别名留着,免得为一次纯粹的搬家改动一批 catch 分支。 */
+/** Legacy name. The actual one is `TransportError` — it describes "which layer did
+ *  the request fail at", independent of whether it went through relay. Alias kept
+ *  to avoid touching all the catch branches just for a pure refactor move. */
 export { TransportError as RelayRequestError } from "./transport";
-/** 历史名,同上。 */
+/** Legacy name, same as above. */
 export type { TransportHandlers as RelayHandlers } from "./transport";
 
 /** Self-description this phone announces to the desktop so it appears in the
- *  desktop 「移动端」 device list. Provided lazily so `pushSubscribed` reflects
+ *  desktop "移动端" (Mobile) device list. Provided lazily so `pushSubscribed` reflects
  *  the state at each heartbeat, not just at construction. */
 export interface DeviceInfo {
   clientId: string;
@@ -82,9 +84,10 @@ async function inflateGzipBytes(buf: ArrayBuffer): Promise<string> {
   return new Response(stream).text();
 }
 
-/** 这台设备的 relay 地址由调用方决定 —— 设备簿里那台指名的,或构建默认值。
- *  纯 URL 计算住在 relayBase.ts(一个不含 relay 客户端的叶子模块),这样想知道
- *  一个地址的人不必把整个 WebSocket + 加密栈拖进来。 */
+/** The relay address for this device is decided by the caller — either the one
+ *  specified in the device registry or the build default. Pure URL computation lives
+ *  in relayBase.ts (a leaf module with no relay client), so anyone needing to know
+ *  an address doesn't have to pull in the entire WebSocket + crypto stack. */
 
 
 /** Control messages (snapshots, tails, marks) are small and 15s is plenty.
@@ -104,7 +107,7 @@ const STABLE_CONNECTION_MS = 30_000;
 export class RelayClient implements FleetTransport {
   private ws: WebSocket | null = null;
   private secret: string;
-  /** 这台设备连的 relay(已解析成 origin)。 */
+  /** The relay this device connects to (resolved to origin). */
   private base: string;
   private handlers: TransportHandlers;
   private deviceInfo?: () => DeviceInfo;
@@ -129,7 +132,7 @@ export class RelayClient implements FleetTransport {
       /** Epoch ms the relay's `msg_ack` for this frame landed. Set once (the
        *  first ack wins) and read on reply to split off the phone↔relay leg. */
       ackAt?: number;
-      // 方案 A: fired once when the desktop's early `ack{req_id}` lands, before
+      // Scheme A: fired once when the desktop's early `ack{req_id}` lands, before
       // the final reply — lets a caller confirm the submit reached the desktop
       // without waiting out the timeout. `acked` guards against a double fire.
       onAck?: () => void;
@@ -145,7 +148,7 @@ export class RelayClient implements FleetTransport {
   private authedAt = 0;
   private closed = false;
   private authed = false;
-  // End-to-end encryption keys derived from the pairing secret (方案A). The
+  // End-to-end encryption keys derived from the pairing secret (Scheme A). The
   // relay only ever sees `channelToken` (what we auth with) and sealed
   // ciphertext; the raw secret and `encKey` never leave this device. Derivation
   // is async (WebCrypto), so it's memoized in `keysReady` and awaited before the
@@ -154,7 +157,7 @@ export class RelayClient implements FleetTransport {
   private encKey?: CryptoKey;
   private keysReady?: Promise<void>;
 
-  /** `base` 省略 = 用构建默认值,与设备记录里 `relayBase: null` 同义。 */
+  /** `base` omitted = use build default, equivalent to `relayBase: null` in device record. */
   constructor(
     secret: string,
     handlers: TransportHandlers,
@@ -221,7 +224,7 @@ export class RelayClient implements FleetTransport {
     return this.authed;
   }
 
-  /** 这台设备说话的对象是中转,不是桌面端 —— 所以显示的是 relay 主机名。 */
+  /** This device talks to the relay, not the desktop — so the label shown is the relay hostname. */
   get endpointLabel(): string {
     return relayDisplayHost(this.base);
   }
@@ -265,9 +268,11 @@ export class RelayClient implements FleetTransport {
       // don't hammer a weak link once per second (the old `wasAuthed ? 1000`
       // reset did exactly that on every auth→drop cycle).
       if (stableMs >= STABLE_CONNECTION_MS) this.reconnectDelay = 1000;
-      // 抖动:多设备之后同一部手机上有 N 条这样的连接,网络恢复的那一刻它们会
-      // 同时醒来撞在一起(N 次握手挤在同一个 RTT 里,弱网上正好把它拖垮)。给每
-      // 次重连加最多 30% 的随机偏移,让它们自然错开;单设备时这点偏移无感。
+      // Jitter: after multiple devices, the same phone has N such connections, which
+      // all wake up and collide at the instant the network recovers (N handshakes
+      // squeezed into one RTT, which can bring down a weak link). Add up to 30%
+      // random offset to each reconnect to naturally stagger them; on single device
+      // this jitter is imperceptible.
       const delay = this.reconnectDelay * (1 + Math.random() * 0.3);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
       window.setTimeout(() => void this.open(), delay);
@@ -416,7 +421,7 @@ export class RelayClient implements FleetTransport {
         break;
       }
       case "ack": {
-        // Early submit-ack (方案 A): the desktop received a write req and is now
+        // Early submit-ack (Scheme A): the desktop received a write req and is now
         // processing it. Fire the caller's onAck once; the promise still settles
         // on the eventual reply / timeout.
         const reqId = String(payload.req_id ?? "");

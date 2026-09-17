@@ -8,7 +8,7 @@ const { classifyHarmonyError, harmonyVoiceProvider } = await import("./voiceHarm
 
 type Win = Record<string, unknown>;
 
-/** 假的原生桥，记下页面调了什么。 */
+/** Fake native bridge that records what the page calls. */
 function installBridge() {
   const calls = { start: [] as string[], stop: 0, cancel: 0 };
   (window as unknown as Win)["fleetNative"] = {
@@ -19,7 +19,7 @@ function installBridge() {
   return calls;
 }
 
-/** 模拟壳侧推一条事件回来。 */
+/** Simulate pushing an event from the shell side back. */
 function push(ev: { kind: string; text?: string; code?: string }): void {
   const hook = (window as unknown as Win)["__fleetVoice"] as
     | ((e: unknown) => void)
@@ -61,7 +61,7 @@ describe("classifyHarmonyError", () => {
     expect(classifyHarmonyError("PERMISSION_DENIED")).toBe("no-permission");
   });
 
-  // Core Speech Kit 的数字错误码没有公开枚举，猜不得。
+  // Core Speech Kit's numeric error codes have no public enum; they cannot be inferred.
   it("引擎的数字码一律归到 unavailable", () => {
     expect(classifyHarmonyError("1002200002")).toBe("unavailable");
     expect(classifyHarmonyError("START_FAILED")).toBe("unavailable");
@@ -95,8 +95,9 @@ describe("harmonyVoiceProvider", () => {
     expect(c.final).toEqual(["把 P3 勾掉"]);
   });
 
-  // stop 之后引擎还要把最后一段定稿推回来。若 stop 就拆掉 hook，那一段没人收，
-  // 现象是「说完按停止，最后一句没进输入框」。
+  // After stop, the engine still needs to push back the last final segment. If we
+  // tear down the hook on stop, nobody receives it, and the symptom is "finish speaking,
+  // press stop, but the last sentence doesn't enter the input box."
   it("stop 之后仍收得到最后一段定稿", async () => {
     const calls = installBridge();
     const c = collect();
@@ -129,7 +130,8 @@ describe("harmonyVoiceProvider", () => {
     expect(c.final).toEqual([]);
   });
 
-  // 引擎自己收工(VAD 说完了)。定稿此前已经到过,这里只拆 hook,不该报错。
+  // The engine finishes itself (VAD is done). The final segment has already arrived;
+  // here we only tear down the hook and should not report an error.
   it("end 事件收尾,不报错", async () => {
     installBridge();
     const c = collect();
@@ -153,9 +155,10 @@ describe("harmonyVoiceProvider", () => {
   });
 });
 
-// 壳侧的 createEngine 是异步的，页面必须等到引擎真的开麦（ready 事件）才敢说
-// 「正在听」。老壳不发这个事件时也不能卡死——那一路由 useVoiceInput 拿首个
-// partial/final 兜底，这里只保证桥认得这个 kind。
+// The shell-side createEngine is async; the page must wait until the engine actually
+// opens the mic (ready event) before daring to say "listening". When the old shell
+// doesn't send this event, we can't hang either — that path is backed up by useVoiceInput
+// taking the first partial/final, and here we only guarantee the bridge recognizes this kind.
 describe("harmonyVoiceProvider 的就绪信号", () => {
   it("startVoice 之后还没就绪", async () => {
     installBridge();
@@ -174,8 +177,8 @@ describe("harmonyVoiceProvider 的就绪信号", () => {
 });
 
 describe("openPermissionSettings", () => {
-  // 老壳（没接二次授权）配新 web：不能假装能拉起面板，否则 UI 会画一个按下去
-  // 什么都不发生的「去授权」。
+  // Old shell (no secondary authorization integration) paired with new web: can't pretend
+  // we can open the panel, or the UI will draw an "authorize" button that does nothing.
   it("壳没登记 openVoiceSettings 时直接说不行", async () => {
     installBridge();
     expect(await harmonyVoiceProvider.openPermissionSettings?.()).toBe(false);
@@ -191,7 +194,7 @@ describe("openPermissionSettings", () => {
     (w["__fleetVoicePermission"] as (g: boolean) => void)(true);
 
     expect(await pending).toBe(true);
-    // 拆干净:留着的话下一次授权会撞上同一个已经 resolve 过的 promise。
+    // Clean up: if left behind, the next authorization will hit the same already-resolved promise.
     expect(w["__fleetVoicePermission"]).toBeUndefined();
   });
 
@@ -204,9 +207,11 @@ describe("openPermissionSettings", () => {
   });
 });
 
-// 鸿蒙的引擎 VAD 判定静默 3 秒就自己收工（也可能是录满 60 秒的上限），壳侧推一条
-// `end` 回来。以前这条事件只用来拆 hook，页面完全不知道 —— 界面一直显示「正在
-// 听」，用户继续说却一个字都不出，只有再点一次停止才回得来。
+// HarmonyOS's engine VAD determines silence for 3 seconds and stops itself (or hits the
+// 60-second recording limit), then the shell pushes an `end` event. Previously this event
+// was only used to tear down the hook, and the page had no idea — the UI kept showing
+// "listening", and when the user continued speaking nothing came out; only pressing stop
+// again would return.
 describe("引擎自己收工", () => {
   it("end 事件要上报给调用方，而不是只在内部拆 hook", async () => {
     installBridge();

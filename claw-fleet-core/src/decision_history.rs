@@ -62,9 +62,9 @@ pub enum FleetAskOutcome {
     /// card away" are not the same event, and folding them lost the only
     /// per-card record of which it was.
     Cancelled,
-    /// User pressed 结束任务 — the task was closed as complete.
+    /// User pressed End Task — the task was closed as complete.
     TaskCompleted,
-    /// User pressed 放弃任务 — the task was closed as unfinished.
+    /// User pressed Abandon Task — the task was closed as unfinished.
     TaskAbandoned,
     /// Desktop consumer disappeared mid-flight.
     HeartbeatLost,
@@ -389,11 +389,11 @@ pub struct DecisionTypeStats {
     /// Declined / cancelled / rejected — the user refused to engage with the
     /// card. Does NOT include the v3 terminal presses; see the two below.
     pub declined: u32,
-    /// fleet-ask cards resolved with 结束任务 (task closed as a success).
+    /// fleet-ask cards resolved with End Task (task closed as a success).
     /// Absent (0) in reports generated before the terminal button existed.
     #[serde(default)]
     pub task_completed: u32,
-    /// fleet-ask cards resolved with 放弃任务 (task closed as unfinished).
+    /// fleet-ask cards resolved with Abandon Task (task closed as unfinished).
     #[serde(default)]
     pub task_abandoned: u32,
     /// Desktop consumer disappeared mid-flight.
@@ -854,7 +854,7 @@ fn read_persisted_records(session_id: &str) -> Vec<DecisionHistoryRecord> {
 /// superseding happens here on read instead of by rewriting the line.
 ///
 /// Without this, every consumer sees the stale first record: the transcript card
-/// would keep reading 「已超时」 with no answer, and the daily stats would count
+/// would keep reading "Timed out" with no answer, and the daily stats would count
 /// the same card twice.
 fn collapse_superseded(records: Vec<DecisionHistoryRecord>) -> Vec<DecisionHistoryRecord> {
     let mut last_at: HashMap<String, usize> = HashMap::new();

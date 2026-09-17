@@ -137,12 +137,12 @@ pub struct SessionInfo {
     pub reasoning_output_tokens: u64,
     /// Cumulative input tokens across all finalized turns (`Σ input_tokens +
     /// cache_creation_input_tokens + cache_read_input_tokens`, cache re-reads
-    /// included) — the "tokens sent to the API" total, on the same口径 as
-    /// `total_cost_usd`. This is NOT the last-turn context-window snapshot (that
-    /// is exposed via `context_percent`); for Codex it's the cumulative
-    /// `total_token_usage.input_tokens`. Matches the per-session input the daily
-    /// report sums (`daily_report.rs`), so "today's cumulative" sums both sources
-    /// on one口径. `0` when no usage seen yet.
+    /// included) — the "tokens sent to the API" total, on the same measurement
+    /// basis as `total_cost_usd`. This is NOT the last-turn context-window
+    /// snapshot (that is exposed via `context_percent`); for Codex it's the
+    /// cumulative `total_token_usage.input_tokens`. Matches the per-session input
+    /// the daily report sums (`daily_report.rs`), so "today's cumulative" sums
+    /// both sources on the same measurement basis. `0` when no usage seen yet.
     #[serde(default)]
     pub total_input_tokens: u64,
     /// Cumulative USD cost for this session alone (main or subagent).
@@ -263,9 +263,9 @@ pub struct SessionInfo {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub user_mark: Option<crate::session_mark::SessionMark>,
     /// Terminal state of the task the session was doing: `completed` (the user
-    /// pressed 结束任务) or `abandoned` (放弃任务). `None` = the task is still
-    /// open. A third axis alongside `status` (running now?) and `user_mark`
-    /// (reviewed by me?) — see `task_outcome`. Stamped by
+    /// pressed "end task") or `abandoned` ("abandon task"). `None` = the task
+    /// is still open. A third axis alongside `status` (running now?) and
+    /// `user_mark` (reviewed by me?) — see `task_outcome`. Stamped by
     /// `task_outcome::enrich_sessions` at scan time, not during the cached deep
     /// parse — the outcome changes while the session's jsonl doesn't.
     #[serde(skip_serializing_if = "Option::is_none", default)]

@@ -168,9 +168,9 @@ pub fn is_disabled(feature: Feature) -> bool {
 ///   `@import`, but nothing re-installs the mirrored carrier, so a harness runs
 ///   without its Fleet guidance until a human notices.
 ///
-/// On 2026-09-07 that asymmetry cost 老板 a day of dsh sessions: CLAUDE.md lost
-/// its blocks to a writer race (since fixed by [`crate::claude_md_lock`]), the
-/// startup reconcile read the file mid-incident, and `~/.dsh/cordis.patch.yml`
+/// On 2026-09-07 that asymmetry cost the user a day of dsh sessions: CLAUDE.md
+/// lost its blocks to a writer race (since fixed by [`crate::claude_md_lock`]),
+/// the startup reconcile read the file mid-incident, and `~/.dsh/cordis.patch.yml`
 /// stayed `[]` long after CLAUDE.md had healed. So a negative read only counts
 /// when [`is_disabled`] agrees — that flag is written only by an explicit
 /// remove, through [`note_intent`].

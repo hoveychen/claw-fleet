@@ -195,7 +195,7 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
 
   // A card that resolved without an answer (declined / timed-out / cancelled /
   // heartbeat-lost) is *done* — show its real outcome instead of leaving it
-  // forever 「未回答」. Without this a card whose turn was SIGINT'd (parked on
+  // forever unanswered. Without this a card whose turn was SIGINT'd (parked on
   // timeout, or two turns collided on one session) has no tool_result to parse
   // and would otherwise read as still-pending.
   const terminalOutcome: DecisionTerminalOutcome | null = decisionTerminalOutcome(

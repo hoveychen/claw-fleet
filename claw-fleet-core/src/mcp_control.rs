@@ -1005,7 +1005,7 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
 
 // ── wiki ─────────────────────────────────────────────────────────────────────
 
-/// `fleet__artifact` — the artifact store (产出 page).
+/// `fleet__artifact` — the artifact store ("产出" / deliverables page).
 ///
 /// Deliberately the only ingest path: the desktop offers no "add" button, so if
 /// an agent does not call this, the page stays empty. That is why the tool

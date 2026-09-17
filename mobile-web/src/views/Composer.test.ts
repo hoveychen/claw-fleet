@@ -16,9 +16,11 @@ import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import type { SessionInfo } from "../types";
 
 /**
- * 下拉列表**按名称字母序**排列（方便扫读）；默认选中不再依赖排序，而是来自独立持久化的
- * 「上次成功创建会话用的 repo」（defaultWorkspace）。这解决了旧字母序方案的痛点——那时
- * 默认永远是字母最靠前的那个而非刚用过的那个，如今字母序仅决定展示顺序。
+ * Dropdown list is sorted **alphabetically by name** (easy to scan); default
+ * selection no longer depends on sort order, but comes from independently
+ * persisted "last repo used to create a session" (defaultWorkspace). This fixes
+ * the old alphabetic-sort pain point — the default was always the first letter
+ * instead of the most recently used, now alphabetic order only affects display.
  */
 function session(
   workspacePath: string,
@@ -33,9 +35,10 @@ function session(
   } as unknown as SessionInfo;
 }
 
-describe("模型 / 努力度下拉（来自 model_catalog）", () => {
-  // 形状与 `model_catalog` 真实返回一致。梯子刻意逐模型不同——那正是旧的两份
-  // 手抄清单写错的地方（它们声称 Codex 只到 high 且有 minimal）。
+describe("Model / effort dropdown (from model_catalog)", () => {
+  // Shape matches actual `model_catalog` return. Effort ladder intentionally
+  // differs per model — that's exactly where the old hand-maintained lists got
+  // it wrong (claiming Codex only goes to high and has minimal).
   const catalog: PickerHarness[] = [
     {
       name: "codex",
@@ -61,7 +64,7 @@ describe("模型 / 努力度下拉（来自 model_catalog）", () => {
     },
   ];
 
-  it("下拉开头是「默认」，其后是目录里的模型", () => {
+  it("dropdown starts with 'default', then models from catalog", () => {
     expect(modelChoicesFor(catalog, "codex", "默认模型")).toEqual([
       ["", "默认模型"],
       ["gpt-6-astra", "GPT-6 Astra"],
@@ -69,11 +72,11 @@ describe("模型 / 努力度下拉（来自 model_catalog）", () => {
     ]);
   });
 
-  it("目录没到时只剩「默认」", () => {
+  it("when catalog is empty, only 'default' remains", () => {
     expect(modelChoicesFor([], "codex", "默认模型")).toEqual([["", "默认模型"]]);
   });
 
-  it("努力度跟着选中的那个模型走，而不是整个 harness", () => {
+  it("effort follows the chosen model, not the entire harness", () => {
     expect(effortChoicesFor(catalog, "codex", "gpt-5.5", "默认").map(([v]) => v)).toEqual([
       "",
       "low",
@@ -83,11 +86,11 @@ describe("模型 / 努力度下拉（来自 model_catalog）", () => {
     ]);
     const astra = effortChoicesFor(catalog, "codex", "gpt-6-astra", "默认").map(([v]) => v);
     expect(astra).toContain("ultra");
-    // 旧清单凭空发明了 minimal；没有任何 Codex 模型接受它。
+    // Old list invented minimal out of nowhere; no Codex model accepts it.
     expect(astra).not.toContain("minimal");
   });
 
-  it("没选模型时给该 harness 内的并集", () => {
+  it("when no model chosen, return union of efforts across harness", () => {
     expect(effortChoicesFor(catalog, "codex", "", "默认").map(([v]) => v)).toEqual([
       "",
       "low",
@@ -101,8 +104,9 @@ describe("模型 / 努力度下拉（来自 model_catalog）", () => {
 });
 
 describe("recentWorkspaces", () => {
-  it("候选未超过 limit 时全部保留，按名称字母序展示", () => {
-    // Zebra 活动时间最新，但都在 limit 内，全部保留后只按名字排序。
+  it("when candidates don't exceed limit, keep all and sort by name alphabetically", () => {
+    // Zebra is most recently active, but all within limit, so keep all and sort
+    // by name only.
     const sessions = [
       session("/home/zebra", "Zebra", 300),
       session("/home/alpha", "Alpha", 100),
@@ -116,8 +120,9 @@ describe("recentWorkspaces", () => {
     ]);
   });
 
-  it("候选超过 limit 时先按最近活动截断，再按名称字母序展示（对齐桌面端）", () => {
-    // limit=2：Alpha(100) 最久未活跃被丢弃，幸存的 Mid/Zebra 再按名字排序。
+  it("when candidates exceed limit, truncate by recent activity then sort by name (align with desktop)", () => {
+    // limit=2: Alpha(100) least recently active is discarded, survivors Mid/Zebra
+    // then sorted by name.
     const sessions = [
       session("/home/zebra", "Zebra", 300),
       session("/home/alpha", "Alpha", 100),
@@ -127,7 +132,7 @@ describe("recentWorkspaces", () => {
     expect(recents.map(([path]) => path)).toEqual(["/home/mid", "/home/zebra"]);
   });
 
-  it("同一路径多条会话时，取最近活动的时间戳与名字去重", () => {
+  it("for same path with multiple sessions, deduplicate by most recent timestamp and name", () => {
     const sessions = [
       session("/home/repo", "OldName", 100),
       session("/home/repo", "NewName", 500),
@@ -140,7 +145,7 @@ describe("recentWorkspaces", () => {
     ]);
   });
 
-  it("剔除纯聊天路径", () => {
+  it("exclude pure chat path", () => {
     const sessions = [
       session("/home/chat", "Chat", 400),
       session("/home/repo", "Repo", 100),
@@ -149,8 +154,9 @@ describe("recentWorkspaces", () => {
     expect(recents.map(([path]) => path)).toEqual(["/home/repo"]);
   });
 
-  it("worktree checkout 折叠回 repo 根，去重后只出现一次（对齐桌面端）", () => {
-    // 同一 repo 的主 checkout 与 .worktrees/<id> 子目录应折叠到 repo 根 /home/repo。
+  it("worktree checkout collapses to repo root, appears once after dedup (align with desktop)", () => {
+    // Main checkout and .worktrees/<id> subdirectory of the same repo should
+    // collapse to repo root /home/repo.
     const sessions = [
       session("/home/repo", "Repo", 100),
       session("/home/repo/.worktrees/feat-x", "Repo", 500),
@@ -159,8 +165,9 @@ describe("recentWorkspaces", () => {
     expect(recents).toEqual([["/home/repo", "Repo"]]);
   });
 
-  it("剔除临时目录下的 workspace（/tmp、/private/tmp、/var/folders、/private/var/folders）", () => {
-    // macOS 上 /var 软链到 /private/var，规范化后的 cwd 会呈现为 /private/var/folders/...
+  it("exclude workspaces in temp dirs (/tmp, /private/tmp, /var/folders, /private/var/folders)", () => {
+    // On macOS /var is symlink to /private/var, so normalized cwd appears as
+    // /private/var/folders/...
     const sessions = [
       session("/tmp/scratch", "Scratch", 500),
       session("/private/tmp/foo", "Foo", 400),
@@ -180,33 +187,33 @@ describe("defaultWorkspace", () => {
     ["/home/zebra", "Zebra"],
   ];
 
-  it("沿用用户本次已选且有效的 workspace", () => {
+  it("keep using the workspace user selected this session if valid", () => {
     expect(defaultWorkspace("/home/zebra", recents, null, "/home/alpha")).toBe("/home/zebra");
   });
 
-  it("沿用 __custom__（自定义路径）选择", () => {
+  it("keep using __custom__ (custom path) selection", () => {
     expect(defaultWorkspace("__custom__", recents, null, "/home/alpha")).toBe("__custom__");
   });
 
-  it("草稿为空时默认选中上次用过的 repo", () => {
+  it("when draft is empty, default to the last used repo", () => {
     expect(defaultWorkspace("", recents, null, "/home/mango")).toBe("/home/mango");
   });
 
-  it("上次用过的 repo 已失效时退回列表首项（字母序）", () => {
+  it("when last used repo is invalid, fall back to list first item (alphabetically)", () => {
     expect(defaultWorkspace("", recents, null, "/home/deleted")).toBe("/home/alpha");
   });
 
-  it("无记忆、无候选时退回纯聊天路径", () => {
+  it("with no memory and no candidates, fall back to pure chat path", () => {
     expect(defaultWorkspace("", [], "/home/chat", "")).toBe("/home/chat");
   });
 
-  it("纯聊天路径可作为上次用过的目标被记住", () => {
+  it("pure chat path can be remembered as last used target", () => {
     expect(defaultWorkspace("", recents, "/home/chat", "/home/chat")).toBe("/home/chat");
   });
 });
 
 describe("new-session summaries", () => {
-  it("把设备与项目压成一条可扫读的位置摘要", () => {
+  it("compress device and project into a scannable location summary", () => {
     expect(
       newSessionLocationSummary({
         deviceLabel: "Mac Studio",
@@ -221,7 +228,7 @@ describe("new-session summaries", () => {
     });
   });
 
-  it("纯聊天摘要不泄漏原 workspace", () => {
+  it("pure chat summary does not leak original workspace", () => {
     expect(
       newSessionLocationSummary({
         deviceLabel: "Mac Studio",
@@ -236,7 +243,7 @@ describe("new-session summaries", () => {
     });
   });
 
-  it("把 Agent、模型、effort 与权限压成配置摘要", () => {
+  it("compress Agent, model, effort, and permission into config summary", () => {
     expect(
       newSessionConfigSummary({
         toolLabel: "Claude",
@@ -250,7 +257,7 @@ describe("new-session summaries", () => {
     });
   });
 
-  it("默认模型与 effort 仍明确显示，不留空白摘要", () => {
+  it("default model and effort still show explicitly, no blank summary", () => {
     expect(
       newSessionConfigSummary({
         toolLabel: "Codex",
@@ -265,8 +272,9 @@ describe("new-session summaries", () => {
   });
 });
 
-// 换新会话目标设备时,只有 prompt 该跟着走。其余每一项(workspace / 模型 /
-// 附件路径)都属于某一台具体机器,搬过去就是一串在目标机上不存在的东西。
+// When switching target device for a new session, only prompt should move with it.
+// Everything else (workspace / model / attachment path) belongs to a specific
+// machine; moving it would be a bunch of nonexistent paths on the target.
 describe("carryPromptToDevice", () => {
   function memStore(): DraftStorage & { map: Map<string, string> } {
     const map = new Map<string, string>();
@@ -280,16 +288,16 @@ describe("carryPromptToDevice", () => {
   const read = (store: DraftStorage, id: string) =>
     loadDraft<Record<string, string>>(`d/${id}/new-session`, {}, store);
 
-  it("prompt 落进目标设备的命名空间,不动来源那台", () => {
+  it("prompt lands in target device's namespace, source device unchanged", () => {
     const store = memStore();
     saveDraft("d/mac/new-session", { workspace: "/repos/mac", prompt: "旧的" }, store);
     carryPromptToDevice("cloud", "刚敲的字", store);
     expect(read(store, "cloud").prompt).toBe("刚敲的字");
-    // 来源那台的草稿原封不动 —— 切回去应当还是它自己那份。
+    // Source device's draft untouched — switching back should still have its own.
     expect(read(store, "mac")).toEqual({ workspace: "/repos/mac", prompt: "旧的" });
   });
 
-  it("保留目标设备自己的 workspace / 模型,只覆盖 prompt", () => {
+  it("preserve target device's own workspace / model, only override prompt", () => {
     const store = memStore();
     saveDraft(
       "d/cloud/new-session",
@@ -304,12 +312,13 @@ describe("carryPromptToDevice", () => {
     });
   });
 
-  it("目标设备还没有草稿时,拿到默认值 + 这段 prompt", () => {
+  it("when target device has no draft, get defaults + this prompt", () => {
     const store = memStore();
     carryPromptToDevice("fresh", "第一句", store);
     const d = read(store, "fresh");
     expect(d.prompt).toBe("第一句");
-    // 默认值必须在(不是只存了个 {prompt}),否则重挂载后 tool/permissionMode 会是 undefined。
+    // Defaults must be present (not just {prompt}), else after remount tool/
+    // permissionMode would be undefined.
     expect(d.tool).toBe("claude");
     expect(d.permissionMode).toBe("acceptEdits");
   });
@@ -318,7 +327,7 @@ describe("carryPromptToDevice", () => {
 describe("resumeConfigChips", () => {
   const labels = { defaultModel: "默认模型", defaultPermission: "沿用权限" };
 
-  it("模型与档位合成一颗，权限单独一颗", () => {
+  it("model and effort combine into one chip, permission is separate", () => {
     expect(
       resumeConfigChips({
         tool: "claude",
@@ -330,7 +339,7 @@ describe("resumeConfigChips", () => {
     ).toEqual(["Opus 5 · xhigh", "接受编辑"]);
   });
 
-  it("没选就报告默认值，而不是空胶囊", () => {
+  it("when unselected, report defaults instead of empty chip", () => {
     expect(
       resumeConfigChips({
         tool: "claude",
@@ -342,7 +351,7 @@ describe("resumeConfigChips", () => {
     ).toEqual(["默认模型", "沿用权限"]);
   });
 
-  it("codex / dsh 不出权限胶囊——它们没有 --permission-mode 这个概念", () => {
+  it("codex / dsh don't show permission chip — they have no --permission-mode concept", () => {
     for (const tool of ["codex", "dsh"]) {
       expect(
         resumeConfigChips({
@@ -362,7 +371,7 @@ describe("recentWorkspaceRows", () => {
     return { ...session(path, name, ms), status } as unknown as SessionInfo;
   }
 
-  it("同一项目下的在跑会话被数出来，时间戳取最近的那条", () => {
+  it("running sessions under same project are counted, timestamp from most recent", () => {
     const rows = recentWorkspaceRows(
       [
         live("/home/repo", "Repo", 100, "executing"),
@@ -374,7 +383,7 @@ describe("recentWorkspaceRows", () => {
     expect(rows).toEqual([{ path: "/home/repo", name: "Repo", lastMs: 500, running: 2 }]);
   });
 
-  it("worktree 折叠进 repo 根之后，两边的在跑会话合并计数", () => {
+  it("after worktree collapses to repo root, running sessions from both sides merge into count", () => {
     const rows = recentWorkspaceRows(
       [
         live("/home/repo", "Repo", 100, "executing"),
@@ -385,50 +394,53 @@ describe("recentWorkspaceRows", () => {
     expect(rows).toEqual([{ path: "/home/repo", name: "Repo", lastMs: 900, running: 2 }]);
   });
 
-  it("全是闲置时 running 为 0", () => {
+  it("when all idle, running is 0", () => {
     const rows = recentWorkspaceRows([live("/home/repo", "Repo", 100, "idle")], null);
     expect(rows[0].running).toBe(0);
   });
 });
 
 describe("composerInset", () => {
-  it("布局高度加上 bottom 偏移，就是转录区要让开的那一截", () => {
+  it("layout height plus bottom offset equals space transcript must leave", () => {
     expect(composerInset(196, "22px")).toBe(218);
   });
 
-  it("决策折叠条把胶囊顶高时，让开的距离跟着变大", () => {
-    // --peek-inset 生效后 computed bottom 从 22px 涨到 78px。
+  it("when decision collapse bar pushes chip higher, space to clear grows", () => {
+    // After --peek-inset takes effect, computed bottom rises from 22px to 78px.
     expect(composerInset(196, "78px")).toBe(274);
   });
 
-  it("bottom 解析不出来（auto）时只算自身高度，绝不报 NaN", () => {
+  it("when bottom can't be parsed (auto), use only own height, never return NaN", () => {
     expect(composerInset(196, "auto")).toBe(196);
   });
 
-  it("入参是布局值，transform 进不来 —— 亚像素也按整数收敛", () => {
-    // 这条锁住的是取值口径：换回 getBoundingClientRect 就会被 transform 污染。
+  it("input is layout value, transform doesn't enter — subpixel converges to integer", () => {
+    // This locks the measurement path: switching back to getBoundingClientRect
+    // would be polluted by transform.
     expect(composerInset(196.4, "21.6px")).toBe(218);
   });
 });
 
 describe("resumeConfigOverrides", () => {
-  // 2026-09-13 的真实故障：桌面用 gpt-6-astra 起的 codex 会话，从手机发一条
-  // 追问，relay 收到 model=None → `codex exec resume` 不带 -m → codex 回落到
-  // ~/.codex/config.toml 的 gpt-5.6-sol，此后整个线程都换了模型。
-  it("用户没动过配置就一个字段都不发 —— 让桌面侧去 launch-spec 取权威值", () => {
-    // 初值来自快照（会话当前跑在 astra 上），但没被亲手改过。
+  // Real incident 2026-09-13: desktop starts codex session with gpt-6-astra, user
+  // asks from phone, relay gets model=None → `codex exec resume` without -m →
+  // codex falls back to gpt-5.6-sol in ~/.codex/config.toml, entire thread
+  // switches models.
+  it("when user hasn't touched config, send no fields — let desktop get authoritative values from launch-spec", () => {
+    // Initial value from snapshot (session currently runs on astra) but not
+    // manually changed.
     expect(resumeConfigOverrides({ touched: false, model: "gpt-6-astra", effort: "high" })).toEqual(
       {},
     );
   });
 
-  it("亲手改过就照发，这是用户明确的中途换模型", () => {
+  it("when manually changed, send as is — user explicitly switching models mid-thread", () => {
     expect(resumeConfigOverrides({ touched: true, model: "gpt-5.6-sol", effort: "" })).toEqual({
       model: "gpt-5.6-sol",
     });
   });
 
-  it("改成「默认」（空串）不发该字段，别把空串当成一个模型 id 传下去", () => {
+  it("when changed to 'default' (empty string), don't send field — don't treat empty string as a model id", () => {
     expect(resumeConfigOverrides({ touched: true, model: "", effort: "medium" })).toEqual({
       effort: "medium",
     });

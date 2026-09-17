@@ -1,8 +1,8 @@
-// codex 近 24h 占用率曲线：session/weekly 两条线。数据走 relay `codex_usage_history`
-// （见 ../account.ts），是桌面端每次拉 codex 用量时落盘的快照，纯读盘。与 Claude 的
-// UsageChart 共用同一套手写 SVG 几何（../usageChart）与样式；差别只在数据源和标签——
-// codex 百分比是 0–100 整数，这里 /100 归一后喂给 linePath。
-// 对应桌面端 CodexUsageHistoryChart.tsx（那张用 recharts）。
+// Codex 24h utilization curve: session/weekly two lines. Data via relay `codex_usage_history`
+// (see ../account.ts), a snapshot persisted each time desktop pulls Codex usage, read-only from disk.
+// Shares the same hand-written SVG geometry (../usageChart) and styles with Claude's UsageChart;
+// difference only in data source and labels — Codex percentages are 0–100 integers, here /100
+// normalized and fed to linePath. Corresponds to desktop CodexUsageHistoryChart.tsx (which uses recharts).
 
 import { useEffect, useMemo, useState } from "react";
 import { fetchCodexUsageHistory } from "../account";
@@ -15,11 +15,11 @@ import styles from "./UsageChart.module.css";
 const WINDOW_MS = 24 * 3_600_000;
 const TICK_STEP_MS = 6 * 3_600_000;
 
-/** viewBox 用户单位；等比缩放到卡片宽度。 */
+/** viewBox user units; scaled proportionally to card width. */
 const W = 320;
 const H = 120;
 
-// 与 Claude 图同一套语义：较短窗口（session）橙色，较长窗口（weekly）蓝色。
+// Same semantics as Claude chart: shorter window (session) orange, longer window (weekly) blue.
 const PRIMARY_COLOR = "#f97316";
 const SECONDARY_COLOR = "#3b82f6";
 
@@ -31,8 +31,8 @@ function clock(ts: number): string {
   });
 }
 
-/** 从窗口时长（分钟）派生一条线的紧凑标签：7d / 5h / 30m。窗口时长可能因换套餐等
- *  在某些采样点缺失，所以取最近一个带时长的点。 */
+/** Derive a compact label for a line from window duration (minutes): 7d / 5h / 30m. Window duration may be
+ *  missing at some sample points due to plan changes etc., so take the most recent point with a duration. */
 function windowLabel(mins: number | null): string {
   if (mins == null || !Number.isFinite(mins)) return t("用量");
   if (mins >= 1440) return `${Math.round(mins / 1440)}d`;
@@ -40,7 +40,7 @@ function windowLabel(mins: number | null): string {
   return `${Math.round(mins)}m`;
 }
 
-/** 最近一个带该窗口时长的采样点的时长；都没有则 null。 */
+/** Duration of the most recent sample point with that window duration; null if none. */
 function latestWindowMins(
   points: CodexUsageHistoryPoint[],
   pick: (p: CodexUsageHistoryPoint) => number | null,
@@ -54,7 +54,7 @@ function latestWindowMins(
 
 export function CodexUsageChart({ client }: { client: FleetTransport | null }) {
   const [points, setPoints] = useState<CodexUsageHistoryPoint[] | null>(null);
-  // 拉取那一刻的时间戳：窗口右端固定住，避免每次重渲染窗口都在漂。
+  // Timestamp at fetch time: pin the window right edge, avoid window drifting on each re-render.
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -80,7 +80,7 @@ export function CodexUsageChart({ client }: { client: FleetTransport | null }) {
     [now],
   );
 
-  // codex 是 0–100 整数，/100 归一到 linePath 期望的 0–1。
+  // Codex is 0–100 integer, /100 normalized to the 0–1 that linePath expects.
   const primary = useMemo(
     () =>
       linePath(points ?? [], (p) => (p.primaryPct == null ? null : p.primaryPct / 100), box),

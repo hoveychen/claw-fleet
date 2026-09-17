@@ -23,7 +23,8 @@ interface Props {
   onClose: () => void;
   /** Make each leg clickable, handing back that leg's session id. Omitted by
    *  the session detail (you are already inside one of these sessions); the
-   *  计划树 passes it so a relay leg jumps straight into that session. */
+   *  "计划树" (plan tree) passes it so a relay leg jumps straight into that
+   *  session. */
   onOpenSession?: (sessionId: string) => void;
 }
 
@@ -193,8 +194,8 @@ function RelayNote({ note }: { note: string }) {
           className={styles.note_toggle}
           aria-expanded={open}
           onClick={(e) => {
-            // The leg above is itself clickable in the 计划树 (it opens that
-            // session); expanding a note must not navigate away from it.
+            // The leg above is itself clickable in the "计划树" (plan tree), which
+            // opens that session; expanding a note must not navigate away from it.
             e.stopPropagation();
             setOpen((v) => !v);
           }}

@@ -58,7 +58,7 @@ if (websiteScene) {
   });
 }
 
-// 判断本身搬去了 ../mockMode（零依赖），这里 re-export 保持既有 import 有效。
+// Logic moved to ../mockMode (zero-dependency); re-export here keeps existing imports working.
 export { isMockMode } from "../mockMode";
 
 export class MockRelayClient extends RelayClient {
@@ -67,9 +67,9 @@ export class MockRelayClient extends RelayClient {
   /** Answered card ids — App's periodic pending_snapshot reconcile (every few
    *  seconds while cards are pending) must not resurrect a card just answered. */
   private answered = new Set<string>();
-  /** 假终端。null = 还没开过（或已清掉），与真主机上「这个工作区没有进程」同义。 */
+  /** Mock terminal. null = never opened (or cleared) — same as "no process in this workspace" on the real host. */
   private mockProc: ProcRecord | null = null;
-  /** 0 = 首屏还没发出去。真的 offset 是字节数,这里只需要「发过没有」。 */
+  /** 0 = first screen not yet sent. Real offset is byte count; here we just track whether data has been sent. */
   private mockProcOffset = 0;
 
   constructor(handlers: RelayHandlers) {
@@ -96,7 +96,7 @@ export class MockRelayClient extends RelayClient {
       this.mockHandlers.onAgentOnline?.(true);
     }, 0);
     // A later incremental push, so the More page demonstrates the delta path
-    // engaged (增量 ✓) in mock/screenshot mode.
+    // engaged (incremental ✓) in mock/screenshot mode.
     setTimeout(() => {
       this.mockHandlers.onSessions?.(MOCK_SESSIONS);
       this.mockHandlers.onSessionsKind?.("delta");
@@ -132,7 +132,7 @@ export class MockRelayClient extends RelayClient {
       case "pending_snapshot":
         return {
           // Mirrors mobile_relay::agent_fingerprint — the More page's
-          // 决策卡来源 row reads it to tell the desktop apart from a stray
+          // "Card source" row reads it to tell the desktop apart from a stray
           // agent answering in its place.
           agent: { host: "studio", pid: 4242, home: "/Users/boss", ver: "0.0.0" },
           guard: (websiteScene ? [] : [MOCK_GUARD]).filter((r) => !this.answered.has(r.id)),
@@ -150,12 +150,12 @@ export class MockRelayClient extends RelayClient {
         return { path: MOCK_CHAT_WORKSPACE };
       case "plan_forest":
         return MOCK_PLAN_FOREST;
-      // The session-detail 任务计划 tab reads the flat per-session shape; derive
+      // The session-detail "Plans" tab reads the flat per-session shape; derive
       // it from the same fixture so the two never drift apart.
       case "task_plans": {
-        // 平铺整棵森林(不只 roots):explore 计划挂在子层,只映射 roots 的话
-        // 手机上永远看不到 explore 徽章。`kind` 也要带上 —— 它是 kind 徽章
-        // 的唯一数据来源。
+        // Flatten the whole forest (not just roots): explore plans hang in child layers, and mapping only roots
+        // means explore badges never show on phone. `kind` must come along too — it's the sole data source
+        // for the kind badge.
         const flat: PlanNode[] = [];
         const walk = (nodes: PlanNode[]) => {
           for (const n of nodes) {
@@ -291,12 +291,12 @@ export class MockRelayClient extends RelayClient {
       case "spawn_session":
         return { ok: true };
 
-      // ── 终端 ────────────────────────────────────────────────────────────
-      // 一个假 pty:第一次 proc_output 吐出一屏提示符,之后就没有新字节。够
-      // 截图,也够看出布局(键位条、标签、退出条)对不对。真的按键什么都不会
-      // 发生 —— mock 后面没有主机。
-      // 开着:mock 背后没有主机(下面那个 pty 是脚本),关掉只会让 ?mock 少一页
-      // 可截图的界面,换不来任何安全性。
+      // ── Terminal ────────────────────────────────────────────────────────────
+      // A mock pty: the first proc_output yields one screen of prompt, then no new bytes.
+      // Good enough for screenshots and to verify layout (key row, tabs, exit bar) works.
+      // Real keypresses do nothing — there's no host behind the mock.
+      // Kept on: no host behind the mock (the pty below is scripted); turning it off just loses
+      // a page of screenshottable UI without any real security gain.
       case "host_features":
         return { terminal: true };
       case "host_identity":

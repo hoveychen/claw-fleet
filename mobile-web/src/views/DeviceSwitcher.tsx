@@ -1,12 +1,14 @@
-// 头部标题位上的设备切换器。
+// Device switcher in the header title position.
 //
-// 在此之前那一格是常量「Fleet」——一个在配对了三台机器之后什么也没说的字。当前
-// 作用域设备(知识库、用量、新会话默认落在哪一台)此前只能从「更多」页最底下那份
-// 列表里切,而那正是用得最勤、藏得最深的一个开关。
+// Previously this slot was the constant "Fleet" — a word that said nothing after
+// pairing three machines. The scoped device (knowledge base, usage, where new
+// sessions default) could only be switched from a list at the bottom of the
+// "More" page — the control most-used and best-hidden.
 //
-// 一台在册时它退化成一行纯文字(那台的名字):没有第二台可切,一个永远只有一个
-// 选项的下拉是噪音。名字不知道(同源形态、mock、老桌面端还没报上主机名)时才回到
-// 「Fleet」。
+// With one device it degenerates to plain text (that device's name): no second
+// device to switch to, so a dropdown with one option is noise. When the name is
+// unknown (same-origin mode, mock, old desktop not yet reporting hostname) fall
+// back to "Fleet".
 
 import { useEffect } from "react";
 import { Check, ChevronDown, Laptop, Monitor, Server, Settings2 } from "lucide-react";
@@ -14,16 +16,16 @@ import type { PairedDevice } from "../devices";
 import { t } from "../i18n";
 import styles from "./DeviceSwitcher.module.css";
 
-/** 一台设备此刻的连通性,只取切换器要显示的那两位。 */
+/** A device's connectivity status now; only the two bits the switcher displays. */
 export interface DeviceStatus {
-  /** 到中转/主机的链路通不通。 */
+  /** Whether the link to relay/host is live. */
   connected: boolean;
-  /** 那台桌面端在不在线。 */
+  /** Whether that machine's desktop agent is online. */
   agentOnline: boolean;
 }
 
-/** 平台键 → 图标。认不出来的平台给一台通用显示器,而不是不给图标 —— 一行少一个
- *  图标会让列表看着像坏掉了。 */
+/** Platform key → icon. Unrecognized platforms get a generic monitor, not no
+ *  icon — a row missing one makes the list look broken. */
 function PlatformIcon({ platform, size = 18 }: { platform?: string; size?: number }) {
   if (platform === "macos") return <Laptop size={size} />;
   if (platform === "linux") return <Server size={size} />;
@@ -52,18 +54,21 @@ export function DeviceSwitcher({
   devices: PairedDevice[];
   activeId: string;
   statusOf: (id: string) => DeviceStatus | undefined;
-  /** 抽屉开着没有。状态放在 App 里,好让「切到更多页」这类动作能把它关掉。 */
+  /** Is the drawer open. State lives in App so actions like "switch to more page"
+   *  can close it. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSwitch: (id: string) => void;
-  /** 「管理设备」——跳到「更多」页那份完整列表(改名、静音、移除都在那儿)。 */
+  /** "Manage devices" — jump to the complete list on the "More" page (rename,
+   *  mute, remove all live there). */
   onManage: () => void;
 }) {
   const active = devices.find((d) => d.id === activeId) ?? devices[0];
   const title = active?.label?.trim() || "Fleet";
 
-  // 安卓返回键 / 浏览器后退在这类浮层上的老问题:不拦一下就直接退出整个页面。
-  // 这里只做最轻的一层 —— Esc 关掉(外接键盘、桌面浏览器调试时都会用到)。
+  // Android back button / browser back on overlays: without catching it, exits
+  // the whole page. Here we just handle Esc (external keyboard, desktop browser
+  // debugging).
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -95,7 +100,8 @@ export function DeviceSwitcher({
 
       {open && (
         <div className={styles.backdrop} onClick={() => onOpenChange(false)}>
-          {/* 抽屉本身吃掉点击,否则选一台的那一下会穿到背板上先把它关掉。 */}
+          {/* Drawer swallows clicks, or selecting a device would bubble to the
+              backdrop and close it first. */}
           <div className={styles.sheet} role="listbox" onClick={(e) => e.stopPropagation()}>
             <div className={styles.sheetTitle}>{t("设备")}</div>
             {devices.map((d) => {

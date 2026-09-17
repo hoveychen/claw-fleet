@@ -15,9 +15,9 @@ fn main() {
     // Thread panics in a GUI app are otherwise invisible: stderr goes nowhere
     // when Finder launches us, and a panic inside a tauri `(async)` command is
     // swallowed by the task harness — the invoke promise just never settles
-    // (the dsh 「永久加载中」 bug hid behind exactly this for three debugging
-    // sessions). Mirror every panic into the debug log, then let the default
-    // hook print to stderr as before.
+    // (the dsh "perpetually loading" bug hid behind exactly this for three
+    // debugging sessions). Mirror every panic into the debug log, then let the
+    // default hook print to stderr as before.
     {
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {

@@ -22,7 +22,7 @@ describe("filterMainRows", () => {
   });
 
   // Every line of a subagent's own file is isSidechain:true — filtering them
-  // there rendered the whole drill-down as "暂无可显示的消息".
+  // there rendered the entire drill-down as empty.
   it("keeps every row when the transcript itself is the subagent's", () => {
     expect(filterMainRows([row(true), row(true)], SUB)).toHaveLength(2);
   });

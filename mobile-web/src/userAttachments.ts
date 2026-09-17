@@ -110,7 +110,7 @@ export interface SplitAnswer {
  * in decisionText.ts, which the history view there feeds to its `AttachmentRow`.
  *
  * Without this the mobile decision history printed the raw answer, so an answer
- * with a picture attached read as `好的 @/Users/…/.fleet/user-attachments/…png`.
+ * with a picture attached read as `Okay @/Users/…/.fleet/user-attachments/…png`.
  */
 export function splitAnswerAttachments(raw: string): SplitAnswer {
   const attachments: string[] = [];

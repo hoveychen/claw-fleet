@@ -2084,8 +2084,8 @@ mod tests {
 
     #[test]
     fn truncate_handles_utf8_boundary_in_cjk() {
-        // Repro: 119 ASCII bytes followed by "中" (3 bytes, 0xE4 0xB8 0xAD).
-        // `&s[..120]` would land inside "中" (bytes 119..122) and panic in
+        // Repro: 119 ASCII bytes followed by a 3-byte character (0xE4 0xB8 0xAD = '中').
+        // `&s[..120]` would land in the middle of that character (bytes 119..122) and panic in
         // core::str::slice_error_fail — taking the entire GUI process with it
         // because the call chain reaches main thread via the
         // `get_audit_events` Tauri command.

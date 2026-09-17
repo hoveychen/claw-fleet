@@ -1,14 +1,16 @@
-// 配对门里的「粘贴配对链接」入口。
+// The "Paste a pairing link" entry in the pairing gate.
 //
-// 为什么必须有这条路:原生壳靠 App Link 接住扫码的 URL,而 App Link 要求在
-// AndroidManifest 里**编译期**写死 host。自建 relay 的 host 编译期不可知,所以
-// 那条路对它结构上不可用——扫码只会打开浏览器,永远进不了 app。粘贴不依赖任何
-// host 声明,是自建 relay 用户进得来的那一条。
+// Why this path is essential: native shells rely on App Link to intercept the
+// scanned URL, but App Link requires the host to be **hardcoded at compile time**
+// in AndroidManifest. A custom relay's host isn't known at compile time, so that
+// path is structurally unavailable—scanning only opens the browser, never the app.
+// Paste doesn't depend on any host declaration, so it's how custom-relay users
+// can get in.
 //
-// iOS 的主屏幕 web app 也走它:那里没有地址栏,没法再开一次带 #k= 的链接(见
-// App.tsx 配对门的注释)。
+// iOS home-screen web apps also use it: there's no address bar, so there's no way
+// to open a link with #k= again (see App.tsx pairing-gate comments).
 //
-// 它同时是相机被拒/不可用时扫码的兜底。
+// It's also the fallback when the camera is denied or unavailable.
 
 import { useState } from "react";
 import { useI18n } from "../i18n";

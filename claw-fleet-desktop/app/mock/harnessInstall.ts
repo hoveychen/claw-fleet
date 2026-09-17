@@ -81,7 +81,7 @@ export interface HarnessTransport {
  * Decode a base64 chunk as UTF-8.
  *
  * `atob` yields one char per *byte*, so a multi-byte character (an installer
- * printing 「验证中」, or the ellipsis in core's "verifying installation…")
+ * printing "Verifying…", or the ellipsis in core's "verifying installation…")
  * would come out mojibake if the bytes were read as code units. Going through
  * TextDecoder is what keeps the log readable.
  */

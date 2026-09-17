@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isMermaidPre } from "./mermaidPre";
 
-/** react-markdown 传给 `pre` 组件的 hast 节点形状（v10）。 */
+/** hast node shape passed by react-markdown to the `pre` component (v10). */
 function pre(codeClass?: string | string[]) {
   return {
     type: "element",
@@ -18,24 +18,24 @@ function pre(codeClass?: string | string[]) {
 }
 
 describe("isMermaidPre", () => {
-  it("认出 ```mermaid fence（className 是数组，react-markdown 的常规形状）", () => {
+  it("recognizes ```mermaid fence (className is array, react-markdown's regular shape)", () => {
     expect(isMermaidPre(pre(["language-mermaid"]))).toBe(true);
   });
 
-  it("className 是字符串时也认", () => {
+  it("also recognizes when className is a string", () => {
     expect(isMermaidPre(pre("language-mermaid hljs"))).toBe(true);
   });
 
-  it("别的语言不认", () => {
+  it("does not recognize other languages", () => {
     expect(isMermaidPre(pre(["language-ts"]))).toBe(false);
     expect(isMermaidPre(pre())).toBe(false);
   });
 
-  it("语言前缀相似的不误伤", () => {
+  it("does not false-match similar language prefixes", () => {
     expect(isMermaidPre(pre(["language-mermaidx"]))).toBe(false);
   });
 
-  it("不是 code 子元素、或节点缺失时一律 false", () => {
+  it("returns false when not a code child element or when node is missing", () => {
     expect(isMermaidPre({ children: [{ tagName: "span", properties: {} }] })).toBe(
       false,
     );

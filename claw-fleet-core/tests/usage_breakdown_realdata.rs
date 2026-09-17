@@ -1,4 +1,4 @@
-//! Real-data smoke test for the cost-breakdown ("花费明细") cache.
+//! Real-data smoke test for the cost-breakdown cache.
 //!
 //! Ignored by default — it reads THIS machine's `~/.claude` transcripts and
 //! writes the real `~/.fleet/usage-breakdown-cache.json`, so it runs only when
@@ -32,7 +32,7 @@ fn real_range_breakdown_is_fast_on_second_call() {
     eprintln!("scanned {} real sessions", sessions.len());
     assert!(!sessions.is_empty(), "no real sessions found to exercise");
 
-    // Last 7 local days, matching the modal's "近 7 天" preset (to = now).
+    // Last 7 local days, matching the modal's "Last 7 days" preset (to = now).
     let now = now_ms();
     let from = now - 6 * 86_400_000;
 

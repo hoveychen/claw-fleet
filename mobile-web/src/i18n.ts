@@ -1,6 +1,7 @@
-// 极简自研 i18n：中文原文即 key，t(zh) 查 zh→en 字典，支持 {0} 占位插值。
-// 不引第三方库 —— 词条量 ~120 条，一个 Record 就够；React 侧用
-// useSyncExternalStore 订阅语言切换触发整树重渲（App 根组件调用 useI18n）。
+// Minimal in-house i18n: Chinese source text is the key; t(zh) looks it up in a
+// zh→en dictionary, supporting {0} placeholder interpolation. No third-party deps—
+// ~120 terms fit in a Record. React subscribes via useSyncExternalStore on lang changes
+// to re-render the whole tree (App root calls useI18n).
 
 import { useSyncExternalStore } from "react";
 
@@ -13,7 +14,7 @@ const LANG_KEY = "fleet-lang";
 const LANG_MANUAL_KEY = "fleet-lang-manual";
 
 /** Language the desktop encoded into the pairing URL fragment (`&lang=zh|en`).
- *  Read at module load, BEFORE devices.ts 的 loadBookSync() scrubs the hash. */
+ *  Read at module load, BEFORE devices.ts's loadBookSync() scrubs the hash. */
 function langFromHash(): Lang | null {
   const m = window.location.hash.match(/[#&]lang=(zh|en)\b/);
   return m ? (m[1] as Lang) : null;
@@ -83,7 +84,7 @@ export function t(zh: string, ...args: Array<string | number>): string {
 }
 
 const DICT: Record<string, string> = {
-  // ── 终端页（FLEET_TERMINAL）──
+  // ── Terminal page (FLEET_TERMINAL) ──
   "新终端": "New terminal",
   "没有终端": "No terminal",
   "正在开终端…": "Opening a terminal…",
@@ -94,15 +95,15 @@ const DICT: Record<string, string> = {
   "向上翻页": "Page up",
   "向下翻页": "Page down",
   "回到底部": "Back to bottom",
-  // ── 会话详情：花费 ──
+  // ── Session details: costs ──
   "暂不可用": "Not available",
   "（另有 {0} 次调用未能定价，token 已计入、金额未计入）":
     "({0} more call(s) could not be priced — tokens counted, cost not)",
-  // ── 用量 ──
+  // ── Usage ──
   "{0} token": "{0} tokens",
-  // ── 压缩包浏览（产出页的 zip 当文件夹开）──
+  // ── Archive browsing (treat zip in artifact page as folder) ──
   "压缩包": "Archive",
-  // 「返回」「分享」已在别处登记过,不重复。
+  // "Back" and "Share" already registered elsewhere — no duplicate.
   "分享": "Share",
   "{0} 项": "{0} items",
   "这个文件夹是空的。": "This folder is empty.",
@@ -115,7 +116,7 @@ const DICT: Record<string, string> = {
   "当前环境不支持解压。": "This environment cannot decompress.",
   "读取压缩包失败。": "Could not read the archive.",
   "其他": "Other",
-  // ── 设备簿（多设备配对）──
+  // ── Device registry (multi-device pairing) ──
   "设备": "Device",
   改名: "Rename",
   静音: "Mute",
@@ -146,23 +147,23 @@ const DICT: Record<string, string> = {
   "清除本机全部配对密钥？需回到桌面端重新扫码才能再连接。":
     "Clear every pairing secret on this phone? You'll need to scan again from the desktop to reconnect.",
   "重新配对 / 清除全部密钥": "Re-pair / clear all secrets",
-  // ── 代理作用域切换器 ──
+  // ── Agent scope switcher ──
   "主进程": "Main",
   "当前": "current",
   "切换代理": "Switch agent",
-  // ── codex 注入的系统上下文折叠卡 ──
+  // ── Codex-injected system context collapsible card ──
   "系统上下文": "System context",
   "权限 / 沙箱": "Permissions / sandbox",
   "多智能体协作": "Multi-agent collab",
   "注入指令": "Injected instructions",
   "{0} 条": "{0} items",
-  // ── App shell / 配对 gate ──
+  // ── App shell / pairing gate ──
   "Fleet 移动端": "Fleet Mobile",
   "扫描桌面端 Fleet「移动端」板块里的二维码完成配对。":
     "Scan the QR code in the desktop Fleet's Mobile panel to pair.",
   "正在恢复配对…": "Restoring pairing…",
-  // 应用内扫码 + 粘贴配对。原生壳（系统相机扫出来的链接进不了 app）与 iOS 主屏幕
-  // web app（没有地址栏，Safari 的存储分区也不共享）都只有这两条路。
+  // In-app QR scanning + paste pairing. Native shell (system camera QR can't reach the app) and iOS home
+  // screen web app (no address bar, Safari's storage not shared) both only have these two paths.
   扫码配对: "Scan to pair",
   "正在打开摄像头…": "Opening the camera…",
   "对准桌面端「移动端」板块里的二维码。": "Point at the QR code in the desktop's Mobile panel.",
@@ -172,8 +173,8 @@ const DICT: Record<string, string> = {
     "No camera permission, so scanning is unavailable. Allow it in system settings, or paste a pairing link instead.",
   "这台设备用不了摄像头。请改用粘贴配对链接。":
     "This device has no usable camera. Paste a pairing link instead.",
-  // 非 https 地址上 getUserMedia 不存在。与「没有摄像头」分开说：后者会把用户
-  // 支使去系统设置里找一个根本不存在的开关。
+  // getUserMedia doesn't exist on non-HTTPS URLs. Kept separate from "no camera": the latter would send
+  // users to system settings looking for a switch that doesn't exist.
   "这个地址不是 HTTPS，浏览器不允许网页调用摄像头。请改用粘贴配对链接。":
     "This address isn't HTTPS, so the browser won't let the page use the camera. Paste a pairing link instead.",
   "这个地址不是 HTTPS，浏览器不允许网页调用摄像头，扫码这条路走不了。请用下面的粘贴。":
@@ -228,7 +229,7 @@ const DICT: Record<string, string> = {
   决策: "Decisions",
   任务: "Tasks",
 
-  // ── Fleet MCP 控制工具卡片摘要 ──
+  // ── Fleet MCP control tool card summaries ──
   "勾选 {0} · {1}": "Check {0} · {1}",
   "取消勾选 {0} · {1}": "Uncheck {0} · {1}",
   "新建计划 {0}": "Create plan {0}",
@@ -260,7 +261,7 @@ const DICT: Record<string, string> = {
   列出知识库: "List wiki",
   "搜索 {0}": "Search {0}",
   "存入产出 {0}": "Stored artifact {0}",
-  // 入库卡自己带标题，所以步骤行只留动作名（见 IngestCard 的 ingestStepLabel）。
+  // Ingest card carries its own title, so step row shows action name only (see IngestCard's ingestStepLabel).
   存入产出: "Stored a deliverable",
   发布到知识库: "Published to the wiki",
   列出产出: "List artifacts",
@@ -288,7 +289,7 @@ const DICT: Record<string, string> = {
   生成图片: "Image",
   修改图片: "Image edit",
   权限询问: "Permission prompt",
-  // ── Fleet 卡:记录字段 / 未来时间 / 时长 / 状态 ──
+  // ── Fleet card: record fields / future times / durations / statuses ──
   "{0} 分钟后": "in {0}m",
   "{0} 小时后": "in {0}h",
   "{0} 天后": "in {0}d",
@@ -313,7 +314,7 @@ const DICT: Record<string, string> = {
   老板已回复: "Answered",
   "{0} 棒": "{0} hops",
 
-  // ── 设置 / 更多 tab ──
+  // ── Settings / More tab ──
   设置: "Settings",
   语言: "Language",
   主题: "Theme",
@@ -327,8 +328,8 @@ const DICT: Record<string, string> = {
   更多: "More",
   连接与通知: "Connection & notifications",
   桌面端: "Desktop",
-  // 同源形态（fleet webui 发出的这份）才显示的两行：连的是哪台服务器，
-  // 以及判反了怎么切回桌面版。
+  // Only shown in same-origin form (this copy from fleet webui): which server to connect to,
+  // and how to switch back to desktop if misjudged.
   服务端: "Server",
   界面: "Interface",
   切到桌面版: "Desktop layout",
@@ -360,11 +361,11 @@ const DICT: Record<string, string> = {
   关于: "About",
   构建: "Build",
 
-  // ── 终端（「更多」页进去的全屏页）──
+  // ── Terminal (full-screen page in the More tab) ──
   终端: "Terminal",
   "在桌面端主机的某个目录里开一个 shell": "Open a shell in a directory on the desktop host",
 
-  // ── 知识库（「更多」页进去的全屏页）──
+  // ── Wiki (full-screen page in the More tab) ──
   "agent 沉淀下来的调研与文档": "Research and docs agents archived for later",
   刷新: "Refresh",
   "搜索标题 / slug…": "Search title / slug…",
@@ -444,13 +445,13 @@ const DICT: Record<string, string> = {
   返回: "Back",
   会话: "Session",
   消息: "Messages",
-  // ── 头部下面那条活状态轨（sessionStatusPills.ts）。额度耗尽 / 运行中 已在
-  //    本 dict 别处登记过，这里复用——重复 key 会静默覆盖已有翻译，别再加一遍。
+  // ── Active status trail below header (sessionStatusPills.ts). "out of credits" / "running" already
+  //    registered elsewhere in this dict — reuse them here. Duplicate keys silently override, so don't repeat.
   远端断开: "Remote lost",
   "{0} 张待决策": "{0} awaiting you",
   "{0} 条排队": "{0} queued",
   会话状态: "Session status",
-  // ── 「会话详情」半屏（SessionSheet.tsx）──
+  // ── Session details half-sheet (SessionSheet.tsx) ──
   会话详情: "Session info",
   此刻: "NOW",
   进度: "PROGRESS",
@@ -484,7 +485,7 @@ const DICT: Record<string, string> = {
   思考: "Thinking",
   "正在思考…": "Thinking…",
   暂无可显示的消息: "No messages to show",
-  // ── 消息详情：工具 digest chips / work-run 带 ──
+  // ── Message details: tool digest chips / work-run tags ──
   错误: "error",
   已中断: "interrupted",
   "{0} 匹配": "{0} matches",
@@ -504,7 +505,7 @@ const DICT: Record<string, string> = {
   "停止后台任务：{0}": "Stopping background task: {0}",
   "读取后台任务输出：{0}": "Reading background task: {0}",
   // dsh's own tools (no Claude counterpart) — see views/toolSummary.ts. The
-  // bare 停止后台任务 above is shared with Claude's TaskStop row; do not re-add
+  // bare "Stop background task" above is shared with Claude's TaskStop row; do not re-add
   // it here, a duplicate key silently overrides the first.
   "读取后台任务输出": "Reading background job output",
   "列出后台任务": "Listing background jobs",
@@ -525,7 +526,7 @@ const DICT: Record<string, string> = {
   "读取目标": "Reading the goal",
   "管理定时任务": "Managing scheduled work",
   "检索会话记录": "Searching the session record",
-  // Fleet MCP tool labels for the ToolSearch load line. 决策卡/计划/交接/知识库
+  // Fleet MCP tool labels for the ToolSearch load line. Decision card / Plan / Handoff / Wiki
   // already exist in this dict (reused here — do NOT re-add, duplicate keys
   // silently override existing translations); only the new ones are declared.
   富交互卡: "Interactive card",
@@ -570,7 +571,7 @@ const DICT: Record<string, string> = {
   上下文占用: "Context used",
   "（系统 {0} · 工具 {1} · 消息 {2}）": "(system {0} · tools {1} · messages {2})",
   运行中: "Running",
-  // 工具步骤上的「后台」标：这条 shell 在回合结束后还自己跑着。
+  // "Background" tag on tool steps: this shell keeps running after the turn ends.
   后台: "Background",
   完成: "Done",
   出错: "Error",
@@ -660,7 +661,7 @@ const DICT: Record<string, string> = {
   "图片加载失败，点按重试": "Image failed to load — tap to retry",
   "{0} 张图片加载失败，点按重试": "{0} image(s) failed to load — tap to retry",
 
-  // ── 英文缺口补漏：以下条目此前只有中文，英文界面下会露中文 ──
+  // ── English coverage: entries below previously had only Chinese; English view would show Chinese ──
   今日累计: "Today",
   未上报: "Not reported",
   "来自 {0}": "from {0}",
@@ -708,7 +709,7 @@ const DICT: Record<string, string> = {
   "{0} 个文件留在本机": "{0} file(s) stayed local",
   额度耗尽: "out of credits",
 
-  // ── 语音输入 ──
+  // ── Voice input ──
   语音输入: "Voice input",
   "要让 agent 做什么？也可点麦克风说": "What should the agent do? Or tap the mic to talk",
   "继续这个会话…": "Continue this session…",
@@ -719,13 +720,13 @@ const DICT: Record<string, string> = {
   停止并发送: "Stop and send",
   录音中: "Recording",
   "整理最后一句…": "Wrapping up the last words…",
-  // 「重试」已在 ErrorBoundary 段登记，不重复。
+  // "Retry" already registered in ErrorBoundary section — no repeat.
   没听到声音: "Didn't catch that",
-  // 「已取消」已在上面的通用词条里，不重复登记。
+  // "Cancelled" already in generic entries above — no re-registration.
   没有麦克风权限: "No microphone permission",
   去授权: "Grant access",
-  // 指引分环境:浏览器里的麦克风权限在站点设置里,不在系统设置里 —— 指错地方
-  // 比不指更糟,用户会真的去翻一遍。
+  // Guidance varies by environment: in-browser mic permissions are in site settings, not system settings — wrong guidance
+  // is worse than none; users will really go digging.
   "在浏览器地址栏左侧的站点设置里，把麦克风改成「允许」":
     "Open the site settings next to the address bar and set Microphone to \"Allow\"",
   "到系统设置 → 应用 → Fleet → 权限里允许麦克风":
@@ -789,7 +790,7 @@ const DICT: Record<string, string> = {
   新建目录失败: "Could not create that directory",
   "要让 agent 做什么？": "Task for the agent?",
   创建会话失败: "Failed to create session",
-  // ── 渲染兜底(ErrorBoundary)──
+  // ── Render fallback (ErrorBoundary) ──
   这一块没能显示出来: "This part could not be displayed",
   "其余部分仍然可用。{0}": "The rest still works. {0}",
   重试: "Retry",
@@ -811,7 +812,7 @@ const DICT: Record<string, string> = {
   已发送: "Sent",
   继续会话: "Resume session",
 
-  // ── 通用 / CopyButton ──
+  // ── Generic / CopyButton ──
   复制: "Copy",
   已复制: "Copied",
   复制失败: "Copy failed",
@@ -828,7 +829,7 @@ const DICT: Record<string, string> = {
   "触发审计 · 已有规则": "triggers audit · rule exists",
   触发审计: "triggers audit",
 
-  // ── 计划页（整仓 TASKS.md 进度矩阵）──
+  // ── Plans page (repo-wide TASKS.md progress matrix) ──
   "整仓 TASKS.md 计划的进度矩阵": "Progress matrix for the repo's TASKS.md plans",
   "计划加载失败：{0}": "Failed to load plans: {0}",
   "这个仓库还没有计划": "No plans in this repo yet",
@@ -836,7 +837,7 @@ const DICT: Record<string, string> = {
   "已完成 {0} 个": "{0} completed",
   "已完成 {0} 条": "{0} done",
 
-  // ── 产出（桌面端产出库的手机版，底部导航的一级 tab）──
+  // ── Artifacts (mobile version of desktop artifact library, primary nav tab) ──
   产出: "Artifacts",
   "还没有产出": "No artifacts yet",
   "Agent 把交付物存进产出库后会出现在这里。":
@@ -853,9 +854,9 @@ const DICT: Record<string, string> = {
     "Phone and desktop only exchange whole files, so a few hundred MB cannot cross. Export it from the desktop's Artifacts page.",
   "分享 / 保存": "Share / Save",
   "准备中…": "Preparing…",
-  // 「加载失败」已在别处定义，复用即可。
+  // "Load failed" already defined elsewhere — reuse it.
 
-  // ── 仓库 tab ──
+  // ── Repositories tab ──
   工具: "Tools",
   仓库: "Repositories",
   "查看未合并 worktree 与未推提交": "Unmerged worktrees & unpushed commits",
@@ -891,7 +892,7 @@ const DICT: Record<string, string> = {
   "未合并 {0}": "{0} unmerged",
   已合并: "merged",
 
-  // ── 账号与用量 ──
+  // ── Account & usage ──
   账号与用量: "Account & usage",
   "今日花费、账号档案与限流占用": "Today's spend, account profile & rate limits",
   "用量加载失败：{0}": "Failed to load usage: {0}",
@@ -919,7 +920,7 @@ const DICT: Record<string, string> = {
   "还没有攒够采样点，桌面端跑一阵子再看。":
     "Not enough samples yet — leave the desktop running for a while.",
   "纵轴 0–100%": "y: 0–100%",
-  // ── 会话详情 header：展开面板 + 汉堡菜单 ──
+  // ── Session details header: expand panel + menu ──
   模型: "Model",
   推理强度: "Reasoning effort",
   工作区: "Workspace",
@@ -935,7 +936,7 @@ const DICT: Record<string, string> = {
   "复制失败（需要 HTTPS 或用户手势）": "Copy failed (needs HTTPS or a user gesture)",
   结束任务: "Finish task",
   放弃任务: "Abandon task",
-  // ── 失败的 turn 卡（ApiErrorCard）──
+  // ── Failed turn card (ApiErrorCard) ──
   "登录已失效": "Sign-in expired",
   "已达用量上限": "Usage limit reached",
   "该模型额度已用完": "Out of quota for this model",

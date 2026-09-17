@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
-// Echo the key plus its interpolations, so a test can tell the three hints
-// apart without hard-coding Chinese copy.
+// Echo the i18n key plus its interpolations, so a test can distinguish the three hints
+// without hard-coding the translated strings.
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (k: string, vars?: Record<string, string>) =>
@@ -30,10 +30,10 @@ const render = (path: string, over?: Partial<PathLinkContext>) =>
 describe("PathChip tooltip", () => {
   /**
    * The regression this guards: the tooltip used to assert a fully-resolved
-   * absolute path ("打开 /Users/x/repo/public/app-icon.png") for a *relative*
+   * absolute path ("open /Users/x/repo/public/app-icon.png") for a *relative*
    * ref. That join is a guess — agents write paths relative to whatever
-   * directory they had in mind — and in the bug report the guessed path did not
-   * exist. Stating a guess as fact is what made the dead click so confusing.
+   * directory they had in mind — and in the bug report the guessed path didn't
+   * exist. Presenting a guess as fact is what made the failed click confusing.
    */
   it("does not assert a resolved absolute path for a relative ref", () => {
     const html = render("public/app-icon.png");
@@ -52,8 +52,8 @@ describe("PathChip tooltip", () => {
 });
 
 describe("PathChip broken-path feedback", () => {
-  // A click that reached the 仓库 page and found nothing reports back through
-  // the store; the chip that sent it marks itself instead of staying inert.
+  // A click that reached the repository page but found no file reports back through
+  // the store; the chip that initiated it marks itself broken instead of staying neutral.
   it("marks itself broken once a click failed to resolve it", () => {
     const html = render("public/app-icon.png", {
       unresolved: [`${ROOT}/public/app-icon.png`],

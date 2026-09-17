@@ -1,15 +1,17 @@
-// 鸿蒙壳的语音识别。ArkWeb 里 Web Speech API 不可用，能力只能由壳提供：
-// web 调 `fleetNative.startVoice()`，结果经 `window.__fleetVoice` 推回来
-// （壳侧是 mobile-harmony 的 WebShell.ets + common/SpeechAsr.ets）。
+// HarmonyOS shell speech recognition. Web Speech API isn't available in ArkWeb,
+// so capabilities come from the shell: web calls `fleetNative.startVoice()`, and
+// results push back via `window.__fleetVoice` (shell side: mobile-harmony's
+// WebShell.ets + common/SpeechAsr.ets).
 //
-// 底下是 Core Speech Kit 的端侧模型：离线、免费、无配额，是三条 provider 里
-// 唯一不需要联网的。代价是**只识别中文** —— 官方明确仅支持中文，所以
-// 「合一下 worktree」这种中英混排里的英文标识符会是短板。这是这条路的既定
-// 边界，不是可以在 web 侧修的东西。
+// This uses Core Speech Kit's on-device model: offline, free, no quota—the only
+// provider of the three that doesn't need the network. The trade-off: **Chinese only**.
+// Official docs explicitly limit support to Chinese, so English identifiers in
+// mixed-language text like "merge a worktree" will be weak spots. This is a hard
+// boundary of this route, not something web-side code can fix.
 //
-// 与 __fleetShare / __fleetPushToken 那两个 hook 不同，这里不需要 pending 队列：
-// 那两个是冷启动带进来的，必然早于 React effect；语音事件只在用户按下按钮之后
-// 才产生，那时 hook 早已注册。
+// Unlike __fleetShare and __fleetPushToken, we don't need a pending queue here:
+// those two arrive at cold startup before React effects; voice events only fire
+// after the user presses the button, by which time the hook is already registered.
 
 import type {
   VoiceErrorKind,
@@ -18,17 +20,18 @@ import type {
   VoiceSession,
 } from "./voiceInput";
 
-/** 壳注入的桥对象名，与 nativeScan.ts 同一个。 */
+/** Name of the shell-injected bridge object; same as in nativeScan.ts. */
 const BRIDGE = "fleetNative";
-/** 壳把识别事件推回页面的入口。 */
+/** Entry point where the shell pushes recognition events back to the page. */
 const HOOK = "__fleetVoice";
-/** 壳把二次授权的结果推回页面的入口。 */
+/** Entry point where the shell pushes the permission re-grant result back to the page. */
 const PERM_HOOK = "__fleetVoicePermission";
 
-/** 二次授权面板等多久算没下文。用户可能在面板里翻一会儿，给足时间。 */
+/** How long to wait for the re-grant panel to respond before giving up.
+ *  Users may browse the panel for a while, so give it plenty of time. */
 const PERM_TIMEOUT_MS = 120_000;
 
-/** 壳侧 VoiceEvent 的形状（WebShell.ets）。 */
+/** Shape of VoiceEvent from the shell side (WebShell.ets). */
 interface HarmonyVoiceEvent {
   kind: "ready" | "partial" | "final" | "error" | "end";
   text: string;
@@ -47,12 +50,13 @@ function bridge(): HarmonyBridge | undefined {
 }
 
 /**
- * 壳侧错误码 → 我们的分类。
+ * Shell-side error code → our classification.
  *
- * `PERMISSION_DENIED` / `START_FAILED` 是 SpeechAsr.ets 自己定的两个串；其余是
- * Core Speech Kit 的数字错误码转成的字符串。数字码的含义没有公开枚举，所以一律
- * 归到 unavailable —— 与 Capacitor 那条同样的保守做法：宁可笼统，也不要把一个
- * 引擎内部错误说成没有权限、让用户白跑一趟设置。
+ * `PERMISSION_DENIED` and `START_FAILED` are strings defined by SpeechAsr.ets itself;
+ * the rest are Core Speech Kit's numeric error codes converted to strings. Since the
+ * numeric codes have no public enum, we conservatively bucket them all as unavailable—
+ * same as the Capacitor approach: better to be vague than to call an engine-internal
+ * error "no permission" and send the user on a wild goose chase to settings.
  */
 export function classifyHarmonyError(code: string): VoiceErrorKind {
   if (code === "PERMISSION_DENIED") return "no-permission";
@@ -62,16 +66,18 @@ export function classifyHarmonyError(code: string): VoiceErrorKind {
 export const harmonyVoiceProvider: VoiceInputProvider = {
   id: "harmony",
 
-  // 桥上有 startVoice 就算可用。壳侧的引擎是系统内置的端侧模型，没有「这台
-  // 设备装没装识别服务」这一说，所以不必再问一次原生。
+  // startVoice on the bridge means it's available. The shell-side engine is a
+  // built-in on-device model; there's no "is this device's recognition service
+  // installed?" question, so we don't need to ask the native side again.
   async isAvailable(): Promise<boolean> {
     return typeof bridge()?.startVoice === "function";
   },
 
-  // 用户拒过一次之后，鸿蒙的 requestPermissionsFromUser 就再也不弹了 —— 页面上
-  // 那句「请在系统设置里允许」于是变成一条死路：用户既不知道去哪开，我们也没有
-  // 任何办法把他送过去。壳侧的 requestPermissionOnSetting 是官方给的二次授权
-  // 入口，直接在应用内弹系统面板。
+  // Once a user denies permission, HarmonyOS's requestPermissionsFromUser never
+  // pops again—so the "Please allow in system settings" text on screen becomes a
+  // dead end: the user doesn't know where to go, and we have no way to send them.
+  // The shell side's requestPermissionOnSetting is the official re-grant entry—
+  // it pops the system panel directly inside the app.
   async openPermissionSettings(): Promise<boolean> {
     const b = bridge();
     if (typeof b?.openVoiceSettings !== "function") return false;
@@ -86,8 +92,9 @@ export const harmonyVoiceProvider: VoiceInputProvider = {
         resolve(granted);
       };
       w[PERM_HOOK] = (granted: boolean) => finish(granted === true);
-      // 面板没有下文时不能永远挂着(某些设备上二次授权面板不弹)。按未授权收场,
-      // 用户看到的还是那个可以再点的错误块,而不是一个卡住不动的界面。
+      // If the panel doesn't respond, we can't hang forever (on some devices,
+      // the re-grant panel doesn't pop). Fall through as denied; the user still
+      // sees an error block they can click again, not a frozen UI.
       setTimeout(() => finish(false), PERM_TIMEOUT_MS);
       b.openVoiceSettings?.();
     });
@@ -124,9 +131,11 @@ export const harmonyVoiceProvider: VoiceInputProvider = {
           handlers.onError(classifyHarmonyError(ev.code));
           break;
         case "end":
-          // 引擎自己收工(VAD 判定说完了、或到了 maxAudioDuration)。定稿已经
-          // 在此之前经 final 到过,这里拆掉 hook **并且告诉调用方会话结束了** ——
-          // 少了后半句,页面会一直停在「正在听」,用户接着说却一个字都不出。
+          // Engine finished on its own (VAD detected speech end, or hit maxAudioDuration).
+          // Finalization already came through "final" earlier. Here we tear down the hook
+          // **and tell the caller the session is over**—skip the second part and the page
+          // stays stuck on "Listening", even though the user can keep talking and gets
+          // no text.
           dead = true;
           teardown();
           handlers.onEnd();
@@ -137,8 +146,9 @@ export const harmonyVoiceProvider: VoiceInputProvider = {
     b.startVoice(lang);
 
     return {
-      // stop 让引擎正常收尾,最后一段定稿仍会经 final 到达,所以这里不拆 hook ——
-      // 拆了那一段就没人收,表现为「说完按停止,最后一句没进输入框」。
+      // stop lets the engine finalize normally; the last segment still arrives via "final",
+      // so we don't tear down the hook here—tear it down and that segment has no handler,
+      // showing up as "I pressed Stop after speaking, but the last sentence didn't appear".
       stop: () => {
         if (dead) return;
         bridge()?.stopVoice?.();

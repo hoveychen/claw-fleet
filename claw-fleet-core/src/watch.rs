@@ -446,7 +446,7 @@ fn list_in(dir: &Path) -> Vec<WatchRecord> {
 // ── session enrichment ────────────────────────────────────────────────────────
 
 /// Lightweight per-session view of an active watch, embedded into `SessionInfo`
-/// so the session card can render "👁 watch · 已过 Xm · N 次" without an extra
+/// so the session card can render "👁 watch · elapsed Xm · N times" without an extra
 /// round-trip. Elapsed is derived frontend-side from `created` (like every other
 /// timestamp on the card), so it isn't duplicated here. Only *active* watches are
 /// ever summarized — a fired or stopped watch has already deleted its record.

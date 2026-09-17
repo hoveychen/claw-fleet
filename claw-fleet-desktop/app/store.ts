@@ -33,7 +33,7 @@ export type Theme = "dark" | "light" | "system";
 // Re-exported here because most call sites import ViewMode from the store.
 export { ALL_VIEW_MODES } from "./viewModes";
 export type { ViewMode, SessionViewMode } from "./viewModes";
-/** 启动台's segmented mark filter. "all" shows every bucket. */
+/** Launcher rail's segmented mark filter. "all" shows every bucket. */
 export type MarkFilter = "all" | "pending" | "done";
 
 export interface MainViewState {
@@ -103,7 +103,7 @@ export interface MainViewState {
      *  shut), so the map only ever holds the nodes the user disagreed with. */
     expandOverrides: Record<string, boolean>;
     /** Show the fully-finished root trees, which are otherwise folded behind a
-     *  single 「已完成 N 个」 row — this workspace has ~350 finished plans and
+     *  single "N completed" row — this workspace has ~350 finished plans and
      *  listing them all is the first thing you'd see otherwise. */
     showCompletedRoots: boolean;
     /** Plan ids whose completed P-tasks are unfolded. An expanded node lists
@@ -180,7 +180,7 @@ function readJson<T>(key: string, fallback: T): T {
   }
 }
 
-/** 计划树's slice of the (otherwise in-memory) main-view state. Its folds are
+/** Plan tree's slice of the (otherwise in-memory) main-view state. Its folds are
  *  worth keeping across restarts: on a repo with hundreds of finished plans,
  *  re-collapsing the tree by hand every launch is the whole cost of the view.
  *  Every key here is also registered in storage.ts's ALL_KEYS — a key written
@@ -221,14 +221,14 @@ interface UIState {
    *  "Sessions" nav entry to restore the user's preferred layout when they
    *  navigate back from audit/report/etc. */
   lastSessionViewMode: SessionViewMode;
-  /** Last page visited inside each sidebar tab (舰队 / 工作), so switching tabs
+  /** Last page visited inside each sidebar tab (Fleet / Work), so switching tabs
    *  returns you where you left off instead of always landing on the tab's home
    *  page. Persisted as a JSON blob under "nav-group-last-view". There is
    *  deliberately no `navGroup` field: the active tab is derived from `viewMode`
    *  via navGroupOf, so a cross-page hop can't desync the two. */
   lastViewByNavGroup: Record<NavGroup, ViewMode>;
   sidebarCollapsed: boolean;
-  /** Per-view collapse state for each view's secondary sidebar (二级侧边栏),
+  /** Per-view collapse state for each view's secondary sidebar (second-level sidebar),
    *  keyed by ViewMode. Re-clicking the already-active nav item toggles the
    *  entry. Persisted to localStorage as JSON. A missing key ⇒ expanded. */
   secondarySidebarCollapsed: Record<string, boolean>;
@@ -244,11 +244,11 @@ interface UIState {
    *  pretending it owns that panel. */
   autoCollapsed: { sidebar: boolean; secondary: ViewMode | null };
   mascotVisible: boolean;
-  /** 启动台 rail filters. HistoryView is mounted through SessionList's `viewMode`
+  /** Launcher rail filters. HistoryView is mounted through SessionList's `viewMode`
    *  ternary, so it unmounts on every trip to another page — including the
    *  involuntary hops a waiting-input alert or the mascot bubble make by calling
    *  setViewMode("list"). Component state would be thrown away each time and the
-   *  segmented filter would snap back to 「全部」, so these live in the store.
+   *  segmented filter would snap back to "all", so these live in the store.
    *  markFilter / workspaceFilter are also written to disk;
    *  `historyQuery` is deliberately store-only — a search box restored on boot
    *  would fire an FTS query the user never asked for. */
@@ -263,7 +263,7 @@ interface UIState {
   /** Workspace paths whose folder section in the task rail is folded shut.
    *  Component state would not survive the filter segments: the sections are
    *  rendered from the *filtered* rows, so a workspace with no match under
-   *  「进行中」 unmounts and comes back expanded when the reader switches back.
+   *  "in progress" unmounts and comes back expanded when the reader switches back.
    *  Written to disk so a deliberately folded repo stays folded across a
    *  restart, same as the filters above. */
   historyCollapsedWorkspaces: string[];
@@ -272,7 +272,7 @@ interface UIState {
     view: K,
     patch: Partial<MainViewState[K]>,
   ) => void;
-  /** 计划树's patcher. Separate from updateMainViewState because this slice is
+  /** Plan tree's patcher. Separate from updateMainViewState because this slice is
    *  the one that writes through to disk (see {@link persistPlansView}); going
    *  through the generic setter would silently skip the write. */
   updatePlansView: (patch: Partial<MainViewState["plans"]>) => void;
@@ -309,16 +309,16 @@ interface UIState {
    *  of the screen instead of the full card. Guard decisions force-expand. */
   decisionPanelCollapsed: boolean;
   setDecisionPanelCollapsed: (on: boolean) => void;
-  /** A pending "reveal this file in the 文件 page" request, raised when the
+  /** A pending "reveal this file in the Files page" request, raised when the
    *  user clicks a path in agent prose. FilesView owns the explorer's
    *  selection state internally, so a request travels through the store
    *  rather than through props. FilesView clears it once consumed. */
   fileNav: FileNavRequest | null;
   requestFileNav: (req: Omit<FileNavRequest, "nonce">) => void;
   clearFileNav: () => void;
-  /** A pending "open a terminal in this repo" request, raised by the 命令 panel's
-   *  在终端打开 button. Travels through the store for the same reason fileNav
-   *  does: TerminalView owns its workspace selection internally, so the 仓库 page
+  /** A pending "open a terminal in this repo" request, raised by the Command panel's
+   *  "Open in Terminal" button. Travels through the store for the same reason fileNav
+   *  does: TerminalView owns its workspace selection internally, so the Files page
    *  has no prop to hand it. TerminalView clears it once consumed. */
   terminalNav: TerminalNavRequest | null;
   requestTerminalNav: (workspacePath: string) => void;
@@ -336,25 +336,25 @@ interface UIState {
   /** Which optional surfaces the backend actually allows — read once at boot
    *  (`host_features`; the browser build gets the same answer over
    *  `GET /host_features`). Starts all-off and stays that way if the call
-   *  fails: offering a 终端 page whose first spawn comes back "disabled" is
+   *  fails: offering a Terminal page whose first spawn comes back "disabled" is
    *  worse than not showing it, and the flag is a launch property of the
    *  backend process, so there is nothing to retry mid-run. */
   hostFeatures: HostFeatures;
   loadHostFeatures: () => Promise<void>;
-  /** Absolute paths the 仓库 page was asked to open and could not resolve to
+  /** Absolute paths the Files page was asked to open and could not resolve to
    *  any file. The path chips in agent prose read this to mark themselves as
    *  broken *after* a click — deliberately not before, since knowing in advance
    *  would mean a filesystem walk per chip on hover (measured at ~140ms warm
    *  against this repo, seconds cold) for a tooltip nobody asked for. */
   unresolvedPaths: string[];
   markPathUnresolved: (absPath: string) => void;
-  /** Schedule page → "新建" shortcut: seed the new-session composer with a
+  /** Schedule page → "New" shortcut: seed the new-session composer with a
    *  scheduling-assistant template and hop to the session view, so the agent
    *  (not a form) authors the schedule. Consumed by HistoryView. */
   newSessionNav: NewSessionNavRequest | null;
   requestNewSession: (req: Omit<NewSessionNavRequest, "nonce">) => void;
   clearNewSessionNav: () => void;
-  /** Notification / tray click on a Fleet-spawned session → hop to the 任务
+  /** Notification / tray click on a Fleet-spawned session → hop to the Tasks
    *  (history) view and open that session in its inline tab strip, instead of
    *  the global session-detail drawer. Consumed by HistoryView. See
    *  `navigateToSessionDetail` for the routing decision. */
@@ -364,7 +364,7 @@ interface UIState {
 }
 
 export interface OpenTaskNavRequest {
-  /** Session id to open in the 任务 page's inline tab strip. */
+  /** Session id to open in the Tasks page's inline tab strip. */
   sessionId: string;
   /** Bumped on every request so clicking the same session twice re-navigates
    *  even when the id is unchanged. */
@@ -374,12 +374,12 @@ export interface OpenTaskNavRequest {
 export interface TerminalNavRequest {
   workspacePath: string;
   /** Bumped on every request so asking for the same repo twice re-navigates —
-   *  without it, hopping back to 仓库 and clicking 在终端打开 again would set an
+   *  without it, hopping back to the Files page and clicking "open in terminal" again would set an
    *  identical object and TerminalView's effect would never re-run. */
   nonce: number;
 }
 
-/** "Open this deliverable on the 产出 page", from a transcript's ingest card. */
+/** "Open this deliverable on the Artifacts page", from a transcript's ingest card. */
 export interface ArtifactNavRequest {
   id: string;
   /** Bumped per request, so asking for the same artifact twice re-navigates. */
@@ -404,9 +404,9 @@ export interface NewSessionNavRequest {
   /** Seed text for the new-session composer's prompt field. */
   prompt: string;
   /** Optional seeds for the rest of the new-session draft, used by the schedule
-   *  page's "立即运行" so the draft opens pre-filled with the task's own
+   *  page's "run now" action so the draft opens pre-filled with the task's own
    *  workspace / model / effort / agent tool. Omitted fields keep the draft's
-   *  own defaults (the "新建" shortcut passes only `prompt`). */
+   *  own defaults (the "new" shortcut passes only `prompt`). */
   workspace?: string;
   model?: string;
   effort?: string;
@@ -487,7 +487,7 @@ function readMarkFilter(): MarkFilter {
 }
 
 /** Values the workspace filter used to take when the pure-chat workspace was
- *  still one of the `<select>`'s options, and later a 仅聊天 toggle. Both are
+ *  still one of the `<select>`'s options, and later a "chat only" toggle. Both are
  *  retired — the chat section is simply pinned to the top of the rail now — so
  *  either legacy word collapses to "all". Every real value is an absolute path,
  *  so these bare words could never collide with one. The rewrite is persisted,
@@ -509,7 +509,7 @@ function readHistoryWorkspaceFilter(): string {
  *  Read-only fallbacks: the first write after a restart re-keys the blob, so an
  *  entry here only has to survive one boot on an already-installed machine. */
 const LEGACY_NAV_GROUP_KEYS: Partial<Record<NavGroup, string>> = {
-  // The 舰队 tab was `steward` until 2026-08.
+  // The Fleet tab was `steward` until 2026-08.
   fleet: "steward",
 };
 
@@ -553,17 +553,19 @@ function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
 const initialHistoryWorkspaceFilter = readHistoryWorkspaceFilter();
 
 /**
- * 精简模式的初值。三级:这个客户端存过的**显式**选择最高,其次是这台主机上次
- * 给出的默认值(`FLEET_SIMPLIFIED_MODE`,见 core 的 feature_flags),都没有才是
- * 关。
+ * Initial value for simplified mode. Three-level precedence: explicit choice
+ * persisted by this client is highest, then the host's last default
+ * (`FLEET_SIMPLIFIED_MODE`, see core's feature_flags), then fallback to false.
  *
- * 为什么要缓存主机的答案:`host_features` 是启动后一次异步请求,而
- * `simplifiedMode` 必须同步给出 —— 只等那次请求的话,每次打开页面都会先画一帧
- * 全功能界面再跳成精简版。缓存让第二次之后的加载直接就位;主机答案每次启动都
- * 会刷新这份缓存,所以在 muvee 里把环境变量改掉,下一次加载就跟着变。
+ * Why cache the host's answer: `host_features` is an async request after boot,
+ * but `simplifiedMode` must resolve synchronously. Without caching, every page
+ * load would render the full UI first, then jump to simplified. Caching makes
+ * subsequent loads land directly; the host's answer refreshes on every startup,
+ * so changing the env var in muvee takes effect on the next load.
  *
- * 读一次,因为下面的 `simplifiedMode` 和 `viewMode` 必须看到同一个答案 ——
- * 两者不一致会让开着精简模式的页面停在一个导航里没有的页上。
+ * Read once, because both `simplifiedMode` and `viewMode` below must see the
+ * same answer — inconsistency would leave the simplified-mode page stuck on a
+ * nav item that doesn't exist there.
  */
 function readSimplifiedMode(): boolean {
   const stored = getItem("simplified-mode");
@@ -575,12 +577,14 @@ function readSimplifiedMode(): boolean {
 const initialSimplifiedMode = readSimplifiedMode();
 
 /**
- * 记下这台主机对界面语言的意见(`FLEET_LOCALE`),并在这个客户端还没有过显式
- * 选择时就地生效 —— 第一次打开这个浏览器时缓存还是空的,只更新缓存的话得等
- * 下一次加载才看得到中文。用户在设置里选过的语言,主机不该替他改回来。
+ * Record the host's opinion on UI language (`FLEET_LOCALE`) and apply it when
+ * this client has no explicit choice. On first browser open the cache is empty,
+ * so caching only helps on reload. A language the user chose in settings must
+ * not be overridden by the host.
  *
- * 主机报了个这个 bundle 没有的语言时只记不换:换过去只会把界面变成一屏
- * translation key,而缓存仍然要如实记着,主机改口时才不会读到一个旧答案。
+ * When the host names a language this bundle doesn't have, record but don't
+ * apply it — switching would fill the UI with translation keys. Keep the cache
+ * accurate so we read fresh answers when the host changes its mind.
  */
 function applyHostLocale(hostLang: string | null): void {
   if (hostLang === null) removeItem("lang-host-default");
@@ -674,7 +678,7 @@ export const useUIStore = create<UIState>((set) => ({
   requestFileNav: (req) =>
     set((s) => ({
       // Same bookkeeping as setViewMode — a nav that skipped it would snap back
-      // to the previous view on the next launch and leave the 工作 tab's memory
+      // to the previous view on the next launch and leave the Work tab's memory
       // pointing at a page the user has since left.
       ...viewModePatch(s, "files"),
       fileNav: { ...req, nonce: (s.fileNav?.nonce ?? 0) + 1 },
@@ -683,14 +687,14 @@ export const useUIStore = create<UIState>((set) => ({
   terminalNav: null,
   requestTerminalNav: (workspacePath) =>
     set((s) =>
-      // The 命令 panel hides its 在终端打开 button while the surface is off, so
+      // The Command panel hides its "open in terminal" button while the surface is off, so
       // this is the belt to that braces: a nav raised by anything else (a
       // keyboard path, a future caller) must not land on a hidden page.
       !s.hostFeatures.terminal
         ? {}
         : {
             // Same bookkeeping as requestFileNav — see the note there on why a
-            // nav that skipped viewModePatch leaves the 工作 tab's memory stale.
+            // nav that skipped viewModePatch leaves the Work tab's memory stale.
             ...viewModePatch(s, "terminal"),
             terminalNav: { workspacePath, nonce: (s.terminalNav?.nonce ?? 0) + 1 },
           },
@@ -712,9 +716,10 @@ export const useUIStore = create<UIState>((set) => ({
     } catch {
       // Fail closed — see the field's doc comment.
     }
-    // 这台主机对精简模式的意见(`FLEET_SIMPLIFIED_MODE`)。缓存下来给下一次
-    // 加载同步读;主机改口(或不再表态)时这份缓存跟着改口,所以它永远不会变成
-    // 一个没人能撤销的粘滞开关。
+    // Host's opinion on simplified mode (`FLEET_SIMPLIFIED_MODE`). Cache it for
+    // sync read on next load; when the host changes its mind (or stops opining),
+    // the cache updates with it, so it never becomes a sticky switch nobody can
+    // undo.
     const hostDefault = features.simplifiedDefault ?? null;
     if (hostDefault === null) removeItem("simplified-mode-host-default");
     else setItem("simplified-mode-host-default", String(hostDefault));
@@ -728,9 +733,10 @@ export const useUIStore = create<UIState>((set) => ({
       ...(!features.terminal && s.viewMode === "terminal"
         ? viewModePatch(s, NAV_GROUP_HOME.work)
         : {}),
-      // 第一次打开这个浏览器时缓存还是空的,所以主机的意见要就地生效,而不是
-      // 等到下一次加载。只在这个客户端**没有**显式选择时才动 —— 用户在设置里
-      // 关掉过的,主机不该替他改回来。
+      // On first browser open the cache is empty, so the host's opinion takes
+      // effect immediately rather than on reload. Only when this client has no
+      // explicit choice — if the user toggled it in settings, the host must not
+      // override it.
       ...(hostDefault !== null &&
       getItem("simplified-mode") === null &&
       hostDefault !== s.simplifiedMode
@@ -765,7 +771,7 @@ export const useUIStore = create<UIState>((set) => ({
   openTaskNav: null,
   requestOpenTask: (sessionId) =>
     set((s) => ({
-      // Hop to the 任务 (history) page, persisting the view like setViewMode so
+      // Hop to the Tasks (history) page, persisting the view like setViewMode so
       // it survives a relaunch, then bump the nonce for HistoryView to consume.
       ...viewModePatch(s, "history"),
       openTaskNav: { sessionId, nonce: (s.openTaskNav?.nonce ?? 0) + 1 },
@@ -996,13 +1002,13 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     });
 
     // Any rejection below (bad path, backend error, watcher failure) must still
-    // clear `isLoading` — otherwise the detail view is stuck on "加载中…"
+    // clear `isLoading` — otherwise the detail view is stuck on "loading..."
     // forever. Mirrors the standalone-mode fetch's `.catch` in SessionDetail.
     try {
       // …and neither may a fetch that simply never answers. `get_messages_tail`
       // has no abort and no timeout of its own: with an unresponsive backend
       // (proven by freezing the dsh web server) the promise stays pending and
-      // the pane spun on 「加载中…」 indefinitely. The deadline doesn't cancel
+      // the pane spun on "loading..." indefinitely. The deadline doesn't cancel
       // anything — it just stops the lie; a late result still renders below.
       const rawMessages = await withStallWatch(
         invoke<RawMessage[]>("get_messages_tail", {
@@ -1019,7 +1025,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       // `get_messages_tail` (1.5s) and `read_live_thinking` (700ms) take read
       // locks — so on an *active* session the write lock's wait is set by other
       // pollers, not by this fetch. Awaiting it before this `set` is what left
-      // the pane on 「加载中…」 with the messages already fetched, and it sat
+      // the pane on "loading..." with the messages already fetched, and it sat
       // outside `withStallWatch` (disarmed the moment the fetch landed), so no
       // deadline and no retry button ever fired. See store.test.ts.
       set({
@@ -1122,10 +1128,10 @@ export const useDetailStore = create<DetailState>((set, get) => ({
 }));
 
 /** Route a notification / tray click to the right session detail. A
- *  Fleet-spawned session (the ones the 任务 page lists) opens in that page's
+ *  Fleet-spawned session (the ones the Tasks page lists) opens in that page's
  *  inline tab strip; every other session keeps the old behaviour — the global
- *  detail drawer on the 会话 page. `isFleetOwnedTask` is the exact gate
- *  HistoryView filters `adhocSessions` by, so "would this appear on the 任务
+ *  detail drawer on the Sessions page. `isFleetOwnedTask` is the exact gate
+ *  HistoryView filters `adhocSessions` by, so "would this appear on the Tasks
  *  page" and "route it there" stay in lockstep. */
 export function navigateToSessionDetail(session: SessionInfo) {
   if (useUIStore.getState().simplifiedMode || isFleetOwnedTask(session)) {
@@ -1226,7 +1232,7 @@ interface ReportState {
   taskReviews: TaskReview[];
   taskReviewsDate: string;
 
-  // "New report" red dot on the 每日报告 nav item. `latestReportDate` is the most
+  // "New report" red dot on the Daily Report nav item. `latestReportDate` is the most
   // recent date that has report data; `lastSeenReportDate` is the newest date the
   // user has actually opened the report view at (persisted). A dot shows while the
   // former is newer than the latter.
@@ -1571,7 +1577,7 @@ interface DecisionState {
   /**
    * Resolve a fleet__ask card without answering it. `taskOutcome` is the v3
    * terminal verdict from the card's always-present end-the-task button —
-   * `"completed"` (结束任务) or `"abandoned"` (放弃任务) — which Fleet stamps onto
+   * `"completed"` (finish) or `"abandoned"` (abandon) — which Fleet stamps onto
    * the session. Omit it for a plain dismissal, which records no terminal state.
    */
   cancelFleetAsk: (id: string, taskOutcome?: TaskOutcome | null) => Promise<void>;
@@ -2339,7 +2345,7 @@ function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
 
 interface ProcState {
   procs: ProcRecord[];
-  /** Re-fetch the proc list from the backend (polled while 文件 page is open). */
+  /** Re-fetch the proc list from the backend (polled while Files page is open). */
   fetchProcs: () => Promise<void>;
   /** Drop a proc the backend reports as already cleared. */
   forgetProc: (id: string) => void;
@@ -2370,7 +2376,7 @@ export function runningProcCounts(procs: ProcRecord[]): Map<string, number> {
   return counts;
 }
 
-/** Total running procs across all workspaces — drives the 仓库 nav badge. */
+/** Total running procs across all workspaces — drives the Files nav badge. */
 export function runningProcTotal(procs: ProcRecord[]): number {
   return procs.reduce((n, p) => (p.status === "exited" ? n : n + 1), 0);
 }

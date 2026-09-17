@@ -25,7 +25,7 @@ describe("conversationPlaceholder", () => {
   });
 
   it("取数失败要报「失败」,不许冒充「超时」", () => {
-    // 这正是老板看到的那一幕:后端秒回一个错误,界面却说「后端一直没有响应」。
+    // This is exactly what the boss saw: the backend returned an error immediately, but the UI says "backend never responded".
     expect(
       conversationPlaceholder({ isLoading: false, stalled: false, failed: true, messageCount: 0 }),
     ).toBe("failed");

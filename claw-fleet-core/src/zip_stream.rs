@@ -5,7 +5,7 @@
 //! offsets, which is fine under the wiki's 100 MB per-version cap and wrong
 //! here. A single artifact may be 4 GiB ([`crate::artifacts::MAX_ARTIFACT_BYTES`]),
 //! and a folder of them is trivially past `u32::MAX` — the exact case the
-//! 产出 page exists for is a folder of 4K renders. So this one:
+//! deliverables page exists for is a folder of 4K renders. So this one:
 //!
 //! - **streams**: each member is copied from disk to the sink in 64 KiB
 //!   chunks, so peak memory is one buffer regardless of archive size;

@@ -1,10 +1,14 @@
-// 产出 tab：桌面端产出库的手机版。数据走 relay 的 `artifact_list` /
-// `artifact_blob`（claw-fleet-core/src/mobile_relay.rs）。列表是 tab 正文
-// （流式，跟着 main 一起滚），点开某份产出才升起 ArtifactDetail 那层全屏浮层。
+// Artifacts tab — the mobile version of the desktop artifact library. Data
+// comes via the relay's `artifact_list` / `artifact_blob` (see
+// claw-fleet-core/src/mobile_relay.rs). The list is the tab body (streaming,
+// scrolling with messages), tapping an artifact opens ArtifactDetail as a
+// fullscreen overlay.
 //
-// 手机只处理小的那一半。relay 传字节只有「单帧 base64」一种形状，而 base64
-// 还要多占三分之一——一段成片没有诚实的办法推过来。所以超过 MAX_RELAY_BYTES
-// 的产出这里只列卡片、显示元信息，并明说去桌面端导出，而不是假装能取。
+// Mobile handles only the smaller half. The relay ships bytes as single-frame
+// base64, which bloats by a third — there is no honest way to stream a chunk
+// that way. Artifacts over MAX_RELAY_BYTES show up here as cards with metadata
+// only, explicitly saying "export from desktop" rather than pretending we can
+// fetch them.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -146,18 +150,22 @@ export function ArtifactDetail({
   onBack: () => void;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  // Office 预览要的是 Blob 本身（三个库都从 zip 里读 XML），不是一个能塞进
-  // <iframe> 的 URL —— 所以这一路和 blobUrl 分开存。
+  // Office preview needs the Blob itself (all three libraries read XML from the
+  // zip), not a URL to put in an <iframe> — so this path is separate from
+  // blobUrl.
   const [blob, setBlob] = useState<Blob | null>(null);
   const [text, setText] = useState<string | null>(null);
-  // 一份 .zip 是整包取过来之后在本地解析的（见 ZipBrowser 顶部的注释）。
+  // A .zip is fetched as a whole and parsed locally (see the comment at the top
+  // of ZipBrowser).
   const [zipBytes, setZipBytes] = useState<Uint8Array | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const kind = previewKind(artifact);
 
-  // 预览是压在产出 tab 正文之上的浮层，所以它要自己登记一层历史。少了这一层，
-  // 硬件返回键弹掉的是 tab 自己那层，人从预览一步退回决策 tab。
+  // The preview is a floating layer on top of the artifact list body, so it
+  // needs to register its own history layer. Without it, the hardware back button
+  // pops the tab layer instead, taking the user back from preview straight to
+  // the decision tab in one step.
   useHistoryLayer(onBack);
 
   useEffect(() => {
@@ -195,8 +203,9 @@ export function ArtifactDetail({
 
   // Prefer the native share sheet (the OS can save / AirDrop / send it), fall
   // back to <a download>. Same shape as the wiki doc export.
-  /** 把一份文件交给系统分享面板，退化到 <a download>。整份产出与 zip 里的
-   *  单个成员走同一条路——两者都只是「一个文件名 + 一串字节」。 */
+  /** Hand a file to the system share panel, falling back to <a download>.
+   *  Full artifacts and individual zip members take the same path — both are
+   *  just "a filename + bytes". */
   const shareFile = useCallback(
     async (file: File, title: string) => {
       try {
@@ -260,7 +269,7 @@ export function ArtifactDetail({
         ) : kind === "zip" && zipBytes ? (
           <ZipBrowser bytes={zipBytes} onShareMember={shareBytes} />
         ) : kind !== "none" ? (
-          // 每一类怎么画,与 zip 里点开的成员共用同一个分派(ArtifactPreviewBody)。
+          // How to render each kind is shared with zip members opened in detail (ArtifactPreviewBody).
           <PreviewBody
             src={source}
             fallback={

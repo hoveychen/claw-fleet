@@ -11,7 +11,7 @@
  *
  * Record 3 is not something the user typed; it is the harness feeding the skill
  * instructions to the agent. Rendered as a normal user bubble it dumps the whole
- * skill file into the transcript (see the red-boxed blob老板 flagged). We fold it
+ * skill file into the transcript (see the red-boxed blob the user flagged). We fold it
  * into a collapsed card instead.
  *
  * The body always begins with this exact English prefix, emitted by Claude

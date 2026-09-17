@@ -24,7 +24,7 @@ export type MetaRenderUnit =
 /**
  * Collapse runs of adjacent `isMeta` user turns into single `meta-group` units,
  * leaving every other row a `single`. N back-to-back injected turns otherwise
- * stack as N identical "系统上下文" cards. A group needs at least two rows — a lone
+ * stack as N identical "system context" cards. A group needs at least two rows — a lone
  * meta row stays a `single` and renders exactly as before.
  *
  * Unlike desktop this does not break runs at day boundaries: mobile-web has no

@@ -1,30 +1,35 @@
 /**
- * mermaid 的配色，接到 App.css 的设计 token 上。
+ * Mermaid color scheme, anchored to App.css design tokens.
  *
- * 之前这里直接把 mermaid 的内置主题喂进去（light → `default`，dark → `dark`），
- * 拿到的是 mermaid 出厂色板：姜黄 subgraph（#ffffde）、淡紫节点（#ECECFF）、
- * 紫罗兰描边（#9370DB）、16px trebuchet。全应用只有图表这一处不吃自己的 token。
+ * Previously we just fed mermaid's built-in themes here (light → `default`, dark →
+ * `dark`), getting its factory palette: mustard subgraph (#ffffde), pale purple nodes
+ * (#ECECFF), violet border (#9370DB), 16px trebuchet. Only charts across the whole app
+ * skip our tokens.
  *
- * 改成 `theme: "base"` 之后，mermaid 会把这里给的每个变量当权威值（`Theme.calculate`
- * 先应用一遍 overrides、跑完派生、再应用一遍 overrides，所以显式写的 key 一定生效），
- * 没写的 key 才从 primaryColor 派生。
+ * After switching to `theme: "base"`, mermaid treats every variable we provide as
+ * authoritative (`Theme.calculate` applies overrides, runs derivations, applies overrides
+ * again, so explicit keys definitely take effect). Missing keys derive from primaryColor.
  *
- * **值必须是不透明 hex。** mermaid 用 khroma 对这些颜色做 darken/lighten/invert 派生，
- * 半透明色派生出来的结果不可控；而且 `var(--x)` 这类 CSS 变量在 khroma 里直接解析失败。
- * 所以这张表是把 App.css 的 token 值**手工压平**成 hex 的一份副本 —— 改 App.css 的
- * 底色/文字色时，这里要跟着改（mermaidTheme.test.ts 只校验对比度，不校验同步）。
- * 唯一的例外是 fontFamily：那是 CSS 字符串，不进 khroma。
+ * **All values must be opaque hex.** Mermaid uses khroma to derive colors via
+ * darken/lighten/invert; semi-transparent results are unpredictable, and CSS variables
+ * like `var(--x)` fail to parse in khroma. So this table is a **manually flattened** copy
+ * of App.css token values as hex — when you change App.css's background/text colors,
+ * update these too (mermaidTheme.test.ts validates contrast, not sync). The only exception
+ * is fontFamily: that's a CSS string, doesn't go through khroma.
  *
- * 桌面端和移动端各有一份（和 mermaidContrast.ts 同样的约定），改一处要改两处。
+ * Desktop and mobile each have a copy (same convention as mermaidContrast.ts); change one
+ * and you must change the other.
  */
 
-/** mermaid 量文字宽度时把图挂在 document.body 下，画的时候却可能落在 markdown 的
- *  <pre> 里继承到等宽字体 —— 量出来 92px 的标签实际画 116px，直接被节点框切掉。
- *  给一个两处都解析成同一个栈的 CSS 变量，量和画就对得上。不能用 "inherit"。 */
+/** Mermaid measures text width by appending to document.body, but when rendering it
+ *  may fall inside markdown's <pre>, inheriting monospace — a label measured as 92px
+ *  actually draws at 116px and gets clipped by the node box. Use a CSS variable that
+ *  resolves to the same stack in both places. Can't use "inherit". */
 const FONT_FAMILY = "var(--font-sans)";
 
-/** 分类色：给 pie / journey / timeline / gitGraph 这些「靠颜色区分条目」的图。
- *  不给的话它们会从近乎中性的 primaryColor 派生出一堆分不开的灰。 */
+/** Categorical colors for pie / journey / timeline / gitGraph charts that "distinguish
+ *  items by color". Without them, they derive a bunch of indistinguishable grays from
+ *  the nearly-neutral primaryColor. */
 const CATEGORICAL_LIGHT = [
   "#c25232", // accent
   "#1d4ed8", // accent-tool
@@ -49,7 +54,8 @@ const CATEGORICAL_DARK = [
 
 export type MermaidMode = "light" | "dark";
 
-/** 把分类色摊成 mermaid 要的 cScale0..7 / pie1..8 两组 key。 */
+/** Expand categorical colors into the two key sets mermaid expects: cScale0..7 and
+ *  pie1..8. */
 function scaleKeys(scale: string[], labelInk: string): Record<string, string> {
   const out: Record<string, string> = { scaleLabelColor: labelInk };
   scale.forEach((color, i) => {
@@ -63,12 +69,12 @@ function scaleKeys(scale: string[], labelInk: string): Record<string, string> {
 const LIGHT: Record<string, string> = {
   darkMode: "false",
 
-  // —— 画布与基础排版 ——
+  // ── Canvas and basic typography ──
   background: "#f1efea", // --color-bg
   fontFamily: FONT_FAMILY,
   fontSize: "14px",
 
-  // —— 节点（flowchart / class / state 共用 mainBkg + nodeBorder）——
+  // ── Nodes (flowchart / class / state share mainBkg + nodeBorder) ──
   primaryColor: "#fbfaf7", // --color-bg-card
   mainBkg: "#fbfaf7",
   nodeBkg: "#fbfaf7",
@@ -79,13 +85,14 @@ const LIGHT: Record<string, string> = {
   nodeTextColor: "#1f2023",
   classText: "#1f2023",
 
-  // —— 连线 ——
+  // ── Connectors ──
   lineColor: "#88837a",
   arrowheadColor: "#88837a",
   defaultLinkColor: "#88837a",
   edgeLabelBackground: "#f1efea",
 
-  // —— subgraph / cluster：比正文纸面沉一档，标题走次级文字色 ——
+  // ── Subgraph / cluster: one level darker than body text, title uses secondary text
+  // color ──
   clusterBkg: "#eae7e0",
   clusterBorder: "#d8d4ca",
   titleColor: "#6f7078", // --color-text-dim
@@ -98,12 +105,12 @@ const LIGHT: Record<string, string> = {
   tertiaryTextColor: "#1f2023",
   border2: "#d8d4ca",
 
-  // —— note：唯一保留暖黄的地方，因为 note 本来就该跳出来 ——
+  // ── Note: only place we keep warm yellow, because notes should stand out ──
   noteBkgColor: "#f7f0dd", // --color-warning-bg
   noteTextColor: "#4a4436",
   noteBorderColor: "#e0d5b4",
 
-  // —— sequenceDiagram ——
+  // ── Sequence diagram ──
   actorBkg: "#fbfaf7",
   actorBorder: "#c9c5bb",
   actorTextColor: "#1f2023",
@@ -118,7 +125,7 @@ const LIGHT: Record<string, string> = {
   activationBorderColor: "#c9c5bb",
   sequenceNumberColor: "#fbfaf7",
 
-  // —— stateDiagram ——
+  // ── State diagram ──
   stateBkg: "#fbfaf7",
   stateLabelColor: "#1f2023",
   labelBackgroundColor: "#f1efea",
@@ -130,13 +137,13 @@ const LIGHT: Record<string, string> = {
   transitionLabelColor: "#5d6168",
   specialStateColor: "#1f2023",
 
-  // —— erDiagram ——
+  // ── ER diagram ──
   attributeBackgroundColorOdd: "#fbfaf7",
   attributeBackgroundColorEven: "#f3f1ec",
   rowOdd: "#fbfaf7",
   rowEven: "#f3f1ec",
 
-  // —— gantt ——
+  // ── Gantt ──
   sectionBkgColor: "#eae7e0",
   sectionBkgColor2: "#f3f1ec",
   altSectionBkgColor: "#f1efea",
@@ -269,11 +276,12 @@ export const MERMAID_THEME_VARIABLES: Record<MermaidMode, Record<string, string>
 };
 
 /**
- * mermaid 的变量表管不到的几何细节，用一小段 CSS 补。
+ * Geometric details the mermaid variable table can't reach; patch with a small CSS block.
  *
- * `rx`/`ry` 在 SVG2 里是 CSS 几何属性，Chromium 和 WebKit 都支持，所以能直接把
- * 直角方框改圆角。`:not([rx])` 是为了只动 mermaid 没写 rx 的形状 —— 作者写
- * `A(圆角)` 时 mermaid 会把 rx 落成属性，那是他的选择，不覆盖。
+ * `rx`/`ry` are CSS geometry properties in SVG2, supported by both Chromium and WebKit,
+ * so we can turn sharp rectangles into rounded corners. `:not([rx])` only affects shapes
+ * where mermaid didn't set rx — when an author writes `A(rounded)`, mermaid sets it as
+ * an attribute, and that's their choice to preserve.
  */
 export function mermaidThemeCss(mode: MermaidMode): string {
   const shadow =
@@ -295,7 +303,7 @@ export function mermaidThemeCss(mode: MermaidMode): string {
   `;
 }
 
-/** 一次调用拿到喂给 `mermaid.initialize` 的整段主题配置。 */
+/** Get the complete theme config to pass to `mermaid.initialize` in one call. */
 export function mermaidThemeConfig(mode: MermaidMode) {
   return {
     theme: "base" as const,

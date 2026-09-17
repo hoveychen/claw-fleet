@@ -37,14 +37,14 @@ fi
 
 ./scripts/build-android-apk.sh
 
-# 取 dist-apk 下 mtime 最新的那个 —— 也就是上面那行刚构建出来的。
+# Take the most recently modified APK in dist-apk/—the one just built above.
 #
-# 不用 `ls -t`(SC2012),也不用 `find -printf '%T@'` —— 后者是 GNU 扩展,本机
-# macOS 的 BSD find 没有它,套上去等于把一个 lint 提示换成一个真的平台 bug。
-# `-nt` 是 POSIX test,两边都有。
+# Don't use `ls -t` (SC2012) or `find -printf '%T@'`—the latter is GNU-only,
+# and this macOS's BSD find lacks it, turning a lint warning into a real platform bug.
+# `-nt` is a POSIX test available everywhere.
 APK=""
 for candidate in dist-apk/*.apk; do
-  [ -e "$candidate" ] || continue   # 空 glob 时它是自己的字面量
+  [ -e "$candidate" ] || continue   # Empty glob returns its literal; check it exists
   if [ -z "$APK" ] || [ "$candidate" -nt "$APK" ]; then
     APK="$candidate"
   fi
@@ -52,7 +52,7 @@ done
 [ -n "$APK" ] || { echo "no apk under dist-apk/ — did the build above fail?" >&2; exit 1; }
 echo
 echo "==> installing $(basename "$APK") ($(du -h "$APK" | cut -f1))"
-# -r keeps app data across reinstalls; a signature change still needs a manual
+# -r preserves app data across reinstalls; a signature change still requires manual
 # uninstall, which is exactly the signal you want if the keystore ever changes.
 adb install -r "$APK"
 

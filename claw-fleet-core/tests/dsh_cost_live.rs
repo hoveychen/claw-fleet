@@ -8,7 +8,7 @@
 //!   cargo test -p claw-fleet-core --test dsh_cost_live -- --ignored --nocapture
 //!
 //! The unit tests cover extraction, tallying and key resolution against
-//! fixtures; what they cannot cover is the one thing 老板 asked for — that the
+//! fixtures; what they cannot cover is the one thing the user asked for — that the
 //! figure is *the provider's*, not ours. This test closes that gap end to end:
 //! real session → real generation ids → real `GET /api/v1/generation` → summed
 //! USD.
@@ -160,7 +160,7 @@ fn live_session_cost_comes_back_from_the_provider() {
 /// Real-data proof of the attribution fix: a session that ran on more than one
 /// local day must have its spend split across those days.
 ///
-/// This is the failure 老板 reported, and it is not reachable from a fixture:
+/// This is the failure the user reported, and it is not reachable from a fixture:
 /// the bug was that a session's whole cumulative figure was booked to its
 /// last-activity day, which only shows up on a real install that has actually
 /// been used across midnight. Measured on this host at the time of writing: 256

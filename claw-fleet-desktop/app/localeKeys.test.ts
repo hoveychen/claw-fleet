@@ -7,25 +7,29 @@ import enJson from "./locales/en.json";
 import zhJson from "./locales/zh.json";
 
 /**
- * 每个 `t("key")` 用到的 key 都必须在 en.json 与 zh.json 里都有。
+ * Every `t("key")` call must have its key present in both en.json and zh.json.
  *
- * 这道门存在,是因为漏一个键的失败模式是**安静的**。i18next 找不到键时回落到
- * 第二个参数,而我们的 fallback 一律写成中文 —— 于是英文 UI 上那一处直接显示
- * 中文,构建、类型检查、既有测试全都是绿的。「移动端」面板里 relay 地址旁边那个
- * 按钮就这样带着中文「编辑」上线了很久,只有人真的把 UI 切成英文点到那一页才
- * 看得见。连一个 fallback 都没写的键更糟:两种语言都显示 key 本身。
+ * This guard exists because missing a key fails silently. When i18next can't find
+ * a key, it falls back to the second argument, which we always write in Chinese —
+ * so the English UI shows Chinese text directly. The build, type checks, and
+ * existing tests all pass. The Mobile ("移动端") panel's relay-address button
+ * shipped with Chinese "Edit" ("编辑") for a long time; only when someone actually
+ * switched the UI to English and navigated there was it visible. Keys with no
+ * fallback at all are worse: both languages show the key itself.
  *
- * 反方向同样拦:zh.json 缺键时中文 UI 靠内联 fallback 侥幸看着对,但那份文案就
- * 不在 locale 文件里,翻译、审校、复用全都绕过它 —— 而下一个把 fallback 删掉的
- * 人不会知道自己删掉的是唯一一份中文。
+ * The reverse direction is gated the same way: when zh.json lacks a key, the
+ * Chinese UI works by accident via inline fallback, but that text lives nowhere
+ * in the locale file — translation, review, and reuse all bypass it. The next
+ * person to delete the fallback won't know they deleted the only Chinese copy.
  *
- * 扫的是**源码**而不是 locale 文件,所以它随代码变化保持为真:新加一处 t() 而
- * 忘了补键,这条测试当场报红并点名那个键。
+ * The scan inspects **source code**, not locale files, so it stays true as code
+ * changes: add a `t()` call and forget to add the key, and this test turns red
+ * and names the key.
  */
 
 const APP_DIR = resolve(__dirname);
 
-/** locale JSON 是嵌套的(`{schedule: {title: …}}`),而 t() 里写的是点号路径。 */
+/** Locale JSON is nested (`{schedule: {title: …}}`), but `t()` calls use dot-separated paths. */
 function flatten(obj: unknown, prefix = ""): Set<string> {
   const out = new Set<string>();
   if (typeof obj !== "object" || obj === null) return out;
@@ -41,15 +45,16 @@ function flatten(obj: unknown, prefix = ""): Set<string> {
 }
 
 /**
- * `t("key")` / `t("key", "fallback")` 的调用点。
+ * Call sites of `t("key")` / `t("key", "fallback")`.
  *
- * `(?<![A-Za-z0-9_$.])` 是必需的而不是讲究:没有它,`createElement("td")` 里
- * 那个 `t(` 也会命中,于是 `td`、`tr`、`iframe` 这些 HTML 标签名会被当成缺失的
- * 翻译键报出来(第一版就是这样,报出 42 个假阳性)。
+ * The negative lookbehind `(?<![A-Za-z0-9_$.])` is necessary, not optional:
+ * without it, the `t(` inside `createElement("td")` would also match, so HTML
+ * tag names like `td`, `tr`, `iframe` would be reported as missing translation
+ * keys (the first version did this, producing 42 false positives).
  */
 const T_CALL = /(?<![A-Za-z0-9_$.])t\(\s*"([A-Za-z0-9_.]+)"/g;
 
-/** 只收动态键会用到的前缀白名单 —— 目前没有,留空数组即为「一个都不许有」。 */
+/** Prefix whitelist for keys that may be generated dynamically. Currently empty, meaning no dynamic keys are permitted. */
 const DYNAMIC_KEY_PREFIXES: string[] = [];
 
 function sourceFiles(dir: string): string[] {
@@ -72,7 +77,7 @@ describe("locale key coverage", () => {
   const en = flatten(enJson);
   const zh = flatten(zhJson);
 
-  /** key → 用到它的文件(相对 app/),按 key 去重后仍保留第一个出处好定位。 */
+  /** key → file that uses it (relative to app/), deduplicated by key but keeping the first occurrence for reference. */
   const used = new Map<string, string>();
   for (const file of sourceFiles(APP_DIR)) {
     const src = readFileSync(file, "utf8");
@@ -83,13 +88,13 @@ describe("locale key coverage", () => {
     }
   }
 
-  it("扫到了可观数量的 t() 调用（正则没有整体失效）", () => {
-    // 这条不是凑数:上面那个 lookbehind 或文件遍历一旦写坏,`used` 会静静地变成
-    // 空集,而下面两条断言就全都「通过」了。
+  it("scans a reasonable number of t() calls (regex is not entirely broken)", () => {
+    // This check is not filler: if the lookbehind or file traversal logic above breaks,
+    // `used` would silently become empty, and the two assertions below would both "pass".
     expect(used.size).toBeGreaterThan(200);
   });
 
-  it("每个 key 都在 en.json 里", () => {
+  it("every key is present in en.json", () => {
     const missing = [...used.entries()]
       .filter(([k]) => !en.has(k))
       .map(([k, f]) => `${k}  (${f})`)
@@ -97,7 +102,7 @@ describe("locale key coverage", () => {
     expect(missing, `en.json 缺这些键 —— 英文 UI 会显示中文 fallback 或 key 本身`).toEqual([]);
   });
 
-  it("每个 key 都在 zh.json 里", () => {
+  it("every key is present in zh.json", () => {
     const missing = [...used.entries()]
       .filter(([k]) => !zh.has(k))
       .map(([k, f]) => `${k}  (${f})`)

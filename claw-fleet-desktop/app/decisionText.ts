@@ -15,7 +15,7 @@ import type { DecisionHistoryRecord } from "./types";
 /** The ways a decision card resolves without being answered. The last two are
  *  v3's terminal button — a verdict on the *task*, not a refusal to engage with
  *  the card, which is why they get their own chips rather than reading as
- *  「已取消」. */
+ *  "dismissed". */
 export type DecisionTerminalOutcome =
   | "declined"
   | "timeout"
@@ -29,7 +29,7 @@ export type DecisionTerminalOutcome =
  * answered / is still pending / has no history record.
  *
  * A declined, timed-out, cancelled or heartbeat-lost card is *done* — it must
- * not keep showing as 「未回答」 (unanswered). That stale-pending state used to
+ * not keep showing as "unanswered". That stale-pending state used to
  * appear whenever the `tool_result` never reached the transcript: when the turn
  * was SIGINT'd (e.g. a card parked on timeout, or two turns collided on one
  * session) the `AskUserQuestion` call was interrupted with no result to parse,
@@ -90,8 +90,8 @@ export function normalizeForSpeech(text: string): string {
   s = s.replace(/[`*_~]+/g, (m, offset: number, str: string) =>
     isAscii(str[offset - 1]) && isAscii(str[offset + m.length]) ? " " : "",
   );
-  // A 重 stranded between ASCII means "重新" — spell it out so the segmenter
-  // sees a word instead of a lone character.
+  // A 重 stranded between ASCII is read as zhòng (weight) when it means chóng
+  // (repeat) — spell it out fully so the segmenter sees a word, not a lone character.
   s = s.replace(/([A-Za-z0-9)\]])([ \t]*)重([ \t]*)([A-Za-z0-9([])/g, "$1$2重新$3$4");
 
   return s.replace(/[ \t]{2,}/g, " ").trim();
@@ -153,7 +153,7 @@ export function normalizeAnswer(
  *
  * dsh answers as `{"answers":[{"id":"<question id>","selected":["<label>"],
  * "custom":"<free text>"}]}`. `selected` holds the chosen option labels (empty
- * when 老板 typed instead), `custom` the free-text escape hatch; a card may
+ * when the user typed instead), `custom` the free-text escape hatch; a card may
  * carry both. The id is the question's own `id` field in the tool input, which
  * is why `readInputQuestions` keeps it.
  *
@@ -221,7 +221,7 @@ export function parseAnswersFromResultText(
   // dsh's `ask_user_question` answers as `{"answers":[{id, selected, custom}]}`
   // — an array keyed by the *question id*, not by question text like the two
   // shapes below. Without this branch a dsh decision card renders its options
-  // but never shows which one 老板 picked.
+  // but never shows which one the user picked.
   const fromDsh = parseDshAnswers(text, questions);
   if (Object.keys(fromDsh).length > 0) return fromDsh;
 

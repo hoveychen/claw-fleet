@@ -8,8 +8,8 @@
  * `stop_reason=end_turn` less than 300s ago. On a main session that genuinely
  * means "parked, your turn". A subagent has no user to answer it — its
  * `end_turn` is the final report going back to the parent, i.e. it is *done*.
- * Reported unchanged, a finished Explore agent sat in a panel titled 运行中的
- * Agent wearing 等待输入 for the whole 300s window before aging out to Idle.
+ * Reported unchanged, a finished Explore agent sat in a panel titled "Running Agent"
+ * wearing "Waiting for Input" for the whole 300s window before aging out to Idle.
  *
  * A subagent parked on a decision card is unaffected: an outstanding MCP call
  * leaves `stop_reason=tool_use`, which `determine_status` maps to Executing,

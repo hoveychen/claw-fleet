@@ -13,12 +13,14 @@ import type { SessionInfo } from "./types";
 import { openDb } from "./secretStore";
 
 const STORE = "kv";
-/** 单设备时代的键。只在首次读取时被认领一次(见 loadCachedSessions),之后删除。 */
+/** Key from the single-device era. Claimed once on first read (see loadCachedSessions),
+ *  then deleted. */
 const LEGACY_KEY = "sessions-snapshot-v1";
 
-/** 每台设备各自一份快照。多设备之前只有一个全局键,于是切换设备会先画出另一台
- *  的任务列表 —— 那不只是不好看:列表里的会话 id 只在单机内唯一,点进去就是一次
- *  张冠李戴的请求。 */
+/** Each device gets its own snapshot. Before multi-device, there was only one global key,
+ *  so switching devices would paint the other device's task list first — a problem that's
+ *  not just cosmetic: session IDs are only unique per machine, so clicking in would
+ *  send a wrong-session request. */
 function keyFor(deviceId: string | null): string {
   return deviceId ? `sessions-snapshot-v2:${deviceId}` : LEGACY_KEY;
 }
@@ -33,8 +35,9 @@ export async function loadCachedSessions(
 ): Promise<SessionInfo[] | null> {
   const own = await readCached(keyFor(deviceId));
   if (own || !deviceId) return own;
-  // 首次升级:全局键里那份属于当时唯一在册的那台设备。认领它(而不是丢掉)是为了
-  // 保住冷启动那一眼即时渲染;认领后删掉全局键,免得第二台设备也来认领同一份。
+  // First upgrade: the global key held the one registered device at that time. Claim it
+  // (rather than discard) to preserve instant cold-start rendering; after claiming,
+  // delete the global key so a second device doesn't also claim the same snapshot.
   const legacy = await readCached(LEGACY_KEY);
   if (!legacy) return null;
   saveCachedSessions(deviceId, legacy);
@@ -75,8 +78,9 @@ export function saveCachedSessions(deviceId: string | null, list: SessionInfo[])
     .catch(() => {});
 }
 
-/** Drop一台设备的快照。解除配对/移除设备时调用,免得下一次配对(可能是另一个
- *  账号)先短暂画出上一台的任务列表。`deviceId` 为 null 时清的是遗留全局键。 */
+/** Drop a device's snapshot. Called when unpairing/removing a device, so the next
+ *  pairing (possibly with a different account) doesn't briefly show the previous device's
+ *  task list. When `deviceId` is null, clears the legacy global key. */
 export function clearCachedSessions(deviceId: string | null): void {
   dropKey(keyFor(deviceId));
 }

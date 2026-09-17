@@ -1,4 +1,4 @@
-/* Row model for 计划树's progress matrix: one row per plan, one cell per
+/* Row model for the plan tree's progress matrix: one row per plan, one cell per
    P-task. Pure — no React, no DOM — so the ordering and the cell states are
    unit-testable away from the rendering.
 

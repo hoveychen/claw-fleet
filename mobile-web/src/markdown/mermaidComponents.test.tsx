@@ -5,9 +5,9 @@ import type { Components } from "react-markdown";
 import { mermaidMarkdownComponents } from "./mermaidComponents";
 import { MD_BLOCK, MD_INLINE } from "../views/SessionDetailTabs";
 
-// MermaidBlock 在 render 期读 html[data-theme] 挑主题。renderToStaticMarkup 不跑
-// effect，所以这一个读取就是它对 DOM 的全部需求 —— 用一行 stub 顶掉，不必为此
-// 给 mobile-web 引入 jsdom（桌面那侧才装了）。
+// MermaidBlock reads html[data-theme] during render to pick the theme. renderToStaticMarkup
+// doesn't run effects, so this single read is its entire DOM need — stub it with one line,
+// no need to add jsdom to mobile-web (only desktop has it).
 vi.stubGlobal("document", { documentElement: { getAttribute: () => "light" } });
 
 const MERMAID = "```mermaid\nflowchart TB\n  A --> B\n```";
@@ -19,39 +19,40 @@ function render(md: string, components: Components): string {
   );
 }
 
-/** 图渲染是异步的（mermaid 是懒加载的），所以服务端首帧只有空的容器 div；
- *  判据是「fence 没有被当成代码块吐出来」，而不是有没有 <svg>。 */
+/** Diagram rendering is async (mermaid is lazy-loaded), so the server's first frame has only
+ *  an empty container div. The test criterion is "fence not rendered as a code block", not
+ *  "whether <svg> exists". */
 function rendersDiagram(html: string): boolean {
   return !html.includes("language-mermaid") && !html.includes("flowchart TB");
 }
 
 describe("mermaidMarkdownComponents", () => {
-  it("mermaid fence 换成图容器，不再是代码块", () => {
+  it("mermaid fence becomes diagram container, no longer a code block", () => {
     expect(rendersDiagram(render(MERMAID, mermaidMarkdownComponents))).toBe(true);
   });
 
-  it("普通 fence 仍是带 <pre> 的代码块", () => {
+  it("Regular fences remain code blocks with <pre>", () => {
     const html = render(TS, mermaidMarkdownComponents);
     expect(html).toContain("<pre");
     expect(html).toContain("const a = 1;");
   });
 });
 
-// 决策/计划 tab 曾经漏接 mermaid（组件表只盖了 a），注释却写着「同 wiki/消息
-// 视图」。这两条把它钉住。
-describe("SessionDetailTabs 的决策正文组件表", () => {
-  it("MD_BLOCK 认 mermaid", () => {
+// Decision/plan tabs once failed to handle mermaid (component map only covered 'a'), yet comments
+// claimed "same as wiki/message view". These two tests lock that down.
+describe("SessionDetailTabs decision content component map", () => {
+  it("MD_BLOCK recognizes mermaid", () => {
     expect(rendersDiagram(render(MERMAID, MD_BLOCK))).toBe(true);
   });
 
-  it("MD_INLINE 也认（选项标签里也可能带图）", () => {
+  it("MD_INLINE also recognizes it (diagrams can appear in option labels)", () => {
     expect(rendersDiagram(render(MERMAID, MD_INLINE))).toBe(true);
   });
 
-  // 曾经这里断言链接必须是 inert 的 <span>：外链在手机上点不开的那条 bug 就
-  // 长在这个断言底下。现在外链一律交给系统浏览器（壳里由 launchIntent /
-  // onLoadIntercept 接管），认不出的 scheme 才继续不可点。
-  it("外链是真 <a>，未知 scheme 仍不可点", () => {
+  // We used to assert links must be inert <span>: the bug where external links wouldn't open on mobile
+  // lived under this assertion. Now external links go to the system browser (handled by launchIntent /
+  // onLoadIntercept in the shell); only unrecognized schemes remain non-clickable.
+  it("External links are real <a>, unknown schemes remain non-clickable", () => {
     expect(render("[x](https://example.com)", MD_BLOCK)).toContain("<a ");
     expect(render("[x](./a.md)", MD_BLOCK)).not.toContain("href=");
   });

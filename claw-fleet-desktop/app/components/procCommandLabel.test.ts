@@ -3,16 +3,18 @@ import { isDefaultShellCommand, procCommandText, procLabel } from "./procCommand
 import type { ProcRecord } from "../types";
 
 /**
- * 这几个断言存在的理由是一次真实的回归：core 的 default_shell_command 从
- * `exec "$SHELL" -i` 改成 `exec "/bin/zsh" -i` 之后，认命令的正则没跟着改，默认
- * shell 的标签就显示成了「exec」。当时两个页面各存了一份正则，只同步了一份。
+ * These assertions exist because of a real regression: when core's default_shell_command
+ * changed from `exec "$SHELL" -i` to `exec "/bin/zsh" -i`, the regex for recognizing
+ * commands didn't update, so the default shell label showed as "exec". At that time,
+ * two pages each had their own copy of the regex, and only one was synced.
  *
- * 所以这里钉死的是**两种形状都要认**——新形状是现在生成的，旧形状存在于那次改动
- * 之前起的、仍活着的 pty 记录里。
+ * So we lock in **both forms must be recognized** here — the new form is what's currently
+ * generated, and the old form exists in still-alive pty records from before that change.
  *
- * isDefaultShellCommand 现在住在 shared-ts/procShell.ts,移动端 import 的是同一个
- * 文件(经本模块 re-export 进来)。所以这一组绿就等于两端都绿 —— 共享层没有自己的
- * vitest 工程,把用例放在这里是为了不为一个纯函数再配一套测试运行器。
+ * isDefaultShellCommand now lives in shared-ts/procShell.ts, and the mobile end imports
+ * the same file (re-exported through this module). So this test group passing means both
+ * ends pass — the shared layer doesn't have its own vitest project, so we put test cases
+ * here to avoid spinning up another test runner for a pure function.
  */
 
 function rec(command: string): ProcRecord {
@@ -28,40 +30,40 @@ function rec(command: string): ProcRecord {
 }
 
 describe("isDefaultShellCommand", () => {
-  it("认得 core 现在生成的绝对路径形状", () => {
+  it("recognizes the absolute path form that core currently generates", () => {
     expect(isDefaultShellCommand('exec "/bin/zsh" -i')).toBe(true);
     expect(isDefaultShellCommand('exec "/usr/local/bin/fish" -i')).toBe(true);
     expect(isDefaultShellCommand('  exec "/bin/sh" -i  ')).toBe(true);
   });
 
-  it("认得改动之前留下的旧形状", () => {
+  it("recognizes the old form left from before the change", () => {
     expect(isDefaultShellCommand('exec "$SHELL" -i')).toBe(true);
     expect(isDefaultShellCommand("exec $SHELL -i")).toBe(true);
   });
 
-  it("认得 Windows 的裸 cmd", () => {
+  it("recognizes Windows bare cmd", () => {
     expect(isDefaultShellCommand("cmd")).toBe(true);
   });
 
-  it("不把普通命令误判成 shell", () => {
+  it("doesn't misclassify normal commands as shell", () => {
     expect(isDefaultShellCommand("pnpm build")).toBe(false);
     expect(isDefaultShellCommand("cargo test")).toBe(false);
-    // 形似但不是：exec 一个脚本、没有 -i
+    // Similar in appearance but not actually: exec a script, no -i
     expect(isDefaultShellCommand('exec "/bin/zsh" script.sh')).toBe(false);
     expect(isDefaultShellCommand("cmd /c dir")).toBe(false);
   });
 });
 
 describe("procLabel", () => {
-  it("默认 shell 用给定的短名", () => {
+  it("default shell uses given short name", () => {
     expect(procLabel(rec('exec "/bin/zsh" -i'), "shell")).toBe("shell");
   });
 
-  it("其余取第一个词", () => {
+  it("others take first word", () => {
     expect(procLabel(rec("pnpm build --watch"), "shell")).toBe("pnpm");
   });
 
-  it("过长的第一个词截断", () => {
+  it("truncates overly long first word", () => {
     const label = procLabel(rec("./scripts/run-a-very-long-thing.sh"), "shell");
     expect(label).toHaveLength(16);
     expect(label.endsWith("…")).toBe(true);
@@ -69,11 +71,11 @@ describe("procLabel", () => {
 });
 
 describe("procCommandText", () => {
-  it("默认 shell 换成短名", () => {
+  it("default shell becomes short name", () => {
     expect(procCommandText('exec "/bin/zsh" -i', "shell")).toBe("shell");
   });
 
-  it("普通命令保留全文——命令面板的价值就在于看得见跑的是哪条命令", () => {
+  it("normal commands keep full text — the command panel's value is seeing which command is actually running", () => {
     expect(procCommandText("pnpm build --watch", "shell")).toBe("pnpm build --watch");
   });
 });

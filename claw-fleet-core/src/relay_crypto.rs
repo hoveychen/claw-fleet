@@ -1,4 +1,4 @@
-//! End-to-end encryption for the mobile relay (方案A: symmetric AEAD keyed by
+//! End-to-end encryption for the mobile relay (Plan A: symmetric AEAD keyed by
 //! the pairing secret).
 //!
 //! The relay at `fleet-relay.muveeai.com` is a *blind* forwarder: it must never
