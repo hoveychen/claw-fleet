@@ -12,7 +12,7 @@ import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugin
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { useDocumentTheme } from "../hooks/useDocumentTheme";
 import { framePreviewSrcDoc } from "../decisionFrame";
-import { usePrecedingAgentMessages } from "../hooks/usePrecedingAgentMessages";
+import { useLastUserInput } from "../hooks/useLastUserInput";
 import type {
   DecisionHistoryRecord,
   ElicitationAttachment,
@@ -464,13 +464,12 @@ function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision
 // ── Elicitation card renderer (multi-step wizard) ─────────────────────────
 
 /**
- * The agent's plain-text narration since the user's last input, shown above a
- * question card. Collapsed by default to a single slim hint bar ("Agent said N
- * more things while working") so the question stays the focus; clicking the bar
- * expands an inner scrollable region with the full narration and the card grows
- * to fit. Renders nothing when there's no narration.
+ * What the *user* last said before this question — the prompt they typed, or
+ * the answer they gave to the previous decision card. Shown above the question
+ * so the round's starting point stays visible while answering. Renders nothing
+ * when the transcript holds no earlier user input.
  */
-function PrecedingAgentMessagesRegion({
+function LastUserInputRegion({
   sessionId,
   requestId,
 }: {
@@ -478,46 +477,25 @@ function PrecedingAgentMessagesRegion({
   requestId: string;
 }) {
   const { t } = useTranslation();
-  const { messages, loading } = usePrecedingAgentMessages(sessionId, requestId);
+  const { input, loading } = useLastUserInput(sessionId, requestId);
   const mdComponents = usePathMarkdown(sessionId);
-  const [expanded, setExpanded] = useState(false);
 
-  // Collapse again whenever a fresh question arrives for this card so the next
-  // decision opens focused on the question, not someone's old expanded state.
-  useEffect(() => {
-    setExpanded(false);
-  }, [requestId]);
-
-  if (loading || !messages.length) return null;
+  if (loading || !input) return null;
 
   return (
-    <div className={`${styles.preceding} ${expanded ? styles.preceding_open : ""}`}>
-      <button
-        type="button"
-        className={styles.preceding_toggle}
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-      >
-        <span className={styles.preceding_toggle_label}>
-          {expanded
-            ? t("decision.preceding_label", "Agent said while working")
-            : t("decision.preceding_hint", {
-                n: messages.length,
-                defaultValue: "Agent said {{n}} more while working",
-              })}
-        </span>
-      </button>
-      {expanded && (
-        <div className={styles.preceding_body}>
-          {messages.map((m, i) => (
-            <div key={m.uuid ?? i} className={styles.preceding_msg}>
-              <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
-                {normalizeSvgBlankLines(m.text)}
-              </ReactMarkdown>
-            </div>
-          ))}
+    <div className={styles.preceding}>
+      <div className={styles.preceding_label}>
+        {input.kind === "answer"
+          ? t("decision.last_answer_label", "Your last answer")
+          : t("decision.last_prompt_label", "Your last message")}
+      </div>
+      <div className={styles.preceding_body}>
+        <div className={styles.preceding_msg}>
+          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
+            {normalizeSvgBlankLines(input.text)}
+          </ReactMarkdown>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -670,7 +648,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   return (
     <div className={`${styles.card} ${styles.card_flex}`}>
       <div className={styles.card_scroll}>
-      <PrecedingAgentMessagesRegion sessionId={request.sessionId} requestId={request.id} />
+      <LastUserInputRegion sessionId={request.sessionId} requestId={request.id} />
       <div className={styles.card_header}>
         <svg
           className={styles.card_icon_question}
@@ -1537,7 +1515,7 @@ export function FleetAskCard({
   return (
     <div className={`${styles.card} ${styles.card_flex}`}>
       <div className={styles.card_scroll}>
-      <PrecedingAgentMessagesRegion sessionId={request.sessionId} requestId={request.id} />
+      <LastUserInputRegion sessionId={request.sessionId} requestId={request.id} />
       <div className={styles.card_header}>
         <svg
           className={styles.card_icon_question}

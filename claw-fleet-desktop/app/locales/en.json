@@ -2246,8 +2246,8 @@
   },
   "decision": {
     "pending": "Pending decisions",
-    "preceding_label": "Hide earlier context",
-    "preceding_hint": "Earlier context · {{n}}",
+    "last_answer_label": "Your last answer",
+    "last_prompt_label": "Your last message",
     "options_expand": "Show options ({{n}})",
     "options_expand_plain": "Show answer box",
     "options_collapse": "Hide options",

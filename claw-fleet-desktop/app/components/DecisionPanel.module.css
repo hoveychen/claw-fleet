@@ -1581,37 +1581,22 @@
   color: #8a5cf6;
 }
 
-/* ── Preceding agent narration (above a question card) ──────────────────────
- * The plain-text the agent emitted between the user's last input and this
- * question. Collapsed by default to a single slim hint bar so the question
- * stays the focus; clicking the bar expands .preceding_body (an inner scroll
- * region) and the card grows to fit. */
+/* ── The user's last input (above a question card) ─────────────────────────
+ * The prompt the user typed, or the answer they gave to the previous card —
+ * the starting point of this round, kept visible while they answer this one.
+ * Bounded height with its own scroll so a long prompt never pushes the
+ * question off-screen. */
 .preceding {
   margin: 0 0 10px;
-}
-.preceding_open {
   border-left: 2px solid rgba(var(--color-accent-rgb), 0.35);
   padding-left: 10px;
 }
-/* Subtle borderless text link — no chevron, no full-width hover box — so the
- * preamble reads as a quiet "view earlier context" affordance and stops
- * competing with the panel-toolbar collapse chevron. */
-.preceding_toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 0;
-  background: transparent;
-  border: none;
-  cursor: pointer;
+.preceding_label {
+  font-size: 11px;
+  font-weight: 500;
   color: var(--color-text-dim);
-  text-align: left;
-  transition: color 0.12s ease;
 }
-.preceding_toggle:hover {
-  color: var(--color-text);
-  text-decoration: underline;
-}
+/* Shared chevron, also used by the options collapse bar in the card footer. */
 .preceding_chevron {
   width: 13px;
   height: 13px;
@@ -1621,15 +1606,10 @@
 .preceding_chevron_open {
   transform: rotate(180deg);
 }
-.preceding_toggle_label {
-  font-size: 11px;
-  font-weight: 500;
-}
-/* Expanded narration body: bounded height with its own scroll so a long
- * history never pushes the question off-screen — the card grows up to this
- * cap, then the body scrolls. */
+/* Body: bounded height with its own scroll — the card grows up to this cap,
+ * then the body scrolls. */
 .preceding_body {
-  max-height: 38vh;
+  max-height: 22vh;
   overflow-y: auto;
   margin-top: 6px;
   padding-right: 4px;
