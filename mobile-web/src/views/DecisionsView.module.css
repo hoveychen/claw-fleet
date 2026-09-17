@@ -925,7 +925,7 @@
   opacity: 0.45;
 }
 
-/* ── v2.2: preceding narration + session link ── */
+/* ── v2.2: last user input + session link ── */
 
 .sessionLink {
   display: inline-flex;
@@ -946,25 +946,34 @@
   margin-bottom: 8px;
 }
 
-.precedingToggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  text-align: left;
-  border: 1px dashed var(--color-border);
-  background: var(--color-bg-secondary);
+.precedingQa {
+  margin-bottom: 8px;
+}
+
+.precedingQa:last-child {
+  margin-bottom: 0;
+}
+
+.precedingQ {
   color: var(--color-text-dim);
-  border-radius: 8px;
-  padding: 6px 10px;
   font-size: var(--t-aux, 12px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.precedingLabel {
+  color: var(--color-text-dim);
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
 }
 
 .precedingBody {
   border-left: 2px solid var(--color-border-strong);
   padding: 4px 0 4px 10px;
   margin-top: 6px;
-  max-height: 40vh;
+  max-height: 24vh;
   overflow-y: auto;
   color: var(--color-text-secondary);
 }

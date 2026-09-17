@@ -2243,8 +2243,8 @@
   },
   "decision": {
     "pending": "待处理决策",
-    "preceding_label": "收起前文",
-    "preceding_hint": "查看前文 · {{n}} 段",
+    "last_answer_label": "你上一轮的回答",
+    "last_prompt_label": "你上一轮说的",
     "options_expand": "展开选项（{{n}}）",
     "options_expand_plain": "展开回答区",
     "options_collapse": "收起选项",
