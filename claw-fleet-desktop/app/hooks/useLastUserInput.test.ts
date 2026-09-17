@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findLastUserInput, formatAnswer, stripPromptEnvelope } from "./useLastUserInput";
+import { answerLabel, findLastUserInput, formatAnswer, stripPromptEnvelope } from "./useLastUserInput";
 import type { RawMessage } from "../types";
 
 function userPrompt(text: string): RawMessage {
@@ -49,14 +49,21 @@ describe("findLastUserInput", () => {
     expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "修一下这个 bug" });
   });
 
-  it("returns the previous card's answer, not the question it answered", () => {
+  it("returns the previous card's answer with a clipped question label", () => {
     const msgs = [
       userPrompt("开始吧"),
       askCall("t1", "mcp__fleet__fleet__ask"),
-      askResult("t1", JSON.stringify({ answers: { "很长很长的问题正文…": "先做 A 方案" } })),
+      askResult(
+        "t1",
+        JSON.stringify({ answers: { "两条路线选一条。\n---\n很长很长的问题正文…": "先做 A 方案" } }),
+      ),
       assistantText("好的，我按 A 方案来。"),
     ];
-    expect(findLastUserInput(msgs)).toEqual({ kind: "answer", text: "先做 A 方案" });
+    expect(findLastUserInput(msgs)).toEqual({
+      kind: "answer",
+      text: "先做 A 方案",
+      answers: [{ label: "两条路线选一条。", value: "先做 A 方案" }],
+    });
   });
 
   it("ignores plain tool results — Bash output is not the user speaking", () => {
@@ -100,13 +107,26 @@ describe("findLastUserInput", () => {
 });
 
 describe("formatAnswer", () => {
-  it("joins multiple answer values", () => {
-    const raw = JSON.stringify({ answers: { q1: "选 A", note: "顺便清理一下" } });
-    expect(formatAnswer(raw)).toBe("选 A\n顺便清理一下");
+  it("pairs every answer value with its question label", () => {
+    const raw = JSON.stringify({ answers: { q1: "选 A", rollout_note: "顺便清理一下" } });
+    expect(formatAnswer(raw)).toEqual([
+      { label: "q1", value: "选 A" },
+      { label: "rollout_note", value: "顺便清理一下" },
+    ]);
   });
 
-  it("passes through non-JSON payloads like TASK FINISHED", () => {
-    expect(formatAnswer("TASK FINISHED")).toBe("TASK FINISHED");
+  it("passes through non-JSON payloads like TASK FINISHED, unlabelled", () => {
+    expect(formatAnswer("TASK FINISHED")).toEqual([{ label: "", value: "TASK FINISHED" }]);
+  });
+});
+
+describe("answerLabel", () => {
+  it("keeps only the TTS summary line before the --- separator", () => {
+    expect(answerLabel("改完了，等你放行。\n---\n老板，**详细**报告……")).toBe("改完了，等你放行。");
+  });
+
+  it("clips a long single-line question", () => {
+    expect(answerLabel("x".repeat(80))).toBe(`${"x".repeat(48)}…`);
   });
 });
 

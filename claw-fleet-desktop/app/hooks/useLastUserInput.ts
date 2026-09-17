@@ -9,6 +9,13 @@ import type {
   ToolUseBlock,
 } from "../types";
 
+/** One answered question from the previous card: the question's short label
+ *  (its first line, clipped) and the value the user picked or typed. */
+export interface AnswerEntry {
+  label: string;
+  value: string;
+}
+
 /**
  * The last thing the *user* said before this question — either a prompt they
  * typed, or the answer they gave to the previous decision card. Shown above a
@@ -17,7 +24,10 @@ import type {
 export interface LastUserInput {
   /** `prompt` = typed message, `answer` = answer to a previous ask-family card. */
   kind: "prompt" | "answer";
+  /** Flat text — the prompt itself, or the answer values joined. */
   text: string;
+  /** Per-question breakdown; only set when `kind === "answer"`. */
+  answers?: AnswerEntry[];
 }
 
 export interface LastUserInputResult {
@@ -31,6 +41,9 @@ export interface LastUserInputResult {
 const TRANSCRIPT_TAIL = 400;
 // Hard cap on the rendered text so a pasted wall of text can't blow up the card.
 const MAX_CHARS = 4000;
+// Question labels are clipped to one short line — an ask-family answer key is
+// the question's whole body, which is often an entire report.
+const MAX_LABEL_CHARS = 48;
 
 // Tool names whose *result* counts as the user having "spoken" — answering an
 // AskUserQuestion card or approving a plan is user input, not agent plumbing.
@@ -76,29 +89,49 @@ function toolResultText(block: ToolResultBlock): string {
 }
 
 /**
+ * Shorten an answer key into a one-line question label. `fleet__ask` keys are
+ * the full question body — a TTS summary line, a `---` separator, then the
+ * whole report — so the first line before the separator is the closest thing
+ * to a title. Form-field answers key on the field name, which is already short.
+ */
+export function answerLabel(key: string): string {
+  const head = key.split(/\n---\n/)[0].split("\n")[0];
+  const plain = head
+    .replace(/[*`#>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain.length > MAX_LABEL_CHARS
+    ? `${plain.slice(0, MAX_LABEL_CHARS)}…`
+    : plain;
+}
+
+/**
  * Render a card answer for display. `fleet__ask` / `AskUserQuestion` return
  * `{"answers": {<question or field name>: <value>}}`; the keys are the full
- * question bodies (often a whole report), so only the values are shown.
- * Anything else — `TASK FINISHED`, a plan approval, an unknown shape — falls
- * back to the raw text.
+ * question bodies (often a whole report), so each one is clipped to a short
+ * label and paired with its value. Anything else — `TASK FINISHED`, a plan
+ * approval, an unknown shape — falls back to one unlabelled entry.
  */
-export function formatAnswer(raw: string): string {
+export function formatAnswer(raw: string): AnswerEntry[] {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === "object") {
       const answers = (parsed as { answers?: unknown }).answers;
       if (answers && typeof answers === "object") {
-        const vals = Object.values(answers as Record<string, unknown>)
-          .map((v) => (typeof v === "string" ? v : JSON.stringify(v)))
-          .map((v) => v.trim())
-          .filter(Boolean);
-        if (vals.length) return vals.join("\n");
+        const out: AnswerEntry[] = [];
+        for (const [key, v] of Object.entries(answers as Record<string, unknown>)) {
+          const value = (typeof v === "string" ? v : JSON.stringify(v)).trim();
+          if (!value) continue;
+          const label = answerLabel(key);
+          out.push({ label: label === value ? "" : label, value });
+        }
+        if (out.length) return out;
       }
     }
   } catch {
     // Not JSON — fall through to the raw text.
   }
-  return raw;
+  return raw ? [{ label: "", value: raw }] : [];
 }
 
 /**
@@ -144,8 +177,17 @@ export function findLastUserInput(messages: RawMessage[]): LastUserInput | null 
       if (tr.is_error) continue;
       const name = toolNameById.get(tr.tool_use_id);
       if (!name || !isAskTool(name)) continue;
-      const text = formatAnswer(toolResultText(tr)).trim();
-      if (text) return { kind: "answer", text: clamp(text) };
+      const answers = formatAnswer(toolResultText(tr)).map((a) => ({
+        label: a.label,
+        value: clamp(a.value),
+      }));
+      if (answers.length) {
+        return {
+          kind: "answer",
+          text: answers.map((a) => a.value).join("\n"),
+          answers,
+        };
+      }
     }
   }
   return null;

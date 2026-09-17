@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findLastUserInput, formatAnswer, stripPromptEnvelope } from "./DecisionsView";
+import { answerLabel, findLastUserInput, formatAnswer, stripPromptEnvelope } from "./DecisionsView";
 import type { RawMessage } from "../types";
 
 function userPrompt(text: string): RawMessage {
@@ -43,14 +43,21 @@ describe("findLastUserInput (mobile-web)", () => {
     expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "go investigate" });
   });
 
-  it("returns the previous card's answer, not the question it answered", () => {
+  it("returns the previous card's answer with a clipped question label", () => {
     const msgs = [
       userPrompt("start"),
       askCall("t1", "mcp__fleet__fleet__ask"),
-      toolResult("t1", JSON.stringify({ answers: { "a very long question body…": "plan A" } })),
+      toolResult(
+        "t1",
+        JSON.stringify({ answers: { "Pick a route.\n---\na very long question body…": "plan A" } }),
+      ),
       assistantText("going with A"),
     ];
-    expect(findLastUserInput(msgs)).toEqual({ kind: "answer", text: "plan A" });
+    expect(findLastUserInput(msgs)).toEqual({
+      kind: "answer",
+      text: "plan A",
+      answers: [{ label: "Pick a route.", value: "plan A" }],
+    });
   });
 
   it("ignores plain tool results — Bash output is not the user speaking", () => {
@@ -83,14 +90,29 @@ describe("findLastUserInput (mobile-web)", () => {
 });
 
 describe("formatAnswer (mobile-web)", () => {
-  it("joins multiple answer values", () => {
-    expect(formatAnswer(JSON.stringify({ answers: { q1: "pick A", note: "also tidy up" } }))).toBe(
-      "pick A\nalso tidy up",
+  it("pairs every answer value with its question label", () => {
+    expect(formatAnswer(JSON.stringify({ answers: { q1: "pick A", note: "also tidy up" } }))).toEqual(
+      [
+        { label: "q1", value: "pick A" },
+        { label: "note", value: "also tidy up" },
+      ],
     );
   });
 
-  it("passes through non-JSON payloads like TASK FINISHED", () => {
-    expect(formatAnswer("TASK FINISHED")).toBe("TASK FINISHED");
+  it("passes through non-JSON payloads like TASK FINISHED, unlabelled", () => {
+    expect(formatAnswer("TASK FINISHED")).toEqual([{ label: "", value: "TASK FINISHED" }]);
+  });
+});
+
+describe("answerLabel (mobile-web)", () => {
+  it("keeps only the summary line before the --- separator", () => {
+    expect(answerLabel("Done, waiting on you.\n---\nBoss, the **details**…")).toBe(
+      "Done, waiting on you.",
+    );
+  });
+
+  it("clips a long single-line question", () => {
+    expect(answerLabel("x".repeat(80))).toBe(`${"x".repeat(48)}…`);
   });
 });
 

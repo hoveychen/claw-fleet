@@ -490,11 +490,24 @@ function LastUserInputRegion({
           : t("decision.last_prompt_label", "Your last message")}
       </div>
       <div className={styles.preceding_body}>
-        <div className={styles.preceding_msg}>
-          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
-            {normalizeSvgBlankLines(input.text)}
-          </ReactMarkdown>
-        </div>
+        {input.answers?.length ? (
+          input.answers.map((a, i) => (
+            <div key={i} className={styles.preceding_qa}>
+              {a.label && <div className={styles.preceding_q} title={a.label}>{a.label}</div>}
+              <div className={styles.preceding_msg}>
+                <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
+                  {normalizeSvgBlankLines(a.value)}
+                </ReactMarkdown>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className={styles.preceding_msg}>
+            <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
+              {normalizeSvgBlankLines(input.text)}
+            </ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   );

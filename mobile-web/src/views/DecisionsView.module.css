@@ -946,6 +946,23 @@
   margin-bottom: 8px;
 }
 
+.precedingQa {
+  margin-bottom: 8px;
+}
+
+.precedingQa:last-child {
+  margin-bottom: 0;
+}
+
+.precedingQ {
+  color: var(--color-text-dim);
+  font-size: var(--t-aux, 12px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
 .precedingLabel {
   color: var(--color-text-dim);
   font-size: var(--t-aux, 12px);

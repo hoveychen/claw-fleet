@@ -1614,6 +1614,21 @@
   margin-top: 6px;
   padding-right: 4px;
 }
+/* One answered question: its clipped title above the value the user picked. */
+.preceding_qa {
+  margin-bottom: 8px;
+}
+.preceding_qa:last-child {
+  margin-bottom: 0;
+}
+.preceding_q {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
 .preceding_body::-webkit-scrollbar {
   width: 8px;
 }

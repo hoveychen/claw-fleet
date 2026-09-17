@@ -860,6 +860,9 @@ function A2uiCard({
 
 const TRANSCRIPT_TAIL = 200;
 const MAX_CHARS = 4000;
+// Question labels are clipped to one short line — an ask-family answer key is
+// the question's whole body, which is often an entire report.
+const MAX_LABEL_CHARS = 48;
 
 function isAskToolName(name: string): boolean {
   return (
@@ -885,35 +888,56 @@ export function stripPromptEnvelope(text: string): string {
     .trim();
 }
 
+/** Shorten an answer key into a one-line question label. `fleet__ask` keys are
+ *  the question's whole body — a TTS summary line, a `---` separator, then the
+ *  report — so the first line is the closest thing to a title. */
+export function answerLabel(key: string): string {
+  const head = key.split(/\n---\n/)[0].split("\n")[0];
+  const plain = head.replace(/[*`#>]/g, "").replace(/\s+/g, " ").trim();
+  return plain.length > MAX_LABEL_CHARS ? `${plain.slice(0, MAX_LABEL_CHARS)}…` : plain;
+}
+
 /** `fleet__ask` / `AskUserQuestion` answer payloads are
- *  `{"answers": {<question body>: <value>}}` — the keys are whole reports, so
- *  only the values are shown. Anything else falls back to the raw text. */
-export function formatAnswer(raw: string): string {
+ *  `{"answers": {<question body>: <value>}}` — each key is clipped to a short
+ *  label and paired with its value. Anything else falls back to one unlabelled
+ *  entry holding the raw text. */
+export function formatAnswer(raw: string): AnswerEntry[] {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === "object") {
       const answers = (parsed as { answers?: unknown }).answers;
       if (answers && typeof answers === "object") {
-        const vals = Object.values(answers as Record<string, unknown>)
-          .map((v) => (typeof v === "string" ? v : JSON.stringify(v)))
-          .map((v) => v.trim())
-          .filter(Boolean);
-        if (vals.length) return vals.join("\n");
+        const out: AnswerEntry[] = [];
+        for (const [key, v] of Object.entries(answers as Record<string, unknown>)) {
+          const value = (typeof v === "string" ? v : JSON.stringify(v)).trim();
+          if (!value) continue;
+          const label = answerLabel(key);
+          out.push({ label: label === value ? "" : label, value });
+        }
+        if (out.length) return out;
       }
     }
   } catch {
     // Not JSON — fall through to the raw text.
   }
-  return raw;
+  return raw ? [{ label: "", value: raw }] : [];
 }
 
 function clampText(text: string): string {
   return text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}…` : text;
 }
 
+export interface AnswerEntry {
+  label: string;
+  value: string;
+}
+
 export interface LastUserInput {
   kind: "prompt" | "answer";
+  /** Flat text — the prompt itself, or the answer values joined. */
   text: string;
+  /** Per-question breakdown; only set when `kind === "answer"`. */
+  answers?: AnswerEntry[];
 }
 
 /** Walk backwards to the user's last real input: a typed prompt, or their
@@ -958,8 +982,13 @@ export function findLastUserInput(messages: RawMessage[]): LastUserInput | null 
               .map((c) => c.text as string)
               .join("\n")
               .trim();
-      const text = formatAnswer(raw).trim();
-      if (text) return { kind: "answer", text: clampText(text) };
+      const answers = formatAnswer(raw).map((a) => ({
+        label: a.label,
+        value: clampText(a.value),
+      }));
+      if (answers.length) {
+        return { kind: "answer", text: answers.map((a) => a.value).join("\n"), answers };
+      }
     }
   }
   return null;
@@ -994,15 +1023,20 @@ function LastUserInputBlock({
         {input.kind === "answer" ? t("你上一轮的回答") : t("你上一轮说的")}
       </div>
       <div className={styles.precedingBody}>
-        <div className={styles.markdown}>
-          <ReactMarkdown
-            remarkPlugins={mdRemarkPlugins}
-            rehypePlugins={mdRehypePlugins}
-            components={mdComponents}
-          >
-            {input.text}
-          </ReactMarkdown>
-        </div>
+        {(input.answers ?? [{ label: "", value: input.text }]).map((a, i) => (
+          <div key={i} className={styles.precedingQa}>
+            {a.label ? <div className={styles.precedingQ}>{a.label}</div> : null}
+            <div className={styles.markdown}>
+              <ReactMarkdown
+                remarkPlugins={mdRemarkPlugins}
+                rehypePlugins={mdRehypePlugins}
+                components={mdComponents}
+              >
+                {a.value}
+              </ReactMarkdown>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
