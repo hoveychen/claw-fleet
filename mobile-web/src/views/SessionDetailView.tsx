@@ -821,13 +821,13 @@ function WorkRunBand({
   jsonlPath?: string;
 }) {
   const last = msgs[msgs.length - 1];
-  // Streaming = the run's final record hasn't recorded a stop_reason yet. An
-  // old relay that still strips the field (undefined) falls back to the
-  // session-status approximation the band used before.
-  const lastStop = last?.message && "stop_reason" in last.message
-    ? last.message.stop_reason
-    : undefined;
-  const streaming = lastStop === undefined ? live : live && lastStop === null;
+  const finished = workRunFinished(msgs, live, (id) => resultIds?.has(id) ?? true);
+  // In progress = the run can still grow, i.e. the same fact the Done check
+  // reads, inverted. It used to additionally require the last record to be an
+  // unterminated partial (`stop_reason === null`), which flapped the shimmer
+  // off between records and for the entire time a tool was running — the same
+  // stop_reason misreading that put a premature 完成 on the rail.
+  const streaming = !finished && live;
   // The trailing band starts open and stays open: folded, a growing tail shows
   // only a rising step count and a newer timestamp with nothing to read. It is
   // a latch, not a mirror — `streaming` flips off mid-run whenever a tool
@@ -875,7 +875,7 @@ function WorkRunBand({
               jsonlPath={jsonlPath}
             />
           ))}
-          {workRunFinished(msgs, live, (id) => resultIds?.has(id) ?? true) && (
+          {finished && (
             <div className={`${styles.railStep} ${styles.doneStep}`}>
               <span className={`${styles.railIcon} ${styles.doneIcon}`} aria-hidden>
                 <CircleCheck />
