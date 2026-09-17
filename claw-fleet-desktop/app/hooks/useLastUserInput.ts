@@ -190,6 +190,13 @@ export function findLastUserInput(messages: RawMessage[]): LastUserInput | null 
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.type !== "user" || !msg.message) continue;
+    // Harness-injected `role=user` records are not the user speaking. The one
+    // that actually reached the card was the companion row Claude Code writes
+    // next to an image tool_result ("[Image: original 2560x1640, displayed
+    // at …]"), which is `isMeta` + `turnCompanion` — so any screenshot the
+    // agent Read shadowed the prompt the user had typed. Skill bodies, hook
+    // output and system reminders carry the same flag and are equally not input.
+    if (msg.isMeta) continue;
     const content = msg.message.content;
 
     if (typeof content === "string") {

@@ -85,6 +85,20 @@ describe("findLastUserInput", () => {
     expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "继续" });
   });
 
+  it("skips the isMeta companion row Claude Code writes next to an image read", () => {
+    const imageCompanion = {
+      type: "user",
+      isMeta: true,
+      message: {
+        role: "user",
+        content:
+          "[Image: original 2560x1640, displayed at 2000x1281. Multiply coordinates by 1.28 to map to original image.]",
+      },
+    } as RawMessage;
+    const msgs = [userPrompt("看下这张截图"), assistantText("读一下"), imageCompanion];
+    expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "看下这张截图" });
+  });
+
   it("returns null when the session has no earlier user input", () => {
     expect(findLastUserInput([assistantText("开场白")])).toBeNull();
   });

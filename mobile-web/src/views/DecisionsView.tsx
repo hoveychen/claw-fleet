@@ -953,6 +953,12 @@ export function findLastUserInput(messages: RawMessage[]): LastUserInput | null 
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.type !== "user" || !msg.message) continue;
+    // Harness-injected `role=user` records are not the user speaking — see the
+    // desktop twin in claw-fleet-desktop/app/hooks/useLastUserInput.ts. The
+    // common one is the companion row next to an image tool_result
+    // ("[Image: original 2560x1640, displayed at …]"), which would otherwise
+    // shadow the prompt the user actually typed.
+    if (msg.isMeta) continue;
     const content = msg.message.content;
     if (typeof content === "string") {
       const text = stripPromptEnvelope(content);
