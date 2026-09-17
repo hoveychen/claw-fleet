@@ -146,7 +146,7 @@ export function MobileView() {
       setBusy(true);
       setError(null);
       try {
-        // secret 留空：后端保留现有值或首次启用时生成（不回传明文也能工作）
+        // Leave secret empty: backend preserves existing value or generates on first enable (works without returning plaintext)
         const stored = await invoke<MobileRelayConfig>("set_mobile_relay_config", {
           cfg: { ...config, ...next },
         });

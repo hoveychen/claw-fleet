@@ -7,9 +7,9 @@ describe("localDateKey", () => {
     const justBeforeMidnight = new Date(2026, 8, 14, 23, 30, 0);
     expect(localDateKey(justAfterMidnight)).toBe("2026-09-14");
     expect(localDateKey(justBeforeMidnight)).toBe("2026-09-14");
-    // 只有当本机不在 UTC 上时，UTC 口径才会在这两个瞬间之一上错开——
-    // 断言写成「至少有一侧和 toISOString 不同」会在 CI 的 UTC 机器上假红，
-    // 所以这里只钉住本地口径本身。
+    // UTC basis only diverges at one of these two moments if this machine is not in UTC —
+    // writing the assertion as "at least one side differs from toISOString" would false-red
+    // on CI's UTC machine, so we only pin down the local basis itself here.
   });
 
   it("月份和日补零", () => {

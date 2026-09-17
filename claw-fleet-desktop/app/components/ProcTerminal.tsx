@@ -27,8 +27,8 @@ export function ProcTerminal({
   onRecord?: (record: ProcRecord) => void;
   /** Called when another view has already deleted this proc's registry entry. */
   onMissing?: (id: string) => void;
-  /** Fixed pixel height (the 命令 panel's inline rows) or a CSS length — the
-   *  终端 page passes `"100%"` to fill its pane. The ResizeObserver below
+  /** Fixed pixel height (the command panel's inline rows) or a CSS length — the
+   *  terminal page passes `"100%"` to fill its pane. The ResizeObserver below
    *  re-fits either way, so a stretched terminal reflows with the window. */
   height?: number | string;
 }) {

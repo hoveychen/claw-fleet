@@ -10,8 +10,8 @@
 //! on disk and fires from a detached timer, so nothing depends on the registering
 //! session's process still being alive.
 //!
-//! Why a separate module rather than a flag on `agent_loop`: the semantics差得
-//! 远。A schedule fires exactly once and then retires; it is addressed by an
+//! Why a separate module rather than a flag on `agent_loop`: the semantics are
+//! vastly different. A schedule fires exactly once and then retires; it is addressed by an
 //! absolute time the user names (`--at "2026-07-25 09:00"` or `--in 5d`); and it
 //! deliberately drops the 7-day expiry that bounds a loop, because "remind me in
 //! three weeks" is the whole point. Overloading the loop record with an

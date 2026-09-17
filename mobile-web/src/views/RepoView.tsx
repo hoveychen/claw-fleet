@@ -1,6 +1,7 @@
-// 仓库列表：桌面端所有会话 workspace 里的 git 仓库，每个给一个「漏活」健康标
-// —— 未推提交(忘记 push)、未合并/有脏改动的 worktree(忘记 merge)。有漏活的
-// 仓库排在最前、标黄点。点开进 RepoDetailView 看逐个 worktree 明细并 push/pull。
+// Repository list: git repos from all session workspaces on desktop, each gets a
+// "loose ends" health marker — unpushed commits (forgot to push), unmerged/dirty
+// worktrees (forgot to merge). Repos with loose ends come first, yellow-marked. Click
+// to RepoDetailView for per-worktree details and push/pull.
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronRight, FolderGit2, RefreshCw } from "lucide-react";

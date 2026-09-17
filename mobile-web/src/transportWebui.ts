@@ -1,13 +1,15 @@
-// 同源形态的传输层工厂。与 transportRelay.ts 同签名,好让 main.tsx 那处选择只是
-// 换一个 import 说明符,而不是两套装配代码。
+// Transport factory for same-origin mode. Same signature as transportRelay.ts
+// so main.tsx's choice is just swapping one import, not two separate setups.
 //
-// 这一形态下设备簿里永远只有一台「同源」设备(App 的 SAME_ORIGIN_DEVICE:
-// kind 为 http、baseUrl 为空 = 就问发出这张页面的那个 origin)。这里仍然按设备
-// 记录取 baseUrl/token,而不是无条件走同源 —— 那样同一份代码也能服务「同源页面
-// 指向另一台 HTTP 主机」的情形,不必为它再分一次叉。
+// In this mode, the device book always has exactly one "same-origin" device
+// (App's SAME_ORIGIN_DEVICE: kind="http", baseUrl="" = the origin that served
+// this page). We still read baseUrl/token from the device record instead of
+// forcing same-origin unconditionally—that way the same code can serve scenarios
+// where a same-origin page points to another HTTP host, without branching again.
 //
-// **本文件不得 import relay 侧模块**,这是同源产物不含 relay 客户端的最后一道
-// 关口(见 hostMode.test.ts 与 main.tsx 的注释)。
+// **This file must never import relay-side modules.** This is the last gate
+// ensuring same-origin builds don't include the relay client (see comments in
+// hostMode.test.ts and main.tsx).
 
 import { HttpTransport } from "./httpTransport";
 import type { PairedDevice } from "./devices";

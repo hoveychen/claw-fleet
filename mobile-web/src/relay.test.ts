@@ -1,16 +1,17 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RelayClient, RelayRequestError, type RttSample, isDesktopRejection } from "./relay";
-// URL 归属计算搬去了 relayBase.ts（一个不含 relay 客户端的叶子模块）。
+// URL membership calculation moved to relayBase.ts (a leaf module without relay client).
 import { relayDisplayHost, resolveRelayBase } from "./relayBase";
 import { deriveKeys, isSealed, open, type RelayKeys, seal, sealBytes } from "./relayCrypto";
 
-// relay.ts 依赖浏览器全局（window.setTimeout/WebSocket/location），node 环境没有，
-// 用最小 shim 注入，并用假 WebSocket 捕获发出的帧、手动投递收到的帧。
+// relay.ts depends on browser globals (window.setTimeout/WebSocket/location) which don't exist in node;
+// we inject minimal shims and use a fake WebSocket to capture outgoing frames and manually deliver received frames.
 //
-// 端到端加密后每个 `msg.payload` 都是密文信封 {enc:"box"}（auth/authed/error 等
-// relay 控制帧仍是明文）。所以：捕获的出站帧要先用同一对配对密钥解密才能断言；
-// 注入的入站业务帧要先加密再投递。密钥两端一致（同 secret 派生同 key），这正是
-// relay 广播串号场景成立的前提。测试跑在 node，全局有 crypto.subtle。
+// After end-to-end encryption, each `msg.payload` is a ciphertext envelope {enc:"box"} (auth/authed/error
+// and other relay control frames remain plaintext). So: captured outbound frames must be decrypted with the
+// shared keypair to verify; injected inbound business frames must be encrypted before delivery. Keys match
+// on both ends (same secret derives same key), which is how relay broadcast cross-wiring works in the first
+// place. Tests run in node where crypto.subtle is available globally.
 
 const SECRET = "shared-secret-1234567890";
 let KEYS: RelayKeys;
@@ -34,30 +35,30 @@ class FakeWs {
     this.sent.push(data);
   }
   close() {}
-  /** 模拟 relay 投递一个文本帧给这个连接。 */
+  /** Simulate relay delivering a text frame to this connection. */
   deliver(frame: unknown) {
     this.onmessage?.({ data: JSON.stringify(frame) });
   }
 }
 
-/** 睡一个固定时长。
+/** Sleep for a fixed duration.
  *
- *  **只在两种场合用它，别拿它等一件事发生**（那是 `waitFor` 的活）：
- *  1. 负向断言——要给「错误的行为」真实的机会发生，之后才能断言它没发生
- *     （`expect(settled).toBe(false)` 之类）。这里轮询会立刻返回、什么都没
- *     验证到，是把测试改弱。
- *  2. 时间夹具——刻意推进墙钟，让某个时长本身可断言（如 `tick(40)` 之后
- *     断言 `totalMs >= 40`）。 */
+ *  **Only use this in two cases — never use it to wait for something to happen** (that's `waitFor`'s job):
+ *  1. Negative assertion — give "incorrect behavior" a real chance to occur before asserting it didn't
+ *     (like `expect(settled).toBe(false)`). Polling would return immediately without verifying anything,
+ *     making the test weaker.
+ *  2. Time fixture — intentionally advance the clock so a specific duration itself is verifiable
+ *     (e.g. assert `totalMs >= 40` after `tick(40)`). */
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 
-/** 等到 `ok()` 成立再返回（最多约 2s），而不是睡一个固定时长。
+/** Wait until `ok()` returns true (up to ~2s), rather than sleeping for a fixed duration.
  *
- *  固定时长的 `await tick()` 只够那些「解封一次就回调」的帧。gzip 帧要先
- *  WebCrypto 解封、再过一道 `DecompressionStream` inflate 才回调，是本文件里
- *  单个 tick 内异步活最重的一条路径——机器一凉 20ms 就过不去，断言会在回调
- *  还没跑时看到初始值。这在冷 vite 缓存下实测偶发（热跑 0/29、冷跑 1/6），
- *  CI 每次都是冷缓存，所以那边概率更高。抬高睡眠时长只是把窗口往后挪，轮询
- *  才是消掉它——`nextWs` 用的就是同一个套路。 */
+ *  Fixed-duration `await tick()` only works for frames that "unseal once and callback". gzip frames must
+ *  first unseal via WebCrypto, then pass through `DecompressionStream` inflate before calling back — this is
+ *  the heaviest async work in a single tick in this file. If the machine slows by 20ms, we fail; assertions
+ *  see the initial value before the callback runs. This rarely happens in warm vite cache (0/29) but can
+ *  happen in cold cache (1/6). CI always cold-starts, so the odds are higher there. Raising the sleep just
+ *  shifts the window; polling eliminates it — `nextWs` uses the same pattern. */
 async function waitFor(ok: () => boolean | Promise<boolean>, what: string): Promise<void> {
   for (let i = 0; i < 200; i++) {
     if (await ok()) return;
@@ -66,8 +67,8 @@ async function waitFor(ok: () => boolean | Promise<boolean>, what: string): Prom
   throw new Error(`${what} 未在预期时间内发生`);
 }
 
-/** 连接是异步建立的（open() 先 await 派生密钥再 new WebSocket），所以等到新的
- *  FakeWs 出现为止再返回它。 */
+/** Connection is established asynchronously (open() awaits key derivation before new WebSocket),
+ *  so wait until a new FakeWs appears and return it. */
 async function nextWs(baseline: number): Promise<FakeWs> {
   for (let i = 0; i < 200; i++) {
     if (FakeWs.instances.length > baseline) return FakeWs.instances[FakeWs.instances.length - 1];
@@ -76,12 +77,12 @@ async function nextWs(baseline: number): Promise<FakeWs> {
   throw new Error("ws 未在预期时间内创建");
 }
 
-/** 把一个业务 payload 封成桌面会发出的密文 `msg` 帧（z=false，明文直封）。 */
+/** Seal a business payload into a ciphertext `msg` frame the desktop would emit (z=false, plaintext sealed directly). */
 async function sealedMsg(payload: unknown): Promise<{ type: string; payload: unknown }> {
   return { type: "msg", payload: await seal(KEYS.encKey, JSON.stringify(payload)) };
 }
 
-/** 解出某连接发出的所有密文 `msg` 业务 payload。 */
+/** Unseal all ciphertext `msg` business payloads sent from a connection. */
 async function openSent(ws: FakeWs): Promise<Array<Record<string, unknown>>> {
   const out: Array<Record<string, unknown>> = [];
   for (const raw of ws.sent) {
@@ -93,10 +94,10 @@ async function openSent(ws: FakeWs): Promise<Array<Record<string, unknown>>> {
   return out;
 }
 
-/** 取某连接发出的 `req` 帧的 req_id（先解密）。
+/** Get the req_id of a `req` frame sent from a connection (unseal first).
  *
- *  出站是异步加密的，所以这里等到帧真正落到 `ws.sent` 上为止，而不是让调用方
- *  在前面睡一个固定时长再赌它到了——睡不够就抛「该连接没有发出 req 帧」。 */
+ *  Outbound encryption is asynchronous, so we wait until the frame actually lands in `ws.sent` rather than
+ *  having the caller sleep a fixed duration and hope — if sleep is insufficient, throw "no req frame sent from this connection". */
 async function sentReqId(ws: FakeWs): Promise<string> {
   let found: string | undefined;
   await waitFor(async () => {
@@ -119,7 +120,7 @@ const windowShim = () => ({
   clearInterval: (id: number) => clearInterval(id),
 });
 
-/** 建一个已 authed 的 client，返回它和它的假 ws。 */
+/** Create an authed client and return it with its fake ws. */
 async function connected(clients: RelayClient[]): Promise<{ client: RelayClient; ws: FakeWs }> {
   const base = FakeWs.instances.length;
   const client = new RelayClient(SECRET, {});
@@ -148,7 +149,7 @@ describe("RelayClient 连接用 channelToken 认证", () => {
     expect(authFrame).toBeTruthy();
     expect(authFrame.secret).toBe(KEYS.channelToken);
     expect(authFrame.secret).not.toBe(SECRET);
-    // channelToken 是 64 hex（HKDF 256 bit），relay 眼里只是个不透明 token。
+    // channelToken is 64 hex (HKDF 256 bit); relay sees it as an opaque token.
     expect(authFrame.secret).toMatch(/^[0-9a-f]{64}$/);
   });
 });
@@ -163,15 +164,15 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
   });
 
   afterEach(() => {
-    // 清掉 15s 超时/心跳定时器，避免泄漏到别的测试。
+    // Clean up 15s timeout/heartbeat timers to avoid leaking into other tests.
     for (const c of clients.splice(0)) c.close();
   });
 
-  // 核心 bug：两台手机同 secret 落到同一 relay channel。relay 把 agent 的 reply 帧
-  // 广播给该 channel 的每一个 client（registry.rs forward），帧里没有客户端定向。
-  // 若两台手机的 req_id 空间共享（都从 r1 起），A 的 reply 会被 B 拿自己的同号
-  // pending 匹配掉，B 解析出 A 的数据。同 secret 派生同 encKey，所以广播来的密文
-  // B 也能解开——定向只靠 reqPrefix（每实例一个 UUID）区分。
+  // Core bug: two phones with the same secret land on the same relay channel. Relay broadcasts the agent's
+  // reply frame to every client in that channel (registry.rs forward), but the frame carries no client routing.
+  // If both phones share req_id space (both start from 1), A's reply gets matched by B's pending with the
+  // same number, and B parses A's data. Same secret derives same encKey, so B can also unseal the broadcast
+  // ciphertext — routing only differentiates by reqPrefix (a UUID per instance).
   it("A 的 reply 被广播到 B 时，B 不会用它 resolve 自己的同号请求", async () => {
     const a = await connected(clients);
     const b = await connected(clients);
@@ -184,7 +185,7 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
 
     const reqIdA = await sentReqId(a.ws);
 
-    // agent 对 A 请求的回复（携带 A 的 req_id），被 relay 广播到 A 和 B 两个连接。
+    // Agent's reply to A's request (carrying A's req_id) is broadcast by relay to both A and B connections.
     const replyForA = await sealedMsg({
       event: "reply",
       req_id: reqIdA,
@@ -196,8 +197,8 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
 
     await expect(pa).resolves.toEqual({ who: "A-tail" });
 
-    // 负向断言：让 microtask/timer 有机会跑，再断言 B 没被 A 的回复串号。
-    // 这里必须是固定睡眠——轮询「bSettled 仍是 PENDING」会立刻返回，等于没验。
+    // Negative assertion: give microtasks/timers a chance to run, then assert B wasn't cross-wired by A's reply.
+    // Must use fixed sleep here — polling "bSettled is still PENDING" returns immediately without verifying.
     await tick();
     expect(bSettled).toBe("PENDING");
   });
@@ -226,16 +227,17 @@ describe("RelayClient 早 ack(方案 A)", () => {
     p.then((v) => (settled = v)).catch(() => (settled = "REJECTED"));
     const reqId = await sentReqId(ws);
 
-    // 早 ack 到达：onAck 触发，但 promise 不 resolve（仍等最终 reply）。
+    // Early ack arrives: onAck triggers, but promise doesn't resolve (still waiting for final reply).
     ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
-    // 先等 ack 真被处理（正向），再多睡一会儿给「promise 被错误 resolve」留出
-    // 机会——否则机器一凉，两件事都还没发生，下面那句就白白通过了。
+    // First wait for ack to actually be processed (positive), then sleep more to give "promise resolves
+    // incorrectly" a chance — if we don't, and the machine is slow, neither event has happened yet and
+    // the assertion below passes falsely.
     await waitFor(() => acked, "onAck 触发");
     await tick();
     expect(acked).toBe(true);
     expect(settled).toBe("PENDING");
 
-    // 最终 reply 到达才 resolve。
+    // Promise resolves only when the final reply arrives.
     ws.deliver(await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: { ok: true } }));
     await expect(p).resolves.toEqual({ ok: true });
   });
@@ -250,8 +252,9 @@ describe("RelayClient 早 ack(方案 A)", () => {
     const reqId = await sentReqId(ws);
     ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
     ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
-    // 先等第一个 ack 落地（正向），再睡一会儿给第二个 ack 机会去错误地二次触发。
-    // 只睡固定时长的话，凉机器上可能一个都没跑，`count === 1` 就成了假绿。
+    // First wait for the first ack to land (positive), then sleep to give the second ack a chance to
+    // incorrectly trigger twice. If we only sleep a fixed duration, on a slow machine neither may have run,
+    // and `count === 1` becomes a false green.
     await waitFor(() => count >= 1, "首个 ack 触发 onAck");
     await tick();
     expect(count).toBe(1);
@@ -276,7 +279,7 @@ describe("RelayClient RTT 分段", () => {
     for (const c of clients.splice(0)) c.close();
   });
 
-  /** 发一个请求并返回它的 req_id 与收到的样本槽。 */
+  /** Make a request and return its req_id and the sample slot received. */
   async function requestWithSamples(): Promise<{
     ws: FakeWs;
     reqId: string;
@@ -297,8 +300,8 @@ describe("RelayClient RTT 分段", () => {
 
   it("ack 与 handle_ms 都在时，三段可分辨", async () => {
     const { ws, reqId, samples } = await requestWithSamples();
-    // relay 先回 msg_ack（此时桌面还没参与），隔一会儿桌面的 reply 才到。
-    // 时间夹具：这 40ms 本身就是下面 `totalMs >= 40` 要断言的量，不能换成轮询。
+    // Relay replies with msg_ack first (desktop not involved yet), then desktop's reply arrives later.
+    // Time fixture: this 40ms is the quantity itself that the `totalMs >= 40` assertion below verifies; can't be replaced with polling.
     ws.deliver({ type: "msg_ack", ack_id: reqId, status: "delivered" });
     await tick(40);
     ws.deliver(
@@ -310,7 +313,7 @@ describe("RelayClient RTT 分段", () => {
     const s = samples[0];
     expect(s.desktopHandleMs).toBe(380);
     expect(s.phoneRelayMs).not.toBeNull();
-    // ack 在 reply 之前到，所以手机段必然短于总数——若把两者搞反，残差会变负。
+    // ack arrives before reply, so phone leg must be less than total — if we reversed them, residual would go negative.
     expect(s.phoneRelayMs!).toBeLessThan(s.totalMs);
     expect(s.totalMs).toBeGreaterThanOrEqual(40);
   });
@@ -348,13 +351,13 @@ describe("RelayClient RTT 分段", () => {
   });
 });
 
-// 一个请求可能因为两种完全不同的原因失败，调用方的正确反应也完全相反：
-//   - 桌面端明确回了 ok:false（"Workspace directory not found: ..."）——桌面收到了、
-//     判断了、拒绝了。重试/等待都没有意义，该立刻把错误摊给用户。
-//   - reply 帧丢了（切网/息屏/重连，relay 是 best-effort 不排队）——桌面很可能已经
-//     照做了，只是回执没回来。这时才该进宽限期盯快照。
-// 以前两者都是裸 Error，Composer 无法区分，于是把桌面的明确拒绝也拖进 20 秒宽限期，
-// 表现成"点了没反应，二十秒后才报错"。
+// A request can fail for two completely different reasons, and the correct caller response is opposite:
+//   - Desktop explicitly replied ok:false ("Workspace directory not found: ...") — desktop received,
+//     judged, rejected. Retry/wait are pointless; error should go to user immediately.
+//   - reply frame dropped (network switch/screen sleep/reconnect; relay is best-effort, no queue) — desktop
+//     likely already acted; only the receipt is missing. This is when a grace period watching the snapshot makes sense.
+// Before, both were bare Error and Composer couldn't tell them apart, so it dragged desktop's explicit
+// rejection into a 20-second grace period, appearing as "clicked, no response, error after twenty seconds".
 describe("RelayClient 失败来源可区分", () => {
   const clients: RelayClient[] = [];
 
@@ -408,7 +411,7 @@ describe("RelayClient 失败来源可区分", () => {
   });
 });
 
-/** 用与桌面端对称的方式 gzip 一段 JSON，返回原始字节（模拟桌面 z:true 的明文）。 */
+/** Gzip a JSON string the same way the desktop does, return raw bytes (simulate desktop plaintext with z:true). */
 async function gzipBytes(json: string): Promise<ArrayBuffer> {
   const stream = new Blob([new TextEncoder().encode(json)])
     .stream()
@@ -442,7 +445,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     ws.deliver({ type: "authed", agent_online: true, clients: 1 });
 
     ws.deliver(await sealedMsg({ event: "sessions", sessions }));
-    await waitFor(() => got !== null, "sessions 帧解密后分发"); // 解密是异步的
+    await waitFor(() => got !== null, "sessions 帧解密后分发"); // Unseal is async
     expect(got).toEqual(sessions);
   });
 
@@ -458,7 +461,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     ws.onopen?.();
     ws.deliver({ type: "authed", agent_online: true, clients: 1 });
 
-    // 整表基线（桌面 slim 已按 lastActivityMs desc 排好）。
+    // Full baseline (desktop slim already sorted by lastActivityMs desc).
     const full = [
       { id: "s1", lastActivityMs: 3, status: "active" },
       { id: "s2", lastActivityMs: 2, status: "idle" },
@@ -468,7 +471,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     await waitFor(() => got.length === 3, "整表基线到达");
     expect(got.map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
 
-    // 增量：s2 活跃度升到 9、s4 新增(4)、s3 删除。
+    // Delta: s2 activity rises to 9, s4 added (4), s3 removed.
     ws.deliver(
       await sealedMsg({
         event: "sessions_delta",
@@ -479,10 +482,10 @@ describe("RelayClient sessions 快照收发（加密）", () => {
         remove: ["s3"],
       }),
     );
-    // s3 被移除后整表仍是 3 条（s2/s4/s1），所以只看长度分不出增量到没到——
-    // 盯 s3 消失这个只有增量应用后才成立的条件。
+    // After s3 is removed, the table is still 3 rows (s2/s4/s1), so length alone doesn't show if delta applied —
+    // watch s3 disappearing, a condition that only holds after delta is applied.
     await waitFor(() => !got.some((s) => s.id === "s3"), "sessions_delta 应用");
-    // 合并后按 lastActivityMs desc: s2(9) s4(4) s1(3)；s3 已移除。
+    // After merge, sorted by lastActivityMs desc: s2(9) s4(4) s1(3); s3 removed.
     expect(got.map((s) => s.id)).toEqual(["s2", "s4", "s1"]);
     expect(got.find((s) => s.id === "s2")?.status).toBe("active");
   });
@@ -498,7 +501,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     ws.onopen?.();
     ws.deliver({ type: "authed", agent_online: true, clients: 1 });
 
-    // 桌面路径：payload 整体先 gzip 成字节，再对字节 seal，信封打 z:true。
+    // Desktop path: payload is first gzipped to bytes, then sealed to those bytes, envelope marked z:true.
     const gz = await gzipBytes(JSON.stringify({ event: "sessions", sessions }));
     const sealed = await sealBytes(KEYS.encKey, gz);
     ws.deliver({ type: "msg", payload: { ...sealed, z: true } });
@@ -517,9 +520,9 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     ws.onopen?.();
     ws.deliver({ type: "authed", agent_online: true, clients: 1 });
 
-    // 永远加密下，明文业务 payload 不该被处理（可能来自不受信来源）。
+    // Under strict encryption, plaintext business payload should never be processed (may come from untrusted source).
     ws.deliver({ type: "msg", payload: { event: "sessions", sessions: [{ id: "x" }] } });
-    // 负向断言：给「明文帧被错误处理」留出机会，固定睡眠是对的工具。
+    // Negative assertion: give "plaintext frame incorrectly processed" a chance; fixed sleep is the right tool.
     await tick();
     expect(got).toBe("UNTOUCHED");
   });
@@ -538,8 +541,8 @@ describe("RelayClient client_hello 携带构建 commit", () => {
     for (const c of clients.splice(0)) c.close();
   });
 
-  // 桌面端靠 hello 里的 appCommit 判断这台手机跑的 bundle 是否过期，所以 hello 帧
-  // 必须原样带上 deviceInfo 的 appCommit（sendHello 是 `...info` 展开，这里锁住它）。
+  // Desktop uses appCommit in hello to judge if this phone's bundle is stale, so hello frame must
+  // pass through deviceInfo.appCommit as-is (sendHello does `...info` spread; lock it down here).
   it("authed 后的 hello 帧带上 deviceInfo.appCommit", async () => {
     const base = FakeWs.instances.length;
     const client = new RelayClient(SECRET, {}, () => ({
@@ -568,9 +571,10 @@ describe("RelayClient client_hello 携带构建 commit", () => {
   });
 });
 
-// answerViaReq:决策卡答复走 req/reply(而非旧的即发即忘 answer 帧),弱网下要么拿到
-// 桌面送达确认、要么重发、要么最终失败让调用方保留卡片。这是「弱网答复了、卡片却消失
-// 且 app 端仍在等」这个 bug 的修复面——绝不在拿到送达确认前把卡当成已答。
+// answerViaReq: decision card replies use req/reply (not the old fire-and-forget answer frame); over weak
+// networks, either get desktop delivery confirmation, retry, or ultimately fail while caller keeps the card.
+// This fixes the bug where "answer went through, card vanished, app still waiting" — never treat card as
+// answered before getting delivery confirmation.
 describe("RelayClient.answerViaReq 弱网送达确认", () => {
   const clients: RelayClient[] = [];
   beforeEach(() => {
@@ -582,7 +586,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     for (const c of clients.splice(0)) c.close();
   });
 
-  /** 解出某连接发出的所有 decision_answer req 帧的 req_id(按发出顺序)。 */
+  /** Unseal all decision_answer req frame req_ids sent from a connection (in order sent). */
   async function answerReqIds(ws: FakeWs): Promise<string[]> {
     const out: string[] = [];
     for (const p of await openSent(ws)) {
@@ -635,11 +639,11 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
       { attempts: 2, timeoutMs: 200 },
     );
     p.catch(() => {});
-    // 第一帧超时(不投递)后应自动发第二帧。
+    // After first frame times out (not delivered), second frame should auto-send.
     await waitAnswerReqCount(ws, 2);
     const reqs = await answerReqIds(ws);
     expect(reqs.length).toBe(2);
-    // 给第二帧回 ok:true → 整体 resolve(重发被桌面幂等去重,安全)。
+    // Reply ok:true to second frame → overall resolve (resend is idempotent-deduplicated by desktop, safe).
     ws.deliver(await sealedMsg({ event: "reply", req_id: reqs[1], ok: true, data: null }));
     await expect(p).resolves.toBeUndefined();
   });
@@ -659,7 +663,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     );
     const err = await p.catch((e) => e);
     expect(isDesktopRejection(err)).toBe(true);
-    // 明确裁决不该触发重发:只发了一帧。
+    // Explicit rejection should not trigger resend: only one frame sent.
     expect((await answerReqIds(ws)).length).toBe(1);
   });
 
@@ -709,14 +713,15 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     expect(legacy!.id).toBe("d-oldserver");
   });
 
-  // ── relay 托管交付(store-and-forward)────────────────────────────────────
+  // ── Relay store-and-forward delivery ────────────────────────────────────
   //
-  // 桌面掉线时 relay 会接管答复帧并在桌面回来后转投,同时立刻回一个
-  // msg_ack{status:"queued"}。手机连接中位只活 13 秒,等不到桌面重连,所以
-  // 「relay 已收妥」就必须算交付完成 —— 否则老板按了提交、答复其实已在
-  // relay 手里,卡片却因为等不到桌面 reply 而报失败。
+  // When desktop goes offline, relay takes over reply frames and forwards them when desktop returns,
+  // immediately replying with msg_ack{status:"queued"}. Phone connections live ~13 seconds, not long
+  // enough to wait for desktop reconnect, so "relay has it safely" must count as delivery complete —
+  // otherwise user submits, reply is actually in relay's hands, but card reports failure because it
+  // never got desktop's reply.
 
-  /** 取某连接发出的原始外层帧(未加密部分,用来断言 ack_id)。 */
+  /** Get raw outer frames sent from a connection (unencrypted parts, for asserting ack_id). */
   function rawSent(ws: FakeWs): Array<Record<string, unknown>> {
     return ws.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
   }
@@ -732,15 +737,15 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     p.catch(() => {});
     await waitAnswerReqCount(ws, 1);
 
-    // 外层必须带 ack_id:relay 打不开密封 payload,读不到里面的 req_id。
+    // Outer frame must carry ack_id: relay can't unseal the payload, doesn't see the req_id inside.
     const msgFrame = rawSent(ws).find((f) => f.type === "msg" && f.ack_id);
     expect(msgFrame).toBeTruthy();
     const ackId = String(msgFrame!.ack_id);
 
-    // 桌面没上线,relay 报「已接管」。这一帧就该让答复落地。
+    // Desktop offline, relay says "I have it now". This frame should land the reply.
     ws.deliver({ type: "msg_ack", ack_id: ackId, status: "queued" });
     await expect(p).resolves.toBeUndefined();
-    // 已交付就不该再重发。
+    // Already delivered, should not resend.
     expect((await answerReqIds(ws)).length).toBe(1);
   });
 
@@ -757,7 +762,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     const ackId = String(rawSent(ws).find((f) => f.type === "msg" && f.ack_id)!.ack_id);
 
     ws.deliver({ type: "msg_ack", ack_id: ackId, status: "dropped" });
-    // 没送达 → 重发第二帧,而不是坐等 1000ms 超时。
+    // Not delivered → resend second frame instead of waiting 1000ms timeout.
     await waitAnswerReqCount(ws, 2);
     expect((await answerReqIds(ws)).length).toBe(2);
   });
@@ -774,15 +779,15 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     await waitAnswerReqCount(ws, 1);
     const ackId = String(rawSent(ws).find((f) => f.type === "msg" && f.ack_id)!.ack_id);
 
-    // 桌面在线、relay 已转交 —— 但桌面是否真消费了这张卡只有它自己知道,
-    // 所以 delivered 不能顶替 reply(否则又回到「乐观移卡」那个原始 bug)。
+    // Desktop online, relay has forwarded — but only desktop knows if it actually consumed this card,
+    // so delivered cannot replace reply (else we're back to the original "optimistic card move" bug).
     ws.deliver({ type: "msg_ack", ack_id: ackId, status: "delivered" });
     let settled = false;
     p.then(
       () => (settled = true),
       () => (settled = true),
     );
-    // 负向断言：给「delivered/queued 被当成终局」留出机会，固定睡眠是对的工具。
+    // Negative assertion: give "delivered/queued treated as final" a chance; fixed sleep is the right tool.
     await tick(5);
     expect(settled).toBe(false);
 
@@ -792,8 +797,8 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
   });
 
   it("普通数据请求不把 queued 当成结果", async () => {
-    // 只有决策答复愿意接受「relay 已收妥」作为终局;pending_snapshot 这类
-    // 请求要的是桌面的数据,relay 的托管确认对它毫无意义。
+    // Only decision replies accept "relay has it safely" as final; pending_snapshot and similar
+    // requests want data from the desktop, relay's store confirmation means nothing to them.
     const { client, ws } = await connected(clients);
     const p = client.request("pending_snapshot", {}, 1000);
     p.catch(() => {});
@@ -807,7 +812,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
       () => (settled = true),
       () => (settled = true),
     );
-    // 负向断言：给「delivered/queued 被当成终局」留出机会，固定睡眠是对的工具。
+    // Negative assertion: give "delivered/queued treated as final" a chance; fixed sleep is the right tool.
     await tick(5);
     expect(settled).toBe(false);
   });

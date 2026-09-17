@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import indexHtml from "../index.html?raw";
 
-// 手机打开 `fleet webui` 时把人送到 `/m/`（同源移动端 UI）的那段判定。
+// Logic that redirects mobile users opening `fleet webui` to `/m/` (same-origin
+// mobile UI).
 //
-// 它必须是 index.html 里的**内联**脚本：走 module bundle 的话，手机要先下完
-// 整个桌面 bundle 才会跳走，白等一次。而内联脚本天然不可单测。
+// Must be an **inline** script in index.html: if it went through the module
+// bundle, the phone would download the entire desktop bundle first, then
+// redirect—wasted time. Inline scripts normally can't be unit tested.
 //
-// 所以这里的做法是：脚本把判定挂成一个纯函数，测试从 index.html 里原样抽出这段
-// 源码执行，再直接调那个函数。测的就是真正会跑的那份代码 —— 不存在「测试里一
-// 份、页面里另一份」的漂移。
+// Solution: the script exposes the redirect decision as a pure function. The
+// test extracts the script source from index.html and executes it, then calls
+// the function directly. This tests the actual code that runs—no drift between
+// test and production versions.
 type Env = {
   search: string;
   tauri: boolean;
@@ -18,15 +21,17 @@ type Env = {
   pathname: string;
 };
 
-/** 抽出内联脚本并执行，拿到它挂出来的判定函数。 */
+/** Extract the inline script, execute it, and return the exposed decision
+ *  function. */
 function loadDecider(): (env: Env) => string | null {
   const m = indexHtml.match(
     /<script id="mobile-redirect">([\s\S]*?)<\/script>/,
   );
   if (!m) throw new Error('index.html 里找不到 <script id="mobile-redirect">');
   const scope: Record<string, unknown> = {};
-  // 脚本在真实页面里会立刻用真环境跑一次；这里给它一个惰性的 window 替身，
-  // 让那次自调用无害，只留下挂好的函数。
+  // The script runs immediately with the real environment on the real page;
+  // give it a lazy window stub here so the self-call is harmless and only the
+  // exposed function remains.
   const fakeWindow = {
     __fleetDecideMobileRedirect: undefined as unknown,
     location: { search: "", pathname: "/", hash: "", replace: () => {} },
@@ -65,7 +70,8 @@ describe("手机访问 fleet webui 的重定向判定", () => {
     ).toBeNull();
   });
 
-  // 平板：粗指针但屏够大。桌面版在这个尺寸上是能用的，硬塞移动版反而更差。
+  // Tablet: coarse pointer but large screen. Desktop version works fine at this
+  // size; forcing mobile would be worse.
   it("粗指针但大屏（平板）⇒ 留在桌面版", () => {
     expect(loadDecider()({ ...phone, minScreenPx: 1024 })).toBeNull();
   });
@@ -74,19 +80,21 @@ describe("手机访问 fleet webui 的重定向判定", () => {
     expect(loadDecider()({ ...phone, search: "?desktop=1" })).toBeNull();
   });
 
-  // 上一次用 ?desktop 选过，之后再打开不带参数也要记住。
+  // User chose ?desktop once; remember that preference on later visits without
+  // the param.
   it("记住过的桌面版偏好优先于尺寸判定", () => {
     expect(loadDecider()({ ...phone, forcedDesktop: true })).toBeNull();
   });
 
-  // Tauri 壳加载的是同一份 index.html。带触摸屏的窄窗口不该把桌面 app 自己
-  // 跳到一个它根本没有的 /m/ 路径上。
+  // The Tauri shell loads the same index.html. A narrow touch-capable window
+  // shouldn't redirect the desktop app itself to /m/, a path that doesn't exist.
   it("Tauri 壳里绝不重定向", () => {
     expect(loadDecider()({ ...phone, tauri: true })).toBeNull();
   });
 
-  // 跳过去之后 /m/ 由移动端 bundle 接管；万一这段脚本在那儿也跑了（缓存、
-  // 误配），不能再跳一次，否则就是死循环。
+  // After redirect, /m/ is handled by the mobile bundle. If this script somehow
+  // runs there too (cache, misconfiguration), it must not redirect again or
+  // we'd loop forever.
   it("已经在 /m/ 下不再重定向", () => {
     expect(loadDecider()({ ...phone, pathname: "/m/" })).toBeNull();
   });

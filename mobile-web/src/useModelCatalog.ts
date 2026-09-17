@@ -1,17 +1,20 @@
-// Fleet 自己的模型目录（`claw-fleet-core/models.toml`），供 Composer 的模型 /
-// 努力度下拉使用。桌面端的对应物是 `claw-fleet-desktop/app/useModelCatalog.ts`：
-// 两边打的是同一个 core 函数，一个走 Tauri command，一个走 relay。
+// Fleet's own model directory (`claw-fleet-core/models.toml`), used by Composer's
+// model / effort dropdowns. The desktop equivalent is
+// `claw-fleet-desktop/app/useModelCatalog.ts`: both query the same core function,
+// one via Tauri command, one via relay.
 //
-// 这替掉了本文件曾经在 Composer.tsx 里手抄的两份清单。那份抄写已经漂了：它声称
-// Codex 的努力度梯子是 `minimal/low/medium/high`，而实测没有任何一个 Codex 模型
-// 接受 `minimal`，且每个都接受 `xhigh`/`max`。
+// This replaces two hardcoded lists that once lived here in Composer.tsx. Those
+// lists fell out of sync: they claimed Codex effort ladder was
+// `minimal/low/medium/high`, but testing shows no Codex model accepts `minimal`,
+// and all of them accept `xhigh`/`max`.
 import { useEffect, useState } from "react";
 import type { FleetTransport } from "./transport";
 import type { PickerHarness } from "./generated/types";
 
-/** 拿不到就返回空数组（relay 未连上、请求在途，或桌面端版本老到不认这个方法）。
- *  调用方把空数组当作「还没加载」，只显示自己的「默认」那一项——与
- *  useCodexProfiles 同样的降级取舍。 */
+/** Returns empty array when unavailable (relay not connected, request in flight,
+ *  or desktop version too old to recognize this method). Callers treat empty as
+ *  "not loaded yet" and show only their "default" entry — same graceful fallback
+ *  as useCodexProfiles. */
 export function useModelCatalog(client: FleetTransport | null): PickerHarness[] {
   const [catalog, setCatalog] = useState<PickerHarness[]>([]);
   useEffect(() => {
@@ -32,8 +35,9 @@ export function useModelCatalog(client: FleetTransport | null): PickerHarness[] 
   return catalog;
 }
 
-/** 某个 harness 的可选模型 → 下拉条目 `[value, label]`，开头带「默认」那一项。
- *  目录没到时只有「默认」，那正是诚实的降级：会话跑在 CLI 自己配置的模型上。 */
+/** Available models for a harness → dropdown entries `[value, label]`, prefixed
+ *  with the "default" entry. When the catalog hasn't arrived, only "default"
+ *  shows — an honest fallback: session runs on whatever the CLI configured. */
 export function modelChoicesFor(
   catalog: PickerHarness[],
   harness: string,
@@ -43,11 +47,13 @@ export function modelChoicesFor(
   return [["", defaultLabel], ...models.map((m): [string, string] => [m.id, m.label])];
 }
 
-/** 某个模型自己的努力度梯子；没选模型时给该 harness 内的并集。
+/** Effort ladder for a model; when no model is selected, the union of all efforts
+ *  in that harness.
  *
- *  逐模型而不是逐 harness，因为同一个 harness 里梯子确实不同：`gpt-5.5` 到
- *  `xhigh` 为止，它的同代兄弟能到 `max` 和 `ultra`。旧代码把这件事写成了「给
- *  gpt-6-astra 开一个特例」，于是其余全错。 */
+ *  Per-model rather than per-harness because ladders truly differ within a harness:
+ *  `gpt-5.5` stops at `xhigh`, but its siblings can reach `max` and `ultra`. Old
+ *  code hard-coded this as "special case gpt-6-astra", so everything else was
+ *  wrong. */
 export function effortChoicesFor(
   catalog: PickerHarness[],
   harness: string,

@@ -769,7 +769,7 @@ export function HistoryView() {
                 key={workspace.path}
                 path={workspace.path}
                 name={workspace.name}
-                // 折叠后的行数：一条接力链折成一组只算 1，与眼下看到的行一致。
+                // Collapsed row count: one relay chain folded into one group counts as 1, matching what we see.
                 count={workspace.items.length}
                 collapsed={collapsedWorkspaces.includes(workspace.path)}
                 onToggle={toggleWorkspaceCollapsed}

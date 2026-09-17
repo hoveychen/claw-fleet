@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// iOS 的 WKWebView 要 iOS 18.4 才有 Screen Wake Lock（16.4–18.3 那版在独立 Web App
-// 里根本不工作），所以壳里得有一条原生兜底：@capacitor-community/keep-awake 底下就是
-// UIApplication.isIdleTimerDisabled。
+// iOS's WKWebView only has Screen Wake Lock on iOS 18.4 (16.4–18.3 doesn't work in standalone Web App),
+// so the shell needs a native fallback: @capacitor-community/keep-awake wraps UIApplication.isIdleTimerDisabled.
 //
-// 这一层要验的是**接线**而不是原生行为：什么时候装这条兜底、装上之后
-// request/release 是不是真转调了原生。原生本身只能真机验。
+// What we test here is **wiring**, not native behavior: when to install the fallback, whether
+// request/release actually delegates to native after install. Native behavior itself only testable on device.
 
 const native = { value: true };
 const keepAwake = vi.fn(async () => {});
@@ -47,11 +46,11 @@ afterEach(() => {
 });
 
 describe("installNativeWakeLock", () => {
-  it("壳里没有标准 API 时装上兜底，持锁真转调原生 keepAwake", async () => {
+  it("installs fallback when shell lacks standard API, lock actually delegates to native keepAwake", async () => {
     const { installNativeWakeLock } = await import("./wakeLockNative");
     const { holdWakeLock, isWakeLockSupported } = await import("./wakeLock");
     await installNativeWakeLock();
-    // 装上之后设置里的常亮开关才该出现——否则 iOS 用户看到一个消失的开关。
+    // After install, always-on toggle should appear in settings — else iOS user sees a phantom toggle.
     expect(isWakeLockSupported()).toBe(true);
     const release = holdWakeLock();
     await flush();
@@ -61,7 +60,7 @@ describe("installNativeWakeLock", () => {
     expect(allowSleep).toHaveBeenCalledTimes(1);
   });
 
-  it("WebView 自带标准 API（iOS 18.4+ / Android）时不装兜底", async () => {
+  it("does not install fallback when WebView has standard API (iOS 18.4+ / Android)", async () => {
     installEnv({ standardApi: true });
     const { installNativeWakeLock } = await import("./wakeLockNative");
     const { holdWakeLock } = await import("./wakeLock");
@@ -71,7 +70,7 @@ describe("installNativeWakeLock", () => {
     expect(keepAwake).not.toHaveBeenCalled();
   });
 
-  it("纯浏览器（非壳）里整个不生效", async () => {
+  it("has no effect in pure browser (not shell)", async () => {
     native.value = false;
     const { installNativeWakeLock } = await import("./wakeLockNative");
     const { isWakeLockSupported } = await import("./wakeLock");
@@ -80,7 +79,7 @@ describe("installNativeWakeLock", () => {
     expect(isSupported).not.toHaveBeenCalled();
   });
 
-  it("原生说不支持时不装——别画一个按下去没反应的开关", async () => {
+  it("does not install when native says unsupported — don't draw a dead button", async () => {
     isSupported.mockResolvedValue({ isSupported: false });
     const { installNativeWakeLock } = await import("./wakeLockNative");
     const { isWakeLockSupported } = await import("./wakeLock");
@@ -88,7 +87,7 @@ describe("installNativeWakeLock", () => {
     expect(isWakeLockSupported()).toBe(false);
   });
 
-  it("插件抛错（壳里没装好）时静默降级，不炸启动", async () => {
+  it("silently degrades when plugin throws (shell not installed correctly), does not break startup", async () => {
     isSupported.mockRejectedValue(new Error("plugin not implemented"));
     const { installNativeWakeLock } = await import("./wakeLockNative");
     const { isWakeLockSupported } = await import("./wakeLock");

@@ -16,18 +16,18 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 /**
- * 启动台's rail filters used to be component-local `useState` inside HistoryView.
+ * The launchpad's rail filters used to be component-local `useState` inside HistoryView.
  * SessionList mounts HistoryView through a `viewMode` ternary, so any hop to
  * another view — including the involuntary `setViewMode("list")` a waiting-input
  * alert or the mascot bubble performs — unmounted it and snapped the segmented
- * filter back to 「全部」. They live in useUIStore now, and the durable ones are
+ * filter back to "all". They live in useUIStore now, and the durable ones are
  * written through to the settings store so they also survive a restart.
  *
  * There is no jsdom/testing-library here, so the unmount itself isn't
  * exercisable; what these cover is the store contract that makes an unmount
  * harmless — the value lives outside React, and it round-trips through storage.
  */
-describe("启动台 rail filters", () => {
+describe("launchpad rail filters", () => {
   beforeEach(() => {
     vi.resetModules();
   });
@@ -82,9 +82,10 @@ describe("启动台 rail filters", () => {
   });
 
   /**
-   * 文件夹折叠状态原本是 WorkspaceRailSection 里的 useState。分组是从*筛选后*的
-   * 行算出来的，所以切到「进行中」时，在该 bucket 里没有任何会话的 workspace
-   * 会整段 unmount，切回来重新挂载就恢复展开——折叠白点了。
+   * Workspace collapse state used to be `useState` in WorkspaceRailSection. Grouping is
+   * computed from *filtered* rows, so when switching to "in-progress", any workspace
+   * with no sessions in that bucket unmounts entirely and re-mounts with the expand state
+   * reset — a collapsed fold is now blank.
    */
   it("toggles a workspace fold and writes it through", async () => {
     const { useUIStore } = await import("./store");
@@ -124,7 +125,7 @@ describe("启动台 rail filters", () => {
   });
 });
 
-describe("主导航页面浏览上下文", () => {
+describe("primary nav page browsing context", () => {
   beforeEach(() => {
     vi.resetModules();
   });
@@ -250,24 +251,24 @@ describe("主导航页面浏览上下文", () => {
 });
 
 /**
- * 侧栏顶部的 舰队 / 工作 tab。The active tab is *derived* from `viewMode`
+ * The nav sidebar's Fleet / Work tabs. The active tab is *derived* from `viewMode`
  * (navGroupOf) rather than stored beside it, so the invariant worth testing is
  * the other half: each tab remembers the page you left it on, and every path
  * that moves the main area — the nav itself and the three cross-page requests
  * (file link, tray click, schedule → new session) — feeds that memory. A path
  * that wrote `viewMode` directly would leave its tab restoring a stale page.
  */
-describe("侧栏模式 tab（舰队 / 工作）", () => {
+describe("nav sidebar mode tab (Fleet / Work)", () => {
   beforeEach(() => {
     vi.resetModules();
   });
 
-  it("切 tab 回到该 tab 上次停留的页面", async () => {
+  it("switching tabs restores that tab's previously left page", async () => {
     const { useUIStore } = await import("./store");
     const ui = () => useUIStore.getState();
 
-    ui().setViewMode("audit"); // 舰队
-    ui().setViewMode("wiki"); // 工作
+    ui().setViewMode("audit"); // Fleet
+    ui().setViewMode("wiki"); // Work
 
     ui().setNavGroup("fleet");
     expect(ui().viewMode).toBe("audit");
@@ -276,14 +277,14 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
     expect(ui().viewMode).toBe("wiki");
   });
 
-  it("首次进入某个 tab 落在它的主页", async () => {
+  it("first entry into a tab lands on its home page", async () => {
     const { useUIStore } = await import("./store");
 
     useUIStore.getState().setNavGroup("work");
     expect(useUIStore.getState().viewMode).toBe("history");
   });
 
-  it("点当前所在 tab 不换页面", async () => {
+  it("clicking the current tab does not change pages", async () => {
     const { useUIStore } = await import("./store");
 
     useUIStore.getState().setViewMode("plans");
@@ -292,33 +293,34 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
     expect(useUIStore.getState().viewMode).toBe("plans");
   });
 
-  it("绕过 nav 的跨页跳转同样记进 tab 记忆", async () => {
+  it("cross-page jumps that bypass nav also feed tab memory", async () => {
     const { useUIStore } = await import("./store");
     const ui = () => useUIStore.getState();
 
-    // 先让 工作 tab 的记忆停在 计划树，这样「主页兜底」和「真的记账了」两种
-    // 结果不再撞成同一个值 —— 否则跳到 history 的断言不记账也能通过。
+    // First set Work tab's memory to plan tree, so "home fallback" and "actually recorded"
+    // results don't collapse into the same value — otherwise the assertion to jump to
+    // history would pass even if not recorded.
     ui().setViewMode("plans");
 
-    // 托盘/通知点击 → 任务页（工作 tab），走的是 requestOpenTask 而非 setViewMode。
+    // Tray / notification click → task page (Work tab), goes via requestOpenTask not setViewMode.
     ui().requestOpenTask("sess-1");
     expect(ui().viewMode).toBe("history");
 
     ui().setNavGroup("fleet");
     expect(ui().viewMode).toBe("gallery");
 
-    // 若 requestOpenTask 没记账，这里会退回上一页 plans。
+    // If requestOpenTask wasn't recorded, we'd revert to the previous page (plans).
     ui().setNavGroup("work");
     expect(ui().viewMode).toBe("history");
 
-    // 文件链接点击（requestFileNav）是同一类绕过 nav 的路径。
+    // File link click (requestFileNav) is the same kind of nav-bypassing path.
     ui().requestFileNav({ workspacePath: "/w", absPath: "/w/a.ts", line: 3 });
     ui().setNavGroup("fleet");
     ui().setNavGroup("work");
     expect(ui().viewMode).toBe("files");
   });
 
-  it("把每个 tab 的最后一页写进设置存储", async () => {
+  it("writes each tab's last page to the settings store", async () => {
     const { useUIStore } = await import("./store");
     const { getItem } = await import("./storage");
 
@@ -331,9 +333,9 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
     });
   });
 
-  it("丢弃已不属于该 tab 的存量页面，回落到主页", async () => {
+  it("discards stale pages no longer belonging to a tab and falls back to home", async () => {
     const { setItem } = await import("./storage");
-    // wiki 现在归 工作 tab；一份把它记在 舰队 名下的旧数据不该让 舰队 打开它。
+    // wiki now belongs to Work tab; old data recording it under Fleet shouldn't let Fleet open it.
     setItem("nav-group-last-view", JSON.stringify({ fleet: "wiki", work: "nonsense" }));
 
     const { useUIStore } = await import("./store");
@@ -344,10 +346,11 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
     });
   });
 
-  it("认得改名前写下的 steward 记忆", async () => {
+  it("recognizes steward memory written before the rename", async () => {
     const { setItem } = await import("./storage");
-    // 这个 tab 的代号在 2026-08 从 steward 改成 fleet。已经在用的机器上，磁盘里
-    // 存的还是旧键；读不认它的话，老板的「舰队 tab 上次停在记忆页」会静默丢掉。
+    // This tab's code was renamed from steward to fleet in 2026-08. On machines already
+    // in use, the old key is still on disk; if we don't recognize it, the user's
+    // "Fleet tab was last on memory page" state is silently lost.
     setItem("nav-group-last-view", JSON.stringify({ steward: "memory", work: "files" }));
 
     const { useUIStore } = await import("./store");
@@ -358,7 +361,7 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
     });
   });
 
-  it("新键优先于同时存在的旧键", async () => {
+  it("new key takes priority over simultaneously existing old key", async () => {
     const { setItem } = await import("./storage");
     setItem("nav-group-last-view", JSON.stringify({ fleet: "skills", steward: "memory", work: "files" }));
 
@@ -375,12 +378,12 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
  * though the detail drawer renders under gallery too; (2) users who already
  * had `list` on disk from that bug never got flipped to the new default.
  */
-describe("gallery 默认会话视图", () => {
+describe("gallery default session view", () => {
   beforeEach(() => {
     vi.resetModules();
   });
 
-  it("在画廊视图下打开非 Fleet 会话时保持画廊,不强切列表", async () => {
+  it("keeps gallery view when opening non-Fleet sessions in gallery, does not force switch to list", async () => {
     const { useUIStore, navigateToSessionDetail } = await import("./store");
 
     useUIStore.getState().setViewMode("gallery");
@@ -400,7 +403,7 @@ describe("gallery 默认会话视图", () => {
     expect(useUIStore.getState().viewMode).toBe("gallery");
   });
 
-  it("一次性把老用户已存的 list 翻成 gallery", async () => {
+  it("one-time migration of existing list view to gallery for old users", async () => {
     const { setItem, getItem, migrateSessionViewDefault } = await import("./storage");
     setItem("viewMode", "list");
     setItem("lastSessionViewMode", "list");
@@ -412,7 +415,7 @@ describe("gallery 默认会话视图", () => {
     expect(getItem("gallery-default-migrated")).toBe("true");
   });
 
-  it("迁移过后尊重用户重新选择的 list", async () => {
+  it("after migration, respects user's new list choice", async () => {
     const { setItem, getItem, migrateSessionViewDefault } = await import("./storage");
     setItem("gallery-default-migrated", "true");
     setItem("viewMode", "list");
@@ -424,17 +427,19 @@ describe("gallery 默认会话视图", () => {
 });
 
 /**
- * 「对话」Tab 永远卡在「加载中…」。
+ * The "Messages" tab gets stuck forever on "loading…".
  *
- * 受控复现(2026-08-17,P1 harness + `kill -STOP` 掉 dsh web):后端一旦不
- * 响应,`get_messages_tail` 就永远不 settle,而详情页对这次取数**没有任何
- * 期限** —— 标题 / tok / 四个 Tab 照常渲染,只有对话区一直是「加载中…」,
- * 80s 不动,单条 /messages 120s 未返回。老板看到的正是这一幕。
+ * Controlled repro (2026-08-17, P1 harness + `kill -STOP` on dsh web): once the
+ * backend stops responding, `get_messages_tail` never settles, and the detail pane
+ * has **no deadline on this fetch** — title / token / four tabs render normally,
+ * but the message area stays "loading…" for 80s without moving, single /messages
+ * call unreturned for 120s. This is exactly what the user sees.
  *
- * 契约:超过期限还没拿到 transcript 就必须停下转圈、把状态摊开(stalled),
- * 让 UI 能给出解释和重试;迟到的结果照常渲染,不能因为标了 stalled 就丢掉。
+ * Contract: if we haven't received a transcript by the deadline, we must stop
+ * spinning and expose the state (stalled) so the UI can explain and offer retry;
+ * late-arriving results still render, we can't discard them just because marked stalled.
  */
-describe("详情取数期限", () => {
+describe("detail fetch deadline", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.useRealTimers();
@@ -448,7 +453,7 @@ describe("详情取数期限", () => {
     fleetSpawned: true,
   } as unknown as SessionInfo;
 
-  it("后端永不返回时,到期停止转圈并标记 stalled", async () => {
+  it("when backend never returns, stops spinning at deadline and marks stalled", async () => {
     vi.useFakeTimers();
     const { invoke } = await import("@tauri-apps/api/core");
     (invoke as unknown as { mockImplementation: (f: unknown) => void }).mockImplementation(
@@ -467,7 +472,7 @@ describe("详情取数期限", () => {
     expect(useDetailStore.getState().loadStalled).toBe(true);
   });
 
-  it("重新打开会清掉上一次的 loadError", async () => {
+  it("reopening clears the previous loadError", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     const mock = invoke as unknown as { mockImplementation: (f: unknown) => void };
     mock.mockImplementation((cmd: string) =>
@@ -484,7 +489,7 @@ describe("详情取数期限", () => {
     expect(useDetailStore.getState().loadError).toBeNull();
   });
 
-  it("迟到的 transcript 仍会渲染并清掉 stalled", async () => {
+  it("late-arriving transcript still renders and clears stalled", async () => {
     vi.useFakeTimers();
     let land: (v: unknown) => void = () => {};
     const { invoke } = await import("@tauri-apps/api/core");
@@ -510,35 +515,37 @@ describe("详情取数期限", () => {
   });
 
   /**
-   * 同一幕的第二个入口,期限机制盖不到的那个。
+   * The second entry point in the same scenario, the one the deadline doesn't cover.
    *
-   * `open()` 里 `isLoading` 要等两个 await 都回来:`get_messages_tail`(有
-   * 20s 期限保护)之后还有一个 `start_watching_session`。后者取的是 backend
-   * 的**写锁**,而 `get_messages_tail` / `read_live_thinking` 取读锁 —— 活跃
-   * 会话上这两个轮询分别是 1.5s / 700ms 一发,所以写锁这一步的等待时间由别人
-   * 的读锁决定,不由 transcript 取数决定。
+   * Inside `open()`, `isLoading` must wait for two awaits: `get_messages_tail` (with
+   * 20s deadline protection) followed by `start_watching_session`. The latter acquires
+   * the backend's **write lock**, while `get_messages_tail` / `read_live_thinking` take
+   * read locks — on active sessions those two polls fire at 1.5s / 700ms intervals, so
+   * the wait time for the write lock is determined by others' read locks, not by
+   * transcript fetch time.
    *
-   * 而 `withStallWatch` 只包了第一个 await:transcript 一旦取回来,期限就被
-   * disarm 了。于是卡在第二个 await 上的症状是**永久「加载中…」且不出重试
-   * 按钮** —— 消息其实已经在手里,只是没被 set 进 store。
+   * But `withStallWatch` only wraps the first await: once transcript arrives, the deadline
+   * is disarmed. So stalling on the second await means **permanent "loading…" with no retry
+   * button** — the messages are actually in hand, just not set into the store.
    *
-   * 契约:watcher 注册不在渲染关键路径上。transcript 到手就渲染,注册失败或
-   * 迟到都不许扣着已经取到的消息。
+   * Contract: watcher registration is not on the critical render path. Once we have the
+   * transcript, we render; registration failure or lateness must not hold back messages
+   * we already have.
    */
-  it("watcher 注册永不返回时,已取到的 transcript 仍须渲染", async () => {
+  it("when watcher registration never returns, already-fetched transcript still renders", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     (invoke as unknown as { mockImplementation: (f: unknown) => void }).mockImplementation(
       (cmd: string) => {
         if (cmd === "get_messages_tail") return Promise.resolve([{ type: "user" }]);
-        // 写锁一直拿不到 —— 命令发出去了,永远不 settle。
+        // Write lock never acquired — command sent out, never settles.
         if (cmd === "start_watching_session") return new Promise(() => {});
         return Promise.resolve(undefined);
       },
     );
 
     const { useDetailStore } = await import("./store");
-    // 不 await open():它本身就挂在那个永不 settle 的注册上,await 会把这个
-    // 测试变成超时而不是一次干净的断言失败。
+    // Don't await open(): it's already stuck on that never-settling registration, and await
+    // would turn this test into a timeout rather than a clean assertion failure.
     void useDetailStore.getState().open(session);
     for (let i = 0; i < 20; i++) await Promise.resolve();
 
@@ -546,7 +553,7 @@ describe("详情取数期限", () => {
     expect(useDetailStore.getState().isLoading).toBe(false);
   });
 
-  it("取数直接失败时也摊开状态,而不是留一片静默的空白", async () => {
+  it("when fetch fails immediately, also exposes state instead of silent blank", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     (invoke as unknown as { mockImplementation: (f: unknown) => void }).mockImplementation(
       (cmd: string) =>
@@ -559,20 +566,20 @@ describe("详情取数期限", () => {
     await useDetailStore.getState().open(session);
 
     expect(useDetailStore.getState().isLoading).toBe(false);
-    // 摊开的方式变了:失败走 loadError(带原因),不再冒充超时的 loadStalled。
+    // State exposure changed: failure goes to loadError (with reason), no longer pretends to be timeout stalled.
     expect(useDetailStore.getState().loadStalled).toBe(false);
     expect(useDetailStore.getState().loadError).toContain("No agent source");
   });
 });
 
 /**
- * 主题「系统」档必须把 `null` 交给 tauri，而不是解析后的 dark/light。
+ * The "system" theme setting must pass `null` to tauri, not the resolved dark/light.
  *
- * macOS 上 tao 的 `set_theme` 落到 `[NSApp setAppearance:]`（application 级，
- * 不是单窗口），而 WKWebView 的 `prefers-color-scheme` 正是从这个 app
- * appearance 解析出来的 —— 也就是 `getSystemTheme` 读回来的那个值。所以传
- * 具体值会把 app 焊死在自己刚设的那一档：老板选过一次暗色之后，再切回
- * 「系统」读到的仍是我们自己焊上去的 dark，白天也回不到亮色。
+ * On macOS, tao's `set_theme` lands in `[NSApp setAppearance:]` (app-level, not per-window),
+ * and WKWebView's `prefers-color-scheme` is resolved from that app appearance — exactly what
+ * `getSystemTheme` reads back. So passing a concrete value locks the app into whatever we
+ * just set: after the user picks dark once, switching back to "system" still reads our
+ * soldered-in dark value, can't return to light even during daytime.
  */
 describe("applyWindowTheme", () => {
   beforeEach(() => {
@@ -607,7 +614,7 @@ describe("applyWindowTheme", () => {
     return stamped;
   }
 
-  it("「系统」档传 null，让 app 松开回到跟随系统", async () => {
+  it("system setting passes null to release app lock and follow OS", async () => {
     const stamped = stubLatchedDarkWebview();
 
     const { applyWindowTheme } = await import("./store");
@@ -618,7 +625,7 @@ describe("applyWindowTheme", () => {
     expect(stamped.at(-1)).toBe("light");
   });
 
-  it("显式档位仍然把自己那一档焊给窗口", async () => {
+  it("explicit settings still solder their level to the window", async () => {
     stubLatchedDarkWebview();
 
     const { applyWindowTheme } = await import("./store");
@@ -629,14 +636,15 @@ describe("applyWindowTheme", () => {
 });
 
 /**
- * 日报自动弹出的去重契约。
+ * Deduplication contract for auto-popup daily reports.
  *
- * 两个信号会调 maybePopupReport：启动后 1.5s 的补弹检查，和调度线程写完 AI
- * 摘要时发的 daily-report-ready 事件。启动检查经常赶在摘要写完之前（调度器
- * 首轮要等 10s），所以「已弹过」这个持久化标记必须等到真的弹出来才写——早写
- * 一步就会把随后那个真事件挡掉，功能主路径直接失效。
+ * Two signals trigger maybePopupReport: a 1.5s make-up check after startup, and the
+ * daily-report-ready event sent when the scheduler finishes writing the AI summary.
+ * The startup check often arrives before the summary is written (scheduler's first cycle
+ * waits 10s), so the "already popped" persistence flag must only be written after we
+ * actually pop — write it early and the real event's outcome gets blocked, main path fails.
  */
-describe("日报自动弹出", () => {
+describe("auto-popup daily report", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -650,7 +658,7 @@ describe("日报自动弹出", () => {
     return await import("./store");
   }
 
-  it("摘要还没生成时不弹，也不写掉「已弹过」标记", async () => {
+  it("does not pop when summary not ready, does not write popped flag", async () => {
     const { useReportStore, REPORT_LAST_POPPED_KEY } = await setup({
       date: "2026-09-05",
       aiSummary: null,
@@ -663,7 +671,7 @@ describe("日报自动弹出", () => {
     expect(getItem(REPORT_LAST_POPPED_KEY) ?? "").not.toBe("2026-09-05");
   });
 
-  it("摘要已就绪时弹出，并记下日期", async () => {
+  it("pops when summary ready, records the date", async () => {
     const { useReportStore, REPORT_LAST_POPPED_KEY } = await setup({
       date: "2026-09-05",
       aiSummary: "今天干了很多活",
@@ -676,7 +684,7 @@ describe("日报自动弹出", () => {
     expect(getItem(REPORT_LAST_POPPED_KEY)).toBe("2026-09-05");
   });
 
-  it("同一天不会弹第二次", async () => {
+  it("does not pop twice on the same day", async () => {
     const { useReportStore } = await setup({
       date: "2026-09-05",
       aiSummary: "今天干了很多活",
@@ -689,7 +697,7 @@ describe("日报自动弹出", () => {
     expect(useReportStore.getState().reportPopupDate).toBeNull();
   });
 
-  it("开关关掉后不弹", async () => {
+  it("does not pop when toggle is off", async () => {
     const { useReportStore, REPORT_AUTO_POPUP_KEY } = await setup({
       date: "2026-09-05",
       aiSummary: "今天干了很多活",
@@ -766,7 +774,7 @@ describe("auto-collapse for a wide reader", () => {
   });
 });
 
-describe("精简模式", () => {
+describe("simplified mode", () => {
   beforeEach(() => vi.resetModules());
 
   it("persists the switch, enters Tasks, and restricts navigation until disabled", async () => {
@@ -787,15 +795,16 @@ describe("精简模式", () => {
   });
 
   /**
-   * 主机给的默认值(后端的 FLEET_SIMPLIFIED_MODE,经 host_features 送来)。
-   * 它存在的理由是浏览器构建的设置各存一份 localStorage —— 在一个浏览器上打开
-   * 的开关到不了下一个浏览器,只有主机能替所有客户端表态。三条不变量:
+   * Host-provided default (backend's FLEET_SIMPLIFIED_MODE, sent via host_features).
+   * It exists because browser builds store settings in localStorage each — a toggle
+   * opened in one browser doesn't reach the next, only the host can speak for all clients.
+   * Three invariants:
    *
-   *   1. 主机说开、这个客户端没表过态 ⇒ 就地开,并且初始页跟着落到任务页
-   *      (两者不一致会让页面停在导航里没有的那一页);
-   *   2. 用户显式关过 ⇒ 主机不许改回来;
-   *   3. 主机的答案缓存下来给下一次同步读,主机改口时这份缓存跟着改口 ——
-   *      否则它会变成一个没人能撤销的粘滞开关。
+   *   1. Host says on, client hasn't signaled ⇒ turn it on here, and land initial page
+   *      on task page (mismatch leaves page stuck in a nav that doesn't have it);
+   *   2. User explicitly turned off ⇒ host cannot override back to on;
+   *   3. Cache host's answer for next sync read, update cache when host changes —
+   *      otherwise it becomes an irreversible sticky toggle.
    */
   it("adopts the host default and caches it for the next load", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
@@ -808,12 +817,12 @@ describe("精简模式", () => {
     await useUIStore.getState().loadHostFeatures();
     expect(useUIStore.getState().simplifiedMode).toBe(true);
     expect(useUIStore.getState().viewMode).toBe("history");
-    // 缓存,不是用户的选择:后者必须仍然是「没表过态」。
+    // Cached, not user choice: the latter must still be "hasn't signaled".
     expect(getItem("simplified-mode-host-default")).toBe("true");
     expect(getItem("simplified-mode")).toBe(null);
   });
 
-  it("boots straight into simplified mode from the cached host default", async () => {
+  it("boots straight into simplified mode from cached host default", async () => {
     const { setItem } = await import("./storage");
     setItem("simplified-mode-host-default", "true");
     const { useUIStore } = await import("./store");
@@ -821,7 +830,7 @@ describe("精简模式", () => {
     expect(useUIStore.getState().viewMode).toBe("history");
   });
 
-  it("lets an explicit opt-out beat the host default", async () => {
+  it("lets explicit opt-out beat the host default", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValueOnce({ terminal: false, simplifiedDefault: true });
 
@@ -846,11 +855,11 @@ describe("精简模式", () => {
 
     await useUIStore.getState().loadHostFeatures();
     expect(getItem("simplified-mode-host-default")).toBe(null);
-    // 已经开着的这一次不动(用户正在看着这个界面);下一次加载起就不再默认开。
+    // Already on this time, don't change (user is looking at this screen); starting next load, won't default to on.
     expect(useUIStore.getState().simplifiedMode).toBe(true);
   });
 
-  it("turns simplified mode off when the host says off", async () => {
+  it("turns off simplified mode when host says off", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValueOnce({ terminal: false, simplifiedDefault: false });
 
@@ -875,12 +884,13 @@ describe("精简模式", () => {
 });
 
 /**
- * 终端页由后端启动时的 FLEET_TERMINAL 决定（core 的 feature_flags），前端只是
- * 照着后端的答案决定这一页在不在。这里盯住三件事：默认必须是关（拿不到答案时
- * 也是关），已经停在终端页的会话要被送回首页，以及关着时任何跳终端页的请求都
- * 不生效——否则用户会落在一个既没有导航项、又开不出 shell 的空白页上。
+ * The terminal page is controlled by backend's FLEET_TERMINAL on startup (core's feature_flags);
+ * the frontend just decides whether this page exists based on the backend's answer. Three
+ * invariants here: default must be off (and stays off if no answer), sessions already on terminal
+ * page are sent back to home, and with it off any terminal-page request is a no-op — else the
+ * user lands on a blank page with no nav items and no shell.
  */
-describe("终端功能开关（host_features）", () => {
+describe("terminal feature toggle (host_features)", () => {
   beforeEach(() => vi.resetModules());
 
   it("defaults to off and stays off when the backend call fails", async () => {
@@ -904,7 +914,7 @@ describe("终端功能开关（host_features）", () => {
     expect(useUIStore.getState().hostFeatures.terminal).toBe(true);
   });
 
-  it("sends a restored terminal page back to the 工作 home when the flag is off", async () => {
+  it("sends restored terminal page back to Work home when flag is off", async () => {
     const { setItem } = await import("./storage");
     setItem("viewMode", "terminal");
     const { invoke } = await import("@tauri-apps/api/core");
@@ -929,7 +939,7 @@ describe("终端功能开关（host_features）", () => {
     expect(useUIStore.getState().viewMode).toBe("terminal");
   });
 
-  it("ignores an 在终端打开 request while the flag is off, and honours it when on", async () => {
+  it("ignores open-in-terminal request while flag is off, honours it when on", async () => {
     const { useUIStore } = await import("./store");
     useUIStore.getState().setViewMode("files");
 

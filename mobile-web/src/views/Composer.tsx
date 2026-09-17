@@ -298,7 +298,7 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
         const keep = new Set(existing);
         setAttachments((prev) => prev.filter((a) => keep.has(a.path)));
       } catch {
-        // 保持原样，不误删。
+        // Keep as-is, avoid false deletions.
       }
     })();
   }, [client, attachments, setAttachments]);
@@ -545,7 +545,7 @@ function OptionSelects({
   );
 }
 
-// ── 新会话 sheet ─────────────────────────────────────────────────────────────
+// ── New session sheet ─────────────────────────────────────────────────────────
 
 interface NewSessionProps {
   sessions: SessionInfo[];
@@ -1313,7 +1313,7 @@ export function NewSessionSheet({
   );
 }
 
-// ── 继续会话 composer ────────────────────────────────────────────────────────
+// ── Resume session composer ────────────────────────────────────────────────────
 
 interface ResumeProps {
   session: SessionInfo;
@@ -1330,8 +1330,9 @@ interface ResumeProps {
    *  tail / live-thinking pollers and yield the single serialized WS to the
    *  resume req/reply instead of contending with a big tail response. */
   onSubmitInFlight?: (inFlight: boolean) => void;
-  /** 本组件当前遮挡的高度。它浮在转录之上、不占布局高度，父级据此给滚动区补
-   *  底部留白，最后一条消息才不会被压在胶囊底下。 */
+  /** Height currently blocked by this component. It floats above the transcript
+   *  without taking layout height; the parent uses this to pad the scroll area's
+   *  bottom so the last message isn't buried under the pill. */
   onHeight?: (px: number) => void;
 }
 
@@ -1344,27 +1345,31 @@ export function ResumeComposer({
   onHeight,
 }: ResumeProps) {
   const enqueueing = mode === "enqueue";
-  // 会话所属的源决定给哪套 model/effort 清单——认不出的源退回 Claude，那是
-  // 注册表自己的 fallback。dsh 接进来之前这里是个写死的 codex 三元判断，于是
-  // dsh 会话被默默塞了 Claude 的模型。
+  // The session's source determines which model/effort list to use — unrecognized
+  // sources fall back to Claude, which is the registry's own default. Before dsh
+  // was added, this was a hardcoded Codex ternary, silently using Claude models
+  // for dsh sessions.
   const tool = toolForAgentSource(session.agentSource);
   const pendingMessages = session.pendingMessages ?? [];
-  // 每个会话各自的续写草稿，按 sessionId 分 key——切到别的会话再回来，
-  // 各自的半截输入互不覆盖；发送成功后清空。
-  // 设备作用域:会话 id 只在单机内唯一,不分家两台机器上同号的会话会共用一份
-  // 半截输入。
+  // Per-session resume draft, keyed by sessionId — switching to another session
+  // and back keeps the draft intact; cleared on successful send. Device-scoped:
+  // session IDs are unique per machine only, so sessions with the same ID on
+  // different machines will share a draft.
   const [prompt, setPrompt, clearPrompt] = useDeviceDraft(`resume:${session.id}`, "");
-  // 续写的模型/努力度以会话当前值起步，而不是空串——空串会让胶囊显示成
-  // 「默认」，看不出这条追问其实会跑在哪个模型上。
+  // Resume model/effort start from the session's current values, not empty
+  // strings — empty would display as "default" in the pill, obscuring which
+  // model this follow-up will actually run on.
   const [model, setModel] = useState(session.model ?? "");
   const [effort, setEffort] = useState(session.effort ?? "");
-  // 用户有没有在选择器里亲手改过。**只有改过才把 model/effort 发上线**：没改
-  // 时留空，让桌面侧从 launch-spec 取权威值(它带 `[1m]` 这类后缀，而快照里的
-  // `session.model` 是从 transcript 解析的、丢后缀)，别让一次「我没动配置」的
-  // 追问反倒把会话钉死在一个降级的 model spec 上。
+  // Whether the user manually changed the selection. **Only send model/effort
+  // if changed**: when untouched, leave empty so the desktop pulls the
+  // authoritative value from launch-spec (it includes `[1m]` suffixes that the
+  // snapshot's `session.model` lacks, parsed from transcript). This prevents an
+  // unchanged follow-up from pinning the session to a degraded model spec.
   const [configTouched, setConfigTouched] = useState(false);
   const [permissionMode, setPermissionMode] = useState("");
-  // 切到别的会话：重新以那个会话的当前配置起步，并清掉「改过」标记。
+  // Switching to another session: reset to that session's current config and
+  // clear the "touched" flag.
   useEffect(() => {
     setModel(session.model ?? "");
     setEffort(session.effort ?? "");
@@ -1422,16 +1427,19 @@ export function ResumeComposer({
   useLayoutEffect(() => {
     const el = boxRef.current;
     if (!el) return;
-    // 报的是「从视口底到本组件顶」的距离，而不是自身高度：胶囊还会被决策折叠条
-    // （--peek-inset）往上顶，那段空隙同样是转录区不能用的地方。
+    // Report "distance from viewport bottom to component top", not just self
+    // height: the pill also gets pushed up by the decision collapse bar
+    // (--peek-inset), and that gap is also unavailable to the transcript.
     //
-    // 用布局值（offsetHeight + computed bottom）而不是 getBoundingClientRect：
-    // rect 把 transform 算在内，任何 transform 动画进行中量到的都不是终值。
+    // Use layout values (offsetHeight + computed bottom), not getBoundingClientRect:
+    // rect includes transforms, so any in-flight transform animation won't
+    // measure to the final value.
     onHeight?.(composerInset(el.offsetHeight, getComputedStyle(el).bottom));
   });
-  // 高度会在本组件不重渲染的情况下变：附件缩略图加载完撑高、textarea 自增高度
-  // 是直接写 style 的、决策折叠条把 --peek-inset 写在 documentElement 上把整根
-  // 胶囊顶上去。任一发生都要重新量一次，否则父级手里是个陈旧的留白。
+  // Height can change without re-rendering: attachment thumbnails load and grow
+  // the component, textarea auto-grows via direct style writes, and the decision
+  // collapse bar sets --peek-inset on documentElement, pushing the whole pill up.
+  // Any of these require remeasuring, or the parent holds stale padding.
   useEffect(() => {
     const el = boxRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -1446,8 +1454,10 @@ export function ResumeComposer({
     };
   }, []);
   void measureNonce;
-  // 卸载时把留白还回去：会话从「可续写」翻成「运行中」会换掉这个组件，留一个
-  // 陈旧的高度在父级手里，转录底下就永远空着一块没人遮的白。
+  // On unmount, return padding to zero: when a session transitions from
+  // "resumable" to "running", this component is swapped out, leaving stale height
+  // in the parent — transcript would have a permanent white gap below the last
+  // message uncovered.
   useEffect(() => () => onHeight?.(0), [onHeight]);
 
   // Chips still worth rendering — gates the "已排队" label too, so cancelling
@@ -1482,29 +1492,34 @@ export function ResumeComposer({
     // follow-up); resume tolerates empty (= continue).
     if (enqueueing && !text) return;
     setBusy(true);
-    // 追问提交在飞:让父级暂停 tail/thinking 轮询,把这条串行加密 WS 让给
-    // resume req/reply,别被一个大 tail 响应堵在前面。收尾时(succeed/catch)复位。
+    // Submit in flight: pause parent's tail/thinking polling, give this
+    // serialized WS to the resume req/reply so it's not blocked by a large tail
+    // response. Reset on success/catch.
     onSubmitInFlight?.(true);
-    // 方案 A 乐观收尾:桌面收到写请求会先回一个早 ack(远早于 claude 冷启动
-    // 产出的最终 reply),不必干等那 5-10s。ack 一到就复位输入、回显消息;
-    // settled 防重复(reply 到达会再触发一次,幂等)。
+    // Plan A: optimistic success. Desktop responds with an early ack (well before
+    // claude's cold-start produces the final reply), no need to wait 5–10s. On
+    // ack, reset input and echo message; `settled` prevents re-trigger (reply
+    // arrival also fires, idempotent).
     let settled = false;
     const succeed = () => {
       if (settled) return;
       settled = true;
-      // resume 把用户输入乐观回显进消息列表;enqueue 尚未投递,沿用已排队 chip。
+      // Resume echoes user input optimistically to the message list; enqueue
+      // hasn't sent yet, so keep the "queued" chip.
       if (!enqueueing && text) onOptimisticSend?.(text);
       clearPrompt();
       reset();
       setSent(true);
       setBusy(false);
-      // ack 已到、写入已投递:恢复父级轮询去拉真实转录(reply 很小,不再是瓶颈)。
+      // Ack arrived, write delivered: resume parent's polling for the real
+      // transcript (reply is small, no longer the bottleneck).
       onSubmitInFlight?.(false);
       window.setTimeout(() => setSent(false), 3000);
     };
     const method = enqueueing ? "enqueue_message" : "resume_session";
-    // 每次提交一把新钥匙:relay 投递是尽力而为,回执丢了这条请求可能被重放
-    // (或被同机第二个 agent 收到),桌面凭它认出重复,不会再起一轮 claude。
+    // Fresh key per submit: relay delivery is best-effort; if the ack is lost,
+    // this request may replay (or reach a second agent on the same machine), so
+    // desktop uses it to deduplicate and not spawn a second claude turn.
     const idempotencyKey = randomId();
     const params = enqueueing
       ? { sessionId: session.id, workspacePath: session.workspacePath, text, idempotencyKey }
@@ -1518,27 +1533,29 @@ export function ResumeComposer({
           // thread resumed as claude would fail, so always send it.
           agentSource: session.agentSource ?? "",
           ...resumeConfigOverrides({ touched: configTouched, model, effort }),
-          // Codex / dsh 都没有 --permission-mode 的对应物；只给 Claude 发。
+          // Codex and dsh have no --permission-mode equivalent; send only to Claude.
           ...(tool === "claude" && permissionMode ? { permissionMode } : {}),
         };
     try {
-      // 5th arg = onAck: fired once when the desktop's early ack arrives.
+      // 5th arg = onAck: fired once when desktop's early ack arrives.
       await client.request(method, params, undefined, succeed);
-      succeed(); // reply 到达同样收尾,与 onAck 幂等
+      succeed(); // Reply also succeeds, idempotent with onAck
     } catch (e) {
-      // 无论何种失败,提交已不在飞:恢复父级轮询。
+      // Regardless of failure, submit is no longer in flight: resume parent's polling.
       onSubmitInFlight?.(false);
-      // 桌面明确拒绝(路径不存在、prompt 非法……):它判断了、说不行,如实报错——
-      // 即便已凭 ack 乐观收尾也要提示,与新建会话一致。
+      // Desktop explicit rejection (path doesn't exist, invalid prompt, etc.): it
+      // judged and declined, report the error honestly — even if already concluded
+      // via ack, still alert (consistent with new session).
       if (isDesktopRejection(e)) {
         window.alert(e.message);
         setBusy(false);
         return;
       }
-      // 已凭早 ack 收尾:随后的超时/掉线 reject 只是那条 reply 没回来,忽略即可。
+      // Already concluded via early ack: subsequent timeout/disconnect reject is
+      // just the reply not arriving, ignore.
       if (settled) return;
-      // 从未 ack 也没 reply——请求可能压根没抵达桌面(relay 尽力而为、不补投),
-      // 如实报超时。
+      // Never ack, no reply — request may not have reached desktop at all
+      // (relay is best-effort, no re-send); report timeout honestly.
       window.alert(e instanceof Error ? e.message : t("恢复会话失败"));
       setBusy(false);
     }
@@ -1564,8 +1581,9 @@ export function ResumeComposer({
           ))}
         </div>
       )}
-      {/* 缩略图单独一行，只在真有附件时才占高度 —— 原来它和 📎/🎤 挤在一条
-          常驻 44px 的 attachRow 里，空着也占位。 */}
+      {/* Thumbnails on their own row, taking height only when there are actual
+          attachments — previously squeezed with 📎/🎤 on a permanent 44px
+          attachRow, taking space even when empty. */}
       {(attachments.length > 0 || pending.length > 0) && !voice.active && (
         <div className={styles.resumeThumbs}>
           <AttachmentThumbs
@@ -1578,8 +1596,8 @@ export function ResumeComposer({
           />
         </div>
       )}
-      {/* 排队模式不给配置：这条消息会跟着当前这一轮的设置跑，显示一组改不动的
-          胶囊只会误导。 */}
+      {/* No config in enqueue mode: this message runs with the current turn's
+          settings, so showing unchangeable pills would only mislead. */}
       {!enqueueing && !voice.active && (
         <div className={styles.resumeChips}>
           {configChips.map((label) => (
@@ -1613,17 +1631,18 @@ export function ResumeComposer({
           <textarea
             ref={voiceTailRef}
             className={styles.composerInput}
-            /* 胶囊里一行只放得下十来个汉字，长 placeholder 会在静息态就把框撑成
-               两行 —— 那正是这次要消灭的东西。麦克风就在右边，不必再用文案介绍；
-               「留空 = continue」的行为没变，只是不再写在框里。 */
+            /* One line in the pill fits only ~10 Chinese chars; a long placeholder
+               expands the box to two lines at rest — exactly what we're eliminating.
+               The mic is right there, no need for text explanation. "Empty = continue"
+               behavior unchanged, just not written in the box. */
             placeholder={enqueueing ? t("排队一条追问…") : t("继续这个会话…")}
             rows={1}
             value={voice.showingPreview ? voice.preview : prompt}
             readOnly={voice.showingPreview}
             onChange={(e) => setPrompt(e.target.value)}
           />
-          {/* 有字了就把麦克风让位给发送：两颗一直并排会让右侧挤成两个 40px 的
-              目标，而这一刻用户要的只有一个。 */}
+          {/* When there's text, yield mic position to send: two buttons side-by-side
+              squeeze the right edge into two 40px targets, but users only want one. */}
           {voice.available && !prompt.trim() && (
             <span className={styles.pillMic}>
               <VoiceMicButton rec={voice} />

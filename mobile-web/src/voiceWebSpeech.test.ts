@@ -8,7 +8,8 @@ const { classifyWebSpeechError, webSpeechProvider } = await import("./voiceWebSp
 
 type Win = Record<string, unknown>;
 
-/** 一个可以手动喂事件的假引擎，替掉 window 上的构造函数。 */
+/** A fake recognition engine that lets us manually feed events, replacing the
+    window constructor. */
 class FakeRecognition {
   static last: FakeRecognition | undefined;
   lang = "";
@@ -28,7 +29,7 @@ class FakeRecognition {
   start() {
     this.started++;
   }
-  /** 引擎真的开麦了 —— 规范里的 onstart。 */
+  /** Engine truly opened the mic — spec's onstart callback. */
   begin() {
     this.onstart?.();
   }
@@ -39,7 +40,7 @@ class FakeRecognition {
     this.aborted++;
   }
 
-  /** 喂一批结果。`from` 是本次事件的 resultIndex。 */
+  /** Feed a batch of results. `from` is this event's resultIndex. */
   emit(from: number, items: { text: string; final: boolean }[]): void {
     const results = items.map((it) => ({ isFinal: it.final, 0: { transcript: it.text } }));
     this.onresult?.({ resultIndex: from, results });
@@ -50,7 +51,7 @@ function installEngine(): void {
   (window as unknown as Win)["SpeechRecognition"] = FakeRecognition;
 }
 
-/** 收集三种回调，供断言。 */
+/** Collect callback results for assertions. */
 function collect() {
   const partial: string[] = [];
   const final: string[] = [];
@@ -81,36 +82,36 @@ afterEach(() => {
 });
 
 describe("classifyWebSpeechError", () => {
-  it("两种拒绝都归到授权问题", () => {
+  it("both rejection types map to permission error", () => {
     expect(classifyWebSpeechError("not-allowed")).toBe("no-permission");
     expect(classifyWebSpeechError("service-not-allowed")).toBe("no-permission");
   });
 
-  it("认得网络、没听到、被取消", () => {
+  it("recognizes network, no-speech, and aborted", () => {
     expect(classifyWebSpeechError("network")).toBe("network");
     expect(classifyWebSpeechError("no-speech")).toBe("no-speech");
     expect(classifyWebSpeechError("aborted")).toBe("aborted");
   });
 
-  it("没见过的串归到不可用", () => {
+  it("unknown strings map to unavailable", () => {
     expect(classifyWebSpeechError("something-new")).toBe("unavailable");
     expect(classifyWebSpeechError(undefined)).toBe("unavailable");
   });
 });
 
 describe("webSpeechProvider", () => {
-  it("没有引擎时报 unavailable 而不是抛异常", async () => {
+  it("no engine returns unavailable error, not exception", async () => {
     const c = collect();
     const s = await webSpeechProvider.start("zh-CN", c.handlers);
     expect(c.errors).toEqual(["unavailable"]);
-    // 返回的 session 仍要能安全调用。
+    // Returned session must still be safe to call.
     expect(() => {
       s.stop();
       s.cancel();
     }).not.toThrow();
   });
 
-  it("开始识别时配好语言并要求中间结果", async () => {
+  it("sets language and requests interim results on start", async () => {
     installEngine();
     const c = collect();
     await webSpeechProvider.start("zh-CN", c.handlers);
@@ -121,7 +122,7 @@ describe("webSpeechProvider", () => {
     expect(rec.started).toBe(1);
   });
 
-  it("中间结果与定稿分流", async () => {
+  it("separates interim and final results", async () => {
     installEngine();
     const c = collect();
     await webSpeechProvider.start("zh-CN", c.handlers);
@@ -131,15 +132,15 @@ describe("webSpeechProvider", () => {
     expect(c.final).toEqual(["把 P3 勾掉"]);
   });
 
-  // results 是累积列表。若从 0 遍历，第二段事件会把第一段已经定稿的内容再报一遍，
-  // 表现为输入框里文字重复。
-  it("只报本次新增的段落,不重复已定稿的", async () => {
+  // results is cumulative. If we iterate from 0, the second event will re-report
+  // the first segment's finalized content, appearing as duplicate text in the input.
+  it("reports only new segments, no duplicates of finalized ones", async () => {
     installEngine();
     const c = collect();
     await webSpeechProvider.start("zh-CN", c.handlers);
     const rec = FakeRecognition.last!;
     rec.emit(0, [{ text: "第一段", final: true }]);
-    // 第二次事件:列表里累积了两条,但 resultIndex 指向第二条。
+    // Second event: list now has two items, but resultIndex points to the second.
     rec.onresult?.({
       resultIndex: 1,
       results: [
@@ -150,20 +151,20 @@ describe("webSpeechProvider", () => {
     expect(c.final).toEqual(["第一段", "第二段"]);
   });
 
-  it("stop 让引擎收尾,定稿仍会到达", async () => {
+  it("stop lets engine wrap up, finals still arrive", async () => {
     installEngine();
     const c = collect();
     const s = await webSpeechProvider.start("zh-CN", c.handlers);
     s.stop();
     expect(FakeRecognition.last!.stopped).toBe(1);
-    // 引擎在 stop 之后才把最后一段吐出来 —— 这一段必须收下。
+    // Engine sends its last segment only after stop — we must receive it.
     FakeRecognition.last!.emit(0, [{ text: "最后一句", final: true }]);
     expect(c.final).toEqual(["最后一句"]);
   });
 
-  // cancel 的语义是「丢弃」。引擎在 abort 之后往往还会补一记 aborted onerror，
-  // 若照报上去，UI 会在用户主动取消后弹一条错误。
-  it("cancel 之后引擎补的错误与结果都不再上报", async () => {
+  // cancel means "discard." After abort, the engine often sends one more aborted
+  // onerror. If we report it, UI shows an error after user cancels, same mistake.
+  it("cancel suppresses both engine errors and results afterward", async () => {
     installEngine();
     const c = collect();
     const s = await webSpeechProvider.start("zh-CN", c.handlers);
@@ -175,7 +176,7 @@ describe("webSpeechProvider", () => {
     expect(c.final).toEqual([]);
   });
 
-  it("出错后不再上报后续结果", async () => {
+  it("stops reporting results after error", async () => {
     installEngine();
     const c = collect();
     await webSpeechProvider.start("zh-CN", c.handlers);
@@ -186,17 +187,17 @@ describe("webSpeechProvider", () => {
   });
 });
 
-// start() 返回 ≠ 麦克风已经开。这段空窗里用户说的话全丢，界面必须说「准备中」
-// 而不是「正在听」，所以 onReady 是这条实现的硬要求。
-describe("webSpeechProvider 的就绪信号", () => {
-  it("start 返回时还没就绪", async () => {
+// start() returning != mic opened. User speech during this window is lost, UI must
+// say "preparing" not "listening", so onReady signal is a hard requirement.
+describe("webSpeechProvider readiness signal", () => {
+  it("not ready when start returns", async () => {
     installEngine();
     const c = collect();
     await webSpeechProvider.start("zh-CN", c.handlers);
     expect(c.ready).toEqual([]);
   });
 
-  it("引擎 onstart 之后才报就绪", async () => {
+  it("ready only after engine onstart", async () => {
     installEngine();
     const c = collect();
     await webSpeechProvider.start("zh-CN", c.handlers);
@@ -204,7 +205,7 @@ describe("webSpeechProvider 的就绪信号", () => {
     expect(c.ready).toEqual([1]);
   });
 
-  it("cancel 之后引擎补的 onstart 不再上报", async () => {
+  it("engine onstart after cancel doesn't report ready", async () => {
     installEngine();
     const c = collect();
     const s = await webSpeechProvider.start("zh-CN", c.handlers);
@@ -214,10 +215,11 @@ describe("webSpeechProvider 的就绪信号", () => {
   });
 });
 
-// 浏览器即便 continuous=true 也会在长静默后自己结束会话（各家实现不一）。以前
-// onend 只把内部的 dead 置上，页面还以为在录 —— 和鸿蒙 VAD 收工是同一个症状。
-describe("引擎自己收工", () => {
-  it("onend 要上报给调用方", async () => {
+// Browser ends the session after long silence even with continuous=true (varies
+// per implementation). Before, onend only set internal flag, page still thought
+// it was recording — same symptom as harmony VAD wrapping up.
+describe("engine self-shutdown", () => {
+  it("onend must report to caller", async () => {
     installEngine();
     const c = collect();
     await webSpeechProvider.start("zh-CN", c.handlers);
@@ -226,7 +228,7 @@ describe("引擎自己收工", () => {
     expect(c.ended).toHaveLength(1);
   });
 
-  it("取消之后引擎补的 onend 不上报", async () => {
+  it("engine onend after cancel doesn't report", async () => {
     installEngine();
     const c = collect();
     const session = await webSpeechProvider.start("zh-CN", c.handlers);
@@ -236,7 +238,7 @@ describe("引擎自己收工", () => {
     expect(c.ended).toHaveLength(0);
   });
 
-  it("报错收场之后紧跟的 onend 不再上报", async () => {
+  it("onend after error doesn't report", async () => {
     installEngine();
     const c = collect();
     await webSpeechProvider.start("zh-CN", c.handlers);

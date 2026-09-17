@@ -38,7 +38,7 @@ import type { ContextMenuItem } from "./ContextMenu";
  *
  * Nothing here is new capability: `export_artifact`, `reveal_artifact`,
  * `open_artifact_external`, `delete_artifact`, `reveal_path`, the wiki's
- * `copyDocRef` / `exportDoc` and the 产出 / 知识库 page navigations all already
+ * `copyDocRef` / `exportDoc` and the artifact / wiki page navigations all already
  * existed. They were simply unreachable from the rail.
  */
 
@@ -147,8 +147,8 @@ function tailItems(tail: AuxCardTail, t: TFunction): ContextMenuItem[] {
 
 // ── collapsed chip ───────────────────────────────────────────────────────────
 
-/** What a chip's 复制 copies, and what it is called, by kind. A wiki chip copies
- *  the `[[slug]]` form because that is the doc's address everywhere else. */
+/** What copying a chip copies and what it is called, by kind. A wiki chip copies
+ *  the `[[slug]]` form because that is the doc's address everywhere. */
 function chipCopy(doc: AuxDoc, t: TFunction): { label: string; text: string } {
   switch (doc.kind) {
     case "file":
@@ -166,12 +166,12 @@ function chipCopy(doc: AuxDoc, t: TFunction): { label: string; text: string } {
  * A collapsed chip's right-click menu.
  *
  * Deliberately *not* the expanded card's menu with items greyed out. A chip has
- * no loaded document behind it, so 导出 (which needs the deliverable's filename
- * and the doc's kind) and 复制文件内容 (which needs the read) genuinely cannot be
+ * no loaded document behind it, so export (which needs the deliverable's filename
+ * and the doc's kind) and copy file content (which needs the read) genuinely cannot be
  * offered — and a menu whose items depend on whether a card happens to be open
- * would be the drift this module exists to prevent. What a chip *can* do is
+ * would be the drift this module is built to prevent. What a chip *can* do is
  * everything that needs only its ref: expand, copy the address, hand it to the
- * page that owns it, and manage the stack.
+ * owning page, and manage the card stack.
  */
 export function buildChipMenu({
   doc,
@@ -184,7 +184,7 @@ export function buildChipMenu({
   tail: AuxCardTail;
   t: TFunction;
   fail: Fail;
-  /** The 仓库 / 知识库 / 产出 / 浏览器 destination for this kind. */
+  /** The repository / wiki / artifact / browser destination for this kind. */
   onOpenPage?: () => void;
 }): ContextMenuItem[] {
   const copyable = chipCopy(doc, t);
@@ -257,8 +257,8 @@ export function buildFileMenu({
   fail: Fail;
   /** The loaded read, when the reader has one — only its text arm adds an item. */
   content?: ExplorerFileContent | null;
-  /** Hand the path to the 仓库 page, which owns the tree and the git status.
-   *  Absent on a collapsed chip's menu, where no workspace is in hand. */
+  /** Hand the path to the repository page, which owns the tree and git status.
+   *  Absent from collapsed chip menus, where no workspace is available. */
   onOpenInFiles?: () => void;
 }): AuxMenuBuild {
   const reveal: AuxAction = {
@@ -294,8 +294,8 @@ export function buildFileMenu({
     expandItem(tail, t),
     ...actions.map((a) => ({ id: a.id, label: a.label, icon: a.icon, onSelect: a.onSelect })),
   ];
-  // Only the text arm has anything to put on a clipboard; an image or a binary
-  // would copy the word "undefined".
+  // Only text content can be meaningfully copied to clipboard; images or binary files
+  // would produce the string "undefined".
   if (content?.kind === "text") {
     menu.push({
       id: "copy-content",
@@ -326,14 +326,14 @@ export function buildArtifactMenu({
   tail: AuxCardTail;
   t: TFunction;
   fail: Fail;
-  /** The deliverable's own title when it is loaded; the card label otherwise. */
+  /** The artifact's own title when loaded; falls back to the card label. */
   title: string;
   exporting?: boolean;
-  /** Owns the save panel (and the browser build's download fallback). */
+  /** Owns the save dialog (and the browser build's download fallback). */
   onExport: () => void;
   onOpenPage: () => void;
-  /** Confirms, deletes, then dismisses the card — the card outliving the
-   *  deliverable it reads is the one state this must not leave behind. */
+  /** Confirms, deletes, then dismisses the card — the card should never outlive
+   *  the artifact it displays, so this closes them together. */
   onDelete: () => void;
 }): AuxMenuBuild {
   const openPage: AuxAction = {
@@ -427,8 +427,8 @@ export function buildWikiMenu({
   t: TFunction;
   fail: Fail;
   onOpenPage: () => void;
-  /** Absent until the doc itself is loaded: the export needs its kind (which
-   *  decides md / html / zip) and the version being read. */
+  /** Only available after the doc loads: export needs the doc's kind (which
+   *  determines md / html / zip output) and the current version. */
   onExport?: () => void;
 }): AuxMenuBuild {
   const openPage: AuxAction = {
@@ -441,8 +441,8 @@ export function buildWikiMenu({
     id: "copy-ref",
     label: t("wiki.copy_ref_short", "复制引用"),
     icon: <Copy {...ICON} />,
-    // The `[[slug]]` form, not the slug: that is the doc's stable address and
-    // what `fleet wiki cat` and the composer's @-mention both resolve.
+    // Use the `[[slug]]` form, not bare slug: it's the doc's permanent address and
+    // what `fleet wiki cat` and composer @-mentions both resolve to.
     onSelect: () => copy(`[[${doc.ref}]]`, fail, t),
   };
   const exportIt: AuxAction | null = onExport
@@ -499,8 +499,8 @@ export function buildWebMenu({
   tail: AuxCardTail;
   t: TFunction;
   fail: Fail;
-  /** Re-probes and forces a fresh frame load. Absent on a collapsed chip,
-   *  which has no frame to reload. */
+  /** Re-fetches and forces the frame to reload. Not available on collapsed chips,
+   *  which have no embedded frame. */
   onReload?: () => void;
 }): AuxMenuBuild {
   const openBrowser: AuxAction = {

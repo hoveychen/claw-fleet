@@ -1,7 +1,8 @@
-// 仓库「漏活检查」客户端：列出桌面端所有会话 workspace 中的 git 仓库，揪出
-// 未合并回 main 的 worktree（忘记 merge）和领先 origin 的未推提交（忘记 push），
-// 并能触发 push / pull。全部经 relay 打到 claw-fleet-core/src/git_ops.rs
-// （repo_list / repo_detail / repo_push / repo_pull）。
+// Repository "pending-work audit" client: lists all git repos in all session
+// workspaces on the desktop, identifies unmerged-back worktrees (forgotten merge)
+// and unpushed commits ahead of origin (forgotten push), and can trigger push/pull.
+// All go through relay to claw-fleet-core/src/git_ops.rs (repo_list / repo_detail /
+// repo_push / repo_pull).
 
 import type { FleetTransport } from "./transport";
 import type { GitOpResult, RepoDetail, RepoSummary } from "./types";

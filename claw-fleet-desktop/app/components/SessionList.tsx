@@ -66,7 +66,7 @@ export function SessionList() {
   const terminalEnabled = useUIStore((s) => s.hostFeatures.terminal);
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
-  // Views that own a secondary sidebar (二级侧边栏). Re-clicking the nav item of
+  // Views that own a secondary sidebar (two-level sidebar). Re-clicking the nav item of
   // the already-active one collapses/expands its sidebar instead of being a
   // no-op; every other view just switches as usual.
   const navTo = useCallback(
@@ -141,7 +141,7 @@ export function SessionList() {
     // so far; and any future events will be caught by the listeners above.
     unlistenPromise.then(() => refresh());
     unlistenScanReady.then(() => refresh());
-    // Keep the running-command total fresh for the 仓库 nav badge even when the
+    // Keep the running-command total fresh for the repos nav badge even when the
     // files view isn't open (FilesView also polls, but only while mounted).
     const fetchProcs = useProcStore.getState().fetchProcs;
     fetchProcs();
@@ -415,10 +415,10 @@ export function SessionList() {
         </button>
 
         {/* Sidebar nav, split into two top-level modes by the tab strip below:
-            舰队 (watching / administering — sessions, audit, report, memory,
-            skills, phone) and 工作 (what you reach for while an agent works —
+            Fleet (watching / administering — sessions, audit, report, memory,
+            skills, phone) and Work (what you reach for while an agent works —
             tasks, repos, wiki, schedules, plan trees). Plugins are a source of
-            skills, so they live under the 技能 entry as a segmented tab
+            skills, so they live under the Skills entry as a segmented tab
             (SkillsSourceTabs), not a separate nav item. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
           <div className={styles.nav_tabs} role="tablist" aria-label={t("nav_group.aria", "模式")}>

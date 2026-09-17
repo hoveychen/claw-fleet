@@ -467,8 +467,9 @@ export function TasksView({
     [chatPaths],
   );
 
-  // 列表按文件夹分区展示（Chat 置顶），所以任务页不再有目录下拉：要看哪个目录
-  // 就折叠掉别的分区。「终端」按钮因此不带初始目录，由终端页自己的目录选择器接手。
+  // List displays partitioned by folder (Chat pinned to top), so the task page
+  // has no directory dropdown: to see a directory, collapse others. The "Terminal"
+  // button thus carries no initial directory; that page's own picker takes over.
   const multiDevice = deviceLabelOf !== undefined;
 
   // Everything except the mark filter — the segment counts are taken over this
@@ -510,7 +511,8 @@ export function TasksView({
 
   const setMark = useCallback(
     (s: WithDevice<SessionInfo>, mark: SessionMark | null) => {
-      // 会话所属那一台,不是当前作用域那一台 —— 打错主机的标记等于没标记。
+      // Mark on the session's own machine, not the scoped one — marking on the
+      // wrong host gets no effect.
       const transport = clientFor(s.deviceId);
       if (!transport) return;
       const key = itemKey(s.deviceId, s.id);
@@ -980,7 +982,8 @@ export function TasksView({
               >
                 <Folder size={13} className={styles.workspaceFolder} />
                 <span className={styles.workspaceName}>{section.name}</span>
-                {/* 折叠后的组数：一条折叠的接力链算一组，与桌面端二级侧栏同义。 */}
+                {/* Item count when collapsed: a collapsed handoff chain counts as one,
+                    same meaning as the desktop secondary sidebar. */}
                 <span className={styles.workspaceCount}>{section.items.length}</span>
                 <ChevronRight
                   size={14}

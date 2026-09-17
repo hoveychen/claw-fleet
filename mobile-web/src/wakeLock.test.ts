@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// 受控验证屏幕常亮的核心行为：开→acquire 真调 navigator.wakeLock.request("screen")，
-// 关→release，回前台重拿。node 环境无 world 隔离（patchwright eval 的隔离 world 会
-// 让注入的 spy 打不到模块看到的对象，故不能用浏览器 eval 验证这一层）。
+// Controlled verification of screen stay-awake core behavior: on → truly calls
+// navigator.wakeLock.request("screen"), off → release, return to foreground and re-acquire.
+// Node has no world isolation (patchwright eval's isolated world prevents injected spies from
+// reaching the module's objects, so we can't use browser eval to verify this layer).
 //
-// 模块在 import 期会读 document / navigator，所以每个用例先装好 mock 再动态 import，
-// 并用 vi.resetModules() 保证模块级 enabled/sentinel 状态互不串扰。
+// Module reads document / navigator at import time, so each test case sets up mocks first,
+// then dynamic import, and uses vi.resetModules() to prevent module-level enabled/sentinel state leakage.
 
 type Sentinel = {
   released: boolean;
@@ -64,7 +65,7 @@ function installEnv(opts: { supported?: boolean; visible?: boolean } = {}) {
   localStorage.clear();
 }
 
-// 让 acquire()/drop() 内部的 await 微任务跑完
+// Let internal await microtasks in acquire()/drop() finish
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 afterEach(() => {
@@ -100,7 +101,7 @@ describe("wakeLock", () => {
     const { setWakeLockEnabled } = await import("./wakeLock");
     setWakeLockEnabled(true);
     await flush();
-    setWakeLockEnabled(true); // next===enabled，早退
+    setWakeLockEnabled(true); // next===enabled, early exit
     await flush();
     expect(requestMock).toHaveBeenCalledTimes(1);
   });
@@ -109,9 +110,9 @@ describe("wakeLock", () => {
     const { setWakeLockEnabled } = await import("./wakeLock");
     setWakeLockEnabled(true);
     await flush();
-    // 模拟系统自动释放（切后台 / 低电量）
+    // Simulate system auto-release (background / low battery)
     sentinels[0]._fireRelease();
-    // 回前台
+    // Return to foreground
     for (const fn of visibilityListeners) fn();
     await flush();
     expect(requestMock).toHaveBeenCalledTimes(2);
@@ -131,12 +132,12 @@ describe("wakeLock", () => {
     expect(isWakeLockSupported()).toBe(false);
     setWakeLockEnabled(true);
     await flush();
-    // 没有 wakeLock API 时不应抛错（requestMock 根本没挂上去）
+    // Should not throw when wakeLock API is absent (requestMock was never attached)
     expect(localStorage.getItem("fleet-wake-lock")).toBe("1");
   });
 
   it("请求返回前被关掉 → 立即释放，不留幽灵锁", async () => {
-    // 让 request 慢一拍返回，期间关掉开关
+    // Make request return slowly, turn off the switch in the meantime
     let resolveReq!: (s: Sentinel) => void;
     const slow = makeSentinel();
     requestMock.mockImplementationOnce(
@@ -155,8 +156,9 @@ describe("wakeLock", () => {
   });
 });
 
-// 录音期间的临时持锁：不改用户的常亮开关，但只要还有人 hold 着，就得真持着锁。
-// 这是「说到一半手机自动息屏，识别被打断」的修复面。
+// Temporary lock hold during recording: do not change the user's stay-awake setting,
+// but as long as anyone is holding it, truly keep the lock. This is the fix for
+// "screen auto-turns off mid-speech, recognition gets interrupted".
 describe("holdWakeLock", () => {
   beforeEach(() => {
     installEnv();
@@ -167,7 +169,7 @@ describe("holdWakeLock", () => {
     const release = holdWakeLock();
     await flush();
     expect(requestMock).toHaveBeenCalledWith("screen");
-    // 临时持锁不该把用户的开关掰开——录完要回到他自己的设置。
+    // Temporary hold should not flip the user's switch — after recording, return to their setting.
     expect(getWakeLockEnabled()).toBe(false);
     release();
     await flush();
@@ -196,7 +198,7 @@ describe("holdWakeLock", () => {
     a();
     a();
     await flush();
-    // 第二次 a() 不该把 b 的那一份也抵消掉。
+    // Second a() call should not cancel out b's hold.
     expect(sentinels[0].release).not.toHaveBeenCalled();
     b();
     await flush();

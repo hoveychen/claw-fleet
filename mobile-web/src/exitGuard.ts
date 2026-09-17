@@ -1,10 +1,12 @@
 import type { RootBackResult } from "./navStack";
 
-/** 栈底返回的「再按一次退出」闸门。
+/** Root-level back's "press again to exit" gate.
  *
- *  为什么不只靠 beforeunload：iOS 独立 PWA（从主屏幕打开）下浏览器基本不弹那个原生
- *  对话框，而这正是 Fleet 移动端的主力形态——只挂 beforeunload 等于对最常用的场景没设防。
- *  所以真正拦住误触的是这里：第一次返回只弹提示并把哨兵压回去，2 秒内再按一次才放行。 */
+ *  Why not rely only on beforeunload: on iOS standalone PWA (opened from home screen),
+ *  the browser basically doesn't show that native dialog, and this is precisely Fleet's
+ *  mobile's primary form — just hooking beforeunload leaves the most common scenario
+ *  unprotected. So what actually prevents accidental taps is here: the first back only
+ *  shows a prompt and pushes the sentinel back; press again within 2 seconds to proceed. */
 
 export const EXIT_WINDOW_MS = 2_000;
 
@@ -13,10 +15,11 @@ export class ExitGuard {
   private timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
-    /** 驱动 toast 的显隐。 */
+    /** Controls toast visibility. */
     private onArmedChange: (armed: boolean) => void,
-    /** 放行前的收尾：摘掉 beforeunload——用户已经通过 toast 确认过一次意图了，
-     *  再弹一个原生「离开此网站？」是第二次确认，纯属折磨。 */
+    /** Cleanup before allowing: remove beforeunload — the user has already confirmed
+     *  their intent once via toast; another native "Leave this website?" is a second
+     *  confirmation, pure torture. */
     private onLeave: () => void,
     private windowMs: number = EXIT_WINDOW_MS,
   ) {}
@@ -42,8 +45,8 @@ export class ExitGuard {
   }
 }
 
-/** 刷新 / 关标签 / 地址栏跳走这些非返回路径的兜底确认（文案由浏览器决定，不可定制）。
- *  返回卸载函数。 */
+/** Fallback confirmation for non-back paths like refresh / close tab / address bar
+ *  navigation (text is decided by browser, not customizable). Returns an uninstall function. */
 export function installUnloadPrompt(): () => void {
   const onBeforeUnload = (e: BeforeUnloadEvent) => {
     e.preventDefault();

@@ -401,7 +401,7 @@ interface Props {
   isLoading: boolean;
   /** The fetch blew its deadline with nothing to show. Replaces the spinner
    *  with an explanation + retry — a transcript fetch that never lands used to
-   *  leave this pane on 「加载中…」 forever. */
+   *  leave this pane on "Loading…" forever. */
   stalled?: boolean;
   /** Why the fetch rejected, if it did. Rendered instead of the timeout
    *  message, which would otherwise blame a backend that answered fine. */
@@ -573,7 +573,7 @@ export function MessageList({
   const visibleMsgs = displayMsgs.slice(effectiveStart);
 
   // Collapse runs of adjacent synthetic `isMeta` user turns into a single fold,
-  // so N back-to-back injected turns don't stack N identical "系统上下文" dividers.
+  // so N back-to-back injected turns don't stack N identical "System Context" dividers.
   // A second pass folds runs of tool-call/thinking assistant records into
   // WorkRunBlock bands. Grouping lives at the list level — a MessageRow only
   // sees one message.

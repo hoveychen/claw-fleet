@@ -47,12 +47,13 @@ describe("recordSnapshotSource", () => {
     const g = log.find((s) => s.agent?.pid === 40404)!;
     expect(g.ignored).toBe(1);
     expect(g.trusted).toBe(false);
-    // 主 agent 那条不受影响 —— 这正是「谁是李鬼」的判据。
+    // The main agent's row is unaffected—this is how we identify the genuine one.
     expect(log.find((s) => s.agent?.pid === 18953)!.trusted).toBe(true);
   });
 
-  // 桌面 App 重启只是换了个 pid，还是同一个桌面端。台账要把它并成一条，
-  // 否则「更多」页会把活着的桌面端报成「另有 1 个 agent」（2026-08-24 实测）。
+  // Desktop app restart just changes the pid; it's still the same desktop.
+  // The ledger must merge them or the "More" page reports the live desktop as
+  // "another 1 agent" (observed 2026-08-24).
   it("桌面端重启（只有 pid 变）：并进同一条，记下换过几个进程并显示最新 pid", () => {
     const restarted = { ...desk, pid: 96862 };
     let log = recordSnapshotSource([], {
@@ -72,7 +73,7 @@ describe("recordSnapshotSource", () => {
     expect(log).toHaveLength(1);
     expect(log[0].snapshots).toBe(2);
     expect(log[0].pids).toEqual([18953, 96862]);
-    // 展示用的指纹跟到最新那个进程上。
+    // The fingerprint for display follows the latest process.
     expect(log[0].agent?.pid).toBe(96862);
   });
 
@@ -127,7 +128,7 @@ describe("recordSnapshotSource", () => {
       });
     }
     expect(log).toHaveLength(MAX_SNAPSHOT_SOURCES);
-    // 最老的被挤掉，最新的一定在。
+    // Oldest is pushed out, newest is guaranteed to be there.
     expect(log.some((s) => s.key === "agent-0")).toBe(false);
     expect(log.some((s) => s.key === `agent-${MAX_SNAPSHOT_SOURCES + 2}`)).toBe(true);
   });

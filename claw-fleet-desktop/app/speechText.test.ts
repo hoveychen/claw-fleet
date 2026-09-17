@@ -5,15 +5,15 @@ import { normalizeForSpeech } from "./decisionText";
 /**
  * Every case here comes from a pronunciation the Edge TTS backend was measured
  * getting wrong, on strings mined out of `~/.fleet/decision-history`. The
- * mechanism is always the same: a polyphone character ends up *isolated* — no
- * Chinese neighbours to segment with — so the frontend falls back to the
- * character's most frequent reading. 重 falls back to zhòng (should be chóng).
+ * mechanism is always the same: a polyphonic character ends up *isolated* — no
+ * Chinese neighbours for segmentation — so the frontend falls back to the
+ * character's most common reading. 重 falls back to zhòng (should be chóng).
  */
 describe("normalizeForSpeech", () => {
   describe("markdown is removed, not turned into spaces", () => {
-    // The old `lastQuestionSentence` did `.replace(/[`*_#>\[\]()]/g, " ")`.
-    // Substituting a space is what splits a word open: `**重**试` -> `重 试`,
-    // and an isolated 重 is read zhòng. Deleting the marker keeps 重试 intact.
+    // Old `lastQuestionSentence` did `.replace(/[`*_#>\[\]()]/g, " ")`.
+    // Substituting space splits a word: `**重**试` -> `重 试`,
+    // and isolated 重 is read zhòng. Deleting the marker keeps 重试 intact.
     it("keeps a word intact when a marker sits inside it", () => {
       expect(normalizeForSpeech("**重**试")).toBe("重试");
     });

@@ -109,8 +109,8 @@ impl Push {
 
     /// Register a subscription for the channel. Two client kinds share one
     /// store: a browser Web Push subscription (`endpoint` + `keys`, deduped by
-    /// endpoint) and a HarmonyOS 元服务 account subscription
-    /// (`platform:"harmony"` + `openId`, deduped by openId). The 元服务 channel
+    /// endpoint) and a HarmonyOS HMS account subscription
+    /// (`platform:"harmony"` + `openId`, deduped by openId). The HMS channel
     /// delivers by Huawei-account OpenID, not a device push token — see
     /// `harmony_push.rs`. A subscription with no explicit `platform` is treated
     /// as Web Push for backward compat.
@@ -189,14 +189,14 @@ impl Push {
 
     /// Identity of a harmony subscription, used for dedup and for pruning.
     ///
-    /// Two Push Kit channels land in the same store: the 元服务 account channel
-    /// keys on `openId`, the 普通应用 device channel on `token`. Prefixing keeps
+    /// Two Push Kit channels land in the same store: the HMS account channel
+    /// keys on `openId`, the device channel on `token`. Prefixing keeps
     /// them from ever colliding, and the prefix is what `notify` reads back to
     /// decide which endpoint to call — so the wire shape alone determines the
     /// channel and no extra discriminator field has to be kept in sync.
     ///
     /// `token` wins when both are present: a device that has migrated from the
-    /// 元服务 build should be reached the new way.
+    /// HMS build should be reached the new way.
     fn harmony_key(sub: &Value) -> Option<String> {
         if !Self::is_harmony(sub) {
             return None;
@@ -251,8 +251,8 @@ impl Push {
         let outcomes = futures_util::future::join_all(subs.iter().map(|sub| async move {
             if Self::is_harmony(sub) {
                 // Two Push Kit channels, picked by the subscription's own shape:
-                // a device `token` goes to the 普通应用 endpoint
-                // (`v3/messages:send`), an `openId` to the 元服务
+                // a device `token` goes to the device-channel endpoint
+                // (`v3/messages:send`), an `openId` to the HMS account
                 // service-notification endpoint. No-op when the channel is
                 // disabled (creds absent → harmony is None).
                 let (Some(hp), Some(key)) = (harmony, Self::harmony_key(sub)) else {
@@ -391,7 +391,7 @@ mod tests {
         json!({ "platform": "harmony", "openId": open_id })
     }
 
-    /// 普通应用 channel registration (device push token) — see `harmony_key`.
+    /// Device-channel registration (device push token) — see `harmony_key`.
     fn mk_harmony_token(token: &str) -> Value {
         json!({ "platform": "harmony", "token": token })
     }
@@ -551,11 +551,11 @@ mod tests {
         assert_eq!(kept.len(), 1);
     }
 
-    // ── 普通应用 (device token) channel ────────────────────────────────────
+    // ── Device channel (device token) ────────────────────────────────────────
 
     #[test]
     fn harmony_key_prefers_token_over_open_id() {
-        // A device that migrated from the 元服务 build can report both; the new
+        // A device that migrated from the HMS build can report both; the new
         // channel must win, otherwise it keeps getting the (now dead) account
         // service-notification.
         let both = json!({ "platform": "harmony", "openId": "OID-A", "token": "TOK-A" });

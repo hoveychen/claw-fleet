@@ -6,18 +6,18 @@ import {
 } from "./mermaidFit";
 
 describe("naturalWidthFromViewBox", () => {
-  it("读 mermaid 实际吐出的那种 viewBox", () => {
-    // 实测值：知识库 arch/overview 那张架构图。
+  it("reads the viewBox that mermaid actually emits", () => {
+    // Measured from wiki arch/overview diagram.
     expect(naturalWidthFromViewBox("0 0 1279.546875 224.28900146484375")).toBeCloseTo(
       1279.546875,
     );
   });
 
-  it("逗号分隔也认", () => {
+  it("also accepts comma-separated values", () => {
     expect(naturalWidthFromViewBox("0,0,800,200")).toBe(800);
   });
 
-  it("缺席 / 残缺 / 非法宽度都返回 null，让调用方别管这张图", () => {
+  it("returns null for missing / truncated / invalid widths, so caller ignores diagram", () => {
     expect(naturalWidthFromViewBox(null)).toBeNull();
     expect(naturalWidthFromViewBox("0 0 800")).toBeNull();
     expect(naturalWidthFromViewBox("0 0 abc 200")).toBeNull();
@@ -26,17 +26,17 @@ describe("naturalWidthFromViewBox", () => {
 });
 
 describe("fitDiagramWidth", () => {
-  it("容器装得下自然宽 → 不插手", () => {
+  it("container fits natural width → no scaling needed", () => {
     expect(fitDiagramWidth(600, 900)).toBeNull();
     expect(fitDiagramWidth(600, 600)).toBeNull();
   });
 
-  it("装不下但缩放还在下限以上 → 不插手，照常缩", () => {
-    // 800 × 0.7 = 560，容器 700 还宽于它。
+  it("doesn't fit but scaling stays above minimum → don't intervene", () => {
+    // 800 × 0.7 = 560, container 700 is still wider.
     expect(fitDiagramWidth(800, 700)).toBeNull();
   });
 
-  it("刚好落在下限上 → 不插手（边界不来回抖）", () => {
+  it("exactly at minimum → don't intervene (no boundary jitter)", () => {
     expect(fitDiagramWidth(800, 560)).toBeNull();
   });
 

@@ -677,7 +677,7 @@ export function ArtifactsView() {
     const items = checkedItems;
     // Everything in one batch shares a destination, so one prompt. The path is
     // normalized (and refused) server-side, so a typo comes back as an error
-    // rather than creating a folder named "  交付 / ".
+    // rather than creating a folder named "  deliverables / ".
     const target = window.prompt(
       t("artifacts.batch_move_prompt", "把选中的 {{count}} 份移动到哪个文件夹？（留空＝工作区根目录）", {
         count: items.length,
@@ -697,7 +697,7 @@ export function ArtifactsView() {
     const names = uniqueExportNames(items.map((a) => a.name));
     // A tab cannot be handed a destination directory, so it falls back to the
     // browser's own download folder, one file at a time — same split the
-    // single-artifact 导出 already makes.
+    // single-artifact export already makes.
     if (isWebBuild()) {
       await runBatch(items, (a, i) => downloadArtifact(a.id, names[i]));
       return;

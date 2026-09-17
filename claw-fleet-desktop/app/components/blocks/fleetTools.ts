@@ -108,8 +108,8 @@ export function friendlyToolName(rawId: string, t: (key: string) => string): str
 }
 
 /**
- * Is this call the moment a deliverable entered the 产出 store or a doc entered
- * the 知识库?
+ * Is this call the moment a deliverable entered the 产出 (Outputs) store or a doc
+ * entered the 知识库 (Wiki)?
  *
  * Both are "the run produced a thing you can hold", which is a different kind
  * of event from the reads and edits around them — so, like a decision card,
@@ -155,7 +155,7 @@ export interface WikiSearchItem {
 }
 
 /**
- * A deliverable that just landed in the 产出 store, parsed out of `artifact
+ * A deliverable that just landed in the 产出 (Outputs) store, parsed out of `artifact
  * add`'s confirmation line. The id is the load-bearing field: it is what lets
  * the card fetch the artifact's metadata and render its actual content, rather
  * than restating the sentence the tool already returned.
@@ -168,7 +168,7 @@ export interface ArtifactAdded {
   bytes: number;
 }
 
-/** A doc that just landed in the 知识库, parsed out of `wiki publish`'s line. */
+/** A doc that just landed in the 知识库 (Wiki), parsed out of `wiki publish`'s line. */
 export interface WikiPublished {
   slug: string;
   version: string;
@@ -256,7 +256,7 @@ export function parseWikiSearch(text: string): WikiSearchItem[] {
 
 /**
  * `artifact add` → `Stored artifact <id> — <title> (<kind>, <n> bytes), copied.
- * It is now on the 产出 page.` (`mcp_control.rs::handle_artifact`).
+ * It is now on the 产出 (Outputs) page.` (`mcp_control.rs::handle_artifact`).
  *
  * A title is free text and may itself contain " (" or " — ", so the shape is
  * matched from the tail: the `(<kind>, <n> bytes)` group is the anchor and the
@@ -355,9 +355,9 @@ export function classifyResult(
   }
   // The two ingest confirmations are the only mutates whose *subject* the
   // reader wants to see rather than be told about — a deliverable landing in
-  // the 产出 store, a doc landing in the 知识库. Parsed into an identifier the
-  // card can resolve into the real thing; an unrecognised sentence (an older
-  // core, a future wording) falls back to the plain confirm line.
+  // the 产出 (Outputs) store, a doc landing in the 知识库 (Wiki). Parsed into an
+  // identifier the card can resolve into the real thing; an unrecognised sentence
+  // (an older core, a future wording) falls back to the plain confirm line.
   if (tool === "artifact" && action === "add") {
     const artifact = parseArtifactAdd(text);
     return artifact ? { kind: "artifact-add", artifact } : { kind: "confirm", text };

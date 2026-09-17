@@ -1,5 +1,5 @@
-/* Fleet 移动端 service worker — Web Push 接收与点击聚焦。
- * 同 tag 的通知互相替换（桌面端与 fleet serve 双发时自然去重）。 */
+/* Fleet mobile service worker — receives Web Push and focuses on notification clicks.
+ * Notifications with the same tag replace each other (naturally deduplicates when desktop and fleet serve both send). */
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -36,9 +36,9 @@ self.addEventListener("notificationclick", (event) => {
       .then((list) => {
         for (const client of list) {
           if ("focus" in client) {
-            // 已经开着的窗口 focus 后 URL 一动不动 —— openWindow 那条路才会把
-            // fragment 带进地址栏。所以把目标 url 单独投一份过去,否则「app 开
-            // 着时点通知」永远停在当前页面。
+            // When an already-open window calls focus(), the URL doesn't move — only the
+            // openWindow path brings the fragment into the address bar. So send the target
+            // url separately; otherwise clicking a notification while the app is open stays on the current page.
             client.postMessage({ type: "fleet-deeplink", url });
             return client.focus();
           }

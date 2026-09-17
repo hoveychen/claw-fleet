@@ -1,6 +1,7 @@
-// 近 24h 占用率曲线：5h 池与 7d Opus 池各一条线。数据是桌面端后台采样器落盘的
-// 快照（relay `usage_history`，纯读盘），所以刷新很便宜。手写 SVG——桌面端那张图
-// 用 recharts，这里只要两条折线加几条网格线，不值得为它引一个图表库。
+// Usage curve over the past 24h: one line each for the 5h pool and 7d Opus pool.
+// Data is a snapshot persisted by the desktop background sampler (relay `usage_history`,
+// pure disk read), so refresh is cheap. Hand-written SVG — the desktop chart uses recharts,
+// but here we only need two polylines and a few grid lines, not worth importing a chart library.
 
 import { useEffect, useMemo, useState } from "react";
 import { fetchUsageHistory } from "../account";
@@ -13,7 +14,7 @@ import styles from "./UsageChart.module.css";
 const WINDOW_MS = 24 * 3_600_000;
 const TICK_STEP_MS = 6 * 3_600_000;
 
-/** viewBox 用户单位；等比缩放到卡片宽度。 */
+/** viewBox user units; scale proportionally to card width. */
 const W = 320;
 const H = 120;
 
@@ -30,7 +31,8 @@ function clock(ts: number): string {
 
 export function UsageChart({ client }: { client: FleetTransport | null }) {
   const [points, setPoints] = useState<UsageHistoryPoint[] | null>(null);
-  // 拉取那一刻的时间戳：窗口右端固定住，避免每次重渲染窗口都在漂。
+  // Timestamp at the moment of fetch: lock the window's right edge to prevent the
+  // window from drifting on each re-render.
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {

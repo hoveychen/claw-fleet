@@ -37,7 +37,7 @@ export function WebTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail }) {
   const { t } = useTranslation();
   const [probe, setProbe] = useState<UrlEmbedProbe | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Bumped by 重新加载: re-probes and, because it keys the iframe, forces a fresh
+  // Bumped by "Reload": re-probes and, because it keys the iframe, forces a fresh
   // load even when the src string is unchanged.
   const [nonce, setNonce] = useState(0);
   const url = doc.ref;

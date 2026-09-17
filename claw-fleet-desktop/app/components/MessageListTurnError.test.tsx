@@ -64,7 +64,7 @@ describe("MessageList — failed turn", () => {
 
     expect(container.querySelector('[data-testid="turn-error"]')).not.toBeNull();
     expect(container.textContent).toContain(ERROR_TEXT);
-    // The bug: the pane sat on 「处理中…」 forever with the reason nowhere.
+    // The bug: the pane showed "Processing" forever with the reason nowhere.
     expect(container.textContent).not.toContain("Processing");
     expect(container.textContent).not.toContain("处理中");
   });

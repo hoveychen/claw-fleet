@@ -50,7 +50,7 @@ function PlanBlock({ plan }: { plan: TaskPlanDetail }) {
   // title already *is* the id, no need to repeat it.
   const showId = Boolean(plan.title && plan.id);
   // The first still-pending item is "current" for this plan — the visible
-  // answer to 「做到第几个 P 了」.
+  // answer to "which P is the session on".
   const currentIdx = plan.items.findIndex((it) => !it.done);
 
   return (

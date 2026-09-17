@@ -55,22 +55,21 @@ const render = () =>
     />,
   );
 
-describe("产出 detail bar — OS actions", () => {
+describe("artifact detail bar — OS actions", () => {
   /**
-   * The bug this pins (2026-09-08): 「用系统应用打开」and 「在访达中显示」were
-   * rendered only when an `artifact_local_path` invoke had come back with a
-   * path, and its failure branch was a bare `.catch(() => setLocalPath(null))`.
-   * On a busy desktop that call is not always prompt — the debug log has
-   * commands stalling for seconds — and while it was outstanding the boss saw a
-   * detail bar with two buttons instead of four, with nothing to explain the
-   * other two and no retry. Both actions only need the artifact id, so nothing
-   * about them may hang off a round trip.
+   * The bug this pins (2026-09-08): "Open with system app" and "Show in Finder"
+   * rendered only when an `artifact_local_path` invoke came back with a path, and
+   * its failure branch was bare `.catch(() => setLocalPath(null))`. On a busy
+   * desktop that call is not always prompt — debug logs show commands stalling
+   * seconds — and while outstanding, the boss saw a detail bar with two buttons
+   * instead of four, nothing explaining the others and no retry. Both actions
+   * only need the artifact id, nothing about them should hang on a round trip.
    */
   it("shows both OS actions without waiting on any command", () => {
     const html = render();
     expect(html).toContain("artifacts.open_with");
     expect(html).toContain("artifacts.reveal");
-    // And 导出 is not itself gated on one either.
+    // And export is not itself gated on one either.
     expect(html).toContain("artifacts.export_short");
   });
 });

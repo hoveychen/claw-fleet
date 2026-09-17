@@ -89,7 +89,7 @@ describe("simplified-mode header decisions pill", () => {
     act(() => pill()!.click());
     expect(useUIStore.getState().openTaskNav?.sessionId).toBe("s-old");
     // The click also has to leave simplified mode on a page that renders the
-    // task, which `requestOpenTask` does by hopping to 任务 (history).
+    // task, which `requestOpenTask` does by hopping to "Tasks" tab (history).
     expect(useUIStore.getState().viewMode).toBe("history");
   });
 

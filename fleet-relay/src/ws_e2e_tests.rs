@@ -208,10 +208,10 @@ async fn auth_then_forward_between_roles() {
     assert_eq!(got["title"], "t");
 }
 
-/// 通知的点击目标必须带上「这条来自哪个 channel」。一部手机可以同时配对多台
-/// 桌面端,而桌面端产出的 url 只带卡 id —— 卡 id 只在单机内唯一,所以两台同时有
-/// 卡时,点开落到哪一张全靠运气。盖标记的只能是 relay:它是唯一在扇出时确切知道
-/// channel 的一方。
+/// Notification tap target must be stamped with "which channel did this come from."
+/// One phone can pair with multiple desktops; desktop-generated URLs only carry card id—card ids are
+/// unique per machine, so when two desktops have cards simultaneously, which opens is luck.
+/// Only the relay can stamp this: it's the only party that knows the channel with certainty when fanning out.
 #[tokio::test]
 async fn notify_target_is_stamped_with_the_channel() {
     let url = spawn_server().await;
@@ -220,7 +220,7 @@ async fn notify_target_is_stamped_with_the_channel() {
     let (mut client_a, _) = connect(&url, "client", SECRET).await;
     let _ = recv_json(&mut agent_a).await; // presence bump
 
-    // 另一个 channel(另一台桌面端),两边故意用**同一个卡 id**。
+    // Another channel (another desktop), both sides deliberately use **the same card id**.
     const OTHER: &str = "fedcba9876543210fedcba9876543210";
     let (mut agent_b, _) = connect(&url, "agent", OTHER).await;
     let (mut client_b, _) = connect(&url, "client", OTHER).await;
@@ -307,14 +307,13 @@ async fn wrong_secret_is_isolated_and_short_secret_rejected() {
     assert_eq!(reply["type"], "error");
 }
 
-/// Full mobile end-to-end encryption (方案A) through the REAL relay: a payload
-/// sealed with the desktop/phone crypto survives a round-trip in both
-/// directions, and the frame the relay forwards is ciphertext only — the relay
-/// never sees the pairing secret (it auths with the derived channel token) nor
-/// the plaintext body. Guards the blind-forwarder contract this whole feature
-/// rests on. The seal/open primitives and cross-language vectors are unit-tested
-/// in claw-fleet-core::relay_crypto / mobile-web relayCrypto.test.ts; this proves
-/// the two halves compose over a live socket.
+/// Full mobile end-to-end encryption (Plan A) through the REAL relay: a payload
+/// sealed with desktop/phone crypto survives round-trip in both directions,
+/// and the relay-forwarded frame is ciphertext only—relay never sees the pairing secret
+/// (it auths with the derived channel token) nor the plaintext body. Guards the blind-forwarder
+/// contract this whole feature rests on. The seal/open primitives and cross-language vectors
+/// are unit-tested in claw-fleet-core::relay_crypto / mobile-web relayCrypto.test.ts;
+/// this proves the two halves compose over a live socket.
 #[tokio::test]
 async fn sealed_payload_round_trips_through_relay() {
     use claw_fleet_core::relay_crypto::{derive_keys, open, seal, SealedBox};

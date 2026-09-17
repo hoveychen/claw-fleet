@@ -1,20 +1,21 @@
 // @vitest-environment jsdom
 //
-// 主机给的界面语言默认值（后端的 FLEET_LOCALE，经 host_features 送来）。
+// Host-provided UI language default (backend's FLEET_LOCALE, sent via host_features).
 //
-// 和精简模式的主机默认值同构，存在的理由也一样：浏览器构建的设置各存一份
-// localStorage，所以一台配了 FLEET_LOCALE=zh 的主机没有任何办法告诉它服务的
-// 页面「我是中文主机」——每个访客都是英文，直到自己翻到设置里那个开关。
+// Structurally identical to simplified mode's host default, exists for the same reason:
+// browser builds store settings in localStorage each, so a host configured with FLEET_LOCALE=zh
+// has no way to tell the pages it serves "I'm a Chinese host" — each visitor sees English until
+// they navigate to the settings toggle.
 //
-// 单独一个文件而不是并进 store.test.ts：这些用例要真的加载 i18n，而 i18n 在
-// 初始化时读 `navigator.language`，所以必须跑在 jsdom 里（store.test.ts 是
-// node 环境）。四条不变量：
+// Separate file rather than merged into store.test.ts: these tests need to actually load i18n,
+// and i18n reads `navigator.language` at init time, so they must run in jsdom (store.test.ts is
+// node environment). Four invariants:
 //
-//   1. 主机表了态、这个客户端没选过 ⇒ 就地换语言，不必等下一次加载；
-//   2. 用户显式选过 ⇒ 主机不许改回来；
-//   3. 主机的答案缓存下来给下一次同步读（i18next 的 lng 必须同步定），主机
-//      不再表态时这份缓存跟着清掉，不会变成撤不掉的粘滞开关；
-//   4. 主机报了个这个 bundle 没有的语言 ⇒ 记下来但不生效。
+//   1. Host signals, this client hasn't chosen ⇒ switch language in place, don't wait for next load;
+//   2. User explicitly chose ⇒ host cannot override back;
+//   3. Cache host's answer for next sync read (i18next's lng must be set synchronously); when host
+//      stops signaling, drop cache with it — doesn't become an unrevertible sticky toggle;
+//   4. Host signals a language this bundle lacks ⇒ record it but don't switch.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => undefined) }));
@@ -26,15 +27,16 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ setTheme: vi.fn(async () => undefined) }),
 }));
 
-describe("界面语言的主机默认值（host_features）", () => {
+describe("UI language host default (host_features)", () => {
   beforeEach(() => vi.resetModules());
 
   it("adopts the host's language in place and caches it for the next load", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     vi.mocked(invoke).mockResolvedValueOnce({ terminal: false, localeDefault: "zh" });
 
-    // 先加载 i18n：它这时读到的是空缓存，所以落在浏览器语言（jsdom 报 en-US）
-    // 上 —— 这样下面断言的才是「就地换」，而不是「初始化时正好读到了」。
+    // Load i18n first: at this point it reads an empty cache, so it falls back to
+    // browser language (jsdom reports en-US) — this way the assertion below tests
+    // "switched in place", not "happened to read during init".
     const i18n = (await import("./i18n")).default;
     expect(i18n.language).toBe("en");
 
@@ -43,7 +45,7 @@ describe("界面语言的主机默认值（host_features）", () => {
     await useUIStore.getState().loadHostFeatures();
 
     expect(i18n.language).toBe("zh");
-    // 缓存，不是用户的选择：后者必须仍然是「没表过态」。
+    // Cached, not user choice: the latter must still be "hasn't signaled".
     expect(getItem("lang-host-default")).toBe("zh");
     expect(getItem("lang")).toBe(null);
   });
@@ -69,7 +71,7 @@ describe("界面语言的主机默认值（host_features）", () => {
     await useUIStore.getState().loadHostFeatures();
 
     expect(i18n.language).toBe("en");
-    // 缓存仍然记下主机的意见 —— 用户日后清掉自己的选择时才接得上。
+    // Cache still records host's opinion — so user can reconnect when they clear their own choice later.
     expect(getItem("lang-host-default")).toBe("zh");
   });
 

@@ -6,8 +6,8 @@ const msg = (uuid?: string): RawMessage =>
   ({ type: "assistant", uuid, message: { role: "assistant", content: [] } }) as unknown as RawMessage;
 
 describe("rowKeyOf", () => {
-  // The bug it pins: the transcript is a tail window and 「加载更早的消息」
-  // prepends 200 rows, so every index slides. Keyed by index, the band the
+  // The bug it pins: the transcript is a tail window and "load earlier messages"
+  // prepends 200 rows, so every index slides. Keyed by index, the section the
   // reader had expanded (and their expanded thinking blocks) jumped onto a
   // different message.
   it("is the record's own identity, unchanged when the window shifts", () => {

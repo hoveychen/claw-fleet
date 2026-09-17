@@ -1,6 +1,6 @@
 // The single field that matters when approving a native Claude Code permission
 // prompt — the actual command / path / pattern / url the AI wants to run — so
-// the card leads with what 老板 is deciding on instead of a raw JSON dump.
+// the card leads with what the user is deciding on instead of a raw JSON dump.
 // Shared by the desktop PermissionPromptCard (and mirrored in mobile-web).
 
 // Tools whose primary input is a filesystem path — surfaced with an extension

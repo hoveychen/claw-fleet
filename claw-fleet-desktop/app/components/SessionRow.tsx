@@ -18,9 +18,9 @@ export function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown
 }
 
 /** Elapsed run time = now − session start (createdAtMs). Shown only for live
- *  rows (busy or waiting-input), where "how long has this been going" is the
- *  useful signal. Same single-unit shape as timeAgo, but counts up from start
- *  instead of down from last activity. */
+ *  rows (busy or waiting-input), where "how long has this been running" matters.
+ *  Same single-unit format as timeAgo, but counts up from start instead of down
+ *  from last activity. */
 function formatRunning(ms: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
   const diff = Math.max(0, Date.now() - ms);
   if (diff < 60_000) return t("ran_s", { n: Math.floor(diff / 1_000) });
@@ -29,8 +29,8 @@ function formatRunning(ms: number, t: (k: string, opts?: Record<string, unknown>
   return t("ran_d", { n: Math.floor(diff / 86_400_000) });
 }
 
-/** Compact, language-neutral elapsed ("40s" / "3m" / "2h" / "1d") for the tight
- *  row watch chip — mirrors SessionCard's formatDuration unit style. */
+/** Compact, language-neutral elapsed ("40s" / "3m" / "2h" / "1d") for the
+ *  tight row watch chip. Mirrors SessionCard's formatDuration unit style. */
 function compactElapsed(ms: number): string {
   const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
   if (s < 60) return `${s}s`;
@@ -42,8 +42,8 @@ function compactElapsed(ms: number): string {
 }
 
 /** FTS5 snippets arrive with literal `<mark>…</mark>` markers (see
- *  search_index.rs). Split them into React nodes instead of trusting the
- *  transcript text as HTML. */
+ *  search_index.rs). Split them into React nodes; don't treat transcript text
+ *  as HTML. */
 function renderSnippet(snippet: string): ReactNode[] {
   return snippet.split("<mark>").flatMap((chunk, i) => {
     if (i === 0) return [chunk];
@@ -57,16 +57,16 @@ function renderSnippet(snippet: string): ReactNode[] {
 }
 
 /**
- * Compare two SessionInfo by value. The scanner re-emits the whole list every
- * couple of seconds and each entry is a fresh JSON deserialisation, so object
- * identity always differs even when nothing changed — a reference check would
+ * Compare two SessionInfo objects by value. The scanner re-emits the whole list
+ * every few seconds, and each entry is a fresh JSON deserialization, so object
+ * identity always differs even when nothing changed. A reference check would
  * make SessionRow's memo useless.
  *
  * Deliberately keyed off the object's own keys rather than a hand-maintained
- * field list: a new SessionInfo field is then covered automatically, instead of
- * silently freezing a row that a forgotten list entry would have updated.
- * Scalars compare with `===`; the few nested fields (handoff, taskPlan, todos)
- * fall back to a structural compare — they are small.
+ * field list: a new SessionInfo field is then covered automatically instead of
+ * silently freezing a row if a forgotten list entry would have updated it.
+ * Scalars use `===`; the few nested fields (handoff, taskPlan, todos) fall back
+ * to structural comparison—they're small.
  */
 export function sessionEq(a: SessionInfo, b: SessionInfo): boolean {
   if (a === b) return true;
@@ -89,11 +89,11 @@ export type SessionRowProps = {
   session: SessionInfo;
   snippet: string | undefined;
   isSelected: boolean;
-  /** Open in a tab, but not the tab currently on screen. Weaker half of the
-   *  same axis as `isSelected` — never both at once. */
+  /** Open in a tab, but not the currently visible tab. The weaker half of the
+   *  same axis as `isSelected`—never both at once. */
   isOpen: boolean;
   /** Bumped every 30s by the parent so relative times keep advancing. Without
-   *  it the memo would freeze the elapsed "3 分钟" at whatever it said on mount. */
+   *  it, the memo would freeze the elapsed time at whatever value it had on mount. */
   nowTick: number;
   /** True only when the task page holds more than one agent source at once
    *  (e.g. Claude and Codex): the little source glyph then rides ahead of the

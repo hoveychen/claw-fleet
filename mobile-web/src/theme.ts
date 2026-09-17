@@ -1,6 +1,6 @@
-// 主题：跟随系统 / 亮 / 暗。JS 侧解析 system（matchMedia + change 监听）后
-// 总是把解析结果写到 html[data-theme]，CSS 只需要一份 [data-theme="light"]
-// 变量组，不用媒体查询里重复一遍。
+// Theme: follow system / light / dark. JS side resolves "system" (via matchMedia +
+// change listener) then always writes result to html[data-theme]. CSS only needs
+// one [data-theme="light"] variable set, no media query duplication.
 
 import { useSyncExternalStore } from "react";
 

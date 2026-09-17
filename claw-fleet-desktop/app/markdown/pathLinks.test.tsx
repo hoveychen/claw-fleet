@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
-// Echo the key plus its interpolations, so a test can tell the three hints
-// apart without hard-coding Chinese copy.
+// Echo the i18n key plus its interpolations, so a test can distinguish the three hints
+// without hard-coding the translated strings.
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (k: string, vars?: Record<string, string>) =>

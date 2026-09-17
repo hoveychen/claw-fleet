@@ -143,7 +143,7 @@ export function workRunTitle(msgs: RawMessage[]): string | null {
  * The band used to answer this from `live && stop_reason === null` alone, which
  * is never the right question: a band is tool-call/thinking records *by
  * construction* (`isWorkRow`), so its last record's stop_reason is `tool_use`
- * on every finished record, and 完成 appeared under a run that was still
+ * on every finished record, and the "Done" (完成) label appeared under a run that was still
  * mid-flight. Three facts have to hold instead:
  *  - the band is not the live tail (`liveTail` is `working && trailing unit`,
  *    so a live band can still grow more work rows);
