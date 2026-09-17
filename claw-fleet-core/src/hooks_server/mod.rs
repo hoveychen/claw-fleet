@@ -532,6 +532,11 @@ pub fn serve(opts: ServeOptions) {
                         .filter(|s| {
                             !s.is_subagent
                                 && s.status == crate::session::SessionStatus::WaitingInput
+                                // A live process at WaitingInput is parked on a
+                                // decision card / permission prompt, which
+                                // notifies on its own — same reading of
+                                // `proc_alive` as `maybe_raise` below.
+                                && !s.proc_alive
                         })
                         .map(|s| s.id.clone())
                         .collect();

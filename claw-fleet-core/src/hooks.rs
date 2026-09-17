@@ -101,6 +101,10 @@ pub enum HookState {
     ModelProcessing,
     /// Stop fired — agent finished its turn.
     Stopped,
+    /// A PreToolUse fired for a tool whose whole job is to wait for the user —
+    /// a decision card, a permission prompt. The tool is "running", but nothing
+    /// is being computed; the session is parked until someone answers.
+    AwaitingUserInput,
     /// No recent hook events for this session.
     Unknown,
 }
@@ -111,6 +115,10 @@ pub struct HookEvent {
     pub session_id: String,
     pub event_name: String,
     pub timestamp_ms: u64,
+    /// The tool a `PreToolUse` / `PostToolUse` fired for; `None` on the rest.
+    /// Tells a tool that runs from one the session is parked on waiting for an
+    /// answer — see [`HookState::AwaitingUserInput`].
+    pub tool_name: Option<String>,
     /// Only `Stop` / `SubagentStop` carry these (CLI ≥ 2.1.145); empty otherwise.
     pub background_tasks: Vec<crate::bg_guard::BackgroundTask>,
 }
@@ -1141,6 +1149,55 @@ pub fn read_hook_states() -> HashMap<String, HookState> {
     read_hook_snapshot().states
 }
 
+/// How long a session's last hook event still describes what it is doing.
+const HOOK_STATE_MAX_AGE_MS: u64 = 300_000;
+
+/// Lines the first read of a process seeds itself from. Later reads only
+/// consume the bytes appended since, so this is a one-off cost, not a window.
+const HOOK_SEED_LINES: usize = 500;
+
+/// What one session's last hook event said, and when this process saw it.
+struct SessionHookState {
+    state: HookState,
+    /// Ingest time, not a field of the record: Claude Code's hook payloads carry
+    /// no timestamp at all (see `read_recent_events`). Stamping on the way in is
+    /// what finally gives the freshness gate a real clock — the old code dated
+    /// every record by the file's mtime, which on a busy machine is always
+    /// "now", so nothing ever aged out and *position in the file* was the only
+    /// thing bounding staleness.
+    seen_ms: u64,
+    /// Background tasks still running as of that event. Only `Stop` carries any.
+    background_tasks: Vec<crate::bg_guard::BackgroundTask>,
+}
+
+/// Incremental follow state for `hooks.jsonl`, kept for the life of the process.
+///
+/// Reading a fixed tail window on every scan made a session's hook state a
+/// function of *machine load*: `hooks.jsonl` is machine-wide, so a session quiet
+/// inside a long tool slid out of the last 500 lines as busier siblings appended
+/// (measured 2026-09-17: ~56 events/min across 11 sessions, i.e. the window held
+/// about 9 minutes), and its phase was simply forgotten. Following the file
+/// forward instead means a session's last event is remembered until a newer one
+/// replaces it or it ages out — the same answer no matter what the neighbours
+/// are doing.
+struct HookTail {
+    /// Byte offset of the first unconsumed byte, or `None` before the first read.
+    offset: Option<u64>,
+    /// The file `offset` belongs to. A test (or anything else) that repoints
+    /// `HOME` mid-process must not have its offset applied to a different file.
+    path: Option<PathBuf>,
+    states: HashMap<String, SessionHookState>,
+}
+
+static HOOK_TAIL: std::sync::LazyLock<std::sync::Mutex<HookTail>> =
+    std::sync::LazyLock::new(|| {
+        std::sync::Mutex::new(HookTail {
+            offset: None,
+            path: None,
+            states: HashMap::new(),
+        })
+    });
+
 /// One pass over the hook events → both the state map and the outstanding
 /// background tasks per session.
 pub fn read_hook_snapshot() -> HookSnapshot {
@@ -1148,55 +1205,173 @@ pub fn read_hook_snapshot() -> HookSnapshot {
         return HookSnapshot::default();
     };
 
-    let events = read_recent_events(&path, 500);
-
-    // Group by session_id, keep only the latest event per session.
-    let mut latest: HashMap<String, HookEvent> = HashMap::new();
-    for ev in events {
-        let entry = latest.entry(ev.session_id.clone()).or_insert_with(|| ev.clone());
-        if ev.timestamp_ms >= entry.timestamp_ms {
-            *entry = ev;
-        }
-    }
-
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
 
-    let mut snapshot = HookSnapshot::default();
+    let mut tail = match HOOK_TAIL.lock() {
+        Ok(t) => t,
+        // A panic in another reader must not take the scan down with it.
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    tail.follow(&path, now_ms);
+    tail.snapshot(now_ms)
+}
 
-    for (sid, ev) in latest {
-        let age_ms = now_ms.saturating_sub(ev.timestamp_ms);
-
-        // Ignore hook events older than 5 minutes — too stale to be useful.
-        if age_ms > 300_000 {
-            continue;
+impl HookTail {
+    /// Consume whatever was appended since the last call and fold it in.
+    fn follow(&mut self, path: &Path, now_ms: u64) {
+        let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if self.path.as_deref() != Some(path) {
+            self.offset = None;
+            self.path = Some(path.to_path_buf());
         }
+        match self.offset {
+            // First read of this process, or the file shrank under us
+            // (`maybe_truncate_events_file` rewrites it to its last 2000 lines):
+            // seed from the tail and follow forward from there.
+            None => self.seed(path, len, now_ms),
+            Some(prev) if len < prev => self.seed(path, len, now_ms),
+            Some(prev) => {
+                let (events, consumed) = read_events_from(path, prev, len);
+                for ev in events {
+                    self.ingest(ev, now_ms);
+                }
+                self.offset = Some(consumed);
+            }
+        }
+    }
 
-        // Background tasks are only reported on Stop, and only the *latest* Stop
-        // matters: a later PreToolUse means the session is off doing something
-        // else, at which point last turn's snapshot says nothing about now.
-        let running: Vec<_> = ev
+    fn seed(&mut self, path: &Path, len: u64, now_ms: u64) {
+        for ev in read_recent_events(path, HOOK_SEED_LINES) {
+            self.ingest(ev, now_ms);
+        }
+        // Resume from the last complete record, not from `len`: a hook caught
+        // mid-append would otherwise have its first bytes consumed here and its
+        // tail parsed as a line of its own, losing the event entirely.
+        //
+        // `len` is sampled *before* the tail read, so anything appended in
+        // between is re-read next time rather than skipped. Re-ingesting an
+        // event is harmless: it just re-asserts the state it already set.
+        self.offset = Some(end_of_last_record(path, len));
+    }
+
+    /// Drop states too old to describe the present, then publish what is left.
+    fn snapshot(&mut self, now_ms: u64) -> HookSnapshot {
+        self.states
+            .retain(|_, s| now_ms.saturating_sub(s.seen_ms) <= HOOK_STATE_MAX_AGE_MS);
+
+        let mut snapshot = HookSnapshot::default();
+        for (sid, s) in self.states.iter() {
+            if !s.background_tasks.is_empty() {
+                snapshot
+                    .background_tasks
+                    .insert(sid.clone(), s.background_tasks.clone());
+            }
+            snapshot.states.insert(sid.clone(), s.state.clone());
+        }
+        snapshot
+    }
+
+    /// Fold one event into the per-session state, overwriting whatever the
+    /// session's previous event said — including its background tasks, since
+    /// only the latest event describes the session's present.
+    fn ingest(&mut self, ev: HookEvent, now_ms: u64) {
+        let state = match ev.event_name.as_str() {
+            // A PreToolUse for a tool that exists to *ask the user something*
+            // is not work in flight — the session is parked on a decision card
+            // or a permission prompt until someone answers. Reported as its own
+            // state so the status machine can say "waiting for input" instead of
+            // "running tools". (Under the old tail window this mostly sorted
+            // itself out by accident: the event was evicted before anyone
+            // looked. Following the file forward removes that accident, so the
+            // distinction has to be made explicitly.)
+            "PreToolUse" => {
+                if crate::session::detect::is_interactive_wait_tool(ev.tool_name.as_deref().unwrap_or(""))
+                {
+                    HookState::AwaitingUserInput
+                } else {
+                    HookState::ToolExecuting
+                }
+            }
+            "PostToolUse" | "PostToolUseFailure" => HookState::ModelProcessing,
+            "Stop" | "SubagentStop" => HookState::Stopped,
+            _ => HookState::Unknown,
+        };
+        let background_tasks = ev
             .background_tasks
             .iter()
             .filter(|t| t.is_running())
             .cloned()
             .collect();
-        if !running.is_empty() {
-            snapshot.background_tasks.insert(sid.clone(), running);
-        }
-
-        let state = match ev.event_name.as_str() {
-            "PreToolUse" => HookState::ToolExecuting,
-            "PostToolUse" | "PostToolUseFailure" => HookState::ModelProcessing,
-            "Stop" | "SubagentStop" => HookState::Stopped,
-            _ => HookState::Unknown,
-        };
-        snapshot.states.insert(sid, state);
+        self.states.insert(
+            ev.session_id,
+            SessionHookState {
+                state,
+                seen_ms: now_ms,
+                background_tasks,
+            },
+        );
     }
+}
 
-    snapshot
+/// Offset just past the last newline at or before `len`, i.e. the start of the
+/// record currently being appended (or `len` itself when the file ends cleanly).
+fn end_of_last_record(path: &Path, len: u64) -> u64 {
+    use std::io::{Read, Seek, SeekFrom};
+
+    const LOOKBACK: u64 = 64 * 1024;
+    if len == 0 {
+        return 0;
+    }
+    let Ok(mut f) = fs::File::open(path) else {
+        return len;
+    };
+    let from = len.saturating_sub(LOOKBACK);
+    if f.seek(SeekFrom::Start(from)).is_err() {
+        return len;
+    }
+    let mut buf = vec![0u8; (len - from) as usize];
+    if f.read_exact(&mut buf).is_err() {
+        return len;
+    }
+    match buf.iter().rposition(|&b| b == b'\n') {
+        Some(i) => from + i as u64 + 1,
+        // No newline within the lookback: either a single enormous partial
+        // record or a file with no line breaks at all. Re-reading it is
+        // cheaper than losing it.
+        None => from,
+    }
+}
+
+/// Parse the whole lines in `[from, to)` of the events file.
+///
+/// Returns the events plus the offset just past the last newline consumed — a
+/// record still being appended stays unconsumed and is picked up next read
+/// rather than parsed in half.
+fn read_events_from(path: &Path, from: u64, to: u64) -> (Vec<HookEvent>, u64) {
+    use std::io::{Read, Seek, SeekFrom};
+
+    if to <= from {
+        return (Vec::new(), from);
+    }
+    let Ok(mut f) = fs::File::open(path) else {
+        return (Vec::new(), from);
+    };
+    if f.seek(SeekFrom::Start(from)).is_err() {
+        return (Vec::new(), from);
+    }
+    let mut buf = vec![0u8; (to - from) as usize];
+    if f.read_exact(&mut buf).is_err() {
+        return (Vec::new(), from);
+    }
+    let Some(last_nl) = buf.iter().rposition(|&b| b == b'\n') else {
+        return (Vec::new(), from);
+    };
+    let text = String::from_utf8_lossy(&buf[..=last_nl]);
+    let events = text.lines().filter_map(parse_event_line).collect();
+    (events, from + last_nl as u64 + 1)
 }
 
 /// Truncate the hooks events file if it exceeds a threshold (e.g. 10000 lines).
@@ -1634,34 +1809,50 @@ fn read_recent_events(path: &Path, max_lines: usize) -> Vec<HookEvent> {
     lines
         .iter()
         .filter_map(|line| {
-            let v: Value = serde_json::from_str(line).ok()?;
-            let session_id = v.get("session_id")?.as_str()?.to_string();
-            let event_name = v.get("hook_event_name")?.as_str()?.to_string();
-
-            let timestamp_ms = v
-                .get("timestamp")
-                .and_then(|t| t.as_str())
-                .and_then(|s| {
-                    chrono::DateTime::parse_from_rfc3339(s)
-                        .ok()
-                        .map(|dt| dt.timestamp_millis() as u64)
-                })
-                .unwrap_or(file_mtime_ms);
-
-            // Present on Stop payloads only; a CLI older than 2.1.145 omits it.
-            let background_tasks = v
-                .get("background_tasks")
-                .and_then(|t| serde_json::from_value(t.clone()).ok())
-                .unwrap_or_default();
-
-            Some(HookEvent {
-                session_id,
-                event_name,
-                timestamp_ms,
-                background_tasks,
-            })
+            let mut ev = parse_event_line(line)?;
+            if ev.timestamp_ms == 0 {
+                ev.timestamp_ms = file_mtime_ms;
+            }
+            Some(ev)
         })
         .collect()
+}
+
+/// Parse one `hooks.jsonl` line. `timestamp_ms` is 0 when the record carries no
+/// usable timestamp, which is the normal case — callers supply their own clock.
+fn parse_event_line(line: &str) -> Option<HookEvent> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    let session_id = v.get("session_id")?.as_str()?.to_string();
+    let event_name = v.get("hook_event_name")?.as_str()?.to_string();
+
+    let timestamp_ms = v
+        .get("timestamp")
+        .and_then(|t| t.as_str())
+        .and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|dt| dt.timestamp_millis() as u64)
+        })
+        .unwrap_or(0);
+
+    let tool_name = v
+        .get("tool_name")
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string());
+
+    // Present on Stop payloads only; a CLI older than 2.1.145 omits it.
+    let background_tasks = v
+        .get("background_tasks")
+        .and_then(|t| serde_json::from_value(t.clone()).ok())
+        .unwrap_or_default();
+
+    Some(HookEvent {
+        session_id,
+        event_name,
+        timestamp_ms,
+        tool_name,
+        background_tasks,
+    })
 }
 
 #[cfg(test)]
@@ -2724,6 +2915,150 @@ mod tests {
         let pre = evs.iter().find(|e| e.event_name == "PreToolUse").unwrap();
         assert!(pre.background_tasks.is_empty());
 
+        let _ = fs::remove_file(&p);
+    }
+
+    // ── Incremental follow ────────────────────────────────────────────────
+
+    fn empty_tail() -> HookTail {
+        HookTail {
+            offset: None,
+            path: None,
+            states: HashMap::new(),
+        }
+    }
+
+    fn pre_tool(sid: &str, tool: &str) -> String {
+        format!(
+            r#"{{"session_id":"{sid}","hook_event_name":"PreToolUse","tool_name":"{tool}"}}"#
+        ) + "\n"
+    }
+
+    fn append(path: &Path, line: &str) {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new().append(true).open(path).unwrap();
+        f.write_all(line.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn hook_tail_remembers_a_session_pushed_out_of_the_seed_window() {
+        // The flicker's other half: `hooks.jsonl` is machine-wide, so a session
+        // quiet inside a long tool used to be forgotten as soon as busier
+        // siblings appended past the fixed tail window, and its status fell out
+        // of the working set until its next hook event landed. Following the
+        // file forward keeps the answer independent of the neighbours.
+        let p = write_tmp("follow.jsonl", &pre_tool("quiet", "Bash"));
+        let mut tail = empty_tail();
+        tail.follow(&p, 1_000);
+        assert_eq!(tail.snapshot(1_000).states.get("quiet"), Some(&HookState::ToolExecuting));
+
+        for i in 0..2_000 {
+            append(&p, &pre_tool(&format!("busy-{i}"), "Read"));
+        }
+        tail.follow(&p, 2_000);
+
+        let snap = tail.snapshot(2_000);
+        assert_eq!(
+            snap.states.get("quiet"),
+            Some(&HookState::ToolExecuting),
+            "a session 2000 events deep must still be remembered"
+        );
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn hook_tail_expires_a_state_once_it_stops_describing_the_present() {
+        // Ingest time is the clock — the records themselves carry no timestamp,
+        // and dating them by the file's mtime (the old behaviour) meant nothing
+        // ever expired on a machine whose hooks.jsonl is always being written.
+        let p = write_tmp("expire.jsonl", &pre_tool("s1", "Bash"));
+        let mut tail = empty_tail();
+        tail.follow(&p, 1_000);
+
+        assert!(tail.snapshot(1_000 + HOOK_STATE_MAX_AGE_MS).states.contains_key("s1"));
+        assert!(
+            !tail
+                .snapshot(1_000 + HOOK_STATE_MAX_AGE_MS + 1)
+                .states
+                .contains_key("s1"),
+            "a state older than the freshness window must not be reported"
+        );
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn hook_tail_waits_for_a_record_to_be_fully_written() {
+        // The scan reads while hooks are appending; half a line must not be
+        // parsed, nor silently skipped once its newline lands.
+        let p = write_tmp("partial.jsonl", "");
+        let mut tail = empty_tail();
+        let line = pre_tool("s1", "Bash");
+        let (head, rest) = line.split_at(20);
+
+        append(&p, head);
+        tail.follow(&p, 1_000);
+        assert!(tail.snapshot(1_000).states.is_empty());
+
+        append(&p, rest);
+        tail.follow(&p, 1_000);
+        assert_eq!(tail.snapshot(1_000).states.get("s1"), Some(&HookState::ToolExecuting));
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn hook_tail_reseeds_when_the_file_is_truncated() {
+        // `maybe_truncate_events_file` rewrites the file to its last 2000 lines,
+        // which moves every offset. Re-seed instead of reading garbage.
+        let mut before = String::new();
+        for i in 0..50 {
+            before.push_str(&pre_tool(&format!("old-{i}"), "Bash"));
+        }
+        let p = write_tmp("truncate.jsonl", &before);
+        let mut tail = empty_tail();
+        tail.follow(&p, 1_000);
+
+        fs::write(&p, pre_tool("fresh", "Bash")).unwrap();
+        tail.follow(&p, 1_000);
+
+        let snap = tail.snapshot(1_000);
+        assert_eq!(snap.states.get("fresh"), Some(&HookState::ToolExecuting));
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn hook_tail_calls_an_interactive_tool_a_wait_not_work() {
+        // A `fleet__ask` / permission prompt PreToolUse is a session parked on a
+        // card, not work in flight. Under the old fixed window this sorted
+        // itself out by accident — the event was evicted before anyone looked —
+        // so following the file forward has to draw the line on purpose.
+        let p = write_tmp("interactive.jsonl", "");
+        let mut tail = empty_tail();
+        append(&p, &pre_tool("asking", "mcp__fleet__fleet__ask"));
+        append(&p, &pre_tool("working", "Bash"));
+        tail.follow(&p, 1_000);
+
+        let snap = tail.snapshot(1_000);
+        assert_eq!(snap.states.get("asking"), Some(&HookState::AwaitingUserInput));
+        assert_eq!(snap.states.get("working"), Some(&HookState::ToolExecuting));
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn hook_tail_clears_background_tasks_when_the_session_moves_on() {
+        // Only the latest event describes the session's present: a Stop's
+        // outstanding tasks must not outlive the next tool call.
+        let stop = concat!(
+            r#"{"session_id":"s1","hook_event_name":"Stop","background_tasks":[{"id":"b1","type":"shell","status":"running","description":"deploy"}]}"#,
+            "\n"
+        );
+        let p = write_tmp("bgtasks.jsonl", stop);
+        let mut tail = empty_tail();
+        tail.follow(&p, 1_000);
+        assert_eq!(tail.snapshot(1_000).background_tasks.get("s1").map(Vec::len), Some(1));
+
+        append(&p, &pre_tool("s1", "Bash"));
+        tail.follow(&p, 1_000);
+        assert!(tail.snapshot(1_000).background_tasks.is_empty());
         let _ = fs::remove_file(&p);
     }
 }

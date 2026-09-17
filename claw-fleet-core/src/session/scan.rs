@@ -213,6 +213,8 @@ pub fn apply_pid_liveness(
                 match hook_state {
                     Some(HookState::ToolExecuting) => SessionStatus::Executing,
                     Some(HookState::ModelProcessing) => SessionStatus::Thinking,
+                    // AwaitingUserInput lands here too: parked on a card is
+                    // exactly what WaitingInput means.
                     _ => SessionStatus::WaitingInput,
                 }
             };

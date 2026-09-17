@@ -433,7 +433,7 @@ pub const STUCK_TOOL_BATCH_FLOOR_SECS: f64 = 1200.0; // 20 minutes
 /// user — a decision card or a permission prompt. An unresolved `tool_use` for
 /// one of these is a normal wait, never a deadlock, so it must NOT count toward
 /// stuck detection.
-fn is_interactive_wait_tool(name: &str) -> bool {
+pub(crate) fn is_interactive_wait_tool(name: &str) -> bool {
     name == "AskUserQuestion"
         || name == "ExitPlanMode"
         || name.ends_with("__ask") // mcp__fleet__fleet__ask
@@ -544,6 +544,9 @@ pub(crate) fn determine_status(
         match hook_state {
             Some(HookState::ToolExecuting) => return SessionStatus::Executing,
             Some(HookState::ModelProcessing) => return SessionStatus::Thinking,
+            // Parked on a decision card / permission prompt: a tool is open,
+            // but it is waiting for the user, not computing.
+            Some(HookState::AwaitingUserInput) => return SessionStatus::WaitingInput,
             // Only trust the Stopped hook when a real turn completed recently.
             // A `--resume` of an old session fires Stop and appends housekeeping
             // records (last-prompt, file-history-snapshot) that bump mtime
