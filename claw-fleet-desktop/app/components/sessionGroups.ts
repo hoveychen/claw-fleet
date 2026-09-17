@@ -1,5 +1,5 @@
 import type { SessionInfo } from "../types";
-import { rowBarColor } from "../types";
+import { QUIET_ALIVE_COLOR, rowBarColor } from "../types";
 
 /** How many chain members an expanded group shows before "load more"; a relay
  *  chain can run 50 hops deep, so we reveal the most recent few and page in the
@@ -20,15 +20,35 @@ export function chainTip(members: SessionInfo[]): SessionInfo {
  *  the highest hop: a chain can float up on a mid-chain hop's activity while its
  *  tip sits done, leaving the header with no dot. Aggregate instead, preferring
  *  a running member (green) over a merely waiting one (amber), matching
- *  `rowBarColor`'s own green-beats-amber priority. */
+ *  `rowBarColor`'s own green-beats-amber priority.
+ *
+ *  The faded green (quiet-alive, see [`isQuietAlive`]) is the third rank, and
+ *  leaving it out is how a collapsed chain used to read as *ended* while its tip
+ *  was very much running: a session parked on one long tool call decays to a
+ *  quiet-alive faded dot, this function matched neither literal, and the header
+ *  fell through to `null` — no dot at all, while the detail composer for the
+ *  same session said 会话运行中. Rank by salience rather than by two hard-coded
+ *  strings so any colour `rowBarColor` can return survives the collapse; the
+ *  phone's `chainTone` (mobile-web `TasksView`) already does exactly this. */
+const BAR_PRIORITY = ["var(--color-success)", "var(--color-warning)", QUIET_ALIVE_COLOR];
+
 export function chainBarColor(members: SessionInfo[]): string | null {
-  let waiting = false;
+  let best: string | null = null;
+  let bestRank = BAR_PRIORITY.length;
   for (const m of members) {
     const c = rowBarColor(m);
-    if (c === "var(--color-success)") return c; // a running hop wins outright
-    if (c === "var(--color-warning)") waiting = true;
+    if (c == null) continue;
+    const r = BAR_PRIORITY.indexOf(c);
+    // An unranked colour still beats no dot at all: a new `rowBarColor` hue
+    // must not silently vanish from collapsed rows the way the faded green did.
+    const rank = r >= 0 ? r : BAR_PRIORITY.length - 0.5;
+    if (rank < bestRank) {
+      bestRank = rank;
+      best = c;
+      if (rank === 0) break; // a running hop wins outright
+    }
   }
-  return waiting ? "var(--color-warning)" : null;
+  return best;
 }
 
 /** One entry in the rendered task list: either a standalone session or a

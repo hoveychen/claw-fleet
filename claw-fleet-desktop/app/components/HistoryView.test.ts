@@ -3,7 +3,7 @@ import {
   applyFrozenOrder,
   taskListSessions,
 } from "./HistoryView";
-import { NEW_SESSION_ENTRYPOINT } from "../types";
+import { NEW_SESSION_ENTRYPOINT, QUIET_ALIVE_COLOR, resetQuietAliveLatch } from "../types";
 import { chainBarColor } from "./sessionGroups";
 import { sessionEq } from "./SessionRow";
 import type { SessionInfo, SessionStatus } from "../types";
@@ -74,6 +74,33 @@ describe("chainBarColor (collapsed relay-group header liveness)", () => {
 
   it("prefers a running member (green) over a waiting one (amber)", () => {
     expect(chainBarColor([member("waitingInput", 1), member("executing", 2)])).toBe(SUCCESS);
+  });
+
+  // The 老板-reported symptom: a relay chain whose tip is parked on one long
+  // tool call (62000-frame probe) showed NO dot in the task list — reading as
+  // idle — while that same session's composer said 会话运行中. The tip is
+  // quiet-alive, which is neither of the two literals the old aggregation
+  // matched, so it fell through to null.
+  it("keeps the faded quiet-alive dot when a hop's process is alive but quiet", () => {
+    resetQuietAliveLatch();
+    const quiet = { ...member("idle", 2), procAlive: true } as SessionInfo;
+    expect(chainBarColor([quiet, member("idle", 1)])).toBe(QUIET_ALIVE_COLOR);
+  });
+
+  it("still prefers a genuinely running hop over a quiet-alive one", () => {
+    resetQuietAliveLatch();
+    const quiet = { ...member("idle", 2), procAlive: true } as SessionInfo;
+    expect(chainBarColor([quiet, { ...member("executing", 1), id: "s2" } as SessionInfo])).toBe(
+      SUCCESS,
+    );
+  });
+
+  it("prefers a waiting hop (amber) over a quiet-alive one", () => {
+    resetQuietAliveLatch();
+    const quiet = { ...member("idle", 2), procAlive: true } as SessionInfo;
+    expect(chainBarColor([quiet, { ...member("waitingInput", 1), id: "s2" } as SessionInfo])).toBe(
+      WARNING,
+    );
   });
 });
 
