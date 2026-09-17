@@ -24,10 +24,17 @@ interface Props {
   decisionRecords: DecisionHistoryRecord[];
   searchTerms?: string[] | null;
   paths?: PathLinkContext;
-  /** True while this run is the live tail of a working session. It *opens* the
-   *  band and never closes it — see `useBandOpen` for why following it both
-   *  ways made a live band flap. */
+  /** True when this run is the transcript's trailing unit. The tail is where
+   *  the reader is looking, so it starts open — folded, a growing tail shows
+   *  only a rising step count and a newer timestamp with nothing to read. It
+   *  *opens* the band and never closes it — see `useBandOpen` for why following
+   *  it both ways made a live band flap. */
   defaultOpen: boolean;
+  /** True while the session is in a working status. Drives the headline shimmer
+   *  only; it must not gate `defaultOpen`, because the status drops out of the
+   *  working set mid-run (a tool outliving the backend's 60s freshness window)
+   *  and a band born in that gap would mount folded. */
+  live?: boolean;
   /** True while the active search hit lives inside this run. Opens the band on
    *  the hit; stepping off leaves it open (same latch as `defaultOpen`). */
   forceOpen?: boolean;
@@ -64,6 +71,7 @@ export function WorkRunBlock({
   searchTerms,
   paths,
   defaultOpen,
+  live,
   forceOpen,
 }: Props) {
   const { t } = useTranslation();
@@ -76,7 +84,7 @@ export function WorkRunBlock({
   // Streaming = this band is the live tail and its last record hasn't
   // terminated. The headline gets the claude.ai shimmer sweep to say "in
   // progress"; it stops the moment the record closes.
-  const streaming = defaultOpen && msgs[msgs.length - 1]?.message?.stop_reason === null;
+  const streaming = !!live && defaultOpen && msgs[msgs.length - 1]?.message?.stop_reason === null;
   const shimmer = streaming ? ` ${styles.shimmer}` : "";
 
   // The band collapses several records into one row, so show when the run
