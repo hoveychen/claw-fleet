@@ -69,27 +69,94 @@ pub fn shell_command(script: &str) -> Command {
     cmd
 }
 
-/// Run a gate command (`--until`) through the platform shell; exit status 0 ⇒
-/// the condition is met. stdin/stdout/stderr are nulled — only the exit code
-/// matters. A spawn failure (shell missing, command unrunnable) reads as "not
-/// met" and is logged, so a watch/schedule/loop stuck on a broken gate is
-/// diagnosable from the debug log rather than silently waiting forever.
+/// Longest stderr excerpt kept from a gate evaluation. Enough to carry a
+/// `command not found` / traceback first lines without bloating the watch
+/// record, which is rewritten on every poll.
+pub const GATE_STDERR_CAP: usize = 600;
+
+/// What one evaluation of a gate command produced. `met` is the only thing the
+/// timers act on; the rest exists so a gate that never fires can be *diagnosed*
+/// instead of silently polled for hours — `exit_code` separates "127, the binary
+/// is missing" from "1, not yet", and `stderr` carries the shell's own words.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GateOutcome {
+    /// Exit status 0 — the condition is met.
+    pub met: bool,
+    /// Exit code, or `None` when the process was killed by a signal or the
+    /// shell could not be spawned at all.
+    pub exit_code: Option<i32>,
+    /// Trimmed stderr, truncated to [`GATE_STDERR_CAP`]. Empty when the command
+    /// said nothing (the normal "not yet" case).
+    pub stderr: String,
+}
+
+impl GateOutcome {
+    /// A gate whose command is *structurally* broken rather than merely unmet:
+    /// the shell could not run it (`None`), could not find it (127), or found
+    /// something it could not execute (126). These never become true by waiting
+    /// — a watch on one of them would burn its whole deadline for nothing.
+    pub fn is_structural_failure(&self) -> bool {
+        !self.met && matches!(self.exit_code, None | Some(126) | Some(127))
+    }
+
+    /// One-line human summary for logs, `watch list` and resume prompts.
+    pub fn summary(&self) -> String {
+        let code = match self.exit_code {
+            Some(c) => c.to_string(),
+            None => "signal/spawn-failure".to_string(),
+        };
+        if self.stderr.is_empty() {
+            format!("exit {code}")
+        } else {
+            format!("exit {code}: {}", self.stderr)
+        }
+    }
+}
+
+/// Run a gate command (`--until`) through the platform shell and report the
+/// full outcome. stdin/stdout are nulled (a chatty gate must not buffer
+/// megabytes every poll); **stderr is captured** — it is the only evidence of
+/// *why* a gate stays false, and throwing it away is what made a mistyped
+/// `--until` indistinguishable from "the job is still running".
+///
+/// A spawn failure (shell missing, command unrunnable) reads as not met with
+/// `exit_code: None` and is logged.
 ///
 /// Shared by `watch` (`--until`), `schedule` (`--until` gate) and `agent_loop`
 /// (`--until` per-tick gate) so all three evaluate a gate identically.
-pub fn gate_met(cmd: &str) -> bool {
+pub fn gate_probe(cmd: &str) -> GateOutcome {
     match shell_command(cmd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
+        .stderr(std::process::Stdio::piped())
+        .output()
     {
-        Ok(s) => s.success(),
+        Ok(out) => GateOutcome {
+            met: out.status.success(),
+            exit_code: out.status.code(),
+            stderr: truncate_chars(String::from_utf8_lossy(&out.stderr).trim(), GATE_STDERR_CAP),
+        },
         Err(e) => {
             crate::log_debug(&format!("gate poll: cannot run until-command ({e}): {cmd}"));
-            false
+            GateOutcome { met: false, exit_code: None, stderr: format!("cannot run: {e}") }
         }
     }
+}
+
+/// Truncate on a char boundary, appending an ellipsis when anything was cut.
+fn truncate_chars(s: &str, cap: usize) -> String {
+    if s.chars().count() <= cap {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(cap).collect();
+    out.push('…');
+    out
+}
+
+/// Exit-status-only view of [`gate_probe`], for the call sites that have nowhere
+/// to put a diagnosis (schedule / loop per-tick gates).
+pub fn gate_met(cmd: &str) -> bool {
+    gate_probe(cmd).met
 }
 
 /// Put the child in its own process group (Unix), no-op on Windows.
@@ -172,6 +239,44 @@ pub fn clear_inherited_signal_ignores() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gate_probe_reports_exit_code_and_stderr() {
+        let out = gate_probe("echo boom 1>&2; exit 3");
+        assert!(!out.met);
+        assert_eq!(out.exit_code, Some(3));
+        assert_eq!(out.stderr, "boom");
+        assert!(!out.is_structural_failure(), "exit 3 is a plain unmet gate");
+        assert_eq!(out.summary(), "exit 3: boom");
+    }
+
+    #[test]
+    fn gate_probe_marks_missing_command_structural() {
+        // 127 is what every POSIX shell returns for "command not found"; the
+        // whole point of the diagnosis is that this never becomes true by waiting.
+        let out = gate_probe("fleet-no-such-binary-xyz --version");
+        assert!(!out.met);
+        assert_eq!(out.exit_code, Some(127));
+        assert!(out.is_structural_failure());
+        assert!(!out.stderr.is_empty(), "the shell explains itself on stderr");
+    }
+
+    #[test]
+    fn gate_probe_met_on_zero_and_gate_met_agrees() {
+        let out = gate_probe("exit 0");
+        assert!(out.met);
+        assert!(!out.is_structural_failure());
+        assert!(gate_met("exit 0"));
+        assert!(!gate_met("exit 1"));
+    }
+
+    #[test]
+    fn gate_probe_truncates_long_stderr_on_char_boundary() {
+        // Multi-byte chars: a naive byte slice would panic here.
+        let out = gate_probe("python3 -c \"import sys;sys.stderr.write('中'*5000)\"; exit 1");
+        assert!(out.stderr.chars().count() <= GATE_STDERR_CAP + 1, "capped + ellipsis");
+        assert!(out.stderr.ends_with('…'));
+    }
 
     #[test]
     fn no_window_returns_same_command_and_still_runs() {
