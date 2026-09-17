@@ -49,6 +49,16 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
         _ => "Write in English (questions, option labels, and descriptions all in English).",
     };
 
+    // Extended thinking is generated in whatever language the model drifts to, and
+    // its training skews heavily English — so a non-English locale has to ask for it
+    // explicitly. English locales need no line at all (empty string, no bullet).
+    let thinking_line = match locale {
+        "zh" => "- 思考过程（extended thinking）也尽量用中文。读英文代码时漂回英文没关系，别为此中断手上的推理。\n",
+        "ja" => "- 思考過程（extended thinking）もできるだけ日本語で。英語のコードを読んでいる最中に英語へ戻っても構いません、そのために推論を中断しないでください。\n",
+        "ko" => "- 사고 과정(extended thinking)도 가능한 한 한국어로. 영어 코드를 읽다가 영어로 돌아가도 괜찮으니 그 때문에 추론을 멈추지는 마세요.\n",
+        _ => "",
+    };
+
     if locale == "zh" {
         return format!(
             "# Fleet 交互模式 (managed by Claw Fleet — do not edit)\n\
@@ -63,6 +73,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 - 称呼用户为「{title_zh}」（绝不用第三人称）。声线：一个热情、略带忠犬感的初级开发，向他的「{title_zh}」汇报。\n\
 - {language_line}\n\
+{thinking_line}\
 - `header` ≤12 字符；选项 `label` 1–5 词，细节放 `description`。\n\
 \n\
 ## 三种卡\n\
@@ -125,6 +136,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 两者都不在你的工具集里——既没直接列出、也不在延迟工具清单里（例如非 Claude-Code 的 harness）——本文件即失效，你就像没有本指引时那样用纯文本回复。\n",
             title_zh = title_zh,
             language_line = language_line,
+            thinking_line = thinking_line,
         );
     }
 
@@ -141,6 +153,7 @@ When `fleet__ask` is available this session, every turn that would otherwise han
 \n\
 - Address the user as \"{title_zh}\" (never in third person). Voice: an eager, faintly loyal-puppy junior dev reporting to their \"{title_zh}\".\n\
 - {language_line}\n\
+{thinking_line}\
 - `header` ≤12 characters; option `label` 1–5 words, detail goes in `description`.\n\
 \n\
 ## Three Kinds Of Card\n\
@@ -206,6 +219,7 @@ If neither `fleet__ask` nor `AskUserQuestion` is in your toolset this turn — n
         title_en = title_en,
         title_zh = title_zh,
         language_line = language_line,
+        thinking_line = thinking_line,
     )
 }
 
@@ -323,6 +337,24 @@ mod tests {
         let g2 = render_guidance("", "en");
         assert!(g2.contains("Boss"));
         assert!(g2.contains("老板"));
+    }
+
+    #[test]
+    fn render_asks_non_english_locales_to_think_in_that_language() {
+        // Extended thinking defaults to English regardless of the reply language,
+        // so each localized guidance has to request it; English needs no line.
+        let zh = render_guidance("老板", "zh");
+        assert!(zh.contains("思考过程（extended thinking）也尽量用中文"));
+        assert!(render_guidance("", "ja").contains("思考過程（extended thinking）"));
+        assert!(render_guidance("", "ko").contains("사고 과정(extended thinking)"));
+
+        let en = render_guidance("Boss", "en");
+        assert!(
+            !en.contains("extended thinking"),
+            "English guidance must not spend tokens asking for a language the model already thinks in"
+        );
+        // The empty thinking_line must not leave a stray blank bullet behind.
+        assert!(!en.contains("\n- \n"));
     }
 
     #[test]
