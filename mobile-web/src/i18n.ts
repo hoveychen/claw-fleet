@@ -569,6 +569,8 @@ const DICT: Record<string, string> = {
   上下文占用: "Context used",
   "（系统 {0} · 工具 {1} · 消息 {2}）": "(system {0} · tools {1} · messages {2})",
   运行中: "Running",
+  // 工具步骤上的「后台」标：这条 shell 在回合结束后还自己跑着。
+  后台: "Background",
   完成: "Done",
   出错: "Error",
   排队: "Queued",

@@ -436,6 +436,29 @@
   min-width: 0;
 }
 
+/* 「运行中」/「后台」两枚状态标：一条尚无 tool_result 的调用，和一条回合结束后
+   还在自己跑的后台 shell。两者都不是错误，所以走弱化的 meta 字面，不占状态色。 */
+.toolRunning,
+.toolBgTag {
+  flex-shrink: 0;
+  font-size: var(--t-meta, 10px);
+  line-height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--color-text-dim);
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.toolRunning {
+  animation: toolRunningPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes toolRunningPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
 /* ── Digest stat chips (server-computed toolUseResult stats) ───────────────── */
 .chipRow {
   display: inline-flex;
