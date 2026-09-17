@@ -122,8 +122,9 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
     });
   }
   if (s.watches && s.watches.length > 0) {
-    // until 命令根本跑不起来的 watch 不是在等，是卡死了——轮询次数在这种情况下
-    // 是个误导性的安慰数字，所以换成警示 pill。
+    // A watch whose until command cannot run at all is not waiting, it is
+    // stuck — the poll count is a reassuring lie in that state, so show an
+    // alert pill instead of it.
     const broken = s.watches.filter((w) => (w.structuralFailStreak ?? 0) > 0).length;
     if (broken > 0) {
       pills.push({
