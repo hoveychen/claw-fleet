@@ -92,19 +92,19 @@ fn language_lines(locale: &str) -> (&'static str, &'static str) {
     match locale {
         "zh" => (
             "本规则配套的 TASKS.md 用中文书写。",
-            "决策卡的 question 与 option 文案用中文书写。",
+            "决策卡的 question 与 option 文案、以及回合中途的进度叙述，都用中文书写。",
         ),
         "ja" => (
             "本ルールに対応する TASKS.md は日本語で書いてください。",
-            "意思決定カードの question と option は日本語で書いてください。",
+            "意思決定カードの question と option、そしてターン途中の進捗の語りも日本語で書いてください。",
         ),
         "ko" => (
             "이 규칙과 짝을 이루는 TASKS.md는 한국어로 작성하세요.",
-            "결정 카드의 question과 option은 한국어로 작성하세요.",
+            "결정 카드의 question과 option은 물론, 턴 중간의 진행 서술도 한국어로 작성하세요.",
         ),
         _ => (
             "Write the paired TASKS.md in English.",
-            "Write decision-card question and option text in English.",
+            "Write decision-card question and option text — and your mid-turn progress narration — in English.",
         ),
     }
 }
@@ -1105,8 +1105,9 @@ mod tests {
         let ix = render_codex_interaction_block("", "en");
         assert!(ix.contains("Boss"), "empty title falls back to Boss");
         assert!(
-            ix.contains("decision-card question and option text in English"),
-            "en locale selects the English interaction language line"
+            ix.contains("decision-card question and option text")
+                && ix.contains("mid-turn progress narration"),
+            "en locale selects the English interaction language line, which covers narration too"
         );
         assert!(
             render_codex_prd_block("", "zh").contains("老板"),
