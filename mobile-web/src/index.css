@@ -40,8 +40,9 @@
   --color-success: #6fbf87;
   --color-warning: #d9a441;
   --color-error: #e0796f;
-  /* 「等待 watch 条件」那颗点。绿=在跑、琥珀=等人，这是第三种：没人在跑，
-     但定时器会把它叫回来。挑的是压在暖墨纸上的柔紫，不是冷蓝。 */
+  /* The "waiting on a watch condition" dot. Green = running, amber = waiting on
+     you; this is the third thing: nothing runs, but a timer brings it back. A
+     soft violet that sits on the warm-ink paper, not a cold blue. */
   --color-info: #a892d8;
   --color-bg-glass: rgba(26, 24, 22, 0.93);
   /* 纸感派在暗色下是「暖墨」：同一张纸关了灯，不是另一套冷灰。阴影在暗底上

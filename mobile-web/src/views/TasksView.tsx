@@ -118,9 +118,9 @@ export function statusTone(s: SessionInfo & { deviceId?: string }): string | nul
     lastActivityMs: s.lastActivityMs ?? 0,
     now: Date.now(),
   });
-  // 「等待 watch 条件」排在最前面判：它的进程已经退了、transcript 也不再写，
-  // 否则会一路掉到最后的 `return null`（没点，读起来和已结束一样），而实际上
-  // Fleet 的定时器条件一满足就会把它叫回来。
+  // Checked first: a watch-parked session has no process and writes nothing, so
+  // it would otherwise fall through to the final `return null` — no dot, reading
+  // as ended — when a Fleet timer is in fact going to resume it.
   if (s.status === "watching") return "watching";
   if (s.status === "waitingInput") return "waiting";
   if (s.status === "rateLimited" || s.status === "serverErrored" || s.status === "remoteDisconnected")

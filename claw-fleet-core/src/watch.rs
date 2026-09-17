@@ -512,7 +512,7 @@ fn session_watch_index_in(dir: &Path) -> std::collections::HashMap<String, Vec<W
 /// parked on one. The transcript can't express this state: the turn ended, the
 /// `-p` process exited, nothing writes the jsonl again until the watch fires, so
 /// `determine_status` decays the session to `Idle` after 30s and it reads as
-/// finished work in every client (no run dot, 「空闲」 label, filtered out of
+/// finished work in every client (no run dot, an "idle" label, filtered out of
 /// `fleet agents`). The side channel is the only thing that knows a Fleet timer
 /// will `claude --resume` it — same shape as `remote_disconnect`, which likewise
 /// overrides a transcript-derived status from a record on disk.
