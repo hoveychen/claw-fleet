@@ -48,7 +48,7 @@ describe("splitContextFiles — strip composer-appended tail", () => {
     });
   });
 
-  it(“preserves manually typed “Context files:” in body”, () => {
+  it('preserves manually typed "Context files:" in body', () => {
     const text = "Context files: 你确定吗？\n- 这不是路径";
     expect(splitContextFiles(text).paths).toEqual([]);
     expect(splitContextFiles(text).body).toBe(text);
