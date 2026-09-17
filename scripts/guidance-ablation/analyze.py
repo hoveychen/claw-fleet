@@ -20,7 +20,7 @@ RULE = {
 # compliance? Re-measuring `min` and `shipped` alongside them reproduced within
 # ~1% (8,086 vs 7,993; 19,649 vs 19,558), so the delta method is stable.
 TOKENS = {"none": 0, "full": 24377, "shipped": 19558, "minmode": 19052,
-          "lite": 14607, "minprd": 8690, "min": 7993}
+          "lite": 14607, "newship": 10932, "minprd": 8690, "min": 7993}
 
 
 def fisher(a, b, c, d):
@@ -50,7 +50,7 @@ for f in sorted(RUNS.glob("*/record.json")):
     cells[k][0] += bool(r["score"].get("compliant"))
 
 for model in sorted({k[1] for k in cells}):
-    conds = [c for c in ("none", "full", "shipped", "minmode", "lite", "minprd", "min")
+    conds = [c for c in ("none", "full", "shipped", "minmode", "lite", "newship", "minprd", "min")
              if any(k[2] == c and k[1] == model for k in cells)]
     print(f"\n### model = {model}\n")
     print("| 场景 | 规则 | " + " | ".join(conds) + " |")
@@ -97,7 +97,7 @@ print("\n### 非饱和场景 (B,E,F) 合并对比\n")
 # "F only" against "B+E+F" and read as a collapse (or a win) that is really
 # just a different scenario mix.
 pooled, partial = {}, []
-for c in ("none", "full", "shipped", "minmode", "lite", "minprd", "min"):
+for c in ("none", "full", "shipped", "minmode", "lite", "newship", "minprd", "min"):
     p = sum(cells.get((s, "sonnet", c), [0, 0])[0] for s in POOL)
     n = sum(cells.get((s, "sonnet", c), [0, 0])[1] for s in POOL)
     if not all(cells.get((s, "sonnet", c), [0, 0])[1] for s in POOL):
@@ -109,7 +109,7 @@ for c in ("none", "full", "shipped", "minmode", "lite", "minprd", "min"):
 if partial:
     print(f"- 未纳入合并（只跑了 F，场景组成不可比）: {', '.join(partial)}")
 fp, fn = pooled["full"]
-for c in ("none", "shipped", "minmode", "lite", "minprd", "min"):
+for c in ("none", "shipped", "minmode", "lite", "newship", "minprd", "min"):
     if c not in pooled:
         continue
     xp, xn = pooled[c]

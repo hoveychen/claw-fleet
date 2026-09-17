@@ -40,12 +40,6 @@ fn claude_md_path() -> Option<PathBuf> {
 ///   write and read the durable plan file so context compression can't erase
 ///   the macro state.
 pub fn render_guidance(user_title: &str, locale: &str) -> String {
-    let title = if user_title.is_empty() {
-        "Boss".to_string()
-    } else {
-        user_title.to_string()
-    };
-
     let language_line = match locale {
         "zh" => "本规则配套的 TASKS.md 也用中文书写（task 标题、备注皆中文）。",
         "ja" => "本ルールに対応する TASKS.md も日本語で書いてください。",
@@ -60,1363 +54,385 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
             user_title.to_string()
         };
         return format!(
-            "# Fleet PRD 纪律 (managed by Claw Fleet — do not edit)\n\
-\n\
-本模式锁死三个会拖垮长程多步计划的失败模式：\n\
-\n\
-1. **计划中途的提交唠叨。**代理做完一个 P-task，冒出「现在要提交吗？」的\
-条件反射，{title}得不停地说「不用，继续」。\n\
-2. **压缩后的任务失忆。**上下文压缩后，代理记得自己刚做完 P2，却丢了\
-「P3..Pn 仍待办」这个宏观状态。\n\
-3. **进度汇报式打卡。**代理做完一个 P-task 就停下来问「要我继续下一个吗？」\
-或「进展不错，P4 前要不要先审一下？」。TASKS.md 勾选框和 worktree 提交已让进度\
-一目了然。\n\
-\n\
-## Rule 1 —— 多步计划期间的提交纪律\n\
-\n\
-这里的**多步计划**指：任何你拆成 2 个或更多顺序子任务（P1、P2、...、Pn——或\
-编号 todo，或任何等价物）的任务。一旦进入这样一个计划，以下规则一直适用到计划\
-彻底完成：\n\
-\n\
-**本规则里「提交」的范围。**整个 Rule 1 里，「提交」指**主/默认分支**上的提交。\
-worktree 特性分支（`prd/<plan-id>`）上的提交由 Rule 3 管辖、在每个 P-task 边界\
-都明确允许——它们不算 Rule 1 违规，也无需作为与本规则的冲突点出。\n\
-\n\
-- **不要主动提议在 main 上 `git commit`。** P1 之后不要，P2 之后不要，任何你\
-感觉到的「自然检查点」都不要。工作的单位是计划，不是单个 P-task。\n\
-- **也不要真的在 main 上跑 `git commit`**，除下面两种情形外。\n\
-- **只有以下情形你才可以在 main 上提交：**\n\
-  1. {title}在本回合明确要求提交，或\n\
-  2. 你刚做完计划里的**最后**一个 P-task（即 TASKS.md 里所有项都已勾选）**且**\
-     你已向{title}呈报计划完成。Rule 3（worktree 工作流）生效时，这个 main 上\
-     唯一允许的提交采取从 worktree 分支 `git merge --no-ff` 的形式——确切流程\
-     见 Rule 3。\n\
-- **`git push` 永远受闸控**——无论计划处于什么状态，没有{title}在本回合的明确\
-  批准绝不 push。\n\
-\n\
-### 「完成」意味着什么\n\
-\n\
-计划完成 = 所有 P-task 在 TASKS.md 已勾选（见 Rule 2）+ 构建/测试已跑 + 已向\
-{title}呈报改动摘要。三者未全为真前，计划未完成，不要提议提交。\n\
-\n\
-### 边缘情形\n\
-\n\
-- **单步任务**（一个 bug 修复、一次重命名、一处配置微调）：不是多步计划，适用\
-  常规提交礼仪。\n\
-- **{title}在计划中途问「能把目前做完的提交一下吗？」**：这是上面的情形 1——\
-  照做。\n\
-- **你撞上一个需要{title}输入的阻塞点**：暂停并通过 AskUserQuestion 提问（该\
-  工具不可用时用纯文本）。不要拿阻塞当借口「怕进度丢了」而提交。阻塞解除后再\
-  继续。\n\
-- **你即将做破坏性操作**（rebase、force-push、删分支）：无论计划状态如何，停\
-  下来问。本规则不覆盖既有的破坏性操作确认要求。\n\
-\n\
-## Rule 2 —— TASKS.md 作为持久的宏观计划\n\
-\n\
-上下文压缩会把对话历史压平。近期动作（「提交成功」）高保真地留存；宏观状态\
-（「P3..P10 仍待办」）被摘要掉。为熬过压缩，宏观计划落在磁盘上。\n\
-\n\
-**约定：**\n\
-\n\
-- 当你把任务拆成 2 个或更多子任务时，在开始 P1 **之前**把拆解写进\
-  `<workspace_root>/TASKS.md`。\n\
-- 每完成一个 P-task，把它在 TASKS.md 里的勾选框更新为 `[x]`。\n\
-- 每个回合开始时（压缩之后，或你不确定宏观状态时），活跃计划区域会由 Fleet 的\
-  UserPromptSubmit hook 自动作为 system-reminder 重新注入——但你也可以在需要时\
-  显式 `Read` 该文件。\n\
-- 当你的计划彻底完成，你可以移除自己计划的哨兵块（或留着作历史——提交时由\
-  {title}定夺）。不要动其他计划的块。\n\
-\n\
-### 一个 TASKS.md 里的多个计划\n\
-\n\
-单个 workspace 的 `TASKS.md` 可以**并行承载多个计划**——{title}可以让你做计划\
-A，同时另一个代理（或另一段对话）正在推进计划 B。每个计划活在自己的哨兵对里，\
-由唯一的 `id` 标识：\n\
-\n\
-```markdown\n\
-# TASKS\n\
-\n\
-<!-- fleet:prd:begin id=\"auth-refactor\" v=\"2\" -->\n\
-\n\
-**Plan:** Migrate session middleware to the new auth crate\n\
-\n\
-- [x] **P1** — Audit existing call sites\n\
-- [ ] **P2** — Swap middleware impl\n\
-- [ ] **P3** — Update integration tests\n\
-\n\
-<!-- fleet:prd:end id=\"auth-refactor\" -->\n\
-\n\
-<!-- fleet:prd:begin id=\"prd-multiplan\" v=\"2\" -->\n\
-\n\
-**Plan:** Teach TASKS.md to host parallel plans\n\
-\n\
-- [ ] **P1** — New sentinel format with `id=\"...\"`\n\
-- [ ] **P2** — Hook scans all blocks and re-injects each\n\
-\n\
-<!-- fleet:prd:end id=\"prd-multiplan\" -->\n\
-```\n\
-\n\
-`begin` 哨兵上的 `v=\"2\"` 属性标记 **v2 schema**。`end` 哨兵只需匹配的 `id`。\
-旧版 v1 块（无 `v=\"2\"`）仍可用；跑 `fleet plan migrate` 可就地升级旧的\
-TASKS.md。\n\
-\n\
-**处理多计划 TASKS.md 的规则：**\n\
-\n\
-1. **为你的计划挑一个唯一的 `id`。**用 kebab-case、≤ 32 字符、描述该工作（如\
-   `auth-refactor`、`import-cleanup`）。新建计划前，先 `Read` TASKS.md 确认没有\
-   现存块用了同一 id。\n\
-2. **只编辑你自己的块。**勾选框或修改计划时，只改*你自己*的 `begin id=\"X\"`\
-   与 `end id=\"X\"` 之间的行。把其他每个块都当作只读——它属于另一个可能正在\
-   推进的计划。\n\
-3. **两个哨兵上的 id 要匹配。** `begin id=\"X\"` 必须与 `end id=\"X\"` 配对。id\
-   不匹配会被 hook 忽略。\n\
-4. **旧版无标记块仍被识别。**一对裸的 `<!-- fleet:prd:begin -->` /\
-   `<!-- fleet:prd:end -->`（无 `id=`）为向后兼容被当作单个匿名计划。不要再以\
-   这种形式新建——始终用显式 id。\n\
-5. **不要合并或重排别人的计划。**若两个块看着冗余，向{title}点出，而不是自己\
-   把它们合掉；另一个块可能属于你看不到的会话。\n\
-\n\
-### 用 `fleet plan` 更新计划，而非手改\n\
-\n\
-相较直接编辑 TASKS.md markdown，优先用 `fleet plan` 子命令。它们做出同样的\
-文件改动，**并且**记录哪个会话在做哪个计划/P、带时间戳——这样即使多个会话共用\
-一个 TASKS.md，桌面端也能显示*你*当前的计划和 P（Fleet 知道你的\
-`FLEET_SESSION_ID`；你自己读不到墙上时钟）。命令：\n\
-\n\
-> **若你的工具列表里有 `fleet__plan` / `fleet__handoff` / `fleet__watch` / \
-`fleet__loop` / `fleet__schedule` / `fleet__wiki` 这些 MCP 工具（Fleet 启动的\
-会话都会有），一律优先用它们而不是下面的 `fleet …` 命令行——调 `fleet__plan` \
-传 `action` 参数（如 `action=\"check\"`）即可，语义与 CLI 子命令一一对应。远端\
-（rca）workspace 会话里用 Bash 跑 `fleet …` 会被按 cwd 路由到没有 fleet 的远端\
-executor 而失败（exit 127），而 MCP 工具是 JSON-RPC 打到本地常驻的 `fleet mcp` \
-server、总能触达本地 Fleet 状态。仅当这些工具不在列表里（用户手起、非 Fleet \
-的会话）时，才退回 `fleet …` CLI。**\n\
-\n\
-- `fleet plan create <id> --title \"...\" [--parent <id> | --root --root-reason \
-  \"...\"] [--kind explore|exec]` —— 新增一个 v2 计划块**并**把本会话记录为它的\
-  执行者。创建计划就是开始它，故无需另行声明。\n\
-  \n\
-  **默认行为：你在执行某个计划时新建的计划，自动成为它的子计划。**一个 flag \
-  都不用传。这条默认值就是整个机制——**从一个计划里派生出来的计划，默认就是\
-  它的儿子**。\n\
-  \n\
-  两条相关的 flag 都只是**覆盖**这个默认值：\n\
-  - `--parent <id>`：挂到别处（不是你当前执行的那个计划）。通常用不上。\n\
-  - `--root --root-reason \"<为什么这活不属于当前计划>\"`：另起一棵顶层树。\
-    **你手上有计划时，光传 `--root` 会被拒**，必须给出理由，一句话即可。\n\
-  - 手上**没有**计划时（老板刚开的新话题），root 本来就是默认，什么都不用传。\n\
-  \n\
-  为什么默认值要这么设：前两版设计都没能长出树。①`--parent` 只是「可选」时，\
-  某个仓库前 355 个计划里 350 个是平的；②改成「必须显式二选一」之后，又有 \
-  109 个是平的——因为 `--root` 依然是零成本的合法答案，你不必想清楚新计划跟\
-  手上的活是什么关系。真实代价是一条接力链：老板一句「审一下研究流程的缺陷」\
-  拆出六条清单，每条各自建成顶层计划（8 个计划，0 条 parent），于是每一棒做完\
-  自己那一个、找不到祖先、就结束了回合，而清单还剩两条没做——宏观目标只活在\
-  一份 wiki 和各棒手抄的交接便条里。所以现在不是把选择变成**强制**，而是把它\
-  变成**默认就对**。\n\
-  \n\
-  把兄弟串成一条链也没关系：回溯会跳过已完成的祖先，总是落在最近的未完成\
-  工作上。离开这棵树依然可以，只是要说出口。\n\
-- `fleet plan check <id> <P>` —— 勾选一个任务为完成（`[ ]`→`[x]`）并把本会话的\
-  焦点刷新到 `<id>`。如 `fleet plan check auth-refactor P2`。\n\
-- `fleet plan uncheck <id> <P>` —— 取消勾选。\n\
-- `fleet plan resume <id> [P]` —— 接手一个你没创建的**现存**计划（不改文件；\
-  设定你的当前 P，默认第一个待办）。`create` 之后不需要它，交接之后也不需要——\
-  Fleet 会替你归属后继者。\n\
-- `fleet plan add <id> <P> --text \"...\"` —— 追加一个待办任务。不记录焦点：\
-  编辑计划的形态并不说明谁执行它。\n\
-- `fleet plan migrate` —— 把本 workspace 的 v1 TASKS.md 升级到 v2（幂等）。\n\
-- `fleet plan list` / `fleet plan get <id>` —— 读取。\n\
-\n\
-手改 TASKS.md 仍有效——文件是勾选框的唯一真相来源——但它不记录归属，所以桌面端\
-无法判断你的会话在哪个计划上，你的卡片上什么都不显示。\n\
-\n\
-### explore 计划与 exec 计划\n\
-\n\
-计划的 `--kind` 说明它的 P-task 是**干什么用的**。`exec`（缺省）意味着 P-task \
-会改代码。`explore` 意味着 P-task 产出的是理解，而这个计划的交付物是\
-**它派生出的 exec 子计划**——不是它自己的代码改动。\n\
-\n\
-凡是以「先搞清楚……」开头、你还叫不出具体改动名字的工作，都用 `--kind explore`。\
-调研完成后，把结论变成 `fleet plan create <id> --parent <explore-id>` 的一批\
-子计划——每块自洽的实现各一个——让{title}在动手之前就能逐条读到要做什么。\
-explore 计划里不要改生产代码（一次性的探针脚本可以）。\n\
-\n\
-**为什么这条要用机制拆开而不是口头提醒：**把调研和实现塞进同一个计划，正是\
-长程工作走歪的方式。「P3 —— 调研 X」挨着「P4 —— 实现 X」，P3 的发现悄悄重新\
-定义了 P4 的含义，等有人察觉时，实现已经和没人拍板过的需求耦合在一起了。\
-拆成两个计划会强迫这次交接显形：调研的产出是一份待建 exec 计划清单，而这份\
-清单恰恰是值得在投入前被审阅的东西。这就是 Rule 6 背后的机制——explore 计划\
-是**允许你还不知道**的地方，而子计划是每条需求被追溯回{title}真正要求过的\
-东西的地方。\n\
-\n\
-注入的上下文会给 explore 计划打上 `[explore]` 标记，并在它成为你的焦点时\
-重述这条契约，这样一次上下文压缩没法把一次调研悄悄变成一场自由实现。\n\
-\n\
-### 子计划与回溯\n\
-\n\
-计划中途你有时得分出一条**旁支**——一块必须先完成、主计划才能继续的独立工作\
-（一个前置重构、当前 P 依赖的一个 bug）。把它建成**子计划**，让这段岔路不至于\
-把你来时的计划晾在那儿：\n\
-\n\
-```\n\
-fleet plan create <side-id> --title \"...\" --parent <current-plan-id>\n\
-```\n\
-\n\
-这会在旁支计划的哨兵上记录 `parent=\"<current-plan-id>\"`。当你用\
-`fleet plan check` 勾掉那个子计划的**最后**一个框时，Fleet 沿 `parent` 链向上\
-走到最近的、仍有待办 P-task 的祖先，**把你的焦点重新指回它**，并打印一条指令\
-告诉你下一个要恢复的 P。你不用自己跑 `fleet plan resume`——照指令继续就行；\
-不要因为子计划完成了就结束回合。prd-context hook 里有个兜底：若你的焦点被留在\
-一个已完成的子计划上（例如最后那个框是手改而非用 `fleet plan check` 勾的），它\
-每个 prompt 都会重发同样的提醒。\n\
-\n\
-子计划可以嵌套（子计划可以有自己的子计划），且向上走会跳过已完成的祖先，所以\
-回溯总是落在树上最近的未完成工作。没有 `--parent` 的计划是顶层：完成它不回溯到\
-任何地方，计划就此结束。\n\
-\n\
-格式本身的经验法则：\n\
-- 待办用 `- [ ]`、完成用 `- [x]`（`fleet plan check/uncheck` 会替你写这些）。\
-  不要发明新状态；简单的勾选框就是约定——「此刻谁在做什么」由 Fleet 跟踪，而非\
-  文件里的某个标记。\n\
-- P-task 标题保持 ≤ 60 字符。长验收备注放进子 bullet。\n\
-- {language_line}\n\
-\n\
-### 跨 worktree 的多源扫描\n\
-\n\
-因为 Rule 3 在 `.worktrees/<task-id>/` checkout 里开发计划，prd-context hook\
-每个 prompt 都会扫描它能为该 repo 找到的**每一个** TASKS.md——主 checkout 的\
-`<repo>/TASKS.md` 加上每个存在的 `<repo>/.worktrees/*/TASKS.md`——并把它们全部\
-的活跃计划合并进一次注入。无论会话的 cwd 是主 checkout 还是某个 worktree，这都\
-一样运作，所以跑在 worktree 里的 worker 代理照样能看到活在主 checkout 里的计划\
-（反之亦然）。\n\
-\n\
-**去重规则：**当同一个 `id=\"X\"` 出现在不止一个 TASKS.md 文件里时，hook 保留\
-mtime 最新的那个文件里的版本，丢弃其余。当块来自某个 worktree TASKS.md 时，\
-渲染出的计划标题会带一个 `— source: <path>` 后缀，好让代理知道该编辑哪个文件。\
-匿名（旧版无标记）块按文件各自独立保留——它们早于多计划格式。\n\
-\n\
-**因此：把给定的 `id` 只放在一个 TASKS.md 文件里。**把同一个带 id 的块从主\
-checkout 复制进 worktree（或在两个 worktree 之间复制）会造出一个幽灵计划，它随\
-你最后保存的是哪个文件而闪烁。如果某个计划出于任何原因需要活在 worktree 里，先\
-把它从主 TASKS.md 删掉。\n\
-\n\
-### 让 TASKS.md 别进 git\n\
-\n\
-TASKS.md 是代理的临时草稿状态——它不该进版本控制。你在某个 workspace 里第一次\
-创建 `TASKS.md`（即它在本回合前不存在）时，检查它是否已被 `.gitignore` 覆盖，\
-若没有，**向{title}提一句并主动提议往 `.gitignore` 加一行 `TASKS.md`**。不要\
-悄悄改写 `.gitignore`——把建议点出、让{title}批准。之后编辑已存在的 TASKS.md\
-时，无需再提醒。\n\
-\n\
-## Rule 3 —— 基于 worktree 的特性工作流\n\
-\n\
-**任何触碰生产代码的改动都必须在一个隔离的 git worktree 里开发**，位于\
-`<repo-root>/.worktrees/<task-id>`、基于新分支 `prd/<task-id>`——**无论这工作是\
-多步计划（P1..Pn）还是单次机械改动**。Rule 3 是全局的；它不受 Rule 1 多步计划\
-定义的限制。多步计划里，`<task-id>` 就是你为 TASKS.md 哨兵块挑的那个 id（Rule\
-2）；单步改动里，当场挑一个短 kebab-case 标识（如 `fix-zombie-pid`、\
-`rename-task-fields`）。\n\
-\n\
-**约定：**\n\
-\n\
-- **触碰任何生产代码之前**，基于当前 main 在新分支上创建 worktree：\n\
-\n\
-  ```\n\
-  git worktree add -b prd/<task-id> .worktrees/<task-id> main\n\
-  ```\n\
-\n\
-  所有代码工作都在这个 worktree 里跑；主 checkout 全程保持干净。最后一个 P-task\
-  （单步改动则是收尾动作）是合并回 main。\n\
-- **worktree 内的中间提交明确允许，不违反 Rule 1。** Rule 1 的「不主动提交」\
-  针对的是 *main*；`prd/<task-id>` 上的提交是别的工作看不到的进度标记。只要有助于\
-  推理下一步（如某个后续改动回退了行为时用 `git diff HEAD~1`），就在 P-task 之间\
-  提交（单步改动也可拆成多个提交）。你仍无需*请求*{title}许可才能在 worktree 内\
-  提交——那是私有分支上的自由移动。\n\
-- **工作以一次原子的合并回 main 结束**（最后一个 P-task，单步改动则是收尾\
-  动作）。从主 checkout：\n\
-\n\
-  ```\n\
-  git merge --no-ff prd/<task-id>\n\
-  ```\n\
-\n\
-  `--no-ff` 是强制的。`--ff-only` 和 `--squash` 被禁止——我们让每个 worktree\
-  提交在 main 历史里都可见，旁边配一个概括改动的单一合并提交，好让工作在每提交\
-  粒度上保持可审计。这个 `git merge --no-ff` 就是 Rule 1 允许的那唯一一次 main\
-  上提交；不要在它之前或之后再跑任何 `git commit`。\n\
-- **合并或移除 worktree 之前，抢救计划生成的 gitignored / 未跟踪产物。**\
-  `git merge --no-ff` 只带过*已提交*的内容。任何被 `.gitignore` 匹配的东西——\
-  以及任何你从未 `git add` 的文件——都从未被提交，故它只活在 worktree 的工作\
-  目录里。`git worktree remove` 随后会连同这些文件一起删掉那个目录，而因为它们\
-  从未被跟踪，没有 git 对象能恢复它们：数据永久丢失。`.gitignore` 意思是「别把\
-  这个放进版本控制」，不是「别留着这个」——一个生成的数据集、一个合成的媒体\
-  文件、一个下载的资产、一段{title}可能想要的抓取日志、工作中产生的一个\
-  `.env`，即便未跟踪，也都是真实数据。所以移除任何东西之前，在 worktree 里跑\
-  `git status --ignored`（并检查普通未跟踪文件）。例行可再生的目录——`target/`、\
-  `node_modules/`、`dist/`、`.next/`，任何被已提交的构建脚本从头重建的东西——\
-  无需抢救；跳过。但若 worktree 里存着一个**不**能从已提交代码轻易重现的生成\
-  产物（没提交生成脚本，或输入没了），在移除前停下来向{title}呈报：该把文件拷\
-  出 worktree 到安全位置，还是真的应该跟踪它（加进合并，或从 `.gitignore` 移\
-  除）？在这解决之前不要 `git worktree remove`——移除是不可逆的那一步。\n\
-- **合并成功后，清理。**先确认上面的抢救检查已做。然后跑\
-  `git worktree remove .worktrees/<task-id>` 再 `git branch -d prd/<task-id>`。\
-  若合并失败（冲突、合并后构建/测试回退），就地解决——不要弃掉 worktree，不要\
-  amend 合并提交，不要 `git reset --hard` 抹掉合并。向{title}呈报情况，阻塞解除\
-  后再继续。\n\
-- **不要把 worktree 分支 push 到远端。** `git push` 仍受 Rule 1 闸控：只凭\
-  {title}在本回合的明确批准。本地合并到 main 由 Rule 1 情形 2 允许；push main 是\
-  {title}自己拥有的另一个决定。\n\
-- **`.worktrees/` 必须在 `.gitignore` 里。**和 TASKS.md 一样对待：你在本 repo\
-  第一次创建 worktree 时，检查 `.gitignore`；若 `.worktrees/` 缺席，**向{title}\
-  提一句并主动提议加一行 `.worktrees/`**。不要悄悄改写 `.gitignore`。\n\
-\n\
-### Rule 3 何时不适用\n\
-\n\
-Rule 3 覆盖任何触碰生产代码的改动，**无论多步还是单步**。单步改动不是跳过\
-worktree 的借口——重点就是哪怕一次 50 行的机械编辑也享受同样的隔离。真正的豁免\
-关乎你*改什么*，而非它*花几步*：\n\
-- 纯文档改动（README、docstring、changelog）。\n\
-- 纯配置改动（CI YAML、dotfile、`.gitignore` 本身、格式化器配置）。\n\
-- 必须在另一个在飞的 worktree 完成之前落到 main 的紧急热修——先向{title}呈报\
-  该热修，好让{title}决定是否暂停活跃的 worktree。\n\
-\n\
-## Rule 4 —— 计划执行节奏\n\
-\n\
-多步计划应以一种连续的节奏执行，而非被计划中途的汇报检查点打断。进度的单位是\
-*计划*，不是 P-task——{title}本来就能通过 TASKS.md 和（Rule 3 生效时）worktree\
-提交看到计划状态，所以显式进度汇报是多余的打断。\n\
-\n\
-**节奏。**每个非最后的 P-task 遵循同样的三步循环，然后**在同一回合里**立即\
-继续下一个 P-task，不为{title}的确认停顿：\n\
-\n\
-1. **开发** —— 做出该 P-task 要求的代码改动。\n\
-2. **测试 / 验证** —— 跑合适的验证（单测、`cargo build`、`pnpm build`、\
-   Playwright、类型检查、lint、手动操作 UI——该 P-task 需要什么就跑什么）。\n\
-3. **在 worktree 内提交** —— Rule 3 生效时，把该 P-task 记录为 `prd/<plan-id>`\
-   上的一个提交，好让后续 P-task 有个干净的参照点。Rule 3 之外（如纯配置\
-   计划），此步跳过。\n\
-\n\
-第 3 步后，用 `fleet plan check <plan-id> <P>` 勾选框——不是手改 TASKS.md——并\
-**立即推进到下一个 P-task**。`check` 是让你的会话保持归属到本计划的关键；手改的\
-勾选框会让桌面卡片空白。不要停下来做摘要。不要问「要我继续 P2 吗？」或「P4 前\
-要不要审一下进度？」。不要提议「我写了不少 P-task 了，要我总结一下吗？」。这些\
-正是 Rule 4 存在要消除的主动进度汇报检查点。\n\
-\n\
-**归属。** Fleet 在会话卡片上显示你当前的计划和 P，但只有当它能把你的会话归属到\
-某计划时才行。`fleet plan create`（你写了这计划）和 Fleet 交接（Fleet 把你 spawn\
-进去）会自动归属你；`fleet plan check` 随你推进而刷新。唯一需要显式认领的情形是\
-**接起一个你没创建、也没被交接的计划**：在你第一个 P-task 之前跑\
-`fleet plan resume <plan-id> [P]`。\n\
-\n\
-**现在有两道机制在强制这个节奏，而不只是请求它。**\n\
-\n\
-*聚焦注入。*你一旦被归属到某个计划，每轮的注入就不再罗列全部 active 计划，\
-而是**只展开你这一个**——完整的，连 per-task 备注一起——外加一行到树根的路径。\
-其余计划折叠成一行计数。所以摆在你面前的下一个任务，在构造上就只有一个。\
-如果工作真的属于另一个计划，说出来并用 `fleet plan resume <id>` 显式改指，\
-不要因为另一个计划的下一个 P 看起来更短就悄悄去做它。\n\
-\n\
-*计划门。*当你试图在自己焦点计划（或它的某个祖先）仍有未完成 P-task 时结束\
-回合，`Stop` 钩子会拒绝，并把一条点名下一个 P 的指令交回给你。它只在你**本回合\
-确实推进过计划**时才介入，并且对每一个正当出口让路：已登记的 `fleet handoff`、\
-一个 `fleet watch`、一张等{title}回答的决策卡，以及它已经说过一次之后的第二次\
-尝试。所以它困不住你——但也别把它当成需要绕过去的东西。它触发而你手上没有正当\
-出口时，诚实的反应是继续干活。\n\
-\n\
-### 节奏何时确实要停\n\
-\n\
-节奏只为以下四种情形之一停顿。「我做了不少，要不要报个到？」永远不是其中之一。\n\
-\n\
-1. **最后一个 P-task 的验收闸门。** Rule 3 的计划以\
-   `git merge --no-ff prd/<plan-id>` 结束。跑合并前，向{title}呈报一份「可以\
-   合并了」的摘要并等明确放行。这次合并就是计划的验收时刻；不要在中间检查点\
-   征求验收。\n\
-2. **一个真正的工作方向问题。**需要{title}判断、因为路上有真岔口的东西——\
-   「X 保持向后兼容还是丢掉？」「这数据删还是归档？」「API 设计 A 还是 B？」。\
-   引用那个选择和取舍；那是澄清问题，不是进度汇报。\n\
-3. **一次挺过一轮修复的测试/验证红灯。** `cargo build` / 单测 / Playwright / \
-   hook 在某个 P-task 里第一次失败时，你**可以**试一轮诊断加修复。若那一轮没\
-   恢复绿灯，或者你动手前根因就不清楚，停下来作为阻塞点呈报——不要在没有{title}\
-   的情况下陷入「修→重试→修→重试」的循环。\n\
-4. **一次破坏性操作**（rebase、force-push、删分支、丢弃 migration、\
-   `git reset --hard`）。既有的破坏性操作确认要求仍适用；Rule 4 不覆盖它。\n\
-\n\
-## Rule 5 —— 长上下文交接（`fleet handoff`）\n\
-\n\
-当你的上下文窗口在计划中途拉长时（上下文用量高，或压缩已经触发），不要死磕到\
-窗口耗尽，不要悄悄提前收尾，也不要留下没人执行的「交给下一个会话」的便条。\
-Fleet 有一个一等的接力：\n\
-\n\
-```\n\
-fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>] [--model <模型>] [--effort <档位>]\n\
-```\n\
-\n\
-- **--note 是强制的**，是你这一棒交出去的全部账：什么做完了、什么在飞、关键\
-文件、坑、下一个具体步骤。像换班简报那样写。\n\
-- **当工作是一个 TASKS.md 计划时传 --plan/--next**，好让 Fleet 把后继者自动\
-归属到那个计划和 P；它会在那里恢复节奏，无需自己的任何 `fleet plan` 仪式。\n\
-- **--model / --effort 可选**：钉死后继者的模型（如 `claude-opus-5[1m]`，\
-括号后缀原样透传）和推理档位（low|medium|high|max），覆盖否则自动继承的值。\
-不传就沿用当前会话的模型与 CLAUDE_EFFORT。\n\
-- **然后干净地结束回合**：先按 Rule 3 提交 worktree 进度，再停。你一交出，\
-Fleet 的 Stop hook 就消费这个登记，并在同一 workspace spawn 一个全新会话，其\
-开场 prompt 就是你的便条；prd-context hook 会自动重新注入 TASKS.md 宏观计划。\n\
-- **接力被记录**为一条交接链，显示在会话卡片上（接力 n/N），好让{title}事后\
-追溯整个序列。\n\
-- **整条链你读得到，不止上一棒的便条**：调 `fleet__handoff` 传 \
-`action=\"show\"`（CLI 等价 `fleet handoff show <session id>`），会按棒列出链上\
-每一个 session id 和它交接时写的 note 全文；第 2 棒起的开场白里已附了这份名册\
-的摘要。**{title}若问「最开始的问题」「这个 chain 一开始要干什么」，指的是第 1 \
-棒的起点，不是你手上的 plan**——链中段常派生出新 plan，别拿它当原始诉求，先 \
-`show` 再答。要看某一棒当时逐字发生了什么，读它的 transcript：\
-`find ~/.claude/projects -name \"<session id>.jsonl\"`。\n\
-- 给你会话的一个新用户 prompt 会取消你待定的交接——{title}接管永远优先。链最多\
-100 跳；重新登记会覆盖你之前的便条。\n\
-- **登记就是把便条定稿了，也是本回合最后一个动作。**从 `register` 返回 ok 的那一刻起，\
-note 的内容已经冻结，后继者拿到的就是那一份。所以登记之后**一张决策卡都不要再发**——\
-方向性的（「下一棒该先做哪一面？」）固然不行，不带决策的收尾卡同样不行。两个理由：\
-接力靠回合*结束*触发（Stop hook 消费登记并 spawn 后继者），卡会把回合挂住等人点，\
-卡不点后继者就不起来；而卡上的答案走的是 tool_result，既**不**取消待定的交接，\
-也**进不了**已冻结的 note，{title}的选择会被静默丢弃，而他还以为自己改了方向。\
-要问就**先问、拿到答案、再按答案写 note 去登记**；登记完直接用一行纯文本收尾结束回合。\
-`fleet__ask` 与 `fleet__render_a2ui` 在服务端也会拒掉登记之后的调用。\n\
-- **你挂的 `fleet watch` 会跟着棒一起转给后继者**（含它的条件、deadline 和你的 \
-model/effort）。所以交接前不用特地去 stop 它，也不要在便条里叮嘱后继者「重挂一个」\
-——那会变成两个 watch 叫醒同一个人。反过来，你作为后继者若在开场 prompt 里读到\
-「你继承了 watch X」，那就是你的了，别再创建条件相同的第二个。\n\
-\n\
-你一旦逮到自己在想「上下文长了，我该收尾了」——那个冲动本身就是信号。去登记\
-交接并接力，而不是收尾。\n\
-\n\
-**你不必靠体感判断这件事。** Fleet 在每次工具调用后测一次你的上下文用量，\
-并在 250K / 500K / 750K token 三个档位各注入一次 `[Fleet] 上下文已用 …K` 提示\
-（同一档只说一次；被压缩后重新爬上来会再说）。**收到第一条就该准备交接了**——\
-超过 250K 模型就开始变钝：记不住早先的约束、重复已经做过的调查、把自己的摘要\
-当成原话。接力换回来的是一个清醒的头脑，不是一次损失，所以别把这些提示读成\
-「还剩多少额度」。一条都没看到，就是你还没到 250K（200K 窗口的模型够不到第一\
-档，永远不会收到）。\n\
-\n\
-**叙述一次交接不等于登记一次。**在你的回复文本里写「接下来我起下一棒」/\
-「handing off to the next session」/「剩下的我接力」什么都不做：Fleet 的 Stop\
-hook 消费的是一次*登记*，不是一句话。如果你本回合没真的跑 `fleet handoff`\
-Bash 命令，就没有后继者被 spawn，计划会在你交出的那一刻悄然死掉。所以在结束这样一个\
-回合前，你做的最后一件事就是那个工具调用本身：跑 `fleet handoff --note \"...\"`，\
-等 `ok: handoff registered` 结果回来，然后才停。绝不让一个回合以只活在文字里的\
-交接结束。真正会跨回合边界触发的 Fleet 接力有两个：\
-`fleet handoff` 用于*继续工作*（把简报交给一个全新后继者），`fleet watch` 用于\
-*等待一个外部条件*——一次 CI 跑完、一次构建产出产物、一次部署上线。不要坐在\
-前台 `Monitor` / 后台 `Bash` 里等这种事件：它们在 `-p` 回合结束的那一刻就死，\
-通知永远不到。改跑 `fleet watch create --until '<完成时退出 0 的 shell 命令>'\
---capture '<其 stdout 你想被报告的 shell 命令>' --note '<你在等什么>'`，然后\
-结束回合——Fleet 在后台轮询，条件一触发就 `claude --resume` *这个*会话，把捕获\
-的结果喂给你的下一回合。`fleet watch stop <id>` 取消它。\n\
-\n\
-### 增量笔记：`fleet__notes` 与 `fleet__history`（压缩前后的记忆）\n\
-\n\
-交接是**换人**；本节管的是**同一个会话跨上下文窗口**。上下文压缩会把早期回合压成\
-摘要，「某次修复为什么失败」「某个组件到底怎么工作」这类细节最容易在摘要里丢掉。\
-Fleet 给了两个本地工具（Fleet 起的会话见 MCP 工具 `fleet__notes` / `fleet__history`，\
-手起的会话用 `fleet notes` / `fleet history` CLI）：\n\
-\n\
-- **`fleet__notes`——边做边记，别等到最后。**任何可能跨窗口的任务，从一开始就维护一份\
-checkpoint（如 `checkpoint.md`）：目标、已定的决策、进展、教训、下一步，以及能回捞细节\
-的指针（文件路径、`fleet__history` 的行号）。每完成一个 P-task 或撞上一个值得记的坑就 \
-`append` 一段；过期的用 `write` 重写。笔记存在 `~/.fleet/notes/<session>/`，压缩不会动它，\
-handoff 后继者也能读到前任的（只读）。\n\
-- **压缩后先读 hint，再回捞。**新窗口开头 Fleet 的 SessionStart hook 会注入一段 \
-`<fleet_notes>`：笔记清单 + 最近一份的正文（≤4KB）。先读它恢复宏观状态；缺细节就 \
-`fleet__history search` 搜自己（和前任）transcript 里的原话，拿到 `line_no` 后 \
-`read` 那一条——它会展开工具输入和工具输出，「那次构建到底报了什么」这类问题直接可答。\n\
-- **它们是内部记账。**不要在给{title}的回复里复述笔记、提这两个工具或它们的路径；\
-{title}要看的是结果，不是你的备忘。\n\
-- **与 TASKS.md / handoff 的分工：**TASKS.md 是勾选框级别的宏观计划，handoff note \
-是换人时的一次性简报；笔记是它们之间那层——同一个人、跨窗口、随时可增量、可搜索。\
-三者都不替代彼此。\n\
-\n\
-### 绝不用 Claude Code 自带的跨回合调度器\n\
-\n\
-**NEVER 调用 `ScheduleWakeup` 或 `CronCreate`，也不要用 `/loop` 斜杠命令。**\
-在 Fleet 会话里它们全都是空转：回合就此结束，Fleet 那边没有任何登记，没有后继者\
-被 spawn，你的计划死在原地——而工具还会返回一个像是成功的结果。这一条**与你上下文\
-剩多少无关**：它不只管「上下文长了要接力」那个场景，等后台任务、等构建、想稍后\
-再看一眼，全都算。\n\
-\n\
-真实案例：一个接力会话把 20 局 soak 测试丢后台后，调了 `ScheduleWakeup`\
-（`delaySeconds: 1200`、reason 写「兜底心跳」——几乎是照抄该工具描述里那句 \
-\"the long fallback heartbeat: 1200s+\"）。那是它的最后一次工具调用；没有后继者，\
-计划的 P1 至今未勾。它甚至给一个从未进过 `/loop` 的会话编了个 \
-`<<autonomous-loop-dynamic>>` 哨兵，工具照样接受了。**别把这两个工具的描述当成\
-在 Fleet 会话里也成立的建议——它们描述的是 Fleet 之外的行为。**\n\
-\n\
-Fleet 现在装了一个 PreToolUse hook 会直接 deny 这两个工具并回给你替代命令，所以\
-你大概撞不到这个坑；但 hook 是安全网，不是许可——按下面的对照表挑对工具，别去试\
-探它。真的无事可等，就直接结束回合，不要排一个不会到来的 wakeup。\n\
-\n\
-**Fleet 的定时/调度机制——按*需求*挑，别只盯着名字带 cron 的：**\n\
-- **周期性重复跑一件事（cron 语义）→ `fleet loop`**（CLI 别名 `fleet cron`）。\
-Fleet 托管、durable，每个 interval spawn 一个全新的**本地** detached 会话（所以\
-本地凭证如 muveectl 都在），不随本会话消亡。凡是「每 N 分钟 / 每小时 / 每天 / \
-定期做 X」都归它——别因为它叫 loop 就以为是那个在 headless `-p` 里静默失效的 \
-`/loop`；`fleet loop` 恰恰相反，是活得过回合的那个。\n\
-- **未来某个绝对时刻只跑一次 → `fleet schedule`**（`--at`/`--in`，一次性）。\n\
-- **等一个外部条件满足后再继续*本*会话 → `fleet watch`**（上面那段）。\n\
-- **把工作交给一个全新后继者继续 → `fleet handoff`**。\n\
-\n\
-`fleet loop` 与 `fleet schedule` 都接受一个 `--title <几个字>`：**创建时务必给一个**，\
-计划任务列表拿它当条目名，不给就只能显示 prompt 的头两行，一眼看不出这条是干什么的。\n\
-\n\
-两者也都接受一个可选的 `--until <shell 命令>` 作为\
-**廉价的非 LLM 门**：每个 tick（schedule 是到点后）先跑这条便宜探测，\
-**只有它退出 0 才 spawn 会花钱的 LLM 会话**，否则跳过（loop 不计入 iteration、\
-进位下个 interval；schedule 在 `--timeout` 内按 `--poll` 轮询，仍不满足则放弃\
-记为超时历史）。这正是「高频轮询、只在真有活时才烧 LLM」的省钱模式——例如让 loop \
-每 12h 跑一条 `limit:0` 廉价探测，只有真检测到新数据（探测退出 0）才起 LLM 会话去\
-处理。别默认每个 tick 都起一个 LLM 会话。纯粹等一个外部事件、之后要接着干活的，\
-仍用上面的 `fleet watch`。\n\
-\n\
-### 绝不用空转命令保活回合\n\
-\n\
-**别为了「撑住这个回合」去发一条什么都不做的命令**——`echo waiting`、`true`、\
-`:`、裸 `sleep 30`，以及它们用 `;` / `&&` 串起来的组合。一次空转不比一次真工作\
-便宜：你每个回合都要重读整个上下文。实测一个会话连发 57 次 `echo waiting`，\
-重读了 1163 万 cache token，换回 57 遍「waiting」，约 $17.80——而它当时\
-**已经 armed 了 `Monitor`**，正确答案就在手边，它还是在旁边空转。\n\
-\n\
-你会这么干，是因为你知道「后台 shell 会随回合结束而死」。这句是对的，但撑住回合\
-的办法不是空转。按你在等什么挑一条：\n\
-\n\
-- **等一个能前台跑的命令**（编译、测试、脚本）→ 直接前台跑它，把 Bash 的 \
-`timeout` 调大（上限 600000 毫秒）。一次调用等到底，只花一个 round trip。\n\
-- **等一个已经在跑的条件** → 用 `Monitor` 的 until 轮询。它在回合*内*阻塞，\
-轮询本身不花 round trip。已经 armed 了就等它，别在旁边另开空转。\n\
-- **等的事跨回合**（CI、构建产物、部署上线）→ `fleet watch`（见上），然后干净地\
-结束回合。\n\
-- **真的无事可等** → 直接结束回合。\n\
-\n\
-划清一条界：`sleep 45; <真正的检查命令>` **不**是空转——一次 round trip 换一次\
-真观察，那是划算的，随便用。被禁的只有零信息量的那种。Fleet 的 Bash PreToolUse \
-hook 会 deny 它们并把上面四条回给你；hook 是安全网，不是许可。\n\
-\n\
-## Rule 6 —— 需求保真：别把不存在的需求写进计划\n\
-\n\
-Rule 1/2/4 管执行期的纪律，本规则管它们的上游——把{title}的请求变成计划的那一刻。长程计划最贵的失败不是做得慢，而是**做歪**：计划里混进了{title}从没要求的需求，实现又和这些幻觉需求强耦合，最后重构比重写还贵。本规则锁死这个失败模式。\n\
-\n\
-- **「该写个 RFC / 设计文档 / 要签字过一版」这个冲动本身是信号，但它指向的不是「停下」，而是「先做一次范围审计」。**你想写 RFC，往往是因为你正把这个体裁的完整性——扩展点、配置项、「未来考虑」、边界大全——误当成需求。RFC 奖励穷尽，而对你来说穷尽就等于编造。逮到这个冲动，先别急着把想象力铺开成文档。\n\
-- **计划里每一条 P-task、每一个需求，都必须能追溯到{title}本回合实际说过的话，或由它直接推导出的必要项。**把每条需求默默分成三类：{title}明说的、由明说项推导出的必要项、你自己加的。凡是「你自己加的」（「顺手抽象一层」「为了将来好扩展」「这类功能一般还得有 X」），要么删掉，要么单独拎出来问{title}一句「这条是我加的，你要吗」——**绝不静默写进计划。没有无源头的需求。**\n\
-- **先做能跑通的最薄一条竖切，跑通了再加。**在出现第二个具体用例逼你之前，不要为想象中的需求建抽象层、配置面或插件点。幻觉需求之所以致命，正因为它们往往是架构性的——一旦变成承重墙就拆不动了。薄竖切让「改得动」这件事一直握在你手里：就算范围飘了，飘进来的也是可拆的零件，而不是要推倒重来的地基。\n\
-- **需要设计文档不是罪；把设计文档当成「已批准的需求合同」再逐字实现才是。**真要写设计，审阅时盘的是那张可枚举的需求清单（每条标注 明说／推导／我加的），而不是那段读起来很合理的散文——{title}点头的往往是散文的调性，不是他逐条盘过的细节。签字签在清单上，不在散文上。\n\
-\n\
-本规则无论计划是多步还是单步都适用；它管的是「把请求变成要做的东西」这个动作，不是执行的节奏。\n\
-\n\
-## worktree 工作流的推荐工具\n\
-\n\
-因为 Rule 3 在一个全新 worktree 里开发每个计划，每个新计划实际上是一个干净的\
-checkout——包括依赖树。**按项目**存包的工具（npm 的 `node_modules/`、pip 的\
-per-venv site-packages、yarn classic 的 `node_modules/`）会为每个 worktree 重新\
-下载、重新安装一切，浪费磁盘和安装时间。带**全局内容寻址缓存**的工具在所有项目\
-的所有 worktree 间共享一份副本，所以拉起一个新 worktree 花的是秒，不是分钟。\n\
-\n\
-这些是*推荐*，不是硬规则——它们不是 Rule 5。若{title}为某个特定项目明确挑了\
-别的工具，照那个来。推荐只在{title}尚未做出选择时才生效。\n\
-\n\
-**新项目优先选 worktree 友好的：**\n\
-\n\
-- **Node / TypeScript**：优先 **pnpm**（全局 store 在\
-  `~/.local/share/pnpm/store`，symlink 进每个项目的 `node_modules/`），而非 npm\
-  或 yarn classic。Bun 也用全局缓存、也行；npm 和 yarn classic 是 worktree 密集\
-  工作要避开的。\n\
-- **Python**：优先 **uv**（全局缓存 + 硬链接的 venv 内容），而非 `pip + venv`。\
-  Poetry 若开着缓存共享也可接受，但 uv 在 worktree 拉起上明显更快。\n\
-- **Rust**：`cargo` 已全局共享 `~/.cargo/registry`，故无需额外动作。每个\
-  worktree 的 `target/` 按设计保持 per-worktree——那是为避免锁竞争的刻意取舍；\
-  不要试图在 worktree 间共享 `target/`。\n\
-- **Go**：`go` 已全局共享 `$GOMODCACHE` 和 `$GOCACHE`；worktree 在依赖侧花费\
-  约等于零。无需动作。\n\
-\n\
-**对已有项目，不要只因为你要创建 worktree 就悄悄迁移 lockfile 或包管理器。**\
-一个 `package-lock.json` 的 repo 在{title}同意切换之前一直留在 npm。切换包\
-管理器本身是一个独立计划，有自己的范围、自己的 worktree、自己的验收闸门——动\
-lockfile 之前先向{title}呈报成本对迁移的取舍。\n\
-\n\
-## 本模式何时不适用\n\
-\n\
-Rule 3（worktree）对任何生产代码改动都是**全局**的。Rule 1、2、4 限于多步计划。\
-所以：\n\
-\n\
-- **单步生产代码改动**：Rule 3 适用（worktree + `--no-ff` 合并回 main）。Rule\
-  1、2、4 不适用——无 TASKS.md、无 P-task、无节奏强制。整个改动作为一次机械\
-  编辑在 worktree 里发生，然后合并回去。\n\
-- **纯对话 / 问答回合，没有代码在改**：四条规则都不适用。用纯文本回复。\n\
-- **纯文档、配置或热修工作**（见 Rule 3 自己的「不适用」小节）：除非{title}明确\
-  要求把该工作当作多步计划，四条规则都关闭。\n\
-- **{title}明确要求把工作保持「非正式」或「快点」**：四条规则都关闭；适用常规\
-  提交礼仪，{title}对更轻的流程负责。\n\
-\n\
-## 与其他模式的交互\n\
-\n\
-- 本模式**独立于** Fleet 交互模式。它们可以分别启用。\n\
-- Bash guard hook（若已安装）仍会运行，仍可能要{title}确认有风险的命令。那是\
-  刻意为之——guard 抓风险；本模式抓*不必要*的提交。\n\
-",
+            r##"# Fleet PRD 纪律 (managed by Claw Fleet — do not edit)
+
+本模式锁死三个会拖垮长程多步计划的失败模式：计划中途的提交唠叨、压缩后的任务失忆、进度汇报式打卡。
+
+**多步计划** = 你拆成 2 个或更多顺序子任务（P1..Pn，或编号 todo，或任何等价物）的任务。
+
+## Rule 1 —— main 上的提交纪律（仅多步计划）
+
+- 计划进行中，不要提议、也不要跑 main 上的 `git commit`。没有「自然检查点」，工作的单位是计划，不是单个 P-task。
+- 例外只有两个：① {title}本回合明确要求；② 所有 P-task 已勾选 + 构建/测试已跑 + 已向{title}呈报摘要，此时唯一那次 main 提交就是 `git merge --no-ff prd/<id>`。
+- worktree 分支 `prd/<id>` 上的**中间提交明确允许，不违反 Rule 1**，随便提，无需请示。
+- **`git push` 永远需要{title}本回合的明确批准**，与计划状态无关。
+- 撞上阻塞点就提问，不要拿「怕进度丢」当理由提交。破坏性操作（rebase、force-push、删分支、`git reset --hard`）先问。
+- 单步任务（一个 bug 修复、一次重命名、一处配置微调）不是多步计划，适用常规提交礼仪。
+
+## Rule 2 —— TASKS.md 是持久的宏观计划
+
+上下文压缩会把宏观状态摘要掉，所以计划落在磁盘上。
+
+- 拆成 2 个或更多子任务时，**开始 P1 之前**把拆解写进 `<workspace_root>/TASKS.md`。
+- 每完成一个 P-task 把框改成 `[x]`。活跃计划每回合由 hook 自动重新注入。
+- 格式（一个文件可并行承载多个计划，各自一对哨兵，`id` 唯一、kebab-case、≤32 字符）：
+
+```markdown
+<!-- fleet:prd:begin id="auth-refactor" v="2" -->
+
+**Plan:** Migrate session middleware to the new auth crate
+
+- [x] **P1** — Audit existing call sites
+- [ ] **P2** — Swap middleware impl
+
+<!-- fleet:prd:end id="auth-refactor" -->
+```
+
+- **只编辑你自己 id 的块**，其他块当只读（属于另一个可能正在推进的计划）。`fleet:prd:begin id=` 与 `fleet:prd:end id=` 的 id 必须匹配，不匹配会被 hook 忽略。不要合并或重排别人的计划。
+- 旧版无 `id=` 的裸哨兵对仍被当作单个匿名计划识别，但不要再以这种形式新建。`fleet plan migrate` 可把 v1 就地升级到 v2。
+- **同一个 `id` 只放在一个 TASKS.md 文件里。**hook 会合并扫描主 checkout 与所有 `.worktrees/*/TASKS.md`；重复 id 取 mtime 最新的那份，来自 worktree 的块标题会带 `— source: <path>` 后缀，告诉你该编辑哪个文件。
+- {language_line} P-task 标题 ≤60 字符，长验收备注放子 bullet。只用 `- [ ]` / `- [x]`，不要发明新状态。
+- 你在某 workspace **第一次**创建 TASKS.md 时，若 `.gitignore` 没覆盖它，向{title}提一句并提议加一行（它是临时草稿状态，不该进版本控制）；不要悄悄改写 `.gitignore`。
+
+### 用 `fleet plan` 更新计划，而非手改
+
+手改 TASKS.md 仍有效（文件是勾选框的唯一真相来源），但不记录归属，桌面端就显示不出你在做哪个计划。
+
+> **工具列表里有 `fleet__plan` / `fleet__handoff` / `fleet__watch` / `fleet__loop` / `fleet__schedule` / `fleet__wiki` 这些 MCP 工具时（Fleet 起的会话都有），一律优先用它们而不是 `fleet …` 命令行（传 `action` 参数，语义与 CLI 子命令一一对应）。远端（rca）会话里 Bash 跑 `fleet …` 会被路由到没有 fleet 的远端而 exit 127。**
+
+- `fleet plan create <id> --title "..." [--parent <id> | --root --root-reason "..."] [--kind explore|exec]` —— 新建计划块并把本会话记为执行者。创建即开始。
+  - **默认：你在执行某计划时新建的计划自动成为它的子计划**，一个 flag 都不用传。从一个计划里派生出来的计划，默认就是它的儿子。`--parent` 挂到别处；`--root` 另起顶层树，**手上有计划时必须同时给 `--root-reason`**（一句话说明这活为什么不属于当前计划），否则被拒。手上没计划时 root 本来就是默认，什么都不用传。
+- `fleet plan check <id> <P>` / `uncheck` —— 勾选/取消，并把焦点刷新到该计划。
+- `fleet plan resume <id> [P]` —— 接手一个你没创建、也没被交接给你的现存计划。
+- `fleet plan add <id> <P> --text "..."` / `migrate` / `list` / `get <id>`。
+
+### explore 计划与 exec 计划
+
+`--kind` 说明这个计划的 P-task 是干什么用的。`exec`（缺省）会改代码；`explore` 产出的是理解，它的交付物是**派生出的 exec 子计划**，不是自己的代码改动。
+
+凡是以「先搞清楚……」开头、你还叫不出具体改动名字的工作都用 `--kind explore`，并且**不改生产代码**（一次性探针脚本可以）。调研完成后把结论变成一批 `--parent <explore-id>` 的子计划，让{title}在动手前逐条读到要做什么。把调研和实现塞进同一个计划，正是长程工作走歪的方式：P3 的发现会悄悄重新定义 P4 的含义，等有人察觉时实现已经和没人拍板过的需求耦合在一起了。
+
+### 子计划与回溯
+
+计划中途要分出一条必须先完成的旁支时，用 `--parent <current-plan-id>` 建成子计划。用 `fleet plan check` 勾掉子计划**最后**一个框时，Fleet 沿 `parent` 链走到最近的仍有待办的祖先，把你的焦点指回它并打印下一个要恢复的 P。照指令继续，不要因为子计划完成就结束回合。子计划可嵌套，向上走会跳过已完成的祖先。没有 `--parent` 的计划是顶层，完成它就结束。
+
+## Rule 3 —— 基于 worktree 的特性工作流
+
+Rule 3 是**全局**的：**任何触碰生产代码的改动都必须在隔离的 git worktree 里开发**，无论多步还是单步，不受 Rule 1「多步计划」这个限定影响。
+
+```
+git worktree add -b prd/<task-id> .worktrees/<task-id> main
+```
+
+`<task-id>` 多步计划用 TASKS.md 的计划 id，单步改动当场挑一个短 kebab-case 标识。所有代码工作在 worktree 里跑，主 checkout 全程保持干净。
+
+- 结束时从主 checkout 一次原子合并：`git merge --no-ff prd/<task-id>`。`--no-ff` 强制；**禁止** `--ff-only` 和 `--squash`——我们要每个 worktree 提交在 main 历史里都可见。
+- **合并或移除 worktree 前，抢救 gitignored / 未跟踪产物。** merge 只带走已提交内容，`git worktree remove` 会连同其余一起永久删除，没有 git 对象能恢复。先跑 `git status --ignored` 并检查未跟踪文件。`target/`、`node_modules/`、`dist/`、`.next/` 这类例行可再生的目录跳过。若有**不**能从已提交代码重现的产物，停下来问{title}（拷出去，还是该跟踪它），解决前不要 remove——移除是不可逆的那一步。
+- 合并成功后：`git worktree remove .worktrees/<task-id>`，然后 `git branch -d prd/<task-id>`。合并失败就地解决——不要弃掉 worktree、不要 amend 合并提交、不要 `git reset --hard` 抹掉合并。
+- 不要把 worktree 分支 push 到远端。
+- 本 repo 第一次创建 worktree 时，若 `.gitignore` 没有 `.worktrees/`，向{title}提一句并提议加；不要悄悄改写。
+
+**Rule 3 不适用于**：纯文档改动；纯配置改动（CI YAML、dotfile、`.gitignore` 本身、格式化器配置）；必须先落 main 的紧急热修（先向{title}呈报，好让{title}决定是否暂停活跃的 worktree）。
+
+## Rule 4 —— 计划执行节奏
+
+每个非最后的 P-task：**开发 → 测试/验证 → 在 worktree 内提交 → `fleet plan check <id> <P>` → 同一回合里立即做下一个**，不为确认停顿。
+
+不要停下来做摘要，不要问「要我继续 P2 吗」「P4 前要不要审一下进度」。进度的单位是计划，不是 P-task；TASKS.md 和 worktree 提交已让进度一目了然。
+
+接起一个你没创建、也没被交接的计划时，第一个 P-task 之前先 `fleet plan resume <plan-id> [P]`。`create` 与 Fleet 交接会自动归属你，`check` 随你推进而刷新。
+
+两道机制在强制这个节奏。**聚焦注入**：你被归属到某计划后，每轮注入只展开你这一个，其余折叠成一行计数——摆在你面前的下一个任务在构造上只有一个。**计划门**：你在焦点计划（或它的祖先）仍有未完成 P-task 时试图结束回合，`Stop` 钩子会拒绝并点名下一个 P；它只在你本回合确实推进过计划时介入，并对每一个正当出口让路（已登记的 handoff、一个 watch、一张等答复的决策卡）。
+
+**只为以下四种情形停顿**（「我做了不少，要不要报个到」永远不是其中之一）：
+
+1. **最后一个 P-task 的验收闸门** —— 跑 `git merge --no-ff` 前呈报「可以合并了」并等明确放行。这次合并就是计划的验收时刻，不要在中间检查点征求验收。
+2. **一个真正的方向问题** —— 路上有真岔口、需要{title}判断（「保持向后兼容还是丢掉？」「删还是归档？」「API 设计 A 还是 B？」）。
+3. **挺过一轮修复的验证红灯** —— 构建/测试第一次失败可以试一轮诊断加修复；没恢复绿灯，或动手前根因就不清楚，停下来作为阻塞点呈报，不要陷入「修→重试→修→重试」循环。
+4. **一次破坏性操作**（rebase、force-push、删分支、丢弃 migration、`git reset --hard`）。
+
+## Rule 5 —— 长上下文交接与跨回合等待
+
+### `fleet handoff`
+
+上下文在计划中途拉长时，不要死磕到窗口耗尽、不要悄悄提前收尾、也不要留下没人执行的「交给下一个会话」的便条：
+
+```
+fleet handoff --note "<换班简报：什么做完了、什么在飞、关键文件、坑、下一个具体步骤>" [--plan <plan-id>] [--next <P>] [--model <模型>] [--effort <档位>]
+```
+
+- `--note` 强制。`--plan/--next` 让 Fleet 把后继者自动归属到该计划和 P。`--model/--effort` 可选，不传就继承当前会话。
+- 登记后**干净地结束回合**（先按 Rule 3 提交 worktree 进度）。Stop hook 消费登记并 spawn 后继者，开场 prompt 就是你的便条。
+- **叙述一次交接不等于登记一次。**在回复文本里写「接下来我起下一棒」什么都不做：没真的调用工具就没有后继者，计划在你交出的那一刻悄然死掉。结束这样一个回合前的最后一件事就是那个调用本身，等 `ok: handoff registered` 回来才停。
+- **登记就是把便条定稿了，也是本回合最后一个动作。之后一张决策卡都不要再发**（连不带决策的收尾卡也不要）：接力靠回合*结束*触发，卡会把回合挂住等人点，后继者就起不来；卡上的答案也进不了已冻结的 note，会被静默丢弃。要问就先问、拿到答案、再按答案写 note 去登记。
+- 收到 `[Fleet] 上下文已用 250K` 提示就该准备交接了——超过 250K 模型开始变钝。接力换回来的是一个清醒的头脑，不是一次损失。
+- 整条链可读：`fleet__handoff` 传 `action="show"` 列出每一棒的 session id 与 note 全文。**{title}问「最开始的问题」指的是第 1 棒的起点，不是你手上的 plan**，先 `show` 再答。
+- 你挂的 `fleet watch` 会跟着棒一起转给后继者（含条件、deadline 与 model/effort）。交接前不用停它；作为后继者读到「你继承了 watch X」时，也别再创建条件相同的第二个。
+
+### 增量笔记：`fleet__notes` 与 `fleet__history`
+
+交接是换人；本节管的是同一个会话跨上下文窗口。
+
+- **边做边记，别等到最后。**从一开始就用 `fleet__notes`（CLI：`fleet notes`）维护一份 checkpoint（目标、已定决策、进展、教训、下一步，以及能回捞细节的指针），每完成一个 P-task 或撞上一个值得记的坑就 `append`。笔记不受压缩影响，handoff 后继者也读得到。
+- 压缩后新窗口开头会注入 `<fleet_notes>`：先读它恢复宏观状态；缺细节就用 `fleet__history search`（CLI：`fleet history`）搜自己（和前任）transcript 里的原话，拿到 `line_no` 后 `read` 那一条。
+- 它们是**内部记账**，不要在给{title}的回复里复述笔记或提这两个工具。
+
+### 绝不用 Claude Code 自带的跨回合调度器
+
+**NEVER 调用 `ScheduleWakeup` 或 `CronCreate`，也不要用 `/loop` 斜杠命令。**在 Fleet 会话里它们全是空转：回合就此结束，没有登记、没有后继者、计划死在原地，而工具还返回一个像是成功的结果。这**与你上下文剩多少无关**——等后台任务、等构建、想稍后再看一眼，全都算。
+
+**按需求挑 Fleet 的机制：**
+
+- **周期性重复跑一件事（cron 语义）→ `fleet loop`**（CLI 别名 `fleet cron`）。Fleet 托管、durable，每个 interval spawn 一个全新的本地 detached 会话，不随本会话消亡。
+- **未来某个绝对时刻只跑一次 → `fleet schedule`**（`--at` / `--in`）。
+- **等一个外部条件满足后继续*本*会话 → `fleet watch`**：`fleet watch create --until '<完成时退出 0 的命令>' --capture '<其 stdout 你想被报告的命令>' --note '<你在等什么>'`，然后结束回合；条件触发时 Fleet 会 `claude --resume` 这个会话，把捕获的结果喂给你的下一回合。`fleet watch stop <id>` 取消。
+- **把工作交给全新后继者 → `fleet handoff`**。
+
+`fleet loop` / `fleet schedule` 创建时**务必给 `--title <几个字>`**，否则计划任务列表只显示 prompt 的头两行。两者的可选 `--until <shell 命令>` 是廉价的非 LLM 门：每个 tick 先跑这条便宜探测，只有它退出 0 才 spawn 会花钱的 LLM 会话。别默认每个 tick 都起一个 LLM 会话。
+
+### 绝不用空转命令保活回合
+
+**别为了撑住回合发什么都不做的命令**——`echo waiting`、`true`、`:`、裸 `sleep 30`，以及它们用 `;` / `&&` 串起来的组合。一次空转不比一次真工作便宜：你每个回合都要重读整个上下文。按你在等什么挑：
+
+- **能前台跑的命令**（编译、测试、脚本）→ 直接前台跑，把 Bash 的 `timeout` 调大（上限 600000 毫秒），一次调用等到底。
+- **已经在跑的条件** → `Monitor` 的 until 轮询（回合内阻塞，轮询本身不花 round trip）。
+- **跨回合的事**（CI、构建产物、部署上线）→ `fleet watch`，然后干净地结束回合。
+- **真的无事可等** → 直接结束回合。
+
+`sleep 45; <真正的检查命令>` **不**算空转——一次 round trip 换一次真观察，随便用。被禁的只有零信息量的那种。
+
+## Rule 6 —— 需求保真：别把不存在的需求写进计划
+
+长程计划最贵的失败不是做得慢，而是做歪：计划里混进了{title}从没要求的需求，实现又和这些幻觉需求强耦合。
+
+- **计划里每一条 P-task、每一个需求，都必须能追溯到{title}本回合实际说过的话，或由它直接推导出的必要项。**把每条默默分成三类：明说的、由明说项推导的、你自己加的。凡是「你自己加的」（「顺手抽象一层」「为了将来好扩展」「这类功能一般还得有 X」），要么删掉，要么单独拎出来问{title}一句。**绝不静默写进计划，没有无源头的需求。**
+- **「该写个 RFC / 设计文档 / 要签字过一版」这个冲动是信号，但它指向的不是「停下」，而是「先做一次范围审计」**——RFC 奖励穷尽，而对你来说穷尽就等于编造。
+- **先做能跑通的最薄一条竖切，跑通了再加。**在出现第二个具体用例逼你之前，不要为想象中的需求建抽象层、配置面或插件点——幻觉需求往往是架构性的，一旦变成承重墙就拆不动了。
+- 需要设计文档不是罪；把它当成「已批准的需求合同」逐字实现才是。审阅时盘的是那张标注了 明说／推导／我加的 需求清单，不是那段读起来很合理的散文。
+
+本规则无论多步还是单步都适用。
+
+## worktree 工作流的推荐工具
+
+Rule 3 给每个计划一个干净的 checkout，所以按项目存包的工具会为每个 worktree 重装一遍。这些是推荐，不是硬规则；{title}为某项目明确挑了别的工具就照那个来。
+
+- **Node / TypeScript**：优先 **pnpm**（全局 store + symlink）或 bun，别用 npm / yarn classic。
+- **Python**：优先 **uv**（全局缓存 + 硬链接 venv），而非 `pip + venv`。
+- **Rust**：`cargo` 已全局共享 `~/.cargo/registry`，无需动作。`target/` 按设计 per-worktree，别试图共享。
+- **Go**：已全局共享 `$GOMODCACHE` 和 `$GOCACHE`，无需动作。
+
+**不要只因为要创建 worktree 就悄悄迁移已有项目的 lockfile 或包管理器**——一个 `package-lock.json` 的 repo 在{title}同意切换之前一直留在 npm。切换包管理器是一个独立计划，动 lockfile 之前先呈报取舍。
+
+## 本模式何时不适用
+
+Rule 3 对任何生产代码改动都是全局的；Rule 1、2、4 只限多步计划。
+
+- **单步生产代码改动**：只走 Rule 3（worktree + `--no-ff` 合并），无 TASKS.md、无 P-task、无节奏强制。
+- **纯对话 / 问答回合**、**纯文档 / 配置 / 热修工作**、**{title}明确要求「非正式」或「快点」**：四条规则全部关闭，适用常规提交礼仪。
+
+## 与其他模式的交互
+
+本模式**独立于** Fleet 交互模式，可分别启用。Bash guard hook（若已安装）仍会运行，仍可能要{title}确认有风险的命令——guard 抓风险，本模式抓*不必要*的提交。
+"##,
             title = title,
             language_line = language_line,
         );
     }
 
+    let title = if user_title.is_empty() {
+        "Boss".to_string()
+    } else {
+        user_title.to_string()
+    };
     format!(
-        "# Fleet PRD Discipline (managed by Claw Fleet — do not edit)\n\
-\n\
-This mode locks down three failure modes that hurt long multi-step plans:\n\
-\n\
-1. **Mid-plan commit nagging.** The agent finishes one P-task, gets a \"should \
-I commit now?\" reflex, and {title} has to keep saying \"no, keep going.\"\n\
-2. **Post-compression task amnesia.** After context compression the agent \
-remembers it just finished P2 but loses the macro state that P3..Pn are still \
-pending.\n\
-3. **Progress-report checkpointing.** The agent finishes a P-task, pauses, \
-and asks \"should I continue with the next one?\" or \"I've made good \
-progress, want to review before P4?\". TASKS.md checkboxes and worktree \
-commits already make progress legible.\n\
-\n\
-## Rule 1 — Commit discipline during multi-step plans\n\
-\n\
-A **multi-step plan** here means: any task you decomposed into 2 or more \
-sequential subtasks (P1, P2, ..., Pn — or numbered todos, or any equivalent). \
-Once you are inside such a plan, the following rules apply until the plan is \
-fully done:\n\
-\n\
-**Scope of \"commit\" in this rule.** Throughout Rule 1, \"commit\" means \
-commits on the **main / default branch**. Commits on a worktree feature \
-branch (`prd/<plan-id>`) are governed by Rule 3 and are explicitly allowed \
-at every P-task boundary — they do NOT count as Rule 1 violations and do \
-NOT need to be flagged as a conflict with this rule.\n\
-\n\
-- **DO NOT proactively propose `git commit` on main.** Not after P1, not \
-after P2, not at any \"natural checkpoint\" you sense. The plan is the unit \
-of work, not the individual P-task.\n\
-- **DO NOT actually run `git commit` on main either**, except in the two \
-cases below.\n\
-- **You MAY commit on main only when:**\n\
-  1. {title} explicitly asks for a commit in this turn, OR\n\
-  2. You have just finished the **last** P-task in the plan (i.e. all items \
-     in TASKS.md are checked) AND you have surfaced that the plan is complete \
-     to {title}. When Rule 3 (worktree workflow) is active, this single \
-     allowed commit on main takes the form of `git merge --no-ff` from the \
-     worktree branch — see Rule 3 for the exact procedure.\n\
-- **`git push` is always gated** — never push without {title}'s explicit \
-  approval in the current turn, regardless of plan state.\n\
-\n\
-### What \"finished\" means\n\
-\n\
-Plan completion = all P-tasks checked in TASKS.md (see Rule 2) + build/tests \
-run + a change summary surfaced to {title}. Until all three are true, the \
-plan is not done; do not propose committing.\n\
-\n\
-### Edge cases\n\
-\n\
-- **Single-step task** (one bug fix, one rename, one config tweak): not a \
-  multi-step plan, normal commit etiquette applies.\n\
-- **{title} asks mid-plan, \"can you commit what's done so far?\"**: that's \
-  Case 1 above — proceed.\n\
-- **You hit a blocker that requires {title}'s input**: pause and ask via \
-  AskUserQuestion (or plain text if that tool isn't available). Do NOT use \
-  the blocker as an excuse to commit \"in case progress is lost.\" Resume \
-  after the blocker resolves.\n\
-- **You are about to do something destructive** (rebase, force-push, branch \
-  deletion): stop and ask regardless of plan state. This rule does not \
-  override the existing destructive-action confirmation requirement.\n\
-\n\
-## Rule 2 — TASKS.md as the durable macro plan\n\
-\n\
-Context compression flattens the conversational history. Recent actions \
-(\"commit succeeded\") survive in high fidelity; macro state (\"P3..P10 are \
-still pending\") gets summarized away. To survive compression, the macro \
-plan lives on disk.\n\
-\n\
-**The contract:**\n\
-\n\
-- When you decompose a task into 2 or more subtasks, write the decomposition \
-  to `<workspace_root>/TASKS.md` BEFORE starting P1.\n\
-- After completing each P-task, update its checkbox in TASKS.md to `[x]`.\n\
-- At the start of every turn (after a compression, or whenever you are \
-  unsure of macro state), the active-plan regions are automatically \
-  re-injected as a system-reminder by Fleet's UserPromptSubmit hook — but \
-  you can also `Read` the file explicitly when you need it.\n\
-- When your plan is fully complete, you may remove your plan's sentinel \
-  block (or leave it for history — {title}'s call when committing). Do NOT \
-  touch other plans' blocks.\n\
-\n\
-### Multiple plans in one TASKS.md\n\
-\n\
-A single workspace's `TASKS.md` may carry **several plans in parallel** — \
-{title} can have you working on plan A while another agent (or another \
-conversation) is mid-flight on plan B. Each plan lives inside its own \
-sentinel pair, identified by a unique `id`:\n\
-\n\
-```markdown\n\
-# TASKS\n\
-\n\
-<!-- fleet:prd:begin id=\"auth-refactor\" v=\"2\" -->\n\
-\n\
-**Plan:** Migrate session middleware to the new auth crate\n\
-\n\
-- [x] **P1** — Audit existing call sites\n\
-- [ ] **P2** — Swap middleware impl\n\
-- [ ] **P3** — Update integration tests\n\
-\n\
-<!-- fleet:prd:end id=\"auth-refactor\" -->\n\
-\n\
-<!-- fleet:prd:begin id=\"prd-multiplan\" v=\"2\" -->\n\
-\n\
-**Plan:** Teach TASKS.md to host parallel plans\n\
-\n\
-- [ ] **P1** — New sentinel format with `id=\"...\"`\n\
-- [ ] **P2** — Hook scans all blocks and re-injects each\n\
-\n\
-<!-- fleet:prd:end id=\"prd-multiplan\" -->\n\
-```\n\
-\n\
-The `v=\"2\"` attribute on the `begin` sentinel marks the **v2 schema**. The \
-`end` sentinel needs only the matching `id`. Legacy v1 blocks (no `v=\"2\"`) \
-still work; run `fleet plan migrate` to upgrade an old TASKS.md in place.\n\
-\n\
-**Rules for working with multi-plan TASKS.md:**\n\
-\n\
-1. **Pick a unique `id` for your plan.** Use kebab-case, ≤ 32 chars, \
-   describing the work (e.g. `auth-refactor`, `import-cleanup`). Before \
-   creating a new plan, `Read` TASKS.md and confirm no existing block uses \
-   the same id.\n\
-2. **Only edit your own block.** When you tick a checkbox or revise your \
-   plan, modify only the lines between *your* `begin id=\"X\"` and \
-   `end id=\"X\"`. Treat every other block as read-only — it belongs to \
-   another plan that may be in flight.\n\
-3. **Match the id on both sentinels.** `begin id=\"X\"` must be paired with \
-   `end id=\"X\"`. Mismatched ids will be ignored by the hook.\n\
-4. **Legacy unmarked blocks are still recognised.** A bare \
-   `<!-- fleet:prd:begin -->` / `<!-- fleet:prd:end -->` pair (no `id=`) is \
-   treated as a single anonymous plan for backwards compatibility. Don't \
-   create new ones in this form — always use an explicit id.\n\
-5. **Don't merge or reorder other people's plans.** If two blocks look \
-   redundant, surface that to {title} rather than collapsing them yourself; \
-   the other block may belong to a session you can't see.\n\
-\n\
-### Update plans with `fleet plan`, not by hand-editing\n\
-\n\
-Prefer the `fleet plan` subcommands over editing TASKS.md markdown directly. \
-They make the same file change **and** record which session is working which \
-plan/P, with a timestamp — so the desktop app can show *your* current plan and \
-P even when several sessions share one TASKS.md (Fleet knows your \
-`FLEET_SESSION_ID`; you can't read the wall clock yourself). Commands:\n\
-\n\
-> **If your tool list includes the `fleet__plan` / `fleet__handoff` / \
-`fleet__watch` / `fleet__loop` / `fleet__schedule` / `fleet__wiki` MCP tools \
-(every Fleet-launched session has them), always prefer them over the `fleet …` \
-CLI below — call `fleet__plan` with an `action` parameter (e.g. \
-`action=\"check\"`), one-to-one with the CLI subcommands. In an rca remote \
-workspace session a Bash `fleet …` is routed by cwd to a remote executor that \
-has no `fleet` and fails (exit 127); the MCP tools are JSON-RPC to the local \
-`fleet mcp` server and always reach local Fleet state. Fall back to the \
-`fleet …` CLI only when those tools are absent (a user's hand-launched, \
-non-Fleet session).**\n\
-\n\
-- `fleet plan create <id> --title \"...\" [--parent <id> | --root --root-reason \
-  \"...\"] [--kind explore|exec]` — add a new v2 plan block **and** record this \
-  session as its executor. Creating a plan is starting it, so no separate \
-  declaration is needed.\n\
-  \n\
-  **The default: a plan you author while executing another plan becomes that \
-  plan's child, automatically.** No flag required. That default *is* the \
-  mechanism — **a plan spawned out of a plan is by default its son**.\n\
-  \n\
-  Both flags merely *override* that default:\n\
-  - `--parent <id>` — attach it somewhere other than the plan you are on. \
-    Rarely needed.\n\
-  - `--root --root-reason \"<why this work does not belong under the current \
-    plan>\"` — start a separate top-level tree. **While you are on a plan, a \
-    bare `--root` is refused**; one line of justification is enough.\n\
-  - With **no** plan in flight (a fresh topic from the boss), a root is already \
-    the default and you need neither flag.\n\
-  \n\
-  Why the default is set this way: two earlier designs failed to grow a tree. \
-  (1) With `--parent` merely optional, 350 of the first 355 plans in a repo came \
-  out flat. (2) After the choice was made *mandatory*, 109 more came out flat — \
-  `--root` still answered it at zero cost, without you working out how the new \
-  plan relates to what you are already doing. The real cost was a relay chain: \
-  one boss request (\"audit the research flow for gaps\") produced a six-item \
-  list, each item became its own top-level plan (8 plans, 0 `parent=`), and so \
-  every hop finished its one plan, found no ancestor, and ended the turn with \
-  the list unfinished — the macro goal lived only in a wiki doc and in prose the \
-  agents hand-copied between handoff notes. So the choice is not made \
-  *mandatory*, it is made *correct by default*.\n\
-  \n\
-  Chaining siblings into a line is fine: the backtrack skips completed ancestors \
-  and always lands on the nearest unfinished work. Leaving the tree stays \
-  possible, it just has to be said out loud.\n\
-- `fleet plan check <id> <P>` — tick a task done (`[ ]`→`[x]`) and refresh this \
-  session's focus onto `<id>`. e.g. `fleet plan check auth-refactor P2`.\n\
-- `fleet plan uncheck <id> <P>` — untick.\n\
-- `fleet plan resume <id> [P]` — take over an **existing** plan you did not \
-  create (no file change; sets your current P, defaults to the first pending). \
-  You do not need this after `create`, nor after a handoff — Fleet attributes \
-  the successor for you.\n\
-- `fleet plan add <id> <P> --text \"...\"` — append a pending task. Records no \
-  focus: editing a plan's shape says nothing about who executes it.\n\
-- `fleet plan migrate` — upgrade this workspace's v1 TASKS.md to v2 (idempotent).\n\
-- `fleet plan list` / `fleet plan get <id>` — read.\n\
-\n\
-Hand-editing TASKS.md still works — the file is the source of truth for \
-checkboxes — but it records no attribution, so the desktop app cannot tell \
-which plan your session is on and shows nothing on your card.\n\
-\n\
-### Explore plans vs exec plans\n\
-\n\
-A plan's `--kind` says what its P-tasks are **for**. `exec` (the default) means \
-the P-tasks change code. `explore` means they produce understanding, and the \
-plan's deliverable is **the exec child plans it spawns** — not edits of its own.\n\
-\n\
-Use `--kind explore` whenever the work starts with \"figure out …\" and you \
-cannot yet name the concrete changes. Then, when the investigation is done, \
-turn the findings into `fleet plan create <id> --parent <explore-id>` children \
-— one per coherent chunk of implementation — and let the boss read that list \
-before any code is written. Do not change production code inside an explore \
-plan (throwaway probe scripts are fine).\n\
-\n\
-**Why the split is enforced rather than suggested:** bundling an exploration \
-and an implementation into one plan is how long-range work goes wrong. \"P3 — \
-调研 X\" sits next to \"P4 — 实现 X\", P3's findings silently redefine what P4 \
-means, and by the time anyone notices, the implementation is coupled to \
-requirements nobody agreed to. Separate plans force the handoff to be visible: \
-the exploration's output is a list of proposed exec plans, which is exactly the \
-artifact worth reviewing before committing to it. This is the mechanism behind \
-Rule 6 — an explore plan is where you're *allowed* to not know yet, and the \
-child plans are where each requirement gets traced back to something the boss \
-actually asked for.\n\
-\n\
-The injected context marks explore plans `[explore]` and restates this contract \
-when one is your focus, so a compaction can't quietly turn an exploration into \
-a free-form implementation session.\n\
-\n\
-### Child plans & backtracking\n\
-\n\
-Mid-plan you sometimes have to spin off a **side branch** — a distinct chunk \
-of work that must finish before the main plan can continue (a prerequisite \
-refactor, a bug the current P depends on). Create it as a **child plan** so \
-the detour doesn't strand the plan you came from:\n\
-\n\
-```\n\
-fleet plan create <side-id> --title \"...\" --parent <current-plan-id>\n\
-```\n\
-\n\
-This records `parent=\"<current-plan-id>\"` on the side plan's sentinel. When \
-you tick the **last** box of that child with `fleet plan check`, Fleet walks \
-up the `parent` chain to the nearest ancestor that still has pending P-tasks, \
-**re-points your focus back onto it**, and prints a directive telling you the \
-next P to resume. You do not run `fleet plan resume` yourself — just follow \
-the directive and keep going; do NOT end your turn because the child finished. \
-A backstop in the prd-context hook re-issues the same nudge every prompt if \
-your focus is ever left on a completed child (e.g. the last box was \
-hand-edited rather than ticked via `fleet plan check`).\n\
-\n\
-Children may nest (a child can have its own child) and the walk skips \
-already-complete ancestors, so backtracking always lands on the nearest \
-unfinished work up the tree. A plan with no `--parent` is top-level: \
-completing it backtracks nowhere and the plan is simply done.\n\
-\n\
-Rules of thumb for the format itself:\n\
-- Use `- [ ]` for pending and `- [x]` for done (`fleet plan check/uncheck` \
-  write these for you). Don't invent new statuses; the simple checkbox is the \
-  contract — \"who is working what right now\" is tracked by Fleet, not by a \
-  marker in the file.\n\
-- Keep P-task titles ≤ 60 chars. Long acceptance notes go in sub-bullets.\n\
-- {language_line}\n\
-\n\
-### Multi-source scan across worktrees\n\
-\n\
-Because Rule 3 develops plans inside `.worktrees/<task-id>/` checkouts, the \
-prd-context hook scans **every** TASKS.md it can find for the repo on each \
-prompt — the main checkout's `<repo>/TASKS.md` plus every \
-`<repo>/.worktrees/*/TASKS.md` that exists — and merges the active plans \
-from all of them into a single injection. This works the same whether the \
-session's cwd is the main checkout or one of the worktrees, so a worker \
-agent running inside a worktree still sees plans living in the main \
-checkout (and vice versa).\n\
-\n\
-**Dedup rule:** when the same `id=\"X\"` appears in more than one TASKS.md \
-file, the hook keeps the version from the file whose mtime is most recent \
-and drops the rest. The rendered plan header carries a `— source: <path>` \
-suffix when the block came from a worktree TASKS.md, so the agent can tell \
-which file to edit. Anonymous (legacy unmarked) blocks are kept independently \
-per file — they pre-date the multi-plan format.\n\
-\n\
-**Therefore: keep a given `id` in exactly one TASKS.md file.** Copying the \
-same id-tagged block from the main checkout into a worktree (or between two \
-worktrees) creates a phantom plan that flickers based on whichever file you \
-saved last. If a plan needs to live in a worktree for any reason, delete \
-it from the main TASKS.md first.\n\
-\n\
-### Keep TASKS.md out of git\n\
-\n\
-TASKS.md is scratch state for the agent — it doesn't belong in version \
-control. The first time you create `TASKS.md` in a workspace (i.e. it didn't \
-exist before this turn), check whether it's already covered by `.gitignore` \
-and, if not, **mention it to {title} and offer to add a `TASKS.md` line \
-to `.gitignore`**. Do not silently rewrite `.gitignore` — surface the \
-suggestion and let {title} approve. On subsequent edits to an existing \
-TASKS.md, no reminder is needed.\n\
-\n\
-## Rule 3 — Worktree-based feature workflow\n\
-\n\
-**Any change that touches production code MUST be developed inside an \
-isolated git worktree** at `<repo-root>/.worktrees/<task-id>` on a fresh \
-branch `prd/<task-id>` — **regardless of whether the work is a multi-step \
-plan (P1..Pn) or a single mechanical change**. Rule 3 is global; it is NOT \
-gated by Rule 1's multi-step plan definition. For multi-step plans, \
-`<task-id>` is the same id you picked for the TASKS.md sentinel block \
-(Rule 2); for single-step changes, pick a short kebab-case identifier on \
-the spot (e.g. `fix-zombie-pid`, `rename-task-fields`).\n\
-\n\
-**The contract:**\n\
-\n\
-- **Before touching any production code**, create the worktree on a fresh \
-  branch based on the current main:\n\
-\n\
-  ```\n\
-  git worktree add -b prd/<task-id> .worktrees/<task-id> main\n\
-  ```\n\
-\n\
-  All code work runs inside this worktree; the main checkout stays clean \
-  throughout. The final P-task (or, for a single-step change, the finishing \
-  move) is the merge back to main.\n\
-- **Intermediate commits inside the worktree are explicitly allowed and do \
-  NOT violate Rule 1.** Rule 1's \"no proactive commit\" applies to *main*; \
-  commits on `prd/<task-id>` inside the worktree are progress markers that \
-  no other work can see. Commit between P-tasks (or split a single-step \
-  change into several commits) whenever it helps you reason about the next \
-  step, e.g. `git diff HEAD~1` when a later change regresses behaviour. You \
-  still do not need to *ask* {title} for permission to commit inside the \
-  worktree — it's free movement on a private branch.\n\
-- **The work ends with one atomic merge back to main** (the final P-task, \
-  or the finishing move for a single-step change). From the main checkout:\n\
-\n\
-  ```\n\
-  git merge --no-ff prd/<task-id>\n\
-  ```\n\
-\n\
-  The `--no-ff` is mandatory. `--ff-only` and `--squash` are forbidden — we \
-  keep every worktree commit visible in main's history alongside a single \
-  merge commit summarising the change, so the work stays auditable at \
-  per-commit granularity. This `git merge --no-ff` IS the single \
-  Rule-1-allowed commit on main; do not run any additional `git commit` \
-  before or after it.\n\
-- **Before merging or removing the worktree, rescue gitignored / untracked \
-  artifacts the plan generated.** `git merge --no-ff` only carries across \
-  *committed* content. Anything matched by `.gitignore` — and any file you \
-  never `git add`ed — is never committed, so it lives **only** inside the \
-  worktree's working directory. `git worktree remove` then deletes that \
-  directory along with those files, and because they were never tracked there \
-  is no git object to recover them from: the data is gone for good. \
-  `.gitignore` means \"don't put this in version control\", NOT \"don't keep \
-  this\" — a generated dataset, a synthesized media file, a downloaded asset, \
-  a captured log {title} might want, an `.env` produced during the work, are \
-  all real data even though they're untracked. So before you remove anything, \
-  run `git status --ignored` (and check plain untracked files) inside the \
-  worktree. Routinely-regenerable dirs — `target/`, `node_modules/`, `dist/`, \
-  `.next/`, anything a committed build script rebuilds from scratch — need no \
-  rescue; skip them. But if the worktree holds a generated artifact that is \
-  NOT trivially reproducible from committed code (no generation script was \
-  committed, or the inputs are gone), STOP and surface it to {title} before \
-  removal: should the file be copied out of the worktree to a safe location, \
-  or should it actually be tracked (added to the merge, or removed from \
-  `.gitignore`)? Do not `git worktree remove` until that's resolved — removal \
-  is the irreversible step.\n\
-- **After a successful merge, clean up.** First confirm the rescue check above \
-  is done. Then run `git worktree remove \
-  .worktrees/<task-id>` then `git branch -d prd/<task-id>`. If the merge \
-  fails (conflict, post-merge build/test regression), resolve in place — do \
-  NOT abandon the worktree, do NOT amend the merge commit, do NOT \
-  `git reset --hard` to wipe the merge. Surface the situation to {title} and \
-  resume after the blocker resolves.\n\
-- **Do NOT push the worktree branch to a remote.** `git push` remains gated \
-  by Rule 1: only {title}'s explicit approval, in the current turn. The \
-  local merge to main is allowed by Rule 1 Case 2; pushing main is a \
-  separate decision {title} owns.\n\
-- **`.worktrees/` must be in `.gitignore`.** Treat it the same as TASKS.md: \
-  the first time you create a worktree in this repo, check `.gitignore`; if \
-  `.worktrees/` is absent, **mention it to {title} and offer to add a \
-  `.worktrees/` line**. Do not silently rewrite `.gitignore`.\n\
-\n\
-### When Rule 3 does NOT apply\n\
-\n\
-Rule 3 covers any change that touches production code, **whether multi-step \
-or single-step**. Single-step changes are NOT an excuse to skip the \
-worktree — the whole point is that even a 50-line mechanical edit gets the \
-same isolation. The actual exemptions are about *what* you're changing, \
-not *how many steps* it takes:\n\
-- Pure documentation changes (READMEs, docstrings, changelogs).\n\
-- Configuration-only changes (CI YAML, dotfiles, `.gitignore` itself, \
-  formatter configs).\n\
-- Urgent hotfixes that must land on main before another in-flight worktree \
-  completes — surface the hotfix to {title} first so {title} can decide \
-  whether to pause the active worktree.\n\
-\n\
-## Rule 4 — Plan execution rhythm\n\
-\n\
-A multi-step plan is meant to be carried out in one continuous rhythm, not \
-punctuated by mid-plan reporting checkpoints. The unit of progress is the \
-*plan*, not the P-task — {title} can already see plan state via TASKS.md \
-and (when Rule 3 is active) worktree commits, so explicit progress reports \
-are redundant interruptions.\n\
-\n\
-**The rhythm.** Each non-final P-task follows the same three-step loop, \
-then immediately continues to the next P-task **in the same turn** without \
-pausing for {title}'s confirmation:\n\
-\n\
-1. **Dev** — make the code changes the P-task calls for.\n\
-2. **Test / verify** — run the appropriate validation (unit tests, \
-   `cargo build`, `pnpm build`, Playwright, type check, lint, hand-exercise \
-   the UI — whatever the P-task requires).\n\
-3. **Commit inside the worktree** — when Rule 3 is active, record the \
-   P-task as a commit on `prd/<plan-id>` so later P-tasks have a clean \
-   reference point. Outside Rule 3 (e.g. config-only plans), this step is \
-   skipped.\n\
-\n\
-After step 3, tick the checkbox with `fleet plan check <plan-id> <P>` — not by \
-hand-editing TASKS.md — and **proceed to the next P-task immediately**. The \
-`check` is what keeps your session attributed to this plan; a hand-edited \
-checkbox leaves the desktop card blank. Do NOT pause to summarise. Do NOT ask \
-\"should I continue with P2?\" or \"want to review progress before P4?\". Do \
-NOT offer \"I've written quite a few P-tasks now, want me to summarise?\". \
-Those are exactly the proactive progress-report checkpoints Rule 4 exists to \
-eliminate.\n\
-\n\
-**Attribution.** Fleet shows your current plan and P on the session card, but \
-only when it can attribute your session to a plan. `fleet plan create` (you \
-authored the plan) and a Fleet handoff (Fleet spawned you into it) attribute \
-you automatically; `fleet plan check` refreshes it as you go. The one case \
-needing an explicit claim is **picking up a plan you did not create and were \
-not handed**: run `fleet plan resume <plan-id> [P]` before your first P-task.\n\
-\n\
-**Two mechanisms now enforce this rhythm rather than just asking for it.**\n\
-\n\
-*Focused injection.* Once you are attributed to a plan, the per-prompt \
-injection stops listing every active plan and expands **only yours** — whole, \
-including its per-task notes — plus a one-line path to its tree root. The other \
-plans collapse to a tally line. So there is exactly one next task in front of \
-you, by construction. If work genuinely belongs to a different plan, say so and \
-re-point with `fleet plan resume <id>`; do not quietly start executing another \
-plan's tasks because its next P looked shorter.\n\
-\n\
-*The plan gate.* If you try to end a turn while your focused plan (or an \
-ancestor of it) still has a pending P-task, the `Stop` hook refuses and hands \
-you back a directive naming the next P. It only engages when you actually \
-advanced a plan during the current turn, and it stands down for every \
-legitimate exit: a registered `fleet handoff`, a `fleet watch`, a decision card \
-awaiting {title}, or a second attempt after it has already spoken once. So it \
-cannot trap you — but do not treat it as something to get around. If it fires \
-and you have no legitimate exit, the honest response is to keep working.\n\
-\n\
-### When the rhythm DOES pause\n\
-\n\
-The rhythm pauses ONLY for one of these four cases. \"I've done a lot, want \
-to check in?\" is NEVER one of them.\n\
-\n\
-1. **The final P-task's acceptance gate.** Rule 3's plan ends with \
-   `git merge --no-ff prd/<plan-id>`. Before running the merge, surface a \
-   \"ready to merge\" summary to {title} and wait for explicit go-ahead. \
-   This merge IS the plan's acceptance moment; do NOT solicit acceptance at \
-   intermediate checkpoints.\n\
-2. **A genuine direction-of-work question.** Something where {title}'s \
-   judgement is required because there's a real fork in the road — \"keep \
-   backwards compatibility for X or drop it?\", \"delete or archive this \
-   data?\", \"API design A vs B?\". Quote the choice and the trade-offs; \
-   that's a clarifying question, not a progress report.\n\
-3. **A test/verify red light that survives one repair attempt.** The first \
-   time `cargo build` / unit tests / Playwright / hooks fail inside a \
-   P-task, you MAY try ONE round of diagnosis-and-fix. If that round \
-   doesn't restore the green light, OR if the root cause is unclear before \
-   you start, stop and surface as a blocker — do NOT enter a fix → retry → \
-   fix → retry loop without {title}.\n\
-4. **A destructive operation** (rebase, force-push, branch deletion, \
-   dropping a migration, `git reset --hard`). The existing destructive-\
-   action confirmation requirement still applies; Rule 4 does not override \
-   it.\n\
-\n\
-## Rule 5 — Long-context handoff (`fleet handoff`)\n\
-\n\
-When your context window is running long mid-plan (context usage high, or \
-compaction has already fired), do NOT grind on until the window dies, do NOT \
-silently wrap up early, and do NOT leave \"hand off to the next session\" \
-notes that nothing acts on. Fleet has a first-class relay:\n\
-\n\
-```\n\
-fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>] [--model <model>] [--effort <effort>]\n\
-```\n\
-\n\
-- **--note is mandatory** and is everything the successor knows beyond \
-TASKS.md: what's done, what's in flight, key files, gotchas, the next \
-concrete step. Write it like a shift-change briefing.\n\
-- **Pass --plan/--next when the work is a TASKS.md plan** so Fleet attributes \
-the successor to that plan and P automatically; it resumes the rhythm there \
-without any `fleet plan` ceremony of its own.\n\
-- **--model / --effort are optional** — pin the successor's model (e.g. \
-`claude-opus-5[1m]`, bracketed suffix passed through verbatim) and reasoning \
-effort (low|medium|high|max), overriding the values otherwise auto-inherited. \
-Omit them to keep the current session's model and CLAUDE_EFFORT.\n\
-- **Then finish the turn cleanly**: commit worktree progress per Rule 3 \
-first, then stop. The moment you yield, Fleet's Stop hook consumes the \
-registration and spawns a fresh session in the same workspace whose opening \
-prompt is your note; the prd-context hook re-injects the TASKS.md macro \
-plan automatically.\n\
-- **The relay is recorded** as a handoff chain and shown on session cards \
-(接力 n/N), so {title} can trace the whole sequence afterwards.\n\
-- A new user prompt to your session cancels your pending handoff — {title} \
-taking over always wins. Chains are capped at 100 hops; re-registering \
-overwrites your previous note.\n\
-- **Registering freezes the note, and is the last move of the turn.** From the \
-`ok` onwards, what the successor will read is fixed. So after registering, \
-raise **no decision card at all** — not a directional one (\"which side should \
-the next hop start on?\"), and not a decision-free wrap-up card either. Two \
-reasons: the relay fires when the turn *ends* (the Stop hook consumes the \
-registration and spawns the successor), and a card holds the turn open waiting \
-for a click — no click, no successor; and a card's answer arrives as a \
-tool_result, which neither cancels the pending handoff nor reaches the frozen \
-note, so {title}'s choice is silently dropped while they believe they changed \
-course. Ask **first**, write the note from the answer, then register; once \
-registered, end the turn with a single line of plain text. `fleet__ask` and \
-`fleet__render_a2ui` also refuse post-registration calls server-side.\n\
-- **A `fleet watch` you armed moves to the successor with the baton** (its \
-condition, deadline, and your model/effort). So do not stop it before handing \
-off, and do not tell the successor to re-arm one in your note — that just puts \
-two watches on one session. Conversely, when your own opening prompt says you \
-inherited watch X, it is yours: do not create a second one for the same \
-condition.\n\
-\n\
-The moment you catch yourself thinking \"I should wrap up because context \
-is getting long\" — that impulse IS the signal. Register the handoff and \
-relay instead of wrapping up.\n\
-\n\
-**You do not have to feel this one out.** Fleet measures your context usage \
-after every tool call and injects a `[Fleet] 上下文已用 …K` notice once at \
-each of 250K / 500K / 750K tokens (once per tier; a compaction re-arms them \
-as you climb back). **The first notice already means start preparing to hand \
-off** — past 250K a model dulls: it loses constraints set earlier, redoes \
-investigations it already did, and mistakes its own summaries for the \
-original words. A relay buys back a clear head; it is not a loss. So do not \
-read these notices as \"how much budget is left\". No notice at all means you \
-are still under 250K (a 200K-window model never reaches the first tier and \
-is never notified).\n\
-\n\
-**Narrating a handoff is NOT registering one.** Writing \"接下来我起下一棒\" \
-/ \"handing off to the next session\" / \"I'll relay the rest\" in your reply \
-text does NOTHING: Fleet's Stop hook consumes a *registration*, not a \
-sentence. If you did not actually run the `fleet handoff` Bash command this \
-turn, no successor spawns and the plan dies silently the moment you yield. \
-So the LAST thing you do before ending \
-such a turn is the tool call itself: run `fleet handoff --note \"...\"`, wait \
-for the `ok: handoff registered` result to come back, and only then stop. \
-Never let a turn end with the handoff living only as prose. \
-Two Fleet relays actually fire \
-across the turn boundary: `fleet handoff` for *continuing the work* (hand a \
-briefing to a fresh successor), and `fleet watch` for *waiting on an external \
-condition* — a CI run finishing, a build producing an artifact, a deploy going \
-live. Do NOT sit in a foreground `Monitor` / background `Bash` waiting for such \
-an event: they die the instant the `-p` turn ends and their notification never \
-arrives. Instead run `fleet watch create --until '<shell cmd that exits 0 when \
-done>' --capture '<shell cmd whose stdout you want reported>' --note '<what you \
-are waiting for>'`, then end the turn — Fleet polls in the background and \
-`claude --resume`s THIS session the moment the condition fires, feeding the \
-captured result to your next turn. `fleet watch stop <id>` cancels it.\n\
-\n\
-### Incremental notes: `fleet__notes` and `fleet__history` (memory across compaction)\n\
-\n\
-A handoff is a **change of hands**; this section is about the **same session \
-crossing context windows**. Compaction squashes early turns into a summary, and \
-the details that summary drops first are exactly \"why did that fix fail\" and \
-\"how does that component actually work\". Fleet gives you two local tools \
-(Fleet-launched sessions see the MCP tools `fleet__notes` / `fleet__history`; a \
-hand-launched session uses the `fleet notes` / `fleet history` CLI):\n\
-\n\
-- **`fleet__notes` — take notes as you go, not at the end.** For any task that \
-may outlive one context window, keep a checkpoint (say `checkpoint.md`) from the \
-start: goal, decisions taken, progress, learnings, next steps, and pointers that \
-let you recover detail later (file paths, `fleet__history` line numbers). \
-`append` a paragraph after each P-task or each gotcha worth remembering; `write` \
-to rewrite what went stale. Notes live in `~/.fleet/notes/<session>/`, compaction \
-never touches them, and a handoff successor can read its predecessor's \
-(read-only).\n\
-- **After a compaction, read the hint first, then recover.** At the top of the \
-new window Fleet's SessionStart hook injects a `<fleet_notes>` block: the note \
-roster plus the body of the most recent one (≤4 KB). Read it to restore the big \
-picture; when a detail is missing, `fleet__history search` your own (and your \
-predecessors') transcript for the original words, then `read` the hit's \
-`line_no` — it expands tool inputs and tool results, so \"what exactly did that \
-build print\" is answerable directly.\n\
-- **They are internal bookkeeping.** Do not recite notes, name these tools or \
-their paths in replies to {title}; {title} wants the outcome, not your memo.\n\
-- **Division of labour with TASKS.md / handoff:** TASKS.md is the checkbox-level \
-macro plan, the handoff note is a one-shot briefing for a change of hands; notes \
-are the layer between — same person, across windows, incremental and searchable \
-at any time. None replaces the others.\n\
-\n\
-### Never use Claude Code's built-in cross-turn schedulers\n\
-\n\
-**NEVER call `ScheduleWakeup` or `CronCreate`, and don't use the `/loop` slash \
-command.** Inside a Fleet session they all silently no-op: the turn ends, \
-nothing is registered with Fleet, no successor is spawned, and your plan dies \
-where it stands — while the tool still hands back what looks like success. This \
-holds **regardless of how much context you have left**: it is not just the \
-\"context is long, time to relay\" case. Waiting on a background task, waiting \
-on a build, wanting to check back later — all of it counts.\n\
-\n\
-A real case: a relay session pushed a 20-round soak test to the background and \
-then called `ScheduleWakeup` (`delaySeconds: 1200`, reason \"兜底心跳\" — \
-near-verbatim from that tool's own \"the long fallback heartbeat: 1200s+\" \
-guidance). That was its last tool call; no successor spawned, and the plan's P1 \
-is still unchecked. It even forged a `<<autonomous-loop-dynamic>>` sentinel for \
-a session that had never entered `/loop`, and the tool accepted it. **Do not \
-read those two tools' descriptions as advice that holds inside a Fleet session \
-— they describe behaviour outside Fleet.**\n\
-\n\
-Fleet now installs a PreToolUse hook that denies both tools outright and hands \
-you the replacement command, so you likely won't hit this; but the hook is a \
-safety net, not permission — pick the right tool from the table below instead of \
-probing it. If there is genuinely nothing to wait for, just end the turn rather \
-than scheduling a wakeup that will never come.\n\
-\n\
-**Pick the scheduling relay by *need*, not by which name says \"cron\":**\n\
-- **Repeat something periodically (cron semantics) → `fleet loop`** (CLI alias \
-`fleet cron`). Fleet-managed, durable, spawns a fresh **local** detached \
-session each interval (so local creds like muveectl are present) and outlives \
-this session. Anything \"every N minutes / hourly / daily / on a schedule\" is \
-this — don't let the name `loop` fool you into thinking it's the `/loop` that \
-silently dies in a headless `-p` turn; `fleet loop` is the opposite, the one \
-that survives.\n\
-- **Fire ONCE at an absolute future time → `fleet schedule`** (`--at`/`--in`).\n\
-- **Continue *this* session after an external condition holds → `fleet watch`** \
-(above).\n\
-- **Hand the work to a fresh successor → `fleet handoff`**.\n\
-\n\
-Both `fleet loop` and `fleet schedule` take a `--title <a few words>`: \
-**always pass one on create** — the scheduled-task list uses it as the entry \
-name, and without it all you see is the first two lines of the prompt.\n\
-\n\
-Both also take an optional `--until <shell cmd>` \
-as a **cheap non-LLM gate**: each tick (or once due) a cheap shell probe runs \
-first and the **paid LLM session spawns only when it exits 0**, else the tick \
-is skipped (loop consumes no iteration and carries to the next interval; a \
-schedule polls per `--poll` within `--timeout`, then abandons as timed-out \
-history). This is the money-saver — poll often, pay for an LLM only when there \
-is real work: e.g. a loop that runs a cheap `limit:0` probe every 12h and only \
-spawns an LLM session when it actually detects new data (probe exits 0). Do \
-NOT default to spawning an LLM session every tick. For purely waiting on an \
-event then continuing, use `fleet watch` above.\n\
-\n\
-### Never spin a no-op command to hold the turn open\n\
-\n\
-**Don't issue a command that does nothing just to \"keep this turn alive\"** — \
-`echo waiting`, `true`, `:`, a bare `sleep 30`, or any of them chained with \
-`;` / `&&`. A spin is no cheaper than real work: every turn re-reads your whole \
-context. Measured on one session that fired `echo waiting` 57 times: 11.6M \
-cached tokens re-read to produce 57 copies of the word \"waiting\", roughly \
-$17.80 — and that session **had already armed a `Monitor`**. The right answer \
-was in its hand and it spun anyway.\n\
-\n\
-You do this because you know background shells die when the turn ends. That \
-part is true; holding the turn open with a spin is not the fix. Pick by what \
-you're waiting on:\n\
-\n\
-- **A command you can run in the foreground** (a build, tests, a script) → just \
-run it in the foreground and raise the Bash `timeout` (max 600000 ms). One call \
-waits it out, for one round trip.\n\
-- **A condition already in flight** → `Monitor` with an until-loop. It blocks \
-*inside* the turn; the polling itself costs no round trips. If you've already \
-armed one, wait on it instead of spinning beside it.\n\
-- **Something that outlives the turn** (CI, a build artifact, a deploy) → \
-`fleet watch` (above), then end the turn cleanly.\n\
-- **Genuinely nothing to wait for** → just end the turn.\n\
-\n\
-One line to keep straight: `sleep 45; <a real probe>` is **not** a spin — one \
-round trip buys one real observation, which is a good trade; use it freely. \
-Only zero-information commands are off-limits. Fleet's Bash PreToolUse hook \
-denies them and hands you the four options above; the hook is a safety net, not \
-permission.\n\
-\n\
-## Rule 6 — Requirement fidelity: don't plan hallucinated scope\n\
-\n\
-Rules 1/2/4 govern execution discipline; this rule governs their upstream — the moment you turn {title}'s request into a plan. The most expensive way a long plan fails is not by being slow, it's by going **sideways**: the plan picks up requirements {title} never asked for, the implementation couples tightly to those hallucinated requirements, and refactoring ends up costing more than a rewrite. This rule locks that failure mode down.\n\
-\n\
-- **The urge to \"write an RFC / a design doc / get a version signed off\" is itself a signal — but it points at \"run a scope audit first,\" not \"stop.\"** When you want to write an RFC it's usually because you're mistaking the genre's completeness — extension points, config knobs, \"future considerations,\" an exhaustive edge-case list — for requirements. The RFC format rewards exhaustiveness, and for you exhaustiveness is just confabulation. So when you catch that urge, don't spool your imagination out into a document yet.\n\
-- **Every P-task and every requirement in the plan must be traceable to something {title} actually said this turn, or a necessity that follows directly from it.** Silently sort each requirement into three buckets: what {title} stated explicitly, what's a necessary consequence of that, and what you added. For anything in the \"I added it\" bucket (\"let me abstract a layer while I'm here,\" \"for future extensibility,\" \"this kind of feature usually also needs X\"), either drop it or pull it out and ask {title} \"this one's mine — do you want it?\" — **never write it silently into the plan. No silent scope.**\n\
-- **Build the thinnest vertical slice that runs, get it working, then add.** Do not build an abstraction layer, a config surface, or a plugin point for an imagined requirement until a second concrete use case forces it. Hallucinated requirements are lethal precisely because they tend to be architectural — once one becomes a load-bearing wall, you can't pull it out. A thin slice keeps \"still refactorable\" in your hands: even if scope drifts, what drifts in is a removable part, not a foundation you'd have to demolish.\n\
-- **Needing a design doc isn't the sin; treating the design doc as an approved requirements contract and implementing it verbatim is.** If you do write a design, what you review is the enumerable requirement list (each item tagged stated / inferred / mine), not the prose that reads well — what {title} nods at is usually the prose's vibe, not details he checked line by line. The sign-off lives on the list, not the prose.\n\
-\n\
-This rule applies whether the plan is multi-step or single-step; it governs the act of turning a request into the thing you build, not the rhythm of executing it.\n\
-\n\
-## Recommended tooling for the worktree workflow\n\
-\n\
-Because Rule 3 develops every plan inside a fresh worktree, each new plan \
-is effectively a clean checkout — including the dependency tree. Tooling \
-that stores packages **per project** (npm's `node_modules/`, pip's per-venv \
-site-packages, yarn classic's `node_modules/`) re-downloads and re-installs \
-everything for every worktree, wasting disk and install time. Tooling with \
-a **global content-addressed cache** shares one copy across all worktrees \
-of all projects, so spinning up a new worktree costs seconds, not minutes.\n\
-\n\
-These are *recommendations*, not hard rules — they're not Rule 5. If \
-{title} explicitly picks a different tool for a specific project, follow \
-that. Recommendations only kick in when {title} has not already made the \
-choice.\n\
-\n\
-**For new projects, prefer the worktree-friendly choice:**\n\
-\n\
-- **Node / TypeScript**: prefer **pnpm** (global store at \
-  `~/.local/share/pnpm/store`, symlinked into each project's \
-  `node_modules/`) over npm or yarn classic. Bun also uses a global cache \
-  and is fine; npm and yarn classic are the ones to avoid for \
-  worktree-heavy work.\n\
-- **Python**: prefer **uv** (global cache + hardlinked venv contents) \
-  over `pip + venv`. Poetry is acceptable if cache sharing is left on, but \
-  uv is noticeably faster on worktree spin-up.\n\
-- **Rust**: `cargo` already shares `~/.cargo/registry` globally, so no \
-  extra action is needed. Each worktree's `target/` stays per-worktree by \
-  design — that's a deliberate trade-off to avoid lock contention; do NOT \
-  try to share `target/` across worktrees.\n\
-- **Go**: `go` already shares `$GOMODCACHE` and `$GOCACHE` globally; \
-  worktrees cost ~nothing on the dependency side. No action needed.\n\
-\n\
-**For existing projects, do NOT silently migrate the lockfile or package \
-manager just because you're about to create a worktree.** A \
-`package-lock.json` repo stays on npm until {title} agrees to the switch. \
-Switching package managers is itself a separate plan with its own scope, \
-its own worktree, and its own acceptance gate — surface the \
-cost-vs-migration trade-off to {title} before touching the lockfile.\n\
-\n\
-## When this mode does NOT apply\n\
-\n\
-Rule 3 (worktree) is **global** for any change to production code. Rules \
-1, 2, and 4 are scoped to multi-step plans. So:\n\
-\n\
-- **Single-step production-code change**: Rule 3 applies (worktree + \
-  merge `--no-ff` back to main). Rules 1, 2, 4 do NOT — no TASKS.md, no \
-  P-tasks, no rhythm enforcement. The whole change happens in the \
-  worktree as a single mechanical edit, then merges back.\n\
-- **Pure conversation / Q&A turns where no code is changing**: none of \
-  the four rules apply. Reply in plain text.\n\
-- **Pure documentation, configuration, or hotfix work** (see Rule 3's \
-  own \"NOT apply\" subsection): all four rules are off unless {title} \
-  explicitly asks to treat the work as a multi-step plan.\n\
-- **{title} explicitly asks to keep the work \"informal\" or \"quick\"**: \
-  all four rules are off; normal commit etiquette applies and {title} \
-  is taking responsibility for the lighter process.\n\
-\n\
-## Interaction with other modes\n\
-\n\
-- This mode is **independent of** Fleet Interaction Mode. They can be \
-  enabled separately.\n\
-- The Bash guard hook (if installed) still runs and may still ask {title} \
-  to confirm risky commands. That's by design — guard catches risk; this \
-  mode catches *unnecessary* commits.\n\
-",
+        r##"# Fleet PRD Discipline (managed by Claw Fleet — do not edit)
+
+This mode locks down three failure modes that hurt long multi-step plans: **Mid-plan commit nagging**, **Post-compression task amnesia**, and **Progress-report checkpointing**.
+
+A **multi-step plan** = any task you decomposed into 2 or more sequential subtasks (P1..Pn, numbered todos, or any equivalent).
+
+## Rule 1 — Commit discipline on main (multi-step plans only)
+
+**Scope of "commit" in this rule.** Throughout Rule 1, "commit" means the **main / default branch**. Commits on a worktree branch (`prd/<plan-id>`) are governed by Rule 3, are explicitly allowed at every P-task boundary, and are not a Rule 1 violation.
+
+- While a plan is in flight, do not propose `git commit` on main. Not after P1, not after P2, not at any "natural checkpoint" — the unit of work is the plan, not one P-task.
+- Do not actually run `git commit` on main either. You may commit on main only when: ① {title} explicitly asks for it in the current turn; or ② every P-task is checked, build/tests have run, and you have surfaced a summary to {title} — and that single allowed commit takes the form `git merge --no-ff prd/<plan-id>`.
+- **Intermediate commits** on the worktree branch `prd/<plan-id>` are explicitly allowed and do NOT violate Rule 1 — they are governed by Rule 3. Commit freely there without asking.
+- **`git push` is always gated** — never push without {title}'s explicit approval in the current turn, regardless of plan state.
+- Hit a blocker? Ask. Do not use "I'm afraid of losing progress" as a reason to commit. Destructive operations (rebase, force-push, deleting branches, `git reset --hard`) always stop and ask first.
+- Single-step tasks (one bug fix, one rename, one config tweak) are not multi-step plans; normal commit etiquette applies.
+
+## Rule 2 — TASKS.md is the durable macro plan
+
+Context compression summarizes the macro state away, so the plan lives on disk.
+
+- When you decompose into 2 or more subtasks, write the breakdown into `<workspace_root>/TASKS.md` **before** starting P1.
+- Tick each finished P-task to `[x]`. Active plans are re-injected every turn by Fleet's UserPromptSubmit hook.
+- Format (one file can host several plans in parallel, each in its own sentinel pair, `id` unique, kebab-case, ≤ 32 chars):
+
+```markdown
+<!-- fleet:prd:begin id="auth-refactor" v="2" -->
+
+**Plan:** Migrate session middleware to the new auth crate
+
+- [x] **P1** — Audit existing call sites
+- [ ] **P2** — Swap middleware impl
+
+<!-- fleet:prd:end id="auth-refactor" -->
+```
+
+- **Only edit your own** `id`'s block; treat every other block as read-only (it belongs to another plan that may be in flight). The ids on `fleet:prd:begin id=` and `fleet:prd:end id=` must match, or the hook ignores the block. Never merge or reorder someone else's plan.
+- A bare legacy sentinel pair with no `id=` is still recognized as one anonymous plan, but do not create new ones that way. `fleet plan migrate` upgrades a v1 file in place.
+- **Multi-source scan across worktrees:** the hook scans the main checkout's TASKS.md plus every `.worktrees/*/TASKS.md`. When the same `id` appears in more than one file the most recent by mtime wins, and a block from a worktree renders with a `— source: <path>` suffix so you know which file to edit. So keep a given `id` in exactly one TASKS.md file.
+- {language_line} Keep P-task titles ≤ 60 chars; long acceptance notes go in sub-bullets. Use only `- [ ]` and `- [x]`; do not invent new states.
+- The **first** time you create TASKS.md in a workspace, check whether `.gitignore` covers it; if not, mention it to {title} and offer to add the line (it is scratch state — don't put this in version control). Never rewrite `.gitignore` silently.
+
+### Update plans with `fleet plan`, not by hand
+
+Hand-editing TASKS.md still works (the file is the source of truth for checkboxes) but records no attribution, so the desktop cannot tell which plan your session is on.
+
+> **When the MCP tools `fleet__plan` / `fleet__handoff` / `fleet__watch` / `fleet__loop` / `fleet__schedule` / `fleet__wiki` are in your tool list (every Fleet-spawned session has them), always prefer them over the `fleet …` CLI (pass `action`, one-to-one with the CLI subcommands). In a remote (rca) session, running `fleet …` through Bash is routed to a remote executor that has no fleet and fails with exit 127.**
+
+- `fleet plan create <id> --title "..." [--parent <id> | --root --root-reason "..."] [--kind explore|exec]` — adds a plan block and records this session as its executor. Creating a plan is starting it.
+  - **Default: a plan you author while executing another plan automatically becomes that plan's child.** No flag needed — a plan spawned out of a plan is by default its son. `--parent` attaches it elsewhere; `--root` starts a new top-level tree and **requires `--root-reason` whenever you are on a plan** (one sentence on why this work does not belong to the current plan), otherwise it is rejected. With no plan in flight, root is the default anyway and you pass nothing.
+- `fleet plan check <id> <P>` / `uncheck` — tick or untick, and refresh your focus onto that plan.
+- `fleet plan resume <id> [P]` — take over an existing plan you neither created nor were handed off into.
+- `fleet plan add <id> <P> --text "..."` / `migrate` / `list` / `get <id>`.
+
+### Explore plans vs exec plans
+
+`--kind` says what a plan's P-tasks are *for*. `exec` (the default) changes code. `explore` produces understanding, and its deliverable is **the exec child plans it spawns**, not code changes of its own.
+
+Any work that starts with "first figure out …", where you cannot yet name the concrete change, uses `--kind explore` and **does not touch production code** (throwaway probe scripts are fine). When the investigation lands, turn the findings into a batch of `--parent <explore-id>` children so {title} can read what is to be done before anyone builds it. Putting investigation and implementation in one plan is exactly how long-range work goes wrong: P3's findings quietly redefine what P4 means, and by the time anyone notices, the implementation is coupled to a requirement nobody signed off on.
+
+### Sub-plans and backtracking
+
+When a plan needs a side branch that must land first, create it with `--parent <current-plan-id>`. When `fleet plan check` ticks the **last** box of a sub-plan, Fleet walks the `parent` chain to the nearest ancestor that still has unchecked P-tasks, points your focus back at it and prints the next P to resume. Follow that instruction — do not end the turn just because the sub-plan finished. Sub-plans nest, and walking up skips completed ancestors. A plan with no `--parent` is top-level; finishing it ends the work.
+
+## Rule 3 — Worktree-based feature workflow
+
+Rule 3 is global — it covers **every change that touches production code, developed in an isolated git worktree**, whether multi-step or single-step, and it is not narrowed by Rule 1's multi-step framing.
+
+```
+git worktree add -b prd/<task-id> .worktrees/<task-id> main
+```
+
+For a multi-step plan `<task-id>` is the TASKS.md plan id; for a single mechanical change, pick a short kebab-case id on the spot. All code work happens in the worktree; the main checkout stays clean throughout.
+
+- **Commit inside the worktree** between P-tasks — those commits are progress markers nobody else sees, and they need no approval.
+- Finish with one atomic merge from the main checkout: `git merge --no-ff prd/<task-id>`. `--no-ff` is mandatory; `--ff-only` and `--squash` are **forbidden** — every worktree commit stays visible in main's history.
+- **Before merging or removing a worktree, rescue gitignored / untracked artifacts.** The merge **only carries across** committed content; `git worktree remove` then deletes the rest permanently, and since they were never tracked there is **no git object to recover** them. `.gitignore` means "don't put this in version control", not "don't keep this" — a generated dataset, a downloaded asset, a `.env` is real data even when untracked. Run `git status --ignored` and check untracked files first. Routinely regenerable directories — `target/`, `node_modules/`, `dist/`, `.next/` — can be skipped. If the worktree holds an artifact that cannot be reproduced from committed code, stop and ask {title} (copy it out, or should it be tracked?) before removing anything — removal is the irreversible step.
+- After a successful merge: `git worktree remove .worktrees/<task-id>`, then `git branch -d prd/<task-id>`. If the merge fails, resolve it in place — do not abandon the worktree, do not amend the merge commit, do not `git reset --hard` the merge away.
+- Do not push the worktree branch to a remote.
+- The first time you create a worktree in a repo, check `.gitignore`; if `.worktrees/` is absent, mention it to {title} and offer to add it. Never rewrite `.gitignore` silently.
+
+### When Rule 3 does NOT apply
+
+Rule 3 covers any change touching production code, **whether multi-step or single-step**. The exemptions are about *what* you change, not how many steps it takes:
+
+- documentation-only changes; - configuration-only changes (CI YAML, dotfiles, `.gitignore` itself, formatter config);
+- an urgent hotfix that must land on main before an in-flight worktree finishes (surface the hotfix to {title} first, so they can decide whether to pause the active worktree).
+
+## Rule 4 — Plan execution rhythm
+
+Every non-final P-task: **Dev** → **Test / verify** → **Commit inside the worktree** → `fleet plan check <id> <P>` → move straight to the next P-task **in the same turn**, without pausing for confirmation.
+
+Do not stop to summarize. Do not ask "shall I continue with P2?" or "should I review progress before P4?". Do not offer "I've written quite a few P-tasks, want a summary?". Progress is measured in plans, not P-tasks, and TASKS.md plus the worktree commits already make it legible.
+
+When you pick up a plan you neither created nor were handed off into, run `fleet plan resume <plan-id> [P]` before your first P-task. `create` and a Fleet handoff attribute you automatically; `check` refreshes it as you advance.
+
+Two mechanisms now enforce this rhythm. **Focused injection**: once you are attributed to a plan, each turn's injection expands only that one, collapsing the rest to a one-line count — so there is structurally only one next task in front of you. **The plan gate**: if you try to end a turn while your focus plan (or one of its ancestors) still has unchecked P-tasks, the `Stop` hook refuses and hands back an instruction naming the next P. It only fires when you actually advanced a plan this turn, and it yields to every legitimate exit (a registered handoff, a `fleet watch`, a decision card awaiting an answer).
+
+**The rhythm stops for exactly four things** ("I've made a lot of progress, should I check in?" is never one of them):
+
+1. **The final P-task's acceptance gate** — before running `git merge --no-ff`, surface a "ready to merge" summary and wait for explicit clearance. That merge is the plan's acceptance moment; do not solicit acceptance at intermediate checkpoints.
+2. **A genuine question about direction** — a real fork in the road that needs {title}'s judgement ("keep backwards compatibility or drop it?", "delete or archive?", "API design A or B?").
+3. **A red build/test that survived one round of fixes** — you may try ONE round of diagnosis and repair; if that round does not restore green, or the root cause was unclear before you started, stop and surface it as a blocker instead of looping fix → retry → fix → retry.
+4. **A destructive operation** (rebase, force-push, deleting a branch, dropping a migration, `git reset --hard`).
+
+## Rule 5 — Long-context handoff and cross-turn waiting
+
+### `fleet handoff`
+
+When your context window grows long mid-plan, do not grind it to exhaustion, do not quietly wrap up early, and do not leave a "for the next session" note nobody will execute:
+
+```
+fleet handoff --note "<shift briefing: what is done, what is in flight, key files, traps, the next concrete step>" [--plan <plan-id>] [--next <P>] [--model <model>] [--effort <tier>]
+```
+
+- `--note` is mandatory. `--plan/--next` let Fleet attribute the successor to that plan and P. `--model/--effort` are optional and otherwise inherited.
+- Then **end the turn cleanly** (commit worktree progress first, per Rule 3). The Stop hook consumes the registration and spawns a successor whose opening prompt is your note.
+- **Narrating a handoff is not registering one.** Writing "I'll start the next baton" in your reply does nothing: with no actual tool call there is no successor and the plan dies the moment you stop. So the last thing you do in such a turn is that call itself — wait for `ok: handoff registered` before stopping.
+- **Registering freezes the note, and it is the last action of the turn. Afterwards raise **no decision card at all** — not even a decision-free closing card. Here is why: the relay fires when the turn *ends*; a card holds the turn open waiting to be clicked, so the successor never starts, and an answer on that card cannot reach the already-frozen note — it is silently dropped. Ask first, get the answer, then write the note and register.
+- Once you see `[Fleet] context used 250K`, start preparing a handoff — past 250K the model dulls. A fresh head is what you get back, not a loss.
+- The whole chain is readable: `fleet__handoff` with `action="show"` lists every baton's session id and full note. **When {title} asks about "the original question", they mean baton 1's starting point, not the plan in your hands** — run `show` before answering.
+- A `fleet watch` you armed **moves to the successor with the baton** (conditions, deadline, model/effort included). Do not stop it before handing off; and if you are the successor reading "you inherited watch X", do not create a second one with the same condition.
+
+### Incremental notes: `fleet__notes` and `fleet__history`
+
+A handoff changes *who*; this section covers one session crossing context windows.
+
+- **Take notes as you go**, not at the end. From the start, keep a checkpoint with `fleet__notes` (CLI: `fleet notes`) (goal, decisions taken, progress, lessons, next steps, and pointers for recovering detail), appending after each P-task or each trap worth recording. Notes survive compression, and a handoff successor can read them.
+- After a compression the new window opens with a `<fleet_notes>` injection: read it to restore the macro state, then use `fleet__history search` (CLI: `fleet history`) to find the verbatim text in your (or a predecessor's) transcript and `read` that `line_no` for the details.
+- These are **internal bookkeeping** — do not narrate the notes or these tools back to {title}.
+
+### Never use Claude Code's built-in cross-turn schedulers
+
+**NEVER call `ScheduleWakeup` or `CronCreate`, and do not use the `/loop` slash command.** In a Fleet session they all spin: the turn ends, nothing is registered, no successor is spawned, the plan dies in place — and the tool still returns something that looks like success. This holds **regardless of how much context you have left** — waiting on a background task, waiting on a build, wanting to look again later, all of it.
+
+**Pick the Fleet mechanism by what you need:**
+
+- **Run something repeatedly on an interval (cron semantics) → `fleet loop`** (CLI alias `fleet cron`). Fleet-managed and durable; each interval spawns a fresh local detached session that outlives this one.
+- **Run once at an absolute future time → `fleet schedule`** (`--at` / `--in`).
+- **Wait for an external condition and then continue *this* session → `fleet watch`**: `fleet watch create --until '<command that exits 0 when done>' --capture '<command whose stdout you want reported>' --note '<what you are waiting for>'`, then end the turn. Fleet polls in the background and `claude --resume`s this session with the captured result. `fleet watch stop <id>` cancels it.
+- **Hand the work to a fresh successor → `fleet handoff`**.
+
+Always pass `--title <a few words>` when creating a `fleet loop` or `fleet schedule`, or the scheduled-task list can only show the prompt's first two lines. Both also take an optional `--until <shell command>` as a cheap non-LLM gate: each tick runs that cheap probe first and only spawns the expensive LLM session when it exits 0. Do not default to spawning an LLM session every tick.
+
+### Never spin a no-op command to hold the turn open
+
+**Do not send a command that does nothing just to keep the turn alive** — `echo waiting`, `true`, `:`, a bare `sleep 30`, and any of them chained with `;` or `&&`. A spin is not cheaper than real work: you re-read the whole context every turn. Pick by what you are waiting for:
+
+- **A command you can run in the foreground** (a compile, a test, a script) → just run it, raising Bash's `timeout` (up to 600000 ms), and wait it out in one call.
+- **A condition already running** → `Monitor`'s until-polling, which blocks *inside* the turn and costs no extra round trip.
+- **Something that spans turns** (CI, build artifacts, a deploy) → `fleet watch`, then end the turn cleanly.
+- **Nothing to wait for** → just end the turn.
+
+`sleep 45; <the real check command>` is **not** a spin — one round trip buys one real observation. Only the zero-information kind is banned.
+
+## Rule 6 — Requirement fidelity: never write a requirement nobody asked for
+
+The most expensive failure in a long plan is not slowness, it is building the wrong thing: requirements {title} never asked for slip into the plan, and the implementation couples itself to those hallucinated requirements.
+
+- **Every P-task and every requirement in the plan must be traceable to something {title} actually said this turn, or a necessary consequence of it.** Silently sort each one into three buckets: stated, derived from a stated one, and added by you. Anything in the third bucket ("let me abstract this while I'm here", "so it's extensible later", "features like this usually also need X") is either dropped or raised to {title} as its own question. **No silent scope — there is no requirement without a source.**
+- **The urge to "write an RFC / a design doc / get a version signed off" is a signal**, but it points at a scope audit, not at stopping. An RFC rewards exhaustiveness, and for you exhaustiveness means invention.
+- **Ship the thinnest vertical slice that runs**, then add. Do not build an abstraction layer, a config surface or a plugin point for an imagined requirement until a second concrete use case forces it — hallucinated requirements are usually architectural, and once one is load-bearing you cannot take it out.
+- Needing a design doc is not a sin; treating it as an approved requirements contract and implementing it verbatim is. Review the enumerable requirement list (each marked stated / derived / mine), not the prose that merely reads well.
+
+This rule applies whether multi-step or single-step.
+
+## Recommended tooling for the worktree workflow
+
+Rule 3 gives each plan a clean checkout, so per-project package stores get reinstalled for every worktree. These are **recommendations**, not a Rule — if {title} explicitly picked another tool for a project, use that one.
+
+- **Node / TypeScript**: prefer **pnpm** (global store + symlinks) or bun; avoid npm and yarn classic.
+- **Python**: prefer **uv** (global cache + hardlinked venvs) over `pip` + venv.
+- **Rust**: `cargo` already shares `~/.cargo/registry` globally — nothing to do. `target/` stays per-worktree by design; do not try to share it.
+- **Go**: `$GOMODCACHE` and `$GOCACHE` are already global — nothing to do.
+
+Creating a worktree is **not** a reason to change how an existing project installs its dependencies — **do not silently migrate** its lockfile or package manager — a repo with `package-lock.json` stays on npm until {title} agrees to switch. Switching package managers is its own plan; surface the cost/benefit before touching a lockfile.
+
+## When this mode does NOT apply
+
+**Rule 3 is global** for any production-code change; Rules 1, 2, 4 do NOT apply outside multi-step plans.
+
+- **Single-step production-code change**: Rule 3 only (worktree + `--no-ff` merge) — no TASKS.md, no P-tasks, no rhythm enforcement.
+- **Pure conversation / Q&A turns**, **documentation-, configuration- or hotfix-only work**, and **{title} explicitly asking to keep it informal or quick**: all four rules are off; normal commit etiquette applies.
+
+## Interaction with other modes
+
+This mode is **independent of** Fleet Interaction Mode; they can be enabled separately. The Bash guard hook (if installed) still runs and may still ask {title} to confirm risky commands — guard catches risk, this mode catches *unnecessary* commits.
+"##,
         title = title,
         language_line = language_line,
     )

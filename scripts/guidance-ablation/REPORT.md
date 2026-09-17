@@ -1,7 +1,7 @@
 # 注入 guidance 的 token 成本与行为消融实验
 
 **日期**：2026-09-17 · **仓库**：claude-fleet · **计划**：`guidance-token-diet`
-**状态**：Sonnet 全矩阵 n=40 已跑完，Opus 复验已跑完，2×2 交叉定位已跑完。结论成型。
+**状态**：全部跑完。Sonnet 全矩阵 n≈40、Opus 复验、2×2 交叉定位，以及**实际合进 main 的那份新文本的事后复验**。
 
 ---
 
@@ -23,7 +23,7 @@ Fleet 往 `~/.claude/CLAUDE.md` 注入 6 份 guidance 文件，每个会话的�
 
 **校验。**7 份单独测得的差值合计 30,580；把 6 份 fleet 文件拼成一份一次性测得 30,287（差 293，属拼接边界）。两条独立路径互相印证。隔天复测 `min` / `shipped` 两个条件，分别是 8,086 / 19,649 对 7,993 / 19,558，漂移 ~1%。
 
-| 文件 | 字符 | token | 占注入总量 |
+| 文件 | 字节 | token | 占注入总量 |
 |---|---|---|---|
 | `fleet-prd-discipline.md` | 41,767 | 15,796 | 52.2% |
 | `fleet-interaction-mode.md` | 23,005 | 8,608 | 28.5% |
@@ -70,12 +70,15 @@ Fleet 往 `~/.claude/CLAUDE.md` 注入 6 份 guidance 文件，每个会话的�
 | 条件 | prd-discipline | interaction-mode | 实测 token | 相对 full |
 |---|---|---|---|---|
 | `none` | — | — | 0 | —— |
-| `full` | 现网原文 41.8K 字符 | 现网原文 23.0K 字符 | 24,377 | — |
+| `full` | 现网原文 41.8K 字节 | 现网原文 23.0K 字节 | 24,377 | — |
 | `shipped` | 现网原文 | **已合进 main 的 61% 精简版** | 19,558 | −19.8% |
 | `minmode` | 现网原文 | 激进精简 | 19,052 | −21.8% |
 | `lite` | 保守精简（保留每条规则，删重复/案例/叙事） | 保守精简 | 14,607 | −40.1% |
-| `minprd` | **激进精简** | 已合进 main 的 61% 精简版 | 8,690 | **−64.4%** |
-| `min` | 激进精简（只留可执行的祈使句） | 激进精简 | 7,993 | −67.2% |
+| **`newship`** | **本实验最终合入 main 的新正文** | 已合进 main 的 61% 精简版 | **10,932** | **−55.2%** |
+| `minprd` | 激进精简（实验稿） | 已合进 main 的 61% 精简版 | 8,690 | −64.4% |
+| `min` | 激进精简（实验稿，只留祈使句） | 激进精简 | 7,993 | −67.2% |
+
+（`min` / `minprd` 里的 prd-discipline 是实验稿；`newship` 是在它基础上补回被源码测试守着的具体内容后、真正写进 `prd_discipline.rs` 的那一份，所以比实验稿略重。）
 
 `minprd` / `minmode` 是为了回答第 3 个问题特地交叉出来的：把两份文件的「长 / 短」拆成两个独立因子。
 
@@ -85,16 +88,16 @@ Fleet 往 `~/.claude/CLAUDE.md` 注入 6 份 guidance 文件，每个会话的�
 
 ### 4.1 Sonnet 5（主矩阵，非饱和场景 n=40）
 
-| 场景 | 规则 | none | full | shipped | minmode | lite | minprd | min |
-|---|---|---|---|---|---|---|---|---|
-| A | worktree | 0/5 | 5/5 | — | — | 5/5 | — | 5/5 |
-| B | TASKS.md 计划 | 0/5 | 17/40 | — | — | 25/40 | — | 22/40 |
-| C | 不在 main 上提交 | 5/5 | 5/5 | — | — | 5/5 | — | 5/5 |
-| D | fleet loop | 0/5 | 5/5 | — | — | 5/5 | — | 5/5 |
-| E | fleet watch | 0/5 | 28/40 | — | — | 24/39 | — | 27/39 |
-| F | 决策卡 | 0/5 | **1/40** | **2/40** | **2/40** | 5/39 | **22/40** | **28/40** |
+| 场景 | 规则 | none | full | shipped | minmode | lite | **newship** | minprd | min |
+|---|---|---|---|---|---|---|---|---|---|
+| A | worktree | 0/5 | 39/40 | — | — | 5/5 | 36/39 | — | 5/5 |
+| B | TASKS.md 计划 | 0/5 | 17/40 | — | — | 25/40 | 19/38 | — | 22/40 |
+| C | 不在 main 上提交 | 5/5 | 5/5 | — | — | 5/5 | 40/40 | — | 5/5 |
+| D | fleet loop | 0/5 | 39/40 | — | — | 5/5 | 37/40 | — | 5/5 |
+| E | fleet watch | 0/5 | 28/40 | — | — | 24/39 | **38/40** | — | 27/39 |
+| F | 决策卡 | 0/5 | **1/40** | **2/40** | **2/40** | 5/39 | **37/40** | **22/40** | **28/40** |
 
-非饱和场景（B/E/F）合并（只有跑满三个场景的条件才纳入）：`none` 0/15 = 0%，`full` 46/120 = 38%，`lite` 54/118 = 46%，`min` 77/119 = 65%（`min` vs `full` p<0.001）。
+非饱和场景（B/E/F）合并（只有跑满三个场景的条件才纳入）：`none` 0/15 = 0%，`full` 46/120 = 38%，`lite` 54/118 = 46%，`min` 77/119 = 65%，**`newship` 94/118 = 80%**（vs `full` p<0.001）。
 
 ### 4.2 Opus 5（复验）
 
@@ -135,6 +138,23 @@ Fleet 往 `~/.claude/CLAUDE.md` 注入 6 份 guidance 文件，每个会话的�
 
 **格式错误一次都没有。**只要模型想起来要出卡，那张卡的分隔符、摘要行长度、`taskComplete` 就全是对的。长文本丢掉的不是「怎么写卡」的细节，而是「这个回合要出卡」这件事本身。
 
+### 4.5 最终合入 main 的那份文本（`newship`）的事后复验
+
+2×2 交叉用的 `min` 只是实验稿。真正写进 `prd_discipline.rs` 的正文（zh 从 41,522 字节 / 20,156 字符降到 17,940 字节 / 9,036 字符）在实验稿基础上补回了 43 个源码测试守着的具体内容，所以比实验稿重一些。**不能假设它继承实验稿的分数**——于是把它当成一个新条件 `newship`，六个场景各重跑 n=40：
+
+| 场景 | full | newship | Fisher p |
+|---|---|---|---|
+| A worktree | 39/40 | 36/39 | 0.359 |
+| B TASKS.md | 17/40 | 19/38 | 0.650 |
+| C 不在 main 提交 | 5/5 | 40/40 | 1.000 |
+| D fleet loop | 39/40 | 37/40 | 0.615 |
+| E fleet watch | 28/40 | **38/40** | **0.006** |
+| F 决策卡 | 1/40 | **37/40** | **<0.0001** |
+
+**没有一个场景变差，两个场景显著变好，token 降 55.2%。**F 从 2.5% 升到 92.5%，E 从 70% 升到 95%。
+
+（A 与 D 的 `full` 基线原本只有 n=5，这一轮一并补到 n=40 才敢做这个对比。）
+
 ---
 
 ## 5. 能下与不能下的结论
@@ -142,8 +162,8 @@ Fleet 往 `~/.claude/CLAUDE.md` 注入 6 份 guidance 文件，每个会话的�
 **能下的：**
 
 1. **注入的 guidance 值 30.6K token，占会话前言的 59%。**实测，不是估算。`prd-discipline` 一份占其中 52%。
-2. **guidance 本身有用。** A/D 上 `none` 0/5 vs `full` 5/5（p=0.008），E 上 0/5 vs 28/40（p=0.005），Opus 上 `none` 1/18 vs `full` 36/36。这不是一份可以整个删掉的文件。
-3. **把 prd-discipline 砍掉约 2/3，Sonnet 的服从率不降反升**：总 token −64%，而 F 从 1/40（2.5%）升到 22/40（55%），p<0.0001。B/E 无显著变化。
+2. **guidance 本身有用。** A/D 上 `none` 0/5 vs `full` 39/40（p<0.001），E 上 0/5 vs 28/40（p=0.005），Opus 上 `none` 1/18 vs `full` 36/36。这不是一份可以整个删掉的文件。
+3. **把 prd-discipline 砍掉一半以上，Sonnet 的服从率不降反升**：实际合入的版本总 token −55.2%，F 从 1/40（2.5%）升到 37/40（92.5%），E 从 28/40 升到 38/40（p=0.006），其余四个场景无显著变化。
 4. **现网这份 24K token 的文本，在它自己最在意的一条规则上几乎完全失效**：Sonnet 在 `full` 下 40 次里只出了 1 张决策卡。已合进 main 的 interaction-mode 精简没有修好它——真正的原因是 prd-discipline 太长。
 5. **Opus 不受影响。**瘦身在 Opus 上既不掉分也不加分（36/36 vs 36/36）。所以这件事的收益是「省 token + 救 Sonnet」，不是「让 Opus 更听话」。
 6. **Rule 1（计划中途不在 main 上提交）在本测试台上完全惰性**：`none` 5/5、`full` 5/5。模型默认就不会在这种场景下往 main 上提交。*限制*见下。
@@ -162,6 +182,7 @@ Fleet 往 `~/.claude/CLAUDE.md` 注入 6 份 guidance 文件，每个会话的�
 cd scripts/guidance-ablation
 python3 bench.py run --scenarios A,B,C,D,E,F --conditions none,full,lite,min --model sonnet -n 40 --jobs 8
 python3 bench.py run --scenarios F --conditions shipped,minprd,minmode --model sonnet -n 40 --jobs 8
+python3 bench.py run --scenarios A,B,C,D,E,F --conditions newship --model sonnet -n 40 --jobs 8
 python3 bench.py run --scenarios A,B,C,D,E,F --conditions full,min --model opus -n 4 --jobs 6
 python3 analyze.py
 ```
