@@ -11,7 +11,6 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -95,28 +94,6 @@ pub fn write_request(req: &ElicitationRequest) -> Result<(), String> {
     let path = request_path(&req.id).unwrap();
     let json = serde_json::to_string_pretty(req).map_err(|e| format!("serialize: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write elicitation request: {e}"))
-}
-
-/// Poll for an elicitation response.  Called by `fleet elicitation` CLI.
-/// Returns `None` on timeout.
-pub fn poll_response(id: &str, timeout: Duration) -> Option<ElicitationResponse> {
-    let path = response_path(id)?;
-    let start = std::time::Instant::now();
-    let poll_interval = Duration::from_millis(200);
-
-    loop {
-        if start.elapsed() > timeout {
-            return None;
-        }
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(resp) = serde_json::from_str::<ElicitationResponse>(&content) {
-                    return Some(resp);
-                }
-            }
-        }
-        std::thread::sleep(poll_interval);
-    }
 }
 
 /// Non-blocking read of an elicitation response, if one exists yet.

@@ -20,7 +20,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
 
 /// Written by the `fleet mcp` server → read by Fleet desktop / `fleet serve`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,21 +110,6 @@ pub fn try_read_response(id: &str) -> Option<PermissionPromptResponse> {
     }
     let content = fs::read_to_string(&path).ok()?;
     serde_json::from_str::<PermissionPromptResponse>(&content).ok()
-}
-
-/// Blocking poll for a response. Returns `None` on timeout.
-pub fn poll_response(id: &str, timeout: Duration) -> Option<PermissionPromptResponse> {
-    let start = std::time::Instant::now();
-    let interval = Duration::from_millis(200);
-    loop {
-        if let Some(r) = try_read_response(id) {
-            return Some(r);
-        }
-        if start.elapsed() > timeout {
-            return None;
-        }
-        std::thread::sleep(interval);
-    }
 }
 
 /// Write a response file. Called by the desktop / fleet serve after the

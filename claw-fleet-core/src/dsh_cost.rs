@@ -522,10 +522,6 @@ pub struct PricedCall {
 }
 
 impl PricedCall {
-    /// Was this call priced at all?
-    pub fn is_priced(&self) -> bool {
-        self.usd.is_some()
-    }
 }
 
 /// Fold a ledger back into the per-session figure the token panel shows.

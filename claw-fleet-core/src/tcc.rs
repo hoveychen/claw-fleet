@@ -53,16 +53,6 @@ fn check_tcc_path(_path: &Path) -> bool {
     false
 }
 
-/// Like `Path::exists()`, but returns `false` for TCC-protected paths instead of
-/// calling `stat()`.  This prevents the greedy decode algorithm from locking onto
-/// a TCC-protected directory (e.g. `~/Music`, `~/Downloads`).
-pub fn safe_exists(path: &Path) -> bool {
-    if check_tcc_path(path) {
-        return false;
-    }
-    path.exists()
-}
-
 /// Check whether the given path is inside a TCC-protected directory.
 /// Use this to skip filesystem operations on decoded workspace paths
 /// that might resolve into protected folders.

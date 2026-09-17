@@ -418,14 +418,6 @@ pub(crate) fn enrich_sessions_in(dir: &Path, sessions: &mut [crate::session::Ses
     }
 }
 
-/// Every active watch owned by `session_id`, soonest-deadline first.
-pub fn for_session(session_id: &str) -> Vec<WatchRecord> {
-    let Some(dir) = watches_dir() else {
-        return Vec::new();
-    };
-    for_session_in(&dir, session_id)
-}
-
 pub(crate) fn for_session_in(dir: &Path, session_id: &str) -> Vec<WatchRecord> {
     list_in(dir)
         .into_iter()

@@ -463,12 +463,6 @@ pub fn update_tray(app: &tauri::AppHandle, sessions: &[SessionInfo]) {
     refresh_tray(app);
 }
 
-pub fn update_tray_usage(app: &tauri::AppHandle, summaries: Vec<ui_types::SourceUsageSummary>) {
-    let state = app.state::<AppState>();
-    *state.cached_usage.lock().unwrap() = summaries;
-    refresh_tray(app);
-}
-
 /// How long after a tray click we assume the menu is still open and defer
 /// rebuilds so macOS doesn't yank it away from the user.
 const TRAY_MENU_GRACE_SECS: u64 = 15;

@@ -97,13 +97,6 @@ impl LlmConfig {
             .unwrap_or("claude")
     }
 
-    pub fn standard_model_for(&self, provider: &dyn LlmProvider) -> String {
-        if self.provider == provider.name() && !self.standard_model.is_empty() {
-            self.standard_model.clone()
-        } else {
-            provider.default_standard_model().to_string()
-        }
-    }
 }
 
 fn config_path() -> Option<std::path::PathBuf> {

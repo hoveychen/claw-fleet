@@ -1000,47 +1000,6 @@ fn apply_idle_hooks_inner() -> Result<(), String> {
     write_settings(&settings)
 }
 
-/// Remove both idle hooks from settings.json.
-pub fn remove_idle_hooks() -> Result<(), String> {
-    crate::control_plane_prefs::note_intent(
-        remove_idle_hooks_inner(),
-        crate::control_plane_prefs::Feature::IdleHooks,
-        true,
-    )
-}
-
-fn remove_idle_hooks_inner() -> Result<(), String> {
-    let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let Some(obj) = settings.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return Ok(());
-    };
-
-    if let Some(arr) = hooks_obj.get_mut("Stop").and_then(|v| v.as_array_mut()) {
-        arr.retain(|group| !is_idle_stop_group(group));
-        if arr.is_empty() {
-            hooks_obj.remove("Stop");
-        }
-    }
-    if let Some(arr) = hooks_obj
-        .get_mut("UserPromptSubmit")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|group| !is_idle_resume_group(group));
-        if arr.is_empty() {
-            hooks_obj.remove("UserPromptSubmit");
-        }
-    }
-
-    if hooks_obj.is_empty() {
-        obj.remove("hooks");
-    }
-
-    write_settings(&settings)
-}
-
 fn has_idle_hooks(hooks_obj: &Map<String, Value>) -> bool {
     let stop = hooks_obj
         .get("Stop")

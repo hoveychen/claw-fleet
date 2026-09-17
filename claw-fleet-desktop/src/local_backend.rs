@@ -4249,7 +4249,7 @@ mod tests {
 
         let path_str = path.to_string_lossy().into_owned();
         let mut seen: Vec<Value> = Vec::new();
-        let mut pump = |offset: &mut u64, seen: &mut Vec<Value>| {
+        let pump = |offset: &mut u64, seen: &mut Vec<Value>| {
             if let Ok((lines, new_off)) = source.tail_incremental(&path_str, *offset) {
                 seen.extend(lines);
                 *offset = new_off; // exactly what emit_tail_lines saves to the guard

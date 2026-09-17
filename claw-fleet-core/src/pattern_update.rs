@@ -176,12 +176,6 @@ pub fn start_background_updater() {
         .ok();
 }
 
-/// Signal the background thread to stop.
-#[allow(dead_code)]
-pub fn stop_background_updater() {
-    STOP_FLAG.store(true, Ordering::SeqCst);
-}
-
 // ── Tauri command ───────────────────────────────────────────────────────────
 
 /// Manually trigger an update check (e.g. from a UI button).

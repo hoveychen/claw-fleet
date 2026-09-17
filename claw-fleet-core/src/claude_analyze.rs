@@ -133,54 +133,6 @@ fn build_prompt(last_text: &str, locale: &str, user_title: &str) -> String {
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-/// Analyse the last assistant text and return structured outcome tags.
-///
-/// This function blocks for up to [`ANALYSIS_TIMEOUT`] and should be called
-/// from a background thread.
-pub fn analyze_session_outcome(
-    provider: &dyn LlmProvider,
-    model: &str,
-    last_text: &str,
-    locale: &str,
-    session_id: &str,
-    user_title: &str,
-) -> Option<AnalysisResult> {
-    let sid = &session_id[..session_id.len().min(12)]; // short id for logs
-
-    if !provider.is_available() {
-        log_debug(&format!(
-            "[claude_analyze] [{sid}] provider '{}' not available",
-            provider.name()
-        ));
-        return None;
-    }
-
-    let truncated: String = last_text.chars().take(MAX_INPUT_CHARS).collect();
-    let prompt = build_prompt(&truncated, locale, user_title);
-
-    let raw = match crate::llm_usage::complete_accounted(
-        provider,
-        &prompt,
-        model,
-        ANALYSIS_TIMEOUT,
-        crate::llm_usage::SCENARIO_SESSION_ANALYZE,
-    ) {
-        Some(r) => r,
-        None => {
-            log_debug(&format!("[claude_analyze] [{sid}] provider returned no response"));
-            return None;
-        }
-    };
-
-    log_debug(&format!(
-        "[claude_analyze] [{sid}] raw response (len={}): {:?}",
-        raw.len(),
-        truncate_str(&raw, 200)
-    ));
-
-    Some(parse_response(&raw))
-}
-
 pub fn analyze_session_outcome_routed(
     config: &crate::llm_provider::LlmConfig,
     last_text: &str,

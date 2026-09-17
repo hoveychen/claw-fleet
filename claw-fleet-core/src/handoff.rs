@@ -403,13 +403,6 @@ pub fn cancel_pending(session_id: &str) {
     }
 }
 
-/// Atomically take a session's pending handoff for consumption. Expired
-/// records are discarded and `None` is returned.
-pub fn take_pending(session_id: &str) -> Option<PendingHandoff> {
-    let dir = pending_dir()?;
-    take_pending_in(&dir, session_id, now_ms())
-}
-
 fn take_pending_in(dir: &Path, session_id: &str, now: u64) -> Option<PendingHandoff> {
     let path = dir.join(format!("{session_id}.json"));
     let rec = read_pending_in(dir, session_id)?;
@@ -426,13 +419,6 @@ fn take_pending_in(dir: &Path, session_id: &str, now: u64) -> Option<PendingHand
 }
 
 // ── chain archive ─────────────────────────────────────────────────────────────
-
-/// Append the consumed link to its chain file (creating the chain on first
-/// link) once the successor session has been spawned.
-pub fn record_link(pending: &PendingHandoff, to_session_id: &str) -> Result<(), String> {
-    let dir = chain_dir().ok_or("cannot determine home dir")?;
-    record_link_in(&dir, pending, to_session_id, now_ms())
-}
 
 fn record_link_in(
     dir: &Path,

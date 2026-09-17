@@ -226,12 +226,6 @@ pub fn outcome_index(dir: &std::path::Path) -> HashMap<String, TaskOutcomeRecord
     idx
 }
 
-/// Every recorded outcome, keyed by session id. Used by the retrospective to
-/// find the day's terminated tasks without re-walking every transcript.
-pub fn all_outcomes() -> HashMap<String, TaskOutcomeRecord> {
-    outcome_dir().map(|d| outcome_index(&d)).unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

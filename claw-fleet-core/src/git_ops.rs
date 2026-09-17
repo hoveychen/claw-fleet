@@ -942,7 +942,6 @@ mod tests {
         assert!(dest.join(".git").exists());
     }
 
-    #[test]
     /// The streaming clone path hands `PreparedClone::command` to a shell, so a
     /// url carrying shell metacharacters must come back quoted — otherwise
     /// `https://x/y.git; rm -rf ~` runs as two commands. Asserting on the
