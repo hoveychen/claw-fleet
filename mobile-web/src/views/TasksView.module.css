@@ -321,6 +321,13 @@
   opacity: 0.45;
 }
 
+/* Parked on a `fleet watch`: the process is gone and the transcript has stopped,
+   but a Fleet timer resumes this session the moment its condition fires. Neither
+   "running" nor "ended", so it gets a third colour. */
+.statusDot[data-tone="watching"] {
+  background: var(--color-info);
+}
+
 .statusDot[data-tone="idle"] {
   background: var(--color-text-dim);
 }

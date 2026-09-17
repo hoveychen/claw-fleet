@@ -21,8 +21,12 @@ import sessionStyles from "./SessionCard.module.css";
 // the more reason to keep it in the default view. Letting it drop into the
 // "show all" tail would recreate the exact failure this state exists to fix:
 // a remote session that died and never told anyone.
+// "watching" belongs here for the same reason as the three above: a session
+// parked on a `fleet watch` is unfinished work that a Fleet timer will resume
+// on its own, so dropping it into the "show all" tail would hide exactly the
+// sessions that are still going to do something.
 const ACTIVE_STATUSES: SessionStatus[] = [
-  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating", "rateLimited", "serverErrored", "remoteDisconnected",
+  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating", "rateLimited", "serverErrored", "remoteDisconnected", "watching",
 ];
 
 function isActive(s: SessionInfo) {

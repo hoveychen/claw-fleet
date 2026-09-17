@@ -507,6 +507,17 @@ fn session_watch_index_in(dir: &Path) -> std::collections::HashMap<String, Vec<W
 /// Stamp active-watch summaries onto scanned sessions. Called at scan-aggregation
 /// time (not inside the mtime-cached per-session parse) because a watch's poll
 /// count and very existence change while the waiting session's jsonl doesn't.
+///
+/// Also overrides [`SessionStatus`] to `Watching` for the sessions that are
+/// parked on one. The transcript can't express this state: the turn ended, the
+/// `-p` process exited, nothing writes the jsonl again until the watch fires, so
+/// `determine_status` decays the session to `Idle` after 30s and it reads as
+/// finished work in every client (no run dot, an "idle" label, filtered out of
+/// `fleet agents`). The side channel is the only thing that knows a Fleet timer
+/// will `claude --resume` it — same shape as `remote_disconnect`, which likewise
+/// overrides a transcript-derived status from a record on disk.
+///
+/// [`SessionStatus`]: crate::session::SessionStatus
 pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
     let Some(dir) = watches_dir() else {
         return;
@@ -522,8 +533,26 @@ pub(crate) fn enrich_sessions_in(dir: &Path, sessions: &mut [crate::session::Ses
     for s in sessions.iter_mut() {
         if let Some(w) = idx.get(&s.id) {
             s.watches = w.clone();
+            if watch_status_applies(s) {
+                s.status = crate::session::SessionStatus::Watching;
+            }
         }
     }
+}
+
+/// Whether the `Watching` override may replace this session's status.
+///
+/// Deliberately narrow — the override only rescues the two statuses a parked
+/// session actually decays into (`Idle` past the 30s fallthrough, `WaitingInput`
+/// in the window right after the turn ended). Anything else is either a live
+/// turn, which outranks "waiting on a timer" because the session is *doing*
+/// something right now, or an error state (`RateLimited`, `ServerErrored`,
+/// `Stuck`) whose whole job is to be visible. A live process likewise wins: a
+/// registering session that is still mid-turn — or one the user resumed by hand
+/// while the watch sits armed — is not waiting on anything.
+fn watch_status_applies(s: &crate::session::SessionInfo) -> bool {
+    use crate::session::SessionStatus as St;
+    !s.proc_alive && matches!(s.status, St::Idle | St::WaitingInput)
 }
 
 pub(crate) fn for_session_in(dir: &Path, session_id: &str) -> Vec<WatchRecord> {
@@ -1736,6 +1765,68 @@ mod tests {
             sessions[2].watches.is_empty(),
             "a session with no watch is left empty"
         );
+    }
+
+    /// The status override: a parked session (`Idle`/`WaitingInput`, no process)
+    /// that owns a watch reads as `Watching` instead of as finished work.
+    #[test]
+    fn enrich_overrides_a_parked_session_to_watching() {
+        use crate::session::SessionStatus as St;
+        let d = dir();
+        make(d.path(), "w1", 1_000); // session_id = sess-1
+
+        let mk = |id: &str, status: St, proc_alive: bool| {
+            let mut s = crate::session::SessionInfo::default();
+            s.id = id.to_string();
+            s.status = status;
+            s.proc_alive = proc_alive;
+            s
+        };
+        let mut sessions = vec![
+            mk("sess-1", St::Idle, false),
+            mk("sess-9", St::Idle, false), // no watch of its own
+        ];
+        enrich_sessions_in(d.path(), &mut sessions);
+
+        assert_eq!(sessions[0].status, St::Watching, "the waiting one is rescued");
+        assert_eq!(sessions[1].status, St::Idle, "a watchless session is untouched");
+
+        // WaitingInput — the window right after the turn ended — is rescued too.
+        let mut just_ended = vec![mk("sess-1", St::WaitingInput, false)];
+        enrich_sessions_in(d.path(), &mut just_ended);
+        assert_eq!(just_ended[0].status, St::Watching);
+    }
+
+    /// A live turn outranks the override: the session is doing something right
+    /// now, and so does any state whose whole job is to be visible.
+    #[test]
+    fn enrich_leaves_live_and_error_statuses_alone() {
+        use crate::session::SessionStatus as St;
+        let d = dir();
+        make(d.path(), "w1", 1_000); // session_id = sess-1
+
+        let mk = |status: St, proc_alive: bool| {
+            let mut s = crate::session::SessionInfo::default();
+            s.id = "sess-1".to_string();
+            s.status = status;
+            s.proc_alive = proc_alive;
+            s
+        };
+        for (status, proc_alive) in [
+            (St::Executing, true),
+            (St::Thinking, true),
+            (St::Stuck, true),
+            (St::RateLimited, false),
+            (St::ServerErrored, false),
+            (St::RemoteDisconnected, false),
+            // resumed by hand while the watch sits armed: not waiting on anything
+            (St::Idle, true),
+        ] {
+            let mut sessions = vec![mk(status.clone(), proc_alive)];
+            enrich_sessions_in(d.path(), &mut sessions);
+            assert_eq!(sessions[0].status, status, "{status:?} must survive the override");
+            assert_eq!(sessions[0].watches.len(), 1, "the chip is stamped either way");
+        }
     }
 
     /// Only a watch whose heartbeat is older than the grace window is re-armed;

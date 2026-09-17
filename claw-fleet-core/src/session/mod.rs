@@ -59,6 +59,14 @@ pub enum SessionStatus {
                   // a non-interactive tool_use has been missing its tool_result
                   // for minutes (STUCK_TOOL_BATCH_FLOOR_SECS). The turn is
                   // deadlocked — SIGINT (interrupt_pid) unblocks it, resumable.
+    Watching,     // The turn ended after registering a `fleet watch`: no process,
+                  // no transcript writes, but a Fleet timer is polling the
+                  // condition and will `claude --resume` this very session when
+                  // it fires. Transcript-derived status would decay to Idle and
+                  // read as "ended" — so `watch::enrich_sessions` overrides it,
+                  // the same side-channel-wins shape as RemoteDisconnected.
+                  // Details (note, poll count, deadline) live on
+                  // SessionInfo.watches.
 }
 
 /// Populated when `SessionStatus::RateLimited`. Carries the information needed

@@ -167,6 +167,13 @@ describe("statusTone quiet-alive", () => {
     expect(statusTone(row({ id: "i", status: "waitingInput", procAlive: true }))).toBe("waiting");
   });
 
+  it("gives a watch-parked row its own tone instead of no dot", () => {
+    // Its process is gone, so the old logic fell all the way through to
+    // `return null` — no dot, indistinguishable from an ended row, while a Fleet
+    // timer was still going to resume it once the condition fires.
+    expect(statusTone(row({ id: "wt", status: "watching", procAlive: false }))).toBe("watching");
+  });
+
   it("does not flick back to working on a single sparse write", () => {
     // Same flicker the desktop row had: a session parked on one long tool call
     // writes a line every few minutes, each write pushes the status back to a

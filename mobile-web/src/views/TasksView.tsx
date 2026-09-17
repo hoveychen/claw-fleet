@@ -119,6 +119,10 @@ export function statusTone(s: SessionInfo & { deviceId?: string }): string | nul
     lastActivityMs: s.lastActivityMs ?? 0,
     now: Date.now(),
   });
+  // Checked first: a watch-parked session has no process and writes nothing, so
+  // it would otherwise fall through to the final `return null` — no dot, reading
+  // as ended — when a Fleet timer is in fact going to resume it.
+  if (s.status === "watching") return "watching";
   if (s.status === "waitingInput") return "waiting";
   if (s.status === "rateLimited" || s.status === "serverErrored" || s.status === "remoteDisconnected")
     return "error";
@@ -136,7 +140,7 @@ export function statusTone(s: SessionInfo & { deviceId?: string }): string | nul
  *  active member (which need not be the tip), so its dot must reflect the whole
  *  chain — a running hop outranks a waiting/active/errored one, mirroring the
  *  desktop launchpad's `chainBarColor`. */
-const TONE_PRIORITY = ["working", "waiting", "active", "error", "quiet"];
+const TONE_PRIORITY = ["working", "waiting", "active", "error", "quiet", "watching"];
 function chainTone(members: SessionInfo[]): string | null {
   let best: string | null = null;
   let bestRank = TONE_PRIORITY.length;

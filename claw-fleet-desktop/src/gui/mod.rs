@@ -442,9 +442,14 @@ fn status_label(s: &session::SessionStatus) -> &'static str {
         ServerErrored => "server error",
         RemoteDisconnected => "remote disconnected",
         Stuck => "stuck",
+        Watching => "watching",
     }
 }
 
+/// Tray rows are agents with a turn in flight or parked for the user. `Watching`
+/// is deliberately absent: its process is gone and it comes back on its own when
+/// the condition fires, so putting it here would pin a permanent row on a menu
+/// whose whole point is "what is running right now".
 fn is_session_active(s: &SessionInfo) -> bool {
     use session::SessionStatus;
     matches!(
