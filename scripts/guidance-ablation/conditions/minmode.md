@@ -1,0 +1,399 @@
+# Fleet PRD 纪律 (managed by Claw Fleet — do not edit)
+
+本模式锁死三个会拖垮长程多步计划的失败模式：
+
+1. **计划中途的提交唠叨。**代理做完一个 P-task，冒出「现在要提交吗？」的条件反射，老板得不停地说「不用，继续」。
+2. **压缩后的任务失忆。**上下文压缩后，代理记得自己刚做完 P2，却丢了「P3..Pn 仍待办」这个宏观状态。
+3. **进度汇报式打卡。**代理做完一个 P-task 就停下来问「要我继续下一个吗？」或「进展不错，P4 前要不要先审一下？」。TASKS.md 勾选框和 worktree 提交已让进度一目了然。
+
+## Rule 1 —— 多步计划期间的提交纪律
+
+这里的**多步计划**指：任何你拆成 2 个或更多顺序子任务（P1、P2、...、Pn——或编号 todo，或任何等价物）的任务。一旦进入这样一个计划，以下规则一直适用到计划彻底完成：
+
+**本规则里「提交」的范围。**整个 Rule 1 里，「提交」指**主/默认分支**上的提交。worktree 特性分支（`prd/<plan-id>`）上的提交由 Rule 3 管辖、在每个 P-task 边界都明确允许——它们不算 Rule 1 违规，也无需作为与本规则的冲突点出。
+
+- **不要主动提议在 main 上 `git commit`。** P1 之后不要，P2 之后不要，任何你感觉到的「自然检查点」都不要。工作的单位是计划，不是单个 P-task。
+- **也不要真的在 main 上跑 `git commit`**，除下面两种情形外。
+- **只有以下情形你才可以在 main 上提交：**
+1. 老板在本回合明确要求提交，或
+2. 你刚做完计划里的**最后**一个 P-task（即 TASKS.md 里所有项都已勾选）**且**你已向老板呈报计划完成。Rule 3（worktree 工作流）生效时，这个 main 上唯一允许的提交采取从 worktree 分支 `git merge --no-ff` 的形式——确切流程见 Rule 3。
+- **`git push` 永远受闸控**——无论计划处于什么状态，没有老板在本回合的明确批准绝不 push。
+
+### 「完成」意味着什么
+
+计划完成 = 所有 P-task 在 TASKS.md 已勾选（见 Rule 2）+ 构建/测试已跑 + 已向老板呈报改动摘要。三者未全为真前，计划未完成，不要提议提交。
+
+### 边缘情形
+
+- **单步任务**（一个 bug 修复、一次重命名、一处配置微调）：不是多步计划，适用常规提交礼仪。
+- **老板在计划中途问「能把目前做完的提交一下吗？」**：这是上面的情形 1——照做。
+- **你撞上一个需要老板输入的阻塞点**：暂停并通过 AskUserQuestion 提问（该工具不可用时用纯文本）。不要拿阻塞当借口「怕进度丢了」而提交。阻塞解除后再继续。
+- **你即将做破坏性操作**（rebase、force-push、删分支）：无论计划状态如何，停下来问。本规则不覆盖既有的破坏性操作确认要求。
+
+## Rule 2 —— TASKS.md 作为持久的宏观计划
+
+上下文压缩会把对话历史压平。近期动作（「提交成功」）高保真地留存；宏观状态（「P3..P10 仍待办」）被摘要掉。为熬过压缩，宏观计划落在磁盘上。
+
+**约定：**
+
+- 当你把任务拆成 2 个或更多子任务时，在开始 P1 **之前**把拆解写进`<workspace_root>/TASKS.md`。
+- 每完成一个 P-task，把它在 TASKS.md 里的勾选框更新为 `[x]`。
+- 每个回合开始时（压缩之后，或你不确定宏观状态时），活跃计划区域会由 Fleet 的UserPromptSubmit hook 自动作为 system-reminder 重新注入——但你也可以在需要时显式 `Read` 该文件。
+- 当你的计划彻底完成，你可以移除自己计划的哨兵块（或留着作历史——提交时由老板定夺）。不要动其他计划的块。
+
+### 一个 TASKS.md 里的多个计划
+
+单个 workspace 的 `TASKS.md` 可以**并行承载多个计划**——老板可以让你做计划A，同时另一个代理（或另一段对话）正在推进计划 B。每个计划活在自己的哨兵对里，由唯一的 `id` 标识：
+
+```markdown
+# TASKS
+
+<!-- fleet:prd:begin id="auth-refactor" v="2" -->
+
+**Plan:** Migrate session middleware to the new auth crate
+
+- [x] **P1** — Audit existing call sites
+- [ ] **P2** — Swap middleware impl
+- [ ] **P3** — Update integration tests
+
+<!-- fleet:prd:end id="auth-refactor" -->
+
+<!-- fleet:prd:begin id="prd-multiplan" v="2" -->
+
+**Plan:** Teach TASKS.md to host parallel plans
+
+- [ ] **P1** — New sentinel format with `id="..."`
+- [ ] **P2** — Hook scans all blocks and re-injects each
+
+<!-- fleet:prd:end id="prd-multiplan" -->
+```
+
+`begin` 哨兵上的 `v="2"` 属性标记 **v2 schema**。`end` 哨兵只需匹配的 `id`。旧版 v1 块（无 `v="2"`）仍可用；跑 `fleet plan migrate` 可就地升级旧的TASKS.md。
+
+**处理多计划 TASKS.md 的规则：**
+
+1. **为你的计划挑一个唯一的 `id`。**用 kebab-case、≤ 32 字符、描述该工作（如`auth-refactor`、`import-cleanup`）。新建计划前，先 `Read` TASKS.md 确认没有现存块用了同一 id。
+2. **只编辑你自己的块。**勾选框或修改计划时，只改*你自己*的 `begin id="X"`与 `end id="X"` 之间的行。把其他每个块都当作只读——它属于另一个可能正在推进的计划。
+3. **两个哨兵上的 id 要匹配。** `begin id="X"` 必须与 `end id="X"` 配对。id不匹配会被 hook 忽略。
+4. **旧版无标记块仍被识别。**一对裸的 `<!-- fleet:prd:begin -->` /`<!-- fleet:prd:end -->`（无 `id=`）为向后兼容被当作单个匿名计划。不要再以这种形式新建——始终用显式 id。
+5. **不要合并或重排别人的计划。**若两个块看着冗余，向老板点出，而不是自己把它们合掉；另一个块可能属于你看不到的会话。
+
+### 用 `fleet plan` 更新计划，而非手改
+
+相较直接编辑 TASKS.md markdown，优先用 `fleet plan` 子命令。它们做出同样的文件改动，**并且**记录哪个会话在做哪个计划/P、带时间戳——这样即使多个会话共用一个 TASKS.md，桌面端也能显示*你*当前的计划和 P（Fleet 知道你的`FLEET_SESSION_ID`；你自己读不到墙上时钟）。命令：
+
+> **若你的工具列表里有 `fleet__plan` / `fleet__handoff` / `fleet__watch` / `fleet__loop` / `fleet__schedule` / `fleet__wiki` 这些 MCP 工具（Fleet 启动的会话都会有），一律优先用它们而不是下面的 `fleet …` 命令行——调 `fleet__plan` 传 `action` 参数（如 `action="check"`）即可，语义与 CLI 子命令一一对应。远端（rca）workspace 会话里用 Bash 跑 `fleet …` 会被按 cwd 路由到没有 fleet 的远端executor 而失败（exit 127），而 MCP 工具是 JSON-RPC 打到本地常驻的 `fleet mcp` server、总能触达本地 Fleet 状态。仅当这些工具不在列表里（用户手起、非 Fleet 的会话）时，才退回 `fleet …` CLI。**
+
+- `fleet plan create <id> --title "..." [--parent <id> | --root --root-reason "..."] [--kind explore|exec]` —— 新增一个 v2 计划块**并**把本会话记录为它的执行者。创建计划就是开始它，故无需另行声明。
+
+**默认行为：你在执行某个计划时新建的计划，自动成为它的子计划。**一个 flag 都不用传。这条默认值就是整个机制——**从一个计划里派生出来的计划，默认就是它的儿子**。
+
+两条相关的 flag 都只是**覆盖**这个默认值：
+- `--parent <id>`：挂到别处（不是你当前执行的那个计划）。通常用不上。
+- `--root --root-reason "<为什么这活不属于当前计划>"`：另起一棵顶层树。**你手上有计划时，光传 `--root` 会被拒**，必须给出理由，一句话即可。
+- 手上**没有**计划时（老板刚开的新话题），root 本来就是默认，什么都不用传。
+
+为什么默认值要这么设：前两版设计都没能长出树。①`--parent` 只是「可选」时，某个仓库前 355 个计划里 350 个是平的；②改成「必须显式二选一」之后，又有 109 个是平的——因为 `--root` 依然是零成本的合法答案，你不必想清楚新计划跟手上的活是什么关系。真实代价是一条接力链：老板一句「审一下研究流程的缺陷」拆出六条清单，每条各自建成顶层计划（8 个计划，0 条 parent），于是每一棒做完自己那一个、找不到祖先、就结束了回合，而清单还剩两条没做——宏观目标只活在一份 wiki 和各棒手抄的交接便条里。所以现在不是把选择变成**强制**，而是把它变成**默认就对**。
+
+把兄弟串成一条链也没关系：回溯会跳过已完成的祖先，总是落在最近的未完成工作上。离开这棵树依然可以，只是要说出口。
+- `fleet plan check <id> <P>` —— 勾选一个任务为完成（`[ ]`→`[x]`）并把本会话的焦点刷新到 `<id>`。如 `fleet plan check auth-refactor P2`。
+- `fleet plan uncheck <id> <P>` —— 取消勾选。
+- `fleet plan resume <id> [P]` —— 接手一个你没创建的**现存**计划（不改文件；设定你的当前 P，默认第一个待办）。`create` 之后不需要它，交接之后也不需要——Fleet 会替你归属后继者。
+- `fleet plan add <id> <P> --text "..."` —— 追加一个待办任务。不记录焦点：编辑计划的形态并不说明谁执行它。
+- `fleet plan migrate` —— 把本 workspace 的 v1 TASKS.md 升级到 v2（幂等）。
+- `fleet plan list` / `fleet plan get <id>` —— 读取。
+
+手改 TASKS.md 仍有效——文件是勾选框的唯一真相来源——但它不记录归属，所以桌面端无法判断你的会话在哪个计划上，你的卡片上什么都不显示。
+
+### explore 计划与 exec 计划
+
+计划的 `--kind` 说明它的 P-task 是**干什么用的**。`exec`（缺省）意味着 P-task 会改代码。`explore` 意味着 P-task 产出的是理解，而这个计划的交付物是**它派生出的 exec 子计划**——不是它自己的代码改动。
+
+凡是以「先搞清楚……」开头、你还叫不出具体改动名字的工作，都用 `--kind explore`。调研完成后，把结论变成 `fleet plan create <id> --parent <explore-id>` 的一批子计划——每块自洽的实现各一个——让老板在动手之前就能逐条读到要做什么。explore 计划里不要改生产代码（一次性的探针脚本可以）。
+
+**为什么这条要用机制拆开而不是口头提醒：**把调研和实现塞进同一个计划，正是长程工作走歪的方式。「P3 —— 调研 X」挨着「P4 —— 实现 X」，P3 的发现悄悄重新定义了 P4 的含义，等有人察觉时，实现已经和没人拍板过的需求耦合在一起了。拆成两个计划会强迫这次交接显形：调研的产出是一份待建 exec 计划清单，而这份清单恰恰是值得在投入前被审阅的东西。这就是 Rule 6 背后的机制——explore 计划是**允许你还不知道**的地方，而子计划是每条需求被追溯回老板真正要求过的东西的地方。
+
+注入的上下文会给 explore 计划打上 `[explore]` 标记，并在它成为你的焦点时重述这条契约，这样一次上下文压缩没法把一次调研悄悄变成一场自由实现。
+
+### 子计划与回溯
+
+计划中途你有时得分出一条**旁支**——一块必须先完成、主计划才能继续的独立工作（一个前置重构、当前 P 依赖的一个 bug）。把它建成**子计划**，让这段岔路不至于把你来时的计划晾在那儿：
+
+```
+fleet plan create <side-id> --title "..." --parent <current-plan-id>
+```
+
+这会在旁支计划的哨兵上记录 `parent="<current-plan-id>"`。当你用`fleet plan check` 勾掉那个子计划的**最后**一个框时，Fleet 沿 `parent` 链向上走到最近的、仍有待办 P-task 的祖先，**把你的焦点重新指回它**，并打印一条指令告诉你下一个要恢复的 P。你不用自己跑 `fleet plan resume`——照指令继续就行；不要因为子计划完成了就结束回合。prd-context hook 里有个兜底：若你的焦点被留在一个已完成的子计划上（例如最后那个框是手改而非用 `fleet plan check` 勾的），它每个 prompt 都会重发同样的提醒。
+
+子计划可以嵌套（子计划可以有自己的子计划），且向上走会跳过已完成的祖先，所以回溯总是落在树上最近的未完成工作。没有 `--parent` 的计划是顶层：完成它不回溯到任何地方，计划就此结束。
+
+格式本身的经验法则：
+- 待办用 `- [ ]`、完成用 `- [x]`（`fleet plan check/uncheck` 会替你写这些）。不要发明新状态；简单的勾选框就是约定——「此刻谁在做什么」由 Fleet 跟踪，而非文件里的某个标记。
+- P-task 标题保持 ≤ 60 字符。长验收备注放进子 bullet。
+- 本规则配套的 TASKS.md 也用中文书写（task 标题、备注皆中文）。
+
+### 跨 worktree 的多源扫描
+
+因为 Rule 3 在 `.worktrees/<task-id>/` checkout 里开发计划，prd-context hook每个 prompt 都会扫描它能为该 repo 找到的**每一个** TASKS.md——主 checkout 的`<repo>/TASKS.md` 加上每个存在的 `<repo>/.worktrees/*/TASKS.md`——并把它们全部的活跃计划合并进一次注入。无论会话的 cwd 是主 checkout 还是某个 worktree，这都一样运作，所以跑在 worktree 里的 worker 代理照样能看到活在主 checkout 里的计划（反之亦然）。
+
+**去重规则：**当同一个 `id="X"` 出现在不止一个 TASKS.md 文件里时，hook 保留mtime 最新的那个文件里的版本，丢弃其余。当块来自某个 worktree TASKS.md 时，渲染出的计划标题会带一个 `— source: <path>` 后缀，好让代理知道该编辑哪个文件。匿名（旧版无标记）块按文件各自独立保留——它们早于多计划格式。
+
+**因此：把给定的 `id` 只放在一个 TASKS.md 文件里。**把同一个带 id 的块从主checkout 复制进 worktree（或在两个 worktree 之间复制）会造出一个幽灵计划，它随你最后保存的是哪个文件而闪烁。如果某个计划出于任何原因需要活在 worktree 里，先把它从主 TASKS.md 删掉。
+
+### 让 TASKS.md 别进 git
+
+TASKS.md 是代理的临时草稿状态——它不该进版本控制。你在某个 workspace 里第一次创建 `TASKS.md`（即它在本回合前不存在）时，检查它是否已被 `.gitignore` 覆盖，若没有，**向老板提一句并主动提议往 `.gitignore` 加一行 `TASKS.md`**。不要悄悄改写 `.gitignore`——把建议点出、让老板批准。之后编辑已存在的 TASKS.md时，无需再提醒。
+
+## Rule 3 —— 基于 worktree 的特性工作流
+
+**任何触碰生产代码的改动都必须在一个隔离的 git worktree 里开发**，位于`<repo-root>/.worktrees/<task-id>`、基于新分支 `prd/<task-id>`——**无论这工作是多步计划（P1..Pn）还是单次机械改动**。Rule 3 是全局的；它不受 Rule 1 多步计划定义的限制。多步计划里，`<task-id>` 就是你为 TASKS.md 哨兵块挑的那个 id（Rule2）；单步改动里，当场挑一个短 kebab-case 标识（如 `fix-zombie-pid`、`rename-task-fields`）。
+
+**约定：**
+
+- **触碰任何生产代码之前**，基于当前 main 在新分支上创建 worktree：
+
+```
+git worktree add -b prd/<task-id> .worktrees/<task-id> main
+```
+
+所有代码工作都在这个 worktree 里跑；主 checkout 全程保持干净。最后一个 P-task（单步改动则是收尾动作）是合并回 main。
+- **worktree 内的中间提交明确允许，不违反 Rule 1。** Rule 1 的「不主动提交」针对的是 *main*；`prd/<task-id>` 上的提交是别的工作看不到的进度标记。只要有助于推理下一步（如某个后续改动回退了行为时用 `git diff HEAD~1`），就在 P-task 之间提交（单步改动也可拆成多个提交）。你仍无需*请求*老板许可才能在 worktree 内提交——那是私有分支上的自由移动。
+- **工作以一次原子的合并回 main 结束**（最后一个 P-task，单步改动则是收尾动作）。从主 checkout：
+
+```
+git merge --no-ff prd/<task-id>
+```
+
+`--no-ff` 是强制的。`--ff-only` 和 `--squash` 被禁止——我们让每个 worktree提交在 main 历史里都可见，旁边配一个概括改动的单一合并提交，好让工作在每提交粒度上保持可审计。这个 `git merge --no-ff` 就是 Rule 1 允许的那唯一一次 main上提交；不要在它之前或之后再跑任何 `git commit`。
+- **合并或移除 worktree 之前，抢救计划生成的 gitignored / 未跟踪产物。**`git merge --no-ff` 只带过*已提交*的内容。任何被 `.gitignore` 匹配的东西——以及任何你从未 `git add` 的文件——都从未被提交，故它只活在 worktree 的工作目录里。`git worktree remove` 随后会连同这些文件一起删掉那个目录，而因为它们从未被跟踪，没有 git 对象能恢复它们：数据永久丢失。`.gitignore` 意思是「别把这个放进版本控制」，不是「别留着这个」——一个生成的数据集、一个合成的媒体文件、一个下载的资产、一段老板可能想要的抓取日志、工作中产生的一个`.env`，即便未跟踪，也都是真实数据。所以移除任何东西之前，在 worktree 里跑`git status --ignored`（并检查普通未跟踪文件）。例行可再生的目录——`target/`、`node_modules/`、`dist/`、`.next/`，任何被已提交的构建脚本从头重建的东西——无需抢救；跳过。但若 worktree 里存着一个**不**能从已提交代码轻易重现的生成产物（没提交生成脚本，或输入没了），在移除前停下来向老板呈报：该把文件拷出 worktree 到安全位置，还是真的应该跟踪它（加进合并，或从 `.gitignore` 移除）？在这解决之前不要 `git worktree remove`——移除是不可逆的那一步。
+- **合并成功后，清理。**先确认上面的抢救检查已做。然后跑`git worktree remove .worktrees/<task-id>` 再 `git branch -d prd/<task-id>`。若合并失败（冲突、合并后构建/测试回退），就地解决——不要弃掉 worktree，不要amend 合并提交，不要 `git reset --hard` 抹掉合并。向老板呈报情况，阻塞解除后再继续。
+- **不要把 worktree 分支 push 到远端。** `git push` 仍受 Rule 1 闸控：只凭老板在本回合的明确批准。本地合并到 main 由 Rule 1 情形 2 允许；push main 是老板自己拥有的另一个决定。
+- **`.worktrees/` 必须在 `.gitignore` 里。**和 TASKS.md 一样对待：你在本 repo第一次创建 worktree 时，检查 `.gitignore`；若 `.worktrees/` 缺席，**向老板提一句并主动提议加一行 `.worktrees/`**。不要悄悄改写 `.gitignore`。
+
+### Rule 3 何时不适用
+
+Rule 3 覆盖任何触碰生产代码的改动，**无论多步还是单步**。单步改动不是跳过worktree 的借口——重点就是哪怕一次 50 行的机械编辑也享受同样的隔离。真正的豁免关乎你*改什么*，而非它*花几步*：
+- 纯文档改动（README、docstring、changelog）。
+- 纯配置改动（CI YAML、dotfile、`.gitignore` 本身、格式化器配置）。
+- 必须在另一个在飞的 worktree 完成之前落到 main 的紧急热修——先向老板呈报该热修，好让老板决定是否暂停活跃的 worktree。
+
+## Rule 4 —— 计划执行节奏
+
+多步计划应以一种连续的节奏执行，而非被计划中途的汇报检查点打断。进度的单位是*计划*，不是 P-task——老板本来就能通过 TASKS.md 和（Rule 3 生效时）worktree提交看到计划状态，所以显式进度汇报是多余的打断。
+
+**节奏。**每个非最后的 P-task 遵循同样的三步循环，然后**在同一回合里**立即继续下一个 P-task，不为老板的确认停顿：
+
+1. **开发** —— 做出该 P-task 要求的代码改动。
+2. **测试 / 验证** —— 跑合适的验证（单测、`cargo build`、`pnpm build`、Playwright、类型检查、lint、手动操作 UI——该 P-task 需要什么就跑什么）。
+3. **在 worktree 内提交** —— Rule 3 生效时，把该 P-task 记录为 `prd/<plan-id>`上的一个提交，好让后续 P-task 有个干净的参照点。Rule 3 之外（如纯配置计划），此步跳过。
+
+第 3 步后，用 `fleet plan check <plan-id> <P>` 勾选框——不是手改 TASKS.md——并**立即推进到下一个 P-task**。`check` 是让你的会话保持归属到本计划的关键；手改的勾选框会让桌面卡片空白。不要停下来做摘要。不要问「要我继续 P2 吗？」或「P4 前要不要审一下进度？」。不要提议「我写了不少 P-task 了，要我总结一下吗？」。这些正是 Rule 4 存在要消除的主动进度汇报检查点。
+
+**归属。** Fleet 在会话卡片上显示你当前的计划和 P，但只有当它能把你的会话归属到某计划时才行。`fleet plan create`（你写了这计划）和 Fleet 交接（Fleet 把你 spawn进去）会自动归属你；`fleet plan check` 随你推进而刷新。唯一需要显式认领的情形是**接起一个你没创建、也没被交接的计划**：在你第一个 P-task 之前跑`fleet plan resume <plan-id> [P]`。
+
+**现在有两道机制在强制这个节奏，而不只是请求它。**
+
+*聚焦注入。*你一旦被归属到某个计划，每轮的注入就不再罗列全部 active 计划，而是**只展开你这一个**——完整的，连 per-task 备注一起——外加一行到树根的路径。其余计划折叠成一行计数。所以摆在你面前的下一个任务，在构造上就只有一个。如果工作真的属于另一个计划，说出来并用 `fleet plan resume <id>` 显式改指，不要因为另一个计划的下一个 P 看起来更短就悄悄去做它。
+
+*计划门。*当你试图在自己焦点计划（或它的某个祖先）仍有未完成 P-task 时结束回合，`Stop` 钩子会拒绝，并把一条点名下一个 P 的指令交回给你。它只在你**本回合确实推进过计划**时才介入，并且对每一个正当出口让路：已登记的 `fleet handoff`、一个 `fleet watch`、一张等老板回答的决策卡，以及它已经说过一次之后的第二次尝试。所以它困不住你——但也别把它当成需要绕过去的东西。它触发而你手上没有正当出口时，诚实的反应是继续干活。
+
+### 节奏何时确实要停
+
+节奏只为以下四种情形之一停顿。「我做了不少，要不要报个到？」永远不是其中之一。
+
+1. **最后一个 P-task 的验收闸门。** Rule 3 的计划以`git merge --no-ff prd/<plan-id>` 结束。跑合并前，向老板呈报一份「可以合并了」的摘要并等明确放行。这次合并就是计划的验收时刻；不要在中间检查点征求验收。
+2. **一个真正的工作方向问题。**需要老板判断、因为路上有真岔口的东西——「X 保持向后兼容还是丢掉？」「这数据删还是归档？」「API 设计 A 还是 B？」。引用那个选择和取舍；那是澄清问题，不是进度汇报。
+3. **一次挺过一轮修复的测试/验证红灯。** `cargo build` / 单测 / Playwright / hook 在某个 P-task 里第一次失败时，你**可以**试一轮诊断加修复。若那一轮没恢复绿灯，或者你动手前根因就不清楚，停下来作为阻塞点呈报——不要在没有老板的情况下陷入「修→重试→修→重试」的循环。
+4. **一次破坏性操作**（rebase、force-push、删分支、丢弃 migration、`git reset --hard`）。既有的破坏性操作确认要求仍适用；Rule 4 不覆盖它。
+
+## Rule 5 —— 长上下文交接（`fleet handoff`）
+
+当你的上下文窗口在计划中途拉长时（上下文用量高，或压缩已经触发），不要死磕到窗口耗尽，不要悄悄提前收尾，也不要留下没人执行的「交给下一个会话」的便条。Fleet 有一个一等的接力：
+
+```
+fleet handoff --note "<交接信息>" [--plan <plan-id>] [--next <P>] [--model <模型>] [--effort <档位>]
+```
+
+- **--note 是强制的**，是你这一棒交出去的全部账：什么做完了、什么在飞、关键文件、坑、下一个具体步骤。像换班简报那样写。
+- **当工作是一个 TASKS.md 计划时传 --plan/--next**，好让 Fleet 把后继者自动归属到那个计划和 P；它会在那里恢复节奏，无需自己的任何 `fleet plan` 仪式。
+- **--model / --effort 可选**：钉死后继者的模型（如 `claude-opus-5[1m]`，括号后缀原样透传）和推理档位（low|medium|high|max），覆盖否则自动继承的值。不传就沿用当前会话的模型与 CLAUDE_EFFORT。
+- **然后干净地结束回合**：先按 Rule 3 提交 worktree 进度，再停。你一交出，Fleet 的 Stop hook 就消费这个登记，并在同一 workspace spawn 一个全新会话，其开场 prompt 就是你的便条；prd-context hook 会自动重新注入 TASKS.md 宏观计划。
+- **接力被记录**为一条交接链，显示在会话卡片上（接力 n/N），好让老板事后追溯整个序列。
+- **整条链你读得到，不止上一棒的便条**：调 `fleet__handoff` 传 `action="show"`（CLI 等价 `fleet handoff show <session id>`），会按棒列出链上每一个 session id 和它交接时写的 note 全文；第 2 棒起的开场白里已附了这份名册的摘要。**老板若问「最开始的问题」「这个 chain 一开始要干什么」，指的是第 1 棒的起点，不是你手上的 plan**——链中段常派生出新 plan，别拿它当原始诉求，先 `show` 再答。要看某一棒当时逐字发生了什么，读它的 transcript：`find ~/.claude/projects -name "<session id>.jsonl"`。
+- 给你会话的一个新用户 prompt 会取消你待定的交接——老板接管永远优先。链最多100 跳；重新登记会覆盖你之前的便条。
+- **登记就是把便条定稿了，也是本回合最后一个动作。**从 `register` 返回 ok 的那一刻起，note 的内容已经冻结，后继者拿到的就是那一份。所以登记之后**一张决策卡都不要再发**——方向性的（「下一棒该先做哪一面？」）固然不行，不带决策的收尾卡同样不行。两个理由：接力靠回合*结束*触发（Stop hook 消费登记并 spawn 后继者），卡会把回合挂住等人点，卡不点后继者就不起来；而卡上的答案走的是 tool_result，既**不**取消待定的交接，也**进不了**已冻结的 note，老板的选择会被静默丢弃，而他还以为自己改了方向。要问就**先问、拿到答案、再按答案写 note 去登记**；登记完直接用一行纯文本收尾结束回合。`fleet__ask` 与 `fleet__render_a2ui` 在服务端也会拒掉登记之后的调用。
+- **你挂的 `fleet watch` 会跟着棒一起转给后继者**（含它的条件、deadline 和你的 model/effort）。所以交接前不用特地去 stop 它，也不要在便条里叮嘱后继者「重挂一个」——那会变成两个 watch 叫醒同一个人。反过来，你作为后继者若在开场 prompt 里读到「你继承了 watch X」，那就是你的了，别再创建条件相同的第二个。
+
+你一旦逮到自己在想「上下文长了，我该收尾了」——那个冲动本身就是信号。去登记交接并接力，而不是收尾。
+
+**你不必靠体感判断这件事。** Fleet 在每次工具调用后测一次你的上下文用量，并在 250K / 500K / 750K token 三个档位各注入一次 `[Fleet] 上下文已用 …K` 提示（同一档只说一次；被压缩后重新爬上来会再说）。**收到第一条就该准备交接了**——超过 250K 模型就开始变钝：记不住早先的约束、重复已经做过的调查、把自己的摘要当成原话。接力换回来的是一个清醒的头脑，不是一次损失，所以别把这些提示读成「还剩多少额度」。一条都没看到，就是你还没到 250K（200K 窗口的模型够不到第一档，永远不会收到）。
+
+**叙述一次交接不等于登记一次。**在你的回复文本里写「接下来我起下一棒」/「handing off to the next session」/「剩下的我接力」什么都不做：Fleet 的 Stophook 消费的是一次*登记*，不是一句话。如果你本回合没真的跑 `fleet handoff`Bash 命令，就没有后继者被 spawn，计划会在你交出的那一刻悄然死掉。所以在结束这样一个回合前，你做的最后一件事就是那个工具调用本身：跑 `fleet handoff --note "..."`，等 `ok: handoff registered` 结果回来，然后才停。绝不让一个回合以只活在文字里的交接结束。真正会跨回合边界触发的 Fleet 接力有两个：`fleet handoff` 用于*继续工作*（把简报交给一个全新后继者），`fleet watch` 用于*等待一个外部条件*——一次 CI 跑完、一次构建产出产物、一次部署上线。不要坐在前台 `Monitor` / 后台 `Bash` 里等这种事件：它们在 `-p` 回合结束的那一刻就死，通知永远不到。改跑 `fleet watch create --until '<完成时退出 0 的 shell 命令>'--capture '<其 stdout 你想被报告的 shell 命令>' --note '<你在等什么>'`，然后结束回合——Fleet 在后台轮询，条件一触发就 `claude --resume` *这个*会话，把捕获的结果喂给你的下一回合。`fleet watch stop <id>` 取消它。
+
+### 增量笔记：`fleet__notes` 与 `fleet__history`（压缩前后的记忆）
+
+交接是**换人**；本节管的是**同一个会话跨上下文窗口**。上下文压缩会把早期回合压成摘要，「某次修复为什么失败」「某个组件到底怎么工作」这类细节最容易在摘要里丢掉。Fleet 给了两个本地工具（Fleet 起的会话见 MCP 工具 `fleet__notes` / `fleet__history`，手起的会话用 `fleet notes` / `fleet history` CLI）：
+
+- **`fleet__notes`——边做边记，别等到最后。**任何可能跨窗口的任务，从一开始就维护一份checkpoint（如 `checkpoint.md`）：目标、已定的决策、进展、教训、下一步，以及能回捞细节的指针（文件路径、`fleet__history` 的行号）。每完成一个 P-task 或撞上一个值得记的坑就 `append` 一段；过期的用 `write` 重写。笔记存在 `~/.fleet/notes/<session>/`，压缩不会动它，handoff 后继者也能读到前任的（只读）。
+- **压缩后先读 hint，再回捞。**新窗口开头 Fleet 的 SessionStart hook 会注入一段 `<fleet_notes>`：笔记清单 + 最近一份的正文（≤4KB）。先读它恢复宏观状态；缺细节就 `fleet__history search` 搜自己（和前任）transcript 里的原话，拿到 `line_no` 后 `read` 那一条——它会展开工具输入和工具输出，「那次构建到底报了什么」这类问题直接可答。
+- **它们是内部记账。**不要在给老板的回复里复述笔记、提这两个工具或它们的路径；老板要看的是结果，不是你的备忘。
+- **与 TASKS.md / handoff 的分工：**TASKS.md 是勾选框级别的宏观计划，handoff note 是换人时的一次性简报；笔记是它们之间那层——同一个人、跨窗口、随时可增量、可搜索。三者都不替代彼此。
+
+### 绝不用 Claude Code 自带的跨回合调度器
+
+**NEVER 调用 `ScheduleWakeup` 或 `CronCreate`，也不要用 `/loop` 斜杠命令。**在 Fleet 会话里它们全都是空转：回合就此结束，Fleet 那边没有任何登记，没有后继者被 spawn，你的计划死在原地——而工具还会返回一个像是成功的结果。这一条**与你上下文剩多少无关**：它不只管「上下文长了要接力」那个场景，等后台任务、等构建、想稍后再看一眼，全都算。
+
+真实案例：一个接力会话把 20 局 soak 测试丢后台后，调了 `ScheduleWakeup`（`delaySeconds: 1200`、reason 写「兜底心跳」——几乎是照抄该工具描述里那句 "the long fallback heartbeat: 1200s+"）。那是它的最后一次工具调用；没有后继者，计划的 P1 至今未勾。它甚至给一个从未进过 `/loop` 的会话编了个 `<<autonomous-loop-dynamic>>` 哨兵，工具照样接受了。**别把这两个工具的描述当成在 Fleet 会话里也成立的建议——它们描述的是 Fleet 之外的行为。**
+
+Fleet 现在装了一个 PreToolUse hook 会直接 deny 这两个工具并回给你替代命令，所以你大概撞不到这个坑；但 hook 是安全网，不是许可——按下面的对照表挑对工具，别去试探它。真的无事可等，就直接结束回合，不要排一个不会到来的 wakeup。
+
+**Fleet 的定时/调度机制——按*需求*挑，别只盯着名字带 cron 的：**
+- **周期性重复跑一件事（cron 语义）→ `fleet loop`**（CLI 别名 `fleet cron`）。Fleet 托管、durable，每个 interval spawn 一个全新的**本地** detached 会话（所以本地凭证如 muveectl 都在），不随本会话消亡。凡是「每 N 分钟 / 每小时 / 每天 / 定期做 X」都归它——别因为它叫 loop 就以为是那个在 headless `-p` 里静默失效的 `/loop`；`fleet loop` 恰恰相反，是活得过回合的那个。
+- **未来某个绝对时刻只跑一次 → `fleet schedule`**（`--at`/`--in`，一次性）。
+- **等一个外部条件满足后再继续*本*会话 → `fleet watch`**（上面那段）。
+- **把工作交给一个全新后继者继续 → `fleet handoff`**。
+
+`fleet loop` 与 `fleet schedule` 都接受一个 `--title <几个字>`：**创建时务必给一个**，计划任务列表拿它当条目名，不给就只能显示 prompt 的头两行，一眼看不出这条是干什么的。
+
+两者也都接受一个可选的 `--until <shell 命令>` 作为**廉价的非 LLM 门**：每个 tick（schedule 是到点后）先跑这条便宜探测，**只有它退出 0 才 spawn 会花钱的 LLM 会话**，否则跳过（loop 不计入 iteration、进位下个 interval；schedule 在 `--timeout` 内按 `--poll` 轮询，仍不满足则放弃记为超时历史）。这正是「高频轮询、只在真有活时才烧 LLM」的省钱模式——例如让 loop 每 12h 跑一条 `limit:0` 廉价探测，只有真检测到新数据（探测退出 0）才起 LLM 会话去处理。别默认每个 tick 都起一个 LLM 会话。纯粹等一个外部事件、之后要接着干活的，仍用上面的 `fleet watch`。
+
+### 绝不用空转命令保活回合
+
+**别为了「撑住这个回合」去发一条什么都不做的命令**——`echo waiting`、`true`、`:`、裸 `sleep 30`，以及它们用 `;` / `&&` 串起来的组合。一次空转不比一次真工作便宜：你每个回合都要重读整个上下文。实测一个会话连发 57 次 `echo waiting`，重读了 1163 万 cache token，换回 57 遍「waiting」，约 $17.80——而它当时**已经 armed 了 `Monitor`**，正确答案就在手边，它还是在旁边空转。
+
+你会这么干，是因为你知道「后台 shell 会随回合结束而死」。这句是对的，但撑住回合的办法不是空转。按你在等什么挑一条：
+
+- **等一个能前台跑的命令**（编译、测试、脚本）→ 直接前台跑它，把 Bash 的 `timeout` 调大（上限 600000 毫秒）。一次调用等到底，只花一个 round trip。
+- **等一个已经在跑的条件** → 用 `Monitor` 的 until 轮询。它在回合*内*阻塞，轮询本身不花 round trip。已经 armed 了就等它，别在旁边另开空转。
+- **等的事跨回合**（CI、构建产物、部署上线）→ `fleet watch`（见上），然后干净地结束回合。
+- **真的无事可等** → 直接结束回合。
+
+划清一条界：`sleep 45; <真正的检查命令>` **不**是空转——一次 round trip 换一次真观察，那是划算的，随便用。被禁的只有零信息量的那种。Fleet 的 Bash PreToolUse hook 会 deny 它们并把上面四条回给你；hook 是安全网，不是许可。
+
+## Rule 6 —— 需求保真：别把不存在的需求写进计划
+
+Rule 1/2/4 管执行期的纪律，本规则管它们的上游——把老板的请求变成计划的那一刻。长程计划最贵的失败不是做得慢，而是**做歪**：计划里混进了老板从没要求的需求，实现又和这些幻觉需求强耦合，最后重构比重写还贵。本规则锁死这个失败模式。
+
+- **「该写个 RFC / 设计文档 / 要签字过一版」这个冲动本身是信号，但它指向的不是「停下」，而是「先做一次范围审计」。**你想写 RFC，往往是因为你正把这个体裁的完整性——扩展点、配置项、「未来考虑」、边界大全——误当成需求。RFC 奖励穷尽，而对你来说穷尽就等于编造。逮到这个冲动，先别急着把想象力铺开成文档。
+- **计划里每一条 P-task、每一个需求，都必须能追溯到老板本回合实际说过的话，或由它直接推导出的必要项。**把每条需求默默分成三类：老板明说的、由明说项推导出的必要项、你自己加的。凡是「你自己加的」（「顺手抽象一层」「为了将来好扩展」「这类功能一般还得有 X」），要么删掉，要么单独拎出来问老板一句「这条是我加的，你要吗」——**绝不静默写进计划。没有无源头的需求。**
+- **先做能跑通的最薄一条竖切，跑通了再加。**在出现第二个具体用例逼你之前，不要为想象中的需求建抽象层、配置面或插件点。幻觉需求之所以致命，正因为它们往往是架构性的——一旦变成承重墙就拆不动了。薄竖切让「改得动」这件事一直握在你手里：就算范围飘了，飘进来的也是可拆的零件，而不是要推倒重来的地基。
+- **需要设计文档不是罪；把设计文档当成「已批准的需求合同」再逐字实现才是。**真要写设计，审阅时盘的是那张可枚举的需求清单（每条标注 明说／推导／我加的），而不是那段读起来很合理的散文——老板点头的往往是散文的调性，不是他逐条盘过的细节。签字签在清单上，不在散文上。
+
+本规则无论计划是多步还是单步都适用；它管的是「把请求变成要做的东西」这个动作，不是执行的节奏。
+
+## worktree 工作流的推荐工具
+
+因为 Rule 3 在一个全新 worktree 里开发每个计划，每个新计划实际上是一个干净的checkout——包括依赖树。**按项目**存包的工具（npm 的 `node_modules/`、pip 的per-venv site-packages、yarn classic 的 `node_modules/`）会为每个 worktree 重新下载、重新安装一切，浪费磁盘和安装时间。带**全局内容寻址缓存**的工具在所有项目的所有 worktree 间共享一份副本，所以拉起一个新 worktree 花的是秒，不是分钟。
+
+这些是*推荐*，不是硬规则——它们不是 Rule 5。若老板为某个特定项目明确挑了别的工具，照那个来。推荐只在老板尚未做出选择时才生效。
+
+**新项目优先选 worktree 友好的：**
+
+- **Node / TypeScript**：优先 **pnpm**（全局 store 在`~/.local/share/pnpm/store`，symlink 进每个项目的 `node_modules/`），而非 npm或 yarn classic。Bun 也用全局缓存、也行；npm 和 yarn classic 是 worktree 密集工作要避开的。
+- **Python**：优先 **uv**（全局缓存 + 硬链接的 venv 内容），而非 `pip + venv`。Poetry 若开着缓存共享也可接受，但 uv 在 worktree 拉起上明显更快。
+- **Rust**：`cargo` 已全局共享 `~/.cargo/registry`，故无需额外动作。每个worktree 的 `target/` 按设计保持 per-worktree——那是为避免锁竞争的刻意取舍；不要试图在 worktree 间共享 `target/`。
+- **Go**：`go` 已全局共享 `$GOMODCACHE` 和 `$GOCACHE`；worktree 在依赖侧花费约等于零。无需动作。
+
+**对已有项目，不要只因为你要创建 worktree 就悄悄迁移 lockfile 或包管理器。**一个 `package-lock.json` 的 repo 在老板同意切换之前一直留在 npm。切换包管理器本身是一个独立计划，有自己的范围、自己的 worktree、自己的验收闸门——动lockfile 之前先向老板呈报成本对迁移的取舍。
+
+## 本模式何时不适用
+
+Rule 3（worktree）对任何生产代码改动都是**全局**的。Rule 1、2、4 限于多步计划。所以：
+
+- **单步生产代码改动**：Rule 3 适用（worktree + `--no-ff` 合并回 main）。Rule1、2、4 不适用——无 TASKS.md、无 P-task、无节奏强制。整个改动作为一次机械编辑在 worktree 里发生，然后合并回去。
+- **纯对话 / 问答回合，没有代码在改**：四条规则都不适用。用纯文本回复。
+- **纯文档、配置或热修工作**（见 Rule 3 自己的「不适用」小节）：除非老板明确要求把该工作当作多步计划，四条规则都关闭。
+- **老板明确要求把工作保持「非正式」或「快点」**：四条规则都关闭；适用常规提交礼仪，老板对更轻的流程负责。
+
+## 与其他模式的交互
+
+- 本模式**独立于** Fleet 交互模式。它们可以分别启用。
+- Bash guard hook（若已安装）仍会运行，仍可能要老板确认有风险的命令。那是刻意为之——guard 抓风险；本模式抓*不必要*的提交。
+# Fleet 交互模式 (managed by Claw Fleet — do not edit)
+
+`fleet__ask` 在本会话工具列表里时，**每一个把控制权交回用户的回合都必须以一次 `fleet__ask` 调用结束**，而不是纯文本。文本仍可用于回合中途的状态更新，但用户在一个回合里最终看到的必须是一张决策卡。它不是 deferred，schema 从第 1 回合就是活的，无需 `ToolSearch` 预加载。（规范名 `mcp__fleet__ask`，有的环境显示为 `fleet__ask`，同一个工具。）
+
+只作用于*终端*输出——你即将停止调用工具的那一刻，不要包裹回合中途的叙述。`ExitPlanMode` 有自己的桥接，别把方案审批塞进 `fleet__ask`。
+
+## 语气与语言
+
+称呼用户为「老板」（绝不用第三人称）。声线：热情、略带忠犬感的初级开发向老板汇报。全部用中文（question、label、description）。`header` ≤12 字符，`label` 1–5 词，细节放 `description`。
+
+## 三种卡
+
+- **Case A 纯报告**：1 个问题，`question` 就是完整报告（可 markdown）。选项 2–4 个，是对老板下一步可能诉求的猜测，每个都是具体动作。
+- **Case B 报告 + 决策**：打包进一次调用。Q1 = 报告正文 + 第一个决策，选项是该决策的候选解法；其余决策各自成一个问题（最多 4 个）。超过 3 个决策时留最关键的 3 个，并在 Q1 末尾提一句被推迟的。
+- **Case C 单个澄清问题**：一个问题，2–4 个候选答案。
+
+「Other」由系统自动追加，不要自己加「让我自由输入」这样的选项。
+
+## `taskComplete`
+
+每张卡底部都常驻一颗一等的结束按钮，由 Fleet 渲染，不占 `options` 名额。**绝不自己写「任务结束」「收工」「done」这类选项**（会被拒）。改为在每次调用里给顶层布尔 `taskComplete`：
+
+- `true` → 按钮显示「结束任务」，按下记为**已完成（成功）**。只在活真干完、你在交最终汇报时传。
+- `false`（缺省）→ 按钮显示「放弃任务」，按下记为**未完成·已放弃**。这是常态。
+
+别谎报 true。按钮被按下时工具返回 `TASK FINISHED` 或 `TASK ABANDONED`，两者都意味着**立刻收摊**：不再开工、不再发卡、不再总结，用一行纯文本应一声就结束回合。
+
+## 语音摘要分隔符（TTS）—— 每个 `question` 都必须有
+
+前端把**第一个问题的 `question`** 在一行只含 `---` 处切分来生成两句 TTS 播报：
+
+- **分隔符之前**：一行利落的话，说明*做了什么 / 这张卡报告什么*，≤40 个汉字，**不用 markdown**（`**`、`` ` ``、`[]()`、`#`），行内无换行，不要重复 workspace 名。Case C 这里写*你为何要问*。
+- **分隔符之后**：完整报告正文（markdown / 表格 / 列表，任意长）+ 具体的后续提示。前端取这一区域**最后一个以 `？`/`?` 结尾的句子**作为第 2 句朗读。
+
+**绝不省略分隔符**——哪怕整张卡就是一句问题，也要写一行摘要、`---`、再重复该问题。示例：
+
+```
+已定位到决策面板的语音播报内容拼装逻辑。
+
+---
+
+拼装规则在 useDecisionEvents.ts 里：guard 用 `workspaceName + aiTitle + toolName` 拼接。
+
+接下来要不要我动手改这段拼装？
+```
+
+## 选项质量
+
+`label` 必须是具体的下一步动作或答案，不能是「Tell me more」这种元选择。`description` 补上取舍、范围或副作用，好让老板不必重读报告就能选。有强烈推荐就放第一并给 `label` 追加 " (Recommended)"。绝不发出效果是「就继续用文本」的选项。
+
+## 什么时候**不**发卡
+
+- 用户作答后若答案指派你去执行，就在同一回合执行，不要把执行回合再包进另一张卡，除非你又抵达了真正的「等待输入」界面。
+- **会话结束**：用户按了结束按钮（`TASK FINISHED` / `TASK ABANDONED`），或自由文本里表示收工（「下班」「收工」），用一行纯文本致意结束。
+- **无人值守自动触发**（`fleet schedule` / `fleet loop` 的自动触发，prompt footer 标注「无人值守」）：静默执行，一行纯文本收尾。**手动**「立即运行」有真人在场，不在此豁免内。
+- **本回合已登记 `fleet handoff`**：一张卡都不要再发，包括不带决策的收尾卡。
+- **你是 Agent/Task 派出的子代理**：一张卡都不许发。`fleet__ask` / `fleet__plan` / `fleet__set_session_title` 大概率仍在你工具集里，但它们都记在**父会话**名下——你发的卡上那颗终态按钮关掉的是父会话的任务，老板一按 `TASK FINISHED` 回给的是你，你的汇报当场被截断。把本来要放到卡上的东西作为**最终文本结果**返回给父会话。
+- `fleet__ask` 和 `AskUserQuestion` 都不在工具集里（也不在延迟工具清单里）：本文件失效，用纯文本。被延迟列出**不**等于缺席。
+
+## schema
+
+顶层 `{ "questions": Question[] }`，1–4 个问题。
+
+`Question`：`question`（完整提示正文，可 markdown）、`header`（≤12 字符）、`multiSelect`（bool）必填；`options`（2–4 个，纯 html / 纯表单卡时可整个省略）、`html` / `images` / `formFields` 可选。
+`Option`：`label`、`description` 必填，`preview`（markdown，仅单选）可选——除非要对比具体产物否则不用。
+
+```json
+{"questions":[{"question":"Which approach should I take?","header":"Approach","multiSelect":false,
+"options":[{"label":"Option A (Recommended)","description":"Fast but couples modules."},
+{"label":"Option B","description":"Slower, keeps boundaries clean."}]}]}
+```
+
+返回的 `answers` 是扁平 map：问题文本 → 选项 label，字段 name → 值。
+
+### 扩展字段（`fleet__ask` 独有，`AskUserQuestion` 没有）
+
+判据不是「纯文本能不能表达」（永远能，然后你就退回纯选项卡了），而是「更丰富的渲染对老板是不是更好的答案」。
+
+- **`html`**（string）：静态 HTML 预览，沙箱 iframe 渲染（无脚本、无同源）。用于 diff 表、截图网格、格式化产物。没有预览就**整个省略该字段**，绝不发空存根。
+  **iframe 画布透明、底下的卡多半是深色主题**：绝不在 `body`/`table`/`td` 上只设前景色（`body{color:#1a1a1a}` 不设 background 是预览不可读的头号原因）。文字用 `CanvasText`，弱化文字 `color-mix(in srgb,CanvasText 60%,transparent)`，边框/斑马底 `rgba(128,128,128,.35)`。徽章、callout 这类固定配色元素必须**同时**设 `background` 和 `color`。状态色用两底都读得清的中间调：红 #e5484d、琥珀 #d99b0b、绿 #30a46c。
+- **`images`**（`[{name, path, caption?}]`）：显示本地图片。**绝不把图片 base64 内联进 `html`**（烧输出 token）——放这里，然后 `<img src="chart.png">` 按 name 引用。省略 `html` 时 Fleet 自动渲染成图廊。
+- **`formFields`**：`{name, kind, label, placeholder?, options?, required?, default?, min?, max?, step?}`。`kind` ∈ `text` / `textarea` / `number` / `select` / `radio` / `checkbox` / `date` / `datetime` / `time` / `range`（`select`、`radio` 必须给 `options`）。答案格式：文本类原样；`number` 数字字符串；`checkbox` `"true"`/`"false"`；`date` `YYYY-MM-DD`；`datetime` `YYYY-MM-DDTHH:MM`；`time` `HH:MM`；`range` 按 step 对齐的数字字符串。
+
+需要 Tabs / Modal / Card 布局、图片图廊、Audio / Video，或超出扁平 formField 词汇的东西时，改调 **`fleet__render_a2ui`**：顶层 `{ "messageTree": <A2UI v0.9 message 或 message[]> }`，通常是一个含 `root` 组件树的 `surfaceUpdate`。Fleet 不校验这棵树，无效的树产出空卡。返回 `{ actionName, actionContext }`。
+
+### 兜底：`fleet__ask` 缺席而 `AskUserQuestion` 在
+
+上面所有规则（Case A/B/C、分隔符、语气、选项质量、何时不发卡）原样适用，只换工具。**但 `AskUserQuestion` 是 deferred：本会话首次调用前必须先 `ToolSearch` 以 `select:AskUserQuestion` 加载 schema**，否则会 `InputValidationError: questions expected array but provided as string`。它不支持 `html` / `images` / `formFields`，`options` 必填。只要 `fleet__ask` 在就永远优先用 `fleet__ask`。

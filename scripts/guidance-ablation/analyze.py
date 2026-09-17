@@ -16,7 +16,11 @@ RULE = {
 }
 # Measured with the delta method (see REPORT.md §2). `full` reproduced within
 # 0.02% across two days (24,381 then 24,377), so these are stable.
-TOKENS = {"none": 0, "full": 24377, "shipped": 19558, "lite": 14607, "min": 7993}
+# `minprd` / `minmode` cross the two files: which one's bulk actually costs
+# compliance? Re-measuring `min` and `shipped` alongside them reproduced within
+# ~1% (8,086 vs 7,993; 19,649 vs 19,558), so the delta method is stable.
+TOKENS = {"none": 0, "full": 24377, "shipped": 19558, "minmode": 19052,
+          "lite": 14607, "minprd": 8690, "min": 7993}
 
 
 def fisher(a, b, c, d):
@@ -46,7 +50,7 @@ for f in sorted(RUNS.glob("*/record.json")):
     cells[k][0] += bool(r["score"].get("compliant"))
 
 for model in sorted({k[1] for k in cells}):
-    conds = [c for c in ("none", "full", "shipped", "lite", "min")
+    conds = [c for c in ("none", "full", "shipped", "minmode", "lite", "minprd", "min")
              if any(k[2] == c and k[1] == model for k in cells)]
     print(f"\n### model = {model}\n")
     print("| 场景 | 规则 | " + " | ".join(conds) + " |")
@@ -88,16 +92,26 @@ for c, t in TOKENS.items():
 # so they can only dilute a comparison. Pool the three that actually vary.
 POOL = ("B", "E", "F")
 print("\n### 非饱和场景 (B,E,F) 合并对比\n")
-pooled = {}
-for c in ("none", "full", "shipped", "lite", "min"):
+# Only conditions measured on ALL of B, E and F may be pooled. `shipped`,
+# `minmode` and `minprd` were run on F alone, so pooling them would compare
+# "F only" against "B+E+F" and read as a collapse (or a win) that is really
+# just a different scenario mix.
+pooled, partial = {}, []
+for c in ("none", "full", "shipped", "minmode", "lite", "minprd", "min"):
     p = sum(cells.get((s, "sonnet", c), [0, 0])[0] for s in POOL)
     n = sum(cells.get((s, "sonnet", c), [0, 0])[1] for s in POOL)
-    pooled[c] = (p, n)
-    print(f"- {c}: {p}/{n} = {p / n * 100:.0f}%" if n else f"- {c}: —")
-fp, fn = pooled["full"]
-for c in ("none", "shipped", "lite", "min"):
-    xp, xn = pooled[c]
-    if not xn:
+    if not all(cells.get((s, "sonnet", c), [0, 0])[1] for s in POOL):
+        if n:
+            partial.append(c)
         continue
+    pooled[c] = (p, n)
+    print(f"- {c}: {p}/{n} = {p / n * 100:.0f}%")
+if partial:
+    print(f"- 未纳入合并（只跑了 F，场景组成不可比）: {', '.join(partial)}")
+fp, fn = pooled["full"]
+for c in ("none", "shipped", "minmode", "lite", "minprd", "min"):
+    if c not in pooled:
+        continue
+    xp, xn = pooled[c]
     pv = fisher(xp, xn - xp, fp, fn - fp)
     print(f"- {c} vs full → p={pv:.3f} " + ("(**显著**)" if pv < 0.05 else "(不显著)"))
