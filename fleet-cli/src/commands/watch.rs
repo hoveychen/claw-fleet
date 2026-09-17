@@ -247,8 +247,11 @@ fn create(
 fn poll_state(w: &claw_fleet_core::watch::WatchRecord) -> String {
     match w.last_exit {
         Some(code) => format!("exit {code} ×{}", w.poll_count),
+        // No exit code recorded: either nothing has been polled yet, or this is
+        // a record written before the field existed. Both are "unknown" — do not
+        // render them as a signal kill, which is a much rarer and scarier thing.
         None if w.poll_count == 0 => "—".to_string(),
-        None => format!("signal ×{}", w.poll_count),
+        None => format!("exit ? ×{}", w.poll_count),
     }
 }
 
