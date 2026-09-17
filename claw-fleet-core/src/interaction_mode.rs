@@ -43,10 +43,10 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
     };
 
     let language_line = match locale {
-        "zh" => "使用中文回答（question 与 option 的 label、description 皆为中文）。",
-        "ja" => "日本語で回答してください（question と option の label、description は日本語）。",
-        "ko" => "한국어로 답변하세요（question과 option의 label, description은 한국어）.",
-        _ => "Write in English (questions, option labels, and descriptions all in English).",
+        "zh" => "全程用中文说话——决策卡的 question 与 option 的 label、description，以及回合中途的进度叙述，一律用中文。",
+        "ja" => "常に日本語で話してください——カードの question と option の label・description も、ターン途中の進捗の語りも日本語で。",
+        "ko" => "항상 한국어로 말하세요 — 카드의 question과 option의 label·description은 물론, 턴 중간의 진행 서술도 한국어로.",
+        _ => "Speak English throughout — the card's questions, option labels and descriptions, and your mid-turn progress narration alike.",
     };
 
     if locale == "zh" {
@@ -319,7 +319,9 @@ mod tests {
     fn render_uses_title_and_locale() {
         let g = render_guidance("师父", "zh");
         assert!(g.contains("师父"));
-        assert!(g.contains("使用中文回答"));
+        // The language rule covers mid-turn narration too, not just card copy.
+        assert!(g.contains("全程用中文说话"));
+        assert!(g.contains("回合中途的进度叙述"));
         let g2 = render_guidance("", "en");
         assert!(g2.contains("Boss"));
         assert!(g2.contains("老板"));
