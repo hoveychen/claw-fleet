@@ -17,6 +17,7 @@ import { TextBlock } from "./TextBlock";
 import { AgentInput, ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
 import { friendlyToolName } from "./fleetTools";
 import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
+import { useInFlightTools } from "./inFlightTools";
 import styles from "./ToolUseBlock.module.css";
 
 // Read-only tools that get grouped into a single summary row
@@ -1235,6 +1236,20 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
+  // "No result yet" covers two different states and the card used to show the
+  // running affordance for only one of them (`isPartial`, i.e. the assistant
+  // record is still streaming). The longer one is a finalised `tool_use` record
+  // whose tool has not returned — a multi-minute Bash lives entirely there. See
+  // `inFlightTools`.
+  const inFlight = useInFlightTools();
+  const awaitingResult = (isPartial || (!!block.id && inFlight.has(block.id))) && !resultProp;
+
+  // A `Bash` launched with `run_in_background` returns its shell id instantly
+  // and the turn ends — the card looks finished, the status reads 等待输入, and
+  // the command keeps running with nothing on screen saying so.
+  const isBackgroundShell =
+    block.name === "Bash" && (block.input as { run_in_background?: unknown }).run_in_background === true;
+
   // On expand, recover the full output if this card's tail payload was
   // truncated for transport (see the Rust `message_trim`). headerStats reads
   // only small fields the backend leaves intact, so the collapsed row never
@@ -1245,7 +1260,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // tool_result (for example after live-tail/window reconciliation). That is
   // exactly the empty expanded card shape: use the transcript path to recover
   // the result lazily, just as we do for an explicitly truncated result.
-  const missingReadResult = block.name === "Read" && !resultProp && !isPartial;
+  const missingReadResult = block.name === "Read" && !resultProp && !awaitingResult;
   // Self-heal: the trimmed base64 itself carries the trim marker, so a card
   // whose image data is a transport preview refetches on expand even when the
   // message-level `_fleetTruncated` flag was lost along the way. Without this,
@@ -1318,7 +1333,12 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
           </span>
         )}
         {stats}
-        {isPartial && !result && (
+        {isBackgroundShell && (
+          <span className={styles.bg_badge} title={t("detail.tool_background_hint")}>
+            {t("detail.tool_background")}
+          </span>
+        )}
+        {awaitingResult && !result && (
           <span className={styles.spinner}>⟳</span>
         )}
         {result?.is_error && !open && (
@@ -1375,8 +1395,11 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
           {/* A custom body already presents the result (stdout, todo list,
               subagent output); repeating the raw blob under it is noise. */}
           {result && !custom && <ResultContent result={result} />}
-          {isPartial && !result && (
+          {awaitingResult && !result && (
             <div className={styles.pending}>{t("detail.tool_running", "运行中…")}</div>
+          )}
+          {isBackgroundShell && result && (
+            <div className={styles.pending}>{t("detail.tool_background_hint")}</div>
           )}
         </div>
       )}

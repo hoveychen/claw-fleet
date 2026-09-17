@@ -1933,6 +1933,8 @@
     "no_parameters": "No parameters",
     "no_results": "No results.",
     "no_summary": "No summary recorded.",
+    "tool_background": "background",
+    "tool_background_hint": "Runs in the background — the turn ended, the command did not.",
     "tool_running": "Running…",
     "decision_task_completed": "Task finished",
     "decision_task_abandoned": "Task abandoned",

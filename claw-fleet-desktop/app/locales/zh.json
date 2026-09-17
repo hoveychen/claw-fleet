@@ -1930,6 +1930,8 @@
     "no_parameters": "无参数",
     "no_results": "没有结果。",
     "no_summary": "没有记录摘要。",
+    "tool_background": "后台",
+    "tool_background_hint": "在后台运行——回合已结束，命令还在跑。",
     "tool_running": "运行中…",
     "decision_task_completed": "已结束任务",
     "decision_task_abandoned": "已放弃任务",
