@@ -306,7 +306,9 @@ note?: string | null,
 created: number, 
 pollSecs: number, 
 deadlineAt: number, 
-pollCount: number, };
+pollCount: number, 
+structuralFailStreak: number, 
+lastStderr?: string, };
 
 export type LiveThinking = { sessionId: string, 
 thinking: string, 

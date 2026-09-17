@@ -115,6 +115,27 @@ pub struct WatchRecord {
     /// the session card so a waiting session shows "checked N times".
     #[serde(default)]
     pub poll_count: u64,
+    /// Exit code of the most recent `until` evaluation (the registration
+    /// preflight, then every poll). `None` = killed by a signal or the shell
+    /// could not be spawned.
+    ///
+    /// This and the two fields below exist so a watch that never fires can be
+    /// *diagnosed* while it waits. Before them the only record of 1679 polls
+    /// was the count itself: "still exit 1, not yet" and "still exit 127, the
+    /// binary does not exist" looked identical, and the difference only
+    /// surfaced hours later as a bare timeout.
+    #[serde(default)]
+    pub last_exit: Option<i32>,
+    /// Trimmed stderr of the most recent `until` evaluation, capped at
+    /// [`crate::process_util::GATE_STDERR_CAP`]. Empty in the normal "not yet"
+    /// case — a gate that is merely unmet usually says nothing.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub last_stderr: String,
+    /// Consecutive non-firing evaluations that were *structurally* broken
+    /// (see [`crate::process_util::GateOutcome::is_structural_failure`]).
+    /// Reset by any evaluation that fails normally.
+    #[serde(default)]
+    pub structural_fail_streak: u64,
 }
 
 impl WatchRecord {
@@ -195,9 +216,72 @@ fn write_record(dir: &Path, rec: &WatchRecord) -> Result<(), String> {
 
 // ── create / read / stop ──────────────────────────────────────────────────────
 
+/// How long the registration preflight waits for the `until` command before
+/// giving up on pre-judging it. Long enough for a `git`/`curl`/`ssh` one-liner,
+/// short enough that the agent's tool call doesn't visibly stall.
+pub const PREFLIGHT_LIMIT_SECS: u64 = 5;
+
+/// The advisory line a successful registration carries back about its preflight.
+/// Empty when the first run was an ordinary "not yet" — the expected case, which
+/// deserves no words at all.
+pub fn preflight_note(probe: &crate::process_util::GateOutcome) -> String {
+    if probe.met {
+        // Legal but nearly always a condition written backwards: the agent
+        // meant "wake me when the build finishes" and wrote something already
+        // true, so the watch fires on its first poll and the wait never happens.
+        return "⚠️ until 首跑已经退 0 —— 条件**现在就成立**，这个 watch 会在第一次轮询就立刻触发。\
+                如果你本意是等某件还没发生的事，说明条件写反了（常见：断言了「现象」而非「事实」），\
+                请 stop 掉重写。"
+            .to_string();
+    }
+    if probe.timed_out {
+        return format!(
+            "（注：until 首跑 {PREFLIGHT_LIMIT_SECS}s 未返回，已放行但未能预校验；\
+             若它本身就是个慢命令，注意 poll 间隔要大于它的耗时。）"
+        );
+    }
+    String::new()
+}
+
+/// Run the `until` command **once, at registration**, and rule on it.
+///
+/// Why this exists: `create` used to accept any string and arm a timer, so a
+/// typo'd quote, a binary that isn't on this process's PATH, or a condition
+/// written backwards all looked exactly like "the thing I'm waiting for hasn't
+/// happened yet" — and the agent only learned otherwise when the deadline
+/// expired hours later. One run at registration collapses that feedback loop to
+/// the same tool call.
+///
+/// Returns `Err` only for a *structural* failure (cannot run / 126 / 127): a
+/// command in that state never becomes true by waiting, so registering it is
+/// always a mistake. Everything else is allowed through — including "already
+/// true", which is legal but almost always means the condition was written
+/// backwards, so the outcome is handed back for the caller to warn about.
+pub fn preflight(until_cmd: &str) -> Result<crate::process_util::GateOutcome, String> {
+    let out = crate::process_util::gate_probe_bounded(
+        until_cmd,
+        std::time::Duration::from_secs(PREFLIGHT_LIMIT_SECS),
+    );
+    if out.is_structural_failure() {
+        return Err(format!(
+            "until 命令首跑就跑不起来（{}），这个条件不会因为等待而变成真，拒绝注册。\n\
+             命令：{until_cmd}\n\
+             常见原因：命令不在本进程 PATH 上、引号/变量没展开、写了相对路径（watch 的轮询不保证 cwd）。\
+             先在 Bash 里手跑一遍这条命令，确认它在未满足时退 1、满足时退 0，再重新注册。",
+            out.summary()
+        ));
+    }
+    Ok(out)
+}
+
 /// Register a watch. Fields describe both the condition (`until_cmd`, `poll_secs`,
 /// `timeout_secs`) and how to reanimate the session when it fires (`session_id`,
 /// `workspace_path`, `model`, `effort`, `agent_source`).
+///
+/// Runs [`preflight`] first: a structurally broken `until` is rejected here
+/// rather than armed, and the first evaluation's outcome is returned alongside
+/// the record (and seeded into its diagnostic fields) so the caller can warn
+/// when the condition is *already* true.
 #[allow(clippy::too_many_arguments)]
 pub fn create(
     session_id: &str,
@@ -210,9 +294,12 @@ pub fn create(
     model: Option<&str>,
     effort: Option<&str>,
     agent_source: Option<&str>,
-) -> Result<WatchRecord, String> {
+) -> Result<(WatchRecord, crate::process_util::GateOutcome), String> {
     let dir = watches_dir().ok_or("cannot determine home dir")?;
-    create_in(
+    // Preflight before anything is written: a rejected watch must leave no
+    // record and no timer behind.
+    let probe = preflight(until_cmd.trim())?;
+    let rec = create_in(
         &dir,
         session_id,
         workspace_path,
@@ -226,7 +313,14 @@ pub fn create(
         agent_source,
         &uuid::Uuid::new_v4().to_string()[..8],
         now_ms(),
-    )
+    )?;
+    // Seed the diagnostic fields from the preflight, so a watch shows what its
+    // very first evaluation said even before the timer's first poll lands.
+    let mut rec = rec;
+    rec.last_exit = probe.exit_code;
+    rec.last_stderr = probe.stderr.clone();
+    write_record(&dir, &rec)?;
+    Ok((rec, probe))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -275,6 +369,9 @@ fn create_in(
         created: now,
         last_poll_at: now,
         poll_count: 0,
+        last_exit: None,
+        last_stderr: String::new(),
+        structural_fail_streak: 0,
     };
     write_record(dir, &rec)?;
     Ok(rec)
@@ -369,6 +466,15 @@ pub struct WatchSummary {
     pub deadline_at: u64,
     /// Condition polls run so far (see [`WatchRecord::poll_count`]).
     pub poll_count: u64,
+    /// Consecutive polls whose `until` command could not run at all (see
+    /// [`WatchRecord::structural_fail_streak`]). Non-zero ⇒ this watch is not
+    /// waiting, it is broken, and the card says so instead of showing a
+    /// reassuring poll count.
+    #[serde(default)]
+    pub structural_fail_streak: u64,
+    /// One-line reason for that, e.g. `sh: gh: command not found`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub last_stderr: String,
 }
 
 impl From<&WatchRecord> for WatchSummary {
@@ -380,6 +486,8 @@ impl From<&WatchRecord> for WatchSummary {
             poll_secs: r.poll_secs,
             deadline_at: r.deadline_at,
             poll_count: r.poll_count,
+            structural_fail_streak: r.structural_fail_streak,
+            last_stderr: r.last_stderr.clone(),
         }
     }
 }
@@ -601,11 +709,14 @@ fn decide(
 }
 
 /// Run the `until` command; exit status 0 ⇒ the condition is met. Delegates to
-/// the shared [`crate::process_util::gate_met`] so watch / schedule / loop all
-/// evaluate a `--until` gate identically (exit code only; spawn failure ⇒ not
-/// met + logged). The event text comes from the separate `capture` command.
-fn poll_met(cmd: &str) -> bool {
-    crate::process_util::gate_met(cmd)
+/// the shared [`crate::process_util::gate_probe`] so watch / schedule / loop all
+/// evaluate a `--until` gate identically (spawn failure ⇒ not met + logged).
+/// Unlike the schedule/loop gates, watch keeps the whole outcome: the exit code
+/// and stderr are written onto the record each poll so a watch that never fires
+/// can be diagnosed while it is still waiting. The event text comes from the
+/// separate `capture` command.
+fn poll_probe(cmd: &str) -> crate::process_util::GateOutcome {
+    crate::process_util::gate_probe(cmd)
 }
 
 /// Run the `capture` command; its trimmed stdout becomes the event text handed to
@@ -634,6 +745,24 @@ pub fn compose_resume_prompt(rec: &WatchRecord, event_text: &str, timed_out: boo
             "你注册的 Fleet watch `{}` 已超时——等待的条件在超时前没有满足。",
             rec.id
         ));
+        // Hand over the evidence, not just the verdict: without it the woken
+        // agent's only move is to guess and re-register the same broken command.
+        out.push_str(&format!("\n\nuntil 命令：{}", rec.until_cmd));
+        out.push_str(&format!(
+            "\n轮询 {} 次，最后一次 exit {}",
+            rec.poll_count,
+            rec.last_exit.map(|c| c.to_string()).unwrap_or_else(|| "?".into())
+        ));
+        if !rec.last_stderr.is_empty() {
+            out.push_str(&format!("\n最后一次 stderr：{}", rec.last_stderr));
+        }
+        if rec.structural_fail_streak > 0 {
+            out.push_str(&format!(
+                "\n\n注意：最后 {} 次轮询都是**结构性失败**（命令跑不起来，不是条件没满足）。\
+                 别原样重挂——先在 Bash 里手跑这条 until，确认它在未满足时退 1、满足时退 0。",
+                rec.structural_fail_streak
+            ));
+        }
     } else {
         out.push_str(&format!(
             "你注册的 Fleet watch `{}` 触发了——等待的条件已满足。",
@@ -760,7 +889,17 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
             crate::log_debug(&format!("watch {id}: record gone, timer exiting"));
             return;
         };
-        match decide(&rec, generation, now_ms(), || poll_met(&rec.until_cmd)) {
+        // `decide` stays a pure exit-code decision; the outcome is stashed here
+        // so the Nap branch can persist the diagnosis alongside the heartbeat.
+        let probed: std::cell::RefCell<Option<crate::process_util::GateOutcome>> =
+            std::cell::RefCell::new(None);
+        let step = decide(&rec, generation, now_ms(), || {
+            let out = poll_probe(&rec.until_cmd);
+            let met = out.met;
+            *probed.borrow_mut() = Some(out);
+            met
+        });
+        match step {
             TimerStep::Exit => {
                 crate::log_debug(&format!(
                     "watch {id}: superseded (held gen {generation}), timer exiting"
@@ -778,7 +917,7 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
                 // doesn't mistake this watch for stranded. Preserves generation;
                 // a no-op if the record vanished (stopped) between get and touch.
                 if let Some(dir) = watches_dir() {
-                    touch_in(&dir, id, generation, now_ms());
+                    touch_in(&dir, id, generation, now_ms(), probed.borrow().as_ref());
                 }
                 std::thread::sleep(std::time::Duration::from_millis(ms));
             }
@@ -786,16 +925,34 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
     }
 }
 
-/// Stamp `last_poll_at` to mark the timer alive. Only writes when the record is
-/// present and at the expected generation — a stale or stopped timer must not
-/// resurrect a heartbeat.
-fn touch_in(dir: &Path, id: &str, generation: u64, now: u64) {
+/// Stamp `last_poll_at` to mark the timer alive, and record what the poll saw.
+/// Only writes when the record is present and at the expected generation — a
+/// stale or stopped timer must not resurrect a heartbeat.
+fn touch_in(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    now: u64,
+    outcome: Option<&crate::process_util::GateOutcome>,
+) {
     if let Some(mut rec) = get_in(dir, id) {
         if rec.generation == generation {
             rec.last_poll_at = now;
             // Each heartbeat is one condition poll that didn't fire; count it so the
             // session card can show how many times the watch has checked.
             rec.poll_count += 1;
+            if let Some(out) = outcome {
+                rec.last_exit = out.exit_code;
+                rec.last_stderr = out.stderr.clone();
+                // A streak, not a total: a gate that broke once (transient
+                // network, a binary mid-reinstall) and recovered is not the
+                // thing worth flagging — one that has *only ever* been broken is.
+                rec.structural_fail_streak = if out.is_structural_failure() {
+                    rec.structural_fail_streak + 1
+                } else {
+                    0
+                };
+            }
             let _ = write_record(dir, &rec);
         }
     }
@@ -1428,17 +1585,96 @@ mod tests {
     // ── P3: heartbeat + reconcile ──────────────────────────────────────────────
 
     #[test]
+    /// The core of the registration gate: a command the shell cannot run is
+    /// rejected outright. Before this, `watch --until 'ghh run view 1'` armed a
+    /// timer that polled 127 for two hours and then reported "condition not met",
+    /// which reads as "the CI job is slow" rather than "you typed the binary wrong".
+    #[test]
+    fn preflight_rejects_a_command_that_cannot_run() {
+        let err = preflight("fleet-no-such-binary-xyz --json").unwrap_err();
+        assert!(err.contains("跑不起来"), "{err}");
+        assert!(err.contains("fleet-no-such-binary-xyz"), "the command is quoted back: {err}");
+    }
+
+    #[test]
+    fn preflight_allows_unmet_and_already_met_but_flags_the_latter() {
+        let unmet = preflight("exit 1").expect("a plain unmet gate is the normal case");
+        assert!(!unmet.met);
+        assert_eq!(preflight_note(&unmet), "", "no words for the expected case");
+
+        let already = preflight("exit 0").expect("already-true is legal, just suspicious");
+        assert!(already.met);
+        assert!(preflight_note(&already).contains("现在就成立"));
+    }
+
+    /// A gate that merely fails (exit 1) must reset the streak: the flag is for
+    /// "this has never worked", not "this hiccuped once".
+    #[test]
+    fn touch_tracks_structural_failures_as_a_streak() {
+        let d = dir();
+        make(d.path(), "w1", 1_000);
+        let broken = crate::process_util::GateOutcome {
+            met: false,
+            exit_code: Some(127),
+            stderr: "sh: gh: command not found".into(),
+            timed_out: false,
+        };
+        let unmet = crate::process_util::GateOutcome {
+            met: false,
+            exit_code: Some(1),
+            stderr: String::new(),
+            timed_out: false,
+        };
+        touch_in(d.path(), "w1", 0, 10_000, Some(&broken));
+        touch_in(d.path(), "w1", 0, 20_000, Some(&broken));
+        let rec = get_in(d.path(), "w1").unwrap();
+        assert_eq!(rec.structural_fail_streak, 2);
+        assert_eq!(rec.last_exit, Some(127));
+        assert_eq!(rec.last_stderr, "sh: gh: command not found");
+
+        touch_in(d.path(), "w1", 0, 30_000, Some(&unmet));
+        let rec = get_in(d.path(), "w1").unwrap();
+        assert_eq!(rec.structural_fail_streak, 0, "a normal unmet poll clears the flag");
+        assert_eq!(rec.last_exit, Some(1));
+    }
+
+    /// The timeout resume is the woken agent's only evidence. Handing it the
+    /// verdict alone is what made "re-register the same broken command" the
+    /// rational next move.
+    #[test]
+    fn timeout_prompt_carries_the_diagnosis() {
+        let d = dir();
+        let mut rec = make(d.path(), "w1", 1_000);
+        rec.poll_count = 204;
+        rec.last_exit = Some(127);
+        rec.last_stderr = "sh: gh: command not found".into();
+        rec.structural_fail_streak = 204;
+        let prompt = compose_resume_prompt(&rec, "", true);
+        assert!(prompt.contains("gh run view 123"), "the until command itself");
+        assert!(prompt.contains("204"), "how many polls");
+        assert!(prompt.contains("command not found"), "what the shell said");
+        assert!(prompt.contains("结构性失败"), "and the verdict on it");
+
+        // A watch that timed out while legitimately waiting says none of that.
+        let mut waiting = make(d.path(), "w2", 1_000);
+        waiting.poll_count = 204;
+        waiting.last_exit = Some(1);
+        let prompt = compose_resume_prompt(&waiting, "", true);
+        assert!(!prompt.contains("结构性失败"));
+    }
+
+    #[test]
     fn touch_updates_heartbeat_only_at_the_right_generation() {
         let d = dir();
         make(d.path(), "w1", 1_000); // last_poll_at = 1_000, gen 0
-        touch_in(d.path(), "w1", 0, 50_000);
+        touch_in(d.path(), "w1", 0, 50_000, None);
         assert_eq!(get_in(d.path(), "w1").unwrap().last_poll_at, 50_000);
         // wrong generation: no update
-        touch_in(d.path(), "w1", 9, 90_000);
+        touch_in(d.path(), "w1", 9, 90_000, None);
         assert_eq!(get_in(d.path(), "w1").unwrap().last_poll_at, 50_000);
         // gone: no panic, no resurrection
         stop_in(d.path(), "w1");
-        touch_in(d.path(), "w1", 0, 99_000);
+        touch_in(d.path(), "w1", 0, 99_000, None);
         assert!(get_in(d.path(), "w1").is_none());
     }
 
@@ -1452,16 +1688,16 @@ mod tests {
         let d = dir();
         make(d.path(), "w1", 1_000);
         assert_eq!(get_in(d.path(), "w1").unwrap().poll_count, 0, "starts at zero");
-        touch_in(d.path(), "w1", 0, 50_000);
-        touch_in(d.path(), "w1", 0, 80_000);
-        touch_in(d.path(), "w1", 0, 110_000);
+        touch_in(d.path(), "w1", 0, 50_000, None);
+        touch_in(d.path(), "w1", 0, 80_000, None);
+        touch_in(d.path(), "w1", 0, 110_000, None);
         assert_eq!(
             get_in(d.path(), "w1").unwrap().poll_count,
             3,
             "one increment per poll heartbeat"
         );
         // wrong generation: neither the heartbeat nor the count moves
-        touch_in(d.path(), "w1", 9, 140_000);
+        touch_in(d.path(), "w1", 9, 140_000, None);
         assert_eq!(get_in(d.path(), "w1").unwrap().poll_count, 3);
     }
 
@@ -1472,8 +1708,8 @@ mod tests {
     fn enrich_stamps_active_watches_onto_matching_sessions() {
         let d = dir();
         make(d.path(), "w1", 1_000); // session_id = sess-1
-        touch_in(d.path(), "w1", 0, 2_000);
-        touch_in(d.path(), "w1", 0, 3_000); // poll_count = 2
+        touch_in(d.path(), "w1", 0, 2_000, None);
+        touch_in(d.path(), "w1", 0, 3_000, None); // poll_count = 2
         create_in(
             d.path(), "sess-2", "/ws", "true", None, Some("other thing"), 30, 60, None, None, None,
             "w2", 1_000,

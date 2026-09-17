@@ -25,7 +25,7 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
                 return;
             }
             let now = now_ms_wall();
-            println!("{:<10}  {:<12}  {:<10}  UNTIL", "ID", "SESSION", "TIMEOUT");
+            println!("{:<10}  {:<12}  {:<10}  {:<16}  UNTIL", "ID", "SESSION", "TIMEOUT", "LAST POLL");
             for w in watches {
                 let left = w.deadline_at.saturating_sub(now);
                 let timeout = if w.is_expired(now) {
@@ -44,7 +44,23 @@ pub(crate) fn cmd_watch(action: WatchCommands, session: Option<&str>) {
                 } else {
                     until
                 };
-                println!("{:<10}  {:<12}  {:<10}  {}", w.id, sess, timeout, until);
+                println!(
+                    "{:<10}  {:<12}  {:<10}  {:<16}  {}",
+                    w.id,
+                    sess,
+                    timeout,
+                    poll_state(&w),
+                    until
+                );
+                // The whole point of keeping stderr: a watch that has only ever
+                // failed structurally is broken, not waiting, and the operator
+                // should not have to read a debug log to find that out.
+                if w.structural_fail_streak > 0 {
+                    println!(
+                        "{:<10}  ⚠️ 连续 {} 次跑不起来（不是条件没满足）：{}",
+                        "", w.structural_fail_streak, w.last_stderr
+                    );
+                }
             }
         }
         WatchCommands::Stop { id } => {
@@ -185,7 +201,14 @@ fn create(
         ctx.effort.as_deref(),
         ctx.source.as_deref(),
     ) {
-        Ok(rec) => {
+        Ok((rec, probe)) => {
+            // The preflight's verdict, when it has one to give (already true /
+            // too slow to pre-judge). A structurally broken `until` never gets
+            // here — `create` refuses it.
+            let note = watch::preflight_note(&probe);
+            if !note.is_empty() {
+                println!("{note}");
+            }
             // Arm the detached timer so the watch actually polls. A create that
             // can't arm still leaves the record for the Stop-hook reconcile to
             // pick up — so warn, don't fail.
@@ -215,6 +238,20 @@ fn create(
             eprintln!("Error: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// The LAST POLL column: how many times the condition has been checked and what
+/// the most recent check said. `exit 1 ×204` is a healthy wait; `exit 127 ×204`
+/// is a watch that will never fire, and the two used to render identically.
+fn poll_state(w: &claw_fleet_core::watch::WatchRecord) -> String {
+    match w.last_exit {
+        Some(code) => format!("exit {code} ×{}", w.poll_count),
+        // No exit code recorded: either nothing has been polled yet, or this is
+        // a record written before the field existed. Both are "unknown" — do not
+        // render them as a signal kill, which is a much rarer and scarier thing.
+        None if w.poll_count == 0 => "—".to_string(),
+        None => format!("exit ? ×{}", w.poll_count),
     }
 }
 

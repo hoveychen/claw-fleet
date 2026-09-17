@@ -194,7 +194,7 @@ fn watch_tool_def() -> Value {
             "type": "object",
             "properties": {
                 "action": {"type": "string", "enum": ["create", "stop", "list"], "default": "create"},
-                "until": {"type": "string", "description": "Shell command that exits 0 when the condition is met. Required for create."},
+                "until": {"type": "string", "description": "Shell command that exits 0 when the condition is met. Required for create. It is RUN ONCE at registration: a command the shell cannot run (missing binary, bad quoting) is rejected on the spot, and one that already exits 0 comes back with a warning that the watch will fire immediately. Assert a FACT that will become true (an artifact exists, a run's status is 'completed'), not a transient phenomenon (a line scrolling past in a log you may already have missed)."},
                 "capture": {"type": "string", "description": "Shell command whose stdout is reported back on the resumed turn."},
                 "note": {"type": "string", "description": "What you're waiting for."},
                 "poll": {"type": "string", "description": "Poll interval, e.g. 30s / 5m (default 30s)."},
@@ -719,7 +719,7 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 None => watch::DEFAULT_TIMEOUT_SECS,
             };
             let ctx = crate::session::inherit_launch_context(Some(sid));
-            let rec = watch::create(
+            let (rec, probe) = watch::create(
                 sid,
                 &ctx.workspace,
                 &until,
@@ -737,8 +737,12 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
             };
             Ok(format!(
                 "ok: watch {} created — polling, resumes session {}. {armed}。\
+                 {}\
                  现在可以正常结束这个 turn。停止用 action=stop id={}。",
-                rec.id, rec.session_id, rec.id
+                rec.id,
+                rec.session_id,
+                watch::preflight_note(&probe),
+                rec.id
             ))
         }
         "stop" => {
