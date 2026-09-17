@@ -21,3 +21,11 @@
   color: var(--color-text-secondary);
   font-size: 10px;
 }
+
+/* The `until` command cannot run at all — this session is not waiting, it is
+   stuck. Must not read as the calm secondary chip above. */
+.watch_chip_broken {
+  composes: watch_chip;
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}

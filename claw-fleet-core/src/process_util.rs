@@ -88,6 +88,10 @@ pub struct GateOutcome {
     /// Trimmed stderr, truncated to [`GATE_STDERR_CAP`]. Empty when the command
     /// said nothing (the normal "not yet" case).
     pub stderr: String,
+    /// The evaluation was cut short by a caller-supplied deadline (only
+    /// [`gate_probe_bounded`] sets this). The verdict is then "unknown", not
+    /// "broken" — a slow gate is a normal thing to wait on.
+    pub timed_out: bool,
 }
 
 impl GateOutcome {
@@ -96,11 +100,14 @@ impl GateOutcome {
     /// something it could not execute (126). These never become true by waiting
     /// — a watch on one of them would burn its whole deadline for nothing.
     pub fn is_structural_failure(&self) -> bool {
-        !self.met && matches!(self.exit_code, None | Some(126) | Some(127))
+        !self.met && !self.timed_out && matches!(self.exit_code, None | Some(126) | Some(127))
     }
 
     /// One-line human summary for logs, `watch list` and resume prompts.
     pub fn summary(&self) -> String {
+        if self.timed_out {
+            return format!("超时未返回: {}", self.stderr);
+        }
         let code = match self.exit_code {
             Some(c) => c.to_string(),
             None => "signal/spawn-failure".to_string(),
@@ -135,11 +142,82 @@ pub fn gate_probe(cmd: &str) -> GateOutcome {
             met: out.status.success(),
             exit_code: out.status.code(),
             stderr: truncate_chars(String::from_utf8_lossy(&out.stderr).trim(), GATE_STDERR_CAP),
+            timed_out: false,
         },
         Err(e) => {
             crate::log_debug(&format!("gate poll: cannot run until-command ({e}): {cmd}"));
-            GateOutcome { met: false, exit_code: None, stderr: format!("cannot run: {e}") }
+            GateOutcome {
+                met: false,
+                exit_code: None,
+                stderr: format!("cannot run: {e}"),
+                timed_out: false,
+            }
         }
+    }
+}
+
+/// [`gate_probe`] with a wall-clock deadline: the child is killed if it outlives
+/// `limit`, and the outcome comes back `timed_out` rather than met/unmet.
+///
+/// Only the *preflight* (one synchronous run at registration, inside a tool
+/// call the agent is waiting on) needs this — the polling timers run unbounded
+/// on purpose, since a gate that legitimately takes minutes is normal there.
+/// Deliberately not `timeout(1)`: this machine has no GNU timeout and Windows
+/// has none at all.
+pub fn gate_probe_bounded(cmd: &str, limit: std::time::Duration) -> GateOutcome {
+    let mut child = match shell_command(cmd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            crate::log_debug(&format!("gate preflight: cannot run until-command ({e}): {cmd}"));
+            return GateOutcome {
+                met: false,
+                exit_code: None,
+                stderr: format!("cannot run: {e}"),
+                timed_out: false,
+            };
+        }
+    };
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stderr = child
+                    .wait_with_output()
+                    .map(|o| String::from_utf8_lossy(&o.stderr).trim().to_string())
+                    .unwrap_or_default();
+                return GateOutcome {
+                    met: status.success(),
+                    exit_code: status.code(),
+                    stderr: truncate_chars(&stderr, GATE_STDERR_CAP),
+                    timed_out: false,
+                };
+            }
+            Ok(None) => {}
+            Err(e) => {
+                return GateOutcome {
+                    met: false,
+                    exit_code: None,
+                    stderr: format!("cannot wait: {e}"),
+                    timed_out: false,
+                };
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return GateOutcome {
+                met: false,
+                exit_code: None,
+                stderr: format!("{}s 内未返回，已终止", limit.as_secs()),
+                timed_out: true,
+            };
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
     }
 }
 
@@ -268,6 +346,25 @@ mod tests {
         assert!(!out.is_structural_failure());
         assert!(gate_met("exit 0"));
         assert!(!gate_met("exit 1"));
+    }
+
+    #[test]
+    fn gate_probe_bounded_kills_a_hanging_gate_and_reports_unknown() {
+        let out = gate_probe_bounded("sleep 30", std::time::Duration::from_millis(300));
+        assert!(out.timed_out);
+        assert!(!out.met);
+        assert!(
+            !out.is_structural_failure(),
+            "a slow gate is unknown, not broken — registering it must still be allowed"
+        );
+    }
+
+    #[test]
+    fn gate_probe_bounded_returns_a_fast_verdict_intact() {
+        let out = gate_probe_bounded("echo nope 1>&2; exit 4", std::time::Duration::from_secs(5));
+        assert!(!out.timed_out);
+        assert_eq!(out.exit_code, Some(4));
+        assert_eq!(out.stderr, "nope");
     }
 
     #[test]

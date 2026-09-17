@@ -33,7 +33,7 @@ describe("buildInfoChips", () => {
       slug: "fix/auth",
       runningSubagentCount: 3,
       handoff: { chainId: "c1", hop: 2, chainLen: 3 },
-      watches: [{ id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 1 }],
+      watches: [{ id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 1, structuralFailStreak: 0 }],
     };
     // 会话 id 也不在这行 chip 上：它太长，且它真正被用到的方式是复制走。
     expect(buildInfoChips(rich)).toEqual(["proj"]);

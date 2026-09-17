@@ -122,13 +122,25 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
     });
   }
   if (s.watches && s.watches.length > 0) {
-    // 一个 watch 时报它轮询了几次——那是「它还活着、还在等」唯一的可见证据；
-    // 多个时报个数，逐个的轮询次数在半屏上。
-    const label =
-      s.watches.length === 1
-        ? t("watch ×{0}", s.watches[0].pollCount)
-        : t("{0} 个 watch", s.watches.length);
-    pills.push({ key: "watch", label, tone: "live", target: "sheet" });
+    // until 命令根本跑不起来的 watch 不是在等，是卡死了——轮询次数在这种情况下
+    // 是个误导性的安慰数字，所以换成警示 pill。
+    const broken = s.watches.filter((w) => (w.structuralFailStreak ?? 0) > 0).length;
+    if (broken > 0) {
+      pills.push({
+        key: "watch",
+        label: t("watch 跑不起来 ×{0}", broken),
+        tone: "alert",
+        target: "sheet",
+      });
+    } else {
+      // 一个 watch 时报它轮询了几次——那是「它还活着、还在等」唯一的可见证据；
+      // 多个时报个数，逐个的轮询次数在半屏上。
+      const label =
+        s.watches.length === 1
+          ? t("watch ×{0}", s.watches[0].pollCount)
+          : t("{0} 个 watch", s.watches.length);
+      pills.push({ key: "watch", label, tone: "live", target: "sheet" });
+    }
   }
 
   // ── 进度读数 ────────────────────────────────────────────────────────────

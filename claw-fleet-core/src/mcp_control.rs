@@ -719,7 +719,7 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 None => watch::DEFAULT_TIMEOUT_SECS,
             };
             let ctx = crate::session::inherit_launch_context(Some(sid));
-            let rec = watch::create(
+            let (rec, probe) = watch::create(
                 sid,
                 &ctx.workspace,
                 &until,
@@ -737,8 +737,12 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
             };
             Ok(format!(
                 "ok: watch {} created — polling, resumes session {}. {armed}。\
+                 {}\
                  现在可以正常结束这个 turn。停止用 action=stop id={}。",
-                rec.id, rec.session_id, rec.id
+                rec.id,
+                rec.session_id,
+                watch::preflight_note(&probe),
+                rec.id
             ))
         }
         "stop" => {

@@ -93,19 +93,41 @@ describe("buildStatusPills", () => {
 
   it("单个 watch 报轮询次数，多个报个数", () => {
     const one = buildStatusPills(
-      session({ watches: [{ id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 12 }] }),
+      session({ watches: [{ id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 12, structuralFailStreak: 0 }] }),
     );
     expect(one[0].label).toContain("12");
     const two = buildStatusPills(
       session({
         watches: [
-          { id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 12 },
-          { id: "w2", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 3 },
+          { id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 12, structuralFailStreak: 0 },
+          { id: "w2", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 3, structuralFailStreak: 0 },
         ],
       }),
     );
     expect(two[0].label).toContain("2");
     expect(two[0].label).not.toContain("12");
+  });
+
+  it("until 跑不起来的 watch 报警示，而不是安慰性的轮询次数", () => {
+    // 204 次轮询全是 exit 127 —— 这不是「等了很久」，是这条 watch 永远不会触发。
+    const pills = buildStatusPills(
+      session({
+        watches: [
+          {
+            id: "w1",
+            created: 0,
+            pollSecs: 30,
+            deadlineAt: 0,
+            pollCount: 204,
+            structuralFailStreak: 204,
+            lastStderr: "sh: gh: command not found",
+          },
+        ],
+      }),
+    );
+    const watch = pills.find((p) => p.key === "watch");
+    expect(watch?.tone).toBe("alert");
+    expect(watch?.label).not.toContain("204 次");
   });
 
   it("半分钱以下的花费不占一颗 pill（$0.00 等于没说）", () => {
