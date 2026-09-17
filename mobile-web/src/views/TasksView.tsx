@@ -40,6 +40,7 @@ import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
 import { canControl, runStop, stopMode } from "./sessionStop";
 import { repoRootPath } from "../../../shared-ts/repoPath";
+import { countChainUnits } from "../../../shared-ts/chainUnits";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import styles from "./TasksView.module.css";
 
@@ -472,15 +473,26 @@ export function TasksView({
     });
   }, [all, search, ftsMatchKeys]);
 
+  // 计数单位是「一件在做的事」，不是会话：一条接力链无论跑了多少棒都只算 1
+  // （桌面端 `chainUnitKey` 同款）。链的归属范围要跟列表的分区口径一致 ——
+  // 设备 + 仓库根，否则会出现「算作 1 个单位、列表里却画在两个分区各一行」。
+  // 分组开关关掉时每行各算各的，正好与展开后的列表对上。
   const counts = useMemo(() => {
-    let pending = 0;
-    let done = 0;
-    for (const s of preMark) {
-      if (markBucket(s) === "done") done++;
-      else pending++;
-    }
-    return { all: preMark.length, pending, done };
-  }, [preMark]);
+    const keyOf = (s: WithDevice<SessionInfo>) =>
+      groupHandoff && s.handoff && s.handoff.chainLen > 1
+        ? `${s.deviceId}::${repoRootPath(s.workspacePath)}::${s.handoff.chainId}`
+        : null;
+    const byBucket: Record<SessionMark, Array<WithDevice<SessionInfo>>> = {
+      pending: [],
+      done: [],
+    };
+    for (const s of preMark) byBucket[markBucket(s)].push(s);
+    return {
+      all: countChainUnits(preMark, keyOf),
+      pending: countChainUnits(byBucket.pending, keyOf),
+      done: countChainUnits(byBucket.done, keyOf),
+    };
+  }, [preMark, groupHandoff]);
 
   const visible = useMemo(
     () => preMark.filter((s) => markFilter === "all" || markBucket(s) === markFilter),
