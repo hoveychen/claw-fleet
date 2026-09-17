@@ -528,6 +528,27 @@ fn successor_of(chain: &HandoffChain, session_id: &str) -> Option<String> {
         .map(|l| l.to_session_id.clone())
 }
 
+/// Whether this session has passed its baton on — either a registration is
+/// still pending (the Stop hook has not fired yet) or a link already records
+/// the successor it spawned.
+///
+/// Covers both halves of the window because the two states are seconds apart
+/// and a caller asking "is this session retired?" means the same thing in each.
+/// Anything that would *wake* or *notify about* such a session must consult
+/// this: the successor owns the work, so resuming the predecessor forks the
+/// chain (see [`successor_of`]) and reporting its turn as a finished task is
+/// simply wrong — the task moved, it did not end.
+pub fn has_relayed(session_id: &str) -> bool {
+    if session_id.is_empty() {
+        return false;
+    }
+    if read_pending(session_id).is_some() {
+        return true;
+    }
+    chain_containing(session_id)
+        .is_some_and(|chain| successor_of(&chain, session_id).is_some())
+}
+
 fn chain_containing_in(dir: &Path, session_id: &str) -> Option<HandoffChain> {
     list_chains_in(dir)
         .into_iter()
