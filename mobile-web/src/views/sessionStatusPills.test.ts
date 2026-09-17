@@ -108,8 +108,9 @@ describe("buildStatusPills", () => {
     expect(two[0].label).not.toContain("12");
   });
 
-  it("until 跑不起来的 watch 报警示，而不是安慰性的轮询次数", () => {
-    // 204 次轮询全是 exit 127 —— 这不是「等了很久」，是这条 watch 永远不会触发。
+  it("a watch whose until cannot run alerts instead of reporting a poll count", () => {
+    // 204 polls, all exit 127 — this is not "waited a long time", it is a watch
+    // that will never fire.
     const pills = buildStatusPills(
       session({
         watches: [
