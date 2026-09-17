@@ -75,8 +75,36 @@ describe("findLastUserInput (mobile-web)", () => {
     expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "continue" });
   });
 
+  it("skips the isMeta companion row Claude Code writes next to an image read", () => {
+    const imageCompanion = {
+      type: "user",
+      isMeta: true,
+      message: {
+        role: "user",
+        content:
+          "[Image: original 2560x1640, displayed at 2000x1281. Multiply coordinates by 1.28 to map to original image.]",
+      },
+    } as RawMessage;
+    const msgs = [userPrompt("看下这张截图"), assistantText("reading it"), imageCompanion];
+    expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "看下这张截图" });
+  });
+
   it("returns null when the session has no earlier user input", () => {
     expect(findLastUserInput([assistantText("opening line")])).toBeNull();
+  });
+
+  it("drops the composer's trailing Context files block", () => {
+    const msgs = [
+      userPrompt(
+        "这个卡片怎么回事\n\nContext files:\n- /Users/me/.fleet/user-attachments/ab/paste-1.png",
+      ),
+    ];
+    expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "这个卡片怎么回事" });
+  });
+
+  it("leaves a prompt that merely mentions Context files mid-sentence alone", () => {
+    const text = "Context files: 这个格式是谁定的？";
+    expect(findLastUserInput([userPrompt(text)])).toEqual({ kind: "prompt", text });
   });
 
   it("strips the system-reminder envelope and keeps looking when nothing is left", () => {

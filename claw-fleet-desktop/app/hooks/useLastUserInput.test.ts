@@ -85,6 +85,20 @@ describe("findLastUserInput", () => {
     expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "继续" });
   });
 
+  it("skips the isMeta companion row Claude Code writes next to an image read", () => {
+    const imageCompanion = {
+      type: "user",
+      isMeta: true,
+      message: {
+        role: "user",
+        content:
+          "[Image: original 2560x1640, displayed at 2000x1281. Multiply coordinates by 1.28 to map to original image.]",
+      },
+    } as RawMessage;
+    const msgs = [userPrompt("看下这张截图"), assistantText("读一下"), imageCompanion];
+    expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "看下这张截图" });
+  });
+
   it("returns null when the session has no earlier user input", () => {
     expect(findLastUserInput([assistantText("开场白")])).toBeNull();
   });
@@ -94,6 +108,20 @@ describe("findLastUserInput", () => {
       userPrompt("<system-reminder>internal junk</system-reminder>\n真正说的话"),
     ];
     expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "真正说的话" });
+  });
+
+  it("drops the composer's trailing Context files block", () => {
+    const msgs = [
+      userPrompt(
+        "这个卡片怎么回事\n\nContext files:\n- /Users/me/.fleet/user-attachments/ab/paste-1.png",
+      ),
+    ];
+    expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "这个卡片怎么回事" });
+  });
+
+  it("leaves a prompt that merely mentions Context files mid-sentence alone", () => {
+    const text = "Context files: 这个格式是谁定的？";
+    expect(findLastUserInput([userPrompt(text)])).toEqual({ kind: "prompt", text });
   });
 
   it("keeps looking back when a message is envelope-only", () => {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSessionsStore } from "../store";
+import { splitContextFiles } from "../userAttachments";
 import type {
   ContentBlock,
   RawMessage,
@@ -64,16 +65,19 @@ function asArray(content: ContentBlock[] | string | undefined): ContentBlock[] {
 }
 
 /**
- * Strip the machinery Claude Code wraps around a typed prompt — `<system-reminder>`
- * blocks (hook context, memory recalls) and `<command-name>`/`<command-message>`
- * envelopes — leaving what the user actually typed.
+ * Strip the machinery wrapped around a typed prompt — Claude Code's
+ * `<system-reminder>` blocks (hook context, memory recalls) and
+ * `<command-name>`/`<command-message>` envelopes, plus the composer's own
+ * trailing `Context files:` block (a wall of absolute attachment paths, which
+ * the user never typed) — leaving what the user actually said.
  */
 export function stripPromptEnvelope(text: string): string {
-  return text
+  const stripped = text
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
     .replace(/<command-(name|message|args)>[\s\S]*?<\/command-\1>/g, "")
     .replace(/<local-command-std(out|err)>[\s\S]*?<\/local-command-std\1>/g, "")
     .trim();
+  return splitContextFiles(stripped).body.trim();
 }
 
 /** Flatten a tool_result's content, which is a string on the wire for built-in
@@ -190,6 +194,13 @@ export function findLastUserInput(messages: RawMessage[]): LastUserInput | null 
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.type !== "user" || !msg.message) continue;
+    // Harness-injected `role=user` records are not the user speaking. The one
+    // that actually reached the card was the companion row Claude Code writes
+    // next to an image tool_result ("[Image: original 2560x1640, displayed
+    // at …]"), which is `isMeta` + `turnCompanion` — so any screenshot the
+    // agent Read shadowed the prompt the user had typed. Skill bodies, hook
+    // output and system reminders carry the same flag and are equally not input.
+    if (msg.isMeta) continue;
     const content = msg.message.content;
 
     if (typeof content === "string") {

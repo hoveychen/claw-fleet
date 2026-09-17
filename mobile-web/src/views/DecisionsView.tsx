@@ -17,6 +17,7 @@ import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mdComponents } from "../markdown/components";
 import { fetchDecisionAsset } from "../decisionAsset";
+import { splitContextFiles } from "../userAttachments";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
 import { getLang, t } from "../i18n";
@@ -879,13 +880,16 @@ function blocksOf(msg: RawMessage): ContentBlock[] {
 }
 
 /** Strip the machinery Claude Code wraps around a typed prompt — system-reminder
- *  blocks (hook context, memory recalls) and slash-command envelopes. */
+ *  blocks (hook context, memory recalls) and slash-command envelopes — plus the
+ *  composer's own trailing `Context files:` block, which is a wall of absolute
+ *  attachment paths, not something the user said. */
 export function stripPromptEnvelope(text: string): string {
-  return text
+  const stripped = text
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
     .replace(/<command-(name|message|args)>[\s\S]*?<\/command-\1>/g, "")
     .replace(/<local-command-std(out|err)>[\s\S]*?<\/local-command-std\1>/g, "")
     .trim();
+  return splitContextFiles(stripped).body.trim();
 }
 
 /** Shorten an answer key into a one-line question label. `fleet__ask` keys are
@@ -953,6 +957,12 @@ export function findLastUserInput(messages: RawMessage[]): LastUserInput | null 
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.type !== "user" || !msg.message) continue;
+    // Harness-injected `role=user` records are not the user speaking — see the
+    // desktop twin in claw-fleet-desktop/app/hooks/useLastUserInput.ts. The
+    // common one is the companion row next to an image tool_result
+    // ("[Image: original 2560x1640, displayed at …]"), which would otherwise
+    // shadow the prompt the user actually typed.
+    if (msg.isMeta) continue;
     const content = msg.message.content;
     if (typeof content === "string") {
       const text = stripPromptEnvelope(content);
