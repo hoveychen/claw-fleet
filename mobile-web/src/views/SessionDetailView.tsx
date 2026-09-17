@@ -772,9 +772,9 @@ const bandTitleMdComponents = {
 
 /**
  * A run of ≥2 adjacent pure-work records folded behind one summary line —
- * the mobile counterpart of the desktop WorkRunBlock. `live` (the run is the
- * transcript's working tail) opens the band and shimmers the headline; a
- * finished run closes with the Done check.
+ * the mobile counterpart of the desktop WorkRunBlock. `tail` (the run is the
+ * transcript's last unit) opens the band; `live` (the session is working)
+ * shimmers the headline; a finished run closes with the Done check.
  */
 function WorkRunBand({
   msgs,
@@ -782,6 +782,7 @@ function WorkRunBand({
   expandedThinking,
   onToggleThinking,
   live,
+  tail,
   toolMeta,
   client,
   jsonlPath,
@@ -790,7 +791,10 @@ function WorkRunBand({
   baseIndex: number;
   expandedThinking: Set<number>;
   onToggleThinking: (key: number) => void;
+  /** The session is in a working status — drives the headline shimmer only. */
   live: boolean;
+  /** This run is the transcript's trailing unit — it starts open. */
+  tail: boolean;
   toolMeta?: Map<string, ToolMeta>;
   client?: FleetTransport | null;
   jsonlPath?: string;
@@ -803,8 +807,15 @@ function WorkRunBand({
     ? last.message.stop_reason
     : undefined;
   const streaming = lastStop === undefined ? live : live && lastStop === null;
-  const [open, setOpen] = useState(streaming);
-  useEffect(() => setOpen(streaming), [streaming]);
+  // The trailing band starts open and stays open: folded, a growing tail shows
+  // only a rising step count and a newer timestamp with nothing to read. It is
+  // a latch, not a mirror — `streaming` flips off mid-run whenever a tool
+  // outlives the backend's freshness window, and mirroring it both ways both
+  // flapped the band shut under the reader and stomped a manual toggle.
+  const [open, setOpen] = useState(tail);
+  useEffect(() => {
+    if (tail) setOpen(true);
+  }, [tail]);
   const title = workRunTitle(msgs) ?? t("处理任务");
   const bandTokens = msgs.reduce((sum, m) => sum + (m.message?.usage?.output_tokens ?? 0), 0);
   return (
@@ -1538,8 +1549,10 @@ export function SessionDetailView({
           return units.map((unit, unitIdx) => {
             if (unit.kind === "work-group") {
               // A run of pure-work records folds behind one summary line; the
-              // working tail's run opens itself and shimmers its headline.
-              const live = working && unitIdx === units.length - 1;
+              // trailing run opens itself, and shimmers its headline while the
+              // session is working.
+              const tail = unitIdx === units.length - 1;
+              const live = working && tail;
               return (
                 <WorkRunBand
                   key={unit.startLocal}
@@ -1548,6 +1561,7 @@ export function SessionDetailView({
                   expandedThinking={expandedThinking}
                   onToggleThinking={toggleThinking}
                   live={live}
+                  tail={tail}
                   toolMeta={toolMetaMap}
                   client={client}
                   jsonlPath={detailPath}

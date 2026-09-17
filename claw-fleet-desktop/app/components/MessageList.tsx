@@ -819,7 +819,8 @@ export function MessageList({
                   decisionRecords={records}
                   searchTerms={searchTerms}
                   paths={paths}
-                  defaultOpen={isWorkingNow && unitIdx === renderUnits.length - 1}
+                  defaultOpen={unitIdx === renderUnits.length - 1}
+                  live={isWorkingNow && unitIdx === renderUnits.length - 1}
                   forceOpen={holdsMatch(unit.msgs.length)}
                 />
               </div>
