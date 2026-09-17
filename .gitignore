@@ -68,3 +68,4 @@ TASKS.md
 
 # Vite dependency pre-bundle cache (any subdirectory).
 .vite/
+__pycache__/
