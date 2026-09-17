@@ -118,6 +118,10 @@ export function statusTone(s: SessionInfo & { deviceId?: string }): string | nul
     lastActivityMs: s.lastActivityMs ?? 0,
     now: Date.now(),
   });
+  // 「等待 watch 条件」排在最前面判：它的进程已经退了、transcript 也不再写，
+  // 否则会一路掉到最后的 `return null`（没点，读起来和已结束一样），而实际上
+  // Fleet 的定时器条件一满足就会把它叫回来。
+  if (s.status === "watching") return "watching";
   if (s.status === "waitingInput") return "waiting";
   if (s.status === "rateLimited" || s.status === "serverErrored" || s.status === "remoteDisconnected")
     return "error";
@@ -135,7 +139,7 @@ export function statusTone(s: SessionInfo & { deviceId?: string }): string | nul
  *  active member (which need not be the tip), so its dot must reflect the whole
  *  chain — a running hop outranks a waiting/active/errored one, mirroring the
  *  desktop launchpad's `chainBarColor`. */
-const TONE_PRIORITY = ["working", "waiting", "active", "error", "quiet"];
+const TONE_PRIORITY = ["working", "waiting", "active", "error", "quiet", "watching"];
 function chainTone(members: SessionInfo[]): string | null {
   let best: string | null = null;
   let bestRank = TONE_PRIORITY.length;

@@ -321,6 +321,12 @@
   opacity: 0.45;
 }
 
+/* 挂着 fleet watch：进程已退、transcript 不再写，但 Fleet 的定时器条件一满足
+   就会把这条会话叫回来。所以它既不是「在跑」也不是「已结束」，给第三种颜色。 */
+.statusDot[data-tone="watching"] {
+  background: var(--color-info);
+}
+
 .statusDot[data-tone="idle"] {
   background: var(--color-text-dim);
 }

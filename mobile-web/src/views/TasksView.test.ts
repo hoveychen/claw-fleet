@@ -167,6 +167,12 @@ describe("statusTone quiet-alive", () => {
     expect(statusTone(row({ id: "i", status: "waitingInput", procAlive: true }))).toBe("waiting");
   });
 
+  it("gives a watch-parked row its own tone instead of no dot", () => {
+    // 它的进程已经退了，所以旧逻辑会一路掉到 `return null`——没点，和已结束的
+    // 行长得一样，而 Fleet 的定时器条件一满足就会把它叫回来。
+    expect(statusTone(row({ id: "wt", status: "watching", procAlive: false }))).toBe("watching");
+  });
+
   it("does not flick back to working on a single sparse write", () => {
     // Same flicker the desktop row had: a session parked on one long tool call
     // writes a line every few minutes, each write pushes the status back to a
