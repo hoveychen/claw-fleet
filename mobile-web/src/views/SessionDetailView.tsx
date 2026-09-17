@@ -76,6 +76,12 @@ import { parseSkillInjection } from "../skillInjection";
 import { groupMetaRuns } from "./metaGrouping";
 import { countSteps, groupWorkRuns, isDecisionTool, workRunFinished, workRunTitle } from "./workRuns";
 import { decisionSummary, friendlyToolName, toolSummary } from "./toolSummary";
+import {
+  InFlightToolsContext,
+  inFlightToolIds,
+  isBackgroundShell,
+  useInFlightTools,
+} from "./inFlightTools";
 import { userDisplayText } from "./slashCommand";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
@@ -633,6 +639,12 @@ function ToolStep({
 }) {
   const [open, setOpen] = useState(false);
   const nav = useAgentNav();
+  const inFlight = useInFlightTools();
+  // Reading this through context (not a prop) is deliberate: MessageRow is
+  // memoized against the 2.5s tail poll, and a context update re-renders the
+  // consumer through that memo without widening its comparator.
+  const running = !!b.id && inFlight.has(b.id);
+  const background = isBackgroundShell(b);
   const name = b.name ?? "";
   const fleetTool = isFleetTool(name);
   const summary = meta?.ingest
@@ -668,6 +680,12 @@ function ToolStep({
         <div className={styles.toolLine} title={name}>
           {summary || friendlyToolName(name)}
         </div>
+        {background && <span className={styles.toolBgTag}>{t("后台")}</span>}
+        {running && (
+          <span className={styles.toolRunning} role="status">
+            {t("运行中")}
+          </span>
+        )}
         {meta && <DigestChips meta={meta} />}
       </div>
       {canOpenAgent && (
@@ -1426,6 +1444,12 @@ export function SessionDetailView({
     }
     return ids;
   }, [messages]);
+  // Which of those calls are executing right now, so the step itself says so
+  // instead of leaving the band's missing Done check to imply it.
+  const inFlightTools = useMemo(
+    () => inFlightToolIds(messages ?? [], resultIds, working, blocksOf),
+    [messages, resultIds, working],
+  );
   const turnUsage = useMemo(() => turnUsageByIndex(mainRows), [mainRows]);
 
   // Per-row subset so the row memo can diff by content instead of re-rendering
@@ -1446,6 +1470,7 @@ export function SessionDetailView({
 
   return (
     <AgentNavProvider nav={nav}>
+    <InFlightToolsContext.Provider value={inFlightTools}>
     <div className={styles.page}>
       {/* `seamless`: 头部底下紧跟着的是状态轨（自带一条底线）或 ↑来自 面包屑，
           两者都与头部同属一层 chrome；头部再画一条底线就把一块面切成两片。
@@ -1665,6 +1690,7 @@ export function SessionDetailView({
         />
       )}
     </div>
+    </InFlightToolsContext.Provider>
     </AgentNavProvider>
   );
 }
