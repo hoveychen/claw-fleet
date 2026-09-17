@@ -51,6 +51,24 @@ export function isFleetTool(name: string): FleetTool | null {
   return null;
 }
 
+/**
+ * An *ingest* — a deliverable filed into 产出, a doc published to the 知识库 —
+ * is the run's output, not its scaffolding, and it renders as a preview of the
+ * thing itself (`IngestCard`, deliberately laid out unexpanded under the step
+ * row). So it must never be swept into a collapsed work band, which would put
+ * the one artifact of the run two clicks away. Mirrors the desktop's
+ * `blocks/fleetTools.ts`.
+ */
+export function isIngestCall(name: string, input: unknown): boolean {
+  const tool = isFleetTool(name);
+  if (tool !== "artifact" && tool !== "wiki") return false;
+  const action =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>).action
+      : undefined;
+  return tool === "artifact" ? action === "add" : action === "publish";
+}
+
 // ── Result shapes ────────────────────────────────────────────────────────────
 
 export interface PlanListItem {

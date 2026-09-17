@@ -27,6 +27,16 @@ describe("isWorkRow", () => {
     expect(isWorkRow(assistant([tool("request_user_input")]))).toBe(false);
     expect(isWorkRow(user())).toBe(false);
   });
+
+  // The band would hide the run's own deliverable behind two clicks — the
+  // `IngestCard` preview is laid out to be visible without expanding anything.
+  it("rejects an ingest call, so a filed artifact / published doc stays visible", () => {
+    expect(isWorkRow(assistant([think, tool("mcp__fleet__fleet__artifact", { action: "add" })]))).toBe(false);
+    expect(isWorkRow(assistant([tool("fleet__wiki", { action: "publish" })]))).toBe(false);
+    // Reads of the same tools are ordinary scaffolding and still fold.
+    expect(isWorkRow(assistant([tool("mcp__fleet__fleet__artifact", { action: "list" })]))).toBe(true);
+    expect(isWorkRow(assistant([tool("fleet__wiki", { action: "cat" })]))).toBe(true);
+  });
 });
 
 describe("groupWorkRuns", () => {
