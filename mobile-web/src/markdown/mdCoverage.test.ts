@@ -1,30 +1,32 @@
 import { describe, expect, it } from "vitest";
 
 /**
- * 每个 `<ReactMarkdown>` 都必须显式传 `components`。
+ * Every `<ReactMarkdown>` must explicitly pass `components`.
  *
- * 这条守的是本轮修掉的那类漂移：决策/计划 tab、工具详情、Fleet 工具结果三处
- * 各自 new 了一个 ReactMarkdown 却没传组件表，于是 ```mermaid fence 在手机上
- * 是一块原始代码，桌面却出图 —— 而 SessionDetailTabs 的注释还写着「同 wiki/
- * 消息视图」。漏传是静默的，只有人肉打开那一屏才看得见，所以在这里拦。
+ * This guards against a pattern we just fixed: decision/plan tabs, tool details, and Fleet
+ * tool results each created a ReactMarkdown but forgot to pass the component map. This caused
+ * ```mermaid fences to render as raw code on mobile while showing diagrams on desktop —
+ * even though SessionDetailTabs's comments claimed "same as wiki/message view." Forgetting
+ * to pass is silent; only manual inspection catches it, so we enforce it here.
  *
- * 新增渲染面时：spread `mermaidMarkdownComponents`（要出图），或显式传一张
- * 不含它的表（确实只想要纯文本）—— 两种都过，唯独「忘了传」不过。
+ * When adding a new rendering surface: either spread `mermaidMarkdownComponents` (to render
+ * diagrams), or explicitly pass a map without it (if you only want plain text). Both cases
+ * pass; only forgetting to pass fails.
  */
-// vite 的 glob：拿到 src 下每个 .tsx 的原文，不需要 node:fs（mobile-web 是纯浏览
-// 器包，tsconfig 里没有 node 类型）。
+// Vite's glob import: fetch raw source of every .tsx under src, no need for node:fs
+// (mobile-web is a pure browser package; tsconfig has no node types).
 const FILES = import.meta.glob("../**/*.tsx", {
   query: "?raw",
   import: "default",
   eager: true,
 }) as Record<string, string>;
 
-describe("markdown 渲染面覆盖", () => {
-  it("每个 <ReactMarkdown> 都传了 components", () => {
+describe("markdown rendering surface coverage", () => {
+  it("Every <ReactMarkdown> passes components", () => {
     const offenders: string[] = [];
     for (const [path, src] of Object.entries(FILES)) {
       if (path.endsWith(".test.tsx")) continue;
-      // 每个开标签到它的 `>` 为止就是属性区。
+      // Each opening tag up to its `>` is the attribute region.
       for (const m of src.matchAll(/<ReactMarkdown\b[\s\S]*?>/g)) {
         if (!m[0].includes("components=")) {
           offenders.push(`${path}:${src.slice(0, m.index).split("\n").length}`);
@@ -34,25 +36,26 @@ describe("markdown 渲染面覆盖", () => {
     expect(offenders).toEqual([]);
   });
 
-  // 决策卡那五处曾经只挂 remarkGfm，于是同一段文字在会话里 CJK 加粗、公式、软换行
-  // 都对，进了决策卡就全不认。渲染面之间的差异应该只体现在组件表上，不该体现在
-  // 插件链上。
-  // 消息页把 `a` 覆写成一个 `<span className={styles.mdLink}>`：看着是链接、点
-  // 下去什么都不发生，从会话详情页第一版起一直如此，只有人肉在手机上点一下才
-  // 看得见。唯一合法的 inert 链接是折叠带的标题（它整块在一个 <button> 里），
-  // 它显式列在白名单里。
+  // Decision cards used to attach only remarkGfm, so the same text rendered correctly
+  // in sessions (CJK bold, formulas, soft line breaks all work) but broke entirely in
+  // decision cards. Differences between rendering surfaces should only appear in the
+  // component map, not in the plugin chain.
+  // The message view rewrites `a` as `<span className={styles.mdLink}>`: it looks like
+  // a link but clicking does nothing. This has been the case since the first version
+  // of session details — only manual testing on mobile surfaces it. The only legal inert
+  // link is the band title (it's wrapped in a <button>), explicitly whitelisted.
   const INERT_LINK_OK = new Set(["bandTitleMdComponents"]);
-  it("没有渲染面把链接做成不可点的 span", () => {
+  it("No rendering surface makes links into non-clickable spans", () => {
     const offenders: string[] = [];
     for (const [path, src] of Object.entries(FILES)) {
       if (path.endsWith(".test.tsx")) continue;
-      // 两种写法都拦：组件表里内联的 `a: (…) => <span>`，和先单独声明一个
-      // `const x: Components["a"] = (…) => <span>` 再挂上去（DecisionQa 就是后
-      // 者，所以第一版守门没看见它）。
+      // Catch both patterns: inline in the component map as `a: (…) => <span>`, or
+      // declared separately as `const x: Components["a"] = (…) => <span>` then attached
+      // (DecisionQa uses the latter, which is why the first version missed it).
       const INERT = /(?:a: |Components\["a"\] = )\(\{[^)]*\}[^)]*\) => \(?\s*<span/g;
       for (const m of src.matchAll(INERT)) {
         const line = src.slice(0, m.index).split("\n").length;
-        // 白名单按「这张组件表的变量名」判定：往上找最近的 `const X = {`。
+        // Whitelist is identified by "this component map's variable name": search upward for the nearest `const X = {`.
         const decl = [...src.slice(0, m.index).matchAll(/const (\w+)[^=]*= /g)].pop();
         if (decl && INERT_LINK_OK.has(decl[1])) continue;
         offenders.push(`${path}:${line}`);
@@ -61,7 +64,7 @@ describe("markdown 渲染面覆盖", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("每个 <ReactMarkdown> 都用共享的插件链", () => {
+  it("Every <ReactMarkdown> uses shared plugin chain", () => {
     const offenders: string[] = [];
     for (const [path, src] of Object.entries(FILES)) {
       if (path.endsWith(".test.tsx")) continue;

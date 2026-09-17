@@ -64,7 +64,7 @@ export function isAuxFacet(value: unknown): value is AuxFacet {
 }
 
 /** A document the agent named and the reader opened: a repo file, a wiki doc,
- *  a web page, or a deliverable the run filed into the 产出 store. */
+ *  a web page, or a deliverable the run filed into the artifacts store. */
 export type AuxDocKind = "file" | "wiki" | "web" | "artifact";
 
 export interface AuxDoc {

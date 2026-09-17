@@ -1,5 +1,5 @@
 //! Artifact store — the deliverables a task produced, as opposed to its code
-//! (the 仓库 (Repository) page) or its reusable knowledge (the 知识库 (Wiki) page).
+//! (the Repository page) or its reusable knowledge (the Wiki page).
 //!
 //! A PDF, a slide deck, a spreadsheet, a rendered video: things whose whole
 //! point is to be handed to a person. The wiki cannot hold them — its
@@ -116,7 +116,7 @@ pub struct Artifact {
     /// leading or trailing slash, `""` for "the workspace root".
     ///
     /// This is the one part of an artifact's location the *user* owns. Before
-    /// it existed the 产出 (Artifacts) page derived a folder from [`Self::source_path`]
+    /// it existed the Artifacts page derived a folder from [`Self::source_path`]
     /// relative to the workspace, which meant the tree's shape was decided by
     /// wherever the producing agent happened to write the file and could not be
     /// tidied afterwards. An empty `path` still falls back to that derivation
@@ -678,7 +678,7 @@ fn add_version_in(
     artifact.current_version = version_id;
     artifact.size_bytes = size;
     // `created_ms` tracks the *current* version, so a regenerated deliverable
-    // rises back to the top of the 最近加入 (Recently Added) list — the original ingest time is still on
+    // rises back to the top of the Recently Added list — the original ingest time is still on
     // record as the oldest entry of `versions`.
     artifact.created_ms = now;
     artifact.source_path = source_path;
@@ -957,7 +957,7 @@ pub fn rollback_in(root: &Path, id: &str, version: &str) -> Result<Artifact, Str
     artifact.ingest_len = blob_meta.len();
     artifact.ingest_mtime_ms = mtime_ms(&blob_meta);
     // `created_ms` follows the current version everywhere else, so it does here
-    // too: a rolled-back artifact reads as "changed just now" in the 最近加入 (Recently Added) list,
+    // too: a rolled-back artifact reads as "changed just now" in the Recently Added list,
     // which is what actually happened to it.
     artifact.created_ms = now_ms();
     write_meta(&dir, &artifact)?;
@@ -1170,7 +1170,7 @@ fn folders_path(root: &Path) -> PathBuf {
 }
 
 /// Every folder the user has made. Missing or unreadable file reads as empty —
-/// folders are navigation, and losing one must not blank the 产出 (Artifacts) page.
+/// folders are navigation, and losing one must not blank the Artifacts page.
 pub fn list_folders() -> Vec<Folder> {
     match artifacts_dir() {
         Some(root) => list_folders_in(&root),

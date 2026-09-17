@@ -335,7 +335,7 @@ pub fn read_scratchpad_file(
 //
 // Agents constantly name paths that belong to no workspace — `/tmp/report.md`
 // they just wrote, a file under another repo, something in `~/Downloads`. The
-// 文件 (File Explorer) page can't show those: its whole navigation model is a workspace root
+// "文件" (File Explorer) page can't show those: its whole navigation model is a workspace root
 // plus a relative path, and `validate_workspace` rejects the rest. Clicking
 // such a path used to do nothing at all.
 //
@@ -617,7 +617,7 @@ pub(crate) fn resolve_validated_root(
 
 /// The full set of directories the explorer may browse: the workspaces the
 /// backend derived from session transcripts, plus the ones the user added by
-/// hand or cloned from the 仓库 (Repository) page ([`crate::browse_paths`]).
+/// hand or cloned from the "仓库" (Repository) page ([`crate::browse_paths`]).
 ///
 /// Backends call this to build the `known_workspaces` argument the entry points
 /// above take, so both halves of the boundary are decided server-side — a

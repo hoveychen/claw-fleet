@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// Capacitor 运行时在 node 下不可用，整个替掉；`isNativePlatform` 由每个用例
-// 自己拨（模块级 mock 只能装一次，所以经由可变对象透出去）。
+// Capacitor runtime is unavailable under node, so we replace it entirely.
+// Each test case controls `isNativePlatform` itself (module-level mock can only be set once,
+// so we expose it via a mutable object).
 const native = { value: false };
 vi.mock("@capacitor/core", () => ({
   Capacitor: { isNativePlatform: () => native.value },
@@ -11,12 +12,12 @@ const { appendVoiceText, detectVoiceProvider, hasWebSpeech } = await import("./v
 
 type Win = Record<string, unknown>;
 
-/** 让 window 看起来像个提供 Web Speech 的浏览器。 */
+/** Make window look like a browser that provides Web Speech. */
 function giveWebSpeech(): void {
   (window as unknown as Win)["webkitSpeechRecognition"] = function () {};
 }
 
-/** 挂上鸿蒙壳的原生桥。`voice` 决定这个壳接没接语音。 */
+/** Attach the native bridge for Harmony shell. `voice` determines whether this shell has voice support. */
 function giveHarmonyBridge(opts: { voice: boolean }): void {
   const bridge: Win = { scanPairing: () => {} };
   if (opts.voice) bridge["startVoice"] = () => {};
@@ -32,85 +33,86 @@ afterEach(() => {
 });
 
 describe("detectVoiceProvider", () => {
-  it("浏览器里有 Web Speech 就用它", () => {
+  it("uses Web Speech if browser provides it", () => {
     giveWebSpeech();
     expect(detectVoiceProvider()).toBe("web-speech");
   });
 
-  it("浏览器里没有 Web Speech 就判不出来", () => {
+  it("returns null if browser has no Web Speech", () => {
     expect(detectVoiceProvider()).toBeNull();
   });
 
-  // 本模块存在的理由。iOS WKWebView 里 Apple 关掉了识别功能却仍然暴露
-  // `webkitSpeechRecognition`（WebKit #239816），所以壳里那个对象是个陷阱：
-  // 选中它就得到一条 start() 永不出结果、也不报错的死路。判定必须先认壳。
-  it("Capacitor 壳里即使 webkitSpeechRecognition 存在也不选 web-speech", () => {
+  // This is why this module exists. On iOS WKWebView, Apple disabled recognition but
+  // still exposes `webkitSpeechRecognition` (WebKit #239816), so that object in the shell
+  // is a trap: selecting it gives a start() that never returns or errors. Detection must
+  // check the shell first.
+  it("does not choose web-speech in Capacitor shell even if webkitSpeechRecognition exists", () => {
     native.value = true;
     giveWebSpeech();
     expect(detectVoiceProvider()).toBe("capacitor");
   });
 
-  it("鸿蒙桥接了语音就走桥,不看 Capacitor 也不看 Web Speech", () => {
+  it("chooses Harmony bridge if it has voice support, ignoring Capacitor and Web Speech", () => {
     giveHarmonyBridge({ voice: true });
     native.value = true;
     giveWebSpeech();
     expect(detectVoiceProvider()).toBe("harmony");
   });
 
-  // 老壳配新 web：桥在，但没登记 startVoice。这时候不能选中 harmony —— 那条
-  // 实现在壳侧根本不存在，调下去是静默无响应。
-  it("鸿蒙桥没接语音时不选 harmony,继续往下回落", () => {
+  // Old shell with new web: bridge exists but startVoice isn't registered. Can't choose harmony —
+  // the implementation doesn't exist in the shell, calls would silently fail.
+  it("does not choose Harmony when bridge has no voice support, falls through to next option", () => {
     giveHarmonyBridge({ voice: false });
     giveWebSpeech();
     expect(detectVoiceProvider()).toBe("web-speech");
   });
 
-  it("鸿蒙桥没接语音且没有 Web Speech 时判不出来", () => {
+  it("returns null when Harmony bridge has no voice and Web Speech is unavailable", () => {
     giveHarmonyBridge({ voice: false });
     expect(detectVoiceProvider()).toBeNull();
   });
 });
 
 describe("hasWebSpeech", () => {
-  it("认无前缀的 SpeechRecognition", () => {
+  it("recognizes unprefixed SpeechRecognition", () => {
     (window as unknown as Win)["SpeechRecognition"] = function () {};
     expect(hasWebSpeech()).toBe(true);
   });
 
-  it("两个都没有时为假", () => {
+  it("returns false when neither variant exists", () => {
     expect(hasWebSpeech()).toBe(false);
   });
 });
 
-// 原本住在 VoiceButton.test.tsx 里；那个组件被录音条取代后，这些用例跟着
-// 被测的函数搬到这里。
+// Originally lived in VoiceButton.test.tsx; when that component was replaced by the
+// recording bar, these test cases moved here with the function they test.
 describe("appendVoiceText", () => {
-  it("空输入框直接放进去", () => {
+  it("puts text directly into empty input", () => {
     expect(appendVoiceText("", "把 P3 勾掉")).toBe("把 P3 勾掉");
   });
 
-  it("中文之间不补空格", () => {
+  it("does not add space between Chinese characters", () => {
     expect(appendVoiceText("先看一下", "这个问题")).toBe("先看一下这个问题");
   });
 
-  // Fleet 的语音内容天生中英混排,两种接缝会出现在同一句话里。
-  it("两个英文词之间补空格", () => {
+  // Fleet voice content naturally mixes Chinese and English, with both types of boundaries in the same sentence.
+  it("adds space between English words", () => {
     expect(appendVoiceText("merge the", "worktree")).toBe("merge the worktree");
   });
 
-  it("中文接英文不补空格", () => {
+  it("does not add space between Chinese and English", () => {
     expect(appendVoiceText("合一下", "worktree")).toBe("合一下worktree");
   });
 
-  it("已有内容以空白收尾时不再补,避免双空格", () => {
+  it("does not add space when existing content already ends with whitespace", () => {
     expect(appendVoiceText("merge the ", "worktree")).toBe("merge the worktree");
   });
 
-  it("识别结果首尾空白被去掉", () => {
+  it("trims whitespace from recognition result", () => {
     expect(appendVoiceText("", "  把 P3 勾掉  ")).toBe("把 P3 勾掉");
   });
 
-  it("空的识别结果不改动输入框", () => {
+  it("does not modify input when recognition result is empty", () => {
     expect(appendVoiceText("已经打的字", "   ")).toBe("已经打的字");
   });
 });

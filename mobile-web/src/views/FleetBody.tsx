@@ -140,7 +140,7 @@ function recNum(rec: Record<string, unknown>, key: string): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
-/** Relative time — past reuses TasksView's `{0} 分钟前` keys, future adds `…后`. */
+/** Relative time — past reuses TasksView's existing 'N minutes ago' patterns, future adds symmetric 'N ... later' patterns. */
 function relWhen(ms: number): string {
   const diff = ms - Date.now();
   const abs = Math.abs(diff);

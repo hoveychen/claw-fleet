@@ -188,7 +188,7 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
           />
         )}
 
-        {/* 搜索态 */}
+        {/* Search mode */}
         {!error && searchActive && (
           <>
             {searching && <div className={styles.hint}>{t("搜索中…")}</div>}
@@ -203,7 +203,7 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
           </>
         )}
 
-        {/* 浏览态 */}
+        {/* Browse mode */}
         {!error &&
           !searchActive &&
           docs !== null &&

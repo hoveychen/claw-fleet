@@ -17,9 +17,8 @@ describe("agentLabel", () => {
   });
 
   // The bug this covers: codex `thread_spawn` records `agent_role: null`, so
-  // three concurrent codex subagents all rendered as the bare word 子代理 and
-  // only the id tail told them apart. Core already carries their nickname on
-  // aiTitle.
+  // three concurrent codex subagents all rendered as the bare word 子代理 (Subagent)
+  // and only the id tail told them apart. Core already carries their nickname on aiTitle.
   it("falls back to the codex nickname on aiTitle", () => {
     const s = row({ isSubagent: true, agentSource: "codex", aiTitle: "Kuhn" });
     expect(agentLabel(s)).toContain("Kuhn");

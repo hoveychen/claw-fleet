@@ -66,8 +66,8 @@ describe("relayBaseFor", () => {
     );
   });
 
-  // 迁移过来的设备与扫码时没带 &relay= 的设备都是 null —— 那不是「未知」，
-  // 而是「就用构建默认值」（本测试环境里 origin 是 http://localhost）。
+  // Devices migrated from earlier versions and devices scanned without &relay= are both null — that is not
+  // "unknown", but rather "use the build default" (in this test environment, origin is http://localhost).
   it("falls back to the build default when the device named none", () => {
     expect(relayBaseFor(null)).toBe("http://localhost");
     expect(relayBaseFor(undefined)).toBe("http://localhost");

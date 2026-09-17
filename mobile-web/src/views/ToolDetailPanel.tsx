@@ -357,7 +357,7 @@ function DetailBody({
   }
   // A decision card, if its input still parses — a rejected call or a future
   // schema falls through to the generic body rather than rendering nothing.
-  // Rendered by the very component the 决策 tab uses for a history record.
+  // Rendered by the very component the decision tab uses for a history record.
   if (isDecisionTool(name)) {
     const questions = readDecisionQuestions(detail.input ?? {});
     if (questions.length > 0) {

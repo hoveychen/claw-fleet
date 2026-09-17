@@ -11,28 +11,28 @@ describe("ExitGuard", () => {
     return { guard: new ExitGuard(armedChange, leave), armedChange, leave };
   }
 
-  it("第一次返回只弹提示，不离开", () => {
+  it("first back only shows prompt, doesn't leave", () => {
     const { guard, armedChange, leave } = mk();
     expect(guard.handleRootBack()).toBe("hold");
     expect(armedChange).toHaveBeenLastCalledWith(true);
     expect(leave).not.toHaveBeenCalled();
   });
 
-  it("窗口内再按一次才放行，并先摘掉 beforeunload", () => {
+  it("within window, second back allows exit and removes beforeunload first", () => {
     const { guard, armedChange, leave } = mk();
     guard.handleRootBack();
     vi.advanceTimersByTime(EXIT_WINDOW_MS - 1);
 
     expect(guard.handleRootBack()).toBe("leave");
     expect(leave).toHaveBeenCalledTimes(1);
-    expect(armedChange).toHaveBeenLastCalledWith(false); // toast 收起
+    expect(armedChange).toHaveBeenLastCalledWith(false); // toast dismissed
   });
 
-  it("超过窗口后重新武装：又只是提示，不会漏放行", () => {
+  it("after window expires, re-armed: again just prompt, won't skip exit", () => {
     const { guard, armedChange, leave } = mk();
     guard.handleRootBack();
     vi.advanceTimersByTime(EXIT_WINDOW_MS);
-    expect(armedChange).toHaveBeenLastCalledWith(false); // 自动收起
+    expect(armedChange).toHaveBeenLastCalledWith(false); // auto-dismissed
 
     expect(guard.handleRootBack()).toBe("hold");
     expect(leave).not.toHaveBeenCalled();

@@ -79,17 +79,17 @@ export function clearProc(client: FleetTransport, id: string): Promise<{ cleared
 export const EXIT_DRAIN_POLLS = 3;
 
 export interface OutputPumpDeps {
-  /** 读一段增量输出。offset 为 null 表示「从最近的一段开始跟」。 */
+  /** Read incremental output. offset null means "start following from the most recent". */
   read: (offset: number | null) => Promise<ProcOutputChunk>;
-  /** 把解出来的字节喂给终端。 */
+  /** Feed decoded bytes to the terminal. */
   write: (bytes: Uint8Array) => void;
   onRecord?: (record: ProcRecord) => void;
 }
 
 export interface OutputPump {
-  /** 跑一轮增量读。定时器每个 tick 调一次。 */
+  /** Run one round of incremental read. Timer calls this once per tick. */
   poll: () => Promise<void>;
-  /** 面板卸载：之后的响应一律丢弃，不再推进 offset。 */
+  /** Panel unmount: discard all subsequent responses, stop advancing offset. */
   stop: () => void;
 }
 

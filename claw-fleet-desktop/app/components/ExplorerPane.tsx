@@ -186,7 +186,7 @@ export function FileTree({
       });
       if (target && !target.isDir) onPick(target);
       // Ancestors all loaded but the leaf isn't there — deleted, renamed, or
-      // filtered out by 「显示忽略文件」(show ignored files). Expanding to its
+      // filtered out by "Show Ignored" being off. Expanding to its
       // parent and stopping silently reads as "nothing happened", so report it
       // like a missing dir.
       if (!target && reveal.reportMiss) {

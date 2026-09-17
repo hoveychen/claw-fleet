@@ -15,9 +15,9 @@
 // the shell can deliver before this hook is registered (cold-start notification is exactly
 // this case).
 
-/** 原生壳投递点击目标的入口。 */
+/** Native shell's delivery hook entry point. */
 const NATIVE_DEEPLINK_HOOK = "__fleetDeepLink";
-/** 壳在 hook 注册前把早到的 url 堆在这里。 */
+/** Shell queues early-arriving URLs here before hook is registered. */
 const NATIVE_DEEPLINK_PENDING = "__fleetDeepLinkPending";
 
 /** Fragment param name for decision ID, matches `/#d=` in mobile_relay::notify_url. */

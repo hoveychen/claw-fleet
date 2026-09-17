@@ -105,7 +105,7 @@ describe("filterArtifacts", () => {
   const all = { query: "", workspace: "", starredOnly: false };
 
   it("matches the note and the filename, not just the title", () => {
-    // What a user remembers is as often "the one about 架构" as the title.
+    // What a user remembers is as often "the one about architecture" as the title.
     expect(filterArtifacts(items, { ...all, query: "架构" }).map((a) => a.id)).toEqual(["3"]);
     expect(filterArtifacts(items, { ...all, query: "launch" }).map((a) => a.id)).toEqual(["2"]);
   });

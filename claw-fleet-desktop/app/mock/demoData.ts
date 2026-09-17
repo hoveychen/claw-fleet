@@ -324,7 +324,7 @@ export const DEMO_BOARD: SessionInfo[] = [
 ];
 
 // ── The hero: a 5-hop handoff relay on a fresh project ──────────────────────
-// 老板 spawns one big requirement; five 200k-context sessions carry it end to
+// The user spawns one big requirement; five 200k-context sessions carry it end to
 // end, each handing the baton on when its window fills. Screenplays in
 // ./demoScripts drive the streaming detail view (P2).
 const WS = "aurora-platform";

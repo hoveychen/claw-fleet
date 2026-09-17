@@ -6,7 +6,7 @@ import { type MermaidMode, mermaidThemeConfig } from "./mermaidTheme";
 
 let seq = 0;
 
-/** theme.ts always stamps html[data-theme]; absent means dark. */
+/** `theme.ts` always stamps `html[data-theme]`; if absent, dark mode is assumed. */
 function currentTheme(): MermaidMode {
   return document.documentElement.getAttribute("data-theme") === "light"
     ? "light"
@@ -14,9 +14,9 @@ function currentTheme(): MermaidMode {
 }
 
 /**
- * A ```mermaid fence rendered to SVG. mermaid is ~1MB, so it loads lazily on
- * first use — a phone that never opens a diagram never pays for it. A diagram
- * that fails to parse degrades to its source rather than blanking the message.
+ * A ```mermaid code fence rendered to SVG. Mermaid is ~1MB, so it loads
+ * lazily on first use — a phone that never opens a diagram never pays for it.
+ * A diagram that fails to parse shows its source instead of blanking the message.
  */
 export function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | null>(null);
@@ -40,16 +40,18 @@ export function MermaidBlock({ code }: { code: string }) {
         const mermaid = (await import("mermaid")).default;
         mermaid.initialize({
           startOnLoad: false,
-          // mermaid 的内置 default/dark 色板（姜黄 subgraph、淡紫节点）不吃
-          // index.css 的 token，改走 base + 自己的变量表。字体栈也在那里
-          // （量宽和画宽必须解析成同一个栈，见 mermaidTheme 注释）。
+          // Mermaid's built-in default/dark palettes (ginger subgraphs, pale nodes)
+          // do not respect index.css tokens; switch to base + custom variables.
+          // Font stack is also there (measured and drawn widths must parse the
+          // same stack — see mermaidTheme comment).
           ...mermaidThemeConfig(theme),
           securityLevel: "strict",
         });
         const { svg } = await mermaid.render(`mermaid-${seq++}`, code);
         if (cancelled) return;
-        // 对比度自愈烤进字符串：按深色主题硬编码 `style X fill:#4a3728` 的图，
-        // 在 light 主题下标签仍是主题色 #333，整块糊成黑砖（见 mermaidContrast）。
+        // Contrast self-healing baked into the SVG string: diagrams hard-coded with
+        // dark-mode `style X fill:#4a3728` would show labels in theme color #333 under
+        // light mode, resulting in dark text on dark background (see mermaidContrast).
         setSvg(repairMermaidContrastInSvg(svg));
         setError(null);
       } catch (e) {
@@ -68,8 +70,10 @@ export function MermaidBlock({ code }: { code: string }) {
     };
   }, [code, theme]);
 
-  // 宽图别缩到读不了：装不下时按下限钉宽，让 .diagram 的 overflow-x 接管。
-  // 挂 ResizeObserver 是因为转屏/侧栏折叠会改容器宽，一次性量完就过期了。
+  // Wide diagrams should not shrink below readability: if it does not fit,
+  // pin the width to a minimum and let .diagram's overflow-x take over.
+  // ResizeObserver is needed because screen rotation/sidebar collapse changes
+  // container width, so a one-time measurement becomes stale.
   useEffect(() => {
     const host = hostRef.current;
     if (!host || svg === null) return;

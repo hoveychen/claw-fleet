@@ -1,8 +1,8 @@
-// 桌面主机上被监控的 agent 源（{name, enabled, available}）。手机端推导不出
-// 「装没装 / 开没开」，所以向 relay 要（mobile_relay.rs::serve_request 的
-// `sources_config`）。新会话弹层用它把工具选择器限制在真正被监控的源上——
-// codex 源关掉时就不该在启动器里列 Codex。桌面端的对应物是
-// claw-fleet-desktop/app/components/SettingsPanel 里的 get_sources_config。
+// Monitored agent sources on the desktop host ({name, enabled, available}). Mobile can't derive
+// "installed/enabled", so it fetches from relay (mobile_relay.rs::serve_request's `sources_config`).
+// The new session modal uses this to restrict the tool picker to actually-monitored sources—
+// when a Codex source is disabled, it shouldn't list Codex in the launcher. The desktop equivalent
+// is `get_sources_config` in claw-fleet-desktop/app/components/SettingsPanel.
 import { useEffect, useState } from "react";
 import type { FleetTransport } from "./transport";
 
@@ -12,8 +12,8 @@ export interface SourceInfo {
   available: boolean;
 }
 
-/** `null` 表示还没拿到——relay 未连上、请求在途，或桌面端版本老到不认这个方法。
- *  调用方必须把 null 当作「不知道」而不是「没有源」。 */
+/** `null` means not yet fetched—relay disconnected, request in flight, or desktop version too old to recognize this method.
+ *  Callers must treat null as "don't know", not "no sources". */
 export function useSourcesConfig(client: FleetTransport | null): SourceInfo[] | null {
   const [sources, setSources] = useState<SourceInfo[] | null>(null);
   useEffect(() => {

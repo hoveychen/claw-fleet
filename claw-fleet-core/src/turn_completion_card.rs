@@ -326,11 +326,11 @@ fn deliver_reminder(job: &TurnCardJob, resp: &ElicitationResponse) {
 }
 
 /// Build the reminder prompt, folding in the user's answer when it carries
-/// substance beyond a bare acknowledgement ("收到" in Chinese).
+/// substance beyond a bare acknowledgement.
 fn reminder_prompt_with_answer(answer: Option<&str>) -> String {
     let notice = reminder_prompt();
     match answer {
-        // "收到" (acknowledged): a pure acknowledgement — re-report and stop, nothing else.
+        // Acknowledged: a pure acknowledgement — re-report and stop, nothing else.
         Some("收到") | None => format!("{notice}\n\n{REMINDER_ACTION}"),
         // The boss explicitly asked for more work, which is the one thing that
         // overrides the "do not keep working" line above.

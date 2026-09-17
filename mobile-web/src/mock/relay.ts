@@ -96,7 +96,7 @@ export class MockRelayClient extends RelayClient {
       this.mockHandlers.onAgentOnline?.(true);
     }, 0);
     // A later incremental push, so the More page demonstrates the delta path
-    // engaged (增量 ✓) in mock/screenshot mode.
+    // engaged (incremental ✓) in mock/screenshot mode.
     setTimeout(() => {
       this.mockHandlers.onSessions?.(MOCK_SESSIONS);
       this.mockHandlers.onSessionsKind?.("delta");

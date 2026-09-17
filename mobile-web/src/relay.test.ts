@@ -132,7 +132,7 @@ async function connected(clients: RelayClient[]): Promise<{ client: RelayClient;
   return { client, ws };
 }
 
-describe("RelayClient 连接用 channelToken 认证", () => {
+describe("RelayClient authenticates connections with channelToken", () => {
   const clients: RelayClient[] = [];
   beforeEach(() => {
     FakeWs.instances = [];
@@ -143,7 +143,7 @@ describe("RelayClient 连接用 channelToken 认证", () => {
     for (const c of clients.splice(0)) c.close();
   });
 
-  it("auth 帧发的是派生 channelToken，不是原始 secret", async () => {
+  it("auth frame sends derived channelToken, not raw secret", async () => {
     const { ws } = await connected(clients);
     const authFrame = ws.sent.map((s) => JSON.parse(s)).find((f) => f.type === "auth");
     expect(authFrame).toBeTruthy();
@@ -154,7 +154,7 @@ describe("RelayClient 连接用 channelToken 认证", () => {
   });
 });
 
-describe("RelayClient 跨设备 req_id 隔离", () => {
+describe("RelayClient isolates req_id across devices", () => {
   const clients: RelayClient[] = [];
 
   beforeEach(() => {
@@ -170,10 +170,10 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
 
   // Core bug: two phones with the same secret land on the same relay channel. Relay broadcasts the agent's
   // reply frame to every client in that channel (registry.rs forward), but the frame carries no client routing.
-  // If both phones share req_id space (both start from 1), A's reply gets matched by B's pending with the
+  // If both phones share req_id space (both start from 1), A's reply gets matched by B's pending request with the
   // same number, and B parses A's data. Same secret derives same encKey, so B can also unseal the broadcast
   // ciphertext — routing only differentiates by reqPrefix (a UUID per instance).
-  it("A 的 reply 被广播到 B 时，B 不会用它 resolve 自己的同号请求", async () => {
+  it("When A's reply is broadcast to B, B does not use it to resolve its own same-numbered request", async () => {
     const a = await connected(clients);
     const b = await connected(clients);
 
@@ -193,7 +193,7 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
       data: { who: "A-tail" },
     });
     a.ws.deliver(replyForA);
-    b.ws.deliver(replyForA); // 广播泄漏到 B
+    b.ws.deliver(replyForA); // Broadcast leaks to B
 
     await expect(pa).resolves.toEqual({ who: "A-tail" });
 
@@ -204,7 +204,7 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
   });
 });
 
-describe("RelayClient 早 ack(方案 A)", () => {
+describe("RelayClient early ack (approach A)", () => {
   const clients: RelayClient[] = [];
 
   beforeEach(() => {
@@ -217,7 +217,7 @@ describe("RelayClient 早 ack(方案 A)", () => {
     for (const c of clients.splice(0)) c.close();
   });
 
-  it("收到 ack 触发 onAck，但 promise 仍待 reply 才 resolve", async () => {
+  it("Receiving ack triggers onAck, but promise still waits for reply to resolve", async () => {
     const { client, ws } = await connected(clients);
     let acked = false;
     const p = client.request<{ ok: boolean }>("spawn_session", {}, undefined, () => {
@@ -242,7 +242,7 @@ describe("RelayClient 早 ack(方案 A)", () => {
     await expect(p).resolves.toEqual({ ok: true });
   });
 
-  it("重复 ack 只触发一次 onAck", async () => {
+  it("Duplicate ack triggers onAck only once", async () => {
     const { client, ws } = await connected(clients);
     let count = 0;
     const p = client.request("spawn_session", {}, undefined, () => {
@@ -261,12 +261,13 @@ describe("RelayClient 早 ack(方案 A)", () => {
   });
 });
 
-// 整条往返（手机→relay→桌面→relay→手机）是五段之和，只报总数时"卡"没法归因。
-// 两个已有的观测点各切一刀：relay 收到上行帧就立刻回的 msg_ack 圈出手机↔relay 那
-// 一段（不含桌面），桌面盖印在 reply 里的 handle_ms 圈出它自己 handler 的耗时。
-// 剩下的残差才是 relay↔桌面。任一刀缺席时必须报 null 而不是 0——0 会谎称"那段是
-// 零耗时"，把别人的时间算到残差头上。
-describe("RelayClient RTT 分段", () => {
+// The full round trip (phone → relay → desktop → relay → phone) is five segments. Reporting only
+// the total makes it impossible to diagnose where the slowdown is. Using two existing observation
+// points: relay's immediate msg_ack response isolates the phone↔relay segment (excluding desktop),
+// and desktop's handle_ms timestamp in the reply covers its own handler time. The remainder is the
+// relay↔desktop segment. Missing observations must report null, never 0 — 0 falsely claims "that
+// segment took zero", shifting the lost time to the residual.
+describe("RelayClient RTT segmentation", () => {
   const clients: RelayClient[] = [];
 
   beforeEach(() => {
@@ -318,7 +319,7 @@ describe("RelayClient RTT 分段", () => {
     expect(s.totalMs).toBeGreaterThanOrEqual(40);
   });
 
-  it("msg_ack 没赶上时手机段报 null，不冒充 0", async () => {
+  it("When msg_ack doesn't arrive, phone segment reports null, not 0", async () => {
     const { ws, reqId, samples } = await requestWithSamples();
     ws.deliver(
       await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: {}, handle_ms: 12 }),
@@ -328,7 +329,7 @@ describe("RelayClient RTT 分段", () => {
     expect(samples[0].desktopHandleMs).toBe(12);
   });
 
-  it("旧桌面不带 handle_ms 时桌面段报 null，不冒充 0", async () => {
+  it("When old desktop lacks handle_ms, desktop segment reports null, not 0", async () => {
     const { ws, reqId, samples } = await requestWithSamples();
     ws.deliver({ type: "msg_ack", ack_id: reqId, status: "delivered" });
     await tick();
@@ -338,7 +339,7 @@ describe("RelayClient RTT 分段", () => {
     expect(samples[0].phoneRelayMs).not.toBeNull();
   });
 
-  it("桌面拒绝（ok:false）也照样出样本——慢和失败是两回事", async () => {
+  it("Desktop rejection (ok:false) still produces a sample—slowness and failure are different things", async () => {
     const { ws, reqId, samples } = await requestWithSamples();
     ws.deliver({ type: "msg_ack", ack_id: reqId, status: "delivered" });
     await tick();
@@ -358,7 +359,7 @@ describe("RelayClient RTT 分段", () => {
 //     likely already acted; only the receipt is missing. This is when a grace period watching the snapshot makes sense.
 // Before, both were bare Error and Composer couldn't tell them apart, so it dragged desktop's explicit
 // rejection into a 20-second grace period, appearing as "clicked, no response, error after twenty seconds".
-describe("RelayClient 失败来源可区分", () => {
+describe("RelayClient distinguishes failure sources", () => {
   const clients: RelayClient[] = [];
 
   beforeEach(() => {
@@ -371,7 +372,7 @@ describe("RelayClient 失败来源可区分", () => {
     for (const c of clients.splice(0)) c.close();
   });
 
-  it("桌面端 ok:false 的 reply → remote 错误，携带桌面原文", async () => {
+  it("Desktop reply with ok:false → remote error, carries desktop message", async () => {
     const { client, ws } = await connected(clients);
     const p = client.request("spawn_session", { workspacePath: "~/nope" });
     const reply = await sealedMsg({
@@ -388,7 +389,7 @@ describe("RelayClient 失败来源可区分", () => {
     expect(isDesktopRejection(err)).toBe(true);
   });
 
-  it("请求超时（帧可能丢了）→ 非 remote 错误，调用方仍可进宽限期", async () => {
+  it("Request timeout (frame may be lost) → non-remote error, caller can enter grace period", async () => {
     const { client } = await connected(clients);
     const p = client.request("spawn_session", {}, 5); // 5ms 超时，不投递 reply
     const err = await p.catch((e) => e);
@@ -397,14 +398,14 @@ describe("RelayClient 失败来源可区分", () => {
     expect(isDesktopRejection(err)).toBe(false);
   });
 
-  it("未连接 → 非 remote 错误", async () => {
+  it("Not connected → non-remote error", async () => {
     const client = new RelayClient(SECRET, {});
     clients.push(client);
     const err = await client.request("spawn_session", {}).catch((e) => e);
     expect(isDesktopRejection(err)).toBe(false);
   });
 
-  it("普通 Error / 非 Error 值不会被误判成桌面拒绝", () => {
+  it("Regular Error / non-Error values are not mistaken for desktop rejection", () => {
     expect(isDesktopRejection(new Error("boom"))).toBe(false);
     expect(isDesktopRejection("boom")).toBe(false);
     expect(isDesktopRejection(undefined)).toBe(false);
@@ -419,7 +420,7 @@ async function gzipBytes(json: string): Promise<ArrayBuffer> {
   return new Response(stream).arrayBuffer();
 }
 
-describe("RelayClient sessions 快照收发（加密）", () => {
+describe("RelayClient sessions snapshot exchange (encrypted)", () => {
   const clients: RelayClient[] = [];
   beforeEach(() => {
     FakeWs.instances = [];
@@ -430,7 +431,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     for (const c of clients.splice(0)) c.close();
   });
 
-  it("密文 sessions 帧被解密后透传（z 缺省，未压缩）", async () => {
+  it("Encrypted sessions frame is decrypted and passed through (z defaults to uncompressed)", async () => {
     const sessions = [
       { id: "s1", workspaceName: "alpha", status: "active" },
       { id: "s2", workspaceName: "beta", status: "idle" },
@@ -449,7 +450,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     expect(got).toEqual(sessions);
   });
 
-  it("sessions_delta 在整表基线上 keyed upsert/remove 并按 lastActivityMs 重排", async () => {
+  it("sessions_delta performs keyed upsert/remove on full baseline and resorts by lastActivityMs", async () => {
     let got: Array<{ id: string; lastActivityMs: number; status?: string }> = [];
     const base = FakeWs.instances.length;
     const client = new RelayClient(SECRET, {
@@ -490,7 +491,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     expect(got.find((s) => s.id === "s2")?.status).toBe("active");
   });
 
-  it("桌面先 gzip 再加密（z:true）的帧被解密后 inflate 再分发", async () => {
+  it("Desktop frame gzipped then encrypted (z:true) is decrypted, inflated, then distributed", async () => {
     const sessions = [{ id: "g1", workspaceName: "delta", status: "active" }];
     let got: unknown = null;
     const base = FakeWs.instances.length;
@@ -510,7 +511,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     expect(got).toEqual(sessions);
   });
 
-  it("非密文（非 {enc:box}）msg payload 被丢弃，不会 crash", async () => {
+  it("Non-ciphertext (non-{enc:box}) msg payload is discarded without crashing", async () => {
     let got: unknown = "UNTOUCHED";
     const base = FakeWs.instances.length;
     const client = new RelayClient(SECRET, { onSessions: (s) => (got = s) });
@@ -528,7 +529,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
   });
 });
 
-describe("RelayClient client_hello 携带构建 commit", () => {
+describe("RelayClient client_hello carries build commit", () => {
   const clients: RelayClient[] = [];
 
   beforeEach(() => {
@@ -543,7 +544,7 @@ describe("RelayClient client_hello 携带构建 commit", () => {
 
   // Desktop uses appCommit in hello to judge if this phone's bundle is stale, so hello frame must
   // pass through deviceInfo.appCommit as-is (sendHello does `...info` spread; lock it down here).
-  it("authed 后的 hello 帧带上 deviceInfo.appCommit", async () => {
+  it("hello frame after authed carries deviceInfo.appCommit", async () => {
     const base = FakeWs.instances.length;
     const client = new RelayClient(SECRET, {}, () => ({
       clientId: "c-1",
@@ -575,7 +576,7 @@ describe("RelayClient client_hello 携带构建 commit", () => {
 // networks, either get desktop delivery confirmation, retry, or ultimately fail while caller keeps the card.
 // This fixes the bug where "answer went through, card vanished, app still waiting" — never treat card as
 // answered before getting delivery confirmation.
-describe("RelayClient.answerViaReq 弱网送达确认", () => {
+describe("RelayClient.answerViaReq weak network delivery confirmation", () => {
   const clients: RelayClient[] = [];
   beforeEach(() => {
     FakeWs.instances = [];
@@ -602,7 +603,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     throw new Error(`未在预期时间内发出 ${n} 个 decision_answer req`);
   }
 
-  it("发出 decision_answer req,收到 ok:true reply 后 resolve", async () => {
+  it("Sends decision_answer req, resolves after receiving ok:true reply", async () => {
     const { client, ws } = await connected(clients);
     const p = client.answerViaReq(
       "elicitation",
@@ -626,16 +627,16 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     await expect(p).resolves.toBeUndefined();
   });
 
-  it("reply 丢失(无裁决)→ 重发,第二次 ok:true 才 resolve", async () => {
+  it("reply lost (no verdict) → resend, resolves only on second ok:true", async () => {
     const { client, ws } = await connected(clients);
     const p = client.answerViaReq(
       "fleet-ask",
       "d-resend",
       { cancelled: false, answers: {} },
-      // 200ms 而不是 50ms:这条用的是**真**定时器,而断言要在第二帧发出之后再
-      // 投递回复。50ms 的预算在机器有负载时会让第二帧也超时,于是整条 promise
-      // 变成 reject —— 实测偶发过两次,查了两轮才认出是测试自己的竞态而不是
-      // 被测代码。放宽的是投递窗口,不是被测语义:第一帧仍然必须超时才会重发。
+      // 200ms instead of 50ms: this uses **real** timers, and the assertion comes after the second frame is sent.
+      // With 50ms on a loaded machine, the second frame also times out, so the entire promise rejects —
+      // actual tests showed this twice; took two rounds to realize it was test-internal race, not the code.
+      // We're relaxing the delivery window, not the tested semantics: the first frame must still timeout to trigger resend.
       { attempts: 2, timeoutMs: 200 },
     );
     p.catch(() => {});
@@ -648,7 +649,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     await expect(p).resolves.toBeUndefined();
   });
 
-  it("桌面裁决 ok:false → 不重发,立即 reject(remote)", async () => {
+  it("Desktop verdict ok:false → no resend, reject immediately (remote)", async () => {
     const { client, ws } = await connected(clients);
     const p = client.answerViaReq(
       "elicitation",
@@ -667,7 +668,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     expect((await answerReqIds(ws)).length).toBe(1);
   });
 
-  it("耗尽重发预算仍无裁决 → reject(非 remote)", async () => {
+  it("Resend budget exhausted with no verdict → reject (non-remote)", async () => {
     const { client, ws } = await connected(clients);
     const p = client.answerViaReq(
       "elicitation",
@@ -681,7 +682,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     expect((await answerReqIds(ws)).length).toBe(2);
   });
 
-  it("旧桌面回 unknown method → 回退到即发即忘 answer(),resolve", async () => {
+  it("Old desktop replies unknown method → fall back to fire-and-forget answer(), resolve", async () => {
     // A desktop that predates decision_answer rejects it as an unknown method.
     // A new phone must still be able to answer it: fall back to the legacy
     // fire-and-forget `answer` frame (no worse than that old desktop's behaviour)
@@ -726,7 +727,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     return ws.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
   }
 
-  it("答复帧带外层 ack_id,relay 回 queued 即视为交付完成", async () => {
+  it("Answer frame carries outer ack_id; relay response queued counts as delivery complete", async () => {
     const { client, ws } = await connected(clients);
     const p = client.answerViaReq(
       "fleet-ask",
@@ -749,7 +750,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     expect((await answerReqIds(ws)).length).toBe(1);
   });
 
-  it("relay 回 dropped → 当作未送达,继续重发", async () => {
+  it("relay responds dropped → treat as undelivered, continue resending", async () => {
     const { client, ws } = await connected(clients);
     const p = client.answerViaReq(
       "elicitation",
@@ -767,7 +768,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     expect((await answerReqIds(ws)).length).toBe(2);
   });
 
-  it("delivered 的 ack 不代替桌面裁决:仍等 reply", async () => {
+  it("delivered ack does not replace desktop verdict: still wait for reply", async () => {
     const { client, ws } = await connected(clients);
     const p = client.answerViaReq(
       "elicitation",
@@ -796,7 +797,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     await expect(p).resolves.toBeUndefined();
   });
 
-  it("普通数据请求不把 queued 当成结果", async () => {
+  it("Regular data requests don't treat queued as a result", async () => {
     // Only decision replies accept "relay has it safely" as final; pending_snapshot and similar
     // requests want data from the desktop, relay's store confirmation means nothing to them.
     const { client, ws } = await connected(clients);
@@ -819,16 +820,16 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
 });
 
 describe("relayDisplayHost", () => {
-  it("生产 relay 只显示主机名（https 是常态，scheme 是噪音）", () => {
+  it("Production relay shows only hostname (https is normal, scheme is noise)", () => {
     expect(relayDisplayHost("https://fleet-relay.muveeai.com")).toBe("fleet-relay.muveeai.com");
     expect(relayDisplayHost("https://fleet-relay.muveeai.com/")).toBe("fleet-relay.muveeai.com");
   });
 
-  it("非 https（本地 dev relay）保留 scheme 和端口 —— 这正是要一眼看出的差别", () => {
+  it("Non-https (local dev relay) keeps scheme and port — that's the difference to spot at a glance", () => {
     expect(relayDisplayHost("http://127.0.0.1:18080")).toBe("http://127.0.0.1:18080");
   });
 
-  it("解析不了就原样回显，不抛", () => {
+  it("If unparseable, return as-is without throwing", () => {
     expect(relayDisplayHost("not a url")).toBe("not a url");
   });
 });
@@ -837,21 +838,22 @@ describe("resolveRelayBase", () => {
   const BAKED = "https://fleet-relay.muveeai.com";
   const SHELL_ORIGIN = "https://fleet.local";
 
-  it("配对二维码带来的 relay 胜过打包时烧进去的那个", () => {
-    // 鸿蒙壳扫到的二维码指向自建 relay。以前 WebShell 只把 secret 传给页面，
-    // relay 永远是编译期烧死的那个 —— 自建 relay 在鸿蒙端根本连不上。
+  it("QR code relay from pairing overrides the one baked at build time", () => {
+    // Harmony shell scans a QR code pointing to a self-hosted relay. Previously WebShell
+    // only passed secret to the page; relay was always the compile-time baked one — a
+    // self-hosted relay couldn't connect on Harmony at all.
     const hash = "#k=deadbeefdeadbeef&relay=" + encodeURIComponent("https://relay.corp.example.com");
     expect(resolveRelayBase(hash, BAKED, SHELL_ORIGIN)).toBe("https://relay.corp.example.com");
   });
 
-  it("没带 relay 时仍用打包值，PWA 则回落同源", () => {
+  it("Without relay, use baked value; PWA falls back to same origin", () => {
     expect(resolveRelayBase("#k=abc", BAKED, SHELL_ORIGIN)).toBe(BAKED);
     expect(resolveRelayBase("#k=abc", undefined, "https://fleet-relay.muveeai.com")).toBe(
       "https://fleet-relay.muveeai.com",
     );
   });
 
-  it("非 http(s) 的 relay 一律忽略，回落到打包值", () => {
+  it("Non-http(s) relay is always ignored, falls back to baked value", () => {
     for (const bad of ["javascript:alert(1)", "fleet-relay.muveeai.com", "ftp://x/y", ""]) {
       expect(resolveRelayBase("#k=abc&relay=" + encodeURIComponent(bad), BAKED, SHELL_ORIGIN)).toBe(
         BAKED,

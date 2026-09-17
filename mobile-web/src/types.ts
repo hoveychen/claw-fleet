@@ -275,7 +275,7 @@ export interface ContentBlock {
 export type IngestSummary =
   | {
       kind: "artifact";
-      /** Store id — what `artifact_blob` / the 产出 list is keyed by. */
+      /** Store id — what the artifact list is keyed by. */
       id: string;
       title: string;
       /** The store's coarse bucket (`pdf`, `image`, `sheet`, …). */

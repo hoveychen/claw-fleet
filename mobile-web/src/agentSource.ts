@@ -19,7 +19,7 @@ export const AGENT_TOOL_CHOICES: Array<[string, string]> = [
   ["dsh", "DeepSeek Harness"],
 ];
 
-/** 源注册名 → launcher 的 tool 值。 */
+/** Source registration name → launcher tool value. */
 function sourceNameToTool(name: string): string {
   return name === "claude-code" ? "claude" : name;
 }

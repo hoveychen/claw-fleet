@@ -69,7 +69,7 @@ export function voiceErrorHint(
   providerId: VoiceProviderId | null,
 ): string | null {
   if (kind === "no-permission") {
-    // 有按钮就别再写字了,按钮本身就是那句指引。
+    // If there's a button, don't also write text—the button itself is the instruction.
     if (canOpenSettings) return null;
     return providerId === "web-speech"
       ? t("在浏览器地址栏左侧的站点设置里，把麦克风改成「允许」")
@@ -146,7 +146,7 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
   const [state, setState] = useState<VoiceState>("probing");
   const [partial, setPartial] = useState("");
   const [error, setError] = useState<VoiceErrorKind | null>(null);
-  /** 停止之后还在等最后一段定稿。这期间那段字必须留在屏幕上，见 voiceTail.ts。 */
+  /** Stopped but still waiting for the last segment to finalize. That text must stay on screen; see voiceTail.ts. */
   const [settling, setSettling] = useState(false);
   const sessionRef = useRef<VoiceSession | null>(null);
 

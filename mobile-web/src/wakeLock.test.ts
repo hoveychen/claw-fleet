@@ -77,7 +77,7 @@ describe("wakeLock", () => {
     installEnv();
   });
 
-  it("开启 → 真调 navigator.wakeLock.request('screen') 并持有 sentinel", async () => {
+  it("Enable → actually calls navigator.wakeLock.request('screen') and holds sentinel", async () => {
     const { setWakeLockEnabled } = await import("./wakeLock");
     setWakeLockEnabled(true);
     await flush();
@@ -86,7 +86,7 @@ describe("wakeLock", () => {
     expect(localStorage.getItem("fleet-wake-lock")).toBe("1");
   });
 
-  it("关闭 → release 已持有的 sentinel", async () => {
+  it("Disable → release the held sentinel", async () => {
     const { setWakeLockEnabled } = await import("./wakeLock");
     setWakeLockEnabled(true);
     await flush();
@@ -97,7 +97,7 @@ describe("wakeLock", () => {
     expect(localStorage.getItem("fleet-wake-lock")).toBe("0");
   });
 
-  it("重复开启不重复申请（已持锁时幂等）", async () => {
+  it("Repeated enable doesn't re-request (idempotent when lock is held)", async () => {
     const { setWakeLockEnabled } = await import("./wakeLock");
     setWakeLockEnabled(true);
     await flush();
@@ -106,7 +106,7 @@ describe("wakeLock", () => {
     expect(requestMock).toHaveBeenCalledTimes(1);
   });
 
-  it("系统在后台释放 sentinel 后，回前台重新 acquire", async () => {
+  it("After system releases sentinel in background, foreground returns and re-acquires", async () => {
     const { setWakeLockEnabled } = await import("./wakeLock");
     setWakeLockEnabled(true);
     await flush();
@@ -118,7 +118,7 @@ describe("wakeLock", () => {
     expect(requestMock).toHaveBeenCalledTimes(2);
   });
 
-  it("持久化开启后，下次启动 initWakeLock 自动恢复", async () => {
+  it("After persist enable, next startup initWakeLock auto-recovers", async () => {
     localStorage.setItem("fleet-wake-lock", "1");
     const { initWakeLock } = await import("./wakeLock");
     initWakeLock();
@@ -126,7 +126,7 @@ describe("wakeLock", () => {
     expect(requestMock).toHaveBeenCalledWith("screen");
   });
 
-  it("浏览器不支持 wakeLock → supported=false，开启不报错也不申请", async () => {
+  it("Browser doesn't support wakeLock → supported=false, enable doesn't error or request", async () => {
     installEnv({ supported: false });
     const { isWakeLockSupported, setWakeLockEnabled } = await import("./wakeLock");
     expect(isWakeLockSupported()).toBe(false);
@@ -136,7 +136,7 @@ describe("wakeLock", () => {
     expect(localStorage.getItem("fleet-wake-lock")).toBe("1");
   });
 
-  it("请求返回前被关掉 → 立即释放，不留幽灵锁", async () => {
+  it("Disabled before request returns → immediately release, no ghost lock", async () => {
     // Make request return slowly, turn off the switch in the meantime
     let resolveReq!: (s: Sentinel) => void;
     const slow = makeSentinel();
@@ -157,14 +157,14 @@ describe("wakeLock", () => {
 });
 
 // Temporary lock hold during recording: do not change the user's stay-awake setting,
-// but as long as anyone is holding it, truly keep the lock. This is the fix for
+// but as long as anyone is holding it, truly keep the lock. This fixes the issue where
 // "screen auto-turns off mid-speech, recognition gets interrupted".
 describe("holdWakeLock", () => {
   beforeEach(() => {
     installEnv();
   });
 
-  it("开关关着时 hold 也真申请锁，释放后放掉", async () => {
+  it("When switch is off, hold still truly requests lock, releases after letting go", async () => {
     const { holdWakeLock, getWakeLockEnabled } = await import("./wakeLock");
     const release = holdWakeLock();
     await flush();
@@ -176,7 +176,7 @@ describe("holdWakeLock", () => {
     expect(sentinels[0].release).toHaveBeenCalledTimes(1);
   });
 
-  it("多个 hold 引用计数：放掉一个还剩一个时不松锁", async () => {
+  it("Multiple hold ref counts: when dropping one but one remains, don't release lock", async () => {
     const { holdWakeLock } = await import("./wakeLock");
     const a = holdWakeLock();
     const b = holdWakeLock();
@@ -190,7 +190,7 @@ describe("holdWakeLock", () => {
     expect(sentinels[0].release).toHaveBeenCalledTimes(1);
   });
 
-  it("同一个 hold 重复释放只算一次", async () => {
+  it("Same hold repeated release only counts once", async () => {
     const { holdWakeLock } = await import("./wakeLock");
     const a = holdWakeLock();
     const b = holdWakeLock();
@@ -205,7 +205,7 @@ describe("holdWakeLock", () => {
     expect(sentinels[0].release).toHaveBeenCalledTimes(1);
   });
 
-  it("用户开关开着时，释放 hold 不会把锁一起放掉", async () => {
+  it("When user switch is on, releasing hold doesn't drop the lock too", async () => {
     const { holdWakeLock, setWakeLockEnabled } = await import("./wakeLock");
     setWakeLockEnabled(true);
     await flush();
@@ -216,7 +216,7 @@ describe("holdWakeLock", () => {
     expect(sentinels[0].release).not.toHaveBeenCalled();
   });
 
-  it("hold 期间系统在后台放掉了锁，回前台重新拿", async () => {
+  it("During hold, system drops lock in background, foreground re-acquires", async () => {
     const { holdWakeLock } = await import("./wakeLock");
     holdWakeLock();
     await flush();

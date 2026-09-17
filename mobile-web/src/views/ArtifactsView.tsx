@@ -269,7 +269,7 @@ export function ArtifactDetail({
         ) : kind === "zip" && zipBytes ? (
           <ZipBrowser bytes={zipBytes} onShareMember={shareBytes} />
         ) : kind !== "none" ? (
-          // 每一类怎么画,与 zip 里点开的成员共用同一个分派(ArtifactPreviewBody)。
+          // How to render each kind is shared with zip members opened in detail (ArtifactPreviewBody).
           <PreviewBody
             src={source}
             fallback={

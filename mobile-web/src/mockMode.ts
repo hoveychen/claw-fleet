@@ -1,11 +1,13 @@
-// `?mock` 开关，单独一个零依赖模块。
+// `?mock` switch, a separate zero-dependency module.
 //
-// 它原本住在 mock/relay.ts 里，而那个文件 `extends RelayClient`。于是 App.tsx
-// 为了读一个 query param，静态 import 了整棵 relay 依赖树 —— 同源构建里
-// main.tsx 那对动态 import 消掉的东西，被这条链原样拖了回来（实测过：
-// dist-webui 里能搜到 `fleet-relay/hkdf/v1` 和 `new WebSocket`）。
+// It originally lived in mock/relay.ts, which `extends RelayClient`. So App.tsx
+// had to statically import the entire relay dependency tree just to read one
+// query param — the same things main.tsx's dynamic import dropped in same-origin
+// builds got pulled back in by this chain (verified: dist-webui contains
+// `fleet-relay/hkdf/v1` and `new WebSocket`).
 //
-// 判断本身两行，跟 mock 数据毫无关系，所以它属于这里。
+// The check itself is two lines and has nothing to do with mock data, so it
+// belongs here.
 
 export function isMockMode(): boolean {
   return new URLSearchParams(window.location.search).has("mock");

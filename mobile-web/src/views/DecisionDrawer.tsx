@@ -22,20 +22,21 @@ interface Props {
 
 /** Global decision surface that floats above whatever page the boss is on (a
  *  wiki doc, a task list, a session detail) so a card can be answered without
- *  leaving — and once answered, the page underneath is exactly where they left
- *  it. Mounted by App only while cards are pending AND the plain 决策 tab isn't
- *  already showing them, so it never duplicates the tab's own list.
+ *  leaving — once answered, the page underneath is exactly where they left it.
+ *  App mounts this only while cards are pending AND the plain 决策 (Decisions)
+ *  tab isn't already showing them, so it never duplicates the tab's own list.
  *
- *  Collapsed it is a compact peek bar that auto-rises above the tab bar when a
- *  card arrives (no screen hijack while reading); tapping expands it into a
- *  bottom sheet whose body reuses the same DecisionsView the 决策 tab renders. */
+ *  When collapsed, it's a compact peek bar that auto-rises above the tab bar
+ *  when a card arrives (no screen hijack while reading); tapping expands it
+ *  into a bottom sheet whose body reuses the same DecisionsView the 决策 tab
+ *  renders. */
 export function DecisionDrawer(props: Props) {
   const { decisions, workspaceOf, onOpenSession, deviceLabelOf } = props;
   const [expanded, setExpanded] = useState(false);
   const count = decisions.length;
 
   // Front card = earliest arrived, matching DecisionsView's queue order, so the
-  // peek summarises the same card the expanded sheet focuses first.
+  // peek summarizes the same card the expanded sheet focuses on first.
   const front = useMemo(
     () => [...decisions].sort((a, b) => a.arrivedAt - b.arrivedAt)[0],
     [decisions],
@@ -45,22 +46,23 @@ export function DecisionDrawer(props: Props) {
       workspaceOf(front.deviceId, front.request.sessionId)?.workspaceName ||
       "Fleet"
     : "";
-  // 折叠态那一行也要说清「这张卡在哪台机器上」——不然两台同时有卡时,peek 条
-  // 说的是哪一台全靠猜。
+  // The collapsed peek bar must make clear "which device is this card from" —
+  // otherwise with two devices both having cards, there's no way to tell.
   const frontDevice = front ? deviceLabelOf(front.deviceId) : null;
   const frontKind = front ? t(KIND_LABEL[front.kind] ?? front.kind) : "";
 
   // Opening a session from a card must not bury the session detail (z-index 30)
-  // under the drawer (z-index 45) — collapse to the peek first so the detail
-  // shows with just the low-profile bar above it.
+  // under the drawer (z-index 45) — collapse to peek first so the detail shows
+  // with just the low-profile bar above it.
   const openSession = (deviceId: string, id: string) => {
     setExpanded(false);
     onOpenSession(deviceId, id);
   };
 
-  // 折叠条是全局 fixed 的，会正好压在会话详情页那根浮起的输入胶囊上。把它自己
-  // 占住的下边界发布成一个 CSS 变量，让别人往上让开 —— 量出来而不是写死一个数：
-  // 两台设备同时有卡时这条会换行变高。
+  // The collapsed bar is globally fixed, landing exactly where the session
+  // detail's floating input capsule is. Publish its bottom boundary as a CSS
+  // variable so others move up — measure it rather than hardcode a number:
+  // this bar wraps and grows taller when two devices both have cards.
   const peekRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -79,7 +81,7 @@ export function DecisionDrawer(props: Props) {
   if (expanded) {
     return (
       <>
-        {/* Back / swipe-back collapses the sheet before it pops any page layer. */}
+        {/* Back/swipe-back collapses the sheet before popping any page layer. */}
         <HistoryLayer onBack={() => setExpanded(false)} />
         <div
           className={styles.scrim}

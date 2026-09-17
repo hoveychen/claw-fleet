@@ -166,8 +166,8 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
             </a>
           );
         }
-        // http(s)/mailto/tel → 真链接（壳里交给系统打开，浏览器里开新标签）；
-        // 相对路径 / 未知 scheme → 不可点，免得一次误触把整个 PWA 导走。
+        // http(s)/mailto/tel → real links (shell delegates to system, browser opens new tab);
+        // relative paths / unknown schemes → not clickable, prevent accidental PWA navigation.
         return (
           <MdLink href={href} {...rest}>
             {children}

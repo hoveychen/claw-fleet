@@ -240,7 +240,7 @@ fn create_in(
 /// Shortest `--root-reason` that counts as a justification, in characters. The
 /// gate exists to make leaving your current plan's tree cost a moment's thought,
 /// so the cheap answers it must price out are exactly the short ones — `-`,
-/// `n/a`, `无` (none). Counted in `char`s, not bytes, so a four-character CJK reason is
+/// `n/a`, or any single character. Counted in `char`s, not bytes, so a four-character CJK reason is
 /// not held to a stricter bar than a four-letter English one.
 const MIN_ROOT_REASON_CHARS: usize = 4;
 

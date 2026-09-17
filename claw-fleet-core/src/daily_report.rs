@@ -1025,11 +1025,11 @@ fn build_summary_prompt(report: &DailyReport, locale: &str) -> String {
 /// hero title (`AISummaryCard` treats the first paragraph as the headline).
 ///
 /// Conservative by design: only strips the first paragraph when it BOTH looks
-/// like a self-referential announcement (an opener phrase like "generating" /
-/// "here is" / "以下是" / "根据提供的") AND names the summary/report domain, AND
+/// like a self-referential announcement (an opener phrase like "generating",
+/// "here is", or their equivalents in other languages) AND names the summary/report domain, AND
 /// is short, AND real content follows. A legitimate one-line opening paragraph
-/// that describes the day's content (no announcement opener, no "摘要/报告/summary/
-/// report" self-reference) is left untouched.
+/// that describes the day's content (no announcement-style opener, no summary/report
+/// self-reference) is left untouched.
 fn strip_summary_preamble(summary: &str) -> String {
     let trimmed = summary.trim();
 

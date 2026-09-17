@@ -475,7 +475,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         const fetched = new Set(files.map((f) => f.name));
         const missed = share.files.filter((f) => !fetched.has(f.name));
         const prompt = shareToPrompt({ ...share, files: missed });
-        // 草稿按设备分家，否则从分享菜单塞进来的提示词会落进另一台的新会话表单。
+        // Drafts are segmented per device; otherwise a prompt seeded via share menu
+        // would land in another device's new session form.
         const key = scopedKey(deviceIdRef.current, NEW_SESSION_DRAFT_KEY);
         const existing = loadDraft<Record<string, unknown>>(key, {});
         saveDraft(key, { ...existing, prompt });
@@ -693,7 +694,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     let timer: number | undefined;
     const guard = new ExitGuard(setExitArmed, () => {
       uninstall();
-      // 万一没走成（本页就是历史里的第一条，退无可退），把兜底装回来。
+      // If exit fails (this page is the first in history, nowhere to exit),
+      // restore the fallback.
       timer = window.setTimeout(() => {
         uninstall = install();
       }, 1_000);
@@ -820,7 +822,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       void (async () => {
         const { channelIdOf } = await import("./relayCrypto");
         for (const d of bookRef.current.devices) {
-          // 只有 relay 设备有 channel;HTTP 直连的通知不经 relay,也就不会带标记。
+          // Only relay devices have a channel; HTTP direct notifications don't go
+          // through relay, so there's no mark.
           if (d.kind !== "relay") continue;
           const id = await channelIdOf(d.secret);
           if (!id.startsWith(mark)) continue;

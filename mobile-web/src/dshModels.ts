@@ -1,20 +1,23 @@
-// dsh 的模型目录 —— 手机端的模型/effort 下拉数据源。
+// dsh model catalog — source of model/effort dropdown data on mobile.
 //
-// dsh 是唯一一个模型清单不由 Fleet 策划的 agent:它把主机上配好的 provider 通过
-// `llm.models` 发出来,这台机器上是 2 个 DeepSeek 加 276 个 openrouter 模型、
-// 横跨 43 个 vendor。手机拿不到这份配置(它在主机的 ~/.dsh/settings.yaml 里),
-// 所以走 relay 的 `dsh_models` 方法要。
+// dsh is the only agent whose model list is not curated by Fleet: it exposes
+// the providers configured on the host via `llm.models` — on this machine:
+// 2 DeepSeek models plus 276 openrouter models across 43 vendors. Mobile cannot
+// reach that config (it lives in the host's ~/.dsh/settings.yaml), so we fetch
+// it via relay's `dsh_models` method.
 //
-// 桌面端的对应物是 claw-fleet-desktop/app/modelChoices.ts 的 dshModelMenu ——
-// 那边是两级 popover,这边只有原生 <select>,所以改用 <optgroup> 表达同一套分组
-// 规则(vendor 划分与顺序两端一致,菜单不会因为换个端就重排)。
+// The desktop equivalent is `dshModelMenu` in claw-fleet-desktop/app/modelChoices.ts —
+// that uses a two-level popover, but we only have native <select>, so we use
+// <optgroup> to express the same grouping rules (vendor division and order are
+// consistent across both, so the menu won't reorder just because it's on a different platform).
 import { useEffect, useState } from "react";
 import type { FleetTransport } from "./transport";
 import type { DshModelCatalog } from "./generated/types";
 
-/** 顶到菜单前面的 openrouter vendor。老板钦定的顺序,不是推导出来的:线上数据
- *  里没有任何可排序的热度/时新信号(openrouter 每一行的 description 都是 null)。
- *  与桌面端 DSH_FEATURED_VENDORS 保持一致。 */
+/** Featured openrouter vendors pinned to the top of the menu. Order is
+ *  hand-picked by the user, not derived: the live data has no sortable signal
+ *  like popularity or recency (openrouter descriptions are all null).
+ *  Kept in sync with desktop's DSH_FEATURED_VENDORS. */
 export const DSH_FEATURED_VENDORS: string[] = [
   "anthropic",
   "deepseek",
@@ -23,30 +26,32 @@ export const DSH_FEATURED_VENDORS: string[] = [
   "moonshotai",
 ];
 
-/** 模型数不超过这个值的 group 整组平铺 —— 把两个 DeepSeek 模型折进子分组只会
- *  多一次操作、什么也省不下。超过则按 vendor 拆分组。 */
+/** Groups with model count <= this threshold flatten inline without subgroups —
+ *  nesting just two DeepSeek models would add one extra tap without saving space.
+ *  Larger groups split by vendor. */
 export const DSH_INLINE_GROUP_CAP = 20;
 
-/** 一组下拉条目。`label` 为空表示不加 optgroup 直接平铺。 */
+/** A group of dropdown items. Empty `label` means no optgroup wrapping — items flatten inline. */
 export interface DshModelOptGroup {
   label: string;
   models: Array<[string, string]>;
 }
 
-/** `anthropic/claude-opus-5` → `anthropic`;不带前缀的返回 ""。 */
+/** `anthropic/claude-opus-5` → `anthropic`; returns "" for unprefixed IDs. */
 function vendorOf(modelId: string): string {
   const i = modelId.indexOf("/");
   return i > 0 ? modelId.slice(0, i) : "";
 }
 
-/** 把目录整成 <select> 的分组条目。
+/** Convert catalog into <select> grouped option entries.
  *
- *  构造上是全覆盖的:目录里每个模型都恰好出现在一个分组里。漏掉一个就意味着它
- *  在 UI 上够不着,而 dsh 明明收这个 spec。
+ *  Coverage is exhaustive: each model in the catalog appears in exactly one group.
+ *  Omitting a model means it's unreachable in the UI even though dsh offers the spec.
  *
- *  目录缺失/为空时返回空数组而不是报错 —— 下拉于是只剩自己的「默认」项,这是
- *  诚实的:会话会跑在 ~/.dsh/settings.yaml 选中的模型上。字段一律防御性读取,
- *  主机的 Fleet 版本可能早于其中任何一个。 */
+ *  Returns empty array instead of erroring when catalog is missing or empty —
+ *  the dropdown then only has its own "default" item. This is honest: the session
+ *  will run on whichever model ~/.dsh/settings.yaml selected. All fields read
+ *  defensively; host's Fleet version may be older than any field here. */
 export function dshModelGroups(
   catalog: DshModelCatalog | null | undefined,
 ): DshModelOptGroup[] {
@@ -59,8 +64,8 @@ export function dshModelGroups(
       out.push({ label: group.name || group.id, models: models.map(entry) });
       continue;
     }
-    // 先按 vendor 装桶,再按老板钦定的顺序吐出 featured vendor —— 这样目录变大
-    // 时菜单顺序不会跟着重排。
+    // Bucket by vendor first, then emit featured vendors in user-defined order —
+    // this way the menu stays stable as the catalog grows.
     const byVendor = new Map<string, Array<[string, string]>>();
     for (const m of models) {
       const vendor = DSH_FEATURED_VENDORS.includes(vendorOf(m.id)) ? vendorOf(m.id) : "";
@@ -79,10 +84,12 @@ export function dshModelGroups(
   return out;
 }
 
-/** effort 阶梯该跟着哪个模型走:选了模型就是它;模型还停在「默认」时,是 dsh
- *  自己真正会挂上的那个 —— 目录 `defaultSpec`(主机 agent-default-model 设置)。
- *  以前只认显式选中的模型,于是一直用默认模型的机器上 effort 下拉永远只有
- *  「默认」一项,档位像是不存在。两者都没有时返 "",下游当「没有阶梯」。 */
+/** Which model's effort ladder to display: the explicitly selected one if set;
+ *  otherwise the one dsh will actually use — the catalog's `defaultSpec` (set via
+ *  agent-default-model on the host). Previously only recognized explicit selection,
+ *  so on machines that always used the default, the effort dropdown only had one
+ *  option and the ladder seemed to not exist. Returns "" if neither is available;
+ *  downstream treats this as "no ladder available". */
 export function dshLadderSpec(
   catalog: DshModelCatalog | null | undefined,
   model: string,
@@ -90,8 +97,9 @@ export function dshLadderSpec(
   return model || catalog?.defaultSpec || "";
 }
 
-/** 选中模型自己的 effort 阶梯,以及 dsh 自己的默认值。每个模型的阶梯不同,选
- *  Claude 那套固定档位会发出 dsh 不认的值。 */
+/** This model's own effort ladder and dsh's default value for it.
+ *  Each model has a different ladder; using Claude's fixed tiers would emit
+ *  effort values dsh doesn't recognize. */
 export function dshEffortsFor(
   catalog: DshModelCatalog | null | undefined,
   spec: string,
@@ -109,8 +117,9 @@ export function dshEffortsFor(
   return { efforts: [], defaultEffort: "" };
 }
 
-/** 主机上 dsh 的模型目录。拿不到就返回 null(relay 没连上、请求在途、主机没装
- *  dsh、或桌面端版本老到不认这个方法)—— 调用方把 null 当「只有默认项」。 */
+/** Host's dsh model catalog. Returns null if unreachable (relay disconnected,
+ *  request in flight, host has no dsh installed, or desktop version too old to
+ *  recognize this method) — callers treat null as "only the default item". */
 export function useDshModels(client: FleetTransport | null): DshModelCatalog | null {
   const [catalog, setCatalog] = useState<DshModelCatalog | null>(null);
   useEffect(() => {

@@ -95,7 +95,7 @@ export function RepoView({ client, onBack, onOpenRepo }: Props) {
 }
 
 /** Loose-ends badges: unpushed commits, pending worktrees, dirty files. Shows a
- *  single "干净" tag when nothing needs attention. */
+ *  single "clean" tag when nothing needs attention. */
 function RepoBadges({ repo }: { repo: RepoSummary }) {
   const badges: Array<{ text: string; tone: "warn" | "info" }> = [];
   if ((repo.unpushed ?? 0) > 0) {

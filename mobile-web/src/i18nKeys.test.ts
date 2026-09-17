@@ -4,38 +4,42 @@ import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * 每个 `t("…")` 用到的中文原文都必须在 `i18n.ts` 的 DICT 里有英文条目。
+ * Every Chinese original used in `t("…")` must have an English entry in the `DICT` of `i18n.ts`.
  *
- * 这道门存在,是因为漏一条的失败模式是**安静的**:`t()` 查不到就原样返回那个
- * 中文 key,于是英文 UI 上那一处直接显示中文,而构建、类型检查、既有测试全是
- * 绿的。2026-09-08 产出页的压缩包浏览器就这样上线了 —— 整整 11 条文案(面包
- * 屑、搜索框、四条报错)在英文下全是中文,没有任何一道关卡拦住它。桌面端有
- * `app/localeKeys.test.ts` 抓同一类问题,移动端一直没有。
+ * This gate exists because the failure mode of a missing entry is **silent**: if `t()` cannot
+ * find the key, it returns it as-is, so the English UI displays Chinese directly, while the
+ * build, type check, and existing tests all pass. On 2026-09-08, the artifacts page archive
+ * went live this way — exactly 11 UI strings (breadcrumbs, search box, four errors) showed
+ * Chinese in English mode with nothing stopping it. The desktop has `app/localeKeys.test.ts`
+ * catching the same issue; mobile never had one.
  *
- * 扫的是**源码**而不是词典,所以它随代码变化保持为真:新加一处 t() 而忘了补
- * 词条,这条测试当场报红并点名那个 key 和它所在的文件。
+ * Scans **source code** rather than the dictionary, so it stays true as code changes: add
+ * a `t()` call and forget to add its entry, and this test immediately fails with the missing
+ * key and the file it is in.
  */
 
 const SRC_DIR = resolve(__dirname);
 const I18N_FILE = join(SRC_DIR, "i18n.ts");
 
 /**
- * `(?<![A-Za-z0-9_$.])` 是必需的而不是讲究:没有它,`format(".2f")`、
- * `element.at("x")` 这类以 t 结尾的标识符后面的括号也会命中,把参数当成翻译
- * key 报出来。桌面端那份守门测试踩过同样的坑(第一版报出 42 个假阳性)。
+ * The `(?<![A-Za-z0-9_$.])` negative lookbehind is necessary, not pedantic: without it,
+ * parentheses after identifiers ending in 't' like `format(".2f")` and `element.at("x")`
+ * also match, treating their arguments as translation keys and reporting false positives.
+ * The desktop's corresponding gate test hit the same issue (first version reported 42 false positives).
  */
 const T_CALL = /(?<![A-Za-z0-9_$.])t\(\s*"((?:[^"\\]|\\.)*)"/g;
 
 /**
- * 两种语言里长得一样、因此不进词典的字符串。
+ * Strings that look the same in both languages and therefore do not need dictionary entries.
  *
- * 每一条都必须是**本来就是英文/专名**的东西 —— 词典里补一条
- * `"Fleet": "Fleet"` 只是噪音。中文文案永远不许进这张表:那正是这道门要拦的。
+ * Each entry must be something that is **inherently English or a proper noun** — adding
+ * `"Fleet": "Fleet"` to the dictionary is just noise. Chinese copy is never allowed in
+ * this set: that is exactly what this gate is meant to catch.
  */
 const SAME_IN_BOTH_LANGS = new Set([
-  "Fleet", // 产品名
-  "Codex app-server", // 进程名,用量页按来源分组时原样显示
-  "shell", // 终端页的默认命令名,两种语言都写 shell
+  "Fleet", // product name
+  "Codex app-server", // process name, displayed as-is when grouped by source on usage page
+  "shell", // default command name in terminal view, used as-is in both languages
 ]);
 
 function sourceFiles(dir: string): string[] {
@@ -54,8 +58,9 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-/** DICT 里登记了的 key。字面量既有 `"中文":` 也有裸标识符形式(`改名: "Rename"`),
- *  两种都要收 —— 只认带引号的那种会把裸键当成缺失报出来。 */
+/** Keys registered in DICT. The literal form includes both quoted strings like `"中文":` and
+ *  bare identifiers like `改名: "Rename"` — we must capture both, or bare keys get reported
+ *  as missing. */
 function dictKeys(): Set<string> {
   const src = readFileSync(I18N_FILE, "utf8");
   const start = src.indexOf("const DICT");
@@ -68,7 +73,7 @@ function dictKeys(): Set<string> {
 }
 
 describe("i18n key coverage", () => {
-  /** key → 用到它的文件(相对 src/),按 key 去重后仍保留第一个出处好定位。 */
+  /** key → file using it (relative to src/), deduplicated by key but keeping the first occurrence for locating it. */
   const used = new Map<string, string>();
   for (const file of sourceFiles(SRC_DIR)) {
     const src = readFileSync(file, "utf8");
@@ -77,13 +82,13 @@ describe("i18n key coverage", () => {
     }
   }
 
-  it("扫到了可观数量的 t() 调用（正则没有整体失效）", () => {
-    // 这条不是凑数:上面那个 lookbehind 或文件遍历一旦写坏,`used` 会静静地变
-    // 成空集,而下面那条断言就「通过」了。
+  it("captures a substantial number of t() calls (regex is not completely broken)", () => {
+    // This test is not just a sanity check: if the lookbehind above or the file traversal
+    // breaks, `used` silently becomes an empty set, and the assertion below would pass.
     expect(used.size).toBeGreaterThan(300);
   });
 
-  it("每个 t() 的 key 都在 DICT 里", () => {
+  it("every t() key exists in DICT", () => {
     const keys = dictKeys();
     const missing = [...used.entries()]
       .filter(([k]) => !keys.has(k) && !SAME_IN_BOTH_LANGS.has(k))
@@ -95,8 +100,9 @@ describe("i18n key coverage", () => {
     ).toEqual([]);
   });
 
-  it("同形词允许清单不许收留中文", () => {
-    // 这张表是逃生口,不是垃圾桶:往里塞一条中文就等于把这道门对那条文案关掉。
+  it("same-form-word allowlist must not contain Chinese", () => {
+    // This list is an escape hatch, not a dumping ground: putting Chinese in it disables
+    // this gate for that text.
     const cjk = [...SAME_IN_BOTH_LANGS].filter((s) => /[一-鿿]/.test(s));
     expect(cjk, "中文文案要进 DICT，不是进允许清单").toEqual([]);
   });

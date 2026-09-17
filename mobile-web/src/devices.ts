@@ -537,7 +537,7 @@ function savePendingUnsub(list: PendingUnsub[]): void {
     if (list.length === 0) localStorage.removeItem(PENDING_UNSUB_KEY);
     else localStorage.setItem(PENDING_UNSUB_KEY, JSON.stringify(list));
   } catch {
-    // 存储满 / 隐私模式 —— 退订就只能靠用户手动关通知了,不值得让移除失败
+    // Storage full / private mode — unsubscribe falls back to user manual notifications off, not worth failing removal
   }
 }
 

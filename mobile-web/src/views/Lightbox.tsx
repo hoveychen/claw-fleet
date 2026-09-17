@@ -262,7 +262,7 @@ function LightboxOverlay({
       aria-modal="true"
       aria-label={t("图片查看")}
     >
-      {/* 硬件/手势返回先关灯箱，和其它浮层一致。 */}
+      {/* Hardware/gesture back closes the lightbox, consistent with other overlays. */}
       <HistoryLayer onBack={onClose} />
       <img ref={imgRef} className={styles.image} src={src} alt={alt} draggable={false} />
       <button

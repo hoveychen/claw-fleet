@@ -113,7 +113,7 @@ export function ApiErrorActions({
           // `claude auth login` is an OAuth handshake: it prints a URL and then
           // waits for a pasted code, so it needs a real pty and a place to type
           // — not a fire-and-forget spawn. Fleet already owns both (the
-          // 「终端」(Terminal) page's proc runner), so the card borrows them
+          // Terminal page's proc runner), so the card borrows them
           // inline rather than sending the user off to find a terminal.
           setBusy("login");
           setError(null);

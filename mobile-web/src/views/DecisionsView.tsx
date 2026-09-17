@@ -58,10 +58,10 @@ export const KIND_LABEL: Record<string, string> = {
 };
 
 interface Props {
-  /** 合并收件箱:每张卡都带着它属于哪一台设备。 */
+  /** Merged inbox: each card carries which device it belongs to. */
   decisions: Array<WithDevice<PendingDecision>>;
-  /** 某一台设备的连接。答复必须发回**这张卡所属**的那一台 —— 收件箱是合并的,
-   *  当前作用域那一台未必是卡的主人。 */
+  /** A given device's transport. Answers must return to **the device this card belongs to** — the inbox is merged,
+   *  and the current scope may not be the card's owner. */
   transportFor: (deviceId: string) => FleetTransport | null;
   connected: boolean;
   agentOnline: boolean;
@@ -69,14 +69,14 @@ interface Props {
   workspaceOf: (deviceId: string, sessionId: string) => SessionInfo | undefined;
   onAnswered: (deviceId: string, id: string) => void;
   onOpenSession: (deviceId: string, sessionId: string) => void;
-  /** 这台设备的显示名;只配了一台时返回 null,徽标整个不出现 —— 单设备用户不该
-   *  为多设备付出一行视觉噪音。 */
+  /** The device's display label; returns null when only one device is configured, so the badge doesn't appear —
+   *  single-device users shouldn't pay a line of visual noise for multi-device support. */
   deviceLabelOf: (deviceId: string) => string | null;
-  /** 有几台配过的设备此刻桌面端不在线。只配了一台时恒为 0 —— 那种情况下「桌面端
-   *  离线」本身就是整页的终态,不需要再数一遍。 */
+  /** Count of configured devices that are offline now. Always 0 when only one device is configured — in that case
+   *  "desktop offline" is the whole page's terminal state, no need to count again. */
   offlineDevices?: number;
-  /** 通知点击要聚焦的卡。`nonce` 使连点同一张卡也能重新触发;`deviceId` 来自
-   *  relay 盖在通知上的来源标记 —— 有它才能在两台机器同号的卡之间选对。 */
+  /** The card to focus when clicked from a notification. `nonce` lets consecutive taps on the same card re-trigger; `deviceId` comes from
+   *  the source tag the relay puts on the notification — needed to pick the right card when two devices have the same number. */
   focusDecision?: { id: string; deviceId?: string; nonce: number } | null;
 }
 
@@ -96,7 +96,7 @@ export function DecisionsView({
   // One focused card at a time + a queue bar, mirroring the desktop panel's
   // active-card/tab model. When the active card resolves, focus falls to the
   // card at the same queue position (desktop's "next after removed").
-  // 复合键:两台机器上同号的卡是两张不同的卡。
+  // Composite key: cards with the same number on two machines are two different cards.
   const [activeId, setActiveId] = useState<string | null>(null);
   const lastIndexRef = useRef(0);
 
@@ -116,18 +116,18 @@ export function DecisionsView({
   // the next card mounts under that same offset with its head off-screen. Snap
   // back to the top whenever the focused card changes (answered, or picked from
   // the queue bar) so each card starts from its head.
-  // 通知点击指定的卡。只在它确实存在于当前队列里时才切 —— 卡可能已被别处答掉
-  // (桌面端答了、或超时消失),那时保持现状比跳到一张空卡好。
+  // When a notification click specifies a card, only switch if it actually exists in the current queue — the card may have been answered elsewhere
+  // (desktop answered it, or it expired), and keeping the current state is better than jumping to an empty card.
   //
-  // 依赖里放 nonce 而不是 focusDecision 本身:后者是每次渲染新建的对象,会让
-  // effect 每帧重跑;而只依赖 id 又会让「连点同一条通知」第二次失效。
+  // Put nonce in the dependency list, not focusDecision itself: the latter is a new object every render, causing the
+  // effect to re-run every frame; and depending only on id would make "consecutive taps on the same notification" fail the second time.
   const focusId = focusDecision?.id;
   const focusDeviceId = focusDecision?.deviceId;
   const focusNonce = focusDecision?.nonce;
   useEffect(() => {
     if (!focusId) return;
-    // 知道来源设备就精确到那一台(relay 在通知上盖了来源标记);不知道就按 id
-    // 找第一张 —— 老 relay 不盖标记,而「跳错一张」也好过「点了没反应」。
+    // With the source device known, match exactly to that one (relay puts the source tag on the notification); without it, find by id —
+    // old relay didn't tag, and "jumping to the wrong card" is better than "no response".
     const hit = focusDeviceId
       ? decisions.find((d) => d.deviceId === focusDeviceId && d.id === focusId)
       : decisions.find((d) => d.id === focusId);
@@ -159,8 +159,8 @@ export function DecisionsView({
         icon={CheckCircle2}
         title={t("没有待处理的决策")}
         description={
-          // 「都答完了」只对在线的那几台成立。有设备离线时不说清楚,这句会读成
-          // 「全部机器都没事了」——而离线那台的卡只是同步不过来。
+          // "All answered" only applies to the online devices. Without saying it clearly when a device is offline, this sentence reads as
+          // "all machines are fine" — when in fact the offline device's cards just aren't syncing.
           offlineDevices > 0
             ? t(
                 "在线设备的决策卡都已作答。另有 {0} 台设备离线，它们的卡暂时同步不过来。",
@@ -203,9 +203,9 @@ export function DecisionsView({
         </div>
       )}
       {active && (
-        // 一张畸形卡(比如缺 riskTags 数组)以前会把整个 app 变白。包一层之后
-        // 爆炸半径就这一张:上面的队列条还在,用户能直接翻到下一张;resetKey 是
-        // 复合键,所以翻过去就自动恢复,不必手动点重试。
+        // A malformed card (e.g., missing the riskTags array) used to turn the whole app white. After wrapping it,
+        // the blast radius is just that one card: the queue bar above is still there, so the user can flip to the next card directly; resetKey is
+        // a composite key, so flipping away auto-recovers it, no need to manually click retry.
         <ErrorBoundary
           label={t("决策卡 {0}", active.id)}
           resetKey={itemKey(active.deviceId, active.id)}
@@ -255,7 +255,7 @@ function SkeletonCard() {
 interface CardProps {
   decision: PendingDecision;
   client: FleetTransport | null;
-  /** 这张卡来自哪一台的显示名;单设备时 null,徽标不渲染。 */
+  /** The device's display name where this card comes from; null for single device, badge doesn't render. */
   deviceLabel?: string | null;
   workspaceOf: (sessionId: string) => SessionInfo | undefined;
   onAnswered: (id: string) => void;
@@ -318,8 +318,8 @@ function DecisionCard({
           {t(KIND_LABEL[decision.kind] ?? decision.kind)}
         </span>
         <span className={styles.workspace}>{workspace}</span>
-        {/* 合并收件箱里必须一眼看出这张卡在哪台机器上 —— 答复会发回那一台,
-            而「在哪台机器上批的这条命令」本身就是判断要不要批的依据。 */}
+        {/* In a merged inbox, you must see at once which device this card is from — the answer goes back to that device,
+            and "which device the command was approved on" is itself part of the decision to approve. */}
         {deviceLabel && <span className={styles.deviceChip}>{deviceLabel}</span>}
         {session && (
           <button
@@ -1096,7 +1096,7 @@ function QuestionsCard({
   // `${question} ${label}` → preview expanded before selection.
   const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({});
 
-  // Same head-off-screen problem one level down: the 上一题/下一题 buttons and the
+  // Same head-off-screen problem one level down: the "previous/next question" buttons and the
   // step dots sit below a long question, so stepping leaves the next question's
   // header scrolled past. Snap back on every step change, like the card-level
   // effect above.
@@ -1472,10 +1472,10 @@ function OtherComposer({
   onRemove: (path: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  // 识别结果是异步到的，期间用户可能又敲了字；读 ref 里最近一次渲染的值，
-  // 而不是闭包里那个可能已经过期的 value。
-  // 回答决策卡是手机上最高频的输入场景，这里最该能说 —— 用的是 composer 那同一
-  // 套录音条，不是这一处专有的什么手势。
+  // Recognition results arrive async; meanwhile the user may have typed more; read the most recent rendered value from the ref,
+  // not the potentially stale value in the closure.
+  // Answering decision cards is the most common input scenario on mobile, and this is where voice matters most — it uses the same voice bar as the composer,
+  // not some gesture unique to this spot.
   const rec = useVoiceRecorder({ value, onChange });
   const taRef = useFollowTail<HTMLTextAreaElement>(rec.recording, rec.preview);
   return (
@@ -1507,8 +1507,8 @@ function OtherComposer({
               <Plus size={14} />
             </button>
           )}
-          {/* 录音时输入框留在原地显示实时转写(只读)，录音条另起一行 —— 这一行
-              太窄，塞不下取消/波形/计时/停止那一串。 */}
+          {/* While recording, the input box stays in place showing real-time transcription (read-only); the voice bar starts a new line —
+              this line is too narrow to fit the cancel/waveform/timer/stop buttons. */}
           <textarea
             ref={taRef}
             className={styles.otherInput}

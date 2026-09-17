@@ -40,7 +40,7 @@ function usage(costUsd: number): TodayUsage {
   };
 }
 
-/** 依次施加一串 action。 */
+/** Apply a sequence of actions in order. */
 function run(
   actions: Array<Parameters<typeof devicesReducer>[1]>,
   from: DeviceStates = {},
@@ -58,8 +58,8 @@ describe("devicesReducer", () => {
     expect(states[B].decisions.map((d) => d.id)).toEqual(["g9"]);
   });
 
-  // 决策卡 id 只在单机内唯一。两台机器上同号的卡是两张不同的卡，解决其中一张
-  // 绝不该把另一张也抹掉。
+  // Decision card IDs are unique only per device. Cards with the same ID on two
+  // machines are two different cards; resolving one must never erase the other.
   it("resolving a card on one device leaves the same id on the other alone", () => {
     const states = run([
       { deviceId: A, type: "decisionCreated", kind: "guard", request: req("g1"), now: 1 },
@@ -86,7 +86,8 @@ describe("devicesReducer", () => {
     expect(states[A].decisionsLoaded).toBe(true);
   });
 
-  // 本机答复是乐观的：卡立刻消失，并记下时间戳，好让迟到的快照不能把它复活。
+  // Answering is optimistic: the card vanishes immediately, and we record the
+  // timestamp so a lagging snapshot cannot resurrect it.
   it("an answered card stays gone when a lagging snapshot still lists it", () => {
     const states = run([
       { deviceId: A, type: "decisionCreated", kind: "guard", request: req("g1"), now: 1 },
@@ -178,7 +179,8 @@ describe("aggregation", () => {
     ]);
   });
 
-  // 同一时刻到达时按设备顺序稳定排，免得列表每次刷新自己抖动。
+  // When arriving at the same time, sort stably by device order to prevent list
+  // thrashing on every refresh.
   it("breaks arrival ties by device order", () => {
     const tied = run([
       { deviceId: A, type: "decisionCreated", kind: "guard", request: req("x"), now: 7 },
@@ -221,12 +223,14 @@ describe("header rollups", () => {
     expect(totalUsage(states, ORDER)?.sessionCount).toBe(2);
   });
 
-  // 「还不知道」和「今天没花钱」是两回事：一台都没报过时不能显示 $0.00。
+  // "Don't know yet" and "spent nothing today" are different: we can't display $0.00
+  // when no device has reported.
   it("spend is null until at least one device reports", () => {
     expect(totalUsage({}, ORDER)).toBeNull();
   });
 
-  // 合计回答不了「哪一台在烧钱」，所以同一份状态还要能按设备拆回去。
+  // The aggregate can't answer "which device is burning money", so we must also be
+  // able to split the same state back per device.
   it("today's spend also splits back per device, in switcher order", () => {
     const states = run([
       { deviceId: A, type: "usage", usage: usage(1.5) },
@@ -237,7 +241,8 @@ describe("header rollups", () => {
     expect(rows.map((r) => r.usage?.costUsd)).toEqual([1.5, 2.25]);
   });
 
-  // 没报过的那一台仍要占一行（null），否则界面看不出「合计里少了它」。
+  // An unreported device must still occupy a row (null), otherwise the UI can't show
+  // "the aggregate is missing it".
   it("a device that has not reported keeps its row with a null usage", () => {
     const states = run([{ deviceId: A, type: "usage", usage: usage(1.5) }]);
     expect(usageByDevice(states, ORDER)[1]).toEqual({ id: B, usage: null });
@@ -273,8 +278,8 @@ describe("header rollups", () => {
     expect(allDecisionsLoaded(both, ORDER)).toBe(true);
   });
 
-  // 离线的那一台永远不会回快照。让它守着闸门 = 骨架屏永远转下去，连「桌面端
-  // 离线 / 没有待处理的决策」的提示都出不来。
+  // An offline device never sends a snapshot. If it holds the gate, the skeleton
+  // spins forever and the "desktop offline / no pending decisions" hint never shows.
   it("an offline device does not hold the skeleton gate", () => {
     const states = run([
       { deviceId: A, type: "status", connected: true },
@@ -286,14 +291,15 @@ describe("header rollups", () => {
         agent: { host: "mac", home: "/h", ver: "1" },
         now: 1,
       },
-      // B 连着中转，但它那台桌面端不在线 —— 快照永远不会来。
+      // B relays in, but its desktop is offline — snapshot never arrives.
       { deviceId: B, type: "status", connected: true },
     ]);
     expect(states[B].decisionsLoaded).toBe(false);
     expect(allDecisionsLoaded(states, ORDER)).toBe(true);
   });
 
-  // 「都答完了」这句只对在线那几台成立，所以空态要报出离线的台数。
+  // "All answered" only applies to online devices, so the empty state must report
+  // the count of offline ones.
   it("counts the devices whose desktop is offline", () => {
     const states = run([
       { deviceId: A, type: "status", connected: true },
@@ -307,11 +313,12 @@ describe("header rollups", () => {
         ORDER,
       ),
     ).toBe(0);
-    // 还没 attach 过的设备也算离线 —— 它显然没有在推卡。
+    // Devices that have never attached count as offline — clearly not pushing cards.
     expect(offlineDeviceCount({}, ORDER)).toBe(2);
   });
 
-  // 每一台都离线时同样不该转骨架屏 —— 该显示「桌面端离线」。
+  // When all devices are offline, don't spin the skeleton either — show the
+  // "desktop offline" hint instead.
   it("all-offline reads as loaded so the offline hint can render", () => {
     const states = run([
       { deviceId: A, type: "status", connected: true },

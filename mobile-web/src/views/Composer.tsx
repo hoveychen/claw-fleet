@@ -932,7 +932,7 @@ export function NewSessionSheet({
       tool,
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
-      // Codex / dsh 都没有 --permission-mode 的对应物；只给 Claude 发。
+      // Codex / dsh have no --permission-mode equivalent; only send to Claude.
       ...(sendsPermissionMode && permissionMode ? { permissionMode } : {}),
     };
     setBusy(true);
@@ -1394,8 +1394,8 @@ export function ResumeComposer({
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  // 胶囊上报告的当前配置。dsh 的模型目录是主机运行时给的，这里认不出 id 就
-  // 原样显示 —— 显示一个真实但陌生的 id，好过显示一个错的友好名字。
+  // Current config shown in the pill. dsh's model catalog comes from the host at runtime; if we
+  // don't recognize an id, display it as-is — a real but unfamiliar id beats a wrong friendly name.
   const resumeCatalog = useModelCatalog(client);
   const modelLabel = useMemo(() => {
     if (tool === "dsh") return model;
@@ -1420,8 +1420,8 @@ export function ResumeComposer({
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
   useAutoGrow(voiceTailRef, voice.showingPreview ? voice.preview : prompt);
-  // 实测高度上报给父级：浮起后本组件不占布局高度，转录区要靠这个数字给自己补
-  // 底部留白，否则最后一条消息会永远压在胶囊底下。
+  // Actual measured height reported to parent: the pill floats without taking layout height, so the
+  // transcript relies on this number to pad its bottom, or the last message stays buried under the pill.
   const boxRef = useRef<HTMLDivElement>(null);
   const [measureNonce, remeasure] = useReducer((n: number) => n + 1, 0);
   useLayoutEffect(() => {

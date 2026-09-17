@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { showsMobilePanel } from "./hostEnv";
 
-// Visibility of the "移动端" (Mobile) panel. The answers for all three origin types comprise the entirety of this check,
+// Visibility of the Mobile panel. The answers for all three origin types comprise the entirety of this check,
 // and the differences between them are not stylistic: if you give a pairing code to a host that a phone cannot reach,
-// after scanning you'll only get a device stuck on "连接中…" (Connecting…), with the reason invisible in the UI.
+// after scanning you'll only get a device stuck on Connecting…, with the reason invisible in the UI.
 describe("showsMobilePanel", () => {
   it("Desktop always shows it, ignores origin", () => {
     expect(showsMobilePanel(false, "https:", "fleet.example.com")).toBe(true);

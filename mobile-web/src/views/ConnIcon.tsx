@@ -1,5 +1,5 @@
-// Header connection mark — replaces the old dot + text label ("桌面端在线" /
-// "在线 · 网络拥挤" / …) with a glyph, so the banner's right edge stays legible
+// Header connection mark — replaces the old dot + text label ("Desktop online" /
+// "Online · network congested" / …) with a glyph, so the banner's right edge stays legible
 // on a narrow phone without spending a third of the header width on prose.
 //
 // Two dimensions have to survive the collapse to an icon:

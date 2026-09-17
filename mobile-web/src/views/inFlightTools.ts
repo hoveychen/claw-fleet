@@ -45,7 +45,7 @@ export function inFlightToolIds(
 }
 
 /** A `Bash` the agent launched with `run_in_background`: its result lands
- *  instantly and the turn ends (the session flips to 等待输入) while the command
+ *  instantly and the turn ends (the session flips to "awaiting input") while the command
  *  keeps running. Nothing on screen used to say so. */
 export function isBackgroundShell(b: ContentBlock): boolean {
   if (b.name !== "Bash") return false;

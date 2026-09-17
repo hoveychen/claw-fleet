@@ -6,21 +6,22 @@ import { mdComponents, mdInlineComponents } from "../markdown/components";
 import { splitMarker, taskTip } from "../../../shared-ts/taskItem";
 import styles from "./TaskItemLine.module.css";
 
-/** 一条 P 在计划里的位置。`current` 是第一个待办项（会话页用桌面下发的
- *  currentTask 比对，计划页取第一个未完成的）。 */
+/** Position of one P in the plan. `current` is the first pending item (session page compares with
+ *  desktop-provided currentTask, plan page takes the first uncompleted). */
 export type TaskItemState = "done" | "current" | "pending";
 
 /**
- * 单条 P 任务。会话详情的任务页签与计划页共用一份 —— 两处此前各写了一份
- * 近乎相同的实现，且都只把 `**` 剥掉而不渲染。
+ * Single P task. Reused between session detail task tab and plan page — both previously wrote
+ * nearly identical implementations, both only strip `**` without rendering.
  *
- * 两条约束定了它的形状。一是 P-task 正文常常是几百字的实现笔记，所以默认
- * 压成一行，点一下才展开：整段铺开会把页签变成一堵墙。二是正文是 markdown，
- * 而压行态和展开态要的是两种渲染：压行态用 inline 组件表（`p` 展平成
- * fragment，整项塌成一行），展开态用块级表，多段落笔记保住段落分隔。
+ * Two constraints shape it. First, P-task body is often hundreds of words of implementation notes,
+ * so collapsed to one line by default, expands on click: laying it all out turns the tab into a wall.
+ * Second, body is markdown, and collapsed vs. expanded need two renderings: collapsed uses inline
+ * components (`p` flattened to fragment, whole item collapses to one line), expanded uses block-level,
+ * preserving paragraph breaks in multi-paragraph notes.
  *
- * 与桌面的 `TaskLine` 是同一份契约（marker 抽成徽章 + 正文走真 markdown），
- * 拆 marker 的那一份逻辑本身也共用 `shared-ts/taskItem`。
+ * Same contract as desktop's `TaskLine` (marker extracted as badge + body rendered as true markdown),
+ * the logic for splitting marker is also shared from `shared-ts/taskItem`.
  */
 export function TaskItemLine({
   text,
@@ -29,7 +30,7 @@ export function TaskItemLine({
 }: {
   text: string;
   state: TaskItemState;
-  /** 挂载即展开 —— 计划页从矩阵某一格点进来时用。 */
+  /** Expanded on mount — used when plan page enters from a grid cell. */
   startOpen?: boolean;
 }) {
   const { marker, rest } = splitMarker(text);

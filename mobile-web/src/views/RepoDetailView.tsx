@@ -72,7 +72,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
 
         {!error && detail && (
           <>
-            {/* ── 分支 / 推送状态 ── */}
+            {/* ── Branch / push status ── */}
             <div className={styles.section}>
               <div className={styles.sectionLabel}>{t("当前分支")}</div>
               <div className={styles.card}>
@@ -174,7 +174,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
               )}
             </div>
 
-            {/* ── 最近提交 ── */}
+            {/* ── Recent commits ── */}
             <div className={styles.section}>
               <div className={styles.sectionLabel}>{t("最近提交")}</div>
               {detail.commits.length === 0 ? (

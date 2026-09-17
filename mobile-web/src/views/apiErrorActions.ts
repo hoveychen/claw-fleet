@@ -86,8 +86,8 @@ export async function runApiErrorAction(
     case "login":
       try {
         // The OAuth handshake prints a URL and waits for a pasted code, so it
-        // needs a pty on the host — the same proc runner the 终端 page drives.
-        // The card starts it; the typing happens over there.
+        // needs a pty on the host — the same proc runner the "终端" (Terminal) page
+        // drives. The card starts it; the typing happens over there.
         await env.client.request("proc_run", {
           workspacePath: env.session.workspacePath,
           command: "claude auth login",

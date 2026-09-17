@@ -238,7 +238,7 @@ interface ToolMeta {
   isError?: boolean;
   thumbs?: string[];
   /** Set on the two calls that file something into a store, so the row can show
-   *  the deliverable instead of a bare 「产出」 chip. */
+   *  the deliverable instead of a bare "产出" (Artifact) chip. */
   ingest?: IngestSummary;
 }
 
@@ -1499,10 +1499,10 @@ export function SessionDetailView({
           <div className={styles.headerTitle}>
             {/* Subagent identity only. The scope *switcher* that used to sit
                 here is gone — its full family list lives in the ☰ menu, and on a
-                390px header the trigger cost 83px to say "主进程" about the scope
-                you were already looking at. A subagent still says so here (the
-                ↑来自 breadcrumb below names the parent); a main session shows
-                nothing, which is where the title needs the width. */}
+                390px header the trigger cost 83px to say "主进程" (Main Process)
+                about the scope you were already looking at. A subagent still says
+                so here (the ↑来自 (from) breadcrumb below names the parent); a main
+                session shows nothing, which is where the title needs the width. */}
             {session.isSubagent && (
               <span className={styles.subagentBadge}>⎇ {session.agentType || t("子代理")}</span>
             )}

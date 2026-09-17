@@ -17,7 +17,7 @@
 //
 // Why a half-screen instead of continuing with inline expansion: inline panel height
 // borrows from the content, so it must be small—it only fits five static rows. This
-// is exactly what 老板 said: "even expanded, won't fit watch and subagent." A
+// is exactly what the boss said: "even expanded, won't fit watch and subagent." A
 // half-screen borrows a **temporary** screen space, can use 85vh, so "what's
 // happening now" finally has room to lay out. Handle + rounded corners + bottom
 // safe area are the native mobile idiom for these "grab and go" panes.

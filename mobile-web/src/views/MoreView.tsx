@@ -124,21 +124,21 @@ export function MoreView({
   const { lang, setLang, t } = useI18n();
   const confirm = useConfirm();
   // Device being renamed (inline input, not window.prompt—HarmonyOS ArkWeb dialog
-  // may not be available, and there's no reason to depend on it here).
+  // may not be available, no reason to depend on it).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
   // Camera viewfinder for "scan device QR". HarmonyOS shell uses its own path
-  // (scanPairing reloads WebView and injects #k=); other forms use this page one.
+  // (scanPairing reloads WebView and injects #k=); other surfaces use this page one.
   const [scanning, setScanning] = useState(false);
-  /** Whether shell has built-in scan bridge (HarmonyOS)—if so, system manages camera,
+  /** Whether shell has a built-in scan bridge (HarmonyOS)—if so, system manages camera,
    *  not constrained by page security context. */
   const shellScan = canScanPairing();
-  /** Without shell bridge, can page itself open camera? */
+  /** Without shell bridge, can the page itself open the camera? */
   const scan = scanAvailability();
   const { setting, setTheme } = useTheme();
   const wakeLock = useWakeLock();
-  // Task-list handoff grouping — same "tasks:groupHandoff" draft task page reads on
-  // remount. Default on.
+  // Task-list handoff grouping—same "tasks:groupHandoff" draft that task page reads
+  // on remount. On by default.
   const [groupHandoff, setGroupHandoff] = useDraft<boolean>("tasks:groupHandoff", true);
 
   const themeChoices: Array<[ThemeSetting, string]> = [
@@ -148,14 +148,12 @@ export function MoreView({
   ];
 
   // Diagnose decision card source. Normally one (desktop); second source or ignored
-  // snapshots signal another agent answering in the channel—card disappears because of
-  // that agent.
+  // snapshots signal another agent answering in the channel—that agent causes cards to disappear.
   const trustedSource = snapshotSources.find((s) => s.trusted);
   const foreignSources = snapshotSources.filter((s) => s !== trustedSource);
   const ignoredTotal = snapshotSources.reduce((n, s) => n + s.ignored, 0);
-  // One desktop restart is just a pid change (identity key has no pid), so the record
-  // merges them—report process count honestly so "my ps shows different pid" isn't
-  // mistaken for an impostor.
+  // One desktop restart is just a pid change (identity key has no pid), so records merge—
+  // report process count honestly so "my ps shows different pid" isn't mistaken for impostor.
   const agentLabel = (s: SnapshotSource) => {
     if (!s.agent) return t("未署名");
     const base = `${s.agent.host ?? "?"} · pid ${s.agent.pid ?? "?"}`;
@@ -171,8 +169,8 @@ export function MoreView({
       ? t("桌面端在线")
       : t("桌面端离线");
 
-  // Viewfinder full-screen covers (position: fixed), so lives at top level not inside
-  // devices section—when it appears, "More" page stays below, cancel returns to it.
+  // Viewfinder full-screen cover (position: fixed) lives at top level, not inside
+  // devices section—when visible, "More" page stays below; cancel returns to it.
   if (scanning) {
     return (
       <PairScanner
@@ -187,7 +185,7 @@ export function MoreView({
 
   return (
     <div className={styles.view}>
-      {/* ── 工具 ── */}
+      {/* ── Tools ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("工具")}</div>
         <div className={styles.card}>
@@ -254,7 +252,7 @@ export function MoreView({
         </div>
       </div>
 
-      {/* ── 设置 ── */}
+      {/* ── Settings ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("设置")}</div>
         <div className={styles.card}>
@@ -336,25 +334,23 @@ export function MoreView({
         </div>
       </div>
 
-      {/* ── 连接与通知 ── */}
+      {/* ── Connection & Notifications ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("连接与通知")}</div>
         <div className={styles.card}>
           <div className={styles.row}>
-            {/* "Where I'm connected" title tracks **current device kind**: relay-routed
-                device shows "Relay" (proper noun, consistent across languages, not in
-                i18n), direct-connected shows "Server"—two devices in same build, wrong
-                label is lying. */}
+            {/* "Where I'm connected" title tracks **current device kind**: relay-routed device
+                shows "Relay" (proper noun, consistent across languages, not in i18n),
+                direct-connected shows "Server"—two devices, same build; wrong label lies. */}
             <span className={styles.rowLabel}>
               {supportsPush && activeKind !== "http" ? "Relay" : t("服务端")}
             </span>
             <span className={styles.relayValue}>{endpointLabel}</span>
           </div>
           {/* Same-origin deployment choice only: desktop and mobile are two builds from
-              the same server. Detection goes by screen short edge (see desktop
-              index.html mobile-redirect); large-screen phones or folding phones can
-              mis-detect—give an exit so users aren't stuck. `?desktop` gets saved to
-              localStorage by that script, so choice only needs once. */}
+              same server. Detection by screen short edge (see desktop index.html mobile-redirect);
+              large phones or folding phones mis-detect—provide exit so users aren't stuck.
+              `?desktop` saved to localStorage by that script, choice needed once. */}
           {!supportsPush && (
             <>
               <div className={styles.divider} />
@@ -379,10 +375,9 @@ export function MoreView({
               <span className={styles.connLabel}>{connLabel}</span>
             </span>
           </div>
-          {/* One request round-trip split three ways. Which segment is large tells what to
-              fix: phone large = phone network, desktop link large = desktop to relay (or
-              relay queueing), handler large = desktop handler is slow. Unmeasured
-              segments don't show, never use 0 as placeholder. */}
+          {/* One request round-trip split three ways. Which segment is large says what to fix:
+              phone large = phone network, desktop link large = desktop to relay (or relay queueing),
+              handler large = desktop handler slow. Unmeasured segments don't show, never use 0. */}
           <div className={styles.divider} />
           <div className={styles.row}>
             <span className={styles.rowLabel}>{t("链路耗时")}</span>
@@ -422,11 +417,10 @@ export function MoreView({
               )}
             </span>
           </div>
-          {/* This diagnostic is entirely **relay** semantics: answers "is another agent
-              answering in the same channel instead of desktop?", because relay broadcasts
-              each request to all agents in channel. Direct HTTP host has no channel, no
-              broadcast, can only answer itself—copying this would give false "N other
-              agents" alarms that users can't trace. */}
+          {/* This diagnostic is purely **relay** semantics: answers "is another agent answering
+              in the same channel instead of desktop?"—relay broadcasts each request to all agents.
+              Direct HTTP host has no channel, no broadcast, can only answer itself—copying this
+              would give false "N other agents" alarms users can't trace. */}
           {activeKind === "relay" && snapshotSources.length > 0 && (
             <>
               <div className={styles.divider} />
@@ -473,10 +467,9 @@ export function MoreView({
               )}
             </>
           )}
-          {/* Same-origin deployment has no push channels (VAPID subscription lives on
-              relay, which this deployment deliberately doesn't touch by design). Hide the
-              entire section, not show "unsupported"—that reads like a browser bug, when
-              really this deployment simply lacks the feature. */}
+          {/* Same-origin deployment has no push channels (VAPID subscription lives on relay,
+              which this deployment deliberately doesn't touch). Hide the entire section, not show
+              "unsupported"—that reads like a browser bug; really this deployment just lacks it. */}
           {supportsPush && (
             <>
           <div className={styles.divider} />
@@ -566,8 +559,8 @@ export function MoreView({
                   </div>
                 ) : (
                   <div className={styles.deviceRow}>
-                    {/* Whole row tappable = switch to this device. Current device not tappable,
-                    avoid pointless reconnection. */}
+                    {/* Whole row tappable = switch to this device. Current device not tappable
+                    to avoid pointless reconnection. */}
                     <button
                       className={styles.deviceMain}
                       disabled={d.id === activeDeviceId}
@@ -578,10 +571,9 @@ export function MoreView({
                       </span>
                       <span className={styles.deviceLabel}>{d.label}</span>
                     </button>
-                    {/* Toggle just this device's notifications. Home machine has long
-                        tasks, work machine sends cards at midnight—should handle
-                        separately, not just one all-off. */}
-                    {/* Direct HTTP transport has no push channels, switch would be lying. */}
+                    {/* Toggle just this device's notifications. Home machine has long tasks,
+                        work machine sends cards at midnight—handle separately, not one all-off. */}
+                    {/* Direct HTTP transport has no push channels; switch would be misleading. */}
                     {supportsPush && d.kind === "relay" && (
                       <button
                         className={styles.deviceBtn}
@@ -663,7 +655,7 @@ export function MoreView({
         </div>
       )}
 
-      {/* ── 配对 ── */}
+      {/* ── Pairing ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("配对")}</div>
         <div className={styles.card}>
@@ -684,7 +676,7 @@ export function MoreView({
         </div>
       </div>
 
-      {/* ── 关于 ── */}
+      {/* ── About ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("关于")}</div>
         <div className={styles.card}>
@@ -692,11 +684,11 @@ export function MoreView({
             <span className={styles.rowLabel}>Fleet Mobile</span>
             <span className={styles.rowValue}>v{__APP_VERSION__}</span>
           </div>
-          {/* 构建 commit：报问题时「哪个构建」比「哪个版本」精确——package.json
-              的版本号很少动，而这个 bundle 每次发布都不同。桌面端已经拿它比对
-              手机 bundle 是否过期（hello 帧的 appCommit），这里只是把同一个值
-              显示给人看。无 commit 来源时它是 "unknown"，那不是 commit，整行
-              不渲染。 */}
+          {/* Build commit: for bug reports, "which build" is more precise than "which version"—
+              package.json version changes rarely, but this bundle differs each release. Desktop
+              already uses it to check if phone bundle is stale (hello frame's appCommit); here
+              we just display the same value. When source is "unknown", that's not a commit, so
+              the line doesn't render. */}
           {BUILD_COMMIT && (
             <>
               <div className={styles.divider} />

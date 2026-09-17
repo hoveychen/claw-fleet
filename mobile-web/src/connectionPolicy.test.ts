@@ -16,13 +16,14 @@ describe("shouldConnect", () => {
     expect(shouldConnect({ visible: true, hiddenSince: 0 }, T0)).toBe(true);
   });
 
-  // 切出去回条消息就断开 N 条连接、回来再握手 N 次，是比省下的那点电更烦的事。
+  // Dropping N connections on each background switch and re-handshaking on return is
+  // more annoying than the tiny power savings.
   it("rides out a brief hide", () => {
     expect(shouldConnect({ visible: false, hiddenSince: T0 }, T0 + 5_000)).toBe(true);
   });
 
-  // 真的切走之后就没必要挂着了：后台通道是推送（订阅登记在 relay 上，与这条
-  // socket 在不在无关）。
+  // Once truly backgrounded, no need to stay connected: background delivery is push
+  // (subscription registration lives on relay, independent of this socket).
   it("drops the connections once hidden past the grace window", () => {
     expect(shouldConnect({ visible: false, hiddenSince: T0 }, T0 + HIDDEN_DISCONNECT_MS)).toBe(
       false,
@@ -46,7 +47,7 @@ describe("connectDelayMs", () => {
     expect(connectDelayMs(2)).toBeGreaterThan(connectDelayMs(1));
   });
 
-  // 设备再多也不该让最后一台等到用户以为它挂了。
+  // No matter how many devices, the last one shouldn't make the user think it's hung.
   it("caps the stagger", () => {
     expect(connectDelayMs(100)).toBe(CONNECT_STAGGER_MAX_MS);
   });

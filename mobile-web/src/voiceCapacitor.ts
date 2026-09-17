@@ -53,13 +53,14 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
       const { available } = await SpeechRecognition.available();
       return available;
     } catch {
-      // 壳里插件没装好 / 原生侧抛了 —— 当作不可用，按钮不出现。
+      // Plugin not installed / native side threw — treat as unavailable, button doesn't appear.
       return false;
     }
   },
 
   async start(lang: string, handlers: VoiceHandlers): Promise<VoiceSession> {
-    // cancel 之后原生仍会把事件送完。调用方已经说了不要，这里之后一律咽掉。
+    // After cancel, native side still sends events. Caller said no; swallow all
+    // subsequent ones.
     let dead = false;
     const listeners: { remove: () => void }[] = [];
     const teardown = () => {

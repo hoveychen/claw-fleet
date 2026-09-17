@@ -2457,7 +2457,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         on this side reads the stored value;
                       - the permission row asks the Tauri notification plugin,
                         whose browser stand-ins answer "not granted" then
-                        "denied", so it permanently read "已关闭" (Closed) behind a
+                        "denied", so it permanently reads "Closed" behind a
                         button that could only reach another no-op
                         (`open_notification_settings`).
                     And there is no sender to enable in the first place: OS

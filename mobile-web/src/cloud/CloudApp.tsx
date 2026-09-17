@@ -23,8 +23,8 @@ type CloudTab = "tasks" | "decisions";
 
 type SyncState = "online" | "syncing" | "offline";
 
-/** Cloud 的 header 用和主 app 同一枚连接图标。这里没有链路强度可测,只有三档
- *  同步状态,所以只借用图标的「满格 / 重连中 / 断开」三种形态。 */
+/** Cloud header uses the same connection icon as the main app. There's no link strength to measure here,
+ *  only three sync states, so we borrow the icon's "full / reconnecting / offline" appearances. */
 function cloudConnKind(s: SyncState): ConnIconKind {
   return s === "online" ? "good" : s === "syncing" ? "connecting" : "offline";
 }

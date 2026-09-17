@@ -27,7 +27,7 @@ import styles from "./SessionDetailView.module.css";
  * component.
  *
  * `login` opens `claude auth login` in a pty. The phone genuinely can drive it:
- * `proc_run` is the same proc runner the 终端 page uses, and the OAuth handshake
+ * `proc_run` is the same proc runner the Terminal page uses, and the OAuth handshake
  * is a URL plus a pasted code. The terminal itself is left to that page — this
  * card starts the shell and says where to finish it, rather than embedding an
  * xterm inside a transcript row on a phone screen.

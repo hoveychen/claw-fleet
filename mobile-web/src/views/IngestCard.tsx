@@ -1,15 +1,14 @@
-// 会话详情里的「入库卡」：一次 `fleet__artifact add` / `fleet__wiki publish`
-// 之后，agent 交出来的那份东西本身。
+// The "ingest card" in session details: the artifact itself after a `fleet__artifact add` / `fleet__wiki publish`.
 //
-// 之前这两行和别的工具调用长得一模一样——一条 rail 步骤写着「产出 存入产出」，
-// 而标题被 relay 的 input 白名单裁掉、id 在被裁掉的结果正文里，所以手机上根本
-// 看不出存进去的是什么。摘要现在由 relay 侧算好（mobile_relay.rs 的
-// `ingest_summary`），这张卡只负责把它画出来，并在点开时复用**产出 tab 和知识库
-// tab 各自那个全屏浮层**，不另起一套阅读器。
+// Previously, these two lines looked just like other tool calls—a rail step saying "output: store output",
+// but the title was stripped by relay's input whitelist and the id was buried in the discarded result,
+// so on mobile there was no way to see what was stored. The summary is now computed server-side (mobile_relay.rs's
+// `ingest_summary`), and this card just renders it. When opened, it reuses **the fullscreen overlay from the
+// output tab and knowledge base tab respectively**, not a separate reader.
 //
-// 图片是唯一在卡上直接取字节的类型：手机的 relay 传输是单帧 base64（见
-// artifacts.ts 顶部），一份 PDF 或一段视频不该为了一张缩略图整包推过来。其余
-// 类型卡上只给图标 + 元信息，点开才取——那时人已经明确说了「我要看这个」。
+// Images are the only type that fetch bytes directly on the card: mobile relay transport is single-frame base64 (see
+// artifacts.ts top), and a PDF or video shouldn't be pushed in full just for a thumbnail. Other types show only
+// icon + metadata on the card; fetch only when opened—at that point the user has explicitly said "I want to see this".
 
 import { useEffect, useState } from "react";
 import { BookOpen, FileText, Package } from "lucide-react";
@@ -23,13 +22,13 @@ import { ArtifactDetail } from "./ArtifactsView";
 import { WikiDocView } from "./WikiDocView";
 import styles from "./IngestCard.module.css";
 
-/** 卡上直接取字节的上限。只作用于图片：再往上就该等人点开再说。 */
+/** Byte limit for fetching directly on the card. Only applies to images; larger sizes should wait for user to click. */
 const INLINE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 
 /**
- * 步骤行上的标签。不带标题/slug——那两样就在下面的卡上，行里再念一遍是噪音。
- * 更实际的原因：relay 的 input 白名单裁掉了 `title` 和 `slug`，所以原来的
- * 「存入产出 {0}」在手机上只会渲染成半句话。
+ * Label on the step row. No title/slug—those are already on the card below, repeating them in the row is noise.
+ * More practically: relay's input whitelist strips `title` and `slug`, so the original
+ * "store {0}" would render as incomplete on mobile.
  */
 export function ingestStepLabel(ingest: IngestSummary): string {
   return ingest.kind === "artifact" ? t("存入产出") : t("发布到知识库");
@@ -60,8 +59,8 @@ function ArtifactIngestCard({
   const [thumb, setThumb] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
-  // 产出的完整记录（浮层要用）从列表里按 id 找：relay 没有取单份元信息的方法，
-  // 而列表本来就是产出 tab 每次进来都会拉的那一份。
+  // Fetch the full artifact record (needed for overlay) by id from the list: relay has no single-item fetch,
+  // and the list is what the output tab fetches anyway.
   useEffect(() => {
     if (!client) return;
     let alive = true;
@@ -164,7 +163,7 @@ function WikiIngestCard({
           doc={doc}
           client={client}
           onBack={() => setOpen(false)}
-          // 文档里的 `[[slug]]` 在这一层就地换成下一篇，和知识库 tab 一样。
+          // `[[slug]]` in the document is replaced in-place here, same as in the knowledge base tab.
           onOpenDoc={(next) => setDoc(next)}
         />
       )}

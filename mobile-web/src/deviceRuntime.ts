@@ -81,7 +81,7 @@ export function emptyDeviceState(): DeviceRuntimeState {
   };
 }
 
-/** 设备 id → 它的运行时状态。 */
+/** Device id → its runtime state. */
 export type DeviceStates = Record<string, DeviceRuntimeState>;
 
 export type DeviceAction =

@@ -12,8 +12,8 @@ import zhJson from "./locales/zh.json";
  * This guard exists because missing a key fails silently. When i18next can't find
  * a key, it falls back to the second argument, which we always write in Chinese —
  * so the English UI shows Chinese text directly. The build, type checks, and
- * existing tests all pass. The "移动端" (Mobile) panel's relay-address button
- * shipped with Chinese "编辑" (Edit) for a long time; only when someone actually
+ * existing tests all pass. The Mobile ("移动端") panel's relay-address button
+ * shipped with Chinese "Edit" ("编辑") for a long time; only when someone actually
  * switched the UI to English and navigated there was it visible. Keys with no
  * fallback at all are worse: both languages show the key itself.
  *

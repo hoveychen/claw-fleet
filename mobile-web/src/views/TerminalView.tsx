@@ -16,11 +16,13 @@ import { isDefaultShellCommand } from "../../../shared-ts/procShell";
 import styles from "./TerminalView.module.css";
 import { AppHeader } from "./AppHeader";
 
-// xterm 及其 CSS 只在真的开了终端时才下载 —— 见 TerminalPane 顶部的说明。
+// xterm and its CSS only download when a terminal actually opens — see the note at
+// the top of TerminalPane.
 const TerminalPane = lazy(() => import("./TerminalPane"));
 
-/** 一个可开终端的工作区。deviceId 决定这条命令落在哪台主机上 —— 多设备时两台
- *  机器可以有同名甚至同路径的工作区，只带路径会开错机器。 */
+/** A workspace that can open a terminal. deviceId determines which host this command
+ *  runs on — with multiple devices, two machines can have workspaces with the same
+ *  name or path; using only the path opens on the wrong machine. */
 export interface TerminalWorkspace {
   deviceId: string;
   path: string;
@@ -291,9 +293,9 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
           <button
             className={styles.key}
             data-sticky={ctrl}
-            // onPointerDown + preventDefault:按下就发，且不让浏览器把焦点从
-            // xterm 的隐藏 textarea 上挪走 —— 焦点一丢，软键盘就收起来了，
-            // 而键位条本来就是配着软键盘用的。
+            // onPointerDown + preventDefault: fire on press, and prevent the browser
+            // from moving focus away from xterm's hidden textarea — losing focus makes
+            // the soft keyboard close, and the key bar is meant to be used with it.
             onPointerDown={(e) => {
               e.preventDefault();
               setCtrl((v) => !v);

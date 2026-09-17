@@ -20,8 +20,8 @@ export interface DeviceLabel {
 }
 
 function detectPlatform(ua: string): { platform: DevicePlatform; name: string } {
-  // 鸿蒙 ArkWeb 的 UA 同时含 Chrome/Safari 标识（Chromium 114 遗留），必须先判
-  // 才不会被误当成 Android/桌面 —— 与 push-classify.ts 的 isHarmonyArkWeb 同源。
+  // Harmony ArkWeb's UA contains both Chrome/Safari markers (Chromium 114 legacy),
+  // so check it first to avoid misclassifying as Android/desktop — same source as push-classify.ts's isHarmonyArkWeb.
   if (/arkweb|openharmony/i.test(ua)) return { platform: "harmony", name: "HarmonyOS" };
   if (/ipad/i.test(ua)) return { platform: "ios", name: "iPad" };
   if (/iphone|ipod/i.test(ua)) return { platform: "ios", name: "iPhone" };

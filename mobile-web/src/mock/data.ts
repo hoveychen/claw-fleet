@@ -136,7 +136,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     // dsh session. Its `jsonlPath` is a `dsh://` URI, not a file — dsh keeps no
     // transcript on disk, so every panel that reads one has to go through RPC
     // instead. That difference is the whole reason this fixture exists: without
-    // a dsh session in the roster the dsh Token tab (and its 花费 line) had no
+    // a dsh session in the roster the dsh Token tab (and its 花费 (Cost) line) had no
     // way to be seen outside a live relay.
     id: "session-dsh-ledger",
     workspacePath: "/Users/demo/workspace/claude-fleet",
@@ -394,7 +394,7 @@ export const MOCK_FLEET_ASK: FleetAskRequest = {
   ],
 };
 
-/** Decision-history fixture for the session-detail "决策" tab (`session_decisions`).
+/** Decision-history fixture for the session-detail "决策" (Decisions) tab (`session_decisions`).
  *  Covers all four record kinds with markdown-rich bodies so the tab exercises
  *  the shared markdown chain, ✓/○/▸ option markers, selected-green, the plan
  *  scroll box, italic feedback, the raw user-prompt <pre>, and the amber
@@ -1052,9 +1052,9 @@ export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
       2,
     ),
   },
-  // A decision card expanded in the 消息 tab: the full `questions` input plus
+  // A decision card expanded in the 消息 (Messages) tab: the full `questions` input plus
   // the JSON-string `toolUseResult` an MCP `fleet__ask` returns. Renders through
-  // DecisionQa — the same component the 决策 tab uses.
+  // DecisionQa — the same component the 决策 (Decisions) tab uses.
   fa1: {
     name: "mcp__fleet__fleet__ask",
     input: {

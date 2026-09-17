@@ -20,8 +20,8 @@ function device(id: string, label: string, platform?: string): PairedDevice {
 const online: DeviceStatus = { connected: true, agentOnline: true };
 
 describe("DeviceSwitcher", () => {
-  it("一台在册时只是一行标题，没有可点的切换器", () => {
-    // 一个永远只有一个选项的下拉是噪音：没有第二台可切。
+  it("Single registered device: just a title line, no clickable switcher", () => {
+    // A dropdown with only one option is noise: no second device to switch to.
     const html = renderToStaticMarkup(
       <DeviceSwitcher
         devices={[device("d1", "Harrys-MacBook-Pro")]}
@@ -37,8 +37,8 @@ describe("DeviceSwitcher", () => {
     expect(html).not.toContain("<button");
   });
 
-  it("名字不知道时退回 Fleet，而不是留一格空白", () => {
-    // 同源形态 / mock 那台合成设备的 label 就是空串。
+  it("When name is unknown, fall back to Fleet instead of leaving a blank", () => {
+    // Same-origin form / mock synthesized device has label as empty string.
     const html = renderToStaticMarkup(
       <DeviceSwitcher
         devices={[device("same-origin", "")]}
@@ -53,7 +53,7 @@ describe("DeviceSwitcher", () => {
     expect(html).toContain("Fleet");
   });
 
-  it("多台在册时标题变成当前那台的名字 + 可展开", () => {
+  it("Multiple registered devices: title becomes current device name + expandable", () => {
     const html = renderToStaticMarkup(
       <DeviceSwitcher
         devices={[device("d1", "Harrys-MacBook-Pro", "macos"), device("d2", "build-box", "linux")]}
@@ -67,12 +67,12 @@ describe("DeviceSwitcher", () => {
     );
     expect(html).toContain("build-box");
     expect(html).toContain('aria-expanded="false"');
-    // 收起来时不该有列表
+    // When closed, there should be no list
     expect(html).not.toContain('role="listbox"');
   });
 
-  it("展开后每台各一行，并如实报告各自的连通性", () => {
-    // 头部那盏灯报的是「全体里最好的一条」，切换器要的正相反：哪一台掉了得看得见。
+  it("When expanded, one row per device and report each one's connectivity status", () => {
+    // The header light reports "the best of all", switcher needs the opposite: which device went down is visible.
     const statuses: Record<string, DeviceStatus> = {
       d1: { connected: true, agentOnline: true },
       d2: { connected: true, agentOnline: false },
@@ -90,15 +90,15 @@ describe("DeviceSwitcher", () => {
       />,
     );
     expect(html).toContain('role="listbox"');
-    // 测试环境的语言是 en，所以这里断言英文 —— 顺带钉住这几条词条真的进了字典
-    // （漏一条的表现是界面上突然冒出一句中文，而不是报错）。
+    // Test environment is en, so assert English here — incidentally pins these entries are really in the dictionary
+    // (missing one shows Chinese suddenly in the UI instead of an error).
     expect(html).toContain("Online");
     expect(html).toContain("Desktop offline");
     expect(html).toContain("Not connected");
     expect(html).toMatch(/data-kind="online"/);
     expect(html).toMatch(/data-kind="offline"/);
     expect(html).toMatch(/data-kind="down"/);
-    // 当前那台被标成选中 —— 屏幕阅读器与那枚勾都靠它
+    // Current device marked as selected — screen readers and the checkmark both rely on it
     expect(html).toMatch(/aria-selected="true"[^>]*>(?:(?!aria-selected)[\s\S])*?mac/);
     expect(html).toContain("Manage devices");
   });

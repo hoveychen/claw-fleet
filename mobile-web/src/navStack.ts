@@ -1,27 +1,31 @@
-/** 浏览器后退栈。
+/** Browser back stack.
  *
- *  移动端每一个全屏浮层（会话详情 / 知识库文档 / 仓库 / 用量 / 新会话 / 目录选择器）
- *  以及「当前不在主页 tab」这件事，都在这里登记一层。硬件返回键、手势返回、页面里的
- *  返回按钮三条路径因此共用同一个栈：返回按钮走 history.back()，回到 popstate 上来，
- *  和用户自己按返回没有区别。
+ *  Every full-screen overlay on mobile (session details / wiki docs / workspace /
+ *  usage / new session / directory picker) plus the fact that we're "not on the
+ *  home tab" is registered as one layer here. The hardware back key, gesture back,
+ *  and page back button all share the same stack: back button goes through
+ *  history.back(), which emits popstate, indistinguishable from user pressing back.
  *
- *  记账模型：`applied` = 我们压进浏览器历史的条目数 = 哨兵(1) + 层数。
- *  push/drop 只改 `layers`，真正的 history 调用集中在 reconcile() 里，按
- *  desired(= layers.length + 1) 与 applied 的差值一次补齐。这样 React StrictMode 的
- *  mount → cleanup → mount 双跑会在同一个微任务里自相抵消（push 后立刻 drop 再 push，
- *  净变化为 0），不会残留半层历史让用户多按一次返回。
+ *  Accounting model: `applied` = number of entries we pushed into browser history =
+ *  sentinel (1) + layer count. push/drop only modify `layers`; actual history calls
+ *  are batched in reconcile(), reconciling the gap between desired (= layers.length + 1)
+ *  and applied. This way React StrictMode's mount → cleanup → mount double-run
+ *  self-cancels within one microtask (push then immediately drop then push, net
+ *  change = 0), leaving no stray layer history that forces the user to press back again.
  *
- *  哨兵条目是栈底能拦住返回的前提：没有它，用户在主页按返回会直接卸载 document，
- *  popstate 根本不会派发到我们手里。 */
+ *  Sentinel entry is the prerequisite for holding back at the stack bottom: without it,
+ *  pressing back on the home page directly unloads the document, and popstate never
+ *  reaches us. */
 
 export interface HistoryLike {
   pushState(data: unknown, unused: string): void;
   go(delta: number): void;
 }
 
-/** 栈底（哨兵被消耗）时按返回的处理结果：
- *  - "hold" —— 拦下这次返回，重新压回哨兵（调用方负责给出「再按一次退出」之类的提示）。
- *  - "leave" —— 放行，真的离开页面。 */
+/** Result of pressing back when at stack bottom (sentinel consumed):
+ *  - "hold" — block this back, push the sentinel back again (caller responsible for
+ *    prompting "press again to exit" or similar).
+ *  - "leave" — allow it, actually leave the page. */
 export type RootBackResult = "hold" | "leave";
 
 type Layer = { id: number; close: () => void };
@@ -29,10 +33,11 @@ type Layer = { id: number; close: () => void };
 export class NavStack {
   private layers: Layer[] = [];
   private nextId = 1;
-  /** 我们压进历史的条目数，含哨兵。 */
+  /** Number of entries we pushed into history, including sentinel. */
   private applied = 0;
-  /** 自己发起的 go(-n) 会回吐一次 popstate（跳 n 格是单次导航，只派发一个事件），
-   *  这里记下要跳过的次数，免得把它当成用户按了返回而多关一层。 */
+  /** go(-n) initiated by us emits one popstate (jumping n steps is a single navigation,
+   *  emitting one event). Track how many to skip here to avoid mistaking it for user
+   *  pressing back and closing an extra layer. */
   private ignorePops = 0;
   private scheduled = false;
   private started = false;
@@ -40,12 +45,13 @@ export class NavStack {
   constructor(
     private history: HistoryLike,
     private onRootBack: () => RootBackResult,
-    // 必须包一层：直接写 `= queueMicrotask` 会把它当裸函数存进实例字段，之后
-    // this.schedule(...) 的 receiver 是 NavStack 实例，浏览器抛 "Illegal invocation"。
+    // Must wrap it: writing `= queueMicrotask` directly stores it as a bare function
+    // in the instance field; then when this.schedule(...) is called, the receiver
+    // is the NavStack instance and the browser throws "Illegal invocation".
     private schedule: (fn: () => void) => void = (fn) => queueMicrotask(fn),
   ) {}
 
-  /** 压入哨兵。必须在任何 push() 之前调用一次。 */
+  /** Push the sentinel. Must be called once before any push(). */
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -53,7 +59,8 @@ export class NavStack {
     this.applied = 1;
   }
 
-  /** 登记一层，返回用于注销的 id。`close` 在用户按返回弹掉这一层时被调用。 */
+  /** Register a layer, returning an id for unregistering it. `close` is called when
+   *  the user presses back and this layer is popped. */
   push(close: () => void): number {
     const id = this.nextId++;
     this.layers.push({ id, close });
@@ -61,10 +68,12 @@ export class NavStack {
     return id;
   }
 
-  /** 注销一层。两种来路：
-   *  - UI 主动关闭（点返回按钮 / 点遮罩）：层还在 layers 里，reconcile 会 go(-1) 把
-   *    历史条目一起收掉，保持历史深度与可见层数一致。
-   *  - popstate 已经弹掉它、React 随后卸载组件：层已不在 layers 里，这里是 no-op。 */
+  /** Unregister a layer. Two sources:
+   *  - UI actively closes it (click back button / click overlay): layer is still in
+   *    layers, reconcile calls go(-1) to remove the history entry together,
+   *    keeping history depth in sync with visible layer count.
+   *  - popstate already popped it and React subsequently unmounts the component:
+   *    layer is already gone from layers, this is a no-op. */
   drop(id: number): void {
     const i = this.layers.findIndex((l) => l.id === id);
     if (i === -1) return;
@@ -72,7 +81,7 @@ export class NavStack {
     this.reconcileSoon();
   }
 
-  /** 挂到 window 的 popstate 上。 */
+  /** Attach to window's popstate. */
   handlePopState(): void {
     if (this.ignorePops > 0) {
       this.ignorePops--;
@@ -81,7 +90,7 @@ export class NavStack {
     this.applied = Math.max(0, this.applied - 1);
 
     if (this.applied === 0) {
-      // 哨兵被吃掉了 —— 用户在栈底按了返回。
+      // Sentinel was consumed — user pressed back at the stack bottom.
       if (this.onRootBack() === "leave") {
         this.history.go(-1);
         return;
@@ -91,13 +100,14 @@ export class NavStack {
       return;
     }
 
-    // 弹掉栈顶：close() 会让 React 卸载该浮层，随之而来的 drop() 因为层已不在
-    // layers 里而是 no-op，所以历史深度不会被重复回退。
+    // Pop the stack top: close() makes React unmount that overlay, and the ensuing
+    // drop() is a no-op because the layer is already gone from layers, so history
+    // depth won't be double-decremented.
     const top = this.layers.pop();
     top?.close();
   }
 
-  /** 当前层数（不含哨兵）。 */
+  /** Current layer count (not including sentinel). */
   get depth(): number {
     return this.layers.length;
   }
@@ -113,14 +123,14 @@ export class NavStack {
 
   private reconcile(): void {
     if (!this.started) return;
-    const desired = this.layers.length + 1; // +1 = 哨兵
+    const desired = this.layers.length + 1; // +1 = sentinel
     if (desired > this.applied) {
       for (let i = this.applied; i < desired; i++) this.history.pushState({ fleet: i }, "");
       this.applied = desired;
     } else if (desired < this.applied) {
       const delta = this.applied - desired;
       this.applied = desired;
-      this.ignorePops++; // go(-delta) 只派发一次 popstate，无论 delta 多大
+      this.ignorePops++; // go(-delta) emits only one popstate regardless of delta magnitude
       this.history.go(-delta);
     }
   }

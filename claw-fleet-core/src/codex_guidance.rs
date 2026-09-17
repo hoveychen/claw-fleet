@@ -1082,7 +1082,7 @@ mod tests {
         );
         // …and the zh block too: the section stays English there on purpose, so
         // a locale switch must not silently drop it. Its title follows the same
-        // locale-aware default as the block body (called "老板" in Chinese, not "Boss").
+        // locale-aware default as the block body (called Boss in Chinese, not "Boss").
         let shared_zh = crate::session_title_guidance::render_session_title_section(
             "老板",
             "en",

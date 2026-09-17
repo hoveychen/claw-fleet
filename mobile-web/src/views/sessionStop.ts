@@ -1,11 +1,13 @@
-// 「停」这个动作的全部判断与执行 —— 任务列表卡片和会话详情半屏共用一份。
+// All the logic and execution for the "stop" action — shared by the task list card and session detail half-screen.
 //
-// 原先它只长在 TasksView 的卡片上（`stopMode` + `handleStop` 两个局部定义），
-// 于是在会话详情页上看着一条正在跑的会话，唯一能停它的办法是退回列表再把那张
-// 卡找出来。抽到这里之后两处走同一套三态与同一句确认文案，不会各自漂移。
+// Previously it only existed on the TasksView card (`stopMode` + `handleStop` as local definitions),
+// so when viewing an active session on the session detail page, the only way to stop it was to go back
+// to the list and find that card. After extracting here, both places use the same three-state logic and
+// the same confirmation message, so they don't drift apart.
 //
-// pid / workspacePath 只在**它自己那台主机**上有意义：调用方必须传那台设备的
-// transport，发到别的设备上轻则停不掉，重则按 pid 打到一个毫不相干的进程。
+// pid / workspacePath only has meaning on their own host: the caller must pass the transport
+// for that device. Sending to a different device means either it won't stop, or worse, the pid
+// is matched against an unrelated process.
 
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
@@ -32,15 +34,16 @@ export function stopMode(s: SessionInfo): StopMode {
   return "stop";
 }
 
-/** 子代理没有自己的进程，停不了也不该给按钮。 */
+/** Subagents have no process of their own and cannot be stopped; the button should not be shown. */
 export function canControl(s: SessionInfo): boolean {
   return !s.isSubagent;
 }
 
-/** 执行一次停止/中断。
+/** Execute a stop/interrupt.
  *
- *  返回 `false` 表示用户在确认框上点了取消（或这条会话本来就没得停），调用方
- *  据此收掉忙碌态；抛错表示 relay 那边真的失败了，由调用方决定怎么提示。 */
+ *  Returns `false` if the user cancelled the confirmation dialog (or the session had nothing to stop);
+ *  the caller uses this to clear the busy state. Throwing an error means the relay request truly failed;
+ *  the caller decides how to display the error. */
 export async function runStop(
   transport: FleetTransport,
   s: SessionInfo,

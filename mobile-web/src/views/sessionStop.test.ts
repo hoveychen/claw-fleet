@@ -28,26 +28,26 @@ function fakeTransport() {
 }
 
 describe("stopMode", () => {
-  it("没有 pid = 进程已经没了，无从停起", () => {
+  it("no pid = process already gone, can't stop", () => {
     expect(stopMode(base)).toBe("spent");
   });
 
-  it("Fleet 起的会话、pid 精确、正跑在回合中 → 中断（可继续），不是杀掉", () => {
+  it("Fleet-spawned session, precise pid, executing turn → interrupt (resumable), not kill", () => {
     expect(stopMode(fleetOwned)).toBe("interrupt");
   });
 
-  it("同一条会话空闲下来之后就没有回合可打断了，降级成停止", () => {
+  it("same session becomes idle, no turn left to interrupt, downgrade to stop", () => {
     expect(stopMode({ ...fleetOwned, status: "idle" })).toBe("stop");
   });
 
-  it("不是 Fleet 起的、或 pid 不精确，都只能停止", () => {
+  it("not Fleet-spawned or pid not precise, can only stop", () => {
     expect(stopMode({ ...fleetOwned, entrypoint: "cli" })).toBe("stop");
     expect(stopMode({ ...fleetOwned, pidPrecise: false })).toBe("stop");
   });
 });
 
 describe("canControl", () => {
-  it("子代理没有自己的进程，不给按钮", () => {
+  it("subagent has no process of its own, no button", () => {
     expect(canControl({ ...fleetOwned, isSubagent: true })).toBe(false);
     expect(canControl(fleetOwned)).toBe(true);
   });
@@ -57,7 +57,7 @@ describe("runStop", () => {
   const yes = (_msg: string) => Promise.resolve(true);
   const no = (_msg: string) => Promise.resolve(false);
 
-  it("中断不问确认——它不杀进程，回合还能接着跑", async () => {
+  it("interrupt doesn't ask for confirmation — doesn't kill process, turn can continue", async () => {
     const { transport, calls } = fakeTransport();
     const confirm = vi.fn(yes);
     await expect(runStop(transport, fleetOwned, confirm)).resolves.toBe(true);
@@ -65,34 +65,35 @@ describe("runStop", () => {
     expect(calls).toEqual([{ method: "interrupt", params: { pid: 42 } }]);
   });
 
-  it("pid 精确的停止要确认一次，按 pid 打", async () => {
+  it("precise-pid stop asks for confirmation once, hits by pid", async () => {
     const { transport, calls } = fakeTransport();
     const s = { ...fleetOwned, status: "idle" as const };
     await expect(runStop(transport, s, yes)).resolves.toBe(true);
     expect(calls).toEqual([{ method: "stop", params: { pid: 42 } }]);
   });
 
-  it("pid 不精确时改成停整个目录，且说清楚了才问", async () => {
+  it("imprecise pid stops whole workspace, confirmation explains that clearly", async () => {
     const { transport, calls } = fakeTransport();
     const s = { ...fleetOwned, pidPrecise: false };
     const confirm = vi.fn(yes);
     await expect(runStop(transport, s, confirm)).resolves.toBe(true);
-    // 测试环境的 t() 走英文，所以两种文案都认——要点是这句确认必须说出「整个
-    // 目录都会被停」，而不是复用那句只停一条会话的。
+    // Test environment's t() uses English, so we match either form — key is this
+    // confirmation must say "all sessions in the workspace will stop", not reuse
+    // the text for stopping just one session.
     expect(confirm.mock.calls[0][0]).toMatch(/目录下的所有会话|ALL sessions/);
     expect(calls).toEqual([
       { method: "stop_workspace", params: { workspacePath: "/Users/x/workspace/proj" } },
     ]);
   });
 
-  it("用户在确认框上取消 → 一个请求都不发", async () => {
+  it("user cancels on confirmation prompt → send no requests", async () => {
     const { transport, calls } = fakeTransport();
     const s = { ...fleetOwned, status: "idle" as const };
     await expect(runStop(transport, s, no)).resolves.toBe(false);
     expect(calls).toEqual([]);
   });
 
-  it("已经没进程的会话不发请求", async () => {
+  it("session with no process sends no request", async () => {
     const { transport, calls } = fakeTransport();
     await expect(runStop(transport, base, yes)).resolves.toBe(false);
     expect(calls).toEqual([]);

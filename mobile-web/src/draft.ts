@@ -1,16 +1,17 @@
-// 未提交表单草稿的持久化。新会话 sheet / 继续会话 composer 里输入到一半的内容，
-// 在意外关闭 sheet、切标签、iOS 杀掉 PWA 后不该丢失——落到 localStorage，回来自动恢复，
-// 提交成功后清空。风格对齐 theme.ts / i18n.ts / secretStore.ts 的 localStorage 用法。
+// Persistence of unsubmitted form drafts. Partial input in the new session sheet / resume session
+// composer should not be lost after unexpected sheet closure, tab switch, or iOS killing the PWA —
+// falls to localStorage, auto-recovers on return, cleared after successful submission. Style aligns
+// with localStorage usage in theme.ts / i18n.ts / secretStore.ts.
 
 import { useCallback, useRef, useState } from "react";
 
 const PREFIX = "fleet-draft:";
 
-/** localStorage 里我们真正用到的子集，测试可注入内存实现（node 环境没有 window）。 */
+/** Subset of localStorage that we actually use; tests can inject an in-memory implementation (no window in Node). */
 export type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-/** 私隐模式 / SSR 下 window.localStorage 可能抛异常或不存在，取不到就返回 null，
- *  草稿持久化全程 best-effort，取不到 storage 只是退化成普通 useState。 */
+/** window.localStorage may throw or not exist in private mode / SSR; returns null if unavailable.
+ *  Draft persistence is best-effort throughout; lack of storage simply degrades to plain useState. */
 function defaultStorage(): DraftStorage | null {
   try {
     return window.localStorage;
@@ -23,8 +24,8 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** 读草稿。对象型草稿与 fallback 做浅合并——这样后续给表单加字段时，
- *  旧草稿缺的字段自动取新默认值，不会读出 undefined。非对象（如纯字符串）直接返回解析值。 */
+/** Load draft. Object-shaped drafts are shallow-merged with fallback — so when form fields are added
+ *  later, missing fields in old drafts auto-get new defaults, no undefined reads. Non-objects (like plain strings) return parsed value directly. */
 export function loadDraft<T>(
   key: string,
   fallback: T,
@@ -53,7 +54,7 @@ export function saveDraft<T>(
   try {
     store.setItem(PREFIX + key, JSON.stringify(value));
   } catch {
-    // 配额满 / 私隐模式写入被拒——持久化是锦上添花，失败不影响表单本身可用。
+    // Quota full / private mode write rejected — persistence is a nice-to-have, failure doesn't affect form usability.
   }
 }
 
@@ -65,16 +66,16 @@ export function clearDraft(
   try {
     store.removeItem(PREFIX + key);
   } catch {
-    // 同上，忽略。
+    // Same as above, ignore.
   }
 }
 
-/** 清掉某个前缀下的全部草稿。移除一台设备时用它扫掉那台的命名空间
- *  （`d/<deviceId>/…`，见 deviceScope.ts）——不清的话每移除一台就留下一份
- *  永远不会再被读到的草稿、附件路径和 workspace 记忆。
+/** Clear all drafts under a prefix. Use when removing a device to sweep away its namespace
+ *  (`d/<deviceId>/…`, see deviceScope.ts) — without clearing, each removal leaves behind unreachable
+ *  drafts, attachment paths, and workspace memories.
  *
- *  只在能枚举键的存储上生效（`Storage` 有 length/key(i)，注入的内存实现通常
- *  没有），所以枚举能力是运行时探测的：探测不到就什么都不做，而不是抛。 */
+ *  Only works on stores that can enumerate keys (`Storage` has length/key(i), injected in-memory
+ *  implementations usually don't), so enumeration capability is runtime-probed: if not detected, do nothing rather than throw. */
 export function clearDraftsByPrefix(
   prefix: string,
   store: DraftStorage | null = defaultStorage(),
@@ -90,16 +91,16 @@ export function clearDraftsByPrefix(
     }
     for (const k of doomed) enumerable.removeItem(k);
   } catch {
-    // 同上，忽略。
+    // Same as above, ignore.
   }
 }
 
-/** useState 的持久化版：初值从草稿恢复，每次 set 落盘，clear() 清盘并复位到 fallback。 */
+/** Persistent version of useState: initial value recovered from draft, each set persists, clear() clears disk and resets to fallback. */
 export function useDraft<T>(
   key: string,
   fallback: T,
 ): [T, (next: T | ((prev: T) => T)) => void, () => void] {
-  // fallback 一般是每次渲染新建的字面量，用 ref 钉住首次值，避免 clear 的引用漂移。
+  // fallback is usually a fresh literal on each render; pin the initial value with ref to avoid reference drift on clear.
   const fallbackRef = useRef(fallback);
   const [value, setValue] = useState<T>(() => loadDraft(key, fallbackRef.current));
 

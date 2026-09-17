@@ -1,16 +1,19 @@
-// 账号与用量客户端：桌面端 relay 的 `account_usage`（claw-fleet-core/src/mobile_relay.rs）
-// 一次回包给出 Claude 账号 + 各 agent 源的限流条。今日累计花费不在这里 —— App 已经
-// 为 header 轮询 `today_usage`，页面直接复用那份数据，不重复扫会话。
+// Account and usage client: desktop's relay `account_usage` (claw-fleet-core/src/mobile_relay.rs)
+// returns Claude account info + rate limits for each agent source in one response. Today's
+// total cost is not here — App already polls `today_usage` for the header and the page reuses
+// that data instead of rescanning sessions.
 
 import type { FleetTransport } from "./transport";
 import type { AccountUsage, CodexUsageHistoryPoint, UsageHistoryPoint } from "./types";
 
-/** Claude 账号档案 + 各源限流用量。桌面端会真去打 Anthropic / codex 的接口。 */
+/** Claude account profile + rate limits from each source.
+ *  Desktop actually hits Anthropic / codex APIs for this. */
 export function fetchAccountUsage(client: FleetTransport): Promise<AccountUsage> {
   return client.request<AccountUsage>("account_usage", undefined, ACCOUNT_TIMEOUT_MS);
 }
 
-/** 占用率采样序列（默认近 24h）。桌面端只读它后台采样器落盘的快照，不打网络。 */
+/** Usage utilization sample sequence (default: last ~24h).
+ *  Desktop only reads snapshots written by its background sampler, no network calls. */
 export function fetchUsageHistory(
   client: FleetTransport,
   fromMs: number,
@@ -19,8 +22,9 @@ export function fetchUsageHistory(
   return client.request<UsageHistoryPoint[]>("usage_history", { fromMs, toMs });
 }
 
-/** codex 占用率采样序列（默认近 24h）。与 `usage_history` 同为纯读盘，只是数据来自
- *  codex 那份快照，百分比是 0–100 整数（画图时 /100）。 */
+/** Codex usage utilization sample sequence (default: last ~24h). Like `usage_history`,
+ *  this is pure disk read, except data comes from the codex snapshot and percentages
+ *  are 0–100 integers (divide by 100 when charting). */
 export function fetchCodexUsageHistory(
   client: FleetTransport,
   fromMs: number,
@@ -29,5 +33,5 @@ export function fetchCodexUsageHistory(
   return client.request<CodexUsageHistoryPoint[]>("codex_usage_history", { fromMs, toMs });
 }
 
-/** 桌面端要打网络（甚至读钥匙串），默认超时不够用。 */
+/** Desktop makes network calls (even reads keychain); default timeout is insufficient. */
 const ACCOUNT_TIMEOUT_MS = 30_000;

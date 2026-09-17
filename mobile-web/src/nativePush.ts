@@ -1,28 +1,29 @@
-// 原生壳的推送 token 入口。
+// Entry point for native shell push tokens.
 //
-// 浏览器里推送走 Web Push（service worker + VAPID + pushManager），但原生壳里
-// 那条路是断的：鸿蒙 ArkWeb 的 PushManager 只是 Chromium 114 留下的空壳，没接
-// 投递后端（见 push-classify.ts）；国内安卓也没有 FCM。原生壳只能拿厂商推送的
-// 设备 token，再由我们自己的 relay 调厂商下行接口。
+// Push on the browser uses Web Push (service worker + VAPID + pushManager), but the native shell
+// cannot use that path: HarmonyOS ArkWeb's PushManager is just an empty shell left by Chromium 114,
+// with no backend integration (see push-classify.ts); domestic Android also lacks FCM. The native shell
+// can only obtain device tokens from vendors and use our own relay to call the vendor's downstream interface.
 //
-// 分工：原生只负责「取到 token」，注册到 relay 这半边留在 web —— channel token、
-// relay 连接、用户的通知开关都在这边。鸿蒙曾经在 ArkTS 里自己开 WebSocket 上报，
-// 为此重写了一份 HKDF（Hkdf.ets + FleetTransport.ets，194 行），两套实现各自漂移，
-// 已随本次改造删除。
+// Division of labor: the native side only handles "obtaining the token"; registration to the relay
+// and the rest is handled on the web — channel token, relay connection, and user notification settings
+// are all here. HarmonyOS previously opened its own WebSocket in ArkTS for reporting, rewriting an
+// HKDF implementation (Hkdf.ets + FleetTransport.ets, 194 lines); the two implementations drifted
+// apart and were removed in this refactor.
 //
-// 壳侧约定与 shareTarget.ts 同构：`window.__fleetPushToken(token)`，早到的值先
-// 堆进 `__fleetPushTokenPending`。这是所有原生壳的公共入口，不是鸿蒙专用分支 ——
-// Capacitor 壳接上厂商推送后同样调它。
+// Shell-side contract, isomorphic to shareTarget.ts: `window.__fleetPushToken(token)`. Early-arriving
+// values are queued in `__fleetPushTokenPending`. This is the common entry point for all native shells,
+// not a HarmonyOS-specific branch — the Capacitor shell also calls it after wiring up vendor push.
 
-/** 原生壳投递设备 push token 的入口。 */
+/** Entry point for native shells to deliver device push tokens. */
 const NATIVE_PUSH_HOOK = "__fleetPushToken";
-/** 壳在 hook 注册前把早到的 token 堆在这里。 */
+/** Queue where the shell buffers early-arriving tokens before the hook is registered. */
 const NATIVE_PUSH_PENDING = "__fleetPushTokenPending";
 
-/** 最近一次收到的原生 token。push.ts 的注册/注销/重连重注都读它。 */
+/** Most recently received native token. Used by push.ts for registration/unregistration/reconnection. */
 let nativeToken = "";
 
-/** 当前是否跑在拿得到原生推送 token 的壳里。 */
+/** Whether the current shell supports obtaining native push tokens. */
 export function hasNativePushToken(): boolean {
   return nativeToken.length > 0;
 }
@@ -32,14 +33,16 @@ export function nativePushToken(): string {
 }
 
 /**
- * 订阅原生壳投递的 push token。
+ * Subscribe to native shell push tokens.
  *
- * token 什么时候到是不确定的：原生要先过系统通知授权，必然晚于首帧；而本函数
- * 跑在 React effect 里，又未必早于原生。两头都不确定，所以两头都走队列 —— 注册
- * 时先把积压的消费掉。少了这步，冷启动拿到的 token 会静默丢失，表现为「装了就
- * 是收不到推送」，且没有任何报错。
+ * The arrival time of tokens is uncertain: the native side must first obtain system notification
+ * permissions, which necessarily comes after the first frame; this function runs in a React effect,
+ * which may or may not come before the token. Since timing is uncertain on both sides, both use a queue —
+ * on registration, we consume any buffered tokens first. Without this step, tokens received on cold start
+ * would be silently lost, appearing as "push notifications never arrive even after installation" with no error.
  *
- * 返回退订函数。在非原生环境里这个 hook 永远不会被调用，模块整体是惰性的。
+ * Returns an unsubscribe function. In non-native environments, this hook is never called; the module
+ * is lazy overall.
  */
 export function onNativePushToken(handler: (token: string) => void): () => void {
   const deliver = (token: unknown) => {
