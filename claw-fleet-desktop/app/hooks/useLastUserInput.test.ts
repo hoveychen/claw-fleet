@@ -110,6 +110,20 @@ describe("findLastUserInput", () => {
     expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "真正说的话" });
   });
 
+  it("drops the composer's trailing Context files block", () => {
+    const msgs = [
+      userPrompt(
+        "这个卡片怎么回事\n\nContext files:\n- /Users/me/.fleet/user-attachments/ab/paste-1.png",
+      ),
+    ];
+    expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "这个卡片怎么回事" });
+  });
+
+  it("leaves a prompt that merely mentions Context files mid-sentence alone", () => {
+    const text = "Context files: 这个格式是谁定的？";
+    expect(findLastUserInput([userPrompt(text)])).toEqual({ kind: "prompt", text });
+  });
+
   it("keeps looking back when a message is envelope-only", () => {
     const msgs = [
       userPrompt("原始需求"),

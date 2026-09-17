@@ -93,6 +93,20 @@ describe("findLastUserInput (mobile-web)", () => {
     expect(findLastUserInput([assistantText("opening line")])).toBeNull();
   });
 
+  it("drops the composer's trailing Context files block", () => {
+    const msgs = [
+      userPrompt(
+        "这个卡片怎么回事\n\nContext files:\n- /Users/me/.fleet/user-attachments/ab/paste-1.png",
+      ),
+    ];
+    expect(findLastUserInput(msgs)).toEqual({ kind: "prompt", text: "这个卡片怎么回事" });
+  });
+
+  it("leaves a prompt that merely mentions Context files mid-sentence alone", () => {
+    const text = "Context files: 这个格式是谁定的？";
+    expect(findLastUserInput([userPrompt(text)])).toEqual({ kind: "prompt", text });
+  });
+
   it("strips the system-reminder envelope and keeps looking when nothing is left", () => {
     const msgs = [
       userPrompt("the real request"),
