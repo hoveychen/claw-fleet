@@ -114,7 +114,8 @@ function SheetPreview({ blob }: { blob: Blob }) {
     setErr(null);
     setActive(0);
     (async () => {
-      // `/browser` 而不是包根：read-excel-file 按环境分发,根本没有根导出。
+      // `/browser` rather than the package root: read-excel-file dispatches per
+      // environment and has no root export at all.
       const readXlsxFile = (await import("read-excel-file/browser")).default;
       const parsed = (await readXlsxFile(blob)) as ParsedSheet[];
       if (alive) setSheets(parsed);

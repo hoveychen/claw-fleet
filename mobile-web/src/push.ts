@@ -167,7 +167,7 @@ export async function unsubscribeChannel(client: FleetTransport): Promise<boolea
   try {
     const registration = await navigator.serviceWorker.ready;
     const subscription = await registration.pushManager.getSubscription();
-    if (!subscription) return true; // 本来就没订阅,无事可退
+    if (!subscription) return true; // never subscribed, nothing to unsubscribe from
     return client.pushUnsubscribe({ endpoint: subscription.endpoint, platform: "web" });
   } catch {
     return false;

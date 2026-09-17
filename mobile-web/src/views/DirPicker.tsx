@@ -132,8 +132,9 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
             <button
               className={styles.newCancel}
               onClick={() => {
-                // 退出输入态时把错误一并清掉——「已存在」说的是刚才那次尝试，
-                // 留在屏上会像是当前目录本身有问题。
+                // Clear the error when leaving the input state — "already exists"
+                // described that one attempt, and leaving it on screen would read as
+                // if the current directory itself were broken.
                 setError(null);
                 setCreating(false);
               }}

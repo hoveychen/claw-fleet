@@ -522,7 +522,7 @@ export function MoreView({
         </div>
       </div>
 
-      {/* ── 设备 ── */}
+      {/* ── Devices ── */}
       {devices.length > 0 && (
         <div className={styles.section}>
           <div className={styles.sectionLabel}>{t("设备")}</div>

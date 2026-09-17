@@ -391,7 +391,7 @@ describe("RelayClient distinguishes failure sources", () => {
 
   it("Request timeout (frame may be lost) → non-remote error, caller can enter grace period", async () => {
     const { client } = await connected(clients);
-    const p = client.request("spawn_session", {}, 5); // 5ms 超时，不投递 reply
+    const p = client.request("spawn_session", {}, 5); // 5ms timeout, no reply delivered
     const err = await p.catch((e) => e);
     expect(err).toBeInstanceOf(RelayRequestError);
     expect((err as RelayRequestError).remote).toBe(false);

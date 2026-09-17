@@ -1464,8 +1464,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               relayReady={states[newSessionTargetId]?.connected ?? false}
               onClose={() => {
                 setShowNewSession(false);
-                // 下次打开回到「当前作用域那台」,不记住上次挑的那台 —— 记住会
-                // 让人在 A 页面上打开表单却默默开去 B。
+                // Next open goes back to "whichever device the current scope names",
+                // not the one picked last time — remembering it would let someone open
+                // the form on page A and silently spawn on B.
                 setNewSessionDeviceId(null);
                 // Consumed by the sheet — don't re-upload on reopen.
                 setSharedFiles([]);

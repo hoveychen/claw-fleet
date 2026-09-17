@@ -149,8 +149,8 @@ describe("wakeLock", () => {
     const { setWakeLockEnabled } = await import("./wakeLock");
     setWakeLockEnabled(true);
     await flush();
-    setWakeLockEnabled(false); // await 期间关掉
-    resolveReq(slow); // 现在 request 才 resolve
+    setWakeLockEnabled(false); // turned off while the await is still pending
+    resolveReq(slow); // only now does the request resolve
     await flush();
     expect(slow.release).toHaveBeenCalledTimes(1);
   });
