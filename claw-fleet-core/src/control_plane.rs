@@ -83,6 +83,43 @@ pub fn is_installed(feature: Feature, plan: &HookSetupPlan) -> bool {
     }
 }
 
+/// Whether an *installed* feature's on-disk text has drifted from what this
+/// build renders — true only for the five guidance files, which are generated
+/// artefacts, never for the hooks, whose "installed" check already reads the
+/// thing that matters (the subcommand in settings.json).
+///
+/// Without this, editing guidance wording shipped nothing to a `fleet serve`
+/// host: `is_installed` reads the sentinel block in `CLAUDE.md`, which a new
+/// wording does not change, so [`heal`] skipped the feature and the host kept
+/// the old file until somebody toggled it off and on by hand. (The desktop is
+/// unaffected — it re-applies every installed carrier on each App mount, see
+/// `gui::notification::reapply_all_guidance_if_installed`.)
+///
+/// Each arm only reports drift *within the same locale variant* — see the
+/// per-module `guidance_file_is_stale` for why a locale difference must not
+/// count as staleness here.
+pub fn is_stale(feature: Feature, s: &Settings) -> bool {
+    match feature {
+        Feature::InteractionMode => {
+            crate::interaction_mode::guidance_file_is_stale(&s.title, &s.locale)
+        }
+        Feature::PrdDiscipline => {
+            crate::prd_discipline::guidance_file_is_stale(&s.title, &s.locale)
+        }
+        Feature::WikiGuidance => crate::wiki_guidance::guidance_file_is_stale(&s.locale),
+        Feature::ModelGuidance => crate::model_guidance::guidance_file_is_stale(&s.locale),
+        Feature::SessionTitleGuidance => {
+            crate::session_title_guidance::guidance_file_is_stale(&s.title, &s.locale)
+        }
+        Feature::GuardHook
+        | Feature::ElicitationHook
+        | Feature::PlanApprovalHook
+        | Feature::IdleHooks
+        | Feature::PrdContextHook
+        | Feature::WakeupGuardHook => false,
+    }
+}
+
 /// Install every feature, whatever its current state.
 ///
 /// Idempotent — hooks retain-then-push, guidance strips its sentinel block and
@@ -115,7 +152,9 @@ pub fn install_all(s: &Settings) -> Vec<Step> {
 /// silent about.
 ///
 /// The two skip reasons are not interchangeable:
-/// - *already installed* — nothing to do.
+/// - *already installed* — nothing to do, unless [`is_stale`] finds the
+///   guidance file's text drifted from what this build renders, which is how a
+///   Fleet upgrade's new wording reaches a host that already has the feature.
 /// - *deliberately disabled* — the user turned it off (recorded by
 ///   [`crate::control_plane_prefs`] when something called the remove path).
 ///   Installing it here would override that choice on every restart.
@@ -137,7 +176,7 @@ pub fn heal(s: &Settings) -> Vec<Step> {
     steps.extend(
         Feature::ALL
             .iter()
-            .filter(|&&f| !is_installed(f, &plan) && !is_disabled(f))
+            .filter(|&&f| !is_disabled(f) && (!is_installed(f, &plan) || is_stale(f, s)))
             .map(|&f| Step {
                 name: f.key(),
                 result: apply(f, s),
@@ -290,6 +329,87 @@ mod tests {
         let second = heal(&s);
         let names: Vec<&str> = second.iter().map(|s| s.name).collect();
         assert!(second.is_empty(), "heal must be quiet once whole, got {names:?}");
+    }
+
+    #[test]
+    fn heal_rewrites_a_guidance_file_whose_text_drifted() {
+        // What a Fleet upgrade looks like from a host's point of view: the
+        // sentinel block in CLAUDE.md still says "installed", but the file it
+        // points at holds the previous release's wording. heal must notice and
+        // rewrite it — before `is_stale` it stayed stale until the user
+        // toggled the feature off and on by hand.
+        let _h = HomeGuard::new("drift");
+        let s = Settings {
+            locale: "en".into(),
+            title: String::new(),
+            model: String::new(),
+        };
+
+        let first = heal(&s);
+        if skip_without_fleet_binary(&first) {
+            eprintln!("skipped: no fleet binary on this host");
+            return;
+        }
+        assert!(heal(&s).is_empty(), "heal must be quiet once whole");
+
+        let guidance = crate::session::get_claude_dir()
+            .expect("claude dir")
+            .join("fleet-interaction-mode.md");
+        // Same header (same locale variant), older body — what a reworded
+        // release looks like from here.
+        let fresh = crate::interaction_mode::render_guidance(&s.title, &s.locale);
+        let header = fresh.lines().next().expect("header line");
+        std::fs::write(&guidance, format!("{header}\n\nan older release wrote this\n"))
+            .expect("age the guidance file");
+
+        let third = heal(&s);
+        let names: Vec<&str> = third.iter().map(|s| s.name).collect();
+        assert_eq!(
+            names,
+            vec![Feature::InteractionMode.key()],
+            "only the drifted feature is re-applied"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&guidance).expect("read back"),
+            crate::interaction_mode::render_guidance(&s.title, &s.locale),
+            "heal must restore the wording this build renders"
+        );
+    }
+
+    #[test]
+    fn heal_does_not_rewrite_guidance_in_another_locale() {
+        // `fleet serve` resolves its locale from FLEET_LOCALE, which a hand-run
+        // one on a desktop host does not have, so it heals with "en" against a
+        // user whose guidance is Chinese. Refreshing on an exact-match check
+        // would translate their whole control plane on every start.
+        let _h = HomeGuard::new("otherlocale");
+        let zh = Settings {
+            locale: "zh".into(),
+            title: String::new(),
+            model: String::new(),
+        };
+
+        let first = heal(&zh);
+        if skip_without_fleet_binary(&first) {
+            eprintln!("skipped: no fleet binary on this host");
+            return;
+        }
+        let guidance = crate::session::get_claude_dir()
+            .expect("claude dir")
+            .join("fleet-interaction-mode.md");
+        let before = std::fs::read_to_string(&guidance).expect("zh guidance");
+
+        let en = Settings { locale: "en".into(), ..zh.clone() };
+        let steps = heal(&en);
+        assert!(
+            !steps.iter().any(|s| s.name == Feature::InteractionMode.key()),
+            "a locale difference is not staleness"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&guidance).expect("read back"),
+            before,
+            "the user's Chinese guidance must survive an en-defaulting heal"
+        );
     }
 
     #[test]

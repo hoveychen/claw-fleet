@@ -329,6 +329,30 @@ fn remove_wiki_guidance_inner() -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the guidance file on disk needs rewriting with what this build
+/// renders. True when it is missing, and when its text drifted while staying
+/// the *same* locale variant.
+///
+/// The sentinel block in `CLAUDE.md` says the feature is *installed*; it says
+/// nothing about the *wording* of the file it points at. A Fleet upgrade that
+/// edits the guidance text therefore reached no existing host, because the
+/// appliers only run on install/toggle. This is what lets `heal` notice.
+///
+/// The first-line guard is why a drifted locale is not "stale": `fleet serve`
+/// resolves its locale from `FLEET_LOCALE`, which a hand-run one on a desktop
+/// host does not have, so an exact-match check would let it rewrite the user's
+/// Chinese guidance in English on every start.
+pub fn guidance_file_is_stale(locale: &str) -> bool {
+    let Some(path) = guidance_file_path() else {
+        return false;
+    };
+    let Ok(on_disk) = fs::read_to_string(&path) else {
+        return true; // missing or unreadable — rewrite it
+    };
+    let fresh = render_guidance(locale);
+    on_disk.lines().next() == fresh.lines().next() && on_disk != fresh
+}
+
 /// Whether the sentinel block is present in `~/.claude/CLAUDE.md`.
 pub fn is_wiki_guidance_installed() -> bool {
     let Some(claude_md) = claude_md_path() else {
