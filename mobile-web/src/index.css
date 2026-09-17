@@ -40,6 +40,10 @@
   --color-success: #6fbf87;
   --color-warning: #d9a441;
   --color-error: #e0796f;
+  /* The "waiting on a watch condition" dot. Green = running, amber = waiting on
+     you; this is the third thing: nothing runs, but a timer brings it back. A
+     soft violet that sits on the warm-ink paper, not a cold blue. */
+  --color-info: #a892d8;
   --color-bg-glass: rgba(26, 24, 22, 0.93);
   /* 纸感派在暗色下是「暖墨」：同一张纸关了灯，不是另一套冷灰。阴影在暗底上
      几乎看不见，所以这一档比亮色更黑更散，靠的是「比画布还暗」而不是灰度差。 */
@@ -114,6 +118,7 @@
   --color-success: #178042;
   --color-warning: #9a6a08;
   --color-error: #cc3340;
+  --color-info: #6b4fa8;
   --color-bg-glass: rgba(244, 241, 234, 0.93);
   /* 纸上分层靠影子，不靠线：亮色这一档是暖灰而不是纯黑，纯黑落在米底上发脏。 */
   --shadow-1: 0 1px 2px rgba(60, 50, 35, 0.07);

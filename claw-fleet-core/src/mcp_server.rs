@@ -154,7 +154,7 @@ fn tools_list_result(fleet_owned: bool) -> Value {
 fn fleet_ask_tool_def() -> Value {
     json!({
         "name": "fleet__ask",
-        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus three optional fields: `html` (HTML preview, rendered in a sandboxed iframe), `formFields` (structured input fields), and `images` (local image files shown WITHOUT base64-inlining — pass file paths, reference them from `html` by name). Every question must have an answer surface: at least 2 `options`, OR `html`, OR `formFields` — a question with none of the three is rejected. To display an image, ALWAYS use `images` + a relative `<img src=\"name\">`; never base64-inline it into `html` (that wastes output tokens). Every card already carries a permanent terminal button, so NEVER write your own \"任务结束\" / \"收工\" / \"done\" / \"wrap up\" option — set the top-level `taskComplete` boolean instead (true → the button reads 「结束任务」, false → 「放弃任务」). Such an option is rejected.",
+        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus three optional fields: `html` (HTML preview, rendered in a sandboxed iframe), `formFields` (structured input fields), and `images` (local image files shown WITHOUT base64-inlining — pass file paths, reference them from `html` by name). Every question must have an answer surface: at least 2 `options`, OR `html`, OR `formFields` — a question with none of the three is rejected. To display an image, ALWAYS use `images` + a relative `<img src=\"name\">`; never base64-inline it into `html` (that wastes output tokens). Every card already carries a permanent terminal button, so NEVER write your own \"任务结束\" / \"收工\" / \"done\" / \"wrap up\" option — set the top-level `taskComplete` boolean instead (true → the button reads 「结束任务」, false → 「放弃任务」). Such an option is dropped from the card automatically and its intent folded into `taskComplete`.",
         "inputSchema": crate::mcp_ipc::fleet_ask_input_schema(),
     })
 }
@@ -652,8 +652,26 @@ const END_OPTION_LABELS: &[&str] = &[
     "sign off",
 ];
 
+/// The subset of [`END_OPTION_LABELS`] that means "stop, unfinished" rather than
+/// "stop, done" — they map the repaired card's terminal button to 「放弃任务」.
+const END_OPTION_ABANDON_LABELS: &[&str] = &["放弃任务", "放弃", "不做了", "abandon", "give up"];
+
 /// True when `label` is a hand-rolled terminal option (see [`END_OPTION_LABELS`]).
 fn is_hand_rolled_end_option(label: &str) -> bool {
+    normalize_option_label(label)
+        .map(|n| END_OPTION_LABELS.contains(&n.as_str()))
+        .unwrap_or(false)
+}
+
+/// True when a hand-rolled terminal option means "abandon", not "done".
+fn end_option_means_abandon(label: &str) -> bool {
+    normalize_option_label(label)
+        .map(|n| END_OPTION_ABANDON_LABELS.contains(&n.as_str()))
+        .unwrap_or(false)
+}
+
+/// Normalise an option label for whole-string matching against the tables above.
+fn normalize_option_label(label: &str) -> Option<String> {
     let mut norm = label.trim().to_lowercase();
     // Agents append " (Recommended)" per the guidance; strip it before matching.
     for suffix in [" (recommended)", "（recommended）", " (推荐)", "（推荐）"] {
@@ -667,12 +685,71 @@ fn is_hand_rolled_end_option(label: &str) -> bool {
     let norm = norm
         .trim_matches(|c: char| !c.is_alphanumeric() && c != '\'')
         .trim();
-    END_OPTION_LABELS.contains(&norm)
+    if norm.is_empty() { None } else { Some(norm.to_string()) }
+}
+
+/// What [`strip_hand_rolled_end_options`] removed from a `fleet__ask` payload.
+struct StrippedEndOptions {
+    /// Labels dropped, in payload order — echoed back to the agent.
+    labels: Vec<String>,
+    /// True when at least one dropped label meant "done" rather than "abandon";
+    /// it forces the card's terminal button to 「结束任务」.
+    implies_complete: bool,
+}
+
+impl StrippedEndOptions {
+    fn is_empty(&self) -> bool {
+        self.labels.is_empty()
+    }
+
+    /// The note appended to the agent's tool result, so the repair is visible
+    /// rather than silent — the agent should stop emitting these options.
+    fn note(&self) -> String {
+        format!(
+            "[fleet] Dropped {} hand-rolled terminal option(s) from your card ({}) and set \
+             `taskComplete: {}` instead. Every card already carries a permanent end-the-task \
+             button; never put 「收工」/「任务结束」/\"Done\" in `options` — set the top-level \
+             `taskComplete` boolean yourself next time.",
+            self.labels.len(),
+            self.labels
+                .iter()
+                .map(|l| format!("\"{l}\""))
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.implies_complete
+        )
+    }
+}
+
+/// Remove hand-rolled terminal options in place and report what went.
+///
+/// Rejecting the whole call (what this guard did until 2026-09-17) cost a full
+/// round trip to re-send a card the server had already understood: the label
+/// table identifies the option precisely enough to repair the payload, so
+/// repair it. The agent still learns about it — [`StrippedEndOptions::note`]
+/// rides back with the answers.
+fn strip_hand_rolled_end_options(
+    questions: &mut [crate::mcp_ipc::FleetAskQuestion],
+) -> StrippedEndOptions {
+    let mut out = StrippedEndOptions { labels: Vec::new(), implies_complete: false };
+    for q in questions.iter_mut() {
+        q.options.retain(|o| {
+            if !is_hand_rolled_end_option(&o.label) {
+                return true;
+            }
+            if !end_option_means_abandon(&o.label) {
+                out.implies_complete = true;
+            }
+            out.labels.push(o.label.clone());
+            false
+        });
+    }
+    out
 }
 
 fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
-    let questions: Vec<crate::mcp_ipc::FleetAskQuestion> =
+    let mut questions: Vec<crate::mcp_ipc::FleetAskQuestion> =
         match args.get("questions").cloned() {
             Some(q) => serde_json::from_value(q).map_err(|e| JsonRpcError {
                 code: -32602,
@@ -692,6 +769,17 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         });
     }
 
+    // Terminal-option repair: every card already renders a permanent
+    // end-the-task button whose wording comes from `taskComplete`, so a
+    // hand-rolled 「收工」/「任务结束」/"Done" option is both a wasted option slot
+    // and a terminal press Fleet cannot record (it comes back as an ordinary
+    // answer, leaving the session's outcome unset). Strip it and derive
+    // `taskComplete` from it rather than bouncing the whole call — the label
+    // table already knows exactly which option it is, so a rejection only buys
+    // a round trip for an edit the server can make itself. Must run before the
+    // answer-surface check below, which counts what is left.
+    let stripped = strip_hand_rolled_end_options(&mut questions);
+
     // Answerability guard: `header`/`question` are the only serde-required
     // fields, so a question with no `options`, no `html` and no `formFields`
     // deserialises fine yet renders as a free-text-only card — no clickable or
@@ -699,42 +787,32 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     // marks `options` required with `minItems: 2`); restore that contract here
     // while still allowing `fleet__ask`'s pure-html and pure-form extension
     // cards. A single lone option is likewise unanswerable-by-choice, so
-    // require at least two when options is the only surface.
+    // require at least two when options is the only surface — except right
+    // after a terminal-option strip, where one real option plus the card's
+    // free-text escape hatch is still answerable and bouncing the call would
+    // undo the repair.
+    let min_options = if stripped.is_empty() { 2 } else { 1 };
     if let Some(idx) = questions.iter().position(|q| {
-        q.options.len() < 2 && q.html.is_none() && q.form_fields.is_empty()
+        q.options.len() < min_options && q.html.is_none() && q.form_fields.is_empty()
     }) {
         return Err(JsonRpcError {
             code: -32602,
-            message: format!(
-                "Question {} has no answer surface: give it at least 2 `options`, or `html`, or `formFields`.",
-                idx + 1
-            ),
+            message: if stripped.is_empty() {
+                format!(
+                    "Question {} has no answer surface: give it at least 2 `options`, or `html`, or `formFields`.",
+                    idx + 1
+                )
+            } else {
+                format!(
+                    "Question {} had nothing left after dropping its hand-rolled terminal \
+                     option(s) ({}). Every card already carries a permanent end-the-task button, \
+                     so those options are never needed — set the top-level `taskComplete` boolean \
+                     and give the question real options, `html` or `formFields`.",
+                    idx + 1,
+                    stripped.labels.join(", ")
+                )
+            },
         });
-    }
-
-    // Terminal-option guard: every card already renders a permanent
-    // end-the-task button whose wording comes from `taskComplete`, so a
-    // hand-rolled "wrap up"/"end task"/"Done" option is both a wasted option slot
-    // and a terminal press Fleet cannot record (it comes back as an ordinary
-    // answer, leaving the session's outcome unset). The ban was stated in prose
-    // in four places — this tool's description, the `options` and `taskComplete`
-    // schema fields, and the injected interaction-mode guidance — and agents
-    // kept shipping the option anyway because nothing rejected it. Reject it.
-    for (qi, q) in questions.iter().enumerate() {
-        if let Some(opt) = q.options.iter().find(|o| is_hand_rolled_end_option(&o.label)) {
-            return Err(JsonRpcError {
-                code: -32602,
-                message: format!(
-                    "Question {} has a hand-rolled terminal option (\"{}\"). Every card already \
-                     carries a permanent end-the-task button — drop this option and set the \
-                     top-level `taskComplete` boolean instead (true → the button reads \
-                     「结束任务」 and closes the session as a success, false → 「放弃任务」). \
-                     Every option must be a concrete next action or answer.",
-                    qi + 1,
-                    opt.label
-                ),
-            });
-        }
     }
 
     // Handoff guard: see `PENDING_HANDOFF_ASK_REFUSAL`. Ahead of the heartbeat
@@ -810,10 +888,14 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         ai_title: None,
         timestamp: chrono::Utc::now().to_rfc3339(),
         parked: false,
+        // A dropped 「收工」-style option *was* the agent's terminal intent, so
+        // fold it into the flag the permanent button actually reads. An
+        // explicit `taskComplete: true` still wins over a dropped 「放弃任务」.
         task_complete: args
             .get("taskComplete")
             .and_then(|v| v.as_bool())
-            .unwrap_or(false),
+            .unwrap_or(false)
+            || stripped.implies_complete,
         questions,
         review_docs,
     };
@@ -908,13 +990,16 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         resp.answers.clone(),
     );
 
-    // Pack answers as JSON so the agent can parse structured form values.
+    // Pack answers as JSON so the agent can parse structured form values. A
+    // terminal-option repair rides back as a *second* text block, never mixed
+    // into the first — agents parse block one as JSON.
     let answers_json = serde_json::to_string(&resp.answers).unwrap_or_else(|_| "{}".into());
+    let mut content = vec![json!({ "type": "text", "text": answers_json })];
+    if !stripped.is_empty() {
+        content.push(json!({ "type": "text", "text": stripped.note() }));
+    }
     Ok(json!({
-        "content": [{
-            "type": "text",
-            "text": answers_json,
-        }],
+        "content": content,
         "structuredContent": { "answers": resp.answers },
         "isError": false,
     }))
@@ -1840,11 +1925,55 @@ mod tests {
     }
 
     #[test]
-    fn tools_call_with_hand_rolled_end_option_errors() {
-        // Every card already carries a permanent terminal button driven by
-        // `taskComplete`; an option labelled "wrap up"/"end task"/"Done" is the
-        // pre-v3 convention and records no terminal state. Prose said so in
-        // four places and agents kept doing it anyway, so reject it here.
+    fn end_option_strip_repairs_payload_and_derives_task_complete() {
+        // The repair, at the unit the handler calls: the terminal option goes,
+        // the real one stays, and the dropped label decides `taskComplete`.
+        let mk = |labels: &[&str]| -> Vec<crate::mcp_ipc::FleetAskQuestion> {
+            vec![crate::mcp_ipc::FleetAskQuestion {
+                question: "q".into(),
+                header: "h".into(),
+                multi_select: false,
+                options: labels
+                    .iter()
+                    .map(|l| crate::mcp_ipc::FleetAskOption {
+                        label: (*l).into(),
+                        description: "d".into(),
+                        preview: None,
+                    })
+                    .collect(),
+                html: None,
+                images: Vec::new(),
+                form_fields: Vec::new(),
+            }]
+        };
+
+        let mut qs = mk(&["收工 (Recommended)", "起真 app 验提示音"]);
+        let stripped = strip_hand_rolled_end_options(&mut qs);
+        assert_eq!(stripped.labels, vec!["收工 (Recommended)".to_string()]);
+        assert!(stripped.implies_complete, "「收工」 means the task is done");
+        assert_eq!(qs[0].options.len(), 1);
+        assert_eq!(qs[0].options[0].label, "起真 app 验提示音");
+        assert!(stripped.note().contains("taskComplete"));
+
+        // 「放弃任务」 is terminal too, but it must not flip the button to
+        // 「结束任务」 — ending there is giving up, not succeeding.
+        let mut qs = mk(&["放弃任务", "接着修"]);
+        let stripped = strip_hand_rolled_end_options(&mut qs);
+        assert_eq!(stripped.labels.len(), 1);
+        assert!(!stripped.implies_complete);
+
+        // Ordinary actions that merely mention finishing survive untouched.
+        let mut qs = mk(&["跑完测试再结束任务前的合并", "Finish the migration script"]);
+        let stripped = strip_hand_rolled_end_options(&mut qs);
+        assert!(stripped.is_empty());
+        assert_eq!(qs[0].options.len(), 2);
+    }
+
+    #[test]
+    fn tools_call_with_only_end_options_errors() {
+        // Stripping the terminal option normally leaves a usable card, but a
+        // question whose *every* option was terminal has nothing left to click,
+        // so the call is still refused — with the message that names what went.
         // FLEET_HOME is forced empty for the same reason as the sibling
         // answer-surface test: absent the guard the call would fall through to
         // the (not-alive) consumer check and come back as an `isError`
@@ -1860,6 +1989,58 @@ mod tests {
         let req = json!({
             "jsonrpc": "2.0",
             "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__ask",
+                "arguments": {
+                    "questions": [{
+                        "question": "已合并回 main。还要我做点什么吗?",
+                        "header": "已合并",
+                        "multiSelect": false,
+                        "options": [
+                            {"label": "收工", "description": "活干完了,不用再动。"},
+                            {"label": "任务结束", "description": "同上。"}
+                        ]
+                    }]
+                }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+
+        // SAFETY: restore under the same lock.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert_eq!(resp["error"]["code"], -32602, "got {resp}");
+        let msg = resp["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            msg.contains("taskComplete") && msg.contains("收工"),
+            "error should name the offending label and point at taskComplete, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn tools_call_with_one_end_option_is_repaired_not_rejected() {
+        // A card that still has a real option after the strip must go through:
+        // reaching the consumer check (isError, not a -32602 envelope) is the
+        // pass condition, and it also proves the relaxed min-option count holds
+        // when the strip leaves exactly one.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir()
+            .join(format!("fleet-ask-end-option-repair-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by `fleet_home_lock`.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 14,
             "method": "tools/call",
             "params": {
                 "name": "fleet__ask",
@@ -1887,12 +2068,11 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&tmp);
 
-        assert_eq!(resp["error"]["code"], -32602, "got {resp}");
-        let msg = resp["error"]["message"].as_str().unwrap_or_default();
         assert!(
-            msg.contains("taskComplete") && msg.contains("收工"),
-            "error should name the offending label and point at taskComplete, got: {msg}"
+            resp.get("error").is_none(),
+            "a strippable card must be repaired, not rejected, got {resp}"
         );
+        assert_eq!(resp["result"]["isError"], true);
     }
 
     #[test]

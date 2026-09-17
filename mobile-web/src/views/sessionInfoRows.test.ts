@@ -33,7 +33,7 @@ describe("buildInfoChips", () => {
       slug: "fix/auth",
       runningSubagentCount: 3,
       handoff: { chainId: "c1", hop: 2, chainLen: 3 },
-      watches: [{ id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 1 }],
+      watches: [{ id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 1, structuralFailStreak: 0 }],
     };
     // Session id also skips this chip row: it's too long and its actual use is copying it out.
     expect(buildInfoChips(rich)).toEqual(["proj"]);

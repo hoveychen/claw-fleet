@@ -242,7 +242,8 @@
     "rateLimited": "速率限制",
     "serverErrored": "服务器错误",
     "remoteDisconnected": "远端断开",
-    "stuck": "卡死"
+    "stuck": "卡死",
+    "watching": "等待条件"
   },
   "mirrorWrite": {
     "badge": "{{count}} 个文件留在本机",
@@ -1019,6 +1020,8 @@
     "tip_handoff": "该 session 是一条接力链的第 {{hop}} 棒（共 {{len}} 棒）。点击查看完整链条。",
     "watch_chip": "watch · 已过 {{elapsed}} · {{count}} 次",
     "tip_watch": "已等待 {{elapsed}}，条件已轮询 {{count}} 次（每 {{poll}} 秒一次）。",
+    "watch_chip_broken": "watch 跑不起来 · {{count}} 次",
+    "tip_watch_broken": "这个 watch 的 until 命令连续 {{count}} 次根本跑不起来（不是条件没满足），它不会自己触发：{{reason}}",
     "handoff_loading": "正在加载接力链…",
     "handoff_hop": "第 {{n}} 棒",
     "handoff_note_more": "展开",
@@ -2458,6 +2461,7 @@
     "untitled": "（无标题）",
     "running": "运行中",
     "waiting": "等待输入",
+    "watching": "等待 watch 条件 · 条件满足后 Fleet 会自动唤醒它",
     "quiet_alive": "运行中 · 已 {{mins}} 分钟没有新输出（多半卡在一条长工具调用上）",
     "quiet_sparse": "运行中 · 输出稀疏（每隔几分钟才写一行，多半卡在一条长工具调用上）",
     "decision_pending_chip": "待决策",

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Radar } from "lucide-react";
+import { AlertTriangle, Radar } from "lucide-react";
 import type { SessionInfo } from "../types";
 import styles from "./WatchStatusRow.module.css";
 
@@ -41,16 +41,31 @@ export function WatchStatusRow({ session }: { session: SessionInfo }) {
     <div className={styles.watch_row}>
       {watches.map((w) => {
         const elapsed = formatElapsed(now - w.created);
+        // A non-zero streak means the `until` command cannot run at all, so the
+        // poll count is not reassuring — it is the measure of how long this
+        // session has been waiting for something that will never happen.
+        const broken = (w.structuralFailStreak ?? 0) > 0;
         const title = [
           w.note ?? undefined,
-          t("card.tip_watch", { elapsed, count: w.pollCount, poll: w.pollSecs }),
+          broken
+            ? t("card.tip_watch_broken", {
+                count: w.structuralFailStreak,
+                reason: w.lastStderr || "—",
+              })
+            : t("card.tip_watch", { elapsed, count: w.pollCount, poll: w.pollSecs }),
         ]
           .filter(Boolean)
           .join(" — ");
         return (
-          <span key={w.id} className={styles.watch_chip} title={title}>
-            <Radar size={11} />
-            {t("card.watch_chip", { elapsed, count: w.pollCount })}
+          <span
+            key={w.id}
+            className={broken ? styles.watch_chip_broken : styles.watch_chip}
+            title={title}
+          >
+            {broken ? <AlertTriangle size={11} /> : <Radar size={11} />}
+            {broken
+              ? t("card.watch_chip_broken", { count: w.structuralFailStreak })
+              : t("card.watch_chip", { elapsed, count: w.pollCount })}
           </span>
         );
       })}

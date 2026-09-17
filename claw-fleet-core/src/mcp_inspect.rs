@@ -81,6 +81,7 @@ fn status_label(s: &SessionStatus) -> &'static str {
         SessionStatus::ServerErrored => "server-error",
         SessionStatus::RemoteDisconnected => "remote-disconnected",
         SessionStatus::Stuck => "stuck",
+        SessionStatus::Watching => "watching",
     }
 }
 
@@ -204,9 +205,12 @@ fn render_detail(s: &SessionInfo) -> String {
 }
 
 fn render_speed(sessions: &[SessionInfo]) -> String {
+    // `Watching` is excluded alongside `Idle`: it is pending work (so the list
+    // and events views keep it), but its process is gone and its token speed is
+    // a hard zero — listing it here would only pad the table with 0 tok/s rows.
     let live: Vec<&SessionInfo> = sessions
         .iter()
-        .filter(|s| !matches!(s.status, SessionStatus::Idle))
+        .filter(|s| !matches!(s.status, SessionStatus::Idle | SessionStatus::Watching))
         .collect();
     if live.is_empty() {
         return "No active agents.".to_string();

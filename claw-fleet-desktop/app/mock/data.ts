@@ -77,6 +77,7 @@ const MOCK_SESSIONS_SEED: Array<
         pollSecs: 60,
         deadlineAt: NOW + 2 * 60 * MIN,
         pollCount: 5,
+        structuralFailStreak: 0,
       },
     ],
   },
@@ -372,6 +373,10 @@ const MOCK_SESSIONS_SEED: Array<
         pollSecs: 30,
         deadlineAt: NOW + 60 * MIN,
         pollCount: 24,
+        // A broken gate, so the "watch can't run" chip is visible in mock mode
+        // instead of only ever existing in production.
+        structuralFailStreak: 24,
+        lastStderr: "sh: gh: command not found",
       },
     ],
   },

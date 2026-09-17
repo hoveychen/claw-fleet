@@ -194,11 +194,16 @@ export const SessionRow = memo(function SessionRow({
                 ? t("history.quiet_alive", "运行中 · 已 {{mins}} 分钟没有新输出（多半卡在一条长工具调用上）", {
                     mins: quietMins,
                   })
-                : s.status === "waitingInput"
-                  ? t("history.waiting", "等待输入")
-                  : sparse
-                    ? t("history.quiet_sparse", "运行中 · 输出稀疏（每隔几分钟才写一行，多半卡在一条长工具调用上）")
-                    : t("history.running", "运行中")
+                : s.status === "watching"
+                  ? t("history.watching", "等待 watch 条件 · 条件满足后 Fleet 会自动唤醒它")
+                  : s.status === "waitingInput"
+                    ? t("history.waiting", "等待输入")
+                    : sparse
+                      ? t(
+                          "history.quiet_sparse",
+                          "运行中 · 输出稀疏（每隔几分钟才写一行，多半卡在一条长工具调用上）",
+                        )
+                      : t("history.running", "运行中")
             }
           />
         )}

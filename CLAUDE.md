@@ -40,3 +40,24 @@ Any new long-lived Fleet process that should participate in this contract must:
 **The injection outlives every Fleet process.** `release(pid)` only deregisters the pid — it never touches settings.json. Sessions Fleet spawns are detached (`session_launch::spawn_claude_detached_with_envs`) and keep running after the app quits; pulling the allow rules on exit would strand them on permission prompts that nothing is left to answer (`fleet guard` falls through silently once its consumer heartbeat stops, and headless `-p` sessions have no native prompt UI). The **only** un-injection path is `deactivate()`, wired to the settings-panel toggle.
 
 That makes the snapshot in the lock file load-bearing: `acquire` captures `original_allow` **only when the lock file is first created**, never on a later acquire. Re-snapshotting would record Fleet's own injection as the user's original state and `deactivate` could never undo it. `prune_dead_holders` (called inside both `acquire` and `release`) heals stale pids left behind by `kill -9`; because the lock survives the crash, the snapshot survives with it.
+
+## Code and commits are written in English
+
+Everything an engineer reads *in the repo* is English. Everything a user reads *in the product* keeps whatever language that surface is written in.
+
+**English, no exceptions:**
+- Commit messages (subject and body), branch names, PR titles.
+- Code comments of every kind — `//`, `///`, `/* */`, `#`, JSDoc, module headers, the `TODO:`/`NOTE:` kind included.
+- Identifiers: variable, function, type, module, file and test names.
+- `#[test]` / `it(...)` / `describe(...)` test descriptions, and assertion failure messages meant for the developer running the test.
+- Error strings, `log::`/`tracing::` output, `panic!`/`expect` messages, and CLI `--help` text.
+
+**Stays in its own language (usually Chinese) — do not "translate" these:**
+- Localized UI copy: `mobile-web/src/i18n.ts`, the desktop `zh` locale, any dictionary keyed by language.
+- Guidance text Fleet writes into the user's `~/.claude/*.md` or injects into agent prompts — `claw-fleet-core/src/prd_discipline.rs`, `interaction_mode.rs`, the model sheet, decision-card copy. That text *is* the product, and its audience reads Chinese.
+- Test fixtures and golden files that assert on the above.
+- `design/`, `docs/`, `promo/`, `README`, and anything else addressed to 老板 or to users rather than to the code.
+
+The line is audience, not file type: if the string's reader is a developer opening this repo, it is English; if the reader is the person using Fleet, it is whatever that person reads. When a Rust file holds both — `prd_discipline.rs` is Chinese guidance wrapped in English code — the comments explaining the wrapper are still English.
+
+**Retrofit policy:** existing Chinese comments are grandfathered. Do not open a translation pass over them; rewrite a comment to English only when you were already editing that comment for another reason.

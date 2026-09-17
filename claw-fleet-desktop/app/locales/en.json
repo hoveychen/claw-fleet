@@ -242,7 +242,8 @@
     "rateLimited": "Rate Limited",
     "serverErrored": "Server Error",
     "remoteDisconnected": "Remote lost",
-    "stuck": "Stuck"
+    "stuck": "Stuck",
+    "watching": "Watching"
   },
   "mirrorWrite": {
     "badge": "{{count}} file(s) left here",
@@ -1022,6 +1023,8 @@
     "tip_handoff": "This session is leg {{hop}} of a {{len}}-leg handoff chain. Click to view the chain.",
     "watch_chip": "watch · {{elapsed}} · {{count}}×",
     "tip_watch": "Waiting {{elapsed}}, condition polled {{count}} time(s) (every {{poll}}s).",
+    "watch_chip_broken": "watch can't run · {{count}}×",
+    "tip_watch_broken": "This watch's until command has failed to run {{count}} time(s) in a row (not merely unmet) — it will never fire on its own: {{reason}}",
     "handoff_loading": "Loading relay chain…",
     "handoff_hop": "Leg {{n}}",
     "handoff_note_more": "Expand",
@@ -2462,6 +2465,7 @@
     "untitled": "(untitled)",
     "running": "Running",
     "waiting": "Waiting for input",
+    "watching": "Waiting on a watch condition — Fleet resumes it when the condition fires",
     "quiet_alive": "Running · no new output for {{mins}} min (likely parked on one long tool call)",
     "quiet_sparse": "Running · sparse output (one line every few minutes — likely parked on one long tool call)",
     "decision_pending_chip": "Decision",

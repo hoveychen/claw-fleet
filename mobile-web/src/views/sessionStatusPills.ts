@@ -137,14 +137,27 @@ export function buildStatusPills(s: SessionInfo, opts: PillInput = {}): StatusPi
     });
   }
   if (s.watches && s.watches.length > 0) {
-    // For one watch, report how many times it has polled — that's the only visible
-    // evidence that "it's alive and still waiting". For multiple, report the count;
-    // each one's poll count is in the half-screen.
-    const label =
-      s.watches.length === 1
-        ? t("watch ×{0}", s.watches[0].pollCount)
-        : t("{0} 个 watch", s.watches.length);
-    pills.push({ key: "watch", label, tone: "live", target: "sheet" });
+    // A watch whose until command cannot run at all is not waiting, it is
+    // stuck — the poll count is a reassuring lie in that state, so show an
+    // alert pill instead of it.
+    const broken = s.watches.filter((w) => (w.structuralFailStreak ?? 0) > 0).length;
+    if (broken > 0) {
+      pills.push({
+        key: "watch",
+        label: t("watch 跑不起来 ×{0}", broken),
+        tone: "alert",
+        target: "sheet",
+      });
+    } else {
+      // For one watch, report how many times it has polled — that's the only visible
+      // evidence that "it's alive and still waiting". For multiple, report the count;
+      // each one's poll count is in the half-screen.
+      const label =
+        s.watches.length === 1
+          ? t("watch ×{0}", s.watches[0].pollCount)
+          : t("{0} 个 watch", s.watches.length);
+      pills.push({ key: "watch", label, tone: "live", target: "sheet" });
+    }
   }
 
   // ── Progress readings ───────────────────────────────────────────────────────

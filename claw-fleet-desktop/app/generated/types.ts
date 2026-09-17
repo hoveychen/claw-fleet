@@ -15,7 +15,7 @@ export type NestedKind = "bash-c" | "sh-c" | "zsh-c" | "python-c" | "node-e" | "
 
 export type Connector = "and" | "or" | "pipe" | "semi";
 
-export type SessionStatus = "thinking" | "executing" | "streaming" | "delegating" | "processing" | "waitingInput" | "active" | "idle" | "rateLimited" | "serverErrored" | "remoteDisconnected" | "stuck";
+export type SessionStatus = "thinking" | "executing" | "streaming" | "delegating" | "processing" | "waitingInput" | "active" | "idle" | "rateLimited" | "serverErrored" | "remoteDisconnected" | "stuck" | "watching";
 
 export type RateLimitState = { resetsAt: string, limitType: RateLimitType, parsed: boolean, errorTimestamp: string, };
 
@@ -306,7 +306,9 @@ note?: string | null,
 created: number, 
 pollSecs: number, 
 deadlineAt: number, 
-pollCount: number, };
+pollCount: number, 
+structuralFailStreak: number, 
+lastStderr?: string, };
 
 export type LiveThinking = { sessionId: string, 
 thinking: string, 

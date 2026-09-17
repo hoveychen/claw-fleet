@@ -470,6 +470,7 @@ const DICT: Record<string, string> = {
   恢复命令: "Resume command",
   "{0} 个子代理": "{0} subagents",
   "watch ×{0}": "watch ×{0}",
+  "watch 跑不起来 ×{0}": "watch can't run ×{0}",
   "{0} 个 watch": "{0} watches",
   "接力 {0}/{1}": "Relay {0}/{1}",
   "上下文 {0}%": "Context {0}%",
