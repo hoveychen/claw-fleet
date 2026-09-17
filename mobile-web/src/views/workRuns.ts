@@ -135,3 +135,41 @@ export function workRunTitle(msgs: RawMessage[]): string | null {
   }
   return null;
 }
+
+/**
+ * Has the run actually ended — i.e. may the band close with the Done check?
+ * Twin of the desktop `workRunFinished`; keep the two in step.
+ *
+ * The band used to answer this from `live && stop_reason === null` alone, which
+ * is never the right question: a band is tool-call/thinking records *by
+ * construction* (`isWorkRow`), so its last record's stop_reason is `tool_use`
+ * on every finished record, and 完成 appeared under a run that was still
+ * mid-flight. Three facts have to hold instead:
+ *  - the band is not the live tail (`liveTail` is `working && trailing unit`,
+ *    so a live band can still grow more work rows);
+ *  - the last record is closed, not a partial flush (`stop_reason === null`).
+ *    An old relay strips the field entirely (undefined) — treat that as closed,
+ *    the way the band did before the field existed;
+ *  - every tool call in that last record has a result back. This is what still
+ *    catches a long tool whose session dropped out of the backend's 60s
+ *    freshness window, so `liveTail` went false while the work kept running.
+ */
+export function workRunFinished(
+  msgs: RawMessage[],
+  liveTail: boolean,
+  hasResult: (toolUseId: string) => boolean,
+): boolean {
+  if (liveTail) return false;
+  const last = msgs[msgs.length - 1];
+  if (!last) return false;
+  const stop = last.message && "stop_reason" in last.message ? last.message.stop_reason : undefined;
+  if (stop === null) return false;
+  const content = last.message?.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block.type !== "tool_use" || !block.id) continue;
+      if (!hasResult(block.id)) return false;
+    }
+  }
+  return true;
+}

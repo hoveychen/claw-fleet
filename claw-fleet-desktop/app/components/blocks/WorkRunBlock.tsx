@@ -9,7 +9,7 @@ import {
   safeRemarkPlugins,
   safeRehypePlugins,
 } from "../../markdown/safeLinks";
-import { summarizeWorkRun, workRunTitle } from "../workRuns";
+import { summarizeWorkRun, workRunFinished, workRunTitle } from "../workRuns";
 import { formatMsgTime } from "../../messageRows";
 import { ContentBlocks } from "./ContentBlocks";
 import { RailDone } from "./Rail";
@@ -153,9 +153,10 @@ export function WorkRunBlock({
               />
             );
           })}
-          {/* A finished run closes with the Done check; a still-streaming run
-              (live tail, last record unterminated) keeps the rail open-ended. */}
-          {msgs[msgs.length - 1]?.message?.stop_reason !== null && <RailDone />}
+          {/* A finished run closes with the Done check; a run that can still
+              grow (live tail, partial record, tool call with no result yet)
+              keeps the rail open-ended — see `workRunFinished`. */}
+          {workRunFinished(msgs, !!live, (id) => resultMap.has(id)) && <RailDone />}
         </div>
       )}
     </div>

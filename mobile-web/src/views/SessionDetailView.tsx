@@ -74,7 +74,7 @@ import {
 } from "./SessionDetailTabs";
 import { parseSkillInjection } from "../skillInjection";
 import { groupMetaRuns } from "./metaGrouping";
-import { countSteps, groupWorkRuns, isDecisionTool, workRunTitle } from "./workRuns";
+import { countSteps, groupWorkRuns, isDecisionTool, workRunFinished, workRunTitle } from "./workRuns";
 import { decisionSummary, friendlyToolName, toolSummary } from "./toolSummary";
 import { userDisplayText } from "./slashCommand";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
@@ -800,6 +800,7 @@ function WorkRunBand({
   live,
   tail,
   toolMeta,
+  resultIds,
   client,
   jsonlPath,
 }: {
@@ -807,11 +808,15 @@ function WorkRunBand({
   baseIndex: number;
   expandedThinking: Set<string>;
   onToggleThinking: (key: string) => void;
-  /** The session is in a working status — drives the headline shimmer only. */
+  /** The session is working *and* this run is the trailing unit — drives the
+   *  headline shimmer and withholds the Done check (the run can still grow). */
   live: boolean;
   /** This run is the transcript's trailing unit — it starts open. */
   tail: boolean;
   toolMeta?: Map<string, ToolMeta>;
+  /** Ids of tool calls whose result has come back — a call missing from this
+   *  set is still in flight, so the band withholds its Done check. */
+  resultIds?: Set<string>;
   client?: FleetTransport | null;
   jsonlPath?: string;
 }) {
@@ -870,7 +875,7 @@ function WorkRunBand({
               jsonlPath={jsonlPath}
             />
           ))}
-          {!streaming && (
+          {workRunFinished(msgs, live, (id) => resultIds?.has(id) ?? true) && (
             <div className={`${styles.railStep} ${styles.doneStep}`}>
               <span className={`${styles.railIcon} ${styles.doneIcon}`} aria-hidden>
                 <CircleCheck />
@@ -1409,6 +1414,18 @@ export function SessionDetailView({
   // Tool metadata lives on the tool_result rows the renderable filter drops —
   // harvest it from the unfiltered list, keyed by tool_use_id.
   const toolMetaMap = useMemo(() => collectToolMeta(messages ?? []), [messages]);
+  // Which tool calls have a result back. `toolMetaMap` can't answer this — it
+  // only keeps results that carried a digest/thumb/error — and a work band
+  // needs it to tell a finished run from one still waiting on its last tool.
+  const resultIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const msg of messages ?? []) {
+      for (const b of blocksOf(msg)) {
+        if (b.type === "tool_result" && b.tool_use_id) ids.add(b.tool_use_id);
+      }
+    }
+    return ids;
+  }, [messages]);
   const turnUsage = useMemo(() => turnUsageByIndex(mainRows), [mainRows]);
 
   // Per-row subset so the row memo can diff by content instead of re-rendering
@@ -1580,6 +1597,7 @@ export function SessionDetailView({
                   live={live}
                   tail={tail}
                   toolMeta={toolMetaMap}
+                  resultIds={resultIds}
                   client={client}
                   jsonlPath={detailPath}
                 />

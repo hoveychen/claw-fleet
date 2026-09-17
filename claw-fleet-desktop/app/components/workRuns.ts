@@ -175,6 +175,42 @@ export function workRunTitle(msgs: RawMessage[]): string | null {
   return null;
 }
 
+/**
+ * Has the run actually ended — i.e. may the band close with the "Done" check?
+ *
+ * The band used to answer this from the last record's `stop_reason !== null`,
+ * which is never the right question: a band is tool-call/thinking records *by
+ * construction* (`isWorkRow`), so its last record's stop_reason is `tool_use`
+ * on every finished record. That made "Done" appear under a run that was still
+ * mid-flight — the reader saw 完成 with 思考中 right below it.
+ *
+ * Three facts have to hold instead:
+ *  - the band is not the live tail (`live` is `isWorkingNow && trailing unit`,
+ *    so a live band can still grow more work rows);
+ *  - the last record is closed, not a partial flush (`stop_reason === null`);
+ *  - every tool call in that last record has a result back. This is what still
+ *    catches a long tool whose session dropped out of the backend's 60s
+ *    freshness window, so `live` went false while the work kept running.
+ */
+export function workRunFinished(
+  msgs: RawMessage[],
+  live: boolean,
+  hasResult: (toolUseId: string) => boolean,
+): boolean {
+  if (live) return false;
+  const last = msgs[msgs.length - 1];
+  if (!last) return false;
+  if (last.message?.stop_reason === null) return false;
+  const content = last.message?.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block.type !== "tool_use") continue;
+      if (!hasResult((block as ToolUseBlock).id)) return false;
+    }
+  }
+  return true;
+}
+
 export function summarizeWorkRun(msgs: RawMessage[]): WorkRunSummary {
   const toolNames: string[] = [];
   const counts = new Map<string, number>();
