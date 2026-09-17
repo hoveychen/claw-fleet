@@ -698,12 +698,27 @@ function ToolStep({
   );
 }
 
+/**
+ * Stable identity of one transcript record, for React keys and for the
+ * "which thinking blocks are expanded" set.
+ *
+ * It must not be the row's position: the list is a *tail* window, and 「加载更早
+ * 的消息」 prepends 200 rows at the head, sliding every index along. Keyed by
+ * position, an expanded band (or an expanded thinking block) then belongs to a
+ * different message than the one the reader opened. The transcript's `uuid` is
+ * the record's own identity and survives the shift; the positional fallback is
+ * only for rows that have none (optimistic sends, fixtures).
+ */
+export function rowKeyOf(msg: RawMessage | undefined, index: number): string {
+  return (msg as { uuid?: string } | undefined)?.uuid ?? `i${index}`;
+}
+
 /** One assistant record's blocks in the rail language: thinking and tool calls
  *  as icon-guttered steps, prose flush and full width — same convention as the
  *  desktop transcript. */
 function AssistantBlocks({
   blocks,
-  index,
+  rowKey,
   expandedThinking,
   onToggleThinking,
   toolMeta,
@@ -711,9 +726,10 @@ function AssistantBlocks({
   jsonlPath,
 }: {
   blocks: ContentBlock[];
-  index: number;
-  expandedThinking: Set<number>;
-  onToggleThinking: (key: number) => void;
+  /** Identity of the record these blocks came from — see `rowKeyOf`. */
+  rowKey: string;
+  expandedThinking: Set<string>;
+  onToggleThinking: (key: string) => void;
   toolMeta?: Map<string, ToolMeta>;
   client?: FleetTransport | null;
   jsonlPath?: string;
@@ -722,7 +738,7 @@ function AssistantBlocks({
     <>
       {blocks.map((b, j) => {
         if (b.type === "thinking" && b.thinking?.trim()) {
-          const key = index * 1000 + j;
+          const key = `${rowKey}#${j}`;
           return (
             <RailStep key={j} icon={<Clock />}>
               <ClampedThinking
@@ -789,8 +805,8 @@ function WorkRunBand({
 }: {
   msgs: RawMessage[];
   baseIndex: number;
-  expandedThinking: Set<number>;
-  onToggleThinking: (key: number) => void;
+  expandedThinking: Set<string>;
+  onToggleThinking: (key: string) => void;
   /** The session is in a working status — drives the headline shimmer only. */
   live: boolean;
   /** This run is the transcript's trailing unit — it starts open. */
@@ -844,9 +860,9 @@ function WorkRunBand({
         <div className={styles.bandBody}>
           {msgs.map((m, i) => (
             <AssistantBlocks
-              key={(m as { uuid?: string }).uuid ?? i}
+              key={rowKeyOf(m, baseIndex + i)}
               blocks={blocksOf(m)}
-              index={baseIndex + i}
+              rowKey={rowKeyOf(m, baseIndex + i)}
               expandedThinking={expandedThinking}
               onToggleThinking={onToggleThinking}
               toolMeta={toolMeta}
@@ -871,12 +887,13 @@ function WorkRunBand({
 
 interface MessageRowProps {
   msg: RawMessage;
-  index: number;
-  /** Set of open thinking-block keys (index*1000+blockIndex). Reference is
+  /** Record identity (`rowKeyOf`), not a list position. */
+  rowKey: string;
+  /** Set of open thinking-block keys (`<rowKey>#<blockIndex>`). Reference is
    *  stable across the 2.5s tail poll, so `memo` skips untouched rows then;
    *  it only changes on a user toggle, when re-rendering every row is fine. */
-  expandedThinking: Set<number>;
-  onToggleThinking: (key: number) => void;
+  expandedThinking: Set<string>;
+  onToggleThinking: (key: string) => void;
   /** This row's tool metadata (digest chips / error bits / result thumbs).
    *  Rebuilt every poll, so the memo comparator diffs it by content. */
   toolMeta?: Map<string, ToolMeta>;
@@ -910,7 +927,7 @@ function toolMetaEqual(a?: Map<string, ToolMeta>, b?: Map<string, ToolMeta>): bo
  *  the long-session jank the desktop never hit because it doesn't poll. */
 const MessageRow = memo(function MessageRow({
   msg,
-  index,
+  rowKey,
   expandedThinking,
   onToggleThinking,
   toolMeta,
@@ -1014,7 +1031,7 @@ const MessageRow = memo(function MessageRow({
     <div className={styles.assistantRow}>
       <AssistantBlocks
         blocks={blocks}
-        index={index}
+        rowKey={rowKey}
         expandedThinking={expandedThinking}
         onToggleThinking={onToggleThinking}
         toolMeta={toolMeta}
@@ -1037,7 +1054,7 @@ const MessageRow = memo(function MessageRow({
 },
 (prev, next) =>
   prev.msg === next.msg &&
-  prev.index === next.index &&
+  prev.rowKey === next.rowKey &&
   prev.expandedThinking === next.expandedThinking &&
   prev.onToggleThinking === next.onToggleThinking &&
   prev.client === next.client &&
@@ -1152,7 +1169,7 @@ export function SessionDetailView({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tailN, setTailN] = useState(TAIL_INITIAL);
   const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
-  const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set());
+  const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
   // 回复窗浮在转录之上、不占布局高度，所以滚动区要自己让出被遮住的那一截。
@@ -1334,7 +1351,7 @@ export function SessionDetailView({
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages, shownLiveThinking, composerHeight]);
 
-  const toggleThinking = useCallback((idx: number) => {
+  const toggleThinking = useCallback((idx: string) => {
     setExpandedThinking((prev) => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx);
@@ -1555,7 +1572,7 @@ export function SessionDetailView({
               const live = working && tail;
               return (
                 <WorkRunBand
-                  key={unit.startLocal}
+                  key={rowKeyOf(unit.msgs[0], unit.startLocal)}
                   msgs={unit.msgs}
                   baseIndex={unit.startLocal}
                   expandedThinking={expandedThinking}
@@ -1574,7 +1591,7 @@ export function SessionDetailView({
               if (segments.length === 0) return null;
               const last = unit.msgs[unit.msgs.length - 1];
               return (
-                <div key={unit.startLocal} className={styles.assistantRow}>
+                <div key={rowKeyOf(unit.msgs[0], unit.startLocal)} className={styles.assistantRow}>
                   <MetaFoldCard segments={segments} />
                   <div className={styles.rowTime}>{fmtTime(last.timestamp)}</div>
                 </div>
@@ -1582,9 +1599,9 @@ export function SessionDetailView({
             }
             return (
               <MessageRow
-                key={unit.startLocal}
+                key={rowKeyOf(unit.msg, unit.startLocal)}
                 msg={unit.msg}
-                index={unit.startLocal}
+                rowKey={rowKeyOf(unit.msg, unit.startLocal)}
                 expandedThinking={expandedThinking}
                 onToggleThinking={toggleThinking}
                 toolMeta={metaForMsg(unit.msg)}
