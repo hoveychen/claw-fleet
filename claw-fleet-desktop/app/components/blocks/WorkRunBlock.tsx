@@ -9,7 +9,7 @@ import {
   safeRemarkPlugins,
   safeRehypePlugins,
 } from "../../markdown/safeLinks";
-import { summarizeWorkRun, workRunTitle } from "../workRuns";
+import { summarizeWorkRun, workRunFinished, workRunTitle } from "../workRuns";
 import { formatMsgTime } from "../../messageRows";
 import { ContentBlocks } from "./ContentBlocks";
 import { RailDone } from "./Rail";
@@ -81,10 +81,13 @@ export function WorkRunBlock({
   // A thinking-derived headline (the model's own summary sentence) beats the
   // rule-mapped category; runs with no thinking keep the category label.
   const title = workRunTitle(msgs);
-  // Streaming = this band is the live tail and its last record hasn't
-  // terminated. The headline gets the claude.ai shimmer sweep to say "in
-  // progress"; it stops the moment the record closes.
-  const streaming = !!live && defaultOpen && msgs[msgs.length - 1]?.message?.stop_reason === null;
+  const finished = workRunFinished(msgs, !!live, (id) => resultMap.has(id));
+  // In progress = the run can still grow, i.e. the same fact the Done check
+  // reads, inverted. It used to additionally require the last record to be an
+  // unterminated partial (`stop_reason === null`), which flapped the shimmer
+  // off between records and for the entire time a tool was running — the same
+  // stop_reason misreading that put a premature Done on the rail.
+  const streaming = !finished && !!live && defaultOpen;
   const shimmer = streaming ? ` ${styles.shimmer}` : "";
 
   // The band collapses several records into one row, so show when the run
@@ -153,9 +156,10 @@ export function WorkRunBlock({
               />
             );
           })}
-          {/* A finished run closes with the Done check; a still-streaming run
-              (live tail, last record unterminated) keeps the rail open-ended. */}
-          {msgs[msgs.length - 1]?.message?.stop_reason !== null && <RailDone />}
+          {/* A finished run closes with the Done check; a run that can still
+              grow (live tail, partial record, tool call with no result yet)
+              keeps the rail open-ended — see `workRunFinished`. */}
+          {finished && <RailDone />}
         </div>
       )}
     </div>

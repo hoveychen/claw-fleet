@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { firstSentence, groupWorkRuns, isWorkRow, runCategory, summarizeWorkRun, workRunTitle } from "./workRuns";
+import { firstSentence, groupWorkRuns, isWorkRow, runCategory, summarizeWorkRun, workRunFinished, workRunTitle } from "./workRuns";
 import { groupMetaRuns } from "./metaGrouping";
 import type { ContentBlock, RawMessage } from "../types";
 
@@ -190,5 +190,47 @@ describe("summarizeWorkRun", () => {
       ["thinking", 1],
     ]);
     expect(s.outputTokens).toBe(123);
+  });
+});
+
+describe("workRunFinished", () => {
+  const all = () => true;
+  const none = () => false;
+  // A band is tool-call/thinking records by construction, so its last record
+  // always closes with stop_reason `tool_use` — the old `stop_reason !== null`
+  // test claimed "Done" under a run that was still working.
+  const closed = (content: ContentBlock[]): RawMessage => {
+    const msg = assistant(content);
+    msg.message!.stop_reason = "tool_use";
+    return msg;
+  };
+
+  it("withholds Done while the band is the live tail", () => {
+    const msgs = [closed([tool("Bash")]), closed([think, tool("Bash")])];
+    expect(workRunFinished(msgs, true, all)).toBe(false);
+    expect(workRunFinished(msgs, false, all)).toBe(true);
+  });
+
+  it("withholds Done while the last record is a partial flush", () => {
+    const partial = assistant([think]);
+    partial.message!.stop_reason = null;
+    expect(workRunFinished([closed([tool("Bash")]), partial], false, all)).toBe(false);
+  });
+
+  it("withholds Done while the last record's tool call has no result", () => {
+    const msgs = [closed([tool("Read")]), closed([tool("Bash")])];
+    expect(workRunFinished(msgs, false, none)).toBe(false);
+  });
+
+  it("only the last record's calls gate it — earlier ones may lack results", () => {
+    const early = closed([tool("Read")]);
+    const lastCall = tool("Bash");
+    const late = closed([lastCall]);
+    const hasResult = (id: string) => id === (lastCall as { id: string }).id;
+    expect(workRunFinished([early, late], false, hasResult)).toBe(true);
+  });
+
+  it("treats a thinking-only closing record as finished", () => {
+    expect(workRunFinished([closed([tool("Bash")]), closed([think])], false, none)).toBe(true);
   });
 });

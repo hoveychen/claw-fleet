@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countSteps, firstSentence, groupWorkRuns, isWorkRow, workRunTitle } from "./workRuns";
+import { countSteps, firstSentence, groupWorkRuns, isWorkRow, workRunFinished, workRunTitle } from "./workRuns";
 import { groupMetaRuns } from "./metaGrouping";
 import type { ContentBlock, RawMessage } from "../types";
 
@@ -68,5 +68,40 @@ describe("countSteps / workRunTitle / firstSentence", () => {
       assistant([{ type: "thinking", thinking: "Final intent here. Then more." } as ContentBlock, tool("Read")]),
     ];
     expect(workRunTitle(msgs)).toBe("Final intent here.");
+  });
+});
+
+describe("workRunFinished", () => {
+  const all = () => true;
+  const none = () => false;
+  // A band's last record always closes with stop_reason `tool_use` (it is
+  // tool-call/thinking records by construction), so stop_reason alone could
+  // never tell a finished run from one waiting on its tool.
+  const closed = (content: ContentBlock[]): RawMessage => {
+    const msg = assistant(content);
+    (msg.message as { stop_reason?: string | null }).stop_reason = "tool_use";
+    return msg;
+  };
+
+  it("withholds Done while the band is the live tail", () => {
+    const msgs = [closed([tool("Bash")]), closed([think, tool("Bash")])];
+    expect(workRunFinished(msgs, true, all)).toBe(false);
+    expect(workRunFinished(msgs, false, all)).toBe(true);
+  });
+
+  it("withholds Done while the last record is a partial flush", () => {
+    const partial = assistant([think]);
+    (partial.message as { stop_reason?: string | null }).stop_reason = null;
+    expect(workRunFinished([closed([tool("Bash")]), partial], false, all)).toBe(false);
+  });
+
+  it("withholds Done while the last record's tool call has no result", () => {
+    expect(workRunFinished([closed([tool("Read")]), closed([tool("Bash")])], false, none)).toBe(false);
+  });
+
+  it("treats a relay that strips stop_reason as closed", () => {
+    // Old relays drop the field entirely; the band must not stay open-ended
+    // forever on a session that is no longer working.
+    expect(workRunFinished([assistant([tool("Bash")]), assistant([think])], false, all)).toBe(true);
   });
 });
