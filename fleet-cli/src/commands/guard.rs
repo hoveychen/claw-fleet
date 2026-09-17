@@ -83,16 +83,12 @@ pub(crate) fn cmd_guard() {
                 println!("{}", deny_hook_output(&reason));
                 return;
             }
-            // Not critical — allow. Codex's outer code-mode `exec` has no
-            // description field, so inspect its rollout and inject the Rule 7
-            // correction instead. Claude keeps the original Bash-description
-            // reminder. Both paths are once-per-session and never block tools.
-            let reminder = if codex_fail_closed {
-                guard::missing_exec_note_reminder_output(&hook_input)
-            } else {
-                guard::missing_description_reminder_output(&hook_input)
-            };
-            if let Some(out) = reminder {
+            // Not critical — allow, with any advisory context merged into one
+            // JSON object. Codex's outer code-mode `exec` has no description
+            // field, so it gets the Rule 7 correction instead of the
+            // Bash-description reminder; both are once-per-session. The zsh
+            // equals-expansion hint rides along per call. Nothing here blocks.
+            if let Some(out) = guard::reminder_output(&hook_input, codex_fail_closed) {
                 println!("{out}");
             }
             return;

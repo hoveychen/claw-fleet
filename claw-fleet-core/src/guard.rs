@@ -207,6 +207,139 @@ fn list_pending_in_dir(dir: &std::path::Path) -> std::io::Result<Vec<String>> {
 mod tests {
     use super::*;
 
+    /// Every one of these was measured against a real `zsh -c` on 2026-09-17:
+    /// the first group exits 1 (or silently substitutes a path) and drops the
+    /// rest of the command, the second group exits 0 with full output.
+    #[test]
+    fn detects_only_zsh_expanding_equals_words() {
+        // Aborts the whole `zsh -c`.
+        assert_eq!(
+            unquoted_equals_word("sed -n 1,80p a.mjs && echo ===SITES=== && sed -n 1,80p b.mjs")
+                .as_deref(),
+            Some("===SITES===")
+        );
+        assert_eq!(
+            unquoted_equals_word("grep -n x a; echo ===; grep -n y a").as_deref(),
+            Some("===")
+        );
+        // Exits 0 but silently prints /bin/ls instead of the literal text.
+        assert_eq!(unquoted_equals_word("echo =ls").as_deref(), Some("=ls"));
+
+        // A lone `=` is never expanded.
+        assert_eq!(unquoted_equals_word("[ a = a ] && echo ok"), None);
+        assert_eq!(unquoted_equals_word("test a = a"), None);
+        assert_eq!(unquoted_equals_word("ls | grep = ; echo ok"), None);
+        // Quoting and escaping suppress the expansion.
+        assert_eq!(unquoted_equals_word("echo '==='"), None);
+        assert_eq!(unquoted_equals_word("echo \"===\""), None);
+        assert_eq!(unquoted_equals_word("echo \\=\\=\\="), None);
+        assert_eq!(unquoted_equals_word("awk -F= '{print}' f"), None);
+        // `=` mid-word is an assignment or a flag value, not an expansion.
+        assert_eq!(unquoted_equals_word("echo a=b"), None);
+        assert_eq!(unquoted_equals_word("git log --format===="), None);
+        assert_eq!(unquoted_equals_word("FOO=1 cargo build"), None);
+    }
+
+    /// Heredoc bodies are not word-expanded, and agents fill them with Python
+    /// and JS (`if x==1:`, `=>`). Scanning them made the hint fire on 7930 of
+    /// this machine's 202503 historical Bash calls instead of the ~1000 that
+    /// actually failed.
+    #[test]
+    fn heredoc_bodies_are_not_scanned() {
+        assert_eq!(
+            unquoted_equals_word("python3 - <<'EOF'\nif x==1:\n  print('=>')\nEOF"),
+            None
+        );
+        assert_eq!(
+            unquoted_equals_word("cat <<EOF\n=== banner ===\nEOF"),
+            None
+        );
+        assert_eq!(unquoted_equals_word("cat <<-  END\n==x\n\tEND"), None);
+        // Text after the heredoc closes is scanned again.
+        assert_eq!(
+            unquoted_equals_word("python3 - <<'EOF'\nx==1\nEOF\necho ===").as_deref(),
+            Some("===")
+        );
+        // A here-string is not a heredoc; its word is expanded.
+        assert_eq!(unquoted_equals_word("cat <<< ===x").as_deref(), Some("===x"));
+        // An unterminated heredoc must not loop or panic.
+        assert_eq!(unquoted_equals_word("cat <<EOF\n==x\n"), None);
+    }
+
+    /// Each of these was run through a real `zsh -c` and exits 0 — `=` there is
+    /// a split flag or a comparison operator, not a word to expand. They were
+    /// found by replaying the detector over this machine's Bash history.
+    #[test]
+    fn operator_and_split_flag_contexts_are_suppressed() {
+        assert_eq!(unquoted_equals_word("set -- ${=spec}; echo $1"), None);
+        assert_eq!(unquoted_equals_word("echo $((1 + (e == 2 ? 0 : 3) ))"), None);
+        assert_eq!(unquoted_equals_word("[[ \"$f\" == *.b.* ]] && echo yes"), None);
+        assert_eq!(unquoted_equals_word("(( x == 1 )) && echo yes"), None);
+        // Nested quotes inside a substitution: silent rather than wrong.
+        assert_eq!(
+            unquoted_equals_word("echo \"$(pw eval \"() => document.title\")\""),
+            None
+        );
+        // The suppressions are scoped — a separator outside them still fires.
+        assert_eq!(
+            unquoted_equals_word("[[ -f a ]] && echo ===").as_deref(),
+            Some("===")
+        );
+        assert_eq!(
+            unquoted_equals_word("x=${=spec}; echo ====").as_deref(),
+            Some("====")
+        );
+        // Comments are never expanded; a `#` inside a word is not a comment.
+        assert_eq!(unquoted_equals_word("ls\n# note: mode => off\npwd"), None);
+        assert_eq!(unquoted_equals_word("ls # (=A2a 191925)"), None);
+        assert_eq!(
+            unquoted_equals_word("curl http://x#y; echo ===").as_deref(),
+            Some("===")
+        );
+    }
+
+    #[test]
+    fn hint_names_the_token_and_only_fires_under_zsh() {
+        let input = HookInput {
+            session_id: None,
+            transcript_path: None,
+            tool_name: Some("Bash".into()),
+            tool_input: Some(serde_json::json!({ "command": "ls; echo ===; pwd" })),
+        };
+        let hint = zsh_equals_hint_context_in(&input, true).expect("zsh shell must get the hint");
+        assert!(hint.contains("`===`"), "hint must quote the token: {hint}");
+        assert!(zsh_equals_hint_context_in(&input, false).is_none());
+
+        let non_bash = HookInput {
+            tool_name: Some("Read".into()),
+            ..input
+        };
+        assert!(zsh_equals_hint_context_in(&non_bash, true).is_none());
+    }
+
+    #[test]
+    fn reminder_output_carries_the_hint_in_one_allow_object() {
+        let input = HookInput {
+            session_id: None,
+            transcript_path: None,
+            tool_name: Some("Bash".into()),
+            // A description is present, so only the zsh hint is eligible.
+            tool_input: Some(
+                serde_json::json!({ "command": "echo ===", "description": "Print a separator" }),
+            ),
+        };
+        // Drive the shell gate the same way the hook will see it.
+        let out = zsh_equals_hint_context_in(&input, true)
+            .map(|c| build_context_reminder_output(&c))
+            .expect("hint output");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow");
+        assert!(v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("EQUALS"));
+    }
+
     fn fresh_tmp_dir(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "fleet-guard-{}-{}-{}",
@@ -400,7 +533,7 @@ mod tests {
 
     #[test]
     fn reminder_output_shape_is_allow_plus_context() {
-        let out = build_reminder_output();
+        let out = build_context_reminder_output(MISSING_DESCRIPTION_REMINDER);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["hookSpecificOutput"]["hookEventName"], "PreToolUse");
         assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow");
@@ -665,14 +798,15 @@ fn build_codex_context_reminder_output(context: &str) -> String {
     .to_string()
 }
 
-fn build_reminder_output() -> String {
-    build_context_reminder_output(MISSING_DESCRIPTION_REMINDER)
-}
-
 /// If this Bash call omitted its `description` and the session has not been
 /// reminded yet, return the JSON `fleet guard` should print to inject a one-time
 /// reminder. Returns `None` otherwise, so the caller keeps its silent-allow path.
 pub fn missing_description_reminder_output(input: &HookInput) -> Option<String> {
+    missing_description_reminder_context(input).map(|c| build_context_reminder_output(&c))
+}
+
+/// The missing-description context text, claiming the once-per-session marker.
+pub fn missing_description_reminder_context(input: &HookInput) -> Option<String> {
     if !bash_missing_description(input) {
         return None;
     }
@@ -681,7 +815,278 @@ pub fn missing_description_reminder_output(input: &HookInput) -> Option<String> 
     if !claim_first_reminder_in(&dir, session_id) {
         return None;
     }
-    Some(build_reminder_output())
+    Some(MISSING_DESCRIPTION_REMINDER.to_string())
+}
+
+// ── zsh equals-expansion hint ────────────────────────────────────────────────
+//
+// zsh's EQUALS option expands an unquoted word starting with `=` to the path of
+// the command named after it (`=ls` → `/bin/ls`).  When no such command exists
+// zsh raises an *expansion-time* error, which aborts the whole `zsh -c` — so
+// every command after the offending word is silently never run, whether the
+// chain used `;` or `&&`.  Measured 2026-09-17 across 2368 transcripts and
+// 202303 Bash calls on this machine: 962 calls died this way (21.5% of all
+// errored Bash calls, spread over 336 transcripts), and every single one was a
+// model writing `echo ===` as a section separator.  The model usually reads the
+// truncated stdout as if the whole command had run.
+//
+// Unlike the missing-description nudge this fires on *every* offending call
+// rather than once per session: 207 of those 336 transcripts hit it more than
+// once, and a once-per-session marker would have stayed silent for 626 of the
+// 962 calls (65%).  It costs nothing on the calls that don't match.
+
+/// Context injected when a Bash command contains an unquoted `=`-leading word.
+/// `{tok}` is replaced with the offending token.
+const ZSH_EQUALS_HINT_TEMPLATE: &str = "Fleet: this command contains the unquoted word `{tok}`, and your shell is zsh. zsh expands a word starting with `=` to the path of the command named after it (EQUALS option), and when that lookup fails it is an expansion-time error that aborts the ENTIRE `zsh -c` — so every command after it silently never runs, with `;` just as much as with `&&`. You will get partial output plus `zsh: ... not found` and exit 1. Quote the separator (`echo '==='`) or use a different one (`echo ---`).";
+
+/// True when `c` may precede the start of a shell word.
+fn is_word_boundary(c: char) -> bool {
+    c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')' | '{' | '`')
+}
+
+/// Find the first word that zsh's EQUALS option would expand: an unquoted word
+/// starting with `=` and at least one more character.  A lone `=` is safe
+/// (`[ a = a ]`, `grep =`) and is not reported.
+///
+/// Suppressed contexts, each verified against a real `zsh -c` on 2026-09-17 to
+/// exit 0 — every one of them appears in this machine's transcript history and
+/// would otherwise be a false alarm:
+///
+///   * quoted or backslash-escaped text — `echo '==='`, `echo \=\=\=`
+///   * heredoc bodies — agents fill them with Python/JS (`if x==1:`, `=>`)
+///   * `${=spec}` and friends — a `=` right after `${` is zsh's split flag
+///   * arithmetic `$(( a == b ))` and `(( … ))` — `==` is an operator there
+///   * `[[ "$f" == *.b.* ]]` — likewise an operator, not a word
+///   * `$( … )` bodies — expansion does apply inside, but tracking nested quotes
+///     through a substitution needs a real parser, and guessing wrong here
+///     produced the bulk of the remaining false alarms. Staying silent inside a
+///     substitution costs at most a missed hint.
+///
+/// Pure and allocation-light; runs on every Bash PreToolUse hook.
+pub fn unquoted_equals_word(command: &str) -> Option<String> {
+    let c: Vec<char> = command.chars().collect();
+    let n = c.len();
+    let at = |i: usize| c.get(i).copied();
+    let starts = |i: usize, pat: &str| command_slice_starts(&c, i, pat);
+
+    // Skip from an opening delimiter at `i` to just past its match, honouring
+    // quotes and nesting. `i` must point at the first char of `open`.
+    fn skip_balanced(c: &[char], mut i: usize, open: &str, close: &str) -> usize {
+        let opens: Vec<char> = open.chars().collect();
+        let closes: Vec<char> = close.chars().collect();
+        let mut depth = 0usize;
+        while i < c.len() {
+            match c[i] {
+                '\\' => i += 2,
+                '\'' | '"' => {
+                    let q = c[i];
+                    i += 1;
+                    while i < c.len() && c[i] != q {
+                        if q == '"' && c[i] == '\\' {
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                _ if c[i..].starts_with(&closes[..]) => {
+                    i += closes.len();
+                    depth -= 1;
+                    if depth == 0 {
+                        return i;
+                    }
+                }
+                _ if c[i..].starts_with(&opens[..]) => {
+                    i += opens.len();
+                    depth += 1;
+                }
+                _ => i += 1,
+            }
+        }
+        c.len()
+    }
+
+    let mut i = 0usize;
+    let mut prev_boundary = true;
+    // Heredoc delimiters opened on the current line, in order.
+    let mut pending_heredocs: Vec<String> = Vec::new();
+    while i < n {
+        let ch = c[i];
+        // Heredoc bodies start after the line that opened them.
+        if ch == '\n' && !pending_heredocs.is_empty() {
+            i += 1;
+            for delim in std::mem::take(&mut pending_heredocs) {
+                loop {
+                    let start = i;
+                    if start >= n {
+                        break;
+                    }
+                    while i < n && c[i] != '\n' {
+                        i += 1;
+                    }
+                    let line: String = c[start..i].iter().collect();
+                    if i < n {
+                        i += 1;
+                    }
+                    if line.trim() == delim {
+                        break;
+                    }
+                }
+            }
+            prev_boundary = true;
+            continue;
+        }
+        // A here-string is not a heredoc: its word IS expanded. Must be checked
+        // before `<<`, or the second `<` opens a phantom heredoc.
+        if starts(i, "<<<") {
+            i += 3;
+            prev_boundary = true;
+            continue;
+        }
+        if starts(i, "<<") {
+            i += 2;
+            if at(i) == Some('-') {
+                i += 1;
+            }
+            while matches!(at(i), Some(' ') | Some('\t')) {
+                i += 1;
+            }
+            let start = i;
+            while i < n && !is_word_boundary(c[i]) {
+                i += 1;
+            }
+            let delim: String = c[start..i]
+                .iter()
+                .filter(|ch| !matches!(ch, '\'' | '"' | '\\'))
+                .collect();
+            if !delim.is_empty() {
+                pending_heredocs.push(delim);
+            }
+            prev_boundary = true;
+            continue;
+        }
+        if starts(i, "$((") {
+            i = skip_balanced(&c, i + 1, "(", ")");
+            prev_boundary = false;
+            continue;
+        }
+        if starts(i, "${") {
+            i = skip_balanced(&c, i + 1, "{", "}");
+            prev_boundary = false;
+            continue;
+        }
+        if starts(i, "$(") {
+            i = skip_balanced(&c, i + 1, "(", ")");
+            prev_boundary = false;
+            continue;
+        }
+        if prev_boundary && starts(i, "[[") {
+            i = skip_balanced(&c, i, "[[", "]]");
+            prev_boundary = true;
+            continue;
+        }
+        if prev_boundary && starts(i, "((") {
+            i = skip_balanced(&c, i, "((", "))");
+            prev_boundary = true;
+            continue;
+        }
+        match ch {
+            '\\' => {
+                i += 2;
+                prev_boundary = false;
+            }
+            // A comment runs to end of line and is never expanded. Only at a
+            // word boundary: `foo#bar` and `http://x#y` are ordinary words.
+            '#' if prev_boundary => {
+                while i < n && c[i] != '\n' {
+                    i += 1;
+                }
+                prev_boundary = true;
+            }
+            '\'' => {
+                i += 1;
+                while i < n && c[i] != '\'' {
+                    i += 1;
+                }
+                i += 1;
+                prev_boundary = false;
+            }
+            // Double quotes do not suppress `$( … )` / `${ … }`, and those
+            // bodies carry their own quotes — scanning for a naive closing `"`
+            // walks straight out of the string and mis-reads the rest of the
+            // command as unquoted.
+            '"' => {
+                i += 1;
+                while i < n && c[i] != '"' {
+                    if c[i] == '\\' {
+                        i += 2;
+                    } else if starts(i, "${") || starts(i, "$(") {
+                        let (open, close) = if at(i + 1) == Some('{') {
+                            ("{", "}")
+                        } else {
+                            ("(", ")")
+                        };
+                        i = skip_balanced(&c, i + 1, open, close);
+                    } else {
+                        i += 1;
+                    }
+                }
+                i += 1;
+                prev_boundary = false;
+            }
+            '=' if prev_boundary => {
+                let start = i;
+                while i < n && !is_word_boundary(c[i]) {
+                    i += 1;
+                }
+                let tok: String = c[start..i].iter().collect();
+                if tok.chars().count() > 1 {
+                    return Some(tok);
+                }
+                prev_boundary = true;
+            }
+            _ => {
+                prev_boundary = is_word_boundary(ch);
+                i += 1;
+            }
+        }
+    }
+    None
+}
+
+/// `c[i..]` starts with `pat`.
+fn command_slice_starts(c: &[char], i: usize, pat: &str) -> bool {
+    let p: Vec<char> = pat.chars().collect();
+    c.len() >= i + p.len() && c[i..i + p.len()] == p[..]
+}
+
+/// True when the hook's shell is zsh. The hook inherits the agent's environment,
+/// so `$SHELL` is the login shell Claude Code runs commands with. Unknown or
+/// non-zsh shells get no hint — bash and sh have no EQUALS option.
+fn shell_is_zsh() -> bool {
+    std::env::var("SHELL")
+        .map(|s| s.rsplit('/').next().unwrap_or("").starts_with("zsh"))
+        .unwrap_or(false)
+}
+
+/// The hint context for this Bash call, or `None` when it does not apply.
+/// Split from [`zsh_equals_hint_context`] so tests can drive the zsh gate.
+fn zsh_equals_hint_context_in(input: &HookInput, is_zsh: bool) -> Option<String> {
+    if !is_zsh || input.tool_name.as_deref() != Some("Bash") {
+        return None;
+    }
+    let command = input
+        .tool_input
+        .as_ref()
+        .and_then(|v| v.get("command"))
+        .and_then(|c| c.as_str())?;
+    let tok = unquoted_equals_word(command)?;
+    Some(ZSH_EQUALS_HINT_TEMPLATE.replace("{tok}", &tok))
+}
+
+/// Public entry: the zsh equals-expansion hint for this call, if any.
+pub fn zsh_equals_hint_context(input: &HookInput) -> Option<String> {
+    zsh_equals_hint_context_in(input, shell_is_zsh())
 }
 
 // ── Missing Codex exec-note reminder ───────────────────────────────────────
@@ -773,6 +1178,53 @@ fn missing_exec_note_reminder_output_in(
     Some(build_codex_context_reminder_output(
         MISSING_EXEC_NOTE_REMINDER,
     ))
+}
+
+/// The exec-note context text, claiming the once-per-session marker.
+fn missing_exec_note_reminder_context(input: &HookInput) -> Option<String> {
+    let transcript = input.transcript_path.as_deref()?.trim();
+    if transcript.is_empty() {
+        return None;
+    }
+    let marker_dir = exec_note_reminder_dir()?;
+    if !latest_codex_exec_missing_note(std::path::Path::new(transcript))
+        || !claim_first_reminder_in(&marker_dir, input.session_id.as_deref().unwrap_or(""))
+    {
+        return None;
+    }
+    Some(MISSING_EXEC_NOTE_REMINDER.to_string())
+}
+
+/// The single JSON `fleet guard` prints on its silent-allow path, merging every
+/// context that applies to this call. Only one object may go to stdout, so the
+/// per-call zsh hint and the once-per-session harness nudge share one
+/// `additionalContext` rather than racing for it.
+///
+/// `codex_fail_closed` selects both which harness nudge is eligible and which
+/// PreToolUse shape the output takes (Codex rejects `allow` without
+/// `updatedInput` — see [`build_codex_context_reminder_output`]).
+pub fn reminder_output(input: &HookInput, codex_fail_closed: bool) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(hint) = zsh_equals_hint_context(input) {
+        parts.push(hint);
+    }
+    let nudge = if codex_fail_closed {
+        missing_exec_note_reminder_context(input)
+    } else {
+        missing_description_reminder_context(input)
+    };
+    if let Some(n) = nudge {
+        parts.push(n);
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let context = parts.join("\n\n");
+    Some(if codex_fail_closed {
+        build_codex_context_reminder_output(&context)
+    } else {
+        build_context_reminder_output(&context)
+    })
 }
 
 /// Return the one-time Rule 7 correction for the latest missing-note Codex
