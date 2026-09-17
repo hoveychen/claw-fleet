@@ -237,13 +237,13 @@ describe("live proxy route table", () => {
   });
 
   /**
-   * The v3 terminal button (结束任务 / 放弃任务) is the *only* thing that
-   * distinguishes it from a plain dismissal: `cancelled: true` alone is the
-   * pre-v3 Cancel. This arm dropped `taskOutcome` from the body until
-   * 2026-09-08, so every terminal press in the browser build (fleet-cloud,
-   * `fleet webui`) stamped no task outcome, never marked the session Done, and
-   * recorded the card as `cancelled` — the verdict was silently lost, with a
-   * `{"ok":true}` coming back.
+   * The v3 terminal button ("End Task" / "Abandon Task") is the *only* thing
+   * that distinguishes it from a plain dismissal: `cancelled: true` alone is the
+   * pre-v3 Cancel. This arm dropped `taskOutcome` from the body until 2026-09-08,
+   * so every terminal press in the browser build (fleet-cloud, `fleet webui`)
+   * stamped no task outcome, never marked the session Done, and recorded the
+   * card as `cancelled`—the verdict was silently lost, with a `{"ok":true}`
+   * coming back.
    */
   it("carries the fleet-ask terminal verdict to the server", () => {
     expect(
@@ -514,8 +514,8 @@ describe("list_pending_decisions", () => {
  * The SSE bridge is the browser build's only live channel, and a name missing
  * from `FORWARDED_SSE_EVENTS` fails *silently*: the server broadcasts, nobody
  * listens, and the UI just never updates. That is how `decision-parked` was
- * lost until 2026-09-08 — a card that timed out kept counting down in the
- * browser with no 「已超时」 badge, while the desktop (Tauri events, no
+ * lost until 2026-09-08—a card that timed out kept counting down in the
+ * browser with no "Timed Out" badge, while the desktop (Tauri events, no
  * allowlist) showed it correctly.
  */
 /**

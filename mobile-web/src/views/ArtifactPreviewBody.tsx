@@ -1,11 +1,14 @@
-// 产出预览的渲染分派：给定「哪一类 + 已经取到的形态」，画出对应的东西。
+// Render dispatch for artifact previews: given "which kind + already-fetched form",
+// draw the corresponding thing.
 //
-// 从 ArtifactsView 的 ArtifactDetail 里抽出来，是为了让 zip 浏览器里点开的
-// 成员走**同一个**分派。同一份 report.md，散装打开和从压缩包里打开，必须长
-// 得一模一样；保证这一点的办法是只有一个渲染器，而不是两个今天恰好一致的。
+// Extracted from ArtifactsView's ArtifactDetail to let zip browser members take the
+// **same** dispatch. One report.md must look identical whether opened standalone or from
+// an archive; the only way to guarantee this is one renderer, not two that happen to
+// match today.
 //
-// 「还没取到」「取不了」这两种状态留在调用方：它们要说的话取决于是一份产出
-// 还是一个成员（产出会讲 16 MiB 的 relay 上限，成员不会）。
+// "Not yet fetched" and "can't fetch" states stay with the caller: what they say depends
+// on whether it's an artifact or a member (artifacts mention the 16 MiB relay limit,
+// members don't).
 
 import { Suspense, lazy } from "react";
 import ReactMarkdown from "react-markdown";
@@ -17,21 +20,22 @@ import { isOfficePreview, type PreviewKind } from "../artifacts";
 import styles from "./ArtifactsView.module.css";
 import mdStyles from "./markdownBody.module.css";
 
-// 与 ArtifactsView 里同一份懒加载：三个 Office 渲染器合计约 1.6 MB。
+// Same lazy load as ArtifactsView: three Office renderers are about 1.6 MB combined.
 const OfficePreview = lazy(() => import("./OfficePreview"));
 
 export interface PreviewSource {
   kind: PreviewKind;
   title: string;
-  /** image / pdf 用。 */
+  /** Used by image / pdf. */
   blobUrl: string | null;
-  /** Office 三件套用（三个库都从 zip 里读 XML，要的是 Blob 本身）。 */
+  /** Used by Office (three libraries all read XML from zip, need the Blob itself). */
   blob: Blob | null;
-  /** markdown / html / text 用。 */
+  /** Used by markdown / html / text. */
   text: string | null;
 }
 
-/** 画得出来就画，形态还没到位或这一类没法预览就画 `fallback`。 */
+/** Render if possible; if the form isn't ready or this kind can't be previewed, render
+ *  `fallback`. */
 export function PreviewBody({
   src,
   fallback = null,

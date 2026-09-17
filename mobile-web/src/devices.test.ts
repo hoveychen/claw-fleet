@@ -29,7 +29,8 @@ function mint(id: string) {
   return { id, label: "设备 1", now: 1000 };
 }
 
-/** 断言用:把一台设备窄化成 relay 设备(测试里造的都是 relay 那一种)。 */
+/** Helper for assertions: narrow a device down to a relay device
+ *  (all test instances are relay type). */
 function asRelay(d: PairedDevice): RelayDevice {
   if (d.kind !== "relay") throw new Error("expected a relay device");
   return d;

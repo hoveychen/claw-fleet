@@ -1,9 +1,9 @@
 import type { ViewMode } from "../viewModes";
 
 /** The two top-level modes the sidebar tab strip switches between.
- *  - `fleet` (舰队): watching and administering the fleet — sessions, audit,
+ *  - `fleet`: watching and administering the fleet — sessions, audit,
  *    the daily report, memory rules, skills, phone pairing.
- *  - `work` (工作): what you reach for while an agent is actually working —
+ *  - `work`: what you reach for while an agent is actually working —
  *    tasks, repos, the wiki, deliverables, schedules, plan trees. */
 export type NavGroup = "fleet" | "work";
 

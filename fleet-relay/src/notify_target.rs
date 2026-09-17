@@ -1,35 +1,43 @@
-//! 给通知的点击目标盖上「这条来自哪个 channel」。
+//! Stamp notification click targets with "which channel this came from".
 //!
-//! 一部手机可以同时配对**多台**桌面端(每台一个 channel),而 Web Push 到达时
-//! service worker 手里只有 payload:它不知道这条通知是哪台机器发的。桌面端自己
-//! 产出的 url 只带卡的 id(如 `/#d=guard:g1`),而卡 id 只在单机内唯一 —— 两台
-//! 同时有卡时,点开落到哪一张是不确定的。
+//! One phone can pair with **multiple** desktops at once (one channel each).
+//! When a Web Push arrives, the service worker only has the payload: it doesn't
+//! know which desktop sent it. Each desktop generates URLs with just the card's
+//! id (e.g. `/#d=guard:g1`), and card ids are only unique per device — when two
+//! desktops both have a card, it's ambiguous which one you're clicking.
 //!
-//! 补这个缺口的地方只能是 relay:它是唯一在扇出时**确切知道** channel 的一方
-//! (`Push::notify(channel, …)`),而且这样不需要桌面端配合改任何东西。
+//! Only the relay can fill this gap: it's the only party that **knows which
+//! channel** when fanning out (`Push::notify(channel, …)`), and doing this doesn't
+//! require any desktop changes.
 //!
-//! 盖的是 channel id 的前缀而不是完整 id:前缀足够在一部手机配对过的那几台之间
-//! 区分(手机拿自己的 secret 派生 channel token 再 sha256 就能比对),而通知
-//! payload 会落在系统通知中心里,少带一点身份信息就少一点暴露面。
+//! We stamp the channel id's prefix, not the full id: a prefix is enough to
+//! distinguish between the few devices a phone has paired with (the phone can
+//! derive its own channel token from its secret and sha256 to compare), and
+//! keeping the notification payload smaller in the system notification center
+//! reduces the exposed surface area.
 
-/// 盖进 url 的 channel id 前缀长度(十六进制字符数)。
+/// Channel id prefix length to stamp into the URL (hex characters).
 ///
-/// 4 字节 = 32 位。它要区分的只是「这部手机配对过的那几台」——量级是个位数,
-/// 32 位远远够;而它不是任何安全边界(channel id 本来就是 relay 的路由键,
-/// 手机自己也能算出来),所以不必更长。
+/// 4 bytes = 32 bits. We only need to distinguish between the few devices a
+/// phone has paired with — single-digit scale, so 32 bits is more than enough.
+/// It's not a security boundary (channel ids are relay routing keys anyway and
+/// the phone can compute them too), so no need for a longer prefix.
 const CHANNEL_MARK_LEN: usize = 8;
 
-/// 通知点击目标的 fragment 参数名。手机端按它反查是哪一台设备。
+/// Fragment parameter name for the notification click target. Mobile uses it to
+/// reverse-lookup which device the notification came from.
 pub const CHANNEL_PARAM: &str = "ch";
 
-/// 把 channel 标记盖进点击目标。
+/// Stamp the channel mark into the click target.
 ///
-/// * `url` 为 `None` 时返回 `None` —— 没有目标就没有「落到哪一张」的问题。
-/// * url 里已经有 fragment 时作为 fragment 参数追加(`/#d=guard:g1&ch=…`);
-///   没有则起一个(`/#ch=…`)。移动端的路由本来就全在 fragment 里(见
-///   `mobile-web/src/decisionDeepLink.ts`),所以不碰 query —— query 会进服务端
-///   日志,而 fragment 不会。
-/// * 已经带过 `ch=` 的 url 原样返回:重复盖会让手机端读到两个互相矛盾的来源。
+/// * When `url` is `None`, returns `None` — with no target, there's no
+///   "which card" ambiguity to solve.
+/// * If the url already has a fragment, appends the mark as a fragment parameter
+///   (`/#d=guard:g1&ch=…`); otherwise creates one (`/#ch=…`). Mobile routing
+///   already lives entirely in the fragment (see `mobile-web/src/decisionDeepLink.ts`),
+///   so we avoid the query string — query gets logged server-side, fragment doesn't.
+/// * If the url already has `ch=`, returns it unchanged: duplicate stamping would
+///   give mobile two conflicting sources.
 pub fn stamp_channel(url: Option<&str>, channel: &str) -> Option<String> {
     let url = url?;
     if url.contains(&format!("{CHANNEL_PARAM}=")) {
@@ -59,20 +67,20 @@ mod tests {
         assert_eq!(stamp_channel(Some("/"), CHANNEL).unwrap(), "/#ch=105e300f");
     }
 
-    /// 没有目标就没有歧义要解决。
+    /// No target means no ambiguity to resolve.
     #[test]
     fn leaves_a_targetless_notification_alone() {
         assert_eq!(stamp_channel(None, CHANNEL), None);
     }
 
-    /// 重复盖会让手机端读到两个互相矛盾的来源。
+    /// Duplicate stamping would make mobile read conflicting sources.
     #[test]
     fn is_idempotent() {
         let once = stamp_channel(Some("/#d=guard:g1"), CHANNEL).unwrap();
         assert_eq!(stamp_channel(Some(&once), CHANNEL).unwrap(), once);
     }
 
-    /// 两个 channel 必须盖出不同的标记 —— 否则整件事白做。
+    /// Two channels must stamp different marks — otherwise this whole thing is pointless.
     #[test]
     fn different_channels_stamp_differently() {
         let a = stamp_channel(Some("/#d=guard:g1"), CHANNEL).unwrap();
@@ -84,7 +92,8 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    /// 短 id(测试里手写的、或将来换了摘要算法)不该 panic 在切片上。
+    /// Short channel ids (hand-written in tests or from future hash algorithms)
+    /// shouldn't panic when slicing.
     #[test]
     fn tolerates_a_short_channel_id() {
         assert_eq!(stamp_channel(Some("/"), "abc").unwrap(), "/#ch=abc");

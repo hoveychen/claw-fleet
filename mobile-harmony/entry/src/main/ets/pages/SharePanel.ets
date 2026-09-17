@@ -6,11 +6,11 @@ const DOMAIN = 0x0000;
 const TAG = 'fleet';
 const storage: LocalStorage = LocalStorage.getShared();
 
-/// 分享面板里那一小块界面。
+/// A small piece of UI in the sharing panel.
 ///
-/// 刻意做得极简：用户点 Fleet 的意图就是「把这段内容丢给 Fleet」，不该在别人
-/// 的分享面板里再操作一遍 Fleet。所以这里只负责把内容落进共享 preferences，
-/// 然后拉起主应用、关掉自己。
+/// Deliberately minimal: when users tap Fleet, they mean "throw this content at
+/// Fleet", not "operate Fleet again in someone else's sharing panel". So this just
+/// writes content to shared preferences, launches the main app, and closes itself.
 @Entry(storage)
 @Component
 struct SharePanel {
@@ -31,17 +31,18 @@ struct SharePanel {
       const texts: string[] = [];
       const files: string[] = [];
 
-      // 文件走 `ability.params.stream`：真机日志里图片 uri 就直接躺在这个数组
-      // 里（file://media/Photo/...）。此前按二手资料写的
-      // `ability.want.params.udKey` + UDMF queryData 在真机上根本不存在那个
-      // key，所以永远提取为空 —— 这是「分享列表里有 Fleet，点进去却说没有
-      // 内容」的真正原因。
+      // Files go in `ability.params.stream`: on real hardware, image URIs sit
+      // directly in this array (file://media/Photo/...). Earlier we tried
+      // `ability.want.params.udKey` + UDMF queryData (from secondhand docs),
+      // but that key doesn't exist on real hardware, always empty — that's why
+      // "Fleet shows in the share list but says there's no content".
       const stream = params?.['ability.params.stream'];
       if (Array.isArray(stream)) {
-        // 必须**在这里**把字节拷走。分享给的是媒体库 uri，读权限是临时授给
-        // 本次分享的；面板一关、或换到主应用进程，再去读同一个 uri 就未必有
-        // 权限了。拷进应用沙箱（同 bundle 的进程共享文件目录）之后，主应用
-        // 才能稳稳读到。
+        // Must **copy the bytes here**. Sharing gives us media library URIs;
+        // read permission is temporary for this share. Once the panel closes or
+        // we switch to the main app process, the same URI might not have permission.
+        // Copy into the app sandbox (processes in the same bundle share the file
+        // directory), then the main app can reliably read it.
         const dir: string = ctx.filesDir + '/shared';
         if (!fs.accessSync(dir)) {
           fs.mkdirSync(dir);
@@ -69,7 +70,8 @@ struct SharePanel {
         }
       }
 
-      // 纯文本分享不带 stream，文本在这几个键之一。逐个试而不是赌某一个。
+      // Pure text sharing has no stream; text is in one of these keys. Try them
+      // all rather than betting on one.
       const textKeys: string[] = [
         'ability.want.params.text',
         'ability.params.text',
@@ -95,14 +97,15 @@ struct SharePanel {
       }
       hilog.info(DOMAIN, TAG, 'share-diag extracted text=%{public}d files=%{public}d',
         text.length, files.length);
-      // 内容直接挂在 startAbility 的 parameters 上，不走跨进程存储。
+      // Content goes directly on startAbility's parameters, not via cross-process storage.
       //
-      // 先前用 preferences 交接，真机日志里主应用 drain 到的却是 (empty) ——
-      // UIExtension 与 UIAbility 是两个进程，preferences 未必落在同一沙箱路径，
-      // 而且还要赌「extension 写完」早于「主应用读取」。want 参数没有这两个
-      // 问题：内容跟着拉起动作一起过去，天然有序。
+      // Earlier we used preferences for handoff, but real device logs showed the main
+      // app always drained (empty) — UIExtension and UIAbility are two processes,
+      // preferences might not land in the same sandbox path, and we'd have to bet
+      // "extension write completes before main app reads". Want parameters don't have
+      // those problems: they travel with the launch action, naturally ordered.
       await ctx.startAbility({
-        // 从自身 context 读,不写字面量 —— 改包名时这里跟着走,不会漏。
+        // Read from our own context, not a literal — when bundle name changes, this follows.
         bundleName: ctx.extensionAbilityInfo.bundleName,
         abilityName: 'EntryAbility',
         parameters: {
@@ -130,7 +133,7 @@ struct SharePanel {
   }
 }
 
-/// session 只用到 terminateSelf，避免为一个方法把整个类型引进来。
+/// Session only uses terminateSelf, avoid dragging in the whole type for one method.
 interface UIExtensionContentSessionLike {
   terminateSelf(): void;
 }

@@ -325,9 +325,9 @@ pub(crate) fn detect_rate_limit(last_lines: &[Value]) -> Option<RateLimitState> 
 /// tool calls on this machine (2026-09-17): 17 turns where the tool_use JSON
 /// arrived truncated, 5 of which survived Claude Code's own one-shot retry and
 /// ended the turn. Those 5 are what this arm exists for; without it the session
-/// parks on 「请求失败」 until a human presses 重试本轮, and what it loses is
-/// almost always the report card itself — `fleet__ask` fails this way at
-/// ~1/710 calls versus `Bash` at ~1/67000.
+/// parks on "Request failed" until a human presses "Retry this turn", and what
+/// it loses is almost always the report card itself — `fleet__ask` fails this way
+/// at ~1/710 calls versus `Bash` at ~1/67000.
 pub(crate) fn detect_server_error(last_lines: &[Value]) -> bool {
     for v in last_lines.iter().rev() {
         let t = v.get("type").and_then(|t| t.as_str());

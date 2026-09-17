@@ -9,9 +9,9 @@
  * on a cold 2026-09-10 launch (1361 sessions) `today_usage` blocked on the
  * usage-cache lock for ~40s, the event storm kept firing, and **11** copies of
  * it piled up. Each one occupies a thread in Tauri's async runtime, which has
- * exactly `num_cpus` (10 here) of them — so the pile-up starved *every* other
+ * exactly `num_cpus` (10 here) of them—so the pile-up starved *every* other
  * `(async)` command, including `get_messages_tail` (task detail stuck on
- * 「加载中…」) and Tauri's own `plugin:event|listen`.
+ * "Loading…") and Tauri's own `plugin:event|listen`.
  *
  * Fixing the slow call (see `warm_usage_cache`) removes that particular stall;
  * this removes the amplifier, so the next slow call costs one worker instead of

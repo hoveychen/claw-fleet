@@ -183,8 +183,8 @@ impl DshSource {
     /// — the start / restart / port handoff — and nothing about an in-flight RPC
     /// needs it: a [`DshClient`] is just a port plus an HTTP client, and `dsh web`
     /// answers concurrent requests. Holding it across the call instead made every
-    /// dsh RPC in the process serial, so the `session.history` behind the 对话 tab
-    /// queued behind the 3s roster poll — measured at 4.15s for a call that costs
+    /// dsh RPC in the process serial, so the `session.history` behind the conversation
+    /// panel queued behind the 3s roster poll — measured at 4.15s for a call that costs
     /// 50ms, and worse than one poll's worth because `std`'s mutex lets a later
     /// poller barge past a waiting reader (`tests/dsh_read_starvation.rs`).
     ///
@@ -774,8 +774,8 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         .map(str::to_string);
 
     // dsh reports the four usage buckets separately; Fleet's "input" total is
-    // everything sent to the API, cache re-reads included — the same口径 as the
-    // other two sources.
+    // everything sent to the API, cache re-reads included — the same accounting
+    // standard as the other two sources.
     let output = projection_u64(&projections, "tokenUsage", "outputTokens");
     let input = projection_u64(&projections, "tokenUsage", "uncachedInputTokens")
         + projection_u64(&projections, "tokenUsage", "cacheReadTokens")
@@ -1159,7 +1159,7 @@ impl AgentSource for DshSource {
         // Mark it as Fleet's, the way every other spawn path does. Without this
         // the session is created and healthy but never enters the Tasks list
         // (`isFleetOwnedTask` needs both `fleet_spawned` and a known
-        // `entrypoint`), so the "新建会话" dialog waits for an id that can never
+        // `entrypoint`), so the "New session" dialog waits for an id that can never
         // arrive and spins forever. dsh has no per-session process to stamp an
         // entrypoint on — its turns run inside the shared server — so the note
         // carries the launcher surface too.
@@ -2486,9 +2486,9 @@ mod tests {
     }
 
     /// A dsh session Fleet spawned must read back as a Fleet-owned task, or the
-    /// desktop's "新建会话" dialog spins forever.
+    /// desktop's "New session" dialog spins forever.
     ///
-    /// The 启动台 list is `sessions.filter(isFleetOwnedTask)` =
+    /// The Tasks list is `sessions.filter(isFleetOwnedTask)` =
     /// `!isSubagent && isFleetOwnedEntrypoint(entrypoint) && fleetSpawned`, and
     /// the dialog waits for the id it just spawned to appear in *that* list
     /// before swapping the spinner for the session view. dsh sessions came back
@@ -2556,7 +2556,7 @@ mod tests {
     /// against a live 0.1.2 server on 2026-09-07, a session whose `asOfSeq`
     /// climbed 62587 → 62874 over 40s kept `updatedAt` frozen at the moment its
     /// turn was submitted, 18 minutes earlier. So the mux's event clock has to
-    /// win whenever it is newer, or the card reads "18分钟前" mid-turn.
+    /// win whenever it is newer, or the card reads "18 minutes ago" mid-turn.
     #[test]
     fn a_live_event_clock_overrides_a_stale_updated_at() {
         let mut info = session_info_from_list_item(&live_list_item()).expect("mapped");

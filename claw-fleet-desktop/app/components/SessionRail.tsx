@@ -43,7 +43,7 @@ type SessionRailProps = {
 type WorkspaceRailSectionProps = {
   path: string;
   name: string;
-  /** 折叠后的组数（一条折叠的接力链算一组），不是会话总数。 */
+  /** Folded group count (a collapsed relay chain counts as one group), not session total. */
   count: number;
   /** Fold state is *controlled* by the caller. Sections are rendered from the
    *  filtered rows, so one holding its own state would lose it whenever a

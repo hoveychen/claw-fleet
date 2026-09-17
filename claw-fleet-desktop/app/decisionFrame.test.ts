@@ -75,7 +75,7 @@ describe("framePreviewSrcDoc", () => {
   });
 
   it("never paints an opaque background of its own", () => {
-    // The card's own themed surface has to show through — an opaque白 here is
+    // The card's own themed surface has to show through—an opaque white here is
     // exactly what made the light-on-transparent table unreadable.
     for (const theme of ["dark", "light"] as const) {
       expect(framePreviewSrcDoc("<p>hi</p>", theme)).not.toMatch(/background:\s*#fff/);

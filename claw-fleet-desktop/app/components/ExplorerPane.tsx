@@ -99,7 +99,7 @@ export function FileTree({
    * The path isn't in this tree — a missing ancestor directory, a missing leaf,
    * or a leaf the current filters hide. Only fired for `reportMiss` requests.
    * Before this existed the reveal just `return`ed, which is what made a click
-   * on a path the agent got slightly wrong land on the 仓库 page and stop dead.
+   * on a path the agent got slightly wrong land on the Files page and stop dead.
    */
   onRevealFailed?: (relPath: string) => void;
 }) {

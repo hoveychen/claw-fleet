@@ -629,9 +629,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // IME composing 中的 Enter（中文/日文/韩文输入法确认候选词）放行给 IME。
-      // keyCode === 229 是 Chromium 在 IME 处理期间的兜底信号，覆盖 React 偶发丢
-      // isComposing 状态的边角场景。
+      // Enter during IME composing (Chinese/Japanese/Korean IME confirming
+      // candidate words) passes through to IME. keyCode === 229 is Chromium's
+      // fallback signal during IME processing, covering edge cases where React
+      // loses the isComposing state.
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
 
       // The mention picker owns arrows/Enter/Tab/Escape while open, so Enter
@@ -640,7 +641,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
       if (!onSubmit) return;
       if (e.key !== "Enter") return;
-      // Shift+Enter 留给 textarea 默认换行。
+      // Shift+Enter leaves newline to textarea default.
       if (e.shiftKey) return;
       e.preventDefault();
       if (!submitDisabled && !submitting) onSubmit();

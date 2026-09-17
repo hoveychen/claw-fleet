@@ -3,18 +3,18 @@ import { fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { systemShare } from '@kit.ShareKit';
 
-/// 系统分享 —— `navigator.share` 在 ArkWeb 里的原生一端。
+/// System share — native end of `navigator.share` in ArkWeb.
 ///
-/// mobile-web 的 WikiDocView 导出时本就优先走 Web Share（`navigator.share({files})`），
-/// 拿不到才退回 `<a download>`。所以这里不需要新功能，只要把缺失的那半边补上，
-/// web 侧一行不用改。
+/// mobile-web's WikiDocView export already prioritizes Web Share (`navigator.share({files})`),
+/// falling back to `<a download>` if unavailable. No new functionality needed, just fill the
+/// missing half, web side requires no changes.
 ///
-/// 元服务时代这条路是堵死的：@hms.collaboration.systemShare 整个文件没有一处
-/// `@atomicservice` 标记，所以 feature-gaps P5 只能降级成「保存到选定位置」。
-/// 转普通应用后限制解除。
+/// This path was blocked in the atomic service era: @hms.collaboration.systemShare has no
+/// `@atomicservice` markers anywhere, so feature-gaps P5 downgraded to "save to chosen location".
+/// After switching to regular app, the restriction lifts.
 ///
-/// 分享要的是 uri 而不是字节，所以先把内容落进 cacheDir —— 缓存目录会被系统
-/// 回收，不会长期占用户空间。
+/// Share needs uri not bytes, so write content to cacheDir first — the system will reclaim
+/// cache space, not permanently consuming user storage.
 export async function shareFile(
   context: common.UIAbilityContext,
   filename: string,
@@ -32,8 +32,8 @@ export async function shareFile(
   }
 
   const record: systemShare.SharedRecord = {
-    // 有具体 mime 就报具体的，让接收方（微信、备忘录…）能正确取舍；
-    // 拿不到就退到通用文件类型，总比分享不出去强。
+    // If we have a specific mime type, report it to let the receiver (WeChat, Notes, etc.) make
+    // the right choice; if we don't have it, fall back to a generic file type — anything is better than not sharing.
     utd: mimeType.length > 0 ? mimeType : 'general.file',
     uri: fileUri.getUriFromPath(path),
     title: safeName,

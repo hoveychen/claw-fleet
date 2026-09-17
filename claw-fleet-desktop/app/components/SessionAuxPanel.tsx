@@ -19,7 +19,7 @@ import styles from "./SessionDetail.module.css";
  *
  * The same overlay shape is used at every pane width, which keeps the
  * interaction identical in the standalone detail, `DecisionPanel`, and a 4-way
- * split of the 任务 page.
+ * split of the task page.
  */
 export function SessionAuxPanel({
   title,

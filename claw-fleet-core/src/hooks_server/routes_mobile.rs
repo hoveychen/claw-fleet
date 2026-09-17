@@ -104,8 +104,9 @@ pub(crate) fn route_mobile_rpc(
     query: &std::collections::HashMap<String, String>,
     json_header: tiny_http::Header,
     path: &str,
-    // `cors`:跨源头(见 hooks_server::cors)。手机在设备簿里直连一台主机时,页面
-    // 的 origin 是中转域名,少了这些头浏览器会在页面读到响应之前把它拦掉。
+    // `cors`: cross-origin headers (see hooks_server::cors). When the phone connects directly
+    // to a host in the device book, the page's origin is a relay domain. Without these headers,
+    // the browser blocks the response before the page sees it.
     cors: Vec<tiny_http::Header>,
 ) {
     let mut body_bytes = Vec::new();
@@ -142,7 +143,7 @@ pub(crate) fn route_mobile_rpc(
 }
 
 
-/// Text form of the pairing URL — what the desktop's 「复制配对链接」 button
+/// Text form of the pairing URL — what the desktop's "Copy Pairing Link" button
 /// copies. Separate from the QR route because a self-hosted relay can only be
 /// paired by pasting (App Links need the host baked into the manifest).
 pub(crate) fn route_mobile_relay_pairing_url(

@@ -1,7 +1,7 @@
 /**
  * Browse a .zip artifact as if it were a folder.
  *
- * Mounted by the 产出 page's preview stage in place of the "this format can't
+ * Mounted by the Artifacts page's preview stage in place of the "this format can't
  * be previewed here" placeholder. Everything it knows about the archive comes
  * from `shared-ts/zipDir.ts`, which reads through `Range` requests — listing a
  * 2 GB artifact costs a couple of KB, and opening one member costs that member.

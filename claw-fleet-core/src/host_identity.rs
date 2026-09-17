@@ -1,43 +1,45 @@
-//! 这台主机是谁 —— 手机端给一台配对设备起名字用的那点信息。
+//! Who is this host — the minimal information a phone's device book needs to name a paired device.
 //!
-//! 手机的设备簿(`mobile-web/src/devices.ts`)此前只能把新配对的桌面端叫「设备
-//! 1」「设备 2」:配对二维码里只有密钥和 relay 地址,主机名从来没有跨过这条线。
-//! 一旦在册两台以上,那个序号就是纯噪音 —— 用户要选的是「家里那台 Mac」,而不是
-//! 「设备 2」。
+//! Previously, the phone's device book (`mobile-web/src/devices.ts`) could only call a newly paired
+//! desktop "Device 1", "Device 2", etc. The pairing QR code carries only the key and relay address;
+//! hostname has never crossed this boundary. Once there are two or more devices on file, that sequence
+//! number is pure noise — the user wants to pick "the Mac at home", not "Device 2".
 //!
-//! 这里刻意与 [`crate::feature_flags::HostFeatures`] 分开:那边是**能力开关**
-//! (客户端据此决定某个面存不存在),这里是**身份**(纯展示,不 gate 任何东西)。
-//! 塞进同一个结构会让「拿不到就 fail closed」那条规则跨到一个不该 fail 的字段上。
+//! This is intentionally separate from [`crate::feature_flags::HostFeatures`]: that side is a
+//! **capability gate** (clients decide whether a surface exists), this side is **identity**
+//! (display-only, gates nothing). Mixing them into one struct would pull the "fail closed if you
+//! can't get it" rule onto a field that should never fail.
 //!
-//! 对称物是手机侧的 `deviceLabel.ts`:那边由 UA 猜手机是什么,这边由主机自报。
-//! 两边都只做展示,都允许「不知道」。
+//! The counterpart is `deviceLabel.ts` on the phone: that side guesses what the phone is from its UA,
+//! this side is self-reported by the host. Both sides are display-only and both allow "unknown".
 
 use serde::{Deserialize, Serialize};
 
-/// 一台 Fleet 主机的身份,作为纯展示信息发给每个客户端。
+/// The identity of a Fleet host, sent as display-only information to each client.
 ///
-/// 每一项都可缺席:容器里 `hostname` 可能是一串随机十六进制,某些系统上
-/// `os_version` 拿不到。缺席时客户端退回平台名(「macOS」),而不是编一个。
+/// Each field may be absent: in a container, `hostname` might be random hex, and on some systems
+/// `os_version` cannot be retrieved. When absent, clients fall back to the platform name ("macOS")
+/// rather than make one up.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct HostIdentity {
-    /// 主机名,已去掉 mDNS/局域网后缀(`.local` / `.lan`)。拿不到就是 `None`。
+    /// Hostname with mDNS/LAN suffix stripped (`.local` / `.lan`). `None` if unavailable.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub hostname: Option<String>,
-    /// 平台键,取 `std::env::consts::OS`(`macos` / `windows` / `linux` …)。
-    /// 客户端拿它挑图标,所以是机器可读的小写串而不是展示名。
+    /// Platform key, from `std::env::consts::OS` (`macos` / `windows` / `linux`, …).
+    /// Clients use it to pick an icon, so it is machine-readable lowercase, not a display name.
     pub platform: String,
-    /// 系统版本(`15.2`、`11`…)。展示用,拿不到就是 `None`。
+    /// OS version (`15.2`, `11`, …). Display-only; `None` if unavailable.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub os_version: Option<String>,
 }
 
-/// 去掉主机名的 mDNS/局域网后缀。macOS 上 `hostname` 常是
-/// `Hoveys-MacBook-Pro.local`,那个后缀在设备列表里只是噪音。
+/// Strip mDNS/LAN suffix from hostname. On macOS, `hostname` is often
+/// `Hoveys-MacBook-Pro.local`, but that suffix is noise in the device list.
 ///
-/// 只削**末尾**那一段,且只削这两个已知后缀 —— 一台真叫 `build.local.example`
-/// 的机器不该被截成 `build`。
+/// Only strip the **final** segment, and only these two known suffixes — a machine actually named
+/// `build.local.example` should not be truncated to `build`.
 pub fn trim_host_suffix(raw: &str) -> String {
     let name = raw.trim();
     for suffix in [".local", ".lan"] {
@@ -50,17 +52,18 @@ pub fn trim_host_suffix(raw: &str) -> String {
     name.to_string()
 }
 
-/// macOS 上问 `scutil` 要用户自己设的机器名。
+/// On macOS, ask `scutil` for the user-configured machine name.
 ///
-/// `gethostname()`(也就是 `sysinfo::System::host_name()`)在 macOS 上返回的是
-/// **临时主机名**:只要 `HostName` 没被 `scutil --set HostName` 钉死,系统就会拿
-/// DHCP / 反向 DNS 回来的名字覆盖它。2026-09-16 在老板的 MacBook 上实测,走手机
-/// 热点时对端把「私有 Wi-Fi 地址」当主机名回了过来,于是 `hostname` 变成
-/// `de:e8:92:d6:ca:71`,手机设备簿里那台 Mac 的名字当场跟着变成了这串 MAC。
+/// `gethostname()` (i.e., `sysinfo::System::host_name()`) returns the **transient hostname** on
+/// macOS: unless the system admin has pinned `HostName` via `scutil --set HostName`, the system
+/// will overwrite it with names from DHCP/reverse DNS. On 2026-09-16, tested on the user's MacBook
+/// over a phone hotspot: the remote end sent back "Private Wi-Fi Address" as the hostname, so
+/// `hostname` became `de:e8:92:d6:ca:71`, and the Mac's name in the phone's device book instantly
+/// changed to that MAC address string.
 ///
-/// `ComputerName` 是用户在「系统设置 → 通用 → 关于本机」里起的名字,不随网络变;
-/// `LocalHostName` 是它的 ASCII 化版本,作为第二选择。两个都拿不到才退回
-/// `gethostname()`。
+/// `ComputerName` is the name the user set in System Settings > General > About This Mac; it
+/// doesn't change with the network. `LocalHostName` is its ASCII-fied version, second choice.
+/// Only fall back to `gethostname()` if both are unavailable.
 #[cfg(target_os = "macos")]
 fn scutil_name() -> Option<String> {
     for key in ["ComputerName", "LocalHostName"] {
@@ -82,8 +85,9 @@ fn scutil_name() -> Option<String> {
     None
 }
 
-/// 本机身份。每个客户端问的都是这一个函数(Tauri 侧暂不需要 —— 桌面端展示的是
-/// 它自己,没有「哪一台」要选),所以 relay 方法与 `/host_identity` 路由不会漂移。
+/// The identity of this machine. Every client calls this one function (the desktop Tauri side
+/// doesn't need it yet — the desktop shows itself, not "which one to pick"), so the relay method
+/// and `/host_identity` route will never drift.
 pub fn host_identity() -> HostIdentity {
     let hostname = scutil_name()
         .or_else(sysinfo::System::host_name)
@@ -105,9 +109,9 @@ mod tests {
         assert_eq!(trim_host_suffix("Hoveys-MacBook-Pro.local"), "Hoveys-MacBook-Pro");
         assert_eq!(trim_host_suffix("nas.lan"), "nas");
         assert_eq!(trim_host_suffix("  box  "), "box");
-        // 不是后缀就不动 —— 中间出现的 `.local` 是名字的一部分
+        // Not a suffix if it appears in the middle — `.local` is part of the name
         assert_eq!(trim_host_suffix("build.local.example"), "build.local.example");
-        // 只剩后缀的怪名字保持原样,而不是被削成空字符串
+        // Malformed name with only the suffix stays as-is, not truncated to empty string
         assert_eq!(trim_host_suffix(".local"), ".local");
     }
 
@@ -116,20 +120,20 @@ mod tests {
         let id = host_identity();
         assert!(!id.platform.is_empty());
         assert_eq!(id.platform, std::env::consts::OS);
-        // 主机名要么缺席,要么非空且不带 .local 后缀
+        // Hostname is either absent, or non-empty and without `.local` suffix
         if let Some(h) = id.hostname {
             assert!(!h.is_empty());
             assert!(!h.ends_with(".local"));
         }
     }
 
-    /// macOS 上身份名必须来自 `ComputerName`/`LocalHostName`,而不是随网络漂移的
-    /// `gethostname()` —— 后者在热点下会变成一串 MAC 地址。
+    /// On macOS, identity name must come from `ComputerName`/`LocalHostName`, not from the
+    /// network-drifting `gethostname()` — the latter becomes a MAC address string over hotspot.
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_prefers_scutil_over_transient_hostname() {
         let Some(scutil) = scutil_name() else {
-            return; // 没配 ComputerName 的机器(极少见)不强求
+            return; // Machines without a configured ComputerName (very rare) are not required to pass
         };
         let id = host_identity();
         assert_eq!(id.hostname.as_deref(), Some(trim_host_suffix(&scutil).as_str()));

@@ -141,7 +141,7 @@ describe("NewSessionForm chat-mode pill", () => {
     expect(pill().getAttribute("aria-pressed")).toBe("false");
   });
 
-  // The regression 老板 hit. Reopening the form (or restoring the draft tab)
+  // The regression the user hit. Reopening the form (or restoring the draft tab)
   // mounts it with the chat path already in the shared draft, and
   // `chat_workspace` is one backend round-trip behind that first render. During
   // that window the form saw a workspace it couldn't yet recognise as chat and

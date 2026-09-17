@@ -1,22 +1,25 @@
-// 原生的屏幕常亮兜底 —— Capacitor 壳专用。
+// Native keep-screen-on fallback — Capacitor shell only.
 //
-// 为什么需要它：iOS 的 WKWebView 到 **18.4** 才有 Screen Wake Lock，16.4–18.3 那版
-// 在独立 Web App 里根本不工作（WebKit bug 254545）。也就是说 wakeLock.ts 那条标准
-// 路径在相当一部分在役 iPhone 上是空转的 —— 而语音输入正好是「中途息屏 = 这次
-// 白说」的场景，空转等于没修。
+// Why needed: iOS WKWebView only got Screen Wake Lock at **18.4**; versions
+// 16.4–18.3 don't work in standalone Web App (WebKit bug 254545). So the
+// standard path in wakeLock.ts is a no-op on a good chunk of deployed iPhones
+// — and voice input is exactly the "mid-interaction screen off = wasted
+// recording" scenario, so no-op means unfixed.
 //
-// @capacitor-community/keep-awake 底下就是 iOS 的 `UIApplication.isIdleTimerDisabled`
-// 和 Android 的 `FLAG_KEEP_SCREEN_ON`。选它而不是自己写 plugin 的理由和
-// voiceCapacitor.ts 挑 @capgo 那个包一样：自己写要维护 Swift + Kotlin 两套原生代码。
+// @capacitor-community/keep-awake wraps iOS `UIApplication.isIdleTimerDisabled`
+// and Android `FLAG_KEEP_SCREEN_ON`. We pick it over writing our own plugin
+// for the same reason as voiceCapacitor.ts choosing @capgo: rolling our own
+// means maintaining Swift + Kotlin.
 //
-// 它只在**壳里、且没有标准 API 时**装上：Android WebView（84+）和 iOS 18.4+ 都自带
-// navigator.wakeLock，鸿蒙的 WebShell 也自己注入了一个垫片，那些环境一律走标准路径。
+// It's installed only **in shell, when standard API is absent**: Android
+// WebView (84+) and iOS 18.4+ have native navigator.wakeLock; HarmonyOS
+// WebShell injects its own polyfill. Those all use the standard path.
 
 import { Capacitor } from "@capacitor/core";
 import { KeepAwake } from "@capacitor-community/keep-awake";
 import { setWakeLockFallback, type WakeLockLike, type WakeLockSentinelLike } from "./wakeLock";
 
-/** 把 keep-awake 包装成 wakeLock.ts 认识的形状。 */
+/** Wrap keep-awake into the shape wakeLock.ts understands. */
 export function nativeWakeLock(): WakeLockLike {
   return {
     async request(): Promise<WakeLockSentinelLike> {
@@ -27,8 +30,8 @@ export function nativeWakeLock(): WakeLockLike {
           sentinel.released = true;
           await KeepAwake.allowSleep();
         },
-        // 原生这条路没有「系统主动收走」的事件（切后台由 wakeLock.ts 的
-        // visibilitychange 兜着），所以这里没有可转发的东西。
+        // Native path has no "system takes it away" event (background switch is
+        // handled by wakeLock.ts's visibilitychange), so nothing to forward.
         addEventListener() {},
       };
       return sentinel;
@@ -37,10 +40,12 @@ export function nativeWakeLock(): WakeLockLike {
 }
 
 /**
- * 启动时调一次。非壳环境、已有标准 API、或原生说不支持时都静默不装。
+ * Call once at startup. Silent no-op in non-shell environments, when standard
+ * API exists, or when native says unsupported.
  *
- * 全程吞异常：壳里插件没同步进原生工程时 `isSupported()` 会抛，那不该炸掉启动 ——
- * 最坏的结果是回到没有这条兜底之前的样子。
+ * Swallow all exceptions: if the plugin hasn't synced into the native build,
+ * `isSupported()` throws, and that shouldn't crash startup — worst case, we
+ * get the pre-fallback behavior.
  */
 export async function installNativeWakeLock(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
@@ -54,6 +59,6 @@ export async function installNativeWakeLock(): Promise<void> {
     if (!isSupported) return;
     setWakeLockFallback(nativeWakeLock());
   } catch {
-    /* 插件没装好 —— 当作没有常亮能力 */
+    /* Plugin not installed — treat as no keep-awake capability */
   }
 }

@@ -1,6 +1,7 @@
-// relay 形态的传输层工厂。**只被 main.tsx 的动态 import 引用** —— 这条间接
-// 是有意的:它是 relay 客户端进入 bundle 的唯一入口,同源构建把那个 import
-// 分支消掉,整棵 relay 依赖树就一起消失。直接 import 本文件会让这套安排失效。
+// Transport layer factory for relay mode. **Referenced only via dynamic import from
+// main.tsx** — this indirection is intentional: it's the only entry point for relay
+// client into the bundle, and same-origin builds can eliminate that import branch,
+// making the entire relay dependency tree vanish. Direct imports break this.
 
 import { getClientId } from "./clientId";
 import { deviceLabel } from "./deviceLabel";
@@ -16,12 +17,14 @@ export function makeTransport(
   device: PairedDevice,
   handlers: TransportHandlers,
 ): FleetTransport {
-  // `?mock` 用固定数据跑整个 UI（promo 录屏、无 relay 时改界面）。它归这里而不
-  // 归 App：那个假客户端 extends RelayClient，所以它本来就只在 relay 形态下存在。
+  // `?mock` runs the whole UI with fixed data (promo screenshots, testing without
+  // relay). It belongs here not in App: that mock client extends RelayClient, so it
+  // only exists in relay mode anyway.
   if (isMockMode()) return new MockRelayClient(handlers);
-  // 直连一台 HTTP 主机(`fleet webui` / 云容器)。这条形态下**没有**中转、没有
-  // 配对密钥、也没有推送通道 —— HttpTransport 的 pushSubscribe 恒返回 false,
-  // 「更多」页据此隐掉那台的推送开关。
+  // Direct HTTP host connection (`fleet webui` / cloud container). In this mode there
+  // is **no** relay, no paired keys, no push channel — HttpTransport's pushSubscribe
+  // always returns false, and the "More" page hides that device's push toggle based on
+  // that.
   if (device.kind === "http") {
     return new HttpTransport(handlers, { baseUrl: device.baseUrl, token: device.token });
   }
@@ -29,23 +32,24 @@ export function makeTransport(
     device.secret,
     handlers,
     () => {
-    // 每次心跳都现读,而不是在构造时捕获 —— `pushSubscribed` 要反映当下。
-    const { label, platform } = deviceLabel(navigator.userAgent);
-    return {
-      clientId: getClientId(),
-      label,
-      platform,
-      pushSubscribed: pushState() === "granted",
-      supportsGzip: gzipSupported(),
-      supportsBinary: binarySupported(),
-      // 增量应用是纯 JS(见 relay.ts 的 sessions_delta),没有需要特性检测的
-      // 浏览器 API,所以恒为真。
-      supportsDelta: true,
-      // 每份构建固定;让桌面端能标出一个跑着旧包的设备。
-      appCommit: __APP_COMMIT__,
-    };
-  },
-    // 这台设备指名的 relay(设备簿里存的);null = 构建默认值。
+      // Read on every heartbeat, not captured at construction — `pushSubscribed` must
+      // reflect the current state.
+      const { label, platform } = deviceLabel(navigator.userAgent);
+      return {
+        clientId: getClientId(),
+        label,
+        platform,
+        pushSubscribed: pushState() === "granted",
+        supportsGzip: gzipSupported(),
+        supportsBinary: binarySupported(),
+        // Incremental apply is pure JS (see sessions_delta in relay.ts), has no browser
+        // APIs to feature-detect, so always true.
+        supportsDelta: true,
+        // Fixed per build; lets desktop identify a device running an old package.
+        appCommit: __APP_COMMIT__,
+      };
+    },
+    // This device's designated relay (stored in device book); null = build default.
     device.relayBase,
   );
 }

@@ -90,7 +90,7 @@ export const MAX_PDF_THUMB_BYTES = 32 * 1024 * 1024;
  * atom sits at the *end* (anything not written with faststart) forces the
  * player to fetch to the tail before it can decode anything. This cap is what
  * keeps that case from quietly pulling a multi-gigabyte render into a 190px
- * card; a render that big keeps its icon.
+ * card; a render that big stays with its icon.
  */
 export const MAX_VIDEO_THUMB_BYTES = 256 * 1024 * 1024;
 

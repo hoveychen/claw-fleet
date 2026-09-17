@@ -4,8 +4,9 @@
 //! `dsh web` handle. If that lock is held for the whole RPC — and not just for
 //! the start/restart it exists to protect — then every dsh call in the process
 //! is serialized: the `session/page` read fired when the user opens a session's
-//! 对话 tab waits out however many `session/list` polls (`WatchStrategy::Poll(3s)`,
-//! issued from several call sites at once) happen to hold or barge the lock.
+//! conversation tab waits out however many `session/list` polls
+//! (`WatchStrategy::Poll(3s)`, issued from several call sites at once) happen
+//! to hold or barge the lock.
 //!
 //! The dsh side here is a fixture server (`tests/fixtures/fake-dsh.js`) rather
 //! than a real `dsh web`: it answers `session/list` slowly and `session/page`

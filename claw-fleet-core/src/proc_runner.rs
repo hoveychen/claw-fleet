@@ -1,4 +1,4 @@
-//! Workspace command runner — user commands launched from the 文件 page run
+//! Workspace command runner — user commands launched from the file browser page run
 //! under a detached per-command **host process** (`<binary> fleet-proc-host
 //! <id>`) instead of inside the desktop app / probe server:
 //!
@@ -251,7 +251,7 @@ pub fn default_shell_command() -> String {
     }
 }
 
-/// Whether this spawn request is a bare "give me a shell" that the 终端 feature
+/// Whether this spawn request is a bare "give me a shell" that the Terminal feature
 /// flag must refuse. Kept as a named predicate so the rule is one testable
 /// line: **blank command + flag off**. A named command is never refused — see
 /// the comment in [`spawn_proc_in`] for why the flag is not about those.
@@ -269,7 +269,7 @@ fn terminal_disabled_error() -> String {
 }
 
 /// Spawn `command` at `workspace_path`'s cwd under a detached host process.
-/// An empty `command` means [`default_shell_command`], which requires the 终端
+/// An empty `command` means [`default_shell_command`], which requires the Terminal
 /// feature flag ([`crate::feature_flags::terminal_enabled`]).
 /// `host_exe` is the binary to re-exec with the [`HOST_ARGV_MARKER`] argv —
 /// callers pass their own `std::env::current_exe()` (both the desktop app and
@@ -297,10 +297,10 @@ pub fn spawn_proc_in(
     // terminal panel) has no business knowing what this host's shell is, and
     // guessing client-side would get Windows wrong.
     //
-    // That same blankness is what makes this the one gate the 终端 feature flag
+    // That same blankness is what makes this the one gate the Terminal feature flag
     // needs: it is the only request in the app that means "an interactive shell
     // on this machine, with no command named". Named commands (the clone
-    // dialog, the 仓库 page's 命令 panel) keep working with the flag off — they
+    // dialog, the workspace browser page's command panel) keep working with the flag off — they
     // are a narrower capability and the flag is not about them. Gating here
     // rather than in each client's handler is deliberate: all three clients
     // (Tauri command, `/proc_run` route, relay `proc_run`) funnel through this
@@ -1084,7 +1084,7 @@ mod tests {
         rec
     }
 
-    /// The 终端 flag gate, stated as the two facts that matter: a bare shell
+    /// The Terminal flag gate, stated as the two facts that matter: a bare shell
     /// request needs the flag, a named command never does. Everything the three
     /// clients do funnels through `spawn_proc_in`, so this predicate is the
     /// whole policy.

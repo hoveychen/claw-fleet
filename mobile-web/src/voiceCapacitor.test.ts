@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// 假插件：既供错误码分类那几个纯用例（它们碰不到这里），也让「一次识别的收场」
-// 可以被真的驱动一遍 —— 原生插件在 node 下跑不了，但它与我们之间的那层约定
-// （listener、start 的 promise 什么时候 resolve）是可以受控重放的。
+// Fake plugin: serves both error-code classification pure test cases (which never
+// reach here) and lets "the end of one recognition session" be driven for real —
+// the native plugin can't run under Node, but the contract between us (when listener
+// and start's promise resolve) can be replayed under control.
 const listeners: Record<string, (e: unknown) => void> = {};
 let resolveStart: ((r: { matches?: string[] }) => void) | undefined;
 let rejectStart: ((e: unknown) => void) | undefined;

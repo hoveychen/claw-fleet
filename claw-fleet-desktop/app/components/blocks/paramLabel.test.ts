@@ -34,7 +34,7 @@ describe("paramLabel", () => {
 
   // The bug this exists for: `fleet.param` is keyed by param name alone, so the
   // one entry for `note` (written for a handoff briefing) captioned an
-  // artifact's blurb 「交接」 and a watch's subject 「交接」 too.
+  // artifact's blurb and a watch's subject the same way.
   it("gives the three tools that take a `note` three different labels", () => {
     expect(paramLabel(t, "handoff", "note")).toBe("交接便条");
     expect(paramLabel(t, "watch", "note")).toBe("在等什么");
@@ -60,7 +60,7 @@ describe("paramLabel", () => {
 
 describe("`note` override coverage against claw-fleet-core", () => {
   // A fourth tool growing a `note` param would silently inherit the flat
-  // 「交接」 again. Count the declarations in the tool schemas instead of
+  // default label again. Count the declarations in the tool schemas instead of
   // trusting that anyone remembers to come back here.
   it("covers every tool whose MCP schema declares a `note`", () => {
     const src = readFileSync(join(CORE_SRC, "mcp_control.rs"), "utf8");

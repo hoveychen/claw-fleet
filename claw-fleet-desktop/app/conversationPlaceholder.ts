@@ -5,14 +5,14 @@ export type ConversationPlaceholder = "loading" | "stalled" | "failed" | null;
  * Decide the placeholder for an empty conversation pane.
  *
  * Split out of MessageList so the decision is unit-testable without jsdom —
- * this is the exact branch that rendered an eternal 「加载中…」 when the backend
- * stopped answering.
+ * this is the exact branch that rendered an eternal "Loading..." when the
+ * backend stopped answering.
  *
  * `stalled` and `failed` are deliberately separate. Both used to raise the same
  * flag, so a fetch that *rejected in milliseconds* — a bad path, a source that
- * cannot handle the URI — told the reader "加载超时——后端一直没有响应", which
- * is not merely unhelpful but points the next debugger at the wrong half of the
- * system. A rejection knows why it failed; say that instead.
+ * cannot handle the URI — told the reader "Timed out — backend never responded",
+ * which is not merely unhelpful but points the next debugger at the wrong half
+ * of the system. A rejection knows why it failed; say that instead.
  */
 export function conversationPlaceholder({
   isLoading,

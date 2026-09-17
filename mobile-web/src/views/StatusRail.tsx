@@ -1,12 +1,13 @@
-// 会话详情页头部下面那条「活状态轨」。
+// The "activity rail" below the session-detail page header.
 //
-// 它顶掉的是一条六个 tab 的条（消息/决策/计划/Token/Workflow/接力）。那条 tab
-// 在 390px 宽的屏上每个标签只剩约 46px，且六个标签一个数字都不带——你得逐个
-// 点进去才知道哪个有东西。这条轨反过来：它不给你六个等权重的入口，它只说这个
-// 会话此刻在发生什么，而每一句话顺便就是那件事的入口。
+// It replaces a six-tab bar (Messages / Decisions / Plans / Tokens / Workflow / Relay).
+// That tab bar on a 390px-wide screen leaves each label with ~46px, and none of the
+// six carry numbers—you have to click into each one to know which has content. This
+// rail reverses it: it doesn't give six equal-weight entry points, it just says what
+// this session is doing *right now*, and each line happens to be an entry to that.
 //
-// 空的时候整条不渲染（不是渲染成一条空白带）——安静的会话不该为一行视觉噪音
-// 付出 34px。内容规则见 sessionStatusPills.ts。
+// When empty, it doesn't render at all (not as a blank strip)—a quiet session shouldn't
+// pay 34px of visual noise. Content rules are in sessionStatusPills.ts.
 
 import { t } from "../i18n";
 import type { PillTarget, StatusPill } from "./sessionStatusPills";
@@ -21,8 +22,9 @@ export function StatusRail({
 }) {
   if (pills.length === 0) return null;
   return (
-    // role=list 而不是 nav：这些首先是读数，其中一部分恰好可点。用 nav 会让
-    // 读屏软件把「上下文 40%」念成一个导航目标。
+    // role=list not nav: these are first and foremost readouts, some of which
+    // happen to be clickable. Using nav would make screen readers treat
+    // "Context 40%" as a navigation landmark.
     <div className={styles.rail} role="list" aria-label={t("会话状态")}>
       {pills.map((p) =>
         p.target ? (

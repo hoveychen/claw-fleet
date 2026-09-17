@@ -71,7 +71,7 @@ class HeadTests(unittest.TestCase):
 
     def test_ownership_proofs_only_appear_where_asked_for(self):
         # A proof is checked at the URL you submitted; repeating it on every
-        # page is noise, and emitting an empty one before 老板 supplies codes
+        # page is noise, and emitting an empty one before the user supplies codes
         # would be a meta tag with no content.
         original = seo.VERIFICATION
         try:

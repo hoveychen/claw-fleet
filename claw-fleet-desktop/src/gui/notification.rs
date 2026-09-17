@@ -48,7 +48,7 @@ pub(crate) fn set_user_title(title: String, state: tauri::State<'_, AppState>) {
 /// (`app/controlPlaneSelfHeal.ts`, run from `App.tsx` on every start), where
 /// the localStorage tristate — the actual source of truth for that choice — is
 /// readable. Do not turn these into unconditional applies: that would
-/// resurrect carriers 老板 deliberately removed.
+/// resurrect guidance the user deliberately removed.
 pub(crate) fn reapply_all_guidance_if_installed(
     state: &tauri::State<AppState>,
     title_override: &str,

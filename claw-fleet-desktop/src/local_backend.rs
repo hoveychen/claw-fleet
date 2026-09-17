@@ -130,7 +130,7 @@ impl LocalBackend {
     /// cache; falls back to a direct source scan when the first background
     /// scan hasn't populated it yet.
     ///
-    /// Sessions are only half the set: a repo cloned from the 仓库 page (or a
+    /// Sessions are only half the set: a repo cloned from the repository page (or a
     /// directory added by hand) has no sessions at all, so `browsable_workspaces`
     /// unions in the paths the user explicitly registered.
     fn known_workspaces(&self) -> Vec<String> {
@@ -1457,7 +1457,7 @@ impl LocalBackend {
         // Start the daily report scheduler (backfills missing reports in background).
         // The hook fires once per date, when that day's AI summary lands — the
         // frontend turns it into the auto-popup overlay. Raise the main window
-        // first, same as the tray's 每日报告 item: an overlay painted inside a
+        // first, same as the tray's daily report item: an overlay painted inside a
         // hidden window is a popup nobody sees.
         let app_report = app.clone();
         crate::daily_report::start_report_scheduler(
@@ -1736,8 +1736,8 @@ fn merge_incremental_sessions(
 /// (`dsh_source::POLL_INTERVAL`), and one tick costs 5–9s on a busy box — so
 /// every ~8s the claude-code rows were rolled back by ~5s. A session created
 /// inside that window disappeared from the launchpad, and its open detail pane
-/// fell back to 找不到这个会话, until the next fs-watch rescan put it back. That
-/// is the 5–10s blink Boss hit on 2026-09-10.
+/// fell back to "session not found", until the next fs-watch rescan put it back.
+/// That is the 5–10s blink Boss hit on 2026-09-10.
 ///
 /// The merge is in-memory apart from the enrichers' small state files, so
 /// holding the lock across it costs nothing like holding it across a scan would
@@ -1780,8 +1780,8 @@ fn incremental_rescan_and_emit(
     // whole duration — including the 30s liveness ticker, whose first act is
     // `sessions.lock()` inside `refresh_dead_codex_liveness_and_emit`. On
     // 2026-09-09 that is what left session a878d652 stamped `proc_alive = true`
-    // for ~108s after its turn had ended: the composer kept saying 会话运行中, so
-    // a typed follow-up went into the pending-message queue instead of being
+    // for ~108s after its turn had ended: the composer kept saying "session running",
+    // so a typed follow-up went into the pending-message queue instead of being
     // sent, and the queue could only drain once the ticker finally got the lock.
     let started = Instant::now();
     let scanned = scan_dirty_sources(sources, dirty);
@@ -1959,12 +1959,12 @@ pub fn resume_session_impl(
 /// without a final write — a Codex turn cut off mid-flight (no `task_complete`),
 /// or a headless `claude -p` that exits on hitting the usage limit — leaves
 /// `proc_alive` frozen `true`, jamming the drain gate, auto-resume, and the
-/// "会话运行中" UI. This runs off the periodic ticker — which fires regardless of
-/// file writes — to unstick all three. The Claude arm is what fixes the
-/// Windows-only "session stuck enqueuing after hitting the limit" report: on
-/// macOS noisy FSEvents wake the watcher often enough to heal `proc_alive`
-/// promptly, but a quiet Windows machine delivers no events, so without this the
-/// freeze persisted for tens of minutes. See
+/// "session running" UI. This runs off the periodic ticker — which fires
+/// regardless of file writes — to unstick all three. The Claude arm is what
+/// fixes the Windows-only "session stuck enqueuing after hitting the limit"
+/// report: on macOS noisy FSEvents wake the watcher often enough to heal
+/// `proc_alive` promptly, but a quiet Windows machine delivers no events, so
+/// without this the freeze persisted for tens of minutes. See
 /// [`claw_fleet_core::codex_source::refresh_dead_codex_liveness`] and
 /// [`claw_fleet_core::claude_source::refresh_dead_claude_liveness`].
 fn refresh_dead_codex_liveness_and_emit(
@@ -2100,7 +2100,7 @@ impl LocalBackend {
     /// returns everything appended since byte `n`, plus the new cursor.
     ///
     /// This exists because the standalone detail pane cannot use the pushed
-    /// `session-tail`: that watcher is single-slot, and the 任务 page keeps
+    /// `session-tail`: that watcher is single-slot, and the tasks page keeps
     /// several panes open at once. Re-requesting a whole window every 1.5s
     /// instead is what let one 4513-record session spend 1–3s per poll against
     /// a 1.5s interval (see `liveTailWindow.ts`). A cursor makes the
@@ -2338,7 +2338,7 @@ impl LocalBackend {
         tool: Option<String>,
     ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
         let tool = tool.unwrap_or_default();
-        // The "新会话" button preassigns no id and uses the default entrypoint;
+        // The "new session" button preassigns no id and uses the default entrypoint;
         // the dispatcher routes to claude or codex by `tool`.
         let spec = claw_fleet_core::agent_source::SpawnSpec {
             workspace_path,
@@ -2995,7 +2995,7 @@ impl LocalBackend {
 
     pub fn git_clone(&self, url: &str, dest: &str) -> Result<crate::git_ops::GitOpResult, String> {
         let result = crate::git_ops::git_clone(url, dest)?;
-        // A fresh clone has no sessions, so without registering it the 仓库 page
+        // A fresh clone has no sessions, so without registering it the repository page
         // would list the card and then refuse to open its file tree.
         if let Err(e) = claw_fleet_core::browse_paths::add(dest) {
             claw_fleet_core::log_debug(&format!(
@@ -3464,7 +3464,7 @@ impl LocalBackend {
             feedback,
         };
         // `dismissed: false` — a rejection is an answer the agent has to be woken
-        // up to hear ("老板拒绝了，理由是…"), not a card the user waved away.
+        // up to hear ("Boss rejected it, reason is…"), not a card the user waved away.
         let result = claw_fleet_core::parked::deliver(
             id,
             &resp,
@@ -4189,7 +4189,7 @@ pub(crate) fn get_notification_mode(app: &AppHandle) -> String {
         .unwrap_or_else(|| "user_action".to_string())
 }
 
-/// Read the current user title from AppState (empty string = default "老板"/"Boss").
+/// Read the current user title from AppState (empty string = default "Boss").
 pub(crate) fn get_user_title(app: &AppHandle) -> String {
     use tauri::Manager;
     app.try_state::<crate::AppState>()
@@ -4573,8 +4573,8 @@ mod tests {
     /// poll tick (the only `WatchStrategy::Poll` source, 3s interval, 5–9s per
     /// tick on a busy box) republished claude-code rows as they were 5s earlier.
     /// A session spawned inside that window was erased from the launchpad and
-    /// its open detail pane fell back to 找不到这个会话, until the next fs-watch
-    /// rescan brought it back 5–10s later (Boss, 2026-09-10).
+    /// its open detail pane fell back to "session not found", until the next
+    /// fs-watch rescan brought it back 5–10s later (Boss, 2026-09-10).
     #[test]
     fn slow_rescan_does_not_revert_a_session_added_mid_scan() {
         let _lock = claw_fleet_core::paths::fleet_home_lock();
@@ -4743,7 +4743,7 @@ mod tests {
     /// `WatchStrategy::Filesystem`. `start_watch` must resolve that URI to the
     /// real rollout file before `stat`ing it — otherwise `std::fs::metadata`
     /// fails on the URI, `start_watching_session` rejects, and the desktop
-    /// detail view's `store.open()` hangs forever on "加载中…" (isLoading never
+    /// detail view's `store.open()` hangs forever on "loading..." (isLoading never
     /// cleared). The stored watch path must also be the real path so the fs
     /// watcher's tail matches against real filesystem-event paths.
     #[test]

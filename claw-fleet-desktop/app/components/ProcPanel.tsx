@@ -80,7 +80,7 @@ export function shortcutsFor(map: ProcShortcutMap, workspace: string): string[] 
   return map[workspace] ?? [];
 }
 
-/** The "命令" tab of a workspace's 仓库 detail pane: quick command launcher at
+/** The Commands tab of a workspace's Files detail pane: quick command launcher at
  * the workspace cwd + the list of procs (running and exited) hosted by detached
  * `fleet-proc-host` processes. */
 export function ProcPanel({
@@ -115,7 +115,7 @@ export function ProcPanel({
   const hasFinished = wsProcs.some((p) => p.status === "exited");
   const procGroups = useMemo(() => groupProcs(wsProcs), [wsProcs]);
 
-  /** Replace *this* workspace's slot, leaving every other repository's pins
+  /** Replace this workspace's slot, leaving every other repository's pins
    *  untouched. An emptied slot is deleted so the map doesn't accumulate a key
    *  per repository the user ever visited. */
   const updateShortcuts = (next: string[]) => {
@@ -133,7 +133,7 @@ export function ProcPanel({
   };
 
   /** Start `cmd` as a brand-new proc at the workspace cwd. Both the launcher
-   * input and a row's 重跑 button land here — a re-run is just another launch. */
+   * input and a row's re-run button land here — a re-run is just another launch. */
   const launch = async (cmd: string): Promise<boolean> => {
     if (!cmd) return false;
     setRunError(null);
@@ -237,10 +237,11 @@ export function ProcPanel({
           <Play size={12} strokeWidth={2} />
           {t("files.proc_run")}
         </button>
-        {/* 这里不自己起 shell,只是带着本仓库跳到终端页 —— 终端页进去会接回已有的
-            pty、没有才开新的,那套「不留孤儿 shell」的逻辑只该有一份。
-            终端页本身受 FLEET_TERMINAL 门控,关着时这个入口一并撤掉:上面的
-            「运行」照旧可用,它跑的是具名命令,不在开关管辖范围内。 */}
+        {/* Don't spawn shell here, just jump to terminal page with this repo — terminal page
+            reconnects existing pty, only spawns new if none exist; the "no orphan shells" logic
+            should exist in one place. Terminal page itself is gated by FLEET_TERMINAL; when off,
+            this entry is also withdrawn: the "Run" button above still works (it runs named commands,
+            outside the gate). */}
         {terminalEnabled && (
           <button
             className={styles.proc_term_btn}
@@ -270,8 +271,8 @@ export function ProcPanel({
                 <button
                   className={styles.proc_row_main}
                   onClick={() => setOpenGroupCommand(groupOpen ? null : group.command)}
-                  // tooltip 保留原始命令：行内显示的是「shell」这种友好名，真要查
-                  // 到底跑的是哪个 shell 时，悬停还看得到 exec "/bin/zsh" -i。
+                  // Tooltip keeps original command: inline shows friendly name like "shell", but when
+                  // you hover to see which shell is really running, tooltip shows `exec "/bin/zsh" -i`.
                   title={group.command}
                 >
                   {groupOpen ? (

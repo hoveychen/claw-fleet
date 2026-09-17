@@ -654,13 +654,13 @@ async function handleIPC(
       return qaMode ? MOCK_QA_PLUGINS : [];
     case "list_marketplaces":
       return qaMode ? MOCK_QA_MARKETPLACES : [];
-    // Workspace procs (命令 panel + 终端 page). These used to answer with an
-    // empty list, which left the 终端 page drawing a bare black rectangle under
-    // ?mock — indistinguishable from a layout bug. Mock now serves a scripted
-    // pty instead; see MOCK_PTY_SCRIPT.
-    // 开着:mock 存在的意义就是让每个页面都能被看见和截图,而这里没有真 shell
-    // 可以被开(pty 是 MOCK_PTY_SCRIPT 脚本),所以关掉终端页只会让 ?mock 少一页
-    // 可眼验的界面,换不来任何安全性。
+    // Workspace procs (commands panel + terminal page). These used to answer
+    // with an empty list, which left the terminal page drawing a bare black
+    // rectangle under ?mock — indistinguishable from a layout bug. Mock now
+    // serves a scripted pty instead; see MOCK_PTY_SCRIPT. The point of running
+    // ?mock is to see and screenshot every page, but there's no real shell to run
+    // here (the pty is the MOCK_PTY_SCRIPT script), so hiding the terminal page
+    // just removes one page from the mockable UI — it doesn't gain security.
     case "host_features":
       return { terminal: true };
     case "list_workspace_procs":

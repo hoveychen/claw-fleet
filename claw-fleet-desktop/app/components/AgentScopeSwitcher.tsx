@@ -33,12 +33,13 @@ function agentIdTail(id: string): string {
  * Agent scope selector for the detail header.
  *
  * The session being inspected has a family — a main process plus any subagents
- * it spawned — and every facet (对话 / 决策 / Token / …) is scoped to whichever
- * member is selected (`onOpen` re-scopes the whole detail view, not just the
- * transcript). This used to be a segmented strip sharing the tab row with the
- * view tabs, but subagents appear dynamically and unboundedly, so the strip
- * crowded the fixed view tabs off the right edge. Here the scope is a dropdown
- * that grows downward instead of sideways, leaving the view-tab row fixed.
+ * it spawned — and every facet (conversation / decisions / tokens / …) is
+ * scoped to whichever member is selected (`onOpen` re-scopes the whole detail
+ * view, not just the transcript). This used to be a segmented strip sharing the
+ * tab row with the view tabs, but subagents appear dynamically and unboundedly,
+ * so the strip crowded the fixed view tabs off the right edge. Here the scope is
+ * a dropdown that grows downward instead of sideways, leaving the view-tab row
+ * fixed.
  *
  * With no family to switch between (no subagents) it degrades to a plain
  * identity tag — the same look a solo session had before this refactor.

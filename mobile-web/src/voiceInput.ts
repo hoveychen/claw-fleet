@@ -1,23 +1,25 @@
-// 语音输入的统一接口，以及「这个运行环境该用哪条实现」的判定。
+// Unified voice input interface and detection of which implementation fits this runtime.
 //
-// 三条实现各自独立，形态完全不同：
-//   - 浏览器 / PWA  → Web Speech API（`webkitSpeechRecognition`，音频上传厂商服务器）
-//   - Capacitor 壳  → @capgo/capacitor-speech-recognition（iOS SFSpeechRecognizer /
-//                     Android SpeechRecognizer）
-//   - 鸿蒙壳        → `fleetNative` 桥 → ArkTS Core Speech Kit（端侧，离线）
+// Three implementations, each standalone with distinct shape:
+//   - Browser / PWA  → Web Speech API (`webkitSpeechRecognition`, uploads audio to vendor)
+//   - Capacitor shell → @capgo/capacitor-speech-recognition (iOS SFSpeechRecognizer /
+//                      Android SpeechRecognizer)
+//   - HarmonyOS shell → `fleetNative` bridge → ArkTS Core Speech Kit (on-device, offline)
 //
-// **判定顺序是这个模块唯一真正要紧的东西**，因为 Web Speech 不能用 feature
-// detection 来判：iOS WKWebView 里 Apple 关掉了识别功能，却仍然把
-// `webkitSpeechRecognition` 挂在 window 上（WebKit #239816，挂了三年多没修）。
-// 于是 `if (window.webkitSpeechRecognition)` 在 Capacitor 的 iOS 壳里为真，
-// `start()` 却永远不出结果，也不报错 —— 表现为「按了没反应」的静默失败。
+// **Detection order is the only thing truly critical here**, because Web Speech can't be
+// feature-detected: Apple disabled it in iOS WKWebView but still hangs
+// `webkitSpeechRecognition` on the window (WebKit #239816, unfixed for 3+ years).
+// So `if (window.webkitSpeechRecognition)` is true in Capacitor's iOS shell, but
+// `start()` never returns or errors — silent failure that looks like "nothing happened".
 //
-// 所以顺序必须是**先认壳、最后才回落 Web Speech**：壳的身份是确定的（原生桥对象
-// 存在与否、Capacitor 运行时在不在），而 Web Speech 只在「确定不在任何壳里」时才
-// 采信。反过来写就会在 iOS 壳里选中一条死路。
+// Order must be **shell first, Web Speech last**: shell identity is certain (native bridge
+// object exists or not, Capacitor runtime is or isn't there), while Web Speech is only
+// trusted when "definitely not in any shell". The reverse would hit a dead-end in the iOS
+// shell.
 //
-// 壳侧约定沿用既有的两条通道，没有新发明：web→壳走 `window.fleetNative.x()`
-// （nativeScan.ts），壳→web 走具名 hook + pending 队列（nativePush.ts）。
+// Shell-side protocol reuses two existing channels, nothing new: web→shell is
+// `window.fleetNative.x()` (nativeScan.ts), shell→web is named hooks + pending queue
+// (nativePush.ts).
 
 import { Capacitor } from "@capacitor/core";
 
@@ -39,32 +41,36 @@ export type VoiceErrorKind =
 
 export interface VoiceHandlers {
   /**
-   * 麦克风真的开始收音了。
+   * The microphone actually started capturing audio.
    *
-   * `start()` 返回 ≠ 已经在录：三条实现都要先跨一段异步 —— Web Speech 要等
-   * 浏览器起识别会话，Capacitor 要查/要权限，鸿蒙要 `createEngine`。这段空窗里
-   * 用户说的话**全丢**，而界面上它和「已经在录」长得一模一样，所以用户只会觉得
-   * 「前半句没识别出来」。有了这一声，UI 才能在就绪之前老实说「准备中」。
+   * `start()` returning ≠ recording: all three implementations cross async first —
+   * Web Speech waits for the browser to start recognition, Capacitor checks/requests
+   * permissions, HarmonyOS needs `createEngine`. Speech during that gap is **lost**,
+   * and the UI looks identical to "already recording", so the user only feels like
+   * "the first half didn't register". With this signal, the UI can honestly say
+   * "getting ready" before it's done.
    *
-   * 每条实现都必须调，且只调一次。
+   * Every implementation must call it, and exactly once.
    */
   onReady(): void;
-  /** 说话过程中的临时结果，会被后续结果覆盖。用来做实时回显。 */
+  /** Interim results while speaking, overwritten by later results. Used for live echo. */
   onPartial(text: string): void;
-  /** 定稿的一段文字。一次会话可能出多段（长语音被引擎自己切开）。 */
+  /** Finalized text. One session may produce multiple segments (engine splits long audio). */
   onFinal(text: string): void;
-  /** 出错。收到之后本次会话即结束，不会再有其它回调。 */
+  /** Error. After this, the session ends; no more callbacks. */
   onError(kind: VoiceErrorKind): void;
   /**
-   * **引擎自己收工了** —— 不是调用方要求的。
+   * **The engine wrapped up on its own** — not because the caller asked.
    *
-   * 三条实现都有这一刻，而且都不罕见：鸿蒙的 VAD 判定静默 3 秒（或录满 60 秒
-   * 上限）、Web Speech 即便 continuous 也会在长静默后自行结束、Capacitor 那边
-   * 是 `start()` 的 promise resolve。以前这三处都只在内部把会话标成死的，页面
-   * 无从知道 —— 界面继续显示「正在听」，用户接着说却一个字都不出，只有再点一次
-   * 停止才回得来。
+   * All three implementations have this moment, and it's not rare: HarmonyOS's VAD
+   * decides it's done after 3s of silence (or 60s max recording), Web Speech closes
+   * even with continuous=true after long silence, Capacitor resolves the `start()`
+   * promise. Before, all three only marked the session dead internally — the page had
+   * no idea, so the UI kept showing "listening" while the user spoke and got nothing,
+   * only another tap on stop would get them out.
    *
-   * 与 onError 互斥，一次会话最多一个结局；调用方 cancel 之后不再上报。
+   * Mutually exclusive with onError; one session has at most one ending. After the
+   * caller cancels, this isn't reported.
    */
   onEnd(): void;
 }

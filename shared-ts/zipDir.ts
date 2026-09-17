@@ -1,7 +1,7 @@
 /** Read a .zip's directory — and one entry out of it — over a byte reader that
  *  only ever fetches the ranges it needs.
  *
- *  The 产出 page used to drop every `archive` artifact onto the "this format
+ *  The Artifacts page used to drop every `archive` artifact onto the "this format
  *  can't be previewed here" placeholder. Zip is the one archive format that
  *  does not have to be: it carries a *central directory* at the tail listing
  *  every member with its offset, so listing the contents costs a few KB no
@@ -20,7 +20,7 @@
  *  missing the caller gets a typed `no-inflate` error and can fall back to the
  *  export button.
  *
- *  Shared by the desktop 产出 page and the mobile one so the two show the same
+ *  Shared by the desktop Artifacts page and the mobile one so the two show the same
  *  tree for the same archive.
  */
 

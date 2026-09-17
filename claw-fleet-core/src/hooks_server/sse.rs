@@ -93,8 +93,9 @@ impl Default for SseBroadcaster {
 
 /// Upgrade an incoming HTTP request to a long-lived SSE stream and register
 /// it with the broadcaster.
-/// `cors` 是这条部署该发的跨源头(见 hooks_server::cors)。空 vec = 不开放跨源,
-/// 那时这条流只有同源页面能读 —— 同源本来就不需要 CORS 头。
+/// `cors` is the cross-origin headers this deployment should send (see hooks_server::cors).
+/// Empty vec = cross-origin is not allowed, in which case only same-origin pages can read this
+/// stream — same-origin doesn't need CORS headers anyway.
 pub fn handle_sse_upgrade(request: Request, sse: &SseBroadcaster, cors: Vec<Header>) {
     let mut response = Response::empty(200)
         .with_header(

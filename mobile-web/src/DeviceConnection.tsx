@@ -1,13 +1,16 @@
-// 一台设备的连接:建传输层、把它的回调翻译成 action、跑那几条只与这台有关的
-// 轮询。不渲染任何东西。
+// Connection for one device: set up transport layer, translate its callbacks to
+// actions, run polling loops specific to this device. Renders nothing.
 //
-// 为什么是**组件**而不是 App 里的一个循环:hook 不能在数组上循环调用(设备数一变
-// 就错位)。每台设备渲染一个 `<DeviceConnection key={id}>` 是 React 里表达「一份
-// 独立生命周期」的标准写法 —— 设备被移除时 key 消失,它的 effect 清理函数自然
-// 关掉那条 socket,不需要任何手工的销毁登记。
+// Why a **component** instead of a loop in App: hooks cannot be called in a loop
+// over an array (device count changes cause misalignment). Rendering one
+// `<DeviceConnection key={id}>` per device is the standard React pattern for
+// expressing "independent lifecycles" — when the device is removed, the key
+// vanishes and its effect cleanup function naturally closes the socket without
+// any manual teardown registration.
 //
-// 状态不留在这里:它 dispatch 到 App 的那份 `DeviceStates`(deviceRuntime.ts 的
-// 纯 reducer)。这样聚合视图能一次读到全部设备,而迁移规则又能脱离 React 单测。
+// State does not live here: it dispatches to App's `DeviceStates`
+// (deviceRuntime.ts pure reducer). This lets the aggregated view read all
+// devices at once, and lets migration rules decouple from React tests.
 
 import { useEffect, useRef } from "react";
 import type { TransportFactory } from "./App";
@@ -34,45 +37,54 @@ import type {
   TodayUsage,
 } from "./types";
 
-/** 一台设备暴露给 UI 的操作面。存进 App 的 ref 表,供「答复这张卡」「下钻这条
- *  会话」这类需要点名某一台的动作使用。 */
+/** The operations surface exposed by one device to the UI. Stored in App's ref
+ *  table for actions like "reply to this card" or "drill into this session"
+ *  that need to address a specific device. */
 export interface DeviceHandle {
   transport: FleetTransport;
-  /** 主动拉一次权威快照(前台恢复、答复之后)。 */
+  /** Actively pull a fresh authoritative snapshot (after foreground restore or answer). */
   refresh: () => Promise<void>;
 }
 
 interface Props {
   device: PairedDevice;
-  /** 会话快照缓存的命名空间。`null` = 用遗留全局键(同源形态:只有一个数据源);
-   *  `undefined` = 完全不碰缓存(mock:固定数据,读缓存会把真数据画到假界面上)。 */
+  /** Namespace for session snapshot cache. `null` = use legacy global key
+   *  (same-origin mode: single data source); `undefined` = do not touch cache
+   *  (mock: fixed data; reading cache would render real data onto fake UI). */
   storageId: string | null | undefined;
   makeTransport: TransportFactory;
   dispatch: (action: DeviceAction & { deviceId: string }) => void;
-  /** 挂载/卸载时登记与注销这台的操作面。 */
+  /** Register/unregister this device's operations surface on mount/unmount. */
   registerHandle: (deviceId: string, handle: DeviceHandle | null) => void;
-  /** 这台此刻有没有待决策卡 —— 决定对账轮询的快慢档(reconcilePlan)。 */
+  /** Whether this device has pending decision cards now — determines reconciliation
+   *  polling cadence (reconcilePlan). */
   hasPendingDecisions: boolean;
-  /** 那台桌面端在不在线 —— 两条轮询都以它为闸门。 */
+  /** Whether the desktop agent is online — gates both polling loops. */
   agentOnline: boolean;
-  /** 这台是不是当前作用域那一台。只影响问得多勤(见 connectionPolicy.ts)。 */
+  /** Whether this device is the current-scope device. Affects polling frequency
+   *  only (see connectionPolicy.ts). */
   isActive: boolean;
-  /** 这台在设备清单里的序号,用来错峰连接。 */
+  /** This device's index in the device list, used for staggered connection startup. */
   index: number;
-  /** 页面可见性。隐藏够久就把连接放掉 —— 后台通道是推送,不是这条 socket。 */
+  /** Page visibility. Hidden long enough drops the connection — the background
+   *  channel is push notifications, not this socket. */
   visibility: VisibilityState;
-  /** 这台此刻连上中转了没有。推送订阅是直接写 socket 的(无队列无重传),所以
-   *  必须等它为真才注册 —— 否则那一帧掉在地上,relay 那边永远不会有这条订阅。 */
+  /** Whether this device is currently connected to the relay. Push subscription
+   *  writes directly to the socket (no queue, no retransmit), so we must wait
+   *  for this to be true before registering — otherwise that frame drops and the
+   *  relay never gets the subscription. */
   connected: boolean;
-  /** 浏览器/系统层面的通知权限是否已授予(整部手机一份)。 */
+  /** Whether notification permission has been granted at the browser/system level
+   *  (per phone). */
   pushGranted: boolean;
-  /** 用户是否把**这一台**的通知关掉了。 */
+  /** Whether the user has muted notifications for **this specific device**. */
   pushMuted: boolean;
-  /** 那台主机自报了身份(主机名 + 平台)。App 拿它给这台设备起个认得出来的名字。 */
+  /** The host has reported its identity (hostname + platform). App uses it to
+   *  give this device a recognizable name. */
   onHostIdentity: (deviceId: string, identity: HostIdentity) => void;
 }
 
-/** `pending_snapshot` 的六类请求摊平成一串卡。 */
+/** Flatten six request kinds from `pending_snapshot` into a sequence of cards. */
 function flattenSnapshot(snap: PendingSnapshot, now: number): PendingDecision[] {
   const kinds: Array<[DecisionKind, DecisionRequest[] | undefined]> = [
     ["guard", snap.guard],
@@ -109,18 +121,21 @@ export function DeviceConnection({
 }: Props) {
   const deviceId = device.id;
   const clientRef = useRef<FleetTransport | null>(null);
-  // 轮询 effect 里读的是当下的 dispatch/registerHandle，而它们来自 App 的
-  // useCallback，本来就稳定；放进 ref 只是让下面的 effect 依赖表保持最小，
-  // 免得一次无关的重渲把 socket 拆掉重连。
+  // The polling effect reads the current dispatch/registerHandle, which come from
+  // App's useCallback and are already stable. Using a ref keeps the effect
+  // dependency array minimal to prevent unrelated re-renders from tearing down
+  // and reconnecting the socket.
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
 
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   refreshRef.current = async () => {
     const client = clientRef.current;
-    // 不再要求 `isAuthed`。它说的是「那条流/socket 此刻是开的」,而这次请求走的是
-    // 另一条通道 —— 同源形态下是普通 fetch,流断了主机往往仍然答得动。拿它当闸门
-    // 会让唯一一条能捞回漏掉卡片的路,恰好在最需要它的时候关上(见 reconcilePlan)。
+    // No longer require `isAuthed`. It means "the stream/socket is open right now",
+    // but this request uses a different channel — in same-origin mode it's a
+    // plain fetch; the host often responds even if the stream is down. Using it
+    // as a gate would close the only path to recover missed cards precisely when
+    // we need it most (see reconcilePlan).
     if (!client) return;
     try {
       const snap = await client.request<PendingSnapshot>("pending_snapshot");
@@ -131,16 +146,18 @@ export function DeviceConnection({
         agent: snap.agent,
         now: Date.now(),
       });
-      // 主机真答了这一次,那它就是在线的。反过来不成立:单次请求失败不足以判死,
-      // 「离线」这个信号仍然由流/socket 自己拥有。
+      // The host answered this request, so it is online. The reverse is not true:
+      // a single request failure is not enough to mark it dead. The "offline"
+      // signal is still owned by the stream/socket itself.
       dispatchRef.current({ deviceId, type: "agentOnline", online: true });
     } catch {
-      // 桌面端离线 —— 实时事件或下一轮探测之后会补上
+      // Desktop offline — real-time events or next polling round will catch up
     }
   };
 
-  // 传输层的生命周期。依赖里除了「这台设备是哪一台、连哪个 relay」,只多一个
-  // 可见性策略算出来的开关 —— 其余东西变了都不该把 socket 拆掉重连。
+  // Transport layer lifecycle. Dependency array includes only "which device,
+  // which relay" plus the visibility-policy computed gate — everything else
+  // changing should not tear down and reconnect the socket.
   const connectAllowed = shouldConnect(visibility, Date.now());
   useEffect(() => {
     if (!connectAllowed) return;
@@ -161,8 +178,9 @@ export function DeviceConnection({
       onDecisionResolved: (_kind, id) => d({ type: "decisionResolved", id }),
       onSessions: (list: SessionInfo[]) => {
         d({ type: "sessions", list });
-        // 落盘那一份是给下次冷启动看的第一眼。全量与增量帧到这里时都已经并好
-        // (见 relay.ts),所以缓存里始终是完整快照。
+        // The persisted copy is what cold startup sees first. Both full and
+        // incremental frames have already been merged by this point
+        // (see relay.ts), so the cache always contains a complete snapshot.
         if (storageId !== undefined) saveCachedSessions(storageId, list);
       },
       onSessionsKind: (kind) => d({ type: "sessionsKind", kind }),
@@ -172,11 +190,12 @@ export function DeviceConnection({
     });
     clientRef.current = client;
     d({ type: "attach" });
-    // 错峰:N 条连接同时握手会在网络恢复那一刻挤成一堆。
+    // Stagger connections: N simultaneous handshakes bunch up when network recovers.
     const startAt = window.setTimeout(() => client.connect(), connectDelayMs(index));
     registerHandle(deviceId, { transport: client, refresh: () => refreshRef.current() });
-    // 手机浏览器可能永远不跑 React 的清理函数(直接关标签),所以 pagehide 也说
-    // 一声「我走了」,让桌面端不必等超时才把这台摘掉。
+    // Mobile browsers may never run React cleanup (user closes tab directly), so
+    // pagehide also signals "I'm leaving" to avoid making the desktop wait for
+    // timeout to remove this device.
     const onPageHide = () => client.sayGoodbye();
     window.addEventListener("pagehide", onPageHide);
     return () => {
@@ -186,9 +205,10 @@ export function DeviceConnection({
       clientRef.current = null;
       client.close();
     };
-    // 依赖里放 `device` 整体:换密钥 / 换 relay / 换 baseUrl / 换 token 都该重连,
-    // 而 devices.ts 的每一次修改都产出新对象(纯函数层),所以引用比较正好等价于
-    // 「这台设备的连接参数变了没有」。
+    // Include `device` in full in dependencies: any change to key, relay, baseUrl,
+    // or token should reconnect. devices.ts produces a new object on every edit
+    // (pure function layer), so reference equality precisely means "this device's
+    // connection params changed".
   }, [
     deviceId,
     storageId,
@@ -199,7 +219,8 @@ export function DeviceConnection({
     index,
   ]);
 
-  // 冷启动先画缓存里的任务列表,免得 socket 还在握手时页面一片空白。
+  // Cold start renders cached task list first to avoid blank page while socket
+  // is still handshaking.
   useEffect(() => {
     if (storageId === undefined) return;
     let cancelled = false;
@@ -212,12 +233,13 @@ export function DeviceConnection({
     };
   }, [deviceId, storageId]);
 
-  // 这台主机叫什么。问一次就够 —— 主机名不会在一次会话里变,而它的用途只是给
-  // 设备簿里那条记录起个名字(devices.ts::applyHostIdentity)。
+  // What is the host called. One request is enough — the hostname does not
+  // change during a session, and it only serves to name this device record in
+  // the device list (devices.ts::applyHostIdentity).
   //
-  // 闸门是 `agentOnline` 而不是 `connected`:连上中转只说明这条 socket 通了,答这
-  // 个方法的是桌面端。老桌面端不认这个方法,那就一直叫「设备 N」—— 一个名字不好看
-  // 不值得在界面上报错。
+  // Gate is `agentOnline` not `connected`: reaching the relay only means this
+  // socket works; the desktop answers the method. Old desktops don't know this
+  // method, so it stays "Device N" — a cosmetic name not worth erroring in UI.
   const identityAskedRef = useRef(false);
   useEffect(() => {
     if (!agentOnline || identityAskedRef.current) return;
@@ -231,7 +253,8 @@ export function DeviceConnection({
         if (!cancelled && identity) onHostIdentity(deviceId, identity);
       })
       .catch(() => {
-        // 老桌面端没有这个方法 —— 下次挂载再试,不重试也不报错
+        // Old desktop doesn't have this method — try again on next mount, no retry
+        // or error needed
         identityAskedRef.current = false;
       });
     return () => {
@@ -239,7 +262,8 @@ export function DeviceConnection({
     };
   }, [agentOnline, deviceId, onHostIdentity]);
 
-  // 今日花费。桌面端在线时才轮询;数字由桌面端算好,手机只负责显示。
+  // Today's usage. Poll only when desktop is online; desktop computes the number,
+  // phone just displays it.
   useEffect(() => {
     if (!agentOnline) return;
     const intervalMs = usagePollMs(isActive);
@@ -247,14 +271,14 @@ export function DeviceConnection({
     let timer: number | undefined;
     const poll = async () => {
       const client = clientRef.current;
-      // 页面不可见时跳过这一轮(但仍排下一次):后台问一个只用来显示的数字,
-      // 纯属白烧电与流量。
+      // Skip this round when page is hidden (but still schedule next): querying
+      // the display-only number in the background is just wasted power and bandwidth.
       if (client?.isAuthed && document.visibilityState === "visible") {
         try {
           const usage = await client.request<TodayUsage>("today_usage");
           if (!cancelled) dispatchRef.current({ deviceId, type: "usage", usage });
         } catch {
-          /* 瞬时失败 —— 保留上一次的值 */
+          /* Transient failure — keep previous value */
         }
       }
       if (!cancelled) timer = window.setTimeout(poll, intervalMs);
@@ -266,10 +290,13 @@ export function DeviceConnection({
     };
   }, [agentOnline, deviceId, isActive]);
 
-  // 待决策卡的前台兜底对账。decision_created / decision_resolved 都是无 ack 无
-  // 重传的广播,弱网掉一帧就会漏一张卡;(重)连时那一次 refresh 也可能超时被吞。
-  // 这条循环是耐用的兜底:有卡时快(3s)、闲时慢(15s)、看着离线时更慢(30s),节奏
-  // 由 reconcilePlan 决定 —— 离线那一档正是老板那台服务器上「只能刷新页面」的解药。
+  // Foreground fallback reconciliation for pending decision cards.
+  // decision_created/decision_resolved are unacked, unreliable broadcasts; a
+  // dropped frame on weak networks loses a card; refresh on (re)connect may
+  // timeout. This loop is the durable fallback: fast (3s) when cards are
+  // pending, slow (15s) when idle, slower (30s) when offline. Cadence is
+  // determined by reconcilePlan — the offline tier is the antidote to "refresh
+  // the page" on a desktop-as-server scenario.
   useEffect(() => {
     const plan = reconcilePlan(agentOnline, hasPendingDecisions);
     if (!plan.poll) return;
@@ -286,27 +313,32 @@ export function DeviceConnection({
     };
   }, [agentOnline, hasPendingDecisions]);
 
-  // 推送订阅按**设备**登记:relay 的订阅是每个 channel 一份文件,所以一部手机
-  // 想收到 N 台的通知,就得在 N 个 channel 下各注册一次(同一个浏览器 endpoint)。
+  // Push subscription registered **per device**: relay subscriptions are per
+  // channel file, so to receive from N devices one phone must register in N
+  // channels (same browser endpoint).
   //
-  // `connected` 是依赖而不是顺手:pushSubscribe 直接写 socket,socket 没 OPEN 时
-  // 返回 false 且不排队不重传。历史上这个 effect 只依赖 [push, optedOut],注册
-  // 因此总在握手之前发生 —— 手机报告自己已订阅,而 relay 的订阅库里什么都没有。
+  // `connected` is a dependency, not incidental: pushSubscribe writes directly
+  // to socket; returns false and doesn't queue/retry if socket is not OPEN.
+  // Historically this effect only depended on [push, optedOut], so registration
+  // happened before handshake — phone reported itself subscribed, relay's
+  // subscription DB was empty.
   //
-  // enablePush 是幂等的:已有订阅就复用,权限已授予时 requestPermission 直接返回。
+  // enablePush is idempotent: reuse existing subscription, requestPermission
+  // returns immediately when already granted.
   useEffect(() => {
     if (!SUPPORTS_PUSH) return;
     if (!connected || !pushGranted || pushMuted) return;
-    // HTTP 直连那条传输层没有推送通道(pushSubscribe 恒返回 false),订阅也就无处
-    // 登记 —— 别去问 VAPID 公钥,那个请求只会白打一次。
+    // HTTP direct-connect transport has no push channel (pushSubscribe always
+    // returns false), so subscription has nowhere to register — don't ask for
+    // VAPID public key, that request only wastes a trip.
     if (device.kind !== "relay") return;
     const client = clientRef.current;
     if (!client) return;
     void enablePush(client, device.relayBase, deviceId);
   }, [connected, pushGranted, pushMuted, deviceId, device]);
 
-  // 回到前台时补拉一次:手机浏览器会冻结后台标签的 socket,重连虽然会发生,但
-  // 那一刻的快照可能已经过期。
+  // Refresh when returning to foreground: mobile browsers freeze background tab
+  // sockets; reconnect happens but the snapshot at that moment may already be stale.
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") void refreshRef.current();

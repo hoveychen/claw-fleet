@@ -1,4 +1,4 @@
-//! `fleet artifact` — store and browse finished deliverables (the 产出 page).
+//! `fleet artifact` — store and browse finished deliverables (the deliverables page).
 //!
 //! The wiki's CLI sibling, for the half it cannot hold: `WikiDoc.kind` is
 //! html/htmlDir/markdown, so a `.xlsx` published there lists fine and opens

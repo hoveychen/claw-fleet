@@ -3,10 +3,10 @@
 //!
 //! This is the v3 decision-card axis. Every `fleet__ask` card carries one
 //! always-present first-class button that ends the task: rendered as
-//! **结束任务 / Finish task** when the agent flagged `taskComplete`, and as
-//! **放弃任务 / Abandon task** when it did not. Clicking it resolves the card
+//! **End Task** when the agent flagged `taskComplete`, and as
+//! **Abandon Task** when it did not. Clicking it resolves the card
 //! *and* stamps the session with the outcome recorded here. Before v3 the agent
-//! had to hand-roll a "任务结束" option into `options`, which produced no
+//! had to hand-roll a "task complete" option into `options`, which produced no
 //! machine-readable terminal state at all — the whole point of this module is
 //! that the retrospective (`task_review`) now knows which traces ended well.
 //!
@@ -43,9 +43,9 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum TaskOutcome {
-    /// The user pressed 结束任务 — the work is done and it succeeded.
+    /// The user pressed End Task — the work is done and it succeeded.
     Completed,
-    /// The user pressed 放弃任务 — the task was given up on, unfinished.
+    /// The user pressed Abandon Task — the task was given up on, unfinished.
     Abandoned,
 }
 

@@ -632,11 +632,11 @@ function PrdModeCard({
   );
 }
 
-/** Purely informational — the sidebar's two modes and what each one holds.
+/** Purely informational—the sidebar's two modes and what each one holds.
  *  Unlike every other card here it has no toggle: the split isn't optional, and
- *  an upgrading user who knew where 任务 or 知识库 used to sit needs to be told
- *  they are now behind the 工作 tab rather than discovering it by clicking
- *  around. That's also why "nav_modes" is in ONBOARDING_FEATURES — it makes
+ *  an upgrading user who knew where Tasks or Wiki used to sit needs to be told
+ *  they are now behind the Work tab rather than discovering it by clicking
+ *  around. That's also why "nav_modes" is in ONBOARDING_FEATURES—it makes
  *  this card surface once in What's New for existing installs. */
 function NavModesCard() {
   const { t } = useTranslation();

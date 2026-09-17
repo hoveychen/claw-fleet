@@ -1558,11 +1558,11 @@ export function FleetAskCard({
     () => submitFleetAsk(decision.id),
     [submitFleetAsk, decision.id],
   );
-  // v3 terminal button. It is always present — the agent no longer hand-rolls a
-  // "任务结束" option — and `taskComplete` only decides which verdict it carries:
-  // the agent thinks the work is done → 结束任务 (session closes as a success),
-  // otherwise → 放弃任务 (closes as unfinished). Either way the card resolves as
-  // `cancelled` for the agent, which is what tells it to stop.
+  // v3 terminal button. It is always present—the agent no longer hand-rolls a
+  // "Task Done" option—and `taskComplete` only decides which verdict it carries:
+  // the agent thinks the work is done → "End Task" (session closes as a success),
+  // otherwise → "Abandon Task" (closes as unfinished). Either way the card
+  // resolves as `cancelled` for the agent, which is what tells it to stop.
   const taskComplete = decision.request.taskComplete === true;
   const handleTerminate = useCallback(
     () => cancelFleetAsk(decision.id, taskComplete ? "completed" : "abandoned"),

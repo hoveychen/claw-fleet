@@ -9,10 +9,11 @@
 //! one learned from a task that was abandoned — the single most informative bit
 //! about a trace — and it fires up to 24 hours after the fact.
 //!
-//! The v3 decision card supplies the missing bit: [`TaskOutcome`] is stamped the
-//! moment the user presses 结束任务 / 放弃任务. So the review runs *there*, on
-//! that one task, knowing how it ended. The daily report then aggregates these
-//! finished reviews instead of re-deriving everything from raw transcripts.
+//! The v3 decision card supplies the missing bit: [`TaskOutcome`] is stamped
+//! the moment the user presses "end task" or "abandon task". So the review runs
+//! *there*, on that one task, knowing how it ended. The daily report then
+//! aggregates these finished reviews instead of re-deriving everything from raw
+//! transcripts.
 //!
 //! ## What counts as one task
 //!

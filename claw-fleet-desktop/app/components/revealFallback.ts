@@ -1,15 +1,15 @@
 /**
  * What to do when the file tree could not reveal a path.
  *
- * Clicking a path in agent prose used to end in silence: the 仓库 page opened,
+ * Clicking a path in agent prose used to end in silence: the Files page opened,
  * the tree failed to expand, and nothing said why. Two things go wrong in
  * practice, and they need opposite answers —
  *
  *   • The agent named a path relative to a *sub*directory (`public/app-icon.png`
  *     meaning `claw-fleet-desktop/public/app-icon.png`). The chip joined it onto
  *     the workspace root, so the literal path does not exist. → find the real one.
- *   • The path is right but the tree won't show it — gitignored with 「显示忽略
- *     文件」off. → preview the file on its own instead.
+ *   • The path is right but the tree won't show it — gitignored with "show ignored files"
+ *     off. → preview the file on its own instead.
  *
  * The backend's suffix search tells the two apart, and this decides which.
  * Kept pure and separate from FilesView so the choice is unit-testable without

@@ -74,7 +74,7 @@ pub(crate) async fn get_messages(
 /// it can't stall paints / other IPC (a source of decision-panel submit jank);
 /// off the async workers so it can't be *starved by* them — this is the call
 /// that sat behind 23 other blocked bodies during the 2026-09-10 cold start and
-/// left task detail on 「加载中…」 for ~47s.
+/// left task detail on "Loading..." for ~47s.
 #[tauri::command]
 pub(crate) async fn get_messages_tail(
     jsonl_path: String,
@@ -90,12 +90,12 @@ fn get_messages_tail_inner(
     tail: usize,
     backend: &std::sync::Arc<local_backend::LocalBackend>,
 ) -> Result<Vec<Value>, String> {
-    // Probed: this is the call behind 「对话」Tab, and when it goes slow the log
+    // Probed: this is the call behind the Chat Tab, and when it goes slow the log
     // has to say whether the time went to the backend or to queueing for
     // `AppState::backend`. See `cmd_probe`.
     //
     // dsh:// additionally logs unconditionally at entry AND completion. The
-    // slow-only probe is blind to the two states the eternal 「加载中…」 hunt
+    // slow-only probe is blind to the two states the eternal "Loading..." hunt
     // must distinguish: a call that never arrived and a call that finished
     // under the 1s threshold both leave zero lines. These entry/exit lines are
     // the missing half of the split — the frontend logs the same request id on

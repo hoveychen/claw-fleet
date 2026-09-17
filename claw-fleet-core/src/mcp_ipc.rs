@@ -41,11 +41,11 @@ pub struct FleetAskRequest {
     pub parked: bool,
     /// The agent's own verdict on whether the task is finished, as of raising
     /// this card. It does NOT add an option — it decides how Fleet renders the
-    /// card's always-present terminal button: `true` → 「结束任务 / Finish task」
-    /// (ending here is a success), `false` → 「放弃任务 / Abandon task」 (ending
+    /// card's always-present terminal button: `true` → "Finish task"
+    /// (ending here is a success), `false` → "Abandon task" (ending
     /// here means giving up unfinished).
     ///
-    /// Before v3 the agent hand-rolled a "任务结束" entry into `options`, which
+    /// Before v3 the agent hand-rolled a "task finished" entry into `options`, which
     /// left Fleet with no machine-readable terminal state; this field is what
     /// replaced that convention. The user's click is still the authority — the
     /// flag only picks the wording and the default verdict.
@@ -322,9 +322,9 @@ pub struct FleetAskResponse {
     /// Set when the user resolved the card with its terminal button rather than
     /// by answering. Always accompanied by `cancelled: true` — from the agent's
     /// side both mean "stop, no answer is coming" — but the outcome tells it
-    /// *why*, so 结束任务 and 放弃任务 produce different tool text, and lets
-    /// Fleet stamp `task_outcome` for the session. `None` on a plain dismissal
-    /// (the pre-v3 Cancel behaviour), which records no terminal state.
+    /// *why*, so pressing "Finish task" vs. "Abandon task" produce different tool
+    /// text, and lets Fleet stamp `task_outcome` for the session. `None` on a
+    /// plain dismissal (the pre-v3 Cancel behaviour), which records no terminal state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_outcome: Option<crate::task_outcome::TaskOutcome>,
 }
@@ -424,15 +424,15 @@ fn terminal_context(id: &str) -> Option<(String, bool)> {
 }
 
 /// Record the task's terminal state when the card was resolved with its
-/// terminal button (结束任务 / 放弃任务). Also sets the manual review mark to
-/// `Done`: reaching a terminal state means the human is finished with this
-/// session either way, so leaving it in the "needs review" bucket would just be
-/// a stale chore. No-op for an ordinary answer or a plain dismissal.
+/// terminal button ("Finish task" or "Abandon task"). Also sets the manual
+/// review mark to `Done`: reaching a terminal state means the human is finished
+/// with this session either way, so leaving it in the "needs review" bucket
+/// would just be a stale chore. No-op for an ordinary answer or a plain dismissal.
 ///
 /// **The whole handoff chain is stamped, not just the answering hop.** A relay
 /// chain is one task carried by N sessions (`fleet handoff`), so ending it on
 /// the last hop has to close the earlier ones too — otherwise every predecessor
-/// keeps a row in the desktop's 待办 bucket forever (`markBucket` in
+/// keeps a row in the desktop's pending bucket forever (`markBucket` in
 /// `HistoryView.tsx` calls anything without `userMark == done` pending), and a
 /// long chain leaves N-1 of them behind. Only the hop that actually raised the
 /// card carries the agent's `taskComplete` claim; predecessors record `false`,
@@ -1212,7 +1212,7 @@ mod tests {
         req.task_complete = true;
         write_request(&req).unwrap();
 
-        // …and the user agreed, pressing 结束任务.
+        // …and the user agreed, pressing "Finish task".
         deliver_response(&FleetAskResponse {
             id: "card-term-1".into(),
             answers: BTreeMap::new(),
@@ -1234,7 +1234,7 @@ mod tests {
 
     /// A handoff chain is one task carried by several sessions, so ending it on
     /// the last hop has to close the earlier hops too — otherwise every
-    /// predecessor keeps a row in the desktop's 待办 bucket forever.
+    /// predecessor keeps a row in the desktop's pending bucket forever.
     #[test]
     fn terminal_outcome_stamps_the_whole_handoff_chain() {
         let home = TmpHome::new("terminal-chain");
@@ -1254,7 +1254,7 @@ mod tests {
         )
         .unwrap();
 
-        // The user presses 结束任务 on the last hop's card.
+        // The user presses "Finish task" on the last hop's card.
         stamp_terminal_chain("hop-3", crate::task_outcome::TaskOutcome::Completed, "card-c", true);
 
         for hop in ["hop-1", "hop-2", "hop-3"] {

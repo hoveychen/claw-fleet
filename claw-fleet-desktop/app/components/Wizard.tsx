@@ -10,8 +10,9 @@ interface Step {
   placement: "right" | "top" | "bottom";
 }
 
-// 方案B — 单步直达:onboarding 收尾直接把用户带到「任务」页并高亮「新会话」
-// 按钮,让引导落在真正能发起会话的动作上,而不是在侧边栏里空转介绍功能。
+// Option B—single-step shortcut: onboarding end goes straight to the Tasks page
+// and highlights the "New Session" button, landing guidance on an action that
+// truly starts a session rather than idling in the sidebar describing features.
 const STEPS: Step[] = [
   {
     target: "new-session-btn",
@@ -33,8 +34,8 @@ export function Wizard({ onDone }: { onDone: () => void }) {
 
   const current = STEPS[step];
 
-  // The 新会话 button only exists on the 任务 (history) page, so switch there
-  // before we try to spotlight it.
+  // The "New Session" button only exists on the Tasks (history) page, so switch
+  // there before we try to spotlight it.
   useEffect(() => {
     useUIStore.getState().setViewMode("history");
   }, []);

@@ -301,7 +301,7 @@ mod tests {
     /// The deadline is the whole instruction. Measured on 2026-09-07, the
     /// original "once the conversation has a stable topic" wording got 3 of 5
     /// real Fleet sessions titled: the long ones complied, and the short ones —
-    /// where "stable topic" never felt reached — stayed 「（无标题）」 forever.
+    /// where "stable topic" never felt reached — stayed "(untitled)" forever.
     /// Both locales must name a point in time by which the call has to have
     /// happened, and must not walk it back to waiting for a settled topic.
     #[test]

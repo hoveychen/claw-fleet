@@ -244,7 +244,7 @@ pub fn request_of<T: for<'de> Deserialize<'de>>(id: &str) -> Option<T> {
 ///     unioned, the SSE broadcaster did not, so a timed-out card vanished from
 ///     the browser and the phone the moment it parked.
 ///  2. Cards that *just* became parked and are already on screen are announced
-///     once, so the card can badge itself 「已超时」 instead of sitting there
+///     once, so the card can badge itself "timed out" instead of sitting there
 ///     looking like it is still counting down. `known` alone cannot carry that —
 ///     it only tracks existence.
 ///
@@ -667,10 +667,11 @@ where
 /// the moment it parked ([`crate::mcp_server`]'s `persist_fleet_ask_history` and
 /// the hook CLIs do the same for their channels). That record is what the
 /// transcript's inline card and the history view read, so without this second,
-/// superseding record an answered parked card reads 「已超时」 with every option
-/// unpicked *forever*: the boss's reply reaches the agent (as the resume prompt)
-/// but is nowhere on the card they answered. Same for 结束任务 / 放弃任务, whose
-/// verdict would otherwise be lost behind the earlier `timeout`.
+/// superseding record an answered parked card reads "timed out" with every
+/// option unpicked *forever*: the boss's reply reaches the agent (as the resume
+/// prompt) but is nowhere on the card they answered. Same for "end task" /
+/// "abandon task", whose verdict would otherwise be lost behind the earlier
+/// `timeout`.
 ///
 /// Duplicate ids are collapsed on the read side
 /// ([`crate::decision_history::list_session_records`] keeps the last), so
@@ -806,7 +807,8 @@ fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
 
 /// `answers` is a flat map on every ask-shaped channel: question text → picked
 /// option label, and form-field name → value, in the same map. Pair each entry
-/// back with its question so the agent sees "问 X / 答 Y" rather than a bare map.
+/// back with its question so the agent sees "ask X / answer Y" rather than a
+/// bare map.
 fn render_question_answers(out: &mut String, request: &Value, response: &Value) {
     let answers: BTreeMap<String, String> = response
         .get("answers")
@@ -1282,7 +1284,7 @@ mod tests {
         assert!(answer("nope", &json!({})).is_err());
     }
 
-    /// The card the boss finally answers must stop reading 「已超时」.
+    /// The card the boss finally answers must stop reading "timed out".
     ///
     /// The producer records the card as `timeout` with no answers the moment it
     /// parks — that record is what the transcript's inline card and the history
@@ -1337,8 +1339,8 @@ mod tests {
         );
     }
 
-    /// 结束任务 / 放弃任务 on a parked card is a verdict, not a shrug: it has to
-    /// land as `task-abandoned`, not stay behind the earlier `timeout`.
+    /// "End task" / "abandon task" on a parked card is a verdict, not a shrug: it
+    /// has to land as `task-abandoned`, not stay behind the earlier `timeout`.
     #[test]
     fn a_terminal_press_on_a_parked_card_records_its_verdict() {
         let _home = TmpHome::new("history-terminal");

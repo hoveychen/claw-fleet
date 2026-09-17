@@ -11,10 +11,10 @@ import styles from "./SimpleNavigation.module.css";
  * inline in the task's own dialogue instead (`SessionDetail`), which only
  * renders the ones belonging to the task you have open. So a card raised on any
  * other task used to have no surface at all: you heard the chime and there was
- * nothing on screen anywhere, and the only clue was the 「待决策」chip on that
- * task's row, which you had to go looking for. This pill says how many are
+ * nothing on screen anywhere, and the only clue was the pending-decision chip on
+ * that task's row, which you had to go looking for. This pill says how many are
  * waiting no matter which page you are on, and clicking it opens the oldest
- * one's task (`requestOpenTask` hops to 任务 and selects the tab), where the
+ * one's task (`requestOpenTask` hops to tasks and selects the tab), where the
  * card is rendered.
  */
 function PendingDecisionsPill() {

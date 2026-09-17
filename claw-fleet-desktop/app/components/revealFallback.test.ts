@@ -16,7 +16,7 @@ describe("planRevealFallback", () => {
   });
 
   // The path was right all along — the tree just filters it out (gitignored,
-  // 「显示忽略文件」 off). Retrying it would fail exactly the same way.
+  // show hidden files off). Retrying it would fail exactly the same way.
   it("previews out-of-tree when the tried path is itself a hit", () => {
     expect(planRevealFallback("dist/bundle.js", ["dist/bundle.js"])).toEqual({
       kind: "preview",

@@ -1,4 +1,4 @@
-// End-to-end encryption for the mobile relay (方案A). The peer of
+// End-to-end encryption for the mobile relay. The peer of
 // claw-fleet-core/src/relay_crypto.rs — every parameter here must match that
 // module byte-for-byte or pairing silently fails. Implemented on the browser's
 // native SubtleCrypto so there is zero JS crypto dependency.

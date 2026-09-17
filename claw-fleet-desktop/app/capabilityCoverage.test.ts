@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest";
  * Every Tauri plugin API a window can reach must be granted by that window's
  * capability — checked per window, against the real ACL manifest.
  *
- * This exists because the failure mode is silent. 「用系统应用打开」on the 产出
- * page did nothing on macOS for as long as it shipped: `openPath` needs
+ * This exists because the failure mode is silent. "Open with system app" on the
+ * artifacts page did nothing on macOS for as long as it shipped: `openPath` needs
  * `opener:allow-open-path`, `opener:default` does not include it (it is
  * `allow-open-url` + `allow-reveal-item-in-dir` + `allow-default-urls`), so the
  * ACL rejected the command and the unawaited promise swallowed the rejection.

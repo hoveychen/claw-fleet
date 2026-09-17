@@ -35,7 +35,7 @@ pub struct Step {
 pub struct Settings {
     /// Locale for generated guidance ("en", "zh", …).
     pub locale: String,
-    /// What agents call the user. Empty renders the locale-correct Boss/老板.
+    /// What agents call the user. Empty renders the locale-correct "Boss".
     pub title: String,
     /// Default Claude Code model. Empty leaves the CLI's own default alone.
     pub model: String,

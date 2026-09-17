@@ -10,7 +10,7 @@ function pt(ts: number, fiveHour: number | null): UsageHistoryPoint {
 
 describe("linePath", () => {
   it("maps time to x and 0–1 occupancy to an inverted y", () => {
-    // 窗口起点 0% → 左下角；窗口终点 100% → 右上角。
+    // Window start at 0% → bottom-left; window end at 100% → top-right.
     const path = linePath([pt(0, 0), pt(1000, 1)], (p) => p.fiveHour, BOX);
     expect(path).toBe("M0,50L100,0");
   });
@@ -41,7 +41,8 @@ describe("linePath", () => {
   });
 
   it("accepts codex-shaped points with a /100 pick (0–100 ints → 0–1)", () => {
-    // codex 百分比是 0–100 整数：0% → 左下角，100% → 右上角，与 Claude 同一几何。
+    // Codex percentages are 0–100 integers: 0% → bottom-left, 100% → top-right,
+    // same geometry as Claude.
     const cx = (ts: number, primaryPct: number | null): CodexUsageHistoryPoint => ({
       ts,
       primaryPct,

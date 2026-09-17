@@ -1,5 +1,5 @@
 /**
- * Poster frames for the two formats the 产出 grid is mostly made of and had no
+ * Poster frames for the two formats the Artifacts grid is mostly made of and had no
  * thumbnail for: a video's first real frame and a PDF's first page.
  *
  * Sibling of `officeRender` rather than part of it — the Office three share a

@@ -1,33 +1,39 @@
-// 每份 pending_snapshot 是哪个 agent 回的 —— 手机端自留的诊断台账。
+// Which agent answered each pending_snapshot — a diagnostic ledger kept on the phone.
 //
-// relay 把客户端的每个请求广播给频道里**所有** agent（Channel.agents 是个 map），
-// 手机采信最先到的那份回复。所以桌面端之外只要冒出第二个 agent，它就能替桌面端
-// 作答；如果它看不到本机的 ~/.fleet（例如跑在被重定向的 FLEET_HOME 下），回的就是
-// 一份空列表，而快照在客户端是权威的整表覆盖 —— 卡片因此被抹掉。
-// decisionReconcile.ts 负责当场拦下这种空快照；这里负责把「谁来过」记下来，
-// 好让下次复现时在「更多」页一眼看到李鬼的 host/pid/home，不用再翻服务端日志。
+// The relay broadcasts each client request to **all** agents in the channel (Channel
+// .agents is a map), and the phone trusts the first reply. So a second agent appearing
+// anywhere outside the desktop can answer for it; if it can't see ~/.fleet on this
+// machine (e.g., running under a redirected FLEET_HOME), it returns an empty list, and
+// the snapshot is an authoritative full table replacement on the client — cards vanish.
+// decisionReconcile.ts intercepts these empty snapshots on the spot; this keeps a
+// record of "who showed up" so the next time it repeats, we can see the impostor's
+// host/pid/home at a glance in the "More" page, without digging server logs.
 import type { AgentFingerprint } from "./types";
 
-/** 台账最多留几条来源。正常只有 1 条（桌面端），多出来的就是要查的。 */
+/** How many sources the ledger keeps at most. Normally just 1 (desktop), extras are
+ *  what to investigate. */
 export const MAX_SNAPSHOT_SOURCES = 8;
 
-/** 一条来源最多记几个 pid。够看出「重启过」就行，不必留全部历史。 */
+/** How many PIDs per source. Enough to see "it restarted", no need for full history. */
 export const MAX_SOURCE_PIDS = 8;
 
 export interface SnapshotSource {
-  /** agentKeyOf() 的结果；`undefined` 表示对方没带指纹（老桌面端）。 */
+  /** Result of agentKeyOf(); `undefined` means the other side had no fingerprint
+   *  (old desktop). */
   key?: string;
-  /** 最近一次回快照的那个进程的指纹（pid 跟到最新）。 */
+  /** The fingerprint of the process that most recently returned a snapshot (pid
+   *  updated to latest). */
   agent?: AgentFingerprint;
-  /** 这个来源用过的 pid，按首次出现排序。长度 > 1 就是它重启过。 */
+  /** PIDs this source has used, in order of first appearance. Length > 1 means it
+   *  restarted. */
   pids: number[];
   firstAt: number;
   lastAt: number;
-  /** 这个来源一共回了多少份快照。 */
+  /** Total snapshots returned by this source. */
   snapshots: number;
-  /** 其中有多少份空快照因为来源可疑被丢掉了。 */
+  /** How many empty snapshots were dropped because this source looked suspicious. */
   ignored: number;
-  /** 最近一次是否被当作主 agent（卡片的真实来源）。 */
+  /** Was the most recent one trusted as the primary agent (real source of cards). */
   trusted: boolean;
 }
 
@@ -39,14 +45,16 @@ export interface SnapshotSourceEvent {
   ignored: boolean;
 }
 
-/** 追加一个没见过的 pid，保持首次出现的顺序；满了就丢最早的那个。 */
+/** Append an unseen PID, preserving order of first appearance; when full, drop the
+ *  oldest. */
 function withPid(pids: number[], pid: number | undefined): number[] {
   if (pid === undefined || pids.includes(pid)) return pids;
   const next = [...pids, pid];
   return next.length > MAX_SOURCE_PIDS ? next.slice(next.length - MAX_SOURCE_PIDS) : next;
 }
 
-/** 纯函数：把一次快照到达并入台账，返回新数组（不改入参）。 */
+/** Pure function: merge a snapshot arrival into the ledger, return new array (don't
+ *  mutate input). */
 export function recordSnapshotSource(
   sources: SnapshotSource[],
   ev: SnapshotSourceEvent,
@@ -76,7 +84,8 @@ export function recordSnapshotSource(
       trusted: ev.trusted,
     });
   }
-  // 超出上限时丢最久没动静的那条 —— 当前活跃的来源永远留得住。
+  // When over limit, drop the one that's been silent longest — active sources always
+  // stick around.
   if (next.length > MAX_SNAPSHOT_SOURCES) {
     next.sort((a, b) => b.lastAt - a.lastAt);
     return next.slice(0, MAX_SNAPSHOT_SOURCES);

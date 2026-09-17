@@ -419,7 +419,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     invoke<HookSetupPlan>("get_hooks_setup_plan").then((plan) => {
       setHooksPlan(plan);
       // Same self-heal the app shell runs on every start (App.tsx) — kept here
-      // too because opening 设置 is exactly when a stale disk state is most
+      // too because opening settings is exactly when a stale disk state is most
       // visible, and every command in it is idempotent. The list itself lives
       // in one place so the two callers cannot drift.
       runControlPlaneSelfHeal((command) => invoke(command), plan);

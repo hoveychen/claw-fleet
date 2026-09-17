@@ -1,6 +1,6 @@
 import type { ViewMode } from "../store";
 
-/** Rail = the collapsible 二级侧边栏 a page hangs beside its main container. */
+/** Rail = the collapsible secondary sidebar a page hangs beside its main container. */
 export interface RailConfig {
   /** Persisted width. MUST also be listed in storage.ts's ALL_KEYS, or the width
    *  is written on drag and silently not read back on the next boot. */

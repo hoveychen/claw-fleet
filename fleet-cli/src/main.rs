@@ -80,8 +80,8 @@ enum Commands {
         json: bool,
     },
     /// Publish and browse docs in the Fleet wiki knowledge base (~/.fleet/wiki)
-    /// Store and browse finished deliverables — the 产出 page. For files whose
-    /// point is to be handed to a person (PDF, deck, spreadsheet, video,
+    /// Store and browse finished deliverables — the artifacts page. For files
+    /// whose point is to be handed to a person (PDF, deck, spreadsheet, video,
     /// image), which the wiki cannot hold: it only renders html/markdown.
     Artifact {
         #[command(subcommand)]
@@ -316,10 +316,10 @@ enum Commands {
         #[arg(long, global = true)]
         session: Option<String>,
     },
-    /// Register a session handoff (接力): when this session next ends its
-    /// turn, Fleet spawns a fresh successor session in the same workspace to
-    /// continue the work, opening with your --note. Use when your context is
-    /// running long mid-plan. Reads FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID.
+    /// Register a session handoff: when this session next ends its turn, Fleet
+    /// spawns a fresh successor session in the same workspace to continue the
+    /// work, opening with your --note. Use when your context is running long
+    /// mid-plan. Reads FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID.
     Handoff {
         /// Relay note for the successor (required): what's done, what's next,
         /// key files, gotchas.
@@ -453,7 +453,7 @@ enum Commands {
         #[arg(long)]
         locale: Option<String>,
         /// Title agents address the user as in interaction / PRD guidance. Empty
-        /// (default) renders the locale-correct Boss/老板; a literal value forces
+        /// (default) renders the locale-correct "Boss"; a literal value forces
         /// that string across all locales.
         #[arg(long)]
         title: Option<String>,
@@ -1177,7 +1177,7 @@ pub(crate) enum SessionTitleGuidanceCommands {
     /// Write ~/.claude/fleet-session-title.md and inject its @import into
     /// ~/.claude/CLAUDE.md (idempotent)
     Apply {
-        /// What agents call the user (defaults to the locale's Boss/老板)
+        /// What agents call the user (defaults to the locale's "Boss")
         #[arg(long, default_value = "")]
         title: String,
         /// Guidance locale: `en` or `zh`

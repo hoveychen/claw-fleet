@@ -59,7 +59,7 @@ interface RemoteCodexLoginPoll {
   loggedIn: boolean;
 }
 
-/** One rca workspace host's probe state in the 远端主机 section. */
+/** One rca workspace host's probe state in the remote hosts section. */
 interface RemoteHostState {
   statuses: HarnessStatus[] | null;
   probing: boolean;

@@ -1,4 +1,4 @@
-//! `fleet serve` routes for the artifact store (the 产出 page).
+//! `fleet serve` routes for the artifact store (the artifacts page).
 //!
 //! Mirrors `routes_wiki` in shape, with one thing none of the other route
 //! modules do: [`route_artifact_blob`] honours a `Range` request header and

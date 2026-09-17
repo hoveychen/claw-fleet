@@ -1,7 +1,9 @@
-// 全屏 wiki 阅读页。markdown 用 react-markdown 内联渲染（拦截 <a> 点击：外链
-// 新标签打开、`[[slug]]` 站内跳转、相对链接不放行以免整个 PWA 被导航走）；
-// html / htmlDir 文档经 buildWikiHtml 把相对资源重写成 data: URI 后塞进沙箱
-// iframe，保真渲染桌面端归档的报告 / demo。顶栏可导出/分享当前文档。
+// Full-screen wiki reader. Markdown renders inline via react-markdown (intercepts <a>
+// clicks: external links open in new tab, `[[slug]]` internal links jump, relative
+// links are blocked to prevent the whole PWA navigating away). HTML/htmlDir documents
+// pass through buildWikiHtml to rewrite relative resources as data: URIs, then go into
+// a sandbox iframe for faithful rendering of archived desktop reports/demos. The header
+// can export/share the current document.
 
 import type { ComponentPropsWithoutRef } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -24,12 +26,13 @@ interface Props {
   doc: WikiDoc;
   client: FleetTransport | null;
   onBack: () => void;
-  /** 替换当前打开的文档（`[[slug]]` 站内跳转用）。 */
+  /** Replace the currently open document (`[[slug]]` internal jump). */
   onOpenDoc: (doc: WikiDoc) => void;
 }
 
-/** `[[slug]]` / `[[slug|显示文字]]` → markdown 链接，href 用 wiki: 方案，供
- *  <a> 渲染器识别为站内跳转。slug 里的字符做最小转义避免破坏 markdown。 */
+/** `[[slug]]` / `[[slug|display text]]` → markdown link with href using wiki: scheme,
+ *  for <a> renderer to recognize as an internal jump. Minimal escaping in the slug to
+ *  avoid breaking markdown. */
 function expandWikiMentions(md: string): string {
   return md.replace(/\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g, (_m, slug, label) => {
     const s = String(slug).trim();

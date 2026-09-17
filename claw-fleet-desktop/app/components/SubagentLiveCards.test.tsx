@@ -105,7 +105,7 @@ describe("SubagentLiveCards", () => {
     const el = render(agent());
     const ev = rightClick(el.querySelector("button") as HTMLElement);
 
-    // preventDefault is what stops contextMenu.ts answering with 设置/关于/退出.
+    // preventDefault stops contextMenu.ts from answering with the app-wide menu.
     expect(ev.defaultPrevented).toBe(true);
     const menu = document.body.querySelector("[class*='menu']") as HTMLElement;
     expect(menu.textContent).toContain("a4f1-9c");

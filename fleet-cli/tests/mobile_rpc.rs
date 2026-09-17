@@ -116,7 +116,7 @@ fn options(port: u16, path: &str) -> (u16, String) {
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap();
-    // 预检长这样:浏览器**不带** Authorization —— 它正是在问「带这个头行不行」。
+    // Preflight doesn't carry Authorization — it's asking "will you allow this header?"
     let req = format!(
         "OPTIONS {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nOrigin: https://fleet-relay.example.com\r\nAccess-Control-Request-Method: POST\r\nAccess-Control-Request-Headers: authorization, content-type\r\n\r\n"
     );
@@ -245,13 +245,13 @@ fn serve_keeps_mobile_rpc_behind_the_admin_token() {
     assert!(body.contains(r#""ok":true"#), "got: {body}");
 }
 
-/// 手机在设备簿里直连一台主机时,页面的 origin 是中转域名,`/mobile_rpc` 因此是
-/// 跨源请求。没有 CORS 头,浏览器会在页面读到响应之前把它拦掉 —— 服务端明明答了
-/// 200,前端只看到一个网络错误。
+/// When the phone connects directly to a host in the device book, the page's origin is a relay
+/// domain, so `/mobile_rpc` is a cross-origin request. Without CORS headers, the browser blocks it
+/// before the page sees the response — the server answers 200, but the frontend sees only a network error.
 ///
-/// 预检这一段单独钉住,因为它有一个特别容易写错的顺序:浏览器发 OPTIONS 时**不带**
-/// Authorization,所以预检必须抢在认证之前答;放到之后会拿到 401,真正的请求永远
-/// 发不出去。
+/// The preflight is pinned separately because there is a common mistake in ordering: the browser
+/// sends OPTIONS **without** Authorization, so the preflight must be answered before auth. If it comes
+/// after, you get 401, and the real request never goes out.
 #[test]
 fn token_gated_serve_allows_cross_origin_mobile_rpc() {
     let home = tempfile::TempDir::new().unwrap();
@@ -266,7 +266,7 @@ fn token_gated_serve_allows_cross_origin_mobile_rpc() {
     assert!(lower.contains("access-control-allow-headers"), "got: {headers}");
     assert!(lower.contains("authorization"), "token must be an allowed header\n{headers}");
 
-    // 真正的请求(带 token)也要带上 ACAO,否则浏览器不让页面读这个响应。
+    // The real request (with token) must also carry ACAO headers, otherwise the browser won't let the page read the response.
     let (status, body) = post(
         port,
         "/mobile_rpc",
@@ -280,9 +280,10 @@ fn token_gated_serve_allows_cross_origin_mobile_rpc() {
     );
 }
 
-/// 拒绝也必须带跨源头。少了它,手机那边**看不见** 401 —— 浏览器对缺 CORS 头的
-/// 响应只交给 JS 一个笼统的网络错误,于是「token 填错了」在界面上显示成「连不上
-/// 这台主机」。两句话指向完全不同的修法,所以这一条单独钉住。
+/// Rejections must also carry cross-origin headers. Without them, the phone **can't see** the 401 —
+/// the browser gives JS a generic network error for responses missing CORS headers. So "wrong token"
+/// appears as "can't connect to this host" on the UI. Different error messages need different fixes,
+/// so this case is pinned separately.
 #[test]
 fn cross_origin_rejection_is_readable_by_the_page() {
     let home = tempfile::TempDir::new().unwrap();
@@ -303,9 +304,9 @@ fn cross_origin_rejection_is_readable_by_the_page() {
     );
 }
 
-/// 反面:`fleet webui` 那个端口本身没有认证(它自己的启动日志就写着必须在前面放
-/// 网关)。在那种端口上发 CORS 头等于让用户浏览器里任何一个网页都能驱动这台
-/// Fleet,所以它**不**发 —— 那种部署要跨源就在自己的网关上配。
+/// The counterpoint: `fleet webui`'s port has no auth (its startup log says a gateway must be in front).
+/// Sending CORS headers on an unauthenticated port would let any webpage in the user's browser drive
+/// this Fleet, so it **doesn't** — that kind of deployment should configure CORS at the gateway.
 #[test]
 fn no_auth_webui_does_not_open_cross_origin() {
     let home = tempfile::TempDir::new().unwrap();
@@ -315,7 +316,7 @@ fn no_auth_webui_does_not_open_cross_origin() {
     let mut serve = spawn_webui(home.path(), &port_file, &bundle);
     let port = wait_for_port(&port_file, &mut serve);
 
-    // 同源仍然照常工作 —— 同源本来就不需要 CORS 头。
+    // Same-origin still works — same-origin never needs CORS headers.
     let (status, body) = post(
         port,
         "/mobile_rpc",

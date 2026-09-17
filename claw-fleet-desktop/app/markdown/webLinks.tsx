@@ -4,7 +4,7 @@ import { createContext, useContext, type ReactNode } from "react";
  * Where an external `http(s)` link in markdown opens.
  *
  * Everywhere in the app it goes straight to the system browser — which is right
- * for a decision card or a chat bubble, and wrong for the 任务 page's detail
+ * for a decision card or a chat bubble, and wrong for the Tasks page's detail
  * column, where the whole point is to keep the linked page beside the prose that
  * cited it. So a surface with a tab strip provides an opener here, and the link
  * renderers (safeLinks, wikiLinks) consult it before falling back.

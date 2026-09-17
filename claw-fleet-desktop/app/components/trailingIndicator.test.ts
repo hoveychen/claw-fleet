@@ -66,9 +66,9 @@ describe("trailingIndicator", () => {
     expect(trailingIndicator([], null)).toBeNull();
   });
 
-  // The backstop. A turn that died without ever writing a terminal record —
-  // codex killed mid-flight, a crashed harness — leaves a user prompt at the
-  // tail forever. The resume-gap rule above then pins 「处理中…」 on a session
+  // The backstop. A turn that died without ever writing a terminal record—
+  // codex killed mid-flight, a crashed harness—leaves a user prompt at the
+  // tail forever. The resume-gap rule above then pins "Processing…" on a session
   // where nothing is running, with no timeout to clear it. Once the prompt is
   // minutes old and the scanner does not claim the agent is working, it is not
   // a resume gap any more.

@@ -10,11 +10,12 @@
 //! the parent made itself.
 //!
 //! That is how, on 2026-09-08, session `03f41a3c` ended up with three decision
-//! cards raised by its `general-purpose` subagent 「datahub knowledge API 线」:
-//! the cards were filed under the parent's id, the boss pressed 「结束任务」 on
-//! one of them, the parent's task was recorded complete while it was still
-//! working, and the `TASK FINISHED` string went back to the *subagent*, which
-//! then reported its whole day's work as the four characters 「收工，老板」.
+//! cards raised by its `general-purpose` subagent ("datahub knowledge API
+//! track"): the cards were filed under the parent's id, the boss pressed
+//! "end task" on one of them, the parent's task was recorded complete while it
+//! was still working, and the `TASK FINISHED` string went back to the
+//! *subagent*, which then reported its whole day's work as "done for the day,
+//! boss".
 //!
 //! The one signal that does distinguish them is the transcript. Claude Code
 //! flushes each assistant block to disk before the tool call is dispatched (the

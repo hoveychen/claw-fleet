@@ -1,4 +1,4 @@
-//! `fleet handoff` — register (or manage) a session relay (接力). The successor
+//! `fleet handoff` — register (or manage) a session handoff. The successor
 //! session is spawned by the Stop hook when this session next yields its turn.
 
 use crate::commands::session::{inherit_context_maybe_scanning, resolve_session_id};

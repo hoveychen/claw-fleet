@@ -20,9 +20,9 @@ use serde::{Deserialize, Serialize};
 /// to build and building it.
 ///
 /// The failure this exists to prevent: an exploration and an implementation
-/// bundled into one plan, where "P3 — 调研 X" sits next to "P4 — 实现 X" and the
-/// agent's findings in P3 silently redefine what P4 means. Separating them makes
-/// the handoff explicit — an `Explore` plan's deliverable is a set of `Exec`
+/// bundled into one plan, where "P3 — research X" sits next to "P4 — implement X"
+/// and the agent's findings in P3 silently redefine what P4 means. Separating them
+/// makes the handoff explicit — an `Explore` plan's deliverable is a set of `Exec`
 /// child plans, which the boss can read before any code is written.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -159,7 +159,7 @@ pub struct TaskPlanDetail {
     /// `kind="..."` from the begin sentinel. See [`PlanKind`]. Carried so the
     /// task panels can mark an explore plan as one — its P-tasks produce
     /// understanding, and its deliverable is the exec children it spawns, so
-    /// reading its checklist as "the work" is a category error the 计划树
+    /// reading its checklist as "the work" is a category error the plan tree
     /// already labels and the detail panels used to hide.
     pub kind: PlanKind,
     pub items: Vec<TaskItem>,

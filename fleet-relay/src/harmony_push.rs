@@ -95,18 +95,18 @@ fn is_dead_token_code(code: &str) -> bool {
 
 /// Notification category for the app channel.
 ///
-/// `WORK` matches what the 元服务 template (「工作事项提醒」) was approved for and
-/// is the right classification for a decision card — it is a work item awaiting
-/// the user, not marketing.
+/// `WORK` matches what the atomic-service template ("Work Item Reminder") was
+/// approved for and is the right classification for a decision card — it is a
+/// work item awaiting the user, not marketing.
 ///
 /// CAVEAT (unverified on device): Huawei gates every category except `MARKETING`
-/// behind 自分类权益 approval, applied for per app in AGC. Without it the send is
-/// expected to fail — loudly, as a `Transient` error in the logs, which is why
-/// this defaults to the value we actually want rather than silently degrading.
-/// `MARKETING` does get accepted without approval but is rate-limited to a
-/// handful of messages per device per day, which would drop decision cards on
-/// the floor and look like a bug. Override with `RELAY_HARMONY_CATEGORY` if the
-/// approval is still pending.
+/// behind "self-category rights" (自分类权益) approval, applied for per app in AGC.
+/// Without it the send is expected to fail — loudly, as a `Transient` error in the
+/// logs, which is why this defaults to the value we actually want rather than
+/// silently degrading. `MARKETING` does get accepted without approval but is
+/// rate-limited to a handful of messages per device per day, which would drop
+/// decision cards on the floor and look like a bug. Override with
+/// `RELAY_HARMONY_CATEGORY` if the approval is still pending.
 const DEFAULT_CATEGORY: &str = "WORK";
 
 /// `push-type` header value for a user-visible notification message on the app
@@ -357,7 +357,7 @@ fn gen_msg_id() -> String {
 /// the visible content comes from the claimed template's params: `thing_0` is
 /// the reminder content (the decision preview) and `thing_4` the publishing
 /// unit (the workspace title). This matches the AGC template `1BAAD76B2A818700`
-/// (「工作事项提醒」) verified on-device.
+/// ("Work Item Reminder") verified on-device.
 fn build_service_notification(
     msg_id: &str,
     app_id: &str,

@@ -1,7 +1,7 @@
 // What the detail column shows, as a pure decision.
 //
-// The bug this pins: pressing 「1 张卡等你回复」 on fleet-cloud landed on
-// 「新建会话」. The pill sets `openId` to the card's session id unconditionally;
+// The bug this pins: pressing "1 card awaiting reply" on fleet-cloud landed on
+// "New Session". The pill sets `openId` to the card's session id unconditionally;
 // when that id is nowhere in the scan the pane used to fall past every branch
 // into its resting state, which *is* the new-session composer. Nothing on
 // screen said why, and in simplified mode — which mounts no `DecisionPanel` —

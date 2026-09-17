@@ -13,9 +13,9 @@ interface Props {
 }
 
 /**
- * Small modal for pinning a manual title on a session (任务页 → 右键 → 重命名).
+ * Small modal for pinning a manual title on a session (task page → right-click → rename).
  * Mirrors ConfirmDialog's overlay/dialog shape but with a text field. Saving an
- * empty value — or the explicit "重置为自动标题" button — clears the override so
+ * empty value — or the explicit "Reset to auto title" button — clears the override so
  * the display falls back to the auto-derived title.
  */
 export function RenameSessionDialog({ currentTitle, hasOverride, onSave, onCancel }: Props) {

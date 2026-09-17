@@ -6,7 +6,7 @@
  *  and the expanded sidebar shows it in full. */
 
 /** Money for a rail tile: `$6.62` / `$312.40` / `$3.2k` / `$12k`.
- *  Cents are dropped once the整数部分 alone would blow the tile. */
+ *  Cents are dropped once the integer part alone would blow the tile. */
 export function fmtRailMoney(usd: number): string {
   const n = Number.isFinite(usd) ? usd : 0;
   const sign = n < 0 ? "-" : "";

@@ -37,8 +37,8 @@ export function patchToolSummary(command: string, tr: Translate = t): string | n
 }
 
 /**
- * Human-readable label (i18n source string) for each Fleet MCP tool, keyed by
- * the tail of its wire name (`mcp__fleet__fleet__<tail>`). Mirrors the desktop
+ * Human-readable i18n label for each Fleet MCP tool, keyed by the tail of its
+ * wire name (`mcp__fleet__fleet__<tail>`). Mirrors the desktop's
  * `FLEET_TOOL_LABEL_KEYS` map.
  */
 const FLEET_TOOL_LABELS: Record<string, string> = {

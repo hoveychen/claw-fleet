@@ -64,7 +64,7 @@ function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => s
   return t("d_ago", { n: Math.floor(diff / 86_400_000) });
 }
 
-/** 「移动端」板块 — 启用 mobile relay 通道并展示配对 QR code。 */
+/** Mobile section — enable mobile relay channel and show pairing QR code. */
 export function MobileView() {
   const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<MobileRelayConfig | null>(null);

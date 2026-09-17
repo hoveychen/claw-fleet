@@ -2,7 +2,7 @@
 //!
 //! # Why this exists
 //!
-//! 「对话」Tab sat on 「加载中…」 forever against a dsh session, and every layer
+//! The Chat Tab stuck on "Loading..." forever against a dsh session, and every layer
 //! underneath measured healthy: `dsh session.history` answered a 150-message
 //! tail in 0.03s, and `fleet serve`'s `/messages?path=dsh://…&tail=150` — the
 //! same `LocalBackend::get_messages_tail` the desktop calls — returned 122

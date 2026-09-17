@@ -272,7 +272,7 @@ fn fleet_session_notes_and_history_roundtrip_over_the_wire() {
     );
 }
 
-/// `fleet__artifact` is the ONLY way a deliverable reaches the 产出 page — the
+/// `fleet__artifact` is the ONLY way a deliverable reaches the deliverables page — the
 /// desktop offers no "add" button — so an `add` that returns a cheerful string
 /// without writing anything would leave the whole feature silently dead. This
 /// drives the real MCP path and then checks the bytes are on disk.

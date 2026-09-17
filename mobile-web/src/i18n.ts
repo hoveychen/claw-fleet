@@ -1,6 +1,7 @@
-// 极简自研 i18n：中文原文即 key，t(zh) 查 zh→en 字典，支持 {0} 占位插值。
-// 不引第三方库 —— 词条量 ~120 条，一个 Record 就够；React 侧用
-// useSyncExternalStore 订阅语言切换触发整树重渲（App 根组件调用 useI18n）。
+// Minimal in-house i18n: Chinese source text is the key; t(zh) looks it up in a
+// zh→en dictionary, supporting {0} placeholder interpolation. No third-party deps—
+// ~120 terms fit in a Record. React subscribes via useSyncExternalStore on lang changes
+// to re-render the whole tree (App root calls useI18n).
 
 import { useSyncExternalStore } from "react";
 

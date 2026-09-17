@@ -13,9 +13,9 @@ import type { AuxDocKind } from "../../detailAux";
  *
  * Outside any provider — the mock board, a unit test, any surface with no rail
  * to open into — the value is `null`, and the card falls back to navigating
- * straight to the 产出 / 知识库 page. That fallback is why this is a context and
- * not a required prop: a preview card with a dead click would be worse than one
- * that always jumps.
+ * straight to the artifacts / wiki page. That fallback is why this is a context
+ * and not a required prop: a preview card with a dead click would be worse than
+ * one that always jumps.
  */
 export interface IngestOpenContext {
   /** Card it in the rail and expand it into a reader. */

@@ -4,10 +4,10 @@
 //
 // Simplified mode does not mount the `DecisionPanel`, so this pill is the only
 // always-visible sign that a card is waiting on a task you do not have open.
-// Boss hit the gap on 2026-09-09: a chime every 10s with no card anywhere on
+// User hit the gap on 2026-09-09: a chime every 10s with no card anywhere on
 // screen. What can go wrong here is the header not subscribing to the decision
-// store, or the click not naming a session — either one puts him back to
-// hunting for the 「待决策」row chip.
+// store, or the click not naming a session — either one puts them back to
+// hunting for the pending-decisions row chip.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

@@ -61,8 +61,8 @@ function paramRows(
  * `fleet.param.*` is keyed by param *name* alone, and the same name means
  * different things across tools: `note` is a handoff briefing on `fleet__handoff`,
  * "what you are waiting for" on `fleet__watch`, and a one-line blurb on
- * `fleet__artifact add`. The flat table had settled on 「交接」 for all three,
- * so a 产出 card said "交接" over its description.
+ * `fleet__artifact add`. The flat table had settled on "handoff" for all three,
+ * so an artifact card said "handoff" over its description.
  *
  * So look up `fleet.param_for.<tool>.<key>` first and fall back to the flat
  * `fleet.param.<key>`. A separate `param_for` namespace rather than nesting

@@ -7,8 +7,8 @@
 //! presents native panels on — so a slow sync command freezes unrelated,
 //! already-finished work and keeps a save dialog from appearing at all. That is
 //! not hypothetical: on 2026-09-08 `check_app_version` (blocking HTTP, 10s
-//! timeout, two sources tried in turn) was a plain sync command, and the boss
-//! lost two buttons and a working 导出 in the minute it refreshed its cache.
+//! timeout, two sources tried in turn) was a plain sync command, and the user
+//! lost two buttons and a working export feature in the minute it refreshed its cache.
 //! Wiki: `desktop/ipc-stall-forensics`.
 //!
 //! A source scan rather than a runtime assertion because the hazard *is* the

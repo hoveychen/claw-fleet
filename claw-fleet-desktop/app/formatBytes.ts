@@ -1,4 +1,4 @@
-/** Human-readable byte count for the 产出 page and its zip browser.
+/** Human-readable byte count for the Artifacts page and its zip browser.
  *
  *  Pulled out of ArtifactsView so `ZipBrowser` can size a member without
  *  importing the page that renders it — that import would be a cycle, since

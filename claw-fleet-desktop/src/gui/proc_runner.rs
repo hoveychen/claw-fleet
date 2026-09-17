@@ -1,6 +1,6 @@
 use super::*;
 
-// ── Workspace command runner (文件 page) ─────────────────────────────────────
+// ── Workspace command runner (file page) ─────────────────────────────────────
 
 /// Which optional surfaces this host exposes — read once at boot by `App.tsx`.
 ///
@@ -14,7 +14,7 @@ pub(crate) fn host_features() -> claw_fleet_core::feature_flags::HostFeatures {
 }
 
 /// On the blocking pool: `list_procs` reaps exited children and takes the proc
-/// registry's lock, and the 文件 page polls it — 5 copies were parked on async
+/// registry's lock, and the file page polls it — 5 copies were parked on async
 /// workers during the 2026-09-10 cold start.
 #[tauri::command]
 pub(crate) async fn list_workspace_procs(

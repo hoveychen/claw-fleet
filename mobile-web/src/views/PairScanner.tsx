@@ -1,20 +1,24 @@
-// 「扫码配对」的取景器。配对门与「更多」页的加设备入口共用它，浏览器 / PWA /
-// 原生壳都会走到 —— 唯一的例外是鸿蒙壳，那里有系统相机的桥（nativeScan.ts）。
+// QR code viewfinder for "Scan to pair". Shared by the pairing gate and the "Add
+// device" entry in the More tab; works on browsers, PWAs, and native shells—except
+// HarmonyOS, which has its own system-camera bridge (nativeScan.ts).
 //
-// 为什么 app 要自己扫，而不是让系统相机去扫：系统相机扫出来的是一条 https
-// 链接，交给谁由 App Link 决定，而 App Link 只认 AndroidManifest 里**编译期**
-// 写死的 host。自建 relay 的 host 编译期不可知，所以那条链接只会被送进浏览器。
-// app 内自己扫，拿到的是二维码的原文，跟 host 没有半点关系。
+// Why the app scans instead of delegating to the system camera: the system camera
+// produces an https link, whose recipient is determined by App Link, which only
+// recognizes hosts **hardcoded at compile time** in AndroidManifest. Since a custom
+// relay's host isn't known at compile time, the link goes to the browser. Scanning
+// inside the app gives us the QR's raw content, with no host dependency.
 //
-// iOS 的主屏幕 web app 里它是**唯一**的配对入口之一（另一条是粘贴）：那里没有
-// 地址栏，而它的存储与 Safari 分区隔离，见 App.tsx 配对门的注释。
+// On iOS home-screen web apps, this is **one of the only two** pairing routes (the
+// other is paste): there's no address bar, and its storage is partitioned separately
+// from Safari (see App.tsx pairing gate comments).
 //
-// 解码用 jsQR（纯 JS）而不是浏览器的 `BarcodeDetector`：后者在 Android 上由
-// Google Play 服务的 barcode 模块支撑，而这个 app 的主力分发对象是无 GMS 的
-// 国产机。实测（2026-09-01，Pixel API 36 模拟器、WebView 152.0.7977.64、带
-// GMS）`BarcodeDetector` 确实存在，但那台机器带 Play 服务，结论外推不到无 GMS
-// 设备，而我没有无 GMS 镜像可验。一条在所有机型上行为一致的路径，胜过一条快
-// 但在目标机型上可能静默失效的路径。
+// We use jsQR (pure JS) instead of the browser's `BarcodeDetector` because the latter
+// is backed by Google Play services' barcode module on Android—but this app's main
+// distribution target is Chinese devices without GMS. Testing (2026-09-01, Pixel API
+// 36 emulator, WebView 152.0.7977.64, with GMS) showed `BarcodeDetector` does exist,
+// but that machine had Play services, so the result doesn't generalize to no-GMS
+// devices, and I had no GMS-less image to test. A path that works consistently across
+// all device types beats a faster path that might silently fail on target devices.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
@@ -23,7 +27,8 @@ import { readPairingFromFrame } from "../scanFrame";
 import { scanAvailability } from "../scanAvailability";
 import styles from "./PairScanner.module.css";
 
-/** 解码节流：逐帧解码在低端机上会把主线程吃满，而二维码不会在 100ms 内跑掉。 */
+/** Decode throttle: decoding every frame saturates the main thread on low-end devices,
+ *  and a QR code won't run away in 100ms anyway. */
 const DECODE_INTERVAL_MS = 100;
 
 type Status = "starting" | "scanning" | "denied" | "unavailable" | "insecure";
@@ -38,12 +43,13 @@ export function PairScanner({
   const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [status, setStatus] = useState<Status>("starting");
-  // 扫到了二维码但它不是配对链接（比如随手扫了个付款码）。不是致命错误，继续
-  // 扫就是了，但得说一声，否则用户会以为 app 没反应。
+  // Scanned a QR code, but it's not a pairing link (e.g., a payment code).
+  // Not fatal—keep scanning—but we must say something or the user thinks the app froze.
   const [wrongCode, setWrongCode] = useState(false);
 
-  // onPaired 由 App 传下来且可能每次重渲染换引用；用 ref 读它，免得解码循环
-  // 因为依赖变化被反复拆掉重建（那会重开摄像头）。
+  // onPaired comes from App and may change on every re-render; read it from a ref
+  // to keep the decode loop from being torn down and rebuilt due to dependency changes
+  // (which would reopen the camera).
   const onPairedRef = useRef(onPaired);
   onPairedRef.current = onPaired;
 
@@ -51,7 +57,8 @@ export function PairScanner({
     let stream: MediaStream | null = null;
     let timer: number | undefined;
     let cancelled = false;
-    // 一旦配上就别再解码：onPaired 会换掉整棵树，晚到的一帧不该再触发一次。
+    // Once paired, stop decoding: onPaired will swap out the entire tree,
+    // and a late-arriving frame shouldn't trigger again.
     let done = false;
 
     const canvas = document.createElement("canvas");
@@ -60,7 +67,7 @@ export function PairScanner({
     const tick = () => {
       const video = videoRef.current;
       if (cancelled || done || !video || !ctx) return;
-      // videoWidth 在第一帧到达前是 0，此时 drawImage 会抛。
+      // videoWidth is 0 before the first frame arrives; drawImage will throw.
       if (video.videoWidth > 0 && video.videoHeight > 0) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -79,22 +86,24 @@ export function PairScanner({
     };
 
     const start = async () => {
-      // 非 https 的地址上 mediaDevices 整个不存在,那不是「这台设备没有摄像头」——
-      // 说成后者会把用户支使去系统设置里找一个根本不存在的开关。调用方通常已经
-      // 按 scanAvailability() 把入口收起来了,这里是直达这个组件时的同一句话。
+      // On non-https addresses, mediaDevices doesn't exist at all. That's not
+      // "this device has no camera"—saying so would send the user hunting through
+      // system settings for a switch that doesn't exist. Callers have usually already
+      // hidden the entry via scanAvailability(), but this is the fallback for direct
+      // component visits.
       const avail = scanAvailability();
       if (avail !== "ok") {
         setStatus(avail === "insecure-origin" ? "insecure" : "unavailable");
         return;
       }
       try {
-        // 背面摄像头：用户举着手机对准桌面屏幕上的二维码。
+        // Rear camera: user points the phone at a QR code on the desktop screen.
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
         });
       } catch {
-        // 权限被拒、没有摄像头、被别的 app 占用——对用户而言都是同一件事：
-        // 这条路走不通，改用粘贴。
+        // Permission denied, no camera, or in use by another app—from the user's
+        // perspective, they're all the same: this path doesn't work, so fall back to paste.
         if (!cancelled) setStatus("denied");
         return;
       }
@@ -105,7 +114,7 @@ export function PairScanner({
       const video = videoRef.current;
       if (video) {
         video.srcObject = stream;
-        // iOS Safari 不给 playsInline 的视频自动播放；这里也一并 await 掉。
+        // iOS Safari doesn't autoplay videos with playsInline; await it here too.
         await video.play().catch(() => {});
       }
       setStatus("scanning");
