@@ -50,10 +50,43 @@ pub fn trim_host_suffix(raw: &str) -> String {
     name.to_string()
 }
 
+/// macOS 上问 `scutil` 要用户自己设的机器名。
+///
+/// `gethostname()`(也就是 `sysinfo::System::host_name()`)在 macOS 上返回的是
+/// **临时主机名**:只要 `HostName` 没被 `scutil --set HostName` 钉死,系统就会拿
+/// DHCP / 反向 DNS 回来的名字覆盖它。2026-09-16 在老板的 MacBook 上实测,走手机
+/// 热点时对端把「私有 Wi-Fi 地址」当主机名回了过来,于是 `hostname` 变成
+/// `de:e8:92:d6:ca:71`,手机设备簿里那台 Mac 的名字当场跟着变成了这串 MAC。
+///
+/// `ComputerName` 是用户在「系统设置 → 通用 → 关于本机」里起的名字,不随网络变;
+/// `LocalHostName` 是它的 ASCII 化版本,作为第二选择。两个都拿不到才退回
+/// `gethostname()`。
+#[cfg(target_os = "macos")]
+fn scutil_name() -> Option<String> {
+    for key in ["ComputerName", "LocalHostName"] {
+        let out = std::process::Command::new("/usr/sbin/scutil").arg("--get").arg(key).output().ok();
+        if let Some(out) = out {
+            if out.status.success() {
+                let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !name.is_empty() {
+                    return Some(name);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn scutil_name() -> Option<String> {
+    None
+}
+
 /// 本机身份。每个客户端问的都是这一个函数(Tauri 侧暂不需要 —— 桌面端展示的是
 /// 它自己,没有「哪一台」要选),所以 relay 方法与 `/host_identity` 路由不会漂移。
 pub fn host_identity() -> HostIdentity {
-    let hostname = sysinfo::System::host_name()
+    let hostname = scutil_name()
+        .or_else(sysinfo::System::host_name)
         .map(|h| trim_host_suffix(&h))
         .filter(|h| !h.is_empty());
     HostIdentity {
@@ -88,5 +121,17 @@ mod tests {
             assert!(!h.is_empty());
             assert!(!h.ends_with(".local"));
         }
+    }
+
+    /// macOS 上身份名必须来自 `ComputerName`/`LocalHostName`,而不是随网络漂移的
+    /// `gethostname()` —— 后者在热点下会变成一串 MAC 地址。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_prefers_scutil_over_transient_hostname() {
+        let Some(scutil) = scutil_name() else {
+            return; // 没配 ComputerName 的机器(极少见)不强求
+        };
+        let id = host_identity();
+        assert_eq!(id.hostname.as_deref(), Some(trim_host_suffix(&scutil).as_str()));
     }
 }
