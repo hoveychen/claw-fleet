@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFrozenOrder,
+  chainUnitKey,
   taskListSessions,
 } from "./HistoryView";
+import { countChainUnits } from "../../../shared-ts/chainUnits";
 import { NEW_SESSION_ENTRYPOINT, QUIET_ALIVE_COLOR, resetQuietAliveLatch } from "../types";
 import { chainBarColor } from "./sessionGroups";
 import { sessionEq } from "./SessionRow";
@@ -263,3 +265,56 @@ describe("applyFrozenOrder", () => {
  * repaints it. Hidden session tabs must therefore stay laid out while being
  * invisible, so their scroll layer and ResizeObserver never collapse to zero.
  */
+
+/**
+ * The task page's counters answer "how many things am I working on", so they
+ * count units of work: one per standalone session, one per relay chain. Before
+ * this they counted transcripts — a plan relayed a dozen times read as a dozen
+ * tasks, which is the number of handoffs, not the amount of work in flight.
+ */
+describe("chainUnitKey / countChainUnits (task counters count chains, not sessions)", () => {
+  function hop(id: string, chainId: string | null, workspacePath = "/w"): SessionInfo {
+    return {
+      ...base(),
+      id,
+      jsonlPath: `/p/${id}.jsonl`,
+      workspacePath,
+      handoff: chainId ? { hop: 1, chainLen: 4, chainId } : null,
+    } as unknown as SessionInfo;
+  }
+  const keyed = (rows: SessionInfo[], group = true) =>
+    countChainUnits(rows, (s) => chainUnitKey(s, group));
+
+  it("counts a whole relay chain as one", () => {
+    expect(keyed([hop("a", "c1"), hop("b", "c1"), hop("c", "c1")])).toBe(1);
+  });
+
+  it("counts standalone sessions one each and adds them to the chains", () => {
+    expect(keyed([hop("a", "c1"), hop("b", "c1"), hop("solo", null)])).toBe(2);
+  });
+
+  it("keeps separate chains separate", () => {
+    expect(keyed([hop("a", "c1"), hop("b", "c2")])).toBe(2);
+  });
+
+  it("counts a lone surviving hop as its own unit", () => {
+    // `buildRenderItems` demotes a one-member chain back to a plain row, so the
+    // count must agree: one row on screen, one unit.
+    expect(keyed([hop("a", "c1")])).toBe(1);
+  });
+
+  it("splits a chain that straddles two repository sections", () => {
+    // The rail folds chains *inside* a repository section, so such a chain draws
+    // two rows; keying on chainId alone would have claimed one.
+    expect(keyed([hop("a", "c1", "/w1"), hop("b", "c1", "/w2")])).toBe(2);
+  });
+
+  it("folds a worktree hop into its repository root", () => {
+    expect(keyed([hop("a", "c1", "/w"), hop("b", "c1", "/w/.worktrees/t")])).toBe(1);
+  });
+
+  it("counts every row on its own when chain grouping is off", () => {
+    // Matches what the list then draws: the chains are expanded into rows.
+    expect(keyed([hop("a", "c1"), hop("b", "c1"), hop("c", "c1")], false)).toBe(3);
+  });
+});
