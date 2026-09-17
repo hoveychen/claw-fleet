@@ -99,7 +99,7 @@ function UsageBar({ label, stats }: { label: string; stats: UsageStats | null })
 // (unlike Claude's fixed 5h + 7d pools). So the label must be *derived* from
 // that duration, not from the primary/secondary slot — a Team plan, for
 // example, returns a single 7-day window in the `primary` slot, and hardcoding
-// "会话 (5小时)" there produced the self-contradicting "会话 (5小时) (7d)".
+// "Session (5h)" there produced the self-contradicting "Session (5h) (7d)".
 function CodexWindowBar({ label, window }: { label: string; window: CodexRateLimitWindow }) {
   const { t } = useTranslation();
   const pct = window.usedPercent;

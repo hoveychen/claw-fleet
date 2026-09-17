@@ -374,7 +374,7 @@ fn run_git_in(root: &Path, args: &[&str]) -> Result<GitOpResult, String> {
     })
 }
 
-// ── Repository overview (mobile "仓库" surface) ──────────────────────────────
+// ── Repository overview (mobile Repository surface) ────────────────────
 //
 // A "loose ends" view over every git repo reachable from a known session
 // workspace: which linked worktrees still hold commits not merged back into the
@@ -420,7 +420,7 @@ pub struct WorktreeHealth {
     pub unmerged: usize,
     /// Uncommitted entries in this worktree. Always `dirty_files.len()`.
     pub dirty_count: usize,
-    /// The uncommitted entries themselves, so the "脏 N" badge can expand into
+    /// The uncommitted entries themselves, so the Dirty N badge can expand into
     /// a file list on the mobile repo surface.
     pub dirty_files: Vec<DirtyFile>,
     pub last_commit_summary: Option<String>,
@@ -456,7 +456,7 @@ pub struct RepoDetail {
     pub behind: Option<usize>,
     /// Uncommitted entries in the main checkout. Always `dirty_files.len()`.
     pub dirty_count: usize,
-    /// The uncommitted entries themselves, so the main-checkout "脏 N" badge can
+    /// The uncommitted entries themselves, so the main-checkout Dirty N badge can
     /// expand into a file list on the mobile repo surface.
     pub dirty_files: Vec<DirtyFile>,
     pub worktrees: Vec<WorktreeHealth>,

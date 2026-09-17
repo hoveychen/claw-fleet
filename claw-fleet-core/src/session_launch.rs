@@ -200,12 +200,12 @@ fn normalize_workspace_path_with_home(input: &str, home: Option<&Path>) -> Resul
     Ok(resolved.to_string_lossy().into_owned())
 }
 
-/// `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions launched by the "新会话"
+/// `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions launched by the "New Session"
 /// button. The CLI writes it verbatim into each `user` record's `entrypoint`
 /// field, which is what the history panel filters on.
 pub const NEW_SESSION_ENTRYPOINT: &str = "claw-fleet-newsession";
 
-/// True for the sessions Fleet spawned itself, headless (`-p`): the "新会话"
+/// True for the sessions Fleet spawned itself, headless (`-p`): the "New Session"
 /// button, the handoff relay, and a fired schedule / loop iteration. Mirrors
 /// `isFleetOwnedEntrypoint` in the desktop's `types.ts`.
 ///
@@ -213,7 +213,7 @@ pub const NEW_SESSION_ENTRYPOINT: &str = "claw-fleet-newsession";
 /// headless CLI; an interactive one, attached to a pty, reads Ctrl-C as a
 /// keystroke, so a real SIGINT makes it quit and abandon its tool child. Only
 /// these sessions may be offered an interrupt. Schedule/loop fires are spawned
-/// headless `-p` exactly like the 新会话 button, so they qualify on both counts
+/// headless `-p` exactly like the "New Session" button, so they qualify on both counts
 /// (interrupt-eligible, and listed on the task page).
 pub fn is_fleet_owned_entrypoint(entrypoint: Option<&str>) -> bool {
     matches!(
@@ -785,7 +785,7 @@ pub fn spawn_new_session_with_id(
 
 /// [`spawn_new_session`] with an explicit `CLAUDE_CODE_ENTRYPOINT` stamp, so
 /// programmatic launchers (e.g. the handoff relay) stay distinguishable from
-/// the "新会话" button in transcripts and the history panel.
+/// the "New Session" button in transcripts and the history panel.
 pub fn spawn_new_session_with_entrypoint(
     workspace_path: &str,
     prompt: &str,
@@ -964,7 +964,7 @@ mod tests {
         );
     }
 
-    /// The mobile composer's "自定义路径…" box is a bare text input, so the two
+    /// The mobile composer's "Custom Path" box is a bare text input, so the two
     /// shapes a phone user actually types (`~/...` and a bare relative) reach
     /// the spawn gate verbatim. `Path::is_dir()` knows nothing about `~`, and a
     /// relative path would be resolved against the desktop process's cwd, so
@@ -1375,7 +1375,7 @@ mod fleet_owned_tests {
             crate::handoff::HANDOFF_ENTRYPOINT
         )));
         // A fired schedule / loop iteration is spawned headless `-p` just like
-        // the 新会话 button, so it is Fleet-owned too (task-page + interrupt).
+        // the "New Session" button, so it is Fleet-owned too (task-page + interrupt).
         assert!(is_fleet_owned_entrypoint(Some(
             crate::schedule::SCHEDULE_ENTRYPOINT
         )));

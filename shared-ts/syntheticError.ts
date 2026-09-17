@@ -249,11 +249,11 @@ export function classifySyntheticError(
     case "invalid_request":
     case "request_too_large":
       // "Prompt is too long · automatic compaction failed: You've hit your
-      // session limit" — two of the six such records on the author's machine
+      // session limit"—two of the six such records on the author's machine
       // read like this, and they are NOT a context problem: compaction is
       // itself a model call, so a quota that blocks the turn blocks the escape
-      // hatch too. Offering 「压缩后继续」 there sends the user at a button that
-      // cannot work until the window reopens.
+      // hatch too. Offering "Compress and Continue" there sends the user at a
+      // button that cannot work until the window reopens.
       if (/automatic compaction failed:\s*You've (?:hit|reached) your/.test(text)) {
         return {
           ...base,

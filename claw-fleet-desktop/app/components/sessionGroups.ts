@@ -27,9 +27,10 @@ export function chainTip(members: SessionInfo[]): SessionInfo {
  *  was very much running: a session parked on one long tool call decays to a
  *  quiet-alive faded dot, this function matched neither literal, and the header
  *  fell through to `null` — no dot at all, while the detail composer for the
- *  same session said 会话运行中. Rank by salience rather than by two hard-coded
- *  strings so any colour `rowBarColor` can return survives the collapse; the
- *  phone's `chainTone` (mobile-web `TasksView`) already does exactly this. */
+ *  same session said "Session Running". Rank by salience rather than by two
+ *  hard-coded strings so any colour `rowBarColor` can return survives the
+ *  collapse; the phone's `chainTone` (mobile-web `TasksView`) already does
+ *  exactly this. */
 const BAR_PRIORITY = [
   "var(--color-success)",
   "var(--color-warning)",

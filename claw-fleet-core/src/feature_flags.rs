@@ -1,13 +1,13 @@
 //! Startup feature flags — capabilities Fleet keeps **off** until the user
 //! opts in with an environment variable, read once at process start.
 //!
-//! Currently one flag: the 终端 surface (`FLEET_TERMINAL`). "Open me a shell
+//! Currently one flag: the terminal surface (`FLEET_TERMINAL`). "Open me a shell
 //! here" is the one capability in the app whose blast radius is the whole
 //! machine — the desktop page, the browser build served by `fleet serve`, and
 //! the phone all reach the same [`crate::proc_runner`] pty host — so it ships
 //! disabled and a user who wants it exports `FLEET_TERMINAL=1` before
-//! launching. Running *named* commands (the clone dialog, the 仓库 page's 命令
-//! panel) is a different, narrower capability and stays on.
+//! launching. Running *named* commands (the clone dialog, the repository page's
+//! command panel) is a different, narrower capability and stays on.
 //!
 //! **Why the value is cached rather than re-read.** The flag is a launch-time
 //! property of the process: a `fleet serve` that started without it must not
@@ -36,9 +36,9 @@ use std::sync::OnceLock;
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct HostFeatures {
-    /// The 终端 page / phone terminal — interactive shells on this machine.
+    /// The terminal page / phone terminal — interactive shells on this machine.
     pub terminal: bool,
-    /// Whether this host wants 精简模式 (Tasks + Artifacts only) as the
+    /// Whether this host wants simplified mode (Tasks + Artifacts only) as the
     /// *default* for a client that has never been told otherwise. `None` = this
     /// host has no opinion, so the client keeps its own default (off).
     ///
@@ -83,7 +83,7 @@ pub fn host_features() -> HostFeatures {
     }
 }
 
-/// Env var that enables the 终端 surface.
+/// Env var that enables the terminal surface.
 pub const TERMINAL_ENV: &str = "FLEET_TERMINAL";
 
 /// The values that count as "on". Anything else — including an empty string,
@@ -96,7 +96,7 @@ pub fn env_truthy(raw: Option<&str>) -> bool {
     )
 }
 
-/// Whether the 终端 surface (interactive shells) is enabled on this host.
+/// Whether the terminal surface (interactive shells) is enabled on this host.
 ///
 /// Every client asks this same function — via the Tauri command, the
 /// `/host_features` route, or the relay's `host_features` method — so what the
@@ -109,7 +109,7 @@ pub fn terminal_enabled() -> bool {
     *CACHED.get_or_init(|| env_truthy(std::env::var(TERMINAL_ENV).ok().as_deref()))
 }
 
-/// Env var that sets 精简模式's default for every client of this host.
+/// Env var that sets simplified mode's default for every client of this host.
 /// `1/true/yes/on` = on, `0/false/no/off` = off, unset = no opinion.
 pub const SIMPLIFIED_ENV: &str = "FLEET_SIMPLIFIED_MODE";
 
@@ -124,7 +124,7 @@ pub fn env_tristate(raw: Option<&str>) -> Option<bool> {
     }
 }
 
-/// 精简模式's host-level default, from [`SIMPLIFIED_ENV`].
+/// Simplified mode's host-level default, from [`SIMPLIFIED_ENV`].
 ///
 /// Cached like [`terminal_enabled`] and for the same reason: it is a launch
 /// property of the process, and the desktop / browser build / phone reading one
@@ -227,9 +227,9 @@ mod tests {
         assert!(!env_truthy(None), "an unset var is off — that is the default");
     }
 
-    // 精简模式 is tri-state, not truthy: "the deployment said off" and "the
-    // deployment said nothing" are different answers, because only the latter
-    // leaves a browser's own stored choice / default in charge.
+    // Simplified mode is tri-state, not truthy: "the deployment said off" and
+    // "the deployment said nothing" are different answers, because only the
+    // latter leaves a browser's own stored choice / default in charge.
     #[test]
     fn simplified_env_distinguishes_off_from_unset() {
         for on in ["1", "true", "TRUE", "yes", "On", " 1 "] {

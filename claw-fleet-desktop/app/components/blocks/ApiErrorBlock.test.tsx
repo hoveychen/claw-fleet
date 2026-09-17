@@ -4,7 +4,7 @@
  * promises it makes to the reader: that Claude Code's own wording survives
  * verbatim (it is the only part that names the model / limit / host that
  * failed), and that a button only ever appears when something is wired behind
- * it — a card offering 「重试」 that does nothing is worse than the grey prose it
+ * it — a card offering "retry" that does nothing is worse than the grey prose it
  * replaced.
  */
 import { act } from "react";

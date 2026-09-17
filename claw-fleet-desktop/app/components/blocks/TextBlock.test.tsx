@@ -74,7 +74,7 @@ describe("TextBlock wiki refs", () => {
   });
 
   it("prefers an explicit wiki prop over the provider", () => {
-    // The 知识库 page passes its own context down; a provider higher up (or a
+    // The Wiki page passes its own context down; a provider higher up (or a
     // future one) must not silently replace it.
     const explicit = { hasSlug: () => false, openSlug: () => {} };
     const html = renderToStaticMarkup(

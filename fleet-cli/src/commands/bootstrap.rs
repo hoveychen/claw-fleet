@@ -27,7 +27,7 @@ use std::io::Write;
 use claw_fleet_core::control_plane::{self, Settings};
 
 /// `locale` falls back to `$FLEET_LOCALE` then `"en"`; `title` defaults to empty
-/// (which renders the locale-correct Boss/老板 — a literal value would force that
+/// (which renders the locale-correct Boss — a literal value would force that
 /// same string across all locales); `model` falls back to `$FLEET_CLAUDE_MODEL`
 /// and, when both are absent, is left alone so the host keeps the Claude Code
 /// CLI's own default.

@@ -1,10 +1,10 @@
-// provider 注册表：把 detectVoiceProvider() 判出的环境映射到具体实现。
+// Provider registry: maps environments detected by detectVoiceProvider() to concrete implementations.
 //
-// 单独一个模块是为了让 useVoiceInput 不必 import 三条实现 —— 那会把 Capacitor
-// 插件和鸿蒙桥的代码拖进浏览器包里。这里同样只在被选中时才碰对应实现。
+// A separate module so useVoiceInput doesn't have to import three implementations — that would drag Capacitor
+// plugins and Harmony bridge code into the browser bundle. Here we only touch the chosen implementation.
 //
-// 目前只登记了 Web Speech；Capacitor 与鸿蒙两条在各自的 P-task 里接进来，届时
-// 只需在 REGISTRY 里加一行，调用方不用改。
+// Currently only Web Speech is registered; Capacitor and Harmony are wired in their own P-tasks, at which point
+// just add a line to REGISTRY — callers need no changes.
 
 import { detectVoiceProvider, type VoiceInputProvider, type VoiceProviderId } from "./voiceInput";
 import { capacitorVoiceProvider } from "./voiceCapacitor";
@@ -17,7 +17,7 @@ const REGISTRY: Partial<Record<VoiceProviderId, VoiceInputProvider>> = {
   harmony: harmonyVoiceProvider,
 };
 
-/** 当前环境该用的 provider，没有可用实现时 null。 */
+/** The provider for the current environment, or null if no suitable implementation is available. */
 export function currentVoiceProvider(): VoiceInputProvider | null {
   const id = detectVoiceProvider();
   return id ? (REGISTRY[id] ?? null) : null;

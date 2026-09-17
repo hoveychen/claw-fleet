@@ -95,7 +95,7 @@ pub(crate) fn mobile_relay_qr_svg(
     state.backend.mobile_relay_qr_svg(lang.as_deref())
 }
 
-/// Text form of the pairing URL, for the 「复制配对链接」 button. Carries the
+/// Text form of the pairing URL, for the "Copy Pairing Link" button. Carries the
 /// pairing secret, same as the QR — it goes to the clipboard, never to a log.
 #[tauri::command(async)]
 pub(crate) fn mobile_relay_pairing_url(

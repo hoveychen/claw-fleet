@@ -1,31 +1,32 @@
-// 每个 agent 源在移动端的分支判断，集中一处。
+// Agent source branching for mobile, centralized in one place.
 //
-// 这些判断原先是散在组件里的 `agentSource === "codex"` 三元式，写它们的时候
-// Fleet 只有 claude/codex 两个源；dsh 接进来之后每一处都默默把 dsh 当成 Claude
-// ——给 dsh 会话列 Claude 的模型、拿 `dsh://` 的 uri 去读 jsonl。抽成纯函数是
-// 为了能被测试逐个钉住，新增第四个源时也只改这一个文件。
+// These checks lived scattered as `agentSource === "codex"` ternaries in components.
+// When written, Fleet had only claude/codex; after dsh joined, every place silently
+// treated dsh as Claude—listed Claude models for dsh sessions, read `dsh://` URIs as
+// jsonl. Extracted to pure functions so tests can nail each one down; adding a fourth
+// source only touches this file.
 //
-// 桌面端的对应物是 claw-fleet-desktop/app/modelChoices.ts（toolForAgentSource /
-// tokenPanelForAgentSource）。
+// Desktop equivalent: claw-fleet-desktop/app/modelChoices.ts (toolForAgentSource /
+// tokenPanelForAgentSource).
 import type { SourceInfo } from "./useSourcesConfig";
 
-/** Fleet 能拉起新会话的 agent 工具（镜像桌面端 AGENT_TOOL_CHOICES）。
- *  值是 launcher 的 tool 值：Claude 源注册名是 "claude-code"，但 tool 值是裸的
- *  "claude"；codex / dsh 注册名与 tool 值同名。 */
+/** Agent tools Fleet can launch new sessions with (mirrors desktop AGENT_TOOL_CHOICES).
+ *  Values are launcher tool values: Claude source registered as "claude-code" but
+ *  tool value is bare "claude"; codex / dsh registration names and tool values match. */
 export const AGENT_TOOL_CHOICES: Array<[string, string]> = [
   ["claude", "Claude"],
   ["codex", "Codex"],
   ["dsh", "DeepSeek Harness"],
 ];
 
-/** 源注册名 → launcher 的 tool 值。 */
+/** Source registration name → launcher tool value. */
 function sourceNameToTool(name: string): string {
   return name === "claude-code" ? "claude" : name;
 }
 
-/** 把工具选择器限制在真正被监控的源上（源开着 **且** 主机上装了）。
- *  `null`（配置还没到）或一个都没匹配上时退回 Claude-only，这样选择器永远不为空、
- *  也不会先闪一个没在监控的工具再藏起来。 */
+/** Constrain tool picker to truly monitored sources (source on **and** available on
+ *  host). `null` (config not arrived) or no matches fall back to Claude-only so picker
+ *  is never empty and never flashes a monitored tool then hides it. */
 export function toolChoicesForSources(
   sources: SourceInfo[] | null,
 ): Array<[string, string]> {
@@ -36,18 +37,18 @@ export function toolChoicesForSources(
   return filtered.length ? filtered : [AGENT_TOOL_CHOICES[0]];
 }
 
-/** 会话的 `agentSource` 对应哪套模型/effort 清单。Fleet 不做兜底猜测：认不出的
- *  源按 Claude 处理，那是注册表自己的 fallback。 */
+/** Which model/effort roster a session's `agentSource` uses. Fleet doesn't guess:
+ *  unrecognized sources treat as Claude, the registry's own fallback. */
 export function toolForAgentSource(agentSource: string | undefined | null): string {
   const tool = sourceNameToTool((agentSource ?? "").trim());
   return AGENT_TOOL_CHOICES.some(([v]) => v === tool) ? tool : "claude";
 }
 
-/** 工具行能不能展开详情 —— 展开是拿 tool_use_id 去读 Claude 的 jsonl。
+/** Can a tool row expand details?—expand reads Claude's jsonl by tool_use_id.
  *
- *  codex 的 rollout 没有 toolUseResult，折叠格式也让扫描失效；dsh 干脆没有
- *  transcript 文件，它的 `jsonlPath` 是个 `dsh://<id>` 的 uri，拿去当路径读只会
- *  失败。两者都返回 undefined = 工具行不可展开。 */
+ *  Codex rollout has no toolUseResult, folded format breaks scanning; dsh has no
+ *  transcript file at all, its `jsonlPath` is a `dsh://<id>` URI, reading it as a
+ *  path always fails. Both return undefined = tool row not expandable. */
 export function detailPathForSession(
   agentSource: string | undefined | null,
   jsonlPath: string | undefined,
@@ -55,12 +56,13 @@ export function detailPathForSession(
   return toolForAgentSource(agentSource) === "claude" ? jsonlPath : undefined;
 }
 
-/** Token 页签该向 relay 要哪个方法。
+/** Which relay method the token tab should call.
  *
- *  每个源用自己的词汇记 token、走自己的通道,面板并不通用:Claude 的从会话
- *  JSONL 里解析出来(`token_breakdown`),dsh 压根没有 transcript 文件,它的
- *  用量要拿 `dsh://<id>` 的 uri 走 RPC 问(`dsh_token_breakdown`)——把 uri 当
- *  路径喂给读文件的那条,只会稳定地显示「分析失败」。 */
+ *  Each source tracks tokens in its own vocabulary, uses its own channel; panel isn't
+ *  universal: Claude parses from session JSONL (`token_breakdown`), dsh has no
+ *  transcript file at all—its usage needs RPC call via `dsh://<id>` URI
+ *  (`dsh_token_breakdown`)—feeding a URI as a path to the file-read method only ever
+ *  shows "parse failed". */
 export function tokenRequestFor(session: {
   agentSource?: string;
   jsonlPath?: string;

@@ -27,8 +27,8 @@ export function ProcTerminal({
   onRecord?: (record: ProcRecord) => void;
   /** Called when another view has already deleted this proc's registry entry. */
   onMissing?: (id: string) => void;
-  /** Fixed pixel height (the 命令 panel's inline rows) or a CSS length — the
-   *  终端 page passes `"100%"` to fill its pane. The ResizeObserver below
+  /** Fixed pixel height (the command panel's inline rows) or a CSS length — the
+   *  terminal page passes `"100%"` to fill its pane. The ResizeObserver below
    *  re-fits either way, so a stretched terminal reflows with the window. */
   height?: number | string;
 }) {
@@ -130,10 +130,10 @@ export function ProcTerminal({
     };
   }, [proc.id]);
 
-  // boxSizing 必须是 border-box：content-box 下 height:100% 的内容盒已经吃满父级，
-  // padding 再把整体顶高 4px，而 .screen 是 overflow:hidden —— 多出来的 4px 连同
-  // 最后一行的下半截一起被裁掉。border-box 同时让 FitAddon 读到扣掉 padding 的
-  // 可用高度，算出的行数才真的放得下。
+  // boxSizing must be border-box: with content-box, height:100% already fills the parent's content box,
+  // then padding pushes the total height up by 4px, and .screen is overflow:hidden — the extra 4px plus
+  // the bottom half of the last line get clipped. border-box lets FitAddon see the usable height after padding,
+  // so the calculated line count actually fits.
   return (
     <div ref={containerRef} style={{ height, padding: "4px 0 0 6px", boxSizing: "border-box" }} />
   );

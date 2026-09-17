@@ -245,7 +245,7 @@ fn refuse_if_subagent(name: &str, effect: &str, args: &Value) -> Option<Value> {
 /// effect left is the wait and the click.
 ///
 /// The interaction-mode guidance says all of this in prose — and agents kept
-/// shipping a 收尾卡 after registering anyway, which is the same failure shape
+/// shipping a wrap-up card after registering anyway, which is the same failure shape
 /// as the hand-rolled terminal option above: prose alone does not hold. Refuse
 /// the call so the agent's only remaining move is the correct one, ending the
 /// turn in plain text.
@@ -598,7 +598,7 @@ impl Drop for InflightGuard {
 /// Labels that mean nothing but "we are done here" — the pre-v3 convention the
 /// card's permanent terminal button replaced. Matched against the *whole*
 /// normalised label, never as a substring: an option like
-/// 「跑完测试再结束任务前的合并」 or "Finish the migration script" is a real next
+/// "Run tests then merge before wrapping up" or "Finish the migration script" is a real next
 /// action that happens to mention finishing, and must stay allowed.
 const END_OPTION_LABELS: &[&str] = &[
     // zh

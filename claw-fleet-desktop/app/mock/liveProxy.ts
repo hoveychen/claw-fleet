@@ -58,7 +58,7 @@ export const LIVE_MODE =
 /**
  * `?stall=get_messages_tail,...` — hold those commands pending forever.
  *
- * A wedged agent backend (the condition that produced the eternal 「加载中…」)
+ * A wedged agent backend (the condition that produced the eternal "Loading..." state)
  * can be staged for real by SIGSTOPping the dsh web server, but that also
  * wedges `/sessions`, so the board never loads and there is nothing to click.
  * This knob wedges exactly one command instead, which is what the frontend's
@@ -835,7 +835,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/skills",
   }),
 
-  // ── Artifacts (产出) ──────────────────────────────────────────────────────
+  // ── Artifacts ──────────────────────────────────────────────────────────────
   // Without these the browser build falls through to the fixtures and the page
   // renders "no artifacts yet" against a server that holds five — caught by
   // driving the real UI, which is exactly what ?mock would have hidden.
@@ -923,16 +923,16 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/procs",
   }),
 
-  // 浏览器构建问的是「服务我这张页面的那个 fleet serve 开了哪些面」——终端页
-  // 由那台主机的 FLEET_TERMINAL 决定,不由这个标签页决定,所以必须走 HTTP 而
-  // 不能在本地编一个答案。
+  // Browser build asks: "which features did the fleet serve that's serving this page enable?" —— terminal page
+  // is determined by that host's FLEET_TERMINAL, not by this tab, so must go over HTTP,
+  // not a locally-fabricated answer.
   host_features: () => ({
     method: "GET",
     path: "/host_features",
   }),
 
-  // 直连(手机不经中转)。浏览器构建走同一套 HTTP 路由 —— 少了这几条,那几个
-  // 命令在 webui 里会静默 no-op(见 webTransport.test.ts 的覆盖门禁)。
+  // Direct connection (phone bypasses relay). Browser build uses the same HTTP routes —— without these,
+  // those commands silently no-op in webui (see webTransport.test.ts coverage gate).
 
 
 
@@ -1119,7 +1119,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { id: a.id, declined: a.declined, answers: a.answers },
   }),
 
-  // `taskOutcome` is the v3 terminal verdict (结束任务 / 放弃任务). Dropping it
+  // `taskOutcome` is the v3 terminal verdict ("Finish task" / "Abandon task"). Dropping it
   // here — as this arm did until 2026-09-08 — turned every terminal press in the
   // browser build (fleet-cloud, `fleet webui`) into a plain dismissal: the
   // server stamped no task outcome, left the session out of Done, and recorded
@@ -1936,7 +1936,7 @@ export const FORWARDED_SSE_EVENTS = [
   "permission-prompt-dismissed",
   // A card whose wait timed out. It is NOT dismissed — the backend parked the
   // question and interrupted the turn, and the card stays until answered. Miss
-  // this and the card keeps counting down forever with no 「已超时」 badge.
+  // this and the card keeps counting down forever with no "Timed Out" badge.
   "decision-parked",
 ];
 

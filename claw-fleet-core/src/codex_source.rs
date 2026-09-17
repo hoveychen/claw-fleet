@@ -478,7 +478,7 @@ fn strip_trailing_context_files(text: &str) -> &str {
 /// full relay note, which can be thousands of characters long. Recognise only
 /// the exact template emitted by [`crate::handoff::compose_successor_prompt`]
 /// and use the note's first sentence as the title. The independent `handoff`
-/// metadata already renders the `接力 n/N` chip, so repeating that preamble in
+/// metadata already renders the relay-chain n/N chip, so repeating that preamble in
 /// the title adds noise rather than context.
 ///
 /// Non-handoff prompts remain byte-for-byte unchanged after the pre-existing
@@ -566,7 +566,7 @@ fn is_injected_codex_context(role: &str, text: &str) -> bool {
 ///
 /// Used as a title/preview fallback: codex only flushes its SQLite `title` /
 /// `first_user_message` columns at turn boundaries, so during an in-flight first
-/// turn those are empty and the card would read "(无标题)". The rollout file, by
+/// turn those are empty and the card would read "(Untitled)". The rollout file, by
 /// contrast, carries the prompt from the first turn's start — so reading it here
 /// lets the card show the real prompt immediately instead of waiting for the
 /// turn to complete. Returns `None` if no non-injected, non-empty user prompt is
@@ -734,7 +734,7 @@ fn determine_status(last_lines: &[Value], file_age_secs: f64) -> SessionStatus {
     // in-flight turn matched no `last_turn_event` and fell straight to the `Idle`
     // fallback below. The desktop then drops the session out of ACTIVE_STATUSES,
     // stops live-tailing the transcript, and the session looks frozen while codex
-    // is still working (the "codex 会话卡住不更新" report). Recognise an in-flight
+    // is still working (the "codex session stuck not updating" report). Recognise an in-flight
     // turn from the rollout content (a start with no following completion) and
     // report the working sub-status regardless of file age. A codex process that
     // actually died mid-turn is caught by `clamp_dead_session_status`, which
@@ -844,7 +844,7 @@ fn streaming_substatus(last_lines: &[Value]) -> SessionStatus {
 ///
 /// Callers must hand this the FULL parsed rollout, not a tail window: a single
 /// turn can emit hundreds of lines, scrolling `task_started` out of any fixed
-/// window and misreading an in-flight turn as not-in-flight (the "codex 假死"
+/// window and misreading an in-flight turn as not-in-flight (the "codex zombie"
 /// report). The backward scan stops at the first boundary event, so the full
 /// slice costs nothing extra in practice.
 fn turn_in_flight(last_lines: &[Value]) -> bool {
@@ -877,7 +877,7 @@ fn turn_in_flight(last_lines: &[Value]) -> bool {
 /// (see `pending_message::is_drainable`). Codex frequently ends a turn without
 /// writing a `turn_complete` event, so `determine_status`'s age fallback returns
 /// `Active` for a turn that is already over and whose process has exited. That
-/// left the composer stuck in "queue" mode — showing "会话运行中，排队" — even
+/// left the composer stuck in "queue" mode — showing "Session running, queued" — even
 /// though the turn was done and the backend would have happily resumed. Clamping
 /// the in-flight statuses to `WaitingInput` when the process is gone realigns the
 /// UI gate with the drain gate.
@@ -1649,7 +1649,7 @@ fn parse_source(source: &str) -> SourceInfo {
     // by the JSON branch above. Classifying "exec" as a subagent set
     // is_subagent=true, which the desktop's `adhocSessions`
     // (`!isSubagent && isFleetOwnedEntrypoint`) then filtered out — the New
-    // Session launcher hung forever on "正在启动会话…" because matchSpawnedSession
+    // Session launcher hung forever on "Starting session..." because matchSpawnedSession
     // could never find the spawned codex session.
     let is_subagent = matches!(source.to_lowercase().as_str(), "sub_agent" | "subagent");
 
@@ -1997,7 +1997,7 @@ fn build_session_from_sqlite(
             // boundary, so during an in-flight first turn it hasn't landed yet.
             // The rollout file already carries the opening prompt from the turn's
             // start — read it so the card shows the real title immediately
-            // instead of "(无标题)".
+            // instead of "(Untitled)".
             if let Ok(content) = read_session_content(&rollout_path) {
                 let parsed: Vec<Value> = content
                     .lines()
@@ -2338,7 +2338,7 @@ mod tests {
         // `determine_status` reporting `Active` via its age fallback. With the
         // process gone, that stale in-flight status must clamp to WaitingInput so
         // the desktop composer offers *resume* (matching the drain gate), not the
-        // misleading "会话运行中，排队" enqueue mode.
+        // misleading "Session running, queued" enqueue mode.
         assert_eq!(clamp_dead_session_status(S::Active, false), S::WaitingInput);
         assert_eq!(
             clamp_dead_session_status(S::Streaming, false),
@@ -2439,7 +2439,7 @@ mod tests {
 
     #[test]
     fn parse_codex_session_reads_in_flight_when_task_started_scrolls_past_window() {
-        // Regression (2026-07-16 "codex 假死"): a single long turn that has
+        // Regression (2026-07-16 "codex zombie"): a single long turn that has
         // emitted more than the status window's worth of rollout lines scrolls
         // its `task_started` out of the fixed 100-line tail the status scan was
         // handed. With the rollout then silent >30s (codex writes nothing during
@@ -3295,7 +3295,7 @@ mod tests {
         // `last_agent_message`. That branch used to fall into the catch-all
         // `_ => {}` and get dropped, so the transcript ended on the user's
         // prompt with nothing after it — which the frontend reads as "a turn
-        // about to run" and pins an eternal 「处理中…」 spinner over, with the
+        // about to run" and pins an eternal "Processing..." spinner over, with the
         // actual reason nowhere on screen (real case: two 2026-08-19 codex
         // sessions that died in ~1.3s on "refresh token was already used").
         let lines = vec![
@@ -3861,8 +3861,8 @@ mod tests {
         // branch below. Misclassifying plain "exec" as a subagent set
         // is_subagent=true, which the desktop's `adhocSessions` filter
         // (`!isSubagent && isFleetOwnedEntrypoint`) then excluded — so a
-        // Fleet-spawned codex "新会话" never surfaced and the launcher hung
-        // forever on "正在启动会话…".
+        // Fleet-spawned codex "New session" never surfaced and the launcher hung
+        // forever on "Starting session...".
         assert!(
             !super::parse_source("exec").is_subagent,
             "plain exec is top-level"
@@ -4496,7 +4496,7 @@ mod tests {
     /// A Codex subagent's rollout is a FORK: it opens with its own
     /// `session_meta`, then the parent's, then the parent's entire conversation
     /// replayed, and only then its own work. Rendering the file from the top is
-    /// what made "点进子代理看到的还是主会话" — both `get_messages` and the tail
+    /// what made "viewing a subagent still shows the parent session" — both `get_messages` and the tail
     /// must start at the fork's own first row.
     #[test]
     fn codex_fork_rollout_drops_replayed_parent_conversation() {
@@ -5414,7 +5414,7 @@ fn reconcile_codex_liveness(
 /// `turn_complete` event) stops writing its rollout. The desktop rebuilds a
 /// Codex session's `proc_alive` only when the fs-watcher sees a write to that
 /// rollout, so a silent death produces no event and `proc_alive` stays frozen
-/// `true`. That jams two gates: the "会话运行中" UI (red stop button) and the
+/// `true`. That jams two gates: the "Session running" UI (red stop button) and the
 /// pending-message drain (`pending_message::is_drainable` short-circuits on the
 /// stale flag before the fresh liveness recheck can run). Called off the
 /// periodic ticker — which fires regardless of file writes — this recomputes
@@ -5777,7 +5777,7 @@ fn parse_codex_session(
     // this filesystem-fallback path (and during an in-flight first turn) we
     // derive the title straight from the rollout's first user prompt — with the
     // leading TASKS.md `<system-reminder>` stripped — instead of leaving the card
-    // "(无标题)".
+    // "(Untitled)".
     let ai_title = source_info
         .agent_nickname
         .or(agent_nickname)
@@ -5958,7 +5958,7 @@ fn codex_turn_error_text(payload: &Value) -> Option<String> {
 /// a real file (`kid-english`, 2026-09-13) that was rows 0–78 of 90 — so a
 /// reader that renders the file from the top shows the parent's whole
 /// conversation and the subagent's own 11 rows scroll off the bottom. That is
-/// the "点进子代理看到的还是主会话" bug, and it hit every client at once because
+/// the "viewing a subagent still shows the parent session" bug, and it hit every client at once because
 /// nothing in Fleet trimmed the prefix.
 ///
 /// The fork's own timeline starts at the `thread_settings_applied` event
@@ -7060,7 +7060,7 @@ impl AgentSource for CodexSource {
         // (honest for Claude, whose tail is 1:1 raw↔message); if we returned a
         // short normalized slice it would wrongly latch `fullyLoaded`, hide the
         // "load earlier" affordance, and strand the opening prompt + early turns
-        // above an unreachable window (the "Codex 看不到更早消息" bug).
+        // above an unreachable window (the "Codex cannot see earlier messages" bug).
         //
         // So grow the raw window until normalization yields at least `n`
         // messages or we've consumed the whole file, then return the last `n`.

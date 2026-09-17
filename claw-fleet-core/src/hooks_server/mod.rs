@@ -1154,11 +1154,12 @@ fn handle_request(
 
         let query = parse_query(query_str);
 
-        // CORS 预检必须抢在认证之前:浏览器发 OPTIONS 时**不带**
-        // `Authorization` 头(那正是它要问「带这个头行不行」的东西)。放到认证
-        // 之后,预检会拿到 401,真正的请求就永远发不出去 —— 而症状只是「跨源
-        // 请求失败」,看不出是预检死在门口。见 cors.rs 的理由:只对手机那两条
-        // 数据路开,且只在有 token 门时开。
+        // CORS preflight must run before auth: the browser sends OPTIONS **without**
+        // the `Authorization` header (that's what it's asking about). After auth,
+        // preflight gets 401, and the actual request never goes out — the symptom
+        // is just "cross-origin request failed", hiding that preflight died at the gate.
+        // See cors.rs for details: enabled only for phone's two data routes,
+        // and only when a token gate exists.
         if cors::is_preflight(request.method(), path, auth_disabled) {
             let _ = request.respond(cors::preflight_response());
             return;
@@ -1189,12 +1190,12 @@ fn handle_request(
             // 401 when nothing was presented, 403 when a token was presented but
             // is wrong or a scoped token reached a non-public path.
             let status = if presented.is_some() { 403 } else { 401 };
-            // 拒绝也要带上跨源头 —— 否则手机那边**看不见这个状态码**:浏览器
-            // 对一个缺 CORS 头的响应只交给 JS 一个笼统的网络错误。实测过:填错
-            // token 时手机上显示的是「连不上这台主机,或它没开放跨源」,而正确
-            // 的话应该是「这台主机拒绝了这个 token」—— 两句话指向完全不同的修法。
-            // 让页面读到 401/403 不泄露任何东西:响应体是空的,而「这个端口要
-            // token」本来就是它对任何请求的公开事实。
+            // Rejection must include CORS headers — otherwise the phone **cannot see the status code**:
+            // browsers hide missing-CORS responses from JS as a generic network error. Testing shows:
+            // with a wrong token, the phone sees "cannot reach this host or it disallows cross-origin",
+            // but the real message should be "this host rejected the token" — two very different fixes.
+            // Giving the page 401/403 leaks nothing: the response body is empty, and "this port requires
+            // a token" is already public knowledge for any request.
             let mut res = tiny_http::Response::empty(status);
             for h in cors::headers(auth_disabled, path) {
                 res.add_header(h);
@@ -1206,9 +1207,9 @@ fn handle_request(
         // Handle SSE endpoint — takes over the connection. Cheap: it upgrades
         // and hands the stream to the broadcaster, so it does not pin a worker.
         if path == "/events" {
-            // ACAO 从前是无条件发的。多设备之后跨源是真实用法,但同一条口径要
-            // 贯彻到底:无认证的端口不该把用户的决策卡流给任意网页。所以这里
-            // 也按 token 门给头。
+            // ACAO used to be sent unconditionally. Multi-device scenarios make cross-origin a real use case,
+            // but the auth model must be consistent: an unauthenticated port should not stream decision cards
+            // to arbitrary pages. So here too, CORS headers are gated by the token.
             handle_sse_upgrade(request, sse, cors::headers(auth_disabled, path));
             return;
         }
@@ -1322,7 +1323,7 @@ fn handle_request(
 
             crate::routes::HANDOFF_CHAIN => route_handoff_chain(ctx, request, &query, json_header, path),
 
-            // ── Artifact store (产出) ────────────────────────────────────────
+            // ── Artifact store ────────────────────────────────────────
             crate::routes::ARTIFACTS => route_artifacts(ctx, request, &query, json_header, path),
 
             crate::routes::ARTIFACT => route_artifact(ctx, request, &query, json_header, path),
@@ -1408,7 +1409,7 @@ fn handle_request(
                 if request.method() == &tiny_http::Method::Post => route_plugins_install(ctx, request, &query, json_header, path),
 
             // Resume a scanned session with an optional follow-up prompt
-            // (history panel's "恢复会话" in the browser build). Detached
+            // (history panel's "Resume session" in the browser build). Detached
             // `claude --resume <sid> -p <prompt>`; the resumed turn appears
             // via the scanner as the JSONL grows.
             crate::routes::RESUME_SESSION if request.method() == &tiny_http::Method::Post => route_resume_session(ctx, request, &query, json_header, path),

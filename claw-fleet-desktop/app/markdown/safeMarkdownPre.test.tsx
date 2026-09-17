@@ -15,21 +15,22 @@ function render(md: string): string {
   );
 }
 
-describe("safeMarkdownComponents 的 pre 覆写", () => {
-  it("mermaid fence 不再被外层 <pre> 包住", () => {
-    // <pre> 会把图裹进等宽字体的框里 —— mermaid 是按 sans 量的标签宽度，继承到
-    // 等宽后就画不下、被节点框切掉。
+describe("safeMarkdownComponents overrides pre rendering", () => {
+  it("mermaid fence is no longer wrapped in outer <pre>", () => {
+    // <pre> wraps the diagram in a monospace font box — mermaid measures tag
+    // widths in sans-serif, so when inherited into monospace it can't fit and
+    // gets clipped by the node box.
     const html = render("```mermaid\nflowchart TB\n  A --> B\n```");
     expect(html).not.toContain("<pre");
   });
 
-  it("普通 fence 仍然保留 <pre>（不然空白会被折叠）", () => {
+  it("regular fence keeps <pre> (otherwise whitespace gets collapsed)", () => {
     const html = render("```ts\nconst a = 1;\n```");
     expect(html).toContain("<pre");
     expect(html).toContain("const a = 1;");
   });
 
-  it("无语言 fence 也保留 <pre>", () => {
+  it("fence without language also keeps <pre>", () => {
     const html = render("```\n┌────┐\n└────┘\n```");
     expect(html).toContain("<pre");
   });

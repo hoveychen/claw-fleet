@@ -1,14 +1,14 @@
-//! Directories the user explicitly added to the 仓库 page, persisted server-side.
+//! Directories the user explicitly added to the workspace browser page, persisted server-side.
 //!
 //! `file_explorer` gates every read on `known_workspaces`, which the desktop
 //! derives purely from session transcripts: a directory is browsable only once
 //! some Claude session has run in it. That is the right default, but it leaves
 //! two holes the UI walked straight into:
 //!
-//!   • A repo cloned from the 仓库 page has zero sessions by construction, so
+//!   • A repo cloned from the workspace browser page has zero sessions by construction, so
 //!     the file tree answered "workspace is not a known session workspace" the
 //!     moment the clone finished — it looked like the clone had failed.
-//!   • The same for a directory added by hand ("添加路径"). The front end kept
+//!   • The same for a directory added by hand ("Add Path"). The front end kept
 //!     those in `mainViewState.files.extraPaths`, which is in-memory only, so
 //!     the card also vanished on restart.
 //!

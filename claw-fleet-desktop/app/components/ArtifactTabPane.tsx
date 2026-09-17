@@ -19,16 +19,16 @@ import styles from "./TabPanes.module.css";
 /**
  * One deliverable as an auxiliary-rail reader.
  *
- * The body is the very `ArtifactStage` the 产出 page renders, so a deliverable
+ * The body is the very `ArtifactStage` the artifact page renders, so a deliverable
  * looks the same wherever it is open. What changed is the header: it used to
- * name the kind and the size and offer a single 产出 button, while
+ * name the kind and the size and offer a single export button, while
  * `export_artifact`, `reveal_artifact`, `open_artifact_external` and
  * `delete_artifact` — all four already implemented — were unreachable from
  * here. They now live in the shared `AuxDocBar` and in the card's right-click
  * menu, which are one list (see `auxDocMenu`).
  *
- * The 产出 page still owns rename, move and version rollback, which need its
- * dialogs; 在产出页打开 is the way over to them.
+ * The artifact page still owns rename, move and version rollback, which need its
+ * dialogs; navigating to the artifact page is the way over to them.
  */
 export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail }) {
   const { t } = useTranslation();
@@ -60,7 +60,7 @@ export function ArtifactTabPane({ doc, tail }: { doc: AuxDoc; tail: AuxCardTail 
     try {
       // A browser tab cannot be given a destination path — `save()` answers
       // null there and the action would silently do nothing. Hand the browser a
-      // download instead, the same way 产出 and the wiki's export do.
+      // download instead, the same way the artifact page and the wiki's export do.
       if (isWebBuild()) {
         await downloadArtifact(artifact.id, artifact.name);
         setError(null);

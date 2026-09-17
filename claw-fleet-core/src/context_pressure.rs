@@ -17,7 +17,7 @@
 //!
 //! Tiers are **absolute token counts** — 250K / 500K / 750K — as specified.
 //! A window-relative reading (25/50/75 %) was built first and rejected: these
-//! are the figures 老板 asked for. The accepted cost is that a 200K-window
+//! are the figures the boss asked for. The accepted cost is that a 200K-window
 //! model (every Haiku, Opus/Sonnet ≤4.5) can never reach the first tier and so
 //! is never reminded at all; the sessions this exists for run on 1M models.
 //!
@@ -248,9 +248,10 @@ pub fn forget(session_id: &str) {
 /// The 75% copy names `fleet handoff` explicitly, because "your context is
 /// long" without the command is exactly the nudge that has been failing.
 pub fn reminder_text(pressure: &ContextPressure, tier: u64) -> String {
-    // Deliberately no percentage and no "x / 1000K" framing: those read as "还
-    // 早，才用了四分之一" when the truth is the opposite. Past ~250K the model's
-    // judgement is already degrading, whatever fraction of the window that is.
+    // Deliberately no percentage and no "x / 1000K" framing: those read as
+    // "still early, only used a quarter" when the truth is the opposite. Past
+    // ~250K the model's judgement is already degrading, whatever fraction of
+    // the window that is.
     // dsh names the model on `request/context` and Claude on every assistant
     // turn, but neither is guaranteed — say the number rather than an empty
     // pair of parens.

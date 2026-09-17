@@ -160,7 +160,7 @@ export function resolveAnswers(
 
 /** A user's answer to one question, normalised across both decision tools. */
 export interface DecisionAnswer {
-  /** Comma-joined option labels, or the free text typed into 「其他」. */
+  /** Comma-joined option labels, or the free text typed into "其他" (Other). */
   label: string;
   /** True when the text matches no offered option (the free-text escape hatch). */
   other: boolean;

@@ -3,31 +3,33 @@ import type { Root, Element, Text, ElementContent } from "hast";
 import { visit } from "unist-util-visit";
 
 /**
- * 中文首行缩进。中文排版惯例是正文段落首行缩进 2 个字，英文段落不缩进。CSS
- * 无法按段落内容的语言来选择元素，所以在渲染时判断每个 `<p>` 的首个实义字符
- * 是否为 CJK：是则打上 `cjk-indent` 类，由 index.css 的 `text-indent: 2em` 完成
- * 缩进（`1em ≈ 1 个全角字宽`，`2em` 即 2 个中文字）。英文段落不打类、保持原样。
+ * CJK first-line indent. Typography convention: CJK body paragraphs indent 2
+ * characters, English paragraphs don't. CSS can't select by content language, so at
+ * render time check if each `<p>`'s first meaningful char is CJK: if so, tag with
+ * `cjk-indent` class; `index.css` handles indent with `text-indent: 2em` (`1em ≈ 1
+ * full-width char`, `2em` = 2 CJK characters). English paragraphs stay untagged.
  *
- * 只作用于正文段落：列表项 / 引用块 / 表格单元格内的段落跳过——它们已有自己
- * 的缩进语境，再叠加首行缩进会显得错乱。必须排在 `rehype-sanitize` 之后运行，
- * 否则注入的 `className` 会被清洗掉。
+ * Applies only to body paragraphs: list items / blockquotes / table cells skip because
+ * they have their own indent context; stacking first-line indent looks wrong. Must run
+ * after `rehype-sanitize`, else injected `className` gets stripped.
  *
- * 与桌面 claw-fleet-desktop/app/markdown/cjkIndent.ts 保持同步（两个 app 是独立
- * 的 vite 包，插件逻辑复制而非共享）。
+ * Sync with desktop `claw-fleet-desktop/app/markdown/cjkIndent.ts` (two apps are
+ * separate vite packages; plugin logic copied, not shared).
  */
 
-// 汉字（含扩展 A、兼容表意区）、CJK 标点、全角字符，外加中文常用的弯引号
-// （‘–‟，覆盖 “ ” ‘ ’ 开头的中文引述段落）。判定的是段落首个实义
-// 字符，所以以中文引号开头的段落也能正确缩进。
+// CJK characters (including CJK Extension A, compatibility ideographs), CJK punct,
+// full-width chars, plus curved quotes common in Chinese (‘–‟ covers “ “ ‘ ‘ opening
+// Chinese quote passages). Match the first meaningful character; paragraphs opening with
+// Chinese quotes also indent correctly.
 const CJK_LEADING =
   /[‘-‟　-〿㐀-䶿一-鿿豈-﫿＀-￯]/;
 
-// markdown 生成的 hast 里，正文 <p> 的直接父就是这些容器（松散列表 li > p、
-// 引用块 blockquote > p、表格 td/th > p），所以只需看直接父即可跳过它们内部
-// 的段落——它们已有自己的缩进语境，再首行缩进会显得错乱。
+// In markdown-generated hast, body `<p>` parents are these containers (loose list li > p,
+// blockquote > p, table td/th > p), so checking direct parent skips their inner
+// paragraphs — they have their own indent context, stacking first-line indent looks wrong.
 const SKIP_PARENTS = new Set(["li", "blockquote", "td", "th"]);
 
-/** 返回节点子树里第一个非空白字符；全空白则 null。 */
+/** Return first non-whitespace char in node subtree; null if all whitespace. */
 function firstMeaningfulChar(node: ElementContent): string | null {
   if (node.type === "text") {
     const m = (node as Text).value.match(/\S/);

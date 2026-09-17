@@ -99,7 +99,7 @@ export function FileTree({
    * The path isn't in this tree — a missing ancestor directory, a missing leaf,
    * or a leaf the current filters hide. Only fired for `reportMiss` requests.
    * Before this existed the reveal just `return`ed, which is what made a click
-   * on a path the agent got slightly wrong land on the 仓库 page and stop dead.
+   * on a path the agent got slightly wrong land on the Files page and stop dead.
    */
   onRevealFailed?: (relPath: string) => void;
 }) {
@@ -186,8 +186,9 @@ export function FileTree({
       });
       if (target && !target.isDir) onPick(target);
       // Ancestors all loaded but the leaf isn't there — deleted, renamed, or
-      // filtered out by 「显示忽略文件」. Expanding to its parent and stopping
-      // silently reads as "nothing happened", so report it like a missing dir.
+      // filtered out by "Show Ignored" being off. Expanding to its
+      // parent and stopping silently reads as "nothing happened", so report it
+      // like a missing dir.
       if (!target && reveal.reportMiss) {
         onRevealFailed?.(reveal.relPath);
       }

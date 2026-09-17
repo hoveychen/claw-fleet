@@ -114,8 +114,7 @@ function SheetPreview({ blob }: { blob: Blob }) {
     setErr(null);
     setActive(0);
     (async () => {
-      // `/browser` rather than the package root: read-excel-file dispatches per
-      // environment and has no root export at all.
+      // `/browser` 而不是包根：read-excel-file 按环境分发,根本没有根导出。
       const readXlsxFile = (await import("read-excel-file/browser")).default;
       const parsed = (await readXlsxFile(blob)) as ParsedSheet[];
       if (alive) setSheets(parsed);
@@ -172,10 +171,10 @@ function formatCell(cell: CellValue): string {
 }
 
 /**
- * Word's list bullets are codepoints in the Symbol font's private use area (U+2022 in Symbol is
- * U+F0B7); docx-preview copies them as `content: "\9 "; font-family: Symbol`.
- * Mobile lacks these fonts, so every bullet renders as a tofu block. After rendering, replace
- * these codepoints with regular characters.
+ * Word's list bullets are codepoints in the Symbol font's private use area (U+2022 in Symbol is\u2022」是
+ * U+F0B7），docx-preview 会照搬成 `content: "\uF0B7\\9 "; font-family: Symbol`。
+ * 手机上没有这些字体，于是每个项目符号都渲染成豆腐块。渲染完把这些码位换成
+ * 普通字符即可。
  *
  * This mirrors the same-named function in claw-fleet-desktop/app/officeRender.ts — the two
  * packages don't share code, so both must be updated together.

@@ -6,8 +6,9 @@ import {
   relayWsUrl,
 } from "./relayBase";
 
-// `resolveRelayBase` / `relayDisplayHost` 的用例仍在 relay.test.ts —— 它们跟着
-// 函数一起搬过来太吵，改动只是导入路径。这里补的是多设备新长出来的那几个。
+// Test cases for `resolveRelayBase` and `relayDisplayHost` still live in relay.test.ts—
+// moving them with the functions would be too noisy, changes are just import paths.
+// This file covers the new ones that grew out of multi-device.
 
 const BAKED = "https://fleet-relay.muveeai.com";
 
@@ -35,7 +36,8 @@ describe("parseRelayParam", () => {
     expect(parseRelayParam("")).toBeNull();
   });
 
-  // 二维码是不可信输入，而这个值会成为客户端后续每个 URL 的基底。
+  // QR codes are untrusted input, and this value becomes the base for every URL
+  // the client makes afterward.
   it("refuses anything that is not an absolute http(s) URL", () => {
     expect(parseRelayParam("#relay=javascript%3Aalert(1)")).toBeNull();
     expect(parseRelayParam("#relay=file%3A%2F%2F%2Fetc%2Fpasswd")).toBeNull();
@@ -46,7 +48,8 @@ describe("parseRelayParam", () => {
 
 describe("defaultRelayBaseFrom", () => {
   it("prefers the baked build constant over the page origin", () => {
-    // 鸿蒙壳的页面 origin 是假域名 https://fleet.local，退回它会让 app 拨自己。
+    // HarmonyOS shell pages have a fake origin https://fleet.local; falling back
+    // to it would make the app dial itself.
     expect(defaultRelayBaseFrom(BAKED, "https://fleet.local")).toBe(BAKED);
   });
 
@@ -63,8 +66,8 @@ describe("relayBaseFor", () => {
     );
   });
 
-  // 迁移过来的设备与扫码时没带 &relay= 的设备都是 null —— 那不是「未知」，
-  // 而是「就用构建默认值」（本测试环境里 origin 是 http://localhost）。
+  // Devices migrated from earlier versions and devices scanned without &relay= are both null — that is not
+  // "unknown", but rather "use the build default" (in this test environment, origin is http://localhost).
   it("falls back to the build default when the device named none", () => {
     expect(relayBaseFor(null)).toBe("http://localhost");
     expect(relayBaseFor(undefined)).toBe("http://localhost");

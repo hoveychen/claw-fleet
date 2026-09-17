@@ -48,8 +48,8 @@ const HOUR = 3_600_000;
  *  chat-only / hide-chat filter has something to bite on. */
 export const MOCK_CHAT_WORKSPACE = "/Users/demo/.fleet/chat";
 
-/** 假终端的首屏。带 ANSI 颜色和 `\r\n`,因为这一屏正是用来验证 xterm 真的在渲染
- *  转义序列 —— 换成纯文本就看不出面板到底接没接上终端。 */
+/** Mock terminal first screen. Includes ANSI colors and `\r\n` because this screen specifically verifies that xterm is rendering
+ *  escape sequences — plain text would hide whether the panel is actually connected to the terminal. */
 export const MOCK_TERMINAL_SCREEN =
   "\x1b[32m➜\x1b[0m  \x1b[36mapi-server\x1b[0m git:(\x1b[31mmain\x1b[0m) \r\n" +
   "$ git status --short\r\n" +
@@ -79,9 +79,9 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     contextPercent: 0.72,
     totalCostUsd: 4.33,
     effort: "xhigh",
-    // 头部状态轨的「N 个子代理」pill 靠这个数。这一条与下面那行真的
-    // `agent-explore-1` 对得上——mock 里给一个没有对应行的计数，会让半屏上的
-    // 作用域清单空着而 pill 却在吆喝，正是 mock 替真 bug 打掩护的那种形状。
+    // The "N subagents" pill in the header status bar relies on this count. This row really pairs with
+    // the `agent-explore-1` row below — giving a count in mock that has no corresponding row would leave the
+    // scope list half-empty while the pill shouts anyway, which is the shape where mock hides a real bug.
     runningSubagentCount: 1,
   },
   {
@@ -136,7 +136,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     // dsh session. Its `jsonlPath` is a `dsh://` URI, not a file — dsh keeps no
     // transcript on disk, so every panel that reads one has to go through RPC
     // instead. That difference is the whole reason this fixture exists: without
-    // a dsh session in the roster the dsh Token tab (and its 花费 line) had no
+    // a dsh session in the roster the dsh Token tab (and its 花费 (Cost) line) had no
     // way to be seen outside a live relay.
     id: "session-dsh-ledger",
     workspacePath: "/Users/demo/workspace/claude-fleet",
@@ -207,9 +207,9 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     procAlive: true,
     contextPercent: 0.36,
     totalCostUsd: 4.02,
-    // 这一条是状态轨最忙的样本：它同时有待决策卡（MOCK_ELICITATION 就挂在
-    // 这个 sessionId 上）、两个 watch、一条排队追问。改版前这三样在手机上
-    // 一个都看不见——它们本来就在快照里，只是头部没有地方放。
+    // This is the busiest sample for the status bar: it has pending decision cards (MOCK_ELICITATION is
+    // attached to this sessionId), two watches, and one queued follow-up. Before the redesign, none of these three
+    // were visible on mobile — they were in the snapshot, just had nowhere to display in the header.
     watches: [
       {
         id: "watch-e2e-green",
@@ -396,7 +396,7 @@ export const MOCK_FLEET_ASK: FleetAskRequest = {
   ],
 };
 
-/** Decision-history fixture for the session-detail "决策" tab (`session_decisions`).
+/** Decision-history fixture for the session-detail "决策" (Decisions) tab (`session_decisions`).
  *  Covers all four record kinds with markdown-rich bodies so the tab exercises
  *  the shared markdown chain, ✓/○/▸ option markers, selected-green, the plan
  *  scroll box, italic feedback, the raw user-prompt <pre>, and the amber
@@ -759,9 +759,8 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_use", id: "fp3b", name: "mcp__fleet__fleet__watch", input: { action: "create", note: "等 muvee 拉起 backfill 版镜像（运行镜像 Created 从 05:10:08 变化）；触发时抓容器日志确认补了多少条历史 Tripo 花费", until: "test -f /tmp/ci-done", capture: "muveectl projects logs pixel-portrait --tail 300", poll: 120, timeout: 3600 } },
           { type: "tool_use", id: "fp4", name: "mcp__fleet__fleet__watch", input: { action: "list" } },
           { type: "tool_use", id: "fp5", name: "mcp__fleet__fleet__wiki", input: { action: "list" } },
-          // 两次入库。relay 把结果正文裁掉、把 input.title 也裁掉，所以卡上那点
-          // 东西全靠 `_ingest`（见对面的 tool_result）——这两行正是为了让缺了它
-          // 会怎样一眼可见。
+          // Two entries into the repo. The relay strips the result body and input.title, so all the detail on the card
+          // comes from `_ingest` (see the matching tool_result) — these two lines exist to make it obvious what breaks without it.
           { type: "tool_use", id: "fi1", name: "mcp__fleet__fleet__artifact", input: { action: "add", path: "/Users/demo/workspace/claw-fleet/.worktrees/q3/out.xlsx" } },
           { type: "tool_use", id: "fi2", name: "mcp__fleet__fleet__wiki", input: { action: "publish", path: "/tmp/index.md" } },
           { type: "tool_use", id: "fp6", name: "mcp__fleet__fleet__handoff", input: { action: "list" } },
@@ -1055,9 +1054,9 @@ export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
       2,
     ),
   },
-  // A decision card expanded in the 消息 tab: the full `questions` input plus
+  // A decision card expanded in the 消息 (Messages) tab: the full `questions` input plus
   // the JSON-string `toolUseResult` an MCP `fleet__ask` returns. Renders through
-  // DecisionQa — the same component the 决策 tab uses.
+  // DecisionQa — the same component the 决策 (Decisions) tab uses.
   fa1: {
     name: "mcp__fleet__fleet__ask",
     input: {
@@ -1241,7 +1240,7 @@ export const MOCK_ARTIFACTS: Artifact[] = [
   },
   {
     // Over the relay's 16 MiB frame limit — the one row that must render the
-    // 「仅桌面」 badge rather than pretending it can be fetched.
+    // "desktop only" badge rather than pretending it can be fetched.
     id: "20260826-173311",
     name: "产品发布片.mp4",
     title: "产品发布片 v3",
@@ -1314,9 +1313,9 @@ export const MOCK_WIKI_ENTRY_MD = [
   "",
 ].join("\n");
 
-/** UTF-8 → base64, the framing every wiki relay method uses. Local rather than
+/** UTF-8 → base64, the encoding every wiki relay method uses. Defined locally rather than
  *  reaching into relayCrypto's private `b64encode`: widening a crypto module's
- *  surface for a fixture is the wrong trade. */
+ *  API surface for a fixture is the wrong trade-off. */
 function utf8ToBase64(text: string): string {
   let bin = "";
   for (const b of new TextEncoder().encode(text)) bin += String.fromCharCode(b);
@@ -1326,7 +1325,7 @@ function utf8ToBase64(text: string): string {
 export const MOCK_WIKI_ENTRY_B64 = utf8ToBase64(MOCK_WIKI_ENTRY_MD);
 
 /** `repo_list` / `repo_detail` fixtures. Both the main checkout and one
- *  worktree carry a non-zero `dirtyCount`, because the "脏 N" chip is the only
+ *  worktree carry a non-zero `dirtyCount`, because the "dirty N" chip is the only
  *  way into the expandable file list — a clean fixture renders no toggle at
  *  all, so the expand/collapse control would stay unverifiable under `?mock`. */
 export const MOCK_REPOS: RepoSummary[] = [
@@ -1454,17 +1453,17 @@ export const MOCK_DIR_TREE: Record<string, BrowseDirResponse> = {
   },
 };
 
-/** Mirrors the desktop's `browse_dir`.
+/** Mirrors the desktop's `browse_dir` method.
  *
  *  A path *inside* the tree that has no explicit fixture is a real, empty
  *  directory — on the desktop every directory the picker offers can be entered,
  *  so a fixture-less leaf must render as "no subdirectories", not as an error.
- *  Only a path outside the tree fails, which is what the real `canonicalize`
- *  does for a nonexistent path — that's the picker's error row. */
+ *  Only paths outside the tree fail, which matches what the real `canonicalize`
+ *  does for a nonexistent path — that's what the picker's error row exercises. */
 export function mockBrowseDir(path?: string): BrowseDirResponse {
   const p = path?.trim() || MOCK_HOME;
-  // One root, like a desktop host: the fixture home. A cloud host answers with
-  // two (home + the persistent volume) and the picker then shows root rows.
+  // One root, like a desktop host: just the fixture home. A cloud host answers with
+  // two (home + the persistent volume), and the picker renders root rows for both.
   const roots = [MOCK_HOME];
   const hit = MOCK_DIR_TREE[p];
   if (hit) return { ...hit, roots };
@@ -1475,10 +1474,10 @@ export function mockBrowseDir(path?: string): BrowseDirResponse {
   return { path: p, parent, entries: [], truncated: false, roots };
 }
 
-/** Mirrors the desktop's `create_dir`: one new child, then the listing of that
+/** Mirrors the desktop's `create_dir` method: create one new child, then return the listing of that
  *  child (empty, with a parent link) — so `?mock` exercises the same
  *  land-inside-the-new-directory flow the real host serves. The fixture tree is
- *  mutated, so the new directory stays visible when the user walks back up. */
+ *  mutated, so the new directory remains visible when the user navigates back up. */
 export function mockCreateDir(path: string | undefined, name: string): BrowseDirResponse {
   const parent = mockBrowseDir(path); // throws for a parent outside the tree
   const trimmed = name.trim();
@@ -1499,9 +1498,9 @@ export function mockCreateDir(path: string | undefined, name: string): BrowseDir
   return MOCK_DIR_TREE[child];
 }
 
-/** The relay chain behind `sess-billing-*` — three legs, so the handoff tab has
+/** The relay chain behind `sess-billing-*` — three hops, so the handoff tab has
  *  something to collapse/expand. Long notes with bare newlines also exercise the
- *  markdown line-break rendering. Keyed lookup lives in the mock relay. */
+ *  markdown line-break rendering. Keyed lookup is handled by the mock relay. */
 export const MOCK_HANDOFF_CHAIN: HandoffChain = {
   chainId: "chain-billing",
   workspacePath: "/Users/demo/workspace/billing-service",
@@ -1540,10 +1539,10 @@ export const MOCK_HANDOFF_CHAIN: HandoffChain = {
   ],
 };
 
-// ── Plan forest (计划页) ─────────────────────────────────────────────────────
-// One live root with a sub-plan and a finished root, plus one deliberately
-// long P-task: real plan items run to several paragraphs, and a fixture made of
-// one-liners would hide the sheet's clamp entirely.
+// ── Plan forest (plans page) ─────────────────────────────────────────────────────
+// One active root with a child-plan and a finished root, plus one deliberately
+// long P-task: real plan items span several paragraphs, and a fixture made of
+// one-liners would hide the panel's truncation entirely.
 
 export const MOCK_PLAN_FOREST: PlanForest = {
   roots: [

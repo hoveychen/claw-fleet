@@ -1,26 +1,28 @@
-// 「这台设备的 relay 在哪」—— 纯粹的 URL 归属计算,不含任何 relay 客户端。
+// "Where is the relay for this device" — pure URL assignment logic without any relay client code.
 //
-// 这些函数原先住在 relay.ts,而 relay.ts 是**整个 relay 客户端**(WebSocket、
-// 端到端加密、帧协议)。谁想知道一个 relay 地址,就得把那一整棵树拖进来:同源
-// (webui)构建为此专门用动态 import 绕路(见 main.tsx 与 push.ts 的注释)。
-// 多设备之后需要知道地址的地方多了(设备簿要记住扫码指名的 relay、推送要按
-// relay 取 VAPID 公钥),所以这一小块被切出来单独住。
+// These functions originally lived in relay.ts, which is **the entire relay client** (WebSocket,
+// end-to-end encryption, frame protocol). Anyone wanting to know a relay address had to drag
+// in the entire tree: same-origin (webui) builds work around this with dynamic import (see comments
+// in main.tsx and push.ts). After adding multiple devices, more places need to know the address
+// (device registry needs to remember the relay specified by QR code, push needs the VAPID public key
+// per relay), so this small piece was extracted separately.
 //
-// 本模块**没有模块加载期副作用**:不读 hash、不读 env、不建任何东西。原先
-// relay.ts 里那个 `const RELAY_BASE = resolveRelayBase(...)` 之所以必须在模块
-// 加载时求值,是因为配对 fragment 会在启动后立刻被抹掉;现在扫码指名的 relay
-// 在落地那一刻就存进了设备记录(devices.ts),没有什么需要抢在抹掉之前读了。
+// This module **has no module-load-time side effects**: doesn't read hash, doesn't read env,
+// doesn't initialize anything. The old `const RELAY_BASE = resolveRelayBase(...)` in relay.ts
+// had to be evaluated at module load because the pairing fragment gets wiped immediately after
+// startup; now the relay specified by QR code is saved to the device record (devices.ts) the moment
+// it arrives, so there's nothing that needs to be read before the fragment is wiped.
 
-/** 二维码 fragment 里的 `&relay=<encoded origin>`,解析成一个 origin。
+/** Parse `&relay=<encoded origin>` from the QR code fragment into an origin.
  *
- *  只认绝对的 http/https URL —— 二维码是不可信输入,而这个值会成为客户端后续
- *  每一个 URL 的基底。取 origin(丢掉 path、规范化尾斜杠):带路径前缀的 relay
- *  在这个客户端里本来就不被支持(PWA 的基底取自 window.location.origin,同样
- *  会丢掉前缀)。
+ *  Only accepts absolute http/https URLs — the QR code is untrusted input, and this value
+ *  becomes the base for all subsequent URLs on the client. Extract origin (discard path,
+ *  normalize trailing slash): relay with path prefix is not supported on this client anyway
+ *  (PWA base comes from window.location.origin, which also discards the prefix).
  *
- *  只有鸿蒙壳会写这个参数(WebShell.ets → RelayStore):它的页面 origin 是假的
- *  `https://fleet.local`,没有这个参数就只能一直拨打包时烧进去的那个 relay,
- *  自建 relay 永远配不上。 */
+ *  Only the Harmony shell writes this parameter (WebShell.ets → RelayStore): its page origin
+ *  is fake (`https://fleet.local`), and without this parameter it can only use the relay
+ *  baked in at build time; self-hosted relay would never pair without it. */
 export function parseRelayParam(hash: string): string | null {
   const match = hash.match(/[#&]relay=([^&]+)/);
   if (!match) return null;
@@ -34,19 +36,21 @@ export function parseRelayParam(hash: string): string | null {
   return candidate.origin;
 }
 
-/** 一条完整配对链接指名的 relay。给**原生壳**用:它拿到的是 App Link /
- *  Universal Link 递过来的整个 URL,而不是 `window.location.hash`。
+/** The relay designated by a complete pairing link. For **native shells**: they receive
+ *  the full URL from App Link / Universal Link, not `window.location.hash`.
  *
- *  二维码是 `https://<relay-host>/#k=<secret>`(mobile_relay::pairing_url),
- *  而那个 host 由**桌面端**决定 —— 地区默认值(relay_region.rs)或用户在设置里
- *  填的自建地址。所以链接自身的 origin 就是这台设备该连的 relay。
+ *  The QR code is `https://<relay-host>/#k=<secret>` (mobile_relay::pairing_url),
+ *  and that host is decided by **the desktop** — regional default (relay_region.rs) or
+ *  a self-hosted address the user enters in settings. So the origin of the link itself
+ *  is the relay this device should connect to.
  *
- *  显式的 `&relay=` 仍然优先:它描述的是「这一次配对」,比 origin 更具体(鸿蒙
- *  壳会写它,因为那边的页面 origin 是假域名 `fleet.local`)。与
- *  `resolveRelayBase` 的优先级一致。
+ *  Explicit `&relay=` still takes precedence: it describes "this pairing session",
+ *  more specific than origin (Harmony shell writes it because its page origin is fake
+ *  domain `fleet.local`). Consistent with priority in `resolveRelayBase`.
  *
- *  非 http/https 的链接(自定义 scheme)没有可用 origin,返回 `null` —— 调用方
- *  照常配对,只是这台设备没指名 relay,`relayBaseFor` 会给它构建默认值。 */
+ *  Non-http/https links (custom scheme) have no available origin, returns `null` —
+ *  caller proceeds with pairing normally, but the device doesn't name a relay, and
+ *  `relayBaseFor` builds a default for it. */
 export function pairingLinkRelayBase(url: string): string | null {
   const hashAt = url.indexOf("#");
   const explicit = parseRelayParam(hashAt < 0 ? "" : url.slice(hashAt));
@@ -60,32 +64,34 @@ export function pairingLinkRelayBase(url: string): string | null {
   }
 }
 
-/** 没有指名 relay 的设备用哪个地址。
+/** Which address to use for devices that don't name a relay.
  *
- *  `baked` 是 `VITE_RELAY_URL`,构建时烧进去(鸿蒙壳经
- *  `mobile-harmony/scripts/sync-web.sh` 烧;它的页面 origin 是假域名,退回
- *  origin 会让 app 拨打自己)。`origin` 是 `window.location.origin` —— PWA 的
- *  正解,因为那份页面正是 relay 自己发出来的。
+ *  `baked` is `VITE_RELAY_URL`, baked in at build time (Harmony shell gets it via
+ *  `mobile-harmony/scripts/sync-web.sh`; its page origin is fake domain, falling back to
+ *  origin would make the app call itself). `origin` is `window.location.origin` — the
+ *  correct solution for PWA because that page is served by the relay itself.
  *
- *  取参数而非直接读全局,好让它保持纯函数可测。 */
+ *  Takes parameters rather than reading globals directly, so it stays a pure function
+ *  that can be tested. */
 export function defaultRelayBaseFrom(baked: string | undefined, origin: string): string {
   return baked || origin;
 }
 
-/** 上面那个的活体版本:构建常量 + 当前 origin。 */
+/** Live version of the above: build constant + current origin. */
 export function defaultRelayBase(): string {
   return defaultRelayBaseFrom(import.meta.env.VITE_RELAY_URL, window.location.origin);
 }
 
-/** 一台设备实际连的 relay:它自己指名的那个,否则构建默认值。 */
+/** The relay a device actually connects to: its own named relay, or the built default. */
 export function relayBaseFor(relayBase: string | null | undefined): string {
   return relayBase ?? defaultRelayBase();
 }
 
-/** 三个能指名 relay 的来源合成一个地址。纯函数,好让它脱离 `window` 可测。
+/** Combine three possible sources that can name a relay into one address. Pure function
+ *  so it can be tested independently of `window`.
  *
- *  `hash` 里的 `&relay=` 胜过 `baked`:前者描述的是**这一次配对**,后者只是这
- *  份包恰好带的默认值。 */
+ *  `&relay=` in `hash` takes precedence over `baked`: the former describes **this pairing
+ *  session**, the latter is just the default this package happens to have. */
 export function resolveRelayBase(
   hash: string,
   baked: string | undefined,
@@ -94,9 +100,10 @@ export function resolveRelayBase(
   return parseRelayParam(hash) ?? defaultRelayBaseFrom(baked, origin);
 }
 
-/** relay 主机名的简短人类可读形式,给「更多」页显示一行。`https` 是常态所以
- *  它的 scheme 作为噪音被丢掉;其他(比如 `http://127.0.0.1:…` 的开发 relay)
- *  保留 scheme —— 那个差别恰恰是你看这一行想知道的东西。 */
+/** Short human-readable form of the relay hostname for display on the "More" page.
+ *  `https` is the normal case so its scheme is dropped as noise; others (like
+ *  `http://127.0.0.1:…` for dev relay) keep the scheme — that difference is exactly
+ *  what you want to know when looking at this line. */
 export function relayDisplayHost(base: string): string {
   try {
     const u = new URL(base);
@@ -106,7 +113,7 @@ export function relayDisplayHost(base: string): string {
   }
 }
 
-/** 该 relay 的 WebSocket 端点。 */
+/** The WebSocket endpoint for this relay. */
 export function relayWsUrl(base: string): string {
   return base.replace(/\/$/, "").replace(/^http/, "ws") + "/ws";
 }

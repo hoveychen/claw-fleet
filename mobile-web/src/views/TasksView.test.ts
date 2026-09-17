@@ -37,7 +37,7 @@ describe("groupTaskSections", () => {
     expect(secs[0].sessions.map((s) => s.id)).toEqual(["a", "c"]);
   });
 
-  // 文件夹是稳定的目录清单:zebra 的任务最新(排在传入列表最前)也不能把它顶到前面。
+  // Folders are stable directory list: zebra's newest task (first in input list) can't push it to the front.
   it("orders folders alphabetically, not by their first member's position", () => {
     const secs = groupTaskSections(
       [row("z", "/work/zebra", "zebra"), row("a", "/work/apple", "apple")],
@@ -55,7 +55,7 @@ describe("groupTaskSections", () => {
     expect(secs[0].path).toBe("/work/repo");
   });
 
-  // 两台机器上同路径的 /repos/foo 是两个不同的仓库,合成一个分区点进去是混的。
+  // Same path /repos/foo on two devices are two different repositories; merging into one section is confusing.
   it("splits the same path on two devices, labelling each", () => {
     const rows = [
       { ...row("a", "/repos/foo", "foo"), deviceId: "dev-a" },
@@ -70,8 +70,8 @@ describe("groupTaskSections", () => {
     expect(secs.map((s) => s.name)).toEqual(["MBP · foo", "Studio · foo"]);
   });
 
-  // 远端主机的聊天目录是它自己 home 下的路径（`/root/.fleet/chat`）：拿本机那一条
-  // 去比永远比不中，那台机器的 Chat 分区就沉在项目中间（真实症状）。
+  // Remote host's chat folder is its own home path (`/root/.fleet/chat`): comparing with local path never matches,
+  // so that device's Chat section sinks in the middle of projects (actual symptom).
   it("pins each device's own chat folder, not just the active device's", () => {
     const REMOTE_CHAT = "/root/.fleet/chat";
     const rows = [
@@ -200,9 +200,9 @@ describe("statusTone quiet-alive", () => {
   });
 });
 
-// 合并列表里的每一条都必须一路带着它属于哪一台设备：折叠成接力组、再从组里
-// 取出成员之后，deviceId 不能在中途掉队 —— 掉了就只能猜，而猜错就是拿另一台
-// 的 transport 去拉一条它根本不认识的会话。
+// Each row in the merged list must carry which device it belongs to all the way through: after collapsing
+// into relay groups and extracting members, deviceId must not drop — losing it means guessing, and guessing
+// wrong means using another device's transport to fetch a session it doesn't even know about.
 describe("device tag survives grouping", () => {
   const hop = (id: string, deviceId: string, chainId: string, n: number) =>
     ({
@@ -242,24 +242,24 @@ describe("device tag survives grouping", () => {
       const devices = new Set(item.members.map((m) => m.deviceId));
       expect(devices.size).toBe(1);
     }
-    // React key 也必须分家,否则两组共用一个 key。
+    // React key must also split; otherwise both groups share the same key.
     expect(items[0].key).not.toBe(items[1].key);
   });
 });
 
-// 两台机器上同路径的 /repos/foo 是两个不同的仓库 —— 分区键若只按路径，两台的
-// 会话会合进同一个文件夹分区，点进去是混的（分区拆分本身见 groupTaskSections）。
+// Same path /repos/foo on two devices are two different repositories — if section key is path-only, both
+// devices' sessions merge into one folder section and clicking in is confusing (section splitting itself in groupTaskSections).
 describe("workspaceFilterValue", () => {
   it("scopes the section key by device when several are paired", () => {
     expect(workspaceFilterValue("dev-a", "/repos/foo", true)).toBe("dev-a::/repos/foo");
-    // 单设备保持原样：老草稿里存的是裸路径，值一变筛选就会静默失效。
+    // Single device stays as-is: old drafts stored bare path, value change silently breaks filter.
     expect(workspaceFilterValue("dev-a", "/repos/foo", false)).toBe("/repos/foo");
   });
 });
 
-// 任务栏默认按 lastActivityMs 降序,而桌面端每隔几秒就推一次全量快照。手指还
-// 在列表上滑的时候一次重排,会把手指底下那张卡换成另一张 —— 抬手点下去开的是
-// 别的会话。滚动期间(以及停下后的 5 秒内)必须冻住顺序。
+// Task bar defaults to lastActivityMs descending; desktop pushes full snapshots every few seconds. If list
+// reorders while scrolling, it swaps the card under the finger for a different one — finger lifts and
+// taps the wrong session. Must freeze order during scroll (and for 5 seconds after stopping).
 describe("applyFrozenOrder", () => {
   const row = (deviceId: string, id: string) =>
     ({ id, deviceId, workspacePath: "/w", workspaceName: "n", status: "idle" }) as unknown as
@@ -273,14 +273,14 @@ describe("applyFrozenOrder", () => {
   });
 
   it("holds the frozen order even after the fresh sort flipped the rows", () => {
-    // 冻结时屏幕上是 a、b、c;新快照把 c 顶到了最前。
+    // Freeze captured a, b, c on screen; new snapshot pushed c to the front.
     const frozen = ["d::a", "d::b", "d::c"];
     const resorted = [row("d", "c"), row("d", "a"), row("d", "b")];
     expect(keys(applyFrozenOrder(resorted, frozen))).toEqual(["d::a", "d::b", "d::c"]);
   });
 
   it("appends sessions born after the freeze at the bottom, never in the middle", () => {
-    // 新会话按自然顺序本该排第一,插进去会把每张卡都顶下一格。
+    // New session should naturally sort first; inserting it would push every card down one slot.
     const frozen = ["d::a", "d::b"];
     const rows = [row("d", "new"), row("d", "a"), row("d", "b")];
     expect(keys(applyFrozenOrder(rows, frozen))).toEqual(["d::a", "d::b", "d::new"]);

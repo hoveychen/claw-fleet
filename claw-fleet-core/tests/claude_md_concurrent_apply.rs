@@ -8,7 +8,7 @@
 //! wins and every block that landed in between is gone.
 //!
 //! That is not hypothetical. On 2026-09-07 01:13, the first start after the
-//! startup self-heal began firing all six on every launch, 老板's CLAUDE.md came
+//! startup self-heal began firing all six on every launch, the user's CLAUDE.md came
 //! out 120 bytes long with a single `fleet:model-guidance` block — lessons,
 //! interaction-mode, prd-discipline, wiki-guidance and session-title had all
 //! been overwritten away, so every new session lost its PRD discipline and

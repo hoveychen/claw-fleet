@@ -1,9 +1,10 @@
-// 只在开发期用的取证台：把**真正的** TerminalPane 挂起来，后面接一个假 pty
-// 主机(吐 200 行可辨认的文本)，这样触摸滚动可以在桌面 Chrome 的移动仿真下用
-// patchwright 发真实 touch 序列来判定 —— 而不是靠猜。
+// Dev-only test harness: suspend the **real** TerminalPane and connect a fake pty
+// host behind it (emits 200 recognizable lines of text) so touch-scroll behavior can be
+// verified in desktop Chrome's mobile emulation using patchwright to send real touch sequences —
+// rather than guessing.
 //
-// 它不进任何产物：scroll-harness.html 只在 dev server 上存在，vite build 的
-// 入口是 index.html。
+// This harness is not shipped in any build: scroll-harness.html exists only on the dev server;
+// the vite build entry point is index.html.
 
 import { createRoot } from "react-dom/client";
 import TerminalPane from "./views/TerminalPane";
@@ -32,7 +33,7 @@ function b64(s: string): string {
   return btoa(bin);
 }
 
-/** 假主机。`?latency=800` 可以把响应拖慢，用来看轮询重入。 */
+/** Fake host. `?latency=800` can slow down responses to observe polling re-entrancy. */
 const latency = Number(new URLSearchParams(location.search).get("latency") ?? "0");
 
 const client = {
@@ -58,8 +59,8 @@ const client = {
   answer: () => true,
 } as unknown as FleetTransport;
 
-// 判定滚动位置不需要探针：直接读 .xterm-rows 里第一行的文字是 line-000 还是
-// line-1xx —— 那正是用户眼睛看到的事实。
+// No probe needed to verify scroll position: read the first line's text from .xterm-rows
+// directly — is it line-000 or line-1xx — that is the ground truth of what the user sees.
 
 createRoot(document.getElementById("root")!).render(
   <TerminalPane

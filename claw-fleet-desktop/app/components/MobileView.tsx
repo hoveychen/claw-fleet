@@ -64,7 +64,7 @@ function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => s
   return t("d_ago", { n: Math.floor(diff / 86_400_000) });
 }
 
-/** 「移动端」板块 — 启用 mobile relay 通道并展示配对 QR code。 */
+/** Mobile section — enable mobile relay channel and show pairing QR code. */
 export function MobileView() {
   const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<MobileRelayConfig | null>(null);
@@ -146,7 +146,7 @@ export function MobileView() {
       setBusy(true);
       setError(null);
       try {
-        // secret 留空：后端保留现有值或首次启用时生成（不回传明文也能工作）
+        // Leave secret empty: backend preserves existing value or generates on first enable (works without returning plaintext)
         const stored = await invoke<MobileRelayConfig>("set_mobile_relay_config", {
           cfg: { ...config, ...next },
         });

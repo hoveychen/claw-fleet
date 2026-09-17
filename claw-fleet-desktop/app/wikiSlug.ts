@@ -20,7 +20,7 @@ function normalizeSegment(raw: string): string {
   for (const ch of raw) {
     const c = ch.toLowerCase();
     // ASCII-alphanumeric only, matching core: CJK and accented characters are
-    // not slug material, so `中文 report` normalizes to `report`.
+    // not slug material, so `Chinese report` normalizes to `report`.
     if (c.length === 1 && /[a-z0-9]/.test(c)) {
       out += c;
       prevHyphen = false;

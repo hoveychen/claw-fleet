@@ -1,56 +1,67 @@
-// 多设备的连接策略:什么时候连、隔多久问一次。
+// Connection policy for multiple devices: when to connect, how often to poll.
 //
-// 单设备时这些常数怎么定都无所谓,N 台之后它们要乘以 N:三台设备就是三条心跳、
-// 三条今日花费轮询、三条对账轮询。在弱网或省电场景下,那不是「稍慢一点」,而是
-// 把本来就窄的链路占满 —— 而其中大部分请求问的是用户此刻根本没在看的设备。
+// With a single device, these constants can be anything. With N devices,
+// they should be multiplied by N: three devices means three heartbeats,
+// three daily-spend polls, three reconciliation polls. In weak network or
+// low-power scenarios, this is not "slightly slower" — it fully saturates
+// what is already a narrow link — and most of those requests ask about
+// devices the user is not looking at.
 //
-// 策略拆成纯函数放在这里(而不是散在 effect 里的几个 if),因为它是一组有内容的
-// 取舍,值得被单测钉住:
+// The policy is extracted as pure functions here (rather than scattered
+// across multiple effects) because it encodes a set of meaningful trade-offs
+// worth pinning down with unit tests:
 //
-//   * **后台不连。**页面隐藏够久就把 socket 全部关掉。后台通道本来就是推送
-//     (订阅登记在 relay 上,与 socket 在不在无关),继续挂着 N 条连接只是在烧电。
-//     给一个宽限期,免得切个应用回来就要重握手 N 次。
-//   * **非当前设备问得更慢。**今日花费是头部那个数字,合并后要问每一台;但用户
-//     正在看的那台变化最相关,其余的慢一档足够。
-//   * **错峰。**N 条连接同时重连会在网络恢复的那一刻挤成一堆;按设备序号错开
-//     几百毫秒,代价是感知不到的延迟。
+//   * **No background connections.** Disconnect all sockets after the page
+//     is hidden long enough. The background channel is push-based anyway
+//     (subscriptions live on the relay, independent of socket existence),
+//     so continuing to hold N connections just burns battery. Give a grace
+//     period to avoid re-handshaking N times when switching back.
+//   * **Non-active devices poll slower.** Daily spend is that top number,
+//     merged across all devices; but the device the user is actively viewing
+//     changes most relevantly, and slower polling of the rest is imperceptible.
+//   * **Stagger connections.** N connections reconnecting simultaneously at
+//     network recovery causes a burst; stagger by device index by a few
+//     hundred milliseconds, with imperceptible latency cost.
 
-/** 页面隐藏多久之后断开所有连接。
+/** Disconnect all connections after the page is hidden for this long.
  *
- *  短了会让「切出去回个消息再回来」每次都付一次重握手;长了则在真正切走之后还
- *  白挂着 N 条 socket。30 秒够覆盖大多数「瞄一眼就回来」的场景。 */
+ *  Short interval causes "step away to reply then come back" to re-handshake
+ *  every time; long interval leaves N sockets idle after truly leaving.
+ *  30 seconds covers most "glance and return" scenarios. */
 export const HIDDEN_DISCONNECT_MS = 30_000;
 
-/** 当前作用域设备的今日花费轮询间隔。 */
+/** Daily spend poll interval for the current active device. */
 export const USAGE_POLL_ACTIVE_MS = 20_000;
-/** 其余设备的。它们的数字只进头部那个求和,慢一档没人看得出来。 */
+/** Daily spend poll interval for other devices. Their numbers only feed the
+ *  top-line sum; slower polling is imperceptible. */
 export const USAGE_POLL_BACKGROUND_MS = 60_000;
 
-/** 每台设备连接前的错峰延迟。 */
+/** Stagger delay before each device connects. */
 export const CONNECT_STAGGER_MS = 250;
-/** 错峰的上限:设备再多也不该让最后一台等太久。 */
+/** Cap on stagger delay: even many devices should not make the last one wait too long. */
 export const CONNECT_STAGGER_MAX_MS = 1_500;
 
 export interface VisibilityState {
   visible: boolean;
-  /** 进入隐藏的时刻;`visible` 为真时无意义。 */
+  /** Timestamp when entering hidden state; undefined when `visible` is true. */
   hiddenSince: number;
 }
 
-/** 此刻该不该保持这条连接。
+/** Whether this connection should be kept open now.
  *
- *  隐藏**未满**宽限期时仍然保持 —— 那通常只是切出去看一眼。 */
+ *  Remains open while hidden duration is **below** the grace period — that is
+ *  usually just glancing away briefly. */
 export function shouldConnect(vis: VisibilityState, now: number): boolean {
   if (vis.visible) return true;
   return now - vis.hiddenSince < HIDDEN_DISCONNECT_MS;
 }
 
-/** 这台设备的今日花费轮询间隔。 */
+/** Daily spend poll interval for this device. */
 export function usagePollMs(isActive: boolean): number {
   return isActive ? USAGE_POLL_ACTIVE_MS : USAGE_POLL_BACKGROUND_MS;
 }
 
-/** 第 `index` 台设备的错峰延迟。 */
+/** Stagger delay for device at `index`. */
 export function connectDelayMs(index: number): number {
   return Math.min(index * CONNECT_STAGGER_MS, CONNECT_STAGGER_MAX_MS);
 }

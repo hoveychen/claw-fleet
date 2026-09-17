@@ -74,7 +74,7 @@ function fmtDateTime(ts?: string | null): string {
   });
 }
 
-// ── 决策历史 ─────────────────────────────────────────────────────────────────
+// ── Decision history ───────────────────────────────────────────────────────────
 
 const KIND_LABEL: Record<string, string> = {
   elicitation: "问题请示",
@@ -97,8 +97,8 @@ const OUTCOME_LABEL: Record<string, string> = {
 };
 
 function outcomeTone(outcome: string): string {
-  // v3 的两个终态是判词，不是拒答:结束任务归 good,放弃任务归 warn(一个结局,
-  // 不是一次拒绝参与)。
+  // V3's two terminal states are verdicts, not refusals: completing a task is good,
+  // abandoning a task is warn (a verdict, not a refusal to participate).
   if (["answered", "approved", "approved-with-edits", "task-completed"].includes(outcome))
     return "good";
   if (["declined", "rejected", "cancelled"].includes(outcome)) return "bad";
@@ -122,7 +122,7 @@ function recordSummary(r: DecisionHistoryRecord): string {
 }
 
 // Markdown for decision bodies (the shared plugin chain plus mermaid, links
-// rendered inert) and the Q/A option rows both live in DecisionQa — the 消息
+// rendered inert) and the Q/A option rows both live in DecisionQa — the Messages
 // tab's expanded decision step renders through the very same component.
 export { MD_BLOCK, MD_INLINE } from "./DecisionQa";
 
@@ -235,7 +235,7 @@ export function DecisionHistoryTab({
   );
 }
 
-// ── 任务计划 ─────────────────────────────────────────────────────────────────
+// ── Task plans ─────────────────────────────────────────────────────────────────
 
 export function TaskPlansTab({
   session,
@@ -262,8 +262,9 @@ export function TaskPlansTab({
         return (
           <div key={p.id ?? i} className={styles.planCard}>
             {p.title && <div className={styles.planTitle}>{p.title}</div>}
-            {/* explore 计划的 P-task 产出的是理解,交付物是它派生的 exec 子计划 —
-                把清单读成「要做的活」是个范畴错误,所以这里跟桌面一样标出来。 */}
+            {/* Explore plan P-tasks produce understanding, not work; the deliverable is
+                the exec subplans they spawn. Reading the list as "work to do" is a category error,
+                so we mark it like the desktop does. */}
             {p.kind === "explore" && <div className={styles.planKind}>explore</div>}
             <PlanStrip items={p.items} done={done} />
             {p.items.map((item, j) => {
@@ -285,8 +286,8 @@ export function TaskPlansTab({
   );
 }
 
-/** 一格一个 P 的进度条，和桌面计划树 / 手机计划页同一套语汇:绿=已完成、
- *  橙=下一个、灰=待办。卡片折起时这一条就是全部信息量。 */
+/** Progress bar: one cell per P. Same vocabulary as desktop plan tree / mobile plan page:
+ *  green=done, orange=next, gray=pending. Collapsed card shows just this bar. */
 function PlanStrip({ items, done }: { items: TaskItem[]; done: number }) {
   let markedNext = false;
   return (
@@ -308,7 +309,7 @@ function PlanStrip({ items, done }: { items: TaskItem[]; done: number }) {
 }
 
 
-// ── Token ────────────────────────────────────────────────────────────────────
+// ── Tokens ────────────────────────────────────────────────────────────────────
 
 function fmtTokens(n?: number): string {
   if (!n) return "0";
@@ -317,16 +318,16 @@ function fmtTokens(n?: number): string {
   return String(n);
 }
 
-/** dsh 会话的用量面板。字段和 Claude 那套不通用:dsh 按「未命中缓存的输入」
- *  记账,还额外报了上下文窗口占用。
+/** DSH session token panel. Fields differ from Claude: DSH bills "uncached input"
+ *  and separately reports context window occupation.
  *
- *  成本单独一次 RPC:token 数是本地即时的,花费可能要走一遍 session history、
- *  再问一次 provider,让前者等后者会把整个面板拖慢。
+ *  Cost is a separate RPC: token count is local and immediate; cost may traverse session
+ *  history and ask the provider again, making the panel wait for both.
  *
- *  这里的数字**不是** Fleet 的 $/M 参考价乘 token —— dsh 走的是开放模型空间,
- *  同一个模型经不同 provider 价格不同,拿参考价一乘会得出一个自信的错数。它是
- *  provider 的发票(OpenRouter)或官方标价(deepseek-official)算出来的,而且
- *  算不出价的调用只报个数、绝不折成 $0。 */
+ *  The numbers here are **not** Fleet's $/M reference price times tokens — DSH spans open
+ *  models where the same model costs different via different providers, so applying reference
+ *  price yields confidently wrong numbers. Cost is from provider's invoice (OpenRouter) or
+ *  official pricing (deepseek-official); uncalculable calls report count only, never $0. */
 function DshTokenTab({
   session,
   client,
@@ -399,7 +400,7 @@ export function TokenTab({
   session: SessionInfo;
   client: FleetTransport | null;
 }) {
-  // dsh 没有 transcript 文件,用量走 RPC 问,字段也和 Claude 那套不通用。
+  // DSH has no transcript file; usage goes via RPC, fields differ from Claude.
   if (toolForAgentSource(session.agentSource) === "dsh") {
     return <DshTokenTab session={session} client={client} />;
   }
@@ -450,7 +451,7 @@ function ClaudeTokenTab({
   );
 }
 
-// ── Workflow ─────────────────────────────────────────────────────────────────
+// ── Workflows ─────────────────────────────────────────────────────────────────
 
 const AGENT_STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -483,8 +484,8 @@ export function WorkflowTab({
           <div className={styles.planTitle}>{tree.name || tree.runId}</div>
           {tree.description && <div className={styles.dimNote}>{tree.description}</div>}
           {tree.agents.map((a, i) => {
-            // Drillable when the snapshot surfaced this workflow agent's
-            // transcript (`agent-<id>` row present). Same nav as the Agent card.
+            // Drillable when snapshot surfaced this workflow agent's
+            // transcript (`agent-<id>` row exists). Same nav as Agent card.
             const canOpen = !!a.agentId && !!nav?.has(a.agentId);
             return (
               <div
@@ -508,13 +509,13 @@ export function WorkflowTab({
   );
 }
 
-// ── 笔记 ─────────────────────────────────────────────────────────────────────
+// ── Notes ─────────────────────────────────────────────────────────────────────
 
-/** 代理为熬过上下文压缩写下的 checkpoint 笔记（`~/.fleet/notes/`），只读。
+/** Checkpoint notes agents wrote to survive context compression (`~/.fleet/notes/`), read-only.
  *
- *  列表跨接力链：一条 68 棒的链上，有用的那份 checkpoint 往往是早几棒记的。
- *  所以每行带自己的归属会话，读取也按归属走 —— 整条链常常每棒都留了一个叫
- *  `checkpoint.md` 的文件，按路径重新解析会拿错那一份。 */
+ *  List spans relay chains: on a 68-hop chain, the useful checkpoint often came from an
+ *  earlier hop. So each row carries its session, and reads follow session ownership — the
+ *  whole chain often has `checkpoint.md` on every hop; path-based re-read picks the wrong one. */
 export function NotesTab({
   session,
   client,
@@ -548,8 +549,8 @@ export function NotesTab({
     </div>
   );
 
-  // 搜索中:这一面整体换成命中行,点一行展开那份笔记(词由 relay 侧原样匹配,
-  // 手机上不再本地二次过滤 —— 两套匹配规则会给出两个「命中数」)。
+  // Searching: replace the whole panel with hit rows; click a row to expand that note.
+  // Word matching is relay-side only; phone doesn't filter locally — two matchers give two counts.
   if (query.trim()) {
     return (
       <div className={styles.stack}>
@@ -579,8 +580,8 @@ export function NotesTab({
   );
 }
 
-/** 命中行列表。每行点开就是那份笔记的正文卡（和不搜索时同一个组件），所以
- *  「搜到 → 读全文」不需要先清空搜索框再去目录里找。 */
+/** Hit row list. Clicking a row opens that note's body card (same component as non-search),
+ *  so "found → read full" doesn't require clearing the search box and going to the directory. */
 function NoteHits({
   session,
   client,
@@ -644,8 +645,9 @@ function NoteHits({
   );
 }
 
-/** 一份笔记：折起时只是一行标题，点开才去拉正文。一份 checkpoint 动辄上万字，
- *  整条链的笔记全量预取会把这一面变成一次几百 KB 的 relay 往返。 */
+/** One note: collapsed shows just a title; click to fetch the body. One checkpoint can be
+ *  tens of thousands of words; prefetching all notes in a chain makes this panel a few-hundred-KB
+ *  relay round-trip. */
 function NoteCard({
   file,
   isOwn,
@@ -709,7 +711,7 @@ function NoteBody({
   file: NoteFile;
   client: FleetTransport | null;
 }) {
-  // 归属会话,不是屏幕上这个会话 —— 继承来的笔记要按前任写下的样子读回。
+  // Session that owns it, not the screen's session — inherited notes read as the predecessor wrote them.
   const text = useRelayData<string>(client, "session_note", {
     sessionId: file.sessionId,
     path: file.path,
@@ -728,7 +730,7 @@ function NoteBody({
   );
 }
 
-// ── Handoff 接力链 ───────────────────────────────────────────────────────────
+// ── Handoff relay chain ───────────────────────────────────────────────────────
 
 export function HandoffTab({
   session,

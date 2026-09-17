@@ -9,13 +9,13 @@ import {
 import { ALL_VIEW_MODES } from "../viewModes";
 
 /**
- * The sidebar's 舰队 / 工作 tab strip renders each group's nav items from
+ * The sidebar's "Fleet" / "Work" tab strip renders each group's nav items from
  * NAV_GROUP_VIEWS and derives the highlighted tab through navGroupOf. Those two
- * only stay in sync because the lookup map is built from the same table — and
+ * only stay in sync because the lookup map is built from the same table—and
  * because the table covers every page. A new ViewMode added to the store and
  * forgotten here would silently render in neither tab's nav while still being
- * reachable through a cross-page hop, leaving the strip pointing at 舰队 with a
- * 工作 page on screen. These tests are that guard.
+ * reachable through a cross-page hop, leaving the strip pointing at "Fleet" with
+ * a "Work" page on screen. These tests are that guard.
  */
 describe("nav group partition", () => {
   it("assigns every view mode to exactly one group", () => {

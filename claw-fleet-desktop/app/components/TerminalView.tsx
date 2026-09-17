@@ -1,13 +1,14 @@
-// 终端页：给一个仓库开真 shell，对齐移动端的 TerminalView。
+// Terminal page: open a real shell for a repo, mirroring the mobile TerminalView.
 //
-// 和「仓库 → 命令」面板的分工：那边是**跑一条命令并留下执行记录**（快捷命令、
-// 重跑、用时），这里是**我要一个 shell**。两边共享同一个 proc 注册表，所以在
-// 哪边起的 pty 另一边都看得见 —— 这是刻意的，一个 pty 只该有一个真相来源。
+// Division of labor with the "Repo → Commands" panel: that one **runs a command and leaves
+// an execution record** (shortcuts, re-run, elapsed), this one is **I want a shell**. Both
+// share the same proc registry, so a pty spawned on either side is visible from the other —
+// intentional, one pty should have one source of truth.
 //
-// **进程活在后端主机上，不活在这个页面里。** pty host 是分离的（见
-// claw-fleet-core/src/proc_runner.rs），切走页面、重启 app 都不杀它。所以换仓库
-// 第一件事是把还活着的接回来，一个都没有时才开新的 —— 否则每来一次就多一个孤儿
-// shell。
+// **Processes live on the backend host, not on this page.** The pty host is detached (see
+// claw-fleet-core/src/proc_runner.rs); switching away from the page or restarting the app
+// doesn't kill it. So the first thing on workspace switch is to reconnect live ones; only
+// spawn new if there are none — otherwise every visit orphans another shell.
 
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -39,27 +40,28 @@ export function TerminalView() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // 一个仓库只自动开一次 shell：接回列表是异步的，没有这道闸，「列表空 → 开一个」
-  // 会在下一次渲染时再开一个。
+  // Spawn only once per repo automatically: reconnecting the list is async, without this gate,
+  // "list empty → spawn one" would spawn again on the next render.
   const autoSpawned = useRef<string | null>(null);
 
-  // 列表与 FilesView / 新建会话共用同一套推导：worktree 折叠回仓库根，临时
-  // scratchpad cwd 丢掉。limit 放到最大 —— 下拉框才需要截断，这里是整页。
+  // List shares the same derivation as FilesView / new session: collapse worktrees back to repo root,
+  // discard temporary scratchpad cwd. Limit at max — dropdowns need truncation, this is a full page.
   const workspaces = useMemo(
     () => distinctWorkspaces(sessions, Number.MAX_SAFE_INTEGER),
     [sessions],
   );
 
-  // 仓库页「在终端打开」带过来的仓库。依赖 nonce 而非 workspacePath —— 从终端页
-  // 切回仓库、再点同一个仓库时 path 没变，只有 nonce 变，靠它这个 effect 才会重跑。
+  // Workspace brought by "Open in terminal" from the files page. Depends on nonce not workspacePath —
+  // when switching from terminal back to files and clicking the same repo, path doesn't change, only
+  // nonce does, that's what makes this effect re-run.
   useEffect(() => {
     if (!terminalNav) return;
     setSelected(terminalNav.workspacePath);
     clearTerminalNav();
   }, [terminalNav?.nonce, terminalNav, clearTerminalNav]);
 
-  // 轮询 proc 注册表：标签的存活状态、以及别处（命令面板、手机）起的 pty 都靠它
-  // 进来。ProcTerminal 自己的输出轮询只认它挂着的那一个。
+  // Poll the proc registry: tab liveness and pty spawned elsewhere (command panel, phone) all
+  // come through here. ProcTerminal's own output polling only tracks its own.
   useEffect(() => {
     void fetchProcs();
     const timer = setInterval(() => void fetchProcs(), 2000);
@@ -76,9 +78,9 @@ export function TerminalView() {
     setBusy(true);
     setError(null);
     try {
-      // 空命令 = 让**后端主机**决定用哪个交互式 shell（unix `$SHELL -i`，
-      // Windows `cmd`）。前端猜会在远端 backend 上猜错主机。80x24 只是起点，
-      // ProcTerminal 挂上去立刻发真实尺寸。
+      // Empty command = let the **backend host** decide which interactive shell (`$SHELL -i` on unix,
+      // `cmd` on Windows). Frontend guessing would guess wrong on remote backends. 80x24 is just
+      // a start; ProcTerminal sends the real size immediately after mounting.
       const rec = await invoke<ProcRecord>("run_workspace_proc", {
         workspacePath: selected,
         command: "",
@@ -94,7 +96,7 @@ export function TerminalView() {
     }
   }, [selected, busy, fetchProcs]);
 
-  // 换仓库 → 接回它已有的终端，没有活的才开一个。
+  // Workspace switch → reconnect its existing terminals, only spawn new if none are live.
   useEffect(() => {
     if (!selected) return;
     let stale = false;
@@ -113,7 +115,8 @@ export function TerminalView() {
     return () => {
       stale = true;
     };
-    // spawn 依赖 busy，每次开终端都会换引用；这个 effect 只该在换仓库时跑。
+    // spawn depends on busy, every terminal open changes the reference; this effect should only
+    // run on workspace change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
@@ -215,8 +218,8 @@ export function TerminalView() {
           {error && <div className={termStyles.error}>{error}</div>}
 
           {active ? (
-            // key = proc id：切标签必须重建 xterm，否则新终端会继续写进上一个的
-            // 缓冲区（ProcTerminal 的 effect 就是按 proc.id 生命周期建的）。
+            // key = proc id: switching tabs must rebuild xterm, otherwise the new terminal keeps
+            // writing to the previous one's buffer (ProcTerminal's effect is keyed by proc.id lifecycle).
             <div className={termStyles.screen}>
               <ProcTerminal
                 key={active.id}

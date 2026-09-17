@@ -96,7 +96,7 @@ describe("reconcileMessages", () => {
   // A dsh:// pane polls the whole window every 1.5s; when the history cache
   // behind it is dropped mid-rebuild the answer can come back short or empty.
   // Overwriting with that used to blank the transcript — the user's own message
-  // and the 系统上下文 fold both vanished, leaving only the working spinner.
+  // and the system context fold both vanished, leaving only the working spinner.
   it("keeps the rendered transcript when a poll answers with nothing", () => {
     const prev = [msg("1", "hello"), msg("2", "world")];
     expect(reconcileMessages(prev, [])).toBe(prev);

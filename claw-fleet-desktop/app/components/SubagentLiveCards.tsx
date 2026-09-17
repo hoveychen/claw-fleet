@@ -42,7 +42,7 @@ function elapsed(sinceMs: number): string {
 /**
  * A subagent card's right-click menu.
  *
- * **No 停止 item, deliberately.** A subagent is driven by its parent's process
+ * **No Stop item, deliberately.** A subagent is driven by its parent's process
  * and has no signal of its own — `StopControl.canControl` is literally
  * `!s.isSubagent`, and `SessionInfo.pid` is the *parent's*, shared by every
  * session in that working directory. An item labelled "stop this agent" would
@@ -130,7 +130,7 @@ function agentMenuItems(
  *
  * Before this, a running subagent was only visible if you went looking: the
  * scope dropdown in the header (which navigates *away* from the parent) or the
- * 后台任务 tab (a last-Stop snapshot, minutes stale for a subagent). Neither
+ * background tasks tab (a last-Stop snapshot, minutes stale for a subagent). Neither
  * answered "what is everything working on right now" without clicking. These
  * cards do, and they disappear the moment the last one finishes — the rail is a
  * picture of what is live, not a log.

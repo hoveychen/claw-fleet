@@ -345,7 +345,7 @@ mod tests {
     /// ending is what fires the relay — so the successor waits on a click whose
     /// answer can no longer reach it (the note froze at registration). The
     /// every-turn-asks rule has to say so explicitly, or agents keep shipping a
-    /// wrap-up card and 老板 pays a pointless click per baton.
+    /// wrap-up card and the user pays a pointless click per baton.
     #[test]
     fn render_embeds_handoff_registered_exemption() {
         let z = render_guidance("老板", "zh");

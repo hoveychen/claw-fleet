@@ -1,56 +1,57 @@
-// 通知点击 → 直达对应决策卡。
+// Notification click → deep-link to the corresponding decision card.
 //
-// 桌面在 notify 帧里把决策标识编进 `url` 的 fragment(`/#d=<kind>:<id>`,见
-// mobile_relay 的 notify_url)。三条投递路径最终都汇到这里,web 侧因此只有一份
-// 路由实现:
+// The desktop encodes the decision ID into the `url` fragment in notify frames
+// (`/#d=<kind>:<id>`, see mobile_relay's notify_url). All three delivery paths converge here,
+// so the web side has only one routing implementation:
 //
-//   * PWA 冷启动 —— service worker 的 notificationclick 走 openWindow(url),
-//     地址栏直接带着 fragment 进来
-//   * PWA 已在前台 —— SW 只 focus 不重载,URL 一动不动,所以它额外 postMessage
-//     一份 url 过来
-//   * 原生壳(鸿蒙 WebShell / 后续的 Capacitor)—— 没有 service worker,由原生
-//     从点击的 want 里取出 url,调 window.__fleetDeepLink 注入
+//   * PWA cold start — service worker's notificationclick calls openWindow(url),
+//     fragment comes straight in the address bar
+//   * PWA already in foreground — SW just focus-doesn't-reload, URL unchanges,
+//     so it postMessage the url separately
+//   * Native shell (Harmony WebShell / future Capacitor) — no service worker;
+//     native extracts url from the click intent, calls window.__fleetDeepLink to inject it
 //
-// 与 shareTarget.ts / nativePush.ts 同构:原生 hook 带 pending 队列,因为壳完全
-// 可能在这个 hook 注册之前就投递(冷启动点通知正是这种情形)。
+// Isomorphic with shareTarget.ts / nativePush.ts: native hook holds pending queue because
+// the shell can deliver before this hook is registered (cold-start notification is exactly
+// this case).
 
-/** 原生壳投递点击目标的入口。 */
+/** Native shell's delivery hook entry point. */
 const NATIVE_DEEPLINK_HOOK = "__fleetDeepLink";
-/** 壳在 hook 注册前把早到的 url 堆在这里。 */
+/** Shell queues early-arriving URLs here before hook is registered. */
 const NATIVE_DEEPLINK_PENDING = "__fleetDeepLinkPending";
 
-/** 决策标识的 fragment 参数名,与 mobile_relay::notify_url 的 `/#d=` 一致。 */
+/** Fragment param name for decision ID, matches `/#d=` in mobile_relay::notify_url. */
 const DECISION_PARAM = "d";
-/** 来源 channel 的标记,由 relay 在扇出时盖上(fleet-relay/src/notify_target.rs)。 */
+/** Source channel marker, stamped by relay during fan-out (fleet-relay/src/notify_target.rs). */
 const CHANNEL_PARAM = "ch";
 
 export interface DecisionTarget {
   kind: string;
   id: string;
-  /** 这条通知来自哪个 channel(channel id 的前缀)。多设备之后必须有它:卡 id
-   *  只在单机内唯一,两台同时有卡时,光靠 id 说不出该展开哪一张。
+  /** Source channel (channel id prefix). Multi-device needs this: card ID is unique only
+   *  per device, so when two devices have cards, ID alone can't say which to expand.
    *
-   *  老 relay 不盖这个标记,所以是可选的 —— 缺席时调用方按 id 找第一张匹配的卡
-   *  (跳错一张也好过点了没反应)。 */
+   *  Old relay doesn't stamp this, so it's optional — caller falls back to finding
+   *  the first ID match (wrong card is better than no response). */
   channelMark?: string;
 }
 
 /**
- * 从 notify 的 url 里解出要聚焦的决策。
+ * Extract the decision to focus from a notify URL.
  *
- * 接受完整 URL、路径,或裸 fragment —— 三条投递路径给的形状不同(地址栏是完整
- * URL,SW 转发的是 notify 原样的 `/#d=...`),统一在这里吸收差异。
+ * Accepts full URL, path, or bare fragment — the three delivery paths give different shapes
+ * (address bar is full URL, SW forwards notify's raw `/#d=...`), unified here.
  *
- * 只按**第一个**冒号切分:kind 不含冒号,而 id 是外部给的,不保证不含。
- * 拿不到 id 就返回 null —— 桌面在请求没带 id 时会把 tag 退化成裸 kind,那种
- * 链接没有可聚焦的目标,当作普通「打开应用」处理。
+ * Split on **first** colon only: kind doesn't contain colons, but ID is external and might.
+ * Return null if no ID — desktop degrades tag to bare kind when request lacks ID; those
+ * links have no focusable target, treated as plain "open app".
  */
 export function parseDecisionDeepLink(url: string): DecisionTarget | null {
   const hash = url.indexOf("#");
   if (hash < 0) return null;
-  // fragment 是 `&` 分隔的参数(`d=guard:g1&ch=105e300f`)。按参数解而不是
-  // 「前缀 + 剩下全是 id」:relay 会在后面追加来源标记,那样解会把 `&ch=…`
-  // 一起当成卡 id 的一部分。
+  // Fragment is `&`-delimited params (`d=guard:g1&ch=105e300f`). Parse by param, not
+  // "prefix + rest is id": relay appends source mark, so that naive parse would include
+  // `&ch=…` in the card id.
   const params = new Map<string, string>();
   for (const part of url.slice(hash + 1).split("&")) {
     const eq = part.indexOf("=");
@@ -59,7 +60,7 @@ export function parseDecisionDeepLink(url: string): DecisionTarget | null {
   }
   const value = params.get(DECISION_PARAM);
   if (!value) return null;
-  // 只按**第一个**冒号切分:kind 不含冒号,而 id 是外部给的,不保证不含。
+  // Split on **first** colon only: kind lacks colons, but id is external and might contain them.
   const colon = value.indexOf(":");
   if (colon <= 0) return null;
   const kind = value.slice(0, colon);
@@ -70,10 +71,10 @@ export function parseDecisionDeepLink(url: string): DecisionTarget | null {
 }
 
 /**
- * 订阅「点击通知要打开某张决策卡」。返回退订函数。
+ * Subscribe to "notification click should open a decision card". Returns unsubscribe function.
  *
- * 挂载时先读一次当前地址 —— 冷启动那条路径的 fragment 早就在地址栏里了,没有
- * 任何事件会补发它。
+ * On mount, read the current address once — the cold-start path's fragment is already in
+ * the address bar; no event will replay it.
  */
 export function onDecisionDeepLink(handler: (target: DecisionTarget) => void): () => void {
   const deliver = (url: unknown) => {
@@ -82,21 +83,21 @@ export function onDecisionDeepLink(handler: (target: DecisionTarget) => void): (
     if (target) handler(target);
   };
 
-  // 冷启动:fragment 已经在地址栏里。
+  // Cold start: fragment is already in address bar.
   deliver(window.location.href);
 
-  // 同一个页面里再次点通知(浏览器会改 hash 而不重载)。
+  // Click notification again in same page (browser changes hash, not reload).
   const onHashChange = () => deliver(window.location.href);
   window.addEventListener("hashchange", onHashChange);
 
-  // PWA 已在前台:SW 只 focus 不重载,URL 不变,所以它 postMessage 一份过来。
+  // PWA already foreground: SW just focuses-doesn't-reload, URL unchanged, so it postMessage.
   const onSwMessage = (e: MessageEvent) => {
     const data = e.data as { type?: string; url?: string } | undefined;
     if (data?.type === "fleet-deeplink") deliver(data.url);
   };
   navigator.serviceWorker?.addEventListener("message", onSwMessage);
 
-  // 原生壳注入通道。先消费积压 —— 冷启动点通知时,壳早于 React effect。
+  // Native shell injection channel. Drain backlog first — shell delivers before React effect on cold start.
   const w = window as unknown as Record<string, unknown>;
   const pending = w[NATIVE_DEEPLINK_PENDING];
   w[NATIVE_DEEPLINK_HOOK] = (url: string) => deliver(url);

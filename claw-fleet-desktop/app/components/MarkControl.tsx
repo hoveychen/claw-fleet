@@ -42,10 +42,10 @@ export function MarkControl({ session }: { session: SessionInfo }) {
     }
   };
 
-  // The task's terminal verdict (v3 decision card: 结束任务 / 放弃任务) outranks
-  // the mark for the *glyph*, because "this task was given up on" is a fact the
-  // row should show even after the human toggles the review mark back off. The
-  // click still only touches the mark — the two axes stay separate.
+  // The task's terminal verdict (v3 decision card: "End Task" / "Abandon Task")
+  // outranks the mark for the *glyph*, because "this task was given up on" is a
+  // fact the row should show even after the human toggles the review mark back
+  // off. The click still only touches the mark—the two axes stay separate.
   const abandoned = session.taskOutcome === "abandoned";
   const title = abandoned
     ? t("history.outcome_abandoned", "任务已放弃（未完成）— 点击切换复核标记")
@@ -132,7 +132,7 @@ export function GroupMarkControl({ members }: { members: SessionInfo[] }) {
       aria-pressed={isDone}
     >
       {/* Same hollow-circle / filled-check glyph as a single row's MarkControl —
-          the whole-chain semantics are already carried by the chevron, the 接力
+          the whole-chain semantics are already carried by the chevron, the handoff
           badge and this button's tooltip, so the mark itself stays visually
           identical to every other row's rather than a distinct double-check. */}
       {isDone ? (

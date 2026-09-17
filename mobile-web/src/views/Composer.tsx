@@ -47,10 +47,11 @@ import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs, type PendingAttachmentUpload } from "./AttachmentThumb";
 import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 
-// 模型与努力度清单曾经硬编码在这里，并与桌面端的 modelChoices.ts 手工互抄。
-// 两份都漂了：都声称 Codex 的努力度是 `minimal/low/medium/high`，而实测没有任何
-// 一个 Codex 模型接受 `minimal`，且每个都接受 `xhigh`/`max`。现在统一由
-// `claw-fleet-core/models.toml` 经 `model_catalog` 提供，见 ../useModelCatalog。
+// Model and effort choices were once hardcoded here and manually sync'd with the
+// desktop's modelChoices.ts. Both drifted: each claimed Codex efforts were
+// `minimal/low/medium/high`, but testing showed no Codex model accepts `minimal`,
+// yet all accept `xhigh`/`max`. Now unified via `claw-fleet-core/models.toml` and
+// `model_catalog`; see ../useModelCatalog.
 
 const PERMISSION_LABEL: Record<string, string> = {
   acceptEdits: "自动接受编辑",
@@ -109,14 +110,18 @@ export function newSessionConfigSummary({
   };
 }
 
-/** 回复窗的配置胶囊文案。
+/**
+ * Resume composer config chips text.
  *
- * 三个常驻下拉（模型 / 思考强度 / 权限）在回复窗里一年到头不动一次，却每次都占
- * 掉 44px 的常驻高度。收成胶囊后它们只报告当前值，点开才展开选择器 —— 这是把
- * 「随时可改」降级成「随时可见、点一下可改」，不是把功能藏起来。
+ * Three resident dropdowns (model / thinking intensity / permission) in the
+ * resume window are touched maybe never in a year yet occupy 44px permanent
+ * height. Collapsed into chips, they report only current value; open-on-tap
+ * expands the selector — demoting "changeable any time" to "visible any time,
+ * tap once to change", not hiding the feature.
  *
- * 模型与档位合成一颗（它们总是一起看），权限单独一颗且只对 Claude 出：codex 和
- * dsh 没有 `--permission-mode` 这个概念。 */
+ * Model and effort merge into one chip (always viewed together); permission is
+ * separate and Claude-only: codex and dsh have no `--permission-mode` concept.
+ */
 export function resumeConfigChips({
   tool,
   modelLabel,
@@ -139,13 +144,14 @@ export function resumeConfigChips({
 }
 
 /**
- * 一条续写要不要覆盖会话的 model / effort。
+ * Whether a follow-up should override the session's model / effort.
  *
- * 规则只有一条：**用户亲手改过才发**。胶囊里显示的初值来自快照的
- * `session.model`，那是从 transcript 解析出来的，会丢 `[1m]` 这类 spec 后缀
- * （见 memory `model-suffix-not-in-jsonl`）；把它原样回传，等于拿一个降级的
- * spec 覆盖桌面侧 launch-spec 里记着的权威值。没改就一个字段都不发，让
- * `resume_codex_session` / `claude --resume` 那侧去 launch-spec 取。
+ * One rule only: **send only if the user hand-changed it**. The chip's initial
+ * value comes from the snapshot's `session.model`, parsed from the transcript
+ * and missing `[1m]`-like spec suffixes (see memory `model-suffix-not-in-jsonl`);
+ * sending it as-is means using a degraded spec to override the authoritative
+ * launch-spec on the desktop side. If untouched, send no field; let
+ * `resume_codex_session` / `claude --resume` pull from launch-spec.
  */
 export function resumeConfigOverrides({
   touched,
@@ -164,15 +170,17 @@ export function resumeConfigOverrides({
 }
 
 /**
- * 回复胶囊占住的下边界，供转录区补底部留白用。
+ * Composer pill inset from viewport bottom, for transcript to pad its base.
  *
- * 只吃布局值：`offsetHeight` 是元素自身的布局高度，`bottomCss` 是
- * `getComputedStyle(el).bottom` 解析出来的 px —— 两者都不含 transform。
+ * Uses layout values only: `offsetHeight` is the element's own layout height,
+ * `bottomCss` is parsed px from `getComputedStyle(el).bottom` — both exclude
+ * transform.
  *
- * 别换回 `getBoundingClientRect()`：rect 把 transform 算在内。这里曾经就是那么
- * 写的，配上一个 `translateY` 的折叠动画，展开的首帧量到的留白近乎 0，而此后
- * 组件不再重渲染，那个 0 就成了终值 —— 最后几行消息被胶囊盖死。折叠动画已经
- * 拆了，但取值口径得守住：任何 transform 都不该影响这个数。
+ * Do not switch back to `getBoundingClientRect()`: rect includes transform.
+ * Past code did that with a `translateY` collapse animation; on open, first
+ * frame measured inset near 0, then the component stopped re-rendering and that
+ * 0 became final — last message rows were buried. Collapse animation is removed,
+ * but the measurement discipline must hold: no transform should affect this.
  */
 export function composerInset(offsetHeight: number, bottomCss: string): number {
   const inset = Number.parseFloat(bottomCss);
@@ -252,12 +260,13 @@ export async function uploadAttachmentFiles(
   return out;
 }
 
-// draftKey 让已选附件的 chip 列表跟着表单文本一起持久化——意外关闭 sheet / 切会话
-// 回来后附件不用重挑。存的是已上传到 relay 的路径；万一桌面端清过 user-attachments
-// 存储，恢复的路径会失效，但 chip 可手动删除，故不额外做存在性校验。
+// draftKey makes the selected-attachment chip list persist with form text —
+// after accidental sheet close / session switch, attachments don't need re-picking.
+// Stores paths already uploaded to relay; if desktop cleared user-attachments,
+// recovered paths go stale but chips can be manually deleted, so no existence check.
 function useAttachments(client: FleetTransport | null, draftKey: string) {
-  // 设备作用域:附件是「已上传到**某一台**桌面端」的路径,拿到另一台上去恢复只会
-  // 得到一串失效路径。
+  // Device scope: attachments are paths "uploaded to **one** desktop instance";
+  // restoring them on another device yields a list of dead paths.
   const [attachments, setAttachments, clearAttachments] = useDeviceDraft<Attachment[]>(
     draftKey,
     [],
@@ -272,9 +281,11 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
   // chips fall back to the relay thumbnail.
   const previews = useRef(new Map<string, string>());
 
-  // 从草稿恢复的附件路径可能已在桌面端被清掉。挂载后（client 就绪时）校验一次，
-  // 剔除失效的 chip，避免恢复的 `Context files:` 指向不存在的文件。校验失败（离线等）
-  // 保持原样、不误删。只在初次恢复时跑一次——新上传的文件必然存在，无需再验。
+  // Paths from draft may have been cleared on the desktop. On mount (when client
+  // is ready), validate once and drop stale chips to avoid restored
+  // `Context files:` pointing to nonexistent paths. Validation failure (offline
+  // etc.) leaves it as-is, no false deletions. Runs only on initial recovery —
+  // newly uploaded files exist, no need to re-check.
   const validatedRef = useRef(false);
   useEffect(() => {
     if (validatedRef.current || !client || attachments.length === 0) return;
@@ -287,7 +298,7 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
         const keep = new Set(existing);
         setAttachments((prev) => prev.filter((a) => keep.has(a.path)));
       } catch {
-        // 保持原样，不误删。
+        // Keep as-is, avoid false deletions.
       }
     })();
   }, [client, attachments, setAttachments]);
@@ -295,10 +306,10 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
   const addFiles = useCallback(
     async (files: FileList | File[] | null) => {
       if (!client || !files || files.length === 0) return;
-      // The bytes go to the desktop over the relay — a network hop, not a local
-      // copy — so the chip has to exist before the upload, or the strip stays
-      // empty for seconds and the pick looks like it was ignored. Everything in
-      // this first pass is free: a name, and an object URL for a picture.
+      // Bytes travel to desktop over relay — network hop, not local copy — so the
+      // chip must exist pre-upload or the strip stays empty for seconds making the
+      // pick look ignored. All of this first pass is free: a name and (if image) a
+      // blob: URL object.
       const queued = Array.from(files).map((file) => ({
         id: `upload-${++uploadSeq}`,
         file,
@@ -323,8 +334,8 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
               return prev.some((x) => x.path === entry.path) ? prev : [...prev, entry];
             });
           } catch (e) {
-            // Per file, not per batch: one refused upload used to take every
-            // file behind it down with it.
+            // Per-file error handling, not per-batch: one upload rejection no
+            // longer cascades to later files.
             if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
             window.alert(e instanceof Error ? e.message : t("附件上传失败"));
           } finally {
@@ -361,12 +372,15 @@ function useAttachments(client: FleetTransport | null, draftKey: string) {
   };
 }
 
-/** 输入框按内容自增高。
+/**
+ * Textarea auto-grows with content.
  *
- * 先把 height 归零再按 scrollHeight 量 —— 不归零的话 scrollHeight 永远不小于当前
- * 高度，删字时框只会越撑越高。封顶交给 CSS 的 max-height（超了就框内滚动），这里
- * 不重复写死一个像素数。两处 composer（新会话、回复窗）共用同一个输入框形状，
- * 所以这段也共用。 */
+ * Reset height to "auto" first, then measure scrollHeight — without the reset,
+ * scrollHeight never shrinks below current height, so deleting text only grows
+ * the box. CSS max-height caps it (contents scroll inside); no hardcoded pixel
+ * values here. Both composers (new session and resume) share the same input
+ * shape, so this logic is shared.
+ */
 function useAutoGrow(ref: React.RefObject<HTMLTextAreaElement | null>, text: string) {
   useLayoutEffect(() => {
     const el = ref.current;
@@ -390,11 +404,16 @@ function OptionSelects({
   permissionDefaultLabel,
   onChange,
 }: {
-  /** 三个源的 model/effort id 互不相交,且只有 Claude 有 `--permission-mode`
-   *  这个概念,所以清单和权限选择器都按 tool 分流。 */
+  /**
+   * The three sources (claude/codex/dsh) have disjoint model/effort ids, and
+   * only Claude has the `--permission-mode` concept, so lists and permission
+   * pickers fan out by tool.
+   */
   tool?: string;
-  /** 用来向主机要 codex profile / dsh 模型目录（第三方模型的唯一来源）。
-   *  null 时只显示内置模型。 */
+  /**
+   * Used to request codex profiles / dsh model catalog from the host (the only
+   * source for third-party models). Null shows only builtin models.
+   */
   client: FleetTransport | null;
   model: string;
   effort: string;
@@ -404,16 +423,18 @@ function OptionSelects({
 }) {
   const isCodex = tool === "codex";
   const isDsh = tool === "dsh";
-  // 主机上的 profile 文件补进 codex 模型清单；Claude 侧不受影响。
+  // Host profile files supplement the codex model list; Claude side unaffected.
   const codexProfiles = useCodexProfiles(isCodex ? client : null);
-  // dsh 的模型清单由主机的 provider 配置决定，Fleet 不硬编码任何一条。
+  // dsh's model catalog is determined by the host's provider config; Fleet
+  // hard-codes no entries.
   const dshCatalog = useDshModels(isDsh ? client : null);
   const dshGroups = useMemo(
     () => (isDsh ? dshModelGroups(dshCatalog) : []),
     [isDsh, dshCatalog],
   );
-  // 阶梯跟着会话真正会跑的模型:显式选了就用它,模型还是「默认」就用目录里
-  // dsh 自己的默认选择 —— 否则默认模型下 effort 只剩「默认」一项。
+  // Effort ladder follows the model the session actually runs: if explicitly
+  // chosen, use it; if model is still "default", use dsh's own default from the
+  // catalog — otherwise default model offers only "default" effort.
   const dshEffort = useMemo(
     () =>
       isDsh
@@ -428,9 +449,10 @@ function OptionSelects({
         ...codexProfileChoices(codexProfiles),
       ]
     : modelChoicesFor(catalog, "claude", t("默认模型"));
-  // dsh 的档位是**每个模型自己的**——发 Claude 那套固定档位它不认。目录还没到
-  // 或该模型没有推理控制时只剩「默认」，那是诚实的降级：会话跑在主机
-  // ~/.dsh/settings.yaml 选中的档位上。
+  // dsh efforts are **per-model** — Claude's fixed ladder doesn't apply to it.
+  // When catalog hasn't arrived or the model has no reasoning controls, only
+  // "default" remains — an honest degradation: the session runs on the host's
+  // effort chosen in ~/.dsh/settings.yaml.
   const effortChoices: Array<[string, string]> = isDsh
     ? [
         [
@@ -523,38 +545,59 @@ function OptionSelects({
   );
 }
 
-// ── 新会话 sheet ─────────────────────────────────────────────────────────────
+// ── New session sheet ─────────────────────────────────────────────────────────
 
 interface NewSessionProps {
   sessions: SessionInfo[];
   client: FleetTransport | null;
-  /** 目标设备清单。单设备时只用于摘要里的显示名，不渲染选择器。
-   *  只读 id 与显示名,不要把密钥写进 React key 或 DOM。 */
+  /**
+   * Target device list. With one device, used only for summary display labels;
+   * no picker is rendered. Read only id and label; don't write secrets into
+   * React keys or DOM.
+   */
   devices?: readonly { id: string; label: string }[];
-  /** 这次要开在哪台上（`devices` 里的一个 id）。 */
+  /**
+   * Which device to launch on this time (an id from `devices`).
+   */
   targetDeviceId?: string;
-  /** 换目标设备。App 收到后换 provider 并按新 id 重挂载本组件。 */
+  /**
+   * Switch target device. App receives it, swaps provider, and re-mounts this
+   * component by new id.
+   */
   onTargetDevice?: (id: string) => void;
-  /** 别的 app 分享进来的文件（见 shareTarget.ts）。附件状态住在本组件里，
-   *  所以 App 只把 File 递过来，由这里在 client 就绪后走正常上传路径。 */
+  /**
+   * Files shared in from another app (see shareTarget.ts). Attachment state
+   * lives in this component, so App just passes File objects; this component
+   * uploads via the normal path once client is ready.
+   */
   initialFiles?: File[];
-  /** relay 是否已连上。`client` 非空只说明对象建好了，连接可能还在握手——
-   *  分享是冷启动带进来的，那一刻上传必然撞上「尚未连接 relay」。 */
+  /**
+   * Is relay connected yet. Non-null `client` only means the object exists; the
+   * connection might still be handshaking — shared files arrive at cold start,
+   * when upload would immediately hit "relay not connected yet".
+   */
   relayReady?: boolean;
   onClose: () => void;
 }
 
-/** 新会话表单的未提交草稿 key（实际落盘时按设备加前缀，见 deviceScope.tsx）。
- *  每台设备同时只有一个新会话 sheet，意外关闭
- *  sheet / 切标签 / iOS 杀 PWA 后回来原样恢复；只有创建成功才清空。附件不入草稿——
- *  它们是已上传到 relay 的产物，重开时重新挑选即可。 */
+/**
+ * Unsaved draft key for the new-session form (device-prefixed at persist time;
+ * see deviceScope.tsx). Only one new-session sheet per device at a time;
+ * accidental close/tab switch/iOS PWA kill restores it identically; creates only
+ * when successful. Attachments skip the draft — they're already-uploaded relay
+ * outputs, re-picking is fine on re-open.
+ */
 export const NEW_SESSION_DRAFT_KEY = "new-session";
 const NEW_SESSION_ATTACH_KEY = "new-session:attachments";
 
-/** 把 repo 内的 worktree checkout 折叠回 repo 根。Fleet 在 `<repo-root>/.worktrees/<task-id>`
- *  里开发计划，这些是临时的（合并后即移除）；启动器应给出持久的 repo 根，绝不给 task-id 叶子。
- *  路径里没有 `.worktrees` 段的（含无关的 `~/.fleet/worktrees/`，其段是 `worktrees`）原样返回。
- *  与桌面端 NewSessionForm.repoRootPath 一致。*/
+/**
+ * Collapse worktree checkouts back to repo root. Fleet develops plans in
+ * `<repo-root>/.worktrees/<task-id>` (temporary, removed post-merge); the
+ * launcher should return the persistent repo root, never the task-id leaf. Paths
+ * lacking `.worktrees` segment (including unrelated `~/.fleet/worktrees/`, whose
+ * segment name is `worktrees`) pass through unchanged. Mirrors desktop
+ * NewSessionForm.repoRootPath.
+ */
 export function repoRootPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");
   const idx = normalized.split("/").indexOf(".worktrees");
@@ -563,12 +606,16 @@ export function repoRootPath(path: string): string {
   return before || path;
 }
 
-/** workspace 路径落在 OS 临时/暂存目录下时为 true，这类目录绝不该作为可启动 workspace。
- *  Fleet（与 Claude Code）把 per-session 暂存区丢在 `/tmp`（macOS 上 `/tmp` 软链到
- *  `/private/tmp`），系统用 `/var/folders/.../T` 作 per-user temp（规范化后呈现为
- *  `/private/var/folders/...`，因 `/var`→`/private/var`）——cwd 是其中之一的会话
- *  是临时的、会污染启动器的最近列表。按前导路径段匹配，故一个真的**名叫** `tmp-tools` 的
- *  项目会被保留。与桌面端 NewSessionForm.isTempWorkspacePath 一致。*/
+/**
+ * True if workspace path falls in OS temp/scratch directories — these should
+ * never be launchable workspaces. Fleet (like Claude Code) puts per-session
+ * scratch in `/tmp` (on macOS `/tmp` symlinks to `/private/tmp`); the system
+ * uses `/var/folders/.../T` for per-user temp (normalized to `/private/var/folders/...`
+ * because `/var` → `/private/var`). Sessions with cwd in either are temporary
+ * and pollute the launcher's recent list. Matches by leading path segment, so a
+ * project truly named `tmp-tools` is preserved. Mirrors desktop
+ * NewSessionForm.isTempWorkspacePath.
+ */
 export function isTempWorkspacePath(path: string): boolean {
   const p = path.replace(/\\/g, "/");
   return (
@@ -581,18 +628,25 @@ export function isTempWorkspacePath(path: string): boolean {
   );
 }
 
-/** 最近用过的 workspace（`[path, name]`）。**两段式排序**（对齐桌面端
- *  NewSessionForm.distinctWorkspaces）：先按最后活动时间降序取最近 `limit` 个
- *  （昨天用过的 repo 不会仅因名字排得靠后就被挤掉），幸存者再按名称字母序展示，
- *  得到稳定、可扫读的列表。worktree checkout 折叠回 repo 根（{@link repoRootPath}）
- *  以去重；剔除临时目录（{@link isTempWorkspacePath}）与纯聊天路径（它单独钉在选项首位）。
- *  默认选中**不**依赖这里的顺序——它来自记住的「上次成功创建会话用的 repo」（见
- *  {@link defaultWorkspace}）。*/
-/** 新会话页主区列出的一行项目。
+/**
+ * Most recently used workspaces (`[path, name]`). **Two-stage sort** (mirrors
+ * desktop NewSessionForm.distinctWorkspaces): first, take the most recent
+ * `limit` items by last-activity timestamp descending (yesterday's repo doesn't
+ * drop just for low alphabetical rank), then sort survivors alphabetically,
+ * yielding a stable, scannable list. Worktree checkouts collapse to repo root
+ * ({@link repoRootPath}) for dedup; drops temp directories ({@link isTempWorkspacePath})
+ * and chat-only path (nailed separately as the first option). Default selection
+ * **does not** depend on this order — it comes from the remembered "last repo
+ * used to successfully create a session" ({@link defaultWorkspace}).
+ */
+/**
+ * One workspace row shown in the new session sheet's main area.
  *
- * 名字之外还带「上次活动」与「几个会话在跑」：这两样 sessions 快照里本来就有，
- * 只是过去被 recentWorkspaces 在返回时丢掉了。挑项目时真正想知道的就是这两件事
- * ——哪个最近在动、哪个已经有人在跑。 */
+ * Beyond the name, includes "last active" and "session count running": both
+ * exist in the sessions snapshot but were lost by recentWorkspaces on return.
+ * When picking a project, these two facts are what you actually want to know —
+ * which is most active, which already has sessions running.
+ */
 export interface WorkspaceRow {
   path: string;
   name: string;
@@ -613,7 +667,7 @@ export function recentWorkspaceRows(
     if (path === chatPath) continue;
     const prev = byPath.get(path);
     const running = (prev?.running ?? 0) + (isSessionLive(s) ? 1 : 0);
-    // 同一路径下保留最近活动的那条会话的名字与时间戳。
+    // For the same path, keep the name and timestamp from the most recently active session.
     if (!prev || s.lastActivityMs > prev.lastMs) {
       byPath.set(path, {
         name: s.workspaceName || basename(path),
@@ -639,13 +693,20 @@ export function recentWorkspaces(
   return recentWorkspaceRows(sessions, chatPath, limit).map((r) => [r.path, r.name]);
 }
 
-/** localStorage key（走 draft.ts 的 `fleet-draft:` 前缀，再按设备加命名空间），
- *  记住上次成功创建会话用的 repo —— repo 路径属于某一台机器，所以必须分家。
- *  与新会话草稿是独立的键，故提交成功 clearDraft() 时不会被清掉。 */
+/**
+ * localStorage key (prefixed `fleet-draft:` from draft.ts, then per-device namespaced),
+ * remembers the repo used to last successfully create a session — repo paths are
+ * per-machine so must be device-scoped. Independent of the new-session draft key,
+ * so clearDraft() at submit doesn't erase it.
+ */
 const LAST_WORKSPACE_KEY = "last-new-session-workspace";
 
-/** 新会话默认选中的 workspace：用户本次已选且有效（draftWorkspace）时沿用；否则优先
- *  「上次用过的 repo」（lastWorkspace）——失效则退回列表首项，再退回纯聊天路径。 */
+/**
+ * Default workspace for new session: if user chose one this session and it's
+ * still valid (draftWorkspace), reuse it; otherwise prefer the last-used repo
+ * (lastWorkspace) — if stale, fall back to the list's first item, then to the
+ * chat-only path.
+ */
 export function defaultWorkspace(
   draftWorkspace: string,
   recents: [string, string][],
@@ -663,25 +724,30 @@ const NEW_SESSION_DEFAULT = {
   workspace: "",
   customWorkspace: "",
   prompt: "",
-  // Which agent tool to launch: "claude" (default) or "codex". Routed by the
-  // relay's spawn_session → agent_source::spawn_session.
+  // Which agent tool to launch: "claude" (default), "codex", or "dsh". Routed
+  // by relay's spawn_session → agent_source::spawn_session.
   tool: "claude",
   model: "",
   effort: "",
   // acceptEdits by default: headless -p sessions in default mode can't approve
-  // file edits (same default as the desktop launcher). Ignored for Codex.
+  // file edits (same default as desktop launcher). Ignored for Codex / dsh.
   permissionMode: "acceptEdits",
 };
 
-/** 换新会话的目标设备时,把手上这段 prompt 搬进**目标设备**那份草稿。
+/**
+ * When switching the new session's target device, carry this prompt into the
+ * **target device**'s draft.
  *
- *  为什么只搬 prompt:表单其余每一项都是「某一台机器上的东西」—— workspace 是
- *  A 上的目录路径、model/effort 可能是 A 上的 codex profile、附件是已上传到 A 的
- *  路径。换到 B 之后 App 会按新 id 重挂载本组件(见 App.tsx 的 `key`),那三样就
- *  各自从 B 的命名空间恢复,带不过去正是我们要的。
+ * Why only the prompt: all other form fields are "machine-specific" — workspace
+ * is a path on device A, model/effort may be A's codex profile, attachments are
+ * paths uploaded to A. After switching to B, App re-mounts this component by new
+ * id (see App.tsx `key`), so those three restore themselves from B's namespace.
+ * Not carrying them is what we want.
  *
- *  prompt 不同:那是用户刚敲的字,跟机器无关,重挂载不该把它弄丢。代价是覆盖掉
- *  目标设备上一段未提交的旧文本 —— 手上正在打的字优先。 */
+ * Prompt is different: it's the text the user just typed, machine-independent,
+ * and re-mount shouldn't lose it. The cost: overwriting any draft text on the
+ * target device — the text in hand takes priority.
+ */
 export function carryPromptToDevice(
   nextDeviceId: string,
   prompt: string,
@@ -701,25 +767,31 @@ export function NewSessionSheet({
   relayReady,
   onClose,
 }: NewSessionProps) {
-  // 纯聊天 workspace：不绑定项目，没有「最近会话」可被发现，必须显式钉在选项首位。
+  // Chat-only workspace: not project-bound, no "recent sessions" to discover; must
+  // be explicitly nailed as the first option.
   const chatPath = useChatWorkspace(client);
 
   const recentRows = recentWorkspaceRows(sessions, chatPath);
   const recents = recentRows.map((r): [string, string] => [r.path, r.name]);
-  // 供超时后的宽限期确认读取最新快照(prop 每次快照推送都会更新)。
+  // For grace-period confirmation after timeout to read fresh snapshot (prop
+  // updates on every snapshot push).
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
-  // 新会话草稿按设备分家:里面记着 workspace 路径和模型,那是某一台机器上的东西。
+  // New-session draft is device-scoped: workspace path and model are
+  // machine-specific things.
   const [draft, setDraft, clearDraft] = useDeviceDraft(
     NEW_SESSION_DRAFT_KEY,
     NEW_SESSION_DEFAULT,
   );
   const deviceId = useDeviceScope();
   const patch = (p: Partial<typeof NEW_SESSION_DEFAULT>) => setDraft((d) => ({ ...d, ...p }));
-  // 语音写回用函数式更新:识别结果是异步到的,期间用户可能又敲了字,读闭包里的
-  // prompt 会把那几个字覆盖掉。onSend 里的 submit 是下面才声明的 const —— 箭头
-  // 函数体到点按之后才求值,那时它早就在了;hook 内部还按 ref 取最新的一版,所以
-  // 「停止并发送」等回最后一段定稿之后发的是新内容,不是按下那一刻的旧闭包。
+  // Voice writes back via functional update: recognition results arrive async,
+  // and the user might have typed more text meanwhile, and a closure-captured
+  // prompt would clobber those new characters. The `submit` in onSend is a
+  // const declared below — its arrow function body evaluates only on tap, when
+  // it's already defined; the hook also tracks the latest version via ref, so
+  // "stop and send" flows the final text after that point, not the stale closure
+  // from tap time.
   const voice = useVoiceRecorder({
     value: draft.prompt,
     onChange: (next) => setDraft((d) => ({ ...d, prompt: next })),
@@ -743,12 +815,14 @@ export function NewSessionSheet({
     client,
     NEW_SESSION_ATTACH_KEY,
   );
-  // 分享进来的文件走一次正常上传。
+  // Shared files go through normal upload once.
   //
-  // 必须等 `relayReady` 而不只是 `client` 非空：client 对象在连接建立前就存在，
-  // 那时 request 会直接抛「尚未连接 relay」。分享几乎总是冷启动带进来的，正好
-  // 撞上握手那一小段——真机日志里就是 `upload FAILED: 尚未连接 relay`，一次
-  // 失败后文件就再也没人管了。ref 保证连上后只传一次，不因重连重复上传。
+  // Must wait for `relayReady`, not just non-null `client`: the client object
+  // exists before connection is live, and request() would throw "relay not
+  // connected yet". Shares almost always arrive at cold start, hitting right in
+  // the handshake window — real logs show "upload FAILED: relay not connected
+  // yet", and after one failure the files never get attention again. The ref
+  // guarantees post-connect upload happens once only, no re-upload on reconnect.
   const sharedUploadedRef = useRef(false);
   useEffect(() => {
     if (sharedUploadedRef.current || !client || !relayReady || !initialFiles?.length) return;
@@ -759,11 +833,11 @@ export function NewSessionSheet({
   const { customWorkspace, prompt, model, effort, permissionMode } = draft;
   // Older persisted drafts predate the tool field → default to Claude.
   const tool = draft.tool || "claude";
-  // 只有 Claude 有 --permission-mode 这个概念。
+  // Only Claude has the --permission-mode concept.
   const sendsPermissionMode = tool === "claude";
-  // 三个源的 model/effort id 互不相交，所以切工具就清空它们——残留的 Claude
-  // 模型否则会走进 `codex exec -m`（反之亦然）。Mirrors the desktop
-  // NewSessionForm.
+  // The three sources' model/effort ids are disjoint, so switching tools clears
+  // them — leftover Claude models would otherwise enter `codex exec -m` (and
+  // vice versa). Mirrors the desktop NewSessionForm.
   const setTool = (v: string) => patch({ tool: v, model: "", effort: "" });
 
   // Only offer the agent tools whose source is actually being monitored (source
@@ -783,8 +857,10 @@ export function NewSessionSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, toolChoices, tool]);
 
-  // 默认选中「上次成功创建会话用的 repo」（独立持久化，不随草稿清空），失效则退回
-  // 列表首项，避免 <select> 显示空白。用户本次已选且有效时沿用其选择。
+  // Default-select the "last repo used to successfully create a session"
+  // (independently persisted, doesn't clear with draft); if stale, fall back to
+  // first list item to avoid blank <select>. If user picked something this
+  // session and it's still valid, reuse their choice.
   const workspace = defaultWorkspace(
     draft.workspace,
     recents,
@@ -844,9 +920,10 @@ export function NewSessionSheet({
 
   const submit = async () => {
     if (!client || !canSubmit) return;
-    // 手机端预分配 session_id:桌面会用它作 `claude --session-id`,于是即便
-    // reply 帧丢失,也能凭它在后续快照里认出这个会话;且桌面按此 id 幂等去重,
-    // 超时重发同一 req 不会双开(方案 C)。
+    // Phone pre-allocates session_id: desktop uses it as `claude --session-id`,
+    // so even if the reply frame is lost, it can recognize the session in later
+    // snapshots; and desktop dedupes by this id (idempotent), so retrying the
+    // same request on timeout doesn't double-launch (plan C).
     const sessionId = crypto.randomUUID();
     const params = {
       workspacePath: effectiveWorkspace,
@@ -855,41 +932,47 @@ export function NewSessionSheet({
       tool,
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
-      // Codex / dsh 都没有 --permission-mode 的对应物；只给 Claude 发。
+      // Codex / dsh have no --permission-mode equivalent; only send to Claude.
       ...(sendsPermissionMode && permissionMode ? { permissionMode } : {}),
     };
     setBusy(true);
-    // 一旦确认(ack / reply / 快照)就乐观收尾一次;settled 防重复。
+    // On confirmation (ack / reply / snapshot), optimistically conclude once;
+    // `settled` prevents repeat.
     let settled = false;
     const succeed = () => {
       if (settled) return;
       settled = true;
-      // 记住这次用的 repo，下次打开新会话 sheet 默认选中它（独立键，不受 clearDraft 影响）。
+      // Remember this repo; next time the new-session sheet opens, default-select
+      // it (independent key, unaffected by clearDraft).
       saveDraft(scopedKey(deviceId, LAST_WORKSPACE_KEY), effectiveWorkspace);
       setCreated(true);
-      // ack 到达就清掉已发送草稿；哪怕系统返回键在 650ms 成功态期间关闭页面，
-      // 下次也不会把已经发出的任务恢复出来。短暂停留只用于呈现确认反馈。
+      // Once ack arrives, clear sent draft; even if the system back key closes
+      // the page within the 650ms success state, next time won't recover the
+      // already-launched task. Brief stay is only for success feedback.
       clearDraft();
       reset();
       closeTimerRef.current = window.setTimeout(() => {
         onClose();
       }, 650);
     };
-    // 方案 A:收到桌面早 ack 即乐观关闭——提交已抵达桌面,不必干等 reply。
+    // Plan A: on early ack from desktop, close optimistically — submit reached
+    // desktop, no need to wait for reply.
     const send = () => client.request("spawn_session", params, undefined, succeed);
     try {
       await send();
-      succeed(); // reply 到达同样成功,与 onAck 幂等
+      succeed(); // reply arrival also succeeds, idempotent with onAck
     } catch (e) {
-      // 桌面端明确拒绝(路径不存在、prompt 为空……):它收到了、判断了、说不行,
-      // 会话不可能出现在任何快照里,直接报错、不重发、不进宽限。
+      // Desktop explicit rejection (path doesn't exist, prompt empty, etc.): it
+      // received, judged, said no. Session can't appear in any snapshot; error
+      // directly, no retry, no grace period.
       if (isDesktopRejection(e)) {
         window.alert(e.message);
-        return; // finally 会清 busy
+        return; // finally clears busy
       }
-      if (settled) return; // 已凭 ack 关闭,超时的 reject 忽略即可
-      // 方案 C:超时且没收到 ack——提交可能压根没抵达桌面(relay 尽力而为,
-      // 无队列/不补投)。重发一次同一 req;桌面按 sessionId 幂等去重,不会双开。
+      if (settled) return; // Already closed via ack; timeout reject is fine
+      // Plan C: timeout without ack — submit may never have reached desktop
+      // (relay does best-effort, no queuing/re-send). Retry the same request
+      // once; desktop dedupes by sessionId (idempotent), won't double-launch.
       try {
         await send();
         succeed();
@@ -900,8 +983,9 @@ export function NewSessionSheet({
           return;
         }
         if (settled) return;
-        // 最后兜底:桌面可能已 spawn 但 ack/reply 都丢了。进宽限期盯快照,
-        // 出现同 id 即视为成功;真没出现才报错。
+        // Last fallback: desktop may have spawned but both ack and reply were
+        // lost. Enter grace period watching snapshots; if same id appears, call
+        // it success; if not, error.
         const confirmed = await waitForSessionId(sessionId, () => sessionsRef.current);
         if (confirmed) succeed();
         else window.alert(e2 instanceof Error ? e2.message : t("创建会话失败"));
@@ -931,9 +1015,11 @@ export function NewSessionSheet({
           />
         </div>
 
-        {/* 主区给「最近去过哪」。原来这里是三个 64px 的摘要行 + 一个 190px 的输入
-            卡：一整屏 844px 只承载三件事，而开一个新会话要点三层。位置与配置退到
-            底部的胶囊行之后，这块地才有东西可放。 */}
+        {/* Main area for "where have you been". Previously this was three 64px
+            summary rows + one 190px input card: a full 844px screen held only
+            three items, and launching a session took three taps. With location
+            and config pushed to the bottom pill row, this space now has room for
+            content. */}
         <div className={styles.sheetBody}>
           <span className={styles.sectionLabel}>{t("最近")}</span>
           <div className={styles.recentList}>
@@ -982,9 +1068,10 @@ export function NewSessionSheet({
           )}
         </div>
 
-        {/* 底部就是回复窗那根胶囊的同一套形状：配置 chip 行 + 附件 + 输入胶囊。
-            「启动会话」不再是一颗 50px 的大按钮，而是胶囊右端的圆形发送 —— 两处
-            输入区从此长得一样，用户不必学两遍。 */}
+        {/* Bottom mirrors the resume composer's pill shape: config chip row +
+            attachments + input pill. "Launch session" is no longer a 50px large
+            button but a circular send on the pill's right edge — both input
+            areas now look the same, users don't have to learn twice. */}
         <div className={styles.sheetFooter}>
           <div className={styles.resumeChips}>
             <button className={styles.resumeChip} onClick={() => setPicker("location")}>
@@ -1226,7 +1313,7 @@ export function NewSessionSheet({
   );
 }
 
-// ── 继续会话 composer ────────────────────────────────────────────────────────
+// ── Resume session composer ────────────────────────────────────────────────────
 
 interface ResumeProps {
   session: SessionInfo;
@@ -1243,8 +1330,9 @@ interface ResumeProps {
    *  tail / live-thinking pollers and yield the single serialized WS to the
    *  resume req/reply instead of contending with a big tail response. */
   onSubmitInFlight?: (inFlight: boolean) => void;
-  /** 本组件当前遮挡的高度。它浮在转录之上、不占布局高度，父级据此给滚动区补
-   *  底部留白，最后一条消息才不会被压在胶囊底下。 */
+  /** Height currently blocked by this component. It floats above the transcript
+   *  without taking layout height; the parent uses this to pad the scroll area's
+   *  bottom so the last message isn't buried under the pill. */
   onHeight?: (px: number) => void;
 }
 
@@ -1257,27 +1345,31 @@ export function ResumeComposer({
   onHeight,
 }: ResumeProps) {
   const enqueueing = mode === "enqueue";
-  // 会话所属的源决定给哪套 model/effort 清单——认不出的源退回 Claude，那是
-  // 注册表自己的 fallback。dsh 接进来之前这里是个写死的 codex 三元判断，于是
-  // dsh 会话被默默塞了 Claude 的模型。
+  // The session's source determines which model/effort list to use — unrecognized
+  // sources fall back to Claude, which is the registry's own default. Before dsh
+  // was added, this was a hardcoded Codex ternary, silently using Claude models
+  // for dsh sessions.
   const tool = toolForAgentSource(session.agentSource);
   const pendingMessages = session.pendingMessages ?? [];
-  // 每个会话各自的续写草稿，按 sessionId 分 key——切到别的会话再回来，
-  // 各自的半截输入互不覆盖；发送成功后清空。
-  // 设备作用域:会话 id 只在单机内唯一,不分家两台机器上同号的会话会共用一份
-  // 半截输入。
+  // Per-session resume draft, keyed by sessionId — switching to another session
+  // and back keeps the draft intact; cleared on successful send. Device-scoped:
+  // session IDs are unique per machine only, so sessions with the same ID on
+  // different machines will share a draft.
   const [prompt, setPrompt, clearPrompt] = useDeviceDraft(`resume:${session.id}`, "");
-  // 续写的模型/努力度以会话当前值起步，而不是空串——空串会让胶囊显示成
-  // 「默认」，看不出这条追问其实会跑在哪个模型上。
+  // Resume model/effort start from the session's current values, not empty
+  // strings — empty would display as "default" in the pill, obscuring which
+  // model this follow-up will actually run on.
   const [model, setModel] = useState(session.model ?? "");
   const [effort, setEffort] = useState(session.effort ?? "");
-  // 用户有没有在选择器里亲手改过。**只有改过才把 model/effort 发上线**：没改
-  // 时留空，让桌面侧从 launch-spec 取权威值(它带 `[1m]` 这类后缀，而快照里的
-  // `session.model` 是从 transcript 解析的、丢后缀)，别让一次「我没动配置」的
-  // 追问反倒把会话钉死在一个降级的 model spec 上。
+  // Whether the user manually changed the selection. **Only send model/effort
+  // if changed**: when untouched, leave empty so the desktop pulls the
+  // authoritative value from launch-spec (it includes `[1m]` suffixes that the
+  // snapshot's `session.model` lacks, parsed from transcript). This prevents an
+  // unchanged follow-up from pinning the session to a degraded model spec.
   const [configTouched, setConfigTouched] = useState(false);
   const [permissionMode, setPermissionMode] = useState("");
-  // 切到别的会话：重新以那个会话的当前配置起步，并清掉「改过」标记。
+  // Switching to another session: reset to that session's current config and
+  // clear the "touched" flag.
   useEffect(() => {
     setModel(session.model ?? "");
     setEffort(session.effort ?? "");
@@ -1302,8 +1394,8 @@ export function ResumeComposer({
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  // 胶囊上报告的当前配置。dsh 的模型目录是主机运行时给的，这里认不出 id 就
-  // 原样显示 —— 显示一个真实但陌生的 id，好过显示一个错的友好名字。
+  // Current config shown in the pill. dsh's model catalog comes from the host at runtime; if we
+  // don't recognize an id, display it as-is — a real but unfamiliar id beats a wrong friendly name.
   const resumeCatalog = useModelCatalog(client);
   const modelLabel = useMemo(() => {
     if (tool === "dsh") return model;
@@ -1328,23 +1420,26 @@ export function ResumeComposer({
   });
   const voiceTailRef = useFollowTail<HTMLTextAreaElement>(voice.showingPreview, voice.preview);
   useAutoGrow(voiceTailRef, voice.showingPreview ? voice.preview : prompt);
-  // 实测高度上报给父级：浮起后本组件不占布局高度，转录区要靠这个数字给自己补
-  // 底部留白，否则最后一条消息会永远压在胶囊底下。
+  // Actual measured height reported to parent: the pill floats without taking layout height, so the
+  // transcript relies on this number to pad its bottom, or the last message stays buried under the pill.
   const boxRef = useRef<HTMLDivElement>(null);
   const [measureNonce, remeasure] = useReducer((n: number) => n + 1, 0);
   useLayoutEffect(() => {
     const el = boxRef.current;
     if (!el) return;
-    // 报的是「从视口底到本组件顶」的距离，而不是自身高度：胶囊还会被决策折叠条
-    // （--peek-inset）往上顶，那段空隙同样是转录区不能用的地方。
+    // Report "distance from viewport bottom to component top", not just self
+    // height: the pill also gets pushed up by the decision collapse bar
+    // (--peek-inset), and that gap is also unavailable to the transcript.
     //
-    // 用布局值（offsetHeight + computed bottom）而不是 getBoundingClientRect：
-    // rect 把 transform 算在内，任何 transform 动画进行中量到的都不是终值。
+    // Use layout values (offsetHeight + computed bottom), not getBoundingClientRect:
+    // rect includes transforms, so any in-flight transform animation won't
+    // measure to the final value.
     onHeight?.(composerInset(el.offsetHeight, getComputedStyle(el).bottom));
   });
-  // 高度会在本组件不重渲染的情况下变：附件缩略图加载完撑高、textarea 自增高度
-  // 是直接写 style 的、决策折叠条把 --peek-inset 写在 documentElement 上把整根
-  // 胶囊顶上去。任一发生都要重新量一次，否则父级手里是个陈旧的留白。
+  // Height can change without re-rendering: attachment thumbnails load and grow
+  // the component, textarea auto-grows via direct style writes, and the decision
+  // collapse bar sets --peek-inset on documentElement, pushing the whole pill up.
+  // Any of these require remeasuring, or the parent holds stale padding.
   useEffect(() => {
     const el = boxRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -1359,8 +1454,10 @@ export function ResumeComposer({
     };
   }, []);
   void measureNonce;
-  // 卸载时把留白还回去：会话从「可续写」翻成「运行中」会换掉这个组件，留一个
-  // 陈旧的高度在父级手里，转录底下就永远空着一块没人遮的白。
+  // On unmount, return padding to zero: when a session transitions from
+  // "resumable" to "running", this component is swapped out, leaving stale height
+  // in the parent — transcript would have a permanent white gap below the last
+  // message uncovered.
   useEffect(() => () => onHeight?.(0), [onHeight]);
 
   // Chips still worth rendering — gates the "已排队" label too, so cancelling
@@ -1395,29 +1492,34 @@ export function ResumeComposer({
     // follow-up); resume tolerates empty (= continue).
     if (enqueueing && !text) return;
     setBusy(true);
-    // 追问提交在飞:让父级暂停 tail/thinking 轮询,把这条串行加密 WS 让给
-    // resume req/reply,别被一个大 tail 响应堵在前面。收尾时(succeed/catch)复位。
+    // Submit in flight: pause parent's tail/thinking polling, give this
+    // serialized WS to the resume req/reply so it's not blocked by a large tail
+    // response. Reset on success/catch.
     onSubmitInFlight?.(true);
-    // 方案 A 乐观收尾:桌面收到写请求会先回一个早 ack(远早于 claude 冷启动
-    // 产出的最终 reply),不必干等那 5-10s。ack 一到就复位输入、回显消息;
-    // settled 防重复(reply 到达会再触发一次,幂等)。
+    // Plan A: optimistic success. Desktop responds with an early ack (well before
+    // claude's cold-start produces the final reply), no need to wait 5–10s. On
+    // ack, reset input and echo message; `settled` prevents re-trigger (reply
+    // arrival also fires, idempotent).
     let settled = false;
     const succeed = () => {
       if (settled) return;
       settled = true;
-      // resume 把用户输入乐观回显进消息列表;enqueue 尚未投递,沿用已排队 chip。
+      // Resume echoes user input optimistically to the message list; enqueue
+      // hasn't sent yet, so keep the "queued" chip.
       if (!enqueueing && text) onOptimisticSend?.(text);
       clearPrompt();
       reset();
       setSent(true);
       setBusy(false);
-      // ack 已到、写入已投递:恢复父级轮询去拉真实转录(reply 很小,不再是瓶颈)。
+      // Ack arrived, write delivered: resume parent's polling for the real
+      // transcript (reply is small, no longer the bottleneck).
       onSubmitInFlight?.(false);
       window.setTimeout(() => setSent(false), 3000);
     };
     const method = enqueueing ? "enqueue_message" : "resume_session";
-    // 每次提交一把新钥匙:relay 投递是尽力而为,回执丢了这条请求可能被重放
-    // (或被同机第二个 agent 收到),桌面凭它认出重复,不会再起一轮 claude。
+    // Fresh key per submit: relay delivery is best-effort; if the ack is lost,
+    // this request may replay (or reach a second agent on the same machine), so
+    // desktop uses it to deduplicate and not spawn a second claude turn.
     const idempotencyKey = randomId();
     const params = enqueueing
       ? { sessionId: session.id, workspacePath: session.workspacePath, text, idempotencyKey }
@@ -1431,27 +1533,29 @@ export function ResumeComposer({
           // thread resumed as claude would fail, so always send it.
           agentSource: session.agentSource ?? "",
           ...resumeConfigOverrides({ touched: configTouched, model, effort }),
-          // Codex / dsh 都没有 --permission-mode 的对应物；只给 Claude 发。
+          // Codex and dsh have no --permission-mode equivalent; send only to Claude.
           ...(tool === "claude" && permissionMode ? { permissionMode } : {}),
         };
     try {
-      // 5th arg = onAck: fired once when the desktop's early ack arrives.
+      // 5th arg = onAck: fired once when desktop's early ack arrives.
       await client.request(method, params, undefined, succeed);
-      succeed(); // reply 到达同样收尾,与 onAck 幂等
+      succeed(); // Reply also succeeds, idempotent with onAck
     } catch (e) {
-      // 无论何种失败,提交已不在飞:恢复父级轮询。
+      // Regardless of failure, submit is no longer in flight: resume parent's polling.
       onSubmitInFlight?.(false);
-      // 桌面明确拒绝(路径不存在、prompt 非法……):它判断了、说不行,如实报错——
-      // 即便已凭 ack 乐观收尾也要提示,与新建会话一致。
+      // Desktop explicit rejection (path doesn't exist, invalid prompt, etc.): it
+      // judged and declined, report the error honestly — even if already concluded
+      // via ack, still alert (consistent with new session).
       if (isDesktopRejection(e)) {
         window.alert(e.message);
         setBusy(false);
         return;
       }
-      // 已凭早 ack 收尾:随后的超时/掉线 reject 只是那条 reply 没回来,忽略即可。
+      // Already concluded via early ack: subsequent timeout/disconnect reject is
+      // just the reply not arriving, ignore.
       if (settled) return;
-      // 从未 ack 也没 reply——请求可能压根没抵达桌面(relay 尽力而为、不补投),
-      // 如实报超时。
+      // Never ack, no reply — request may not have reached desktop at all
+      // (relay is best-effort, no re-send); report timeout honestly.
       window.alert(e instanceof Error ? e.message : t("恢复会话失败"));
       setBusy(false);
     }
@@ -1477,8 +1581,9 @@ export function ResumeComposer({
           ))}
         </div>
       )}
-      {/* 缩略图单独一行，只在真有附件时才占高度 —— 原来它和 📎/🎤 挤在一条
-          常驻 44px 的 attachRow 里，空着也占位。 */}
+      {/* Thumbnails on their own row, taking height only when there are actual
+          attachments — previously squeezed with 📎/🎤 on a permanent 44px
+          attachRow, taking space even when empty. */}
       {(attachments.length > 0 || pending.length > 0) && !voice.active && (
         <div className={styles.resumeThumbs}>
           <AttachmentThumbs
@@ -1491,8 +1596,8 @@ export function ResumeComposer({
           />
         </div>
       )}
-      {/* 排队模式不给配置：这条消息会跟着当前这一轮的设置跑，显示一组改不动的
-          胶囊只会误导。 */}
+      {/* No config in enqueue mode: this message runs with the current turn's
+          settings, so showing unchangeable pills would only mislead. */}
       {!enqueueing && !voice.active && (
         <div className={styles.resumeChips}>
           {configChips.map((label) => (
@@ -1526,17 +1631,18 @@ export function ResumeComposer({
           <textarea
             ref={voiceTailRef}
             className={styles.composerInput}
-            /* 胶囊里一行只放得下十来个汉字，长 placeholder 会在静息态就把框撑成
-               两行 —— 那正是这次要消灭的东西。麦克风就在右边，不必再用文案介绍；
-               「留空 = continue」的行为没变，只是不再写在框里。 */
+            /* One line in the pill fits only ~10 Chinese chars; a long placeholder
+               expands the box to two lines at rest — exactly what we're eliminating.
+               The mic is right there, no need for text explanation. "Empty = continue"
+               behavior unchanged, just not written in the box. */
             placeholder={enqueueing ? t("排队一条追问…") : t("继续这个会话…")}
             rows={1}
             value={voice.showingPreview ? voice.preview : prompt}
             readOnly={voice.showingPreview}
             onChange={(e) => setPrompt(e.target.value)}
           />
-          {/* 有字了就把麦克风让位给发送：两颗一直并排会让右侧挤成两个 40px 的
-              目标，而这一刻用户要的只有一个。 */}
+          {/* When there's text, yield mic position to send: two buttons side-by-side
+              squeeze the right edge into two 40px targets, but users only want one. */}
           {voice.available && !prompt.trim() && (
             <span className={styles.pillMic}>
               <VoiceMicButton rec={voice} />

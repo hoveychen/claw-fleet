@@ -28,14 +28,14 @@ function dirname(p: string): string {
  * One file as an auxiliary-rail reader.
  *
  * This replaces the rail's use of `FilesView`'s `ExternalFilePreview`, which
- * was written for the 仓库 page's out-of-tree case and wore its assumptions
+ * was written for the Files page's out-of-tree case and wore its assumptions
  * here: it built its `ExplorerEntry` with `sizeBytes: 0` and `modifiedMs: 0`
  * hard-coded, so the header could never print a size even though the read it
- * was about to perform returns one; and it drew its own 关闭 button beside the
+ * was about to perform returns one; and it drew its own Close button beside the
  * rail card's ✕, which was the same action twice.
  *
  * The reader itself is still the shared `FilePreview`, so a file looks the same
- * here as on the 仓库 page. Only the chrome is the rail's own — the density line
+ * here as on the Files page. Only the chrome is the rail's own — the density line
  * is fed by the settled read (`onLoaded`), which is the only place an
  * out-of-tree file's size and length are known.
  */
@@ -46,7 +46,7 @@ export function FileTabPane({
 }: {
   doc: AuxDoc;
   tail: AuxCardTail;
-  /** The session's repo, needed to hand the path to the 仓库 page. Blank on a
+  /** The session's repo, needed to hand the path to the Files page. Blank on a
    *  session with no workspace, which drops that one menu item. */
   workspacePath: string;
 }) {

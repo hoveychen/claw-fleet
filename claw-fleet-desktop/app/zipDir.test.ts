@@ -1,5 +1,6 @@
 /**
- * `shared-ts/zipDir.ts` — the archive reader behind the 产出 page's zip browser.
+ * `shared-ts/zipDir.ts` — the archive reader behind the artifacts page's zip
+ * browser.
  *
  * Everything here runs against zips this file builds byte by byte, because the
  * properties worth pinning are the ones a fixture file would hide: that the

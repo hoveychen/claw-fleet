@@ -116,7 +116,8 @@ export interface SessionInfo {
   createdAtMs: number;
   jsonlPath: string;
   model?: string | null;
-  /** 推理强度档位（low…max）。桌面 header 上是一颗 chip；手机放进展开面板。 */
+  /** Reasoning effort level (low…max). Desktop shows as chip in header; phone puts it
+   *  in expanded details panel. */
   effort?: string | null;
   agentSource?: string;
   contextPercent?: number | null;
@@ -128,9 +129,9 @@ export interface SessionInfo {
   pidPrecise?: boolean;
   entrypoint?: string | null;
   userMark?: SessionMark | null;
-  /** v3 任务终态:`completed` = 老板按了「结束任务」,`abandoned` = 按了「放弃任务」。
-   *  缺席 = 任务还没终结。与 `userMark`(我复核过没有)、`status`(此刻在跑没有)
-   *  是三个正交的轴。 */
+  /** V3 task terminal state: `completed` = user pressed "end task", `abandoned` = pressed
+   *  "abandon task". Absent = task not yet terminal. Orthogonal to `userMark` (manually
+   *  reviewed?) and `status` (currently running?). */
   taskOutcome?: TaskOutcome | null;
   /** True when the session's agent process is still alive. */
   procAlive?: boolean;
@@ -149,12 +150,14 @@ export interface SessionInfo {
    *  one. `status` alone would say `remoteDisconnected` without naming the host
    *  or the cause. */
   remoteDisconnect?: RemoteDisconnect | null;
-  /** 会话结束后留在本机镜像目录里的文件——本该写到远端主机上的产物。
-   *  会话状态不受影响,所以只有这个字段会说。 */
+  /** Files left in the local mirror directory after session end—outputs that should
+   *  have gone to the remote machine. Session status is unaffected, so only this
+   *  field reports it. */
   mirrorWrite?: MirrorWrite | null;
-  /** 账号额度耗尽时那一轮的原始报错（codex 的 `usage_limit_exceeded`，
-   *  「Your workspace is out of credits…」）。它没有 reset 时刻——等的是有人去充值,
-   *  不是等时钟——所以既不改 `status` 也不进 auto-resume,只有这个字段会说。 */
+  /** Original error from the turn when account credits exhausted (e.g. Codex
+   *  `usage_limit_exceeded`, "Your workspace is out of credits…"). No reset time—waiting
+   *  for recharge, not the clock—so neither `status` nor auto-resume change; only this
+   *  field says. */
   outOfCredits?: string | null;
 }
 
@@ -163,9 +166,9 @@ export interface SessionInfo {
  *  carry `originator === "fleet"` — mirrors codex_launch::CODEX_FLEET_ORIGINATOR. */
 export const CODEX_FLEET_ORIGINATOR = "fleet";
 
-/** Sessions Fleet spawned itself ("新会话" / handoff relay / a Fleet-spawned Codex
- *  session) — the only ones where SIGINT means "abort the tool call" instead of
- *  "quit", and the only ones the 启动台 lists and the detail view can resume.
+/** Sessions Fleet spawned itself (new session / handoff relay / Fleet-launched Codex
+ *  session)—the only ones where SIGINT means "abort the tool call" instead of
+ *  "quit", and the only ones the launchpad lists and the detail view can resume.
  *  Mirrors claw-fleet-desktop/app/types.ts. */
 export function isFleetOwnedEntrypoint(entrypoint: string | null | undefined): boolean {
   return (
@@ -175,13 +178,12 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null | undefined): b
   );
 }
 
-/** Whether a session belongs on the phone's 任务 list: a Fleet-owned main
- *  session Fleet *actually spawned*. The entrypoint alone can't be trusted — a
- *  plain `claude -p` run inside a Fleet session inherits `CLAUDE_CODE_ENTRYPOINT`
- *  from its parent and looks Fleet-owned — so it's ANDed with `fleetSpawned`.
- *  Only an explicit `false` (the core's verdict for a leaked child) excludes;
- *  an absent field (older relay) is treated as not-a-leak so real tasks stay.
- *  Mirrors claw-fleet-desktop isFleetOwnedTask. */
+/** Whether a session belongs on the phone's task list: a Fleet-owned main session
+ *  Fleet *actually spawned*. Entrypoint alone can't be trusted—a bare `claude -p`
+ *  inside a Fleet session inherits `CLAUDE_CODE_ENTRYPOINT` from its parent and
+ *  looks Fleet-owned—so it's ANDed with `fleetSpawned`. Only explicit `false`
+ *  (core's verdict for leaked child) excludes; absent field (older relay) treated
+ *  as not-a-leak so real tasks persist. Mirrors claw-fleet-desktop isFleetOwnedTask. */
 export function isFleetOwnedTask(s: SessionInfo): boolean {
   return (
     !s.isSubagent &&
@@ -190,10 +192,10 @@ export function isFleetOwnedTask(s: SessionInfo): boolean {
   );
 }
 
-/** 这条会话此刻是不是活的（进程还在，或这一轮还在飞）。
- *  与 canResumeSession / canEnqueueSession 的区别：那两个还要求「Fleet 自己起的、
- *  不是 subagent」——它们回答的是「我能不能给它发消息」；这个只回答「它在不在跑」，
- *  用来数一个项目下有几个会话在动。 */
+/** Whether a session is live now (process still exists or this turn is in flight).
+ *  Different from canResumeSession/canEnqueueSession: those also require "Fleet-owned,
+ *  not subagent"—they answer "can I send it a message?"; this only answers "is it
+ *  running?", used to count how many sessions in a project are active. */
 export function isSessionLive(s: SessionInfo): boolean {
   return !!s.procAlive || IN_FLIGHT.includes(s.status);
 }
@@ -251,13 +253,13 @@ export interface ContentBlock {
   /** Decision-card gist on a `tool_use` block (AskUserQuestion / fleet__ask /
    *  request_user_input). The card itself lives in `input.questions`, which the
    *  relay's input whitelist drops, so without this every decision chip in a
-   *  session would read the same bare 「决策卡」. */
+   *  session would read the same bare decision card. */
   _ask?: AskSummary;
   /** Base64 JPEG thumbnails of screenshots embedded in a tool_result body. */
   _thumbs?: string[];
   /** Gist of an ingest confirmation (`artifact add` / `wiki publish`) on a
    *  `tool_result` block. Both the id and the title live in text the tail
-   *  strips, so without this the phone can only say 「产出」 (see
+   *  strips, so without this the phone can only say "artifact" (see
    *  `ingest_summary` in mobile_relay.rs). */
   _ingest?: IngestSummary;
   /** Image block whose `source` is a server-side JPEG thumbnail, not the
@@ -273,7 +275,7 @@ export interface ContentBlock {
 export type IngestSummary =
   | {
       kind: "artifact";
-      /** Store id — what `artifact_blob` / the 产出 list is keyed by. */
+      /** Store id — what the artifact list is keyed by. */
       id: string;
       title: string;
       /** The store's coarse bucket (`pdf`, `image`, `sheet`, …). */
@@ -302,7 +304,7 @@ export interface ToolDigest {
   interrupted?: boolean;
   agentStatus?: string;
   /** The subagent's session id tail (`agent-<agentId>` in the session array);
-   *  the "打开子代理" button uses it to look the subagent up and drill in. */
+   *  the "open subagent" button uses it to look the subagent up and drill in. */
   agentId?: string;
   durationMs?: number;
   tokens?: number;
@@ -479,7 +481,7 @@ export interface WikiExportPayload {
   base64: string;
 }
 
-// ── Repository "仓库" surface (git_ops::RepoSummary/RepoDetail/…) ─────────────
+// ── Repository surface (git_ops::RepoSummary/RepoDetail/…) ─────────────────────
 
 /** One uncommitted working-tree entry (git_ops::DirtyFile). */
 export interface DirtyFile {
@@ -514,7 +516,7 @@ export interface WorktreeHealth {
   /** Commits on this branch not merged back into the main checkout. */
   unmerged: number;
   dirtyCount: number;
-  /** Uncommitted entries (path + status code); expandable from the "脏 N" badge. */
+  /** Uncommitted entries (path + status code); expandable from the "dirty N" badge. */
   dirtyFiles: DirtyFile[];
   lastCommitSummary: string | null;
   /** Tip-commit author date, unix seconds. */
@@ -554,65 +556,68 @@ export interface GitOpResult {
   output: string;
 }
 
-// ── 账号与用量（`account_usage` 回包）─────────────────────────────────────────
+// ── Account and usage (`account_usage` response) ──────────────────────────────
 
-/** 一条限流窗口。`utilization` / `prevUtilization` 都是 0–1 小数（页面自己 ×100），
- *  与 `claw_fleet_core::backend::UsageBar` 一致。 */
+/** One rate-limit window. `utilization` and `prevUtilization` are 0–1 decimals
+ *  (page multiplies by 100 for display), matching `claw_fleet_core::backend::UsageBar`. */
 export interface UsageBar {
   label: string;
   utilization: number;
   resetsAt: string | null;
-  /** 上一周期同一窗口的占用率 —— 只有 Claude 的条目带。 */
+  /** Previous period utilization for the same window—only Claude entries carry this. */
   prevUtilization?: number | null;
 }
 
-/** Claude 账号档案 + 它的 5h / 7d 限流条。 */
+/** Claude account profile + its 5h / 7d rate-limit bars. */
 export interface ClaudeAccount {
   email: string;
   fullName: string;
   organizationName: string;
   plan: string;
-  /** 用量数字的来源："anthropic" 直连，或 "foxy-switcher" 读本地守护进程。 */
+  /** Source of usage numbers: "anthropic" (direct), or "foxy-switcher" (local daemon). */
   usageSource: string;
   bars: UsageBar[];
 }
 
-/** 一笔预付余额。与 `claw_fleet_core::backend::UsageBalance` 一致。
+/** One prepaid balance. Matches `claw_fleet_core::backend::UsageBalance`.
  *
- *  限流条问的是「这个窗口用掉多少」，余额问的是「还剩多少钱」——后者没有分母，
- *  画不出条。dsh 这类自带 key 的源只报得出后者，所以它单独成一类而不是硬塞进
- *  `bars`。 */
+ *  Rate-limit bars ask "how much used in this window?"; balance asks "how much money
+ *  left?"—no denominator for balance, can't draw a bar. Sources like dsh with built-in
+ *  keys only report the latter, so it's a separate type, not forced into `bars`. */
 export interface UsageBalance {
   label: string;
   amount: number;
-  /** "CNY" / "USD"；provider 只给无单位额度时为空。 */
+  /** "CNY" / "USD"; empty when provider gives unitless amount. */
   currency: string | null;
 }
 
-/** 非 Claude 源（codex / dsh）的归一化用量（`SourceUsageSummary`）。 */
+/** Normalized usage for non-Claude sources (codex / dsh) (`SourceUsageSummary`). */
 export interface SourceUsage {
   source: string;
   plan: string | null;
   bars: UsageBar[];
-  /** 预付余额。只有自带 key 的源（dsh）会带；旧后端不带此字段。 */
+  /** Prepaid balances. Only sources with built-in keys (dsh) include this; older
+   *  backends lack this field. */
   balances?: UsageBalance[];
-  /** 数字的来源："foxy-switcher" 读本地守护进程，否则是各家自己的通道
-   *  （"anthropic" / "codex-app-server"）。旧后端不带此字段。 */
+  /** Source of numbers: "foxy-switcher" (local daemon), else provider's own channel
+   *  ("anthropic" / "codex-app-server"). Older backends lack this field. */
   usageSource?: string | null;
-  /** 当前在用的账号，对应 ClaudeAccount.email。源分辨不出时为空
-   *  （如 codex 走 API key 登录，没有 id_token 可解）。 */
+  /** Account currently in use, corresponding to ClaudeAccount.email. Empty when source
+   *  can't disambiguate (e.g. Codex via API key login, no id_token to decode). */
   email?: string | null;
 }
 
-/** `account_usage` 回包。Claude 拉取失败时只填 `claudeError`，其余照常渲染。 */
+/** `account_usage` response. When Claude fetch fails, only `claudeError` is filled;
+ *  others render normally. */
 export interface AccountUsage {
   claude: ClaudeAccount | null;
   claudeError: string | null;
   sources: SourceUsage[];
 }
 
-/** `usage_history` 回包的一个采样点：桌面端后台采样器每隔几分钟落盘一次。
- *  三个字段都是 0–1 小数，某个窗口当次没数据时为 null。 */
+/** One sample point from `usage_history` response: desktop background sampler
+ *  writes every few minutes. All three fields are 0–1 decimals; null when a window
+ *  has no data this sample. */
 export interface UsageHistoryPoint {
   ts: number;
   fiveHour: number | null;
@@ -620,10 +625,11 @@ export interface UsageHistoryPoint {
   sevenDaySonnet: number | null;
 }
 
-/** `codex_usage_history` 回包的一个采样点。镜像
- *  `claw_fleet_core::codex_usage_history::CodexUsageHistoryPoint`：与 Claude 的
- *  `UsageHistoryPoint` 不同，百分比是 codex app-server 直接给的 **0–100 整数**
- *  （画图前要 /100），窗口时长用来给两条线打 session/weekly 标签。某窗口当次没数据时为 null。 */
+/** One sample point from `codex_usage_history` response. Mirrors
+ *  `claw_fleet_core::codex_usage_history::CodexUsageHistoryPoint`: unlike Claude's
+ *  `UsageHistoryPoint`, percentages are **0–100 integers** from Codex app-server
+ *  directly (divide by 100 before plotting); window durations label the two lines
+ *  as session/weekly. Null when a window has no data this sample. */
 export interface CodexUsageHistoryPoint {
   ts: number;
   primaryPct: number | null;
@@ -632,21 +638,23 @@ export interface CodexUsageHistoryPoint {
   secondaryWindowMins: number | null;
 }
 
-/** `browse_dir` 回包里的一个子目录。镜像 claw-fleet-core/src/workspace_browse.rs。 */
+/** One subdirectory in `browse_dir` response. Mirrors claw-fleet-core/src/workspace_browse.rs. */
 export interface BrowseEntry {
   name: string;
   path: string;
   isGitRepo: boolean;
 }
 
-/** `browse_dir` 回包：某个目录下的一层子目录。桌面端只列目录、不列文件，
- *  且把「能不能往上翻」的判断做在服务端——`parent` 为 null 就是到根了。 */
+/** `browse_dir` response: one level of subdirectories in a directory. Desktop only
+ *  lists directories (not files), and the "can navigate up?" check is server-side—
+ *  `parent` null means at root. */
 export interface BrowseDirResponse {
   path: string;
   parent: string | null;
   entries: BrowseEntry[];
   truncated: boolean;
-  /** 全部可浏览根。根没有 parent，所以站在一个根里就没有回到其他根的路——
-   *  云端容器的起点恰恰是一个不是 home 的根。旧主机不发这个字段。 */
+  /** All browsable roots. Roots have no parent, so standing at a root gives no path
+   *  back to other roots—cloud containers often start at a non-home root. Older
+   *  hosts don't send this field. */
   roots?: string[];
 }

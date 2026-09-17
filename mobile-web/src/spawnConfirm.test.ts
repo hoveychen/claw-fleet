@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { waitForSessionId } from "./spawnConfirm";
 import type { SessionInfo } from "./types";
 
-// 只需要 id 字段参与匹配，其余用 as 补齐避免造整个 SessionInfo。
+// Only the id field participates in matching; use 'as' to fill the rest and avoid constructing the whole SessionInfo.
 function sess(id: string): SessionInfo {
   return { id } as SessionInfo;
 }
 
 describe("waitForSessionId", () => {
-  it("快照里已有该 id 时立即成功，不 sleep", async () => {
+  it("succeeds immediately when the id is already in the snapshot, no sleep", async () => {
     let slept = 0;
     const ok = await waitForSessionId("abc", () => [sess("x"), sess("abc")], {
       sleep: async () => void slept++,
@@ -17,21 +17,21 @@ describe("waitForSessionId", () => {
     expect(slept).toBe(0);
   });
 
-  it("id 在几轮轮询后才出现 → 成功", async () => {
+  it("succeeds when the id appears after several polling rounds", async () => {
     let snapshot: SessionInfo[] = [];
     let ticks = 0;
     const ok = await waitForSessionId("late", () => snapshot, {
       attempts: 10,
       sleep: async () => {
         ticks++;
-        if (ticks === 3) snapshot = [sess("late")]; // 第 3 轮桌面快照才带上会话
+        if (ticks === 3) snapshot = [sess("late")]; // Session appears in desktop snapshot on the 3rd round
       },
     });
     expect(ok).toBe(true);
     expect(ticks).toBe(3);
   });
 
-  it("宽限期内始终不出现 → 失败，且耗尽 attempts", async () => {
+  it("fails when the id never appears within the grace period, exhausts all attempts", async () => {
     let ticks = 0;
     const ok = await waitForSessionId("never", () => [sess("other")], {
       attempts: 5,

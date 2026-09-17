@@ -1,11 +1,13 @@
-// 浏览器 / PWA 的语音识别，走 Web Speech API。
+// Browser / PWA speech recognition using the Web Speech API.
 //
-// 只服务「确定不在任何原生壳里」的环境 —— 判定归 voiceInput.ts::detectVoiceProvider，
-// 这里不再自己认环境（壳里 webkitSpeechRecognition 会说谎，见那边的文件头）。
+// Only serves environments "definitely not in any native shell" — detection
+// belongs to voiceInput.ts::detectVoiceProvider, we don't re-detect here
+// (webkitSpeechRecognition lies in shell; see that file's header).
 //
-// 这条路的音频是**上传厂商服务器**识别的：Chrome 发去 Google，Safari 发去 Apple。
-// 所以它在国内的安卓 Chrome 上大概率直接 network 错 —— 那不是 bug，是这条实现的
-// 固有边界，UI 按 `network` 收场即可。真正的离线识别在另外两个 provider 里。
+// This path sends audio to **vendor servers** for recognition: Chrome → Google,
+// Safari → Apple. So on domestic Android Chrome it typically fails with network
+// error — not a bug, it's an inherent boundary of this implementation. True
+// offline recognition is in the other two providers.
 
 import type {
   VoiceErrorKind,
@@ -15,14 +17,15 @@ import type {
 } from "./voiceInput";
 import { hasWebSpeech } from "./voiceInput";
 
-/** Web Speech 的构造函数，无前缀优先。 */
+/** Web Speech constructor, non-prefixed version first. */
 function ctor(): (new () => SpeechRecognitionLike) | undefined {
   const w = window as unknown as Record<string, unknown>;
   const c = w["SpeechRecognition"] ?? w["webkitSpeechRecognition"];
   return typeof c === "function" ? (c as new () => SpeechRecognitionLike) : undefined;
 }
 
-/** 我们用到的那部分 SpeechRecognition。lib.dom 里这套类型并非处处都有，自己写。 */
+/** The SpeechRecognition parts we use. lib.dom doesn't have this type everywhere,
+ *  so we define it ourselves. */
 interface SpeechRecognitionLike {
   lang: string;
   continuous: boolean;
@@ -42,11 +45,12 @@ interface SpeechResultEvent {
 }
 
 /**
- * 规范里的 error 串 → 我们的分类。
+ * Spec error strings → our categories.
  *
- * `service-not-allowed` 和 `not-allowed` 都归到授权：前者是系统/浏览器策略拒绝
- * （iOS 上的 Chrome 就恒报这个），后者是用户拒了麦克风。对用户来说都是「去把
- * 权限打开」，分开说没有意义。
+ * Both `service-not-allowed` and `not-allowed` map to permission: the former
+ * is system/browser policy rejection (Chrome on iOS always reports this), the
+ * latter is user denying the mic. To the user both mean "go enable permission",
+ * so separating them is meaningless.
  */
 export function classifyWebSpeechError(error: string | undefined): VoiceErrorKind {
   switch (error) {
@@ -69,8 +73,9 @@ export function classifyWebSpeechError(error: string | undefined): VoiceErrorKin
 export const webSpeechProvider: VoiceInputProvider = {
   id: "web-speech",
 
-  // 构造函数在就算可用。这里问不出「厂商服务器连不连得上」——那要真开一次麦克风
-  // 才知道，代价太大，留给 start() 的 network 错误去报。
+  // Constructor existing means available. We can't probe "is vendor server
+  // reachable" here — that requires actually opening the mic, cost too high,
+  // let start()'s network error report it.
   async isAvailable(): Promise<boolean> {
     return hasWebSpeech();
   },
@@ -84,16 +89,18 @@ export const webSpeechProvider: VoiceInputProvider = {
 
     const rec = new C();
     rec.lang = lang;
-    // continuous:说完一句不自动收工,由用户按停止。语音输入常常是一段话,
-    // 引擎默认的「一句就结束」会把后半截吃掉。
+    // continuous: don't auto-stop after one sentence, let user press stop.
+    // Voice input is often multiple sentences; the engine's default "one
+    // sentence then done" would eat the rest.
     rec.continuous = true;
     rec.interimResults = true;
 
-    // cancel 之后引擎仍会吐 onend(有的实现还会吐一次 aborted onerror)。调用方
-    // 已经说了不要结果,所以这里之后的一切都咽掉,而不是把它当成一次错误报上去。
+    // After cancel, engine still fires onend (some implementations even fire
+    // aborted onerror once). Caller said no results wanted, so swallow
+    // everything after this, don't report it as an error.
     let dead = false;
 
-    // 规范里的 onstart 就是「音频采集已开始」，正是我们要的那一声。
+    // Spec's onstart means "audio capture started", exactly what we need.
     rec.onstart = () => {
       if (dead) return;
       handlers.onReady();
@@ -101,8 +108,8 @@ export const webSpeechProvider: VoiceInputProvider = {
 
     rec.onresult = (e) => {
       if (dead) return;
-      // 只看本次事件新增的那几条:results 是累积的,从头遍历会把已经定稿过的
-      // 段落重复报一遍。
+      // Only look at new results from this event: results array is cumulative;
+      // iterating from start would re-report already-finalized segments.
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
         const text = r[0]?.transcript ?? "";
@@ -118,10 +125,11 @@ export const webSpeechProvider: VoiceInputProvider = {
       handlers.onError(classifyWebSpeechError(e.error));
     };
 
-    // 浏览器即便 continuous=true 也会在长静默后自行结束会话（各家实现不一）。
-    // 我们自己 stop() 之后也会走到这里 —— 那时上层早已回到待命,再收一次结束
-    // 通知是无害的（它按当前状态决定要不要理）。cancel / 出错那两条路上 dead
-    // 已经是 true,不会重复上报。
+    // Browsers end sessions after long silence even with continuous=true
+    // (varies by implementation). We also reach here after our own stop() —
+    // upper layers already returned to idle, getting one more end notice is
+    // harmless (it decides what to do by state). On cancel/error paths, dead
+    // is already true, won't re-report.
     rec.onend = () => {
       if (dead) return;
       dead = true;
@@ -131,7 +139,8 @@ export const webSpeechProvider: VoiceInputProvider = {
     rec.start();
 
     return {
-      // stop:停止收音,但让引擎把最后一段定稿吐出来(还会再来一次 onresult)。
+      // stop: stop recording but let engine finalize and emit the last segment
+      // (fires onresult once more).
       stop: () => {
         if (dead) return;
         rec.stop();

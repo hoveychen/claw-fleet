@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// 假插件：既供错误码分类那几个纯用例（它们碰不到这里），也让「一次识别的收场」
-// 可以被真的驱动一遍 —— 原生插件在 node 下跑不了，但它与我们之间的那层约定
-// （listener、start 的 promise 什么时候 resolve）是可以受控重放的。
+// Fake plugin: serves both error-code classification pure test cases (which never
+// reach here) and lets "the end of one recognition session" be driven for real —
+// the native plugin can't run under Node, but the contract between us (when listener
+// and start's promise resolve) can be replayed under control.
 const listeners: Record<string, (e: unknown) => void> = {};
 let resolveStart: ((r: { matches?: string[] }) => void) | undefined;
 let rejectStart: ((e: unknown) => void) | undefined;
@@ -51,46 +52,48 @@ beforeEach(() => {
 });
 
 describe("classifyNativeError", () => {
-  it("认得权限类", () => {
+  it("recognizes permission errors", () => {
     expect(classifyNativeError("ERROR_INSUFFICIENT_PERMISSIONS")).toBe("no-permission");
     expect(classifyNativeError("permission_denied")).toBe("no-permission");
     expect(classifyNativeError("not-allowed")).toBe("no-permission");
   });
 
-  it("认得没听清", () => {
+  it("recognizes no-speech errors", () => {
     expect(classifyNativeError("ERROR_NO_MATCH")).toBe("no-speech");
     expect(classifyNativeError("ERROR_SPEECH_TIMEOUT")).toBe("no-speech");
   });
 
-  it("认得网络类", () => {
+  it("recognizes network errors", () => {
     expect(classifyNativeError("ERROR_NETWORK")).toBe("network");
     expect(classifyNativeError("ERROR_NETWORK_TIMEOUT")).toBe("network");
     expect(classifyNativeError("ERROR_SERVER")).toBe("network");
   });
 
-  it("认得服务不可用", () => {
+  it("recognizes unavailable service", () => {
     expect(classifyNativeError("ON_DEVICE_RECOGNITION_UNAVAILABLE")).toBe("unavailable");
   });
 
-  // 两个平台的码值各说各话且没有文档化枚举，所以认不出是常态。宁可笼统说
-  // 「没有可用的语音识别」，也不要把网络问题说成没有权限、让用户白跑一趟设置。
-  it("认不出的一律归到 unavailable,不乱猜", () => {
+  // The two platforms use different error codes with no documented enum, so not
+  // recognizing is normal. Better to say "speech recognition unavailable" than
+  // misclassify a network problem as a permission error, sending user to settings.
+  it("unknown codes map to unavailable, no guessing", () => {
     expect(classifyNativeError("ERROR_CLIENT")).toBe("unavailable");
     expect(classifyNativeError("")).toBe("unavailable");
     expect(classifyNativeError("某个没见过的码")).toBe("unavailable");
   });
 
-  it("大小写不敏感", () => {
+  it("case insensitive", () => {
     expect(classifyNativeError("error_network")).toBe("network");
     expect(classifyNativeError("ERROR_NETWORK")).toBe("network");
   });
 });
 
-// 插件的 start() 要到**整段识别结束**才 resolve —— 那一刻就是「引擎收工了」，
-// 不管是用户按的停止还是原生自己判定说完了。以前这里只把最终结果报上去，没有
-// 说会话已经结束，于是界面继续显示「正在听」。
-describe("一次识别的收场", () => {
-  it("原生收工时上报 onEnd，最终结果照旧先报", async () => {
+// Plugin start() resolves only **after entire recognition finishes** — that moment
+// is "engine shut down," whether from user stop or native determining speech ended.
+// Before, we only reported the final result, not that the session ended, so UI
+// kept showing "listening."
+describe("one recognition session ends", () => {
+  it("native shutdown reports onEnd, final result still reports first", async () => {
     const c = collect();
     await capacitorVoiceProvider.start("zh-CN", c.handlers);
     resolveStart!({ matches: ["说完了"] });
@@ -100,7 +103,7 @@ describe("一次识别的收场", () => {
     expect(c.ended).toHaveLength(1);
   });
 
-  it("用户取消之后，原生补来的收场不上报", async () => {
+  it("native completion after user cancel doesn't report", async () => {
     const c = collect();
     const session = await capacitorVoiceProvider.start("zh-CN", c.handlers);
     session.cancel();
@@ -111,7 +114,7 @@ describe("一次识别的收场", () => {
     expect(c.ended).toHaveLength(0);
   });
 
-  it("报错收场只报错，不再补一次 onEnd", async () => {
+  it("error end reports error only, no extra onEnd", async () => {
     const c = collect();
     await capacitorVoiceProvider.start("zh-CN", c.handlers);
     rejectStart!(new Error("ERROR_NETWORK"));

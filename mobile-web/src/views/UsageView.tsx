@@ -1,7 +1,8 @@
-// 「账号与用量」子页面：把桌面端 AccountInfo + UsagePanel 两块搬到手机上——
-// 今日累计花费（复用 App 已在轮询的 today_usage）、Claude 账号档案与 5h/7d 限流条、
-// 以及其它 agent 源（codex）的归一化用量条。
-// 数据走 relay 的 `account_usage`（见 ../account.ts）。
+// "Account & Usage" subpage: bringing together desktop's AccountInfo and UsagePanel
+// onto mobile — today's cumulative spend (reusing today_usage already polled by App),
+// Claude account profile and 5h/7d rate limit bars, plus normalized usage bars from
+// other agent sources (codex). Data comes through relay's `account_usage` (see
+// ../account.ts).
 
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
@@ -16,7 +17,8 @@ import styles from "./UsageView.module.css";
 import { AppHeader } from "./AppHeader";
 import { HeaderAction } from "./HeaderAction";
 
-/** 「今日累计」里某一台出了多少。`usage` 为 `null` = 这台还没报过。 */
+/** How much one device spent in "Today's Cumulative". `usage` is `null` = this device
+ *  hasn't reported yet. */
 export interface DeviceUsageRow {
   id: string;
   label: string;
@@ -25,20 +27,24 @@ export interface DeviceUsageRow {
 
 interface Props {
   client: FleetTransport | null;
-  /** App header 里那份今日累计，直接复用——避免为同一个数字再扫一遍会话。 */
+  /** Today's cumulative from App header, reused directly — avoid re-scanning sessions
+   *  for the same number. */
   todayUsage: TodayUsage | null;
-  /** 合计的设备明细。只配了一台时为空数组——那时候明细就是合计本身，多画一行
-   *  只是噪音。 */
+  /** Per-device breakdown totals. Empty array when only one device is configured —
+   *  the breakdown is the total itself, and extra lines are just noise. */
   perDevice?: DeviceUsageRow[];
-  /** 当前作用域设备的名字，用来标注「下面这些数只属于这一台」。只配了一台时为
-   *  `null`（那时候没有别的设备可混淆，标了反而是噪音）。 */
+  /** Name of the current scope's device, to annotate "these numbers are for this
+   *  device only". `null` when only one device — no other devices to confuse with,
+   *  and adding a label is just noise. */
   activeDeviceLabel?: string | null;
   onBack: () => void;
 }
 
-/** 区块小标题。`device` 给出时右侧缀一句「来自 <设备名>」——「今日累计」是全部
- *  设备之和，而它下面这些区块（账号、限流条、曲线）读的都是**当前那一台**，
- *  两台登不同账号时这个区别决定了限流条在说谁。 */
+/** Section subheading. When `device` is provided, append "from <device name>" on the
+ *  right — "Today's Cumulative" is the sum of all devices, while the blocks below
+ *  (account, rate limits, charts) read from **the current device only**. When two
+ *  devices are logged into different accounts, this distinction determines whose limits
+ *  the bars refer to. */
 function SectionHead({ label, device }: { label: string; device?: string | null }) {
   return (
     <div className={styles.sectionLabel}>
@@ -48,14 +54,16 @@ function SectionHead({ label, device }: { label: string; device?: string | null 
   );
 }
 
-/** 各源在标题里的显示名；未知源回落到原始 id。 */
+/** Display names for each source in section headings; unknown sources fall back to raw
+ *  id. */
 const SOURCE_LABEL: Record<string, string> = {
   codex: "Codex",
   dsh: "DeepSeek Harness",
 };
 
-/** 按 provider 报的币种格式化金额。两家不一样——DeepSeek 结的是人民币，
- *  OpenRouter 是美元——所以币种跟着每一笔走，认不出的币种原样前缀，不猜。 */
+/** Format amounts by the currency each provider reports. They differ — DeepSeek
+ *  settles in CNY, OpenRouter in USD — so currency follows each transaction. Unknown
+ *  currencies get their code as-is, no guessing. */
 function fmtMoney(amount: number, currency: string | null): string {
   const n = amount.toFixed(2);
   if (currency === "CNY") return `¥${n}`;
@@ -63,14 +71,15 @@ function fmtMoney(amount: number, currency: string | null): string {
   return currency ? `${currency} ${n}` : n;
 }
 
-/** 紧凑 token 数：1.2M / 34.5K / 780。 */
+/** Compact token count: 1.2M / 34.5K / 780. */
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return `${n}`;
 }
 
-/** 距离限流窗口重置还有多久。已过期（或时间串解析不了）就不显示。 */
+/** How much time until the rate limit window resets. Returns null if expired or the
+ *  timestamp can't parse. */
 function formatResetIn(resetsAt: string | null | undefined): string | null {
   if (!resetsAt) return null;
   const ms = new Date(resetsAt).getTime();
@@ -84,7 +93,7 @@ function formatResetIn(resetsAt: string | null | undefined): string | null {
   return t("{0} 分钟后重置", Math.max(1, Math.floor(diff / 60_000)));
 }
 
-/** 与桌面端 UsagePanel 同一套阈值：60% 起警告色，85% 起危险色。 */
+/** Same thresholds as desktop UsagePanel: warning tone at 60%, critical at 85%. */
 function tone(pct: number): "ok" | "warn" | "critical" {
   if (pct >= 85) return "critical";
   if (pct >= 60) return "warn";
@@ -141,9 +150,10 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-/** 「用量来源」那一行的值：foxy 画狐狸头，跟桌面卡头同一个标记。非 foxy 仍是
- *  文字（各家自己的通道名）——手机上没有 hover tooltip，一个 OpenAI/Anthropic
- *  的 mark 摆在这里跟标题里的源名重复，反而认不出它在说来源。 */
+/** Value for the "Usage Source" row: foxy draws a fox head, the same mark as desktop
+ *  card headers. Non-foxy stays as text (each provider's own channel name) — no hover
+ *  tooltip on mobile, and an OpenAI/Anthropic mark here would duplicate the source name
+ *  in the title, making it harder to read what the source is. */
 function UsageSourceValue({
   source,
   fallback,
@@ -169,7 +179,8 @@ export function UsageView({
   const [data, setData] = useState<AccountUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // 点刷新时递增，作为曲线组件的 key —— 让它连同账号一起重新拉一遍。
+  // Increment on refresh, use as the chart component's key — forces it to re-fetch
+  // along with the account data.
   const [reloadKey, setReloadKey] = useState(0);
 
   const refresh = useCallback(async () => {
@@ -209,7 +220,7 @@ export function UsageView({
       />
 
       <div className={styles.body}>
-        {/* ── 今日累计 ── */}
+        {/* ── Today's Cumulative ── */}
         <div className={styles.section}>
           <div className={styles.sectionLabel}>{t("今日累计")}</div>
           <div className={styles.card}>
@@ -227,9 +238,10 @@ export function UsageView({
                   value={`$${todayUsage.agentCostUsd.toFixed(2)} · ${t("{0} 个会话", todayUsage.sessionCount)}`}
                 />
                 <Row label={t("Fleet 自身花费")} value={`$${todayUsage.fleetCostUsd.toFixed(2)}`} />
-                {/* 合计是**所有**设备之和（deviceRuntime 的 totalUsage），但它回答
-                    不了「哪一台在烧钱」——两台登的还可能不是同一个账号。所以多设备
-                    时把它拆回每台一行。 */}
+                {/* The total is **all** devices combined (deviceRuntime's totalUsage), but
+                    it can't answer "which device is spending". Two devices might be logged
+                    into different accounts. So with multiple devices, break it back into
+                    one row per device. */}
                 {perDevice.length > 1 && (
                   <>
                     <div className={styles.divider} />
@@ -260,7 +272,7 @@ export function UsageView({
         {error && <div className={styles.hint}>{t("用量加载失败：{0}", error)}</div>}
         {!error && !data && loading && <div className={styles.hint}>{t("加载中…")}</div>}
 
-        {/* ── Claude 账号 ── */}
+        {/* ── Claude Account ── */}
         {data && (
           <div className={styles.section}>
             <SectionHead label="Claude Code" device={activeDeviceLabel} />
@@ -304,7 +316,7 @@ export function UsageView({
           </div>
         )}
 
-        {/* ── 近 24h 占用率曲线 ── */}
+        {/* ── Utilization curve · last 24 hours ── */}
         <div className={styles.section}>
           <SectionHead label={t("占用率变化 · 近 24 小时")} device={activeDeviceLabel} />
           <div className={styles.card}>
@@ -312,7 +324,7 @@ export function UsageView({
           </div>
         </div>
 
-        {/* ── 其它 agent 源 ── */}
+        {/* ── Other agent sources ── */}
         {data?.sources.map((s) => (
           <div key={s.source} className={styles.section}>
             <SectionHead
@@ -333,7 +345,8 @@ export function UsageView({
                   }
                 />
               )}
-              {/* 预付余额：自带 key 的源（dsh）只有这个，没有限流窗口。 */}
+              {/* Prepaid balance: sources with a key (dsh) only have this, no rate limit
+                   window. */}
               {(s.balances ?? []).map((b) => (
                 <Row key={b.label} label={b.label} value={fmtMoney(b.amount, b.currency)} />
               ))}
@@ -348,7 +361,8 @@ export function UsageView({
                   <div className={styles.hint}>{t("这个来源没有限流数据。")}</div>
                 )
               )}
-              {/* codex 近 24h 占用率曲线（对应桌面端 codex 账号区的历史图）。 */}
+              {/* Codex's 24-hour utilization curve (corresponds to the history graph in
+                   desktop's codex account section). */}
               {s.source === "codex" && (
                 <>
                   <div className={styles.divider} />

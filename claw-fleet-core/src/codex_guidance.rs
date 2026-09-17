@@ -1082,7 +1082,7 @@ mod tests {
         );
         // …and the zh block too: the section stays English there on purpose, so
         // a locale switch must not silently drop it. Its title follows the same
-        // locale-aware default as the block body (老板), not Boss.
+        // locale-aware default as the block body (called Boss in Chinese, not "Boss").
         let shared_zh = crate::session_title_guidance::render_session_title_section(
             "老板",
             "en",
@@ -1151,7 +1151,7 @@ mod tests {
     }
 
     /// A codex session used to be told only about the wiki, so an agent that
-    /// produced a deck had nowhere to put it and the 产出 page stayed empty
+    /// produced a deck had nowhere to put it and the artifacts page stayed empty
     /// for every non-Claude agent. The block must name the store, and it must
     /// route by audience rather than by extension — the artifact store takes
     /// any format, so an html report or a markdown spec belongs there whenever

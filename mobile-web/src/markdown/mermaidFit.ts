@@ -1,21 +1,22 @@
 /**
- * 宽 mermaid 图不该被缩到读不了。
+ * Wide mermaid diagrams shouldn't scale to unreadability.
  *
- * mermaid 吐出的 svg 是 `width="100%"` + `style="max-width:<自然宽>px"` + viewBox。
- * 于是它总是撑满容器，viewBox 再把内容整体缩到 `容器宽 / 自然宽`。实测知识库面板
- * 宽 524px、一张架构图自然宽 1279.5px —— 缩到 41%，14px 的标签渲染成 5.7px。
- * `.diagram` 上那句 `overflow-x: auto` 从来没生效过，因为图永远不溢出。
+ * Mermaid's SVG is `width="100%"` + `style="max-width:<natural-width>px"` + viewBox.
+ * It always stretches to fill the container; viewBox then scales content to
+ * `container-width / natural-width`. Test case: wiki panel is 524px wide, an architecture
+ * diagram naturally 1279.5px wide — scales to 41%, rendering 14px labels as 5.7px.
+ * The `.diagram` `overflow-x: auto` never works because the diagram never overflows.
  *
- * 这里给缩放定一个下限：能装下就照常缩（窄图仍然完整显示），装不下就按下限画，
- * 让它溢出容器、交给 `overflow-x: auto` 横向滚动。
+ * Set a floor on scaling: if it fits, scale normally (narrow diagrams stay complete);
+ * if not, pin at the floor, let it overflow, and let `overflow-x: auto` scroll it.
  *
- * 桌面端和移动端各有一份（和 mermaidContrast.ts / mermaidTheme.ts 同样的约定）。
+ * Desktop and mobile each have one (same convention as mermaidContrast.ts / mermaidTheme.ts).
  */
 
-/** 允许缩到的最小比例。低于这个字就开始糊了。 */
+/** Minimum allowed scale. Below this, text becomes blurry. */
 export const MIN_DIAGRAM_SCALE = 0.7;
 
-/** 从 `viewBox="minX minY w h"` 里取自然宽；取不到返回 null。 */
+/** Extract natural width from `viewBox="minX minY w h"`; returns null if not found. */
 export function naturalWidthFromViewBox(viewBox: string | null): number | null {
   if (!viewBox) return null;
   const parts = viewBox.trim().split(/[\s,]+/);
@@ -25,11 +26,11 @@ export function naturalWidthFromViewBox(viewBox: string | null): number | null {
 }
 
 /**
- * 该给这张图钉多宽（px），`null` 表示别管它、维持 mermaid 自己的 100% 行为。
+ * How wide (px) to pin this diagram; `null` means leave it alone, keep mermaid's 100% behavior.
  *
- * - 容器装得下自然宽 → null（mermaid 的 max-width 会把它停在自然宽，不会放大）
- * - 装不下但缩放还在下限以上 → null（照常缩，窄图完整显示）
- * - 缩放会掉到下限以下 → 返回 `自然宽 × 下限`，溢出容器交给横向滚动
+ * - Container fits natural width → `null` (mermaid's max-width stops it there, won't enlarge)
+ * - Doesn't fit but scale stays above floor → `null` (scale normally, narrow diagrams stay complete)
+ * - Scale would drop below floor → return `natural-width × floor`, overflow to horizontal scroll
  */
 export function fitDiagramWidth(
   naturalWidth: number | null,
@@ -43,20 +44,22 @@ export function fitDiagramWidth(
 }
 
 /**
- * 把上面算出来的结论落到 svg 上。挂在这里而不是组件里，是为了能在 jsdom 里直接测。
+ * Apply the above calculation to the SVG. Placed here instead of in a component to allow direct testing
+ * in jsdom.
  *
- * mermaid 吐出来的 svg 是 `width="100%"` + **内联** `style="max-width:<自然宽>px"`
- * （setupViewPortForSVG → configureSvgSize，那个数和 viewBox 的宽同源）。那句内联
- * max-width 是唯一拦着图别被拉满容器的东西 —— 样式表里的 `.diagram svg{max-width:100%}`
- * 压不过它，一旦被 `removeProperty("max-width")` 抹掉，svg 就只剩 `width="100%"`，
- * viewBox 会把整张图连字一起放大到容器宽（桌面端实测：阅读模式里自然宽 135px 的窄
- * 流程图被画成 778px，5.78 倍，节点里的字大到溢出方框）。
+ * Mermaid's SVG is `width="100%"` + **inline** `style="max-width:<natural-width>px"` (from
+ * setupViewPortForSVG → configureSvgSize, this value sources from viewBox width). That inline
+ * max-width is the only thing stopping the diagram from stretching to container width — stylesheet
+ * `.diagram svg{max-width:100%}` can't override it. Once `removeProperty("max-width")` removes it,
+ * the SVG has only `width="100%"`, and viewBox scales everything to container width (desktop testing:
+ * a 135px narrow flowchart became 778px, 5.78× scale, text overflowing nodes).
  *
- * 所以"不插手"这条路径必须把自然宽**写回去**，而不是删掉。
+ * So the "do nothing" path must write the natural width **back**, not delete it.
  */
 export function applyDiagramWidth(el: SVGElement, containerWidth: number): void {
   const natural = naturalWidthFromViewBox(el.getAttribute("viewBox"));
-  // 量不到自然宽就彻底不碰：既然没量到，下面那条钉宽路径也从没走过，无需撤销。
+  // If we can't measure natural width, don't touch anything: since we didn't measure it, the
+  // pinned-width path below never runs, so there's nothing to undo.
   if (natural === null) return;
   const pinned = fitDiagramWidth(natural, containerWidth);
   if (pinned === null) {
@@ -64,7 +67,7 @@ export function applyDiagramWidth(el: SVGElement, containerWidth: number): void 
     el.style.maxWidth = `${natural}px`;
     return;
   }
-  // 钉宽时 max-width 必须一起让路，否则 mermaid 那句自然宽会把它拽回去。
+  // When pinning width, max-width must also be cleared, or mermaid's natural width will pull it back.
   el.style.width = `${pinned}px`;
   el.style.maxWidth = "none";
 }

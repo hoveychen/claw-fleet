@@ -3,11 +3,11 @@ import { HttpTransport } from "./httpTransport";
 import { isDesktopRejection } from "./transport";
 import type { TransportHandlers } from "./transport";
 
-/** 最小 EventSource 替身：只做「注册监听 / 由测试手动投递」这两件事。 */
+/** Minimal EventSource stub: only register listeners and manually deliver events in tests. */
 class FakeEventSource {
   static last: FakeEventSource | null = null;
   readonly listeners = new Map<string, ((e: { data: string }) => void)[]>();
-  /** 与浏览器同值:0 CONNECTING / 1 OPEN / 2 CLOSED。 */
+  /** Same as browser: 0 CONNECTING / 1 OPEN / 2 CLOSED. */
   readyState = 0;
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
@@ -27,7 +27,7 @@ class FakeEventSource {
     this.closed = true;
   }
 
-  /** 测试侧：模拟服务端推来一条命名事件。 */
+  /** Test side: simulate a named event pushed from server. */
   emit(type: string, data: string) {
     for (const cb of this.listeners.get(type) ?? []) cb({ data });
   }
@@ -67,7 +67,7 @@ describe("HttpTransport.request", () => {
     });
   });
 
-  // 主机给了裁决 —— 重试改变不了结果，调用方必须能认出来别再兜底等下去。
+  // The host has made a decision — retrying won't change it, callers must recognize it and not wait indefinitely.
   it("ok:false 是主机的裁决，抛出的错要认得出 remote", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({ ok: false, error: "unknown method: nope" }),
@@ -80,36 +80,37 @@ describe("HttpTransport.request", () => {
     expect(String((err as Error).message)).toContain("unknown method");
   });
 
-  // 请求根本没落地（网关 502、断网）—— 主机可能已经把活干了，调用方有权另行确认。
+  // Request never landed (gateway 502, network down) — the host may have completed the work, callers can verify independently.
   it("HTTP 层失败不是裁决，remote 必须为 false", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: "bad gateway" }, 502));
     const t = make({}, fetchImpl as unknown as typeof fetch);
 
     const err = await t.request("wiki_list").catch((e) => e);
 
-    // 先确认它真的抛了 —— 只断言 `isDesktopRejection` 为假的话，一个什么都不
-    // 做、直接 resolve 的实现也能骗过这条。
+    // First verify it actually threw — if we only assert `isDesktopRejection` is false,
+    // a no-op implementation that resolves directly could pass the test.
     expect(err).toBeInstanceOf(Error);
     expect(isDesktopRejection(err)).toBe(false);
   });
 });
 
 describe("HttpTransport 的首屏 catch-up", () => {
-  // 老板报的 bug:同源移动端「任务」tab 永远停在「正在加载任务…桌面端在线,
-  // 正在接收首屏快照」。
+  // User-reported bug: on same-origin mobile "Tasks" tab stuck at "Loading tasks…
+  // Desktop online, receiving initial snapshot".
   //
-  // 根因在服务端那条 SSE 的性质:`sessions-updated` 只在 **sessions 变化时**
-  // 广播(hooks_server/mod.rs 的 `if sessions_changed`)。relay 路径为此专门多
-  // 了一个条件 —— `|| mobile_clients > prev_mobile_clients`,注释原话是「新客户端
-  // 刚上线时也要推,因为它需要一份初始快照,即使什么都没变」。SSE 没有这个等价物。
+  // Root cause: SSE semantics. `sessions-updated` broadcasts only when **sessions change**
+  // (hooks_server/mod.rs `if sessions_changed`). The relay path has an extra condition:
+  // `|| mobile_clients > prev_mobile_clients`, with the comment "push to new clients too,
+  // they need an initial snapshot even if nothing changed". SSE has no equivalent.
   //
-  // 于是一个后接入的客户端,只要在它连上之后 sessions 一直没变,就永远收不到任何
-  // 帧,`sessionsLoaded` 永远为 false。实测复现过:同一个 webui 进程连第二个
-  // 客户端,任务页 8 秒后仍停在那句文案,与老板的截图逐字一致。
+  // Result: a late-joining client, if sessions don't change after it connects, never
+  // receives any frames; `sessionsLoaded` stays false. Verified: same webui process with
+  // a second client stuck on that text after 8s, matching the user's screenshot exactly.
   //
-  // 修在客户端而不是服务端:SSE 是广播给所有连接的,为一个新客户端重推全量会打扰
-  // 其他所有客户端;而 mount 时自己拉一次 catch-up 本来就是 HTTP 客户端该做的事
-  // ——桌面 webui 的 liveProxy 一直就是这么干的(它 mount 时调 list_sessions)。
+  // Fix on client not server: SSE broadcasts to all connections, re-pushing full state
+  // for one new client disturbs everyone; but pulling catch-up on mount is what HTTP
+  // clients should do anyway — desktop webui's liveProxy does this (calls list_sessions
+  // on mount).
   it("connect() 之后主动拉一次 /sessions,不能只等 SSE 推", async () => {
     const seen: unknown[][] = [];
     const kinds: string[] = [];
@@ -127,7 +128,7 @@ describe("HttpTransport 的首屏 catch-up", () => {
     );
 
     t.connect();
-    // catch-up 是异步的;给微任务队列跑完的机会。
+    // catch-up is async; let the microtask queue finish.
     await vi.waitFor(() => expect(seen.length).toBe(1));
 
     expect(calls).toContain("/sessions");
@@ -135,7 +136,7 @@ describe("HttpTransport 的首屏 catch-up", () => {
     expect(kinds).toEqual(["full"]);
   });
 
-  // catch-up 失败不该让整个连接算失败 —— SSE 那条路仍然可能把数据送到。
+  // catch-up failure shouldn't fail the entire connection — SSE may still deliver data.
   it("catch-up 拉取失败时安静降级,不抛出去", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error("network down");
@@ -148,19 +149,19 @@ describe("HttpTransport 的首屏 catch-up", () => {
 });
 
 describe("connect 时的首屏补拉", () => {
-  // 老板报的 bug：手机上任务页永远停在「正在加载任务…」，知识库却正常。
+  // User-reported bug: on mobile, tasks page stuck at "Loading tasks…", but wiki works.
   //
-  // 根因不在前端渲染，在推送语义：服务端那个 2 秒循环只在**会话列表发生变化
-  // 时**才广播 `sessions-updated`（hooks_server/mod.rs 的 `if sessions_changed`）。
-  // 一个稳定的容器列表不变，于是新连上来的客户端永远收不到第一帧，
-  // `sessionsLoaded` 一直是 false。relay 那条路有「新客户端上线强制推一次全量」
-  // 的补偿，SSE 这条没有。
+  // Root cause: not rendering, but push semantics. Server 2-second loop broadcasts
+  // `sessions-updated` only when **session list changes** (hooks_server/mod.rs
+  // `if sessions_changed`). Stable container list doesn't change, so new clients never
+  // receive the first frame; `sessionsLoaded` stays false. Relay has "force-push full
+  // state on new client", SSE doesn't.
   //
-  // 实测确认过：先挂一个 curl /events 消费掉首帧，第二个 curl 在 8 秒里收到
-  // 0 条 sessions-updated。
+  // Verified: curl /events consumes the first frame, second curl gets 0
+  // sessions-updated in 8 seconds.
   //
-  // 所以首屏不能等推送 —— 桌面 webui 也是 mount 时主动拉一次做 catch-up，
-  // 这里照做。推送只负责「之后的变化」。
+  // So first screen can't wait for push — desktop webui also pulls catch-up on mount,
+  // do the same here. Push only handles "changes after".
   it("connect 后主动拉一次 /sessions，不等 SSE", async () => {
     const seen: unknown[][] = [];
     const kinds: string[] = [];
@@ -176,15 +177,15 @@ describe("connect 时的首屏补拉", () => {
     t.connect();
     await vi.waitFor(() => expect(seen.length).toBe(1));
 
-    // `vi.fn(async () => …)` 的参数类型被推成空元组，直接下标取 [0][0] 是
-    // 越界（TS2493）。断言成实际的调用形状再取。
+    // `vi.fn(async () => …)` parameter type inferred as empty tuple, direct subscript [0][0]
+    // is out of bounds (TS2493). Cast to actual call shape first.
     const calls = fetchImpl.mock.calls as unknown as [string][];
     expect(calls[0][0]).toBe("/sessions");
     expect(seen[0]).toEqual([{ id: "s1" }, { id: "s2" }]);
     expect(kinds).toEqual(["full"]);
   });
 
-  // 补拉失败（网关 502、断网）不能把连接判死：SSE 还连着，之后的变化照样能到。
+  // Catch-up failure (gateway 502, network down) must not kill the connection: SSE still connected, changes arrive after.
   it("首屏补拉失败时不抛，也不谎报空列表", async () => {
     const seen: unknown[][] = [];
     const fetchImpl = vi.fn(async () => {
@@ -200,7 +201,7 @@ describe("connect 时的首屏补拉", () => {
 
     expect(() => t.connect()).not.toThrow();
     await new Promise((r) => setTimeout(r, 20));
-    // 空数组会让 UI 翻成「还没有会话」——那是个断言，而我们其实什么都不知道。
+    // Empty array makes UI say "no sessions" — that's asserting a fact we don't know.
     expect(seen).toEqual([]);
   });
 });
@@ -230,8 +231,8 @@ describe("HttpTransport 的 SSE 映射", () => {
     expect(created[0][1]).toEqual({ id: "g1" });
   });
 
-  // dismissed 帧的 data 是裸的 JSON 字符串（服务端 serde_json::to_string(id)），
-  // 不是对象 —— 按对象解会静默丢掉每一次「卡片已被解决」。
+  // dismissed frame's data is raw JSON string (server-side serde_json::to_string(id)),
+  // not an object — parsing as object silently drops each "card resolved".
   it("*-dismissed 事件带的是裸 id 字符串，落到 onDecisionResolved", () => {
     const resolved: [string, string][] = [];
     const t = make({ onDecisionResolved: (kind, id) => resolved.push([kind, id]) });
@@ -254,8 +255,8 @@ describe("HttpTransport 的 SSE 映射", () => {
     FakeEventSource.last!.emit("sessions-updated", JSON.stringify([{ id: "s1" }, { id: "s2" }]));
 
     expect(seen).toEqual([[{ id: "s1" }, { id: "s2" }]]);
-    // 同源下服务端只推全量，没有 delta 通道 —— 谎报 delta 会让 UI 显示一个
-    // 并不存在的增量链路。
+    // Same-origin: server only pushes full, no delta channel — reporting delta would show
+    // a non-existent incremental path in UI.
     expect(kinds).toEqual(["full"]);
   });
 
@@ -269,8 +270,8 @@ describe("HttpTransport 的 SSE 映射", () => {
     FakeEventSource.last!.onopen?.();
 
     expect(status).toEqual([true]);
-    // 同源部署里「主机在线」和「这张页面加载出来了」是同一件事：发出这张页面
-    // 的进程就是回答 /mobile_rpc 的那一个。
+    // Same-origin deployment: "host online" and "this page loaded" are the same thing:
+    // the process serving this page answers /mobile_rpc.
     expect(agent).toEqual([true]);
     expect(t.isAuthed).toBe(true);
   });
@@ -288,14 +289,15 @@ describe("HttpTransport 的 SSE 映射", () => {
   });
 });
 
-// 老板报的 bug:webui 部署在服务器上,弱网/断过网之后决策卡就再也不出现,必须
-// 刷新页面才恢复。
+// User-reported bug: webui on server, weak network or reconnect breaks decision cards,
+// only page refresh restores them.
 //
-// 根因是这条传输层把重连整个托付给了 EventSource 的内建重试。那份契约只覆盖
-// **网络层**断开:服务端回非 200(弱网时网关的 502/504)或 Content-Type 不对,
-// 规范要求 UA "fail the connection" —— readyState 变 CLOSED 且永不重试。而
-// `connect()` 开头 `if (this.stream) return`,那个死掉的 stream 还挂在字段上,
-// 于是没有任何路径能重建它,只剩刷新页面。
+// Root cause: transport delegates reconnect to EventSource's built-in retry. That
+// contract only covers **network layer** disconnect: server returns non-200 (gateway
+// 502/504 on weak net) or wrong Content-Type, spec requires UA "fail the connection" —
+// readyState becomes CLOSED and never retries. But `connect()` starts with
+// `if (this.stream) return`, that dead stream still hangs, no path to rebuild it, only
+// page refresh works.
 describe("SSE 断流后的自愈", () => {
   function makeWatched(handlers: TransportHandlers = {}) {
     const created: FakeEventSource[] = [];
@@ -314,9 +316,9 @@ describe("SSE 断流后的自愈", () => {
     return { transport, created };
   }
 
-  // 缺陷 A:第一次握手就失败(页面在断网时打开、网关 502)。旧实现的 onerror 里
-  // `if (this.closed || !this.connected) return` 直接吃掉了这一路 —— 从没连上过
-  // 的连接永远不会被重试。
+  // Defect A: handshake fails on first try (page opens offline, gateway 502). Old
+  // onerror had `if (this.closed || !this.connected) return`, silently dropped this
+  // path — never-connected connections never retry.
   it("首次握手就失败时,仍然会重开一条流", async () => {
     vi.useFakeTimers();
     try {
@@ -334,7 +336,7 @@ describe("SSE 断流后的自愈", () => {
     }
   });
 
-  // 缺陷 B:连上过、之后被网关判死。这是老板那台服务器最可能的形态。
+  // Defect B: connected once, then gateway kills it. Most likely form on user's server.
   it("连上后进入 CLOSED,会重开一条流并恢复在线状态", async () => {
     vi.useFakeTimers();
     try {
@@ -344,7 +346,7 @@ describe("SSE 断流后的自愈", () => {
       created[0].onopen?.();
       expect(status).toEqual([true]);
 
-      created[0].readyState = 2; // CLOSED —— 浏览器不会再自己重试
+      created[0].readyState = 2; // CLOSED — browser won't retry on its own
       created[0].onerror?.();
       expect(status).toEqual([true, false]);
 
@@ -358,8 +360,8 @@ describe("SSE 断流后的自愈", () => {
     }
   });
 
-  // 反面:readyState 还是 CONNECTING 时,浏览器**自己**正在重试。这时再开一条
-  // 就成了两条并行的流,服务端会多算一个消费者,事件也会重复投递。
+  // Opposite: readyState still CONNECTING, browser **itself** retrying. Open another and
+  // we have two parallel streams, server counts an extra consumer, events duplicate.
   it("readyState 仍是 CONNECTING 时不另开流,把重试留给浏览器", async () => {
     vi.useFakeTimers();
     try {
@@ -377,7 +379,7 @@ describe("SSE 断流后的自愈", () => {
     }
   });
 
-  // close() 是用户意图(切后台、拆组件),不该被自愈逻辑复活。
+  // close() is user intent (go background, unmount), shouldn't be revived by auto-heal.
   it("close() 之后不再重开", async () => {
     vi.useFakeTimers();
     try {
@@ -398,8 +400,8 @@ describe("SSE 断流后的自愈", () => {
 });
 
 describe("HttpTransport 没有的能力", () => {
-  // 这条传输层没有推送通道。返回 false 是让「更多」页据此隐掉推送开关；
-  // 假装成功会让用户开了开关却永远收不到通知。
+  // This transport has no push channel. Return false so "More" page hides the toggle;
+  // faking success leaves user with switch on but notifications never arriving.
   it("push 订阅诚实地返回 false", () => {
     const t = make();
     expect(t.pushSubscribe({ endpoint: "x" })).toBe(false);
@@ -407,8 +409,9 @@ describe("HttpTransport 没有的能力", () => {
   });
 });
 
-// 设备簿里的「HTTP 直连主机」跨源指向另一台机器,而那台通常有 token 门。两条
-// 通道带 token 的方式必须不同,这不是风格问题:EventSource 不能设置请求头。
+// Device book's "HTTP direct host" cross-origin points to another machine, usually
+// with token gate. Two channels must handle token differently, not style: EventSource
+// can't set headers.
 describe("cross-origin host with a token", () => {
   function makeWithHost(fetchImpl?: typeof fetch) {
     const created: FakeEventSource[] = [];
@@ -443,8 +446,9 @@ describe("cross-origin host with a token", () => {
     expect(headers["Content-Type"]).toBe("application/json");
   });
 
-  // EventSource 不能带 header —— 服务端为此同时认 `?token=`(它的注释里明写了
-  // 就是为 SSE 准备的)。少了这一步,直连主机会连不上流,而症状只是「一直在连」。
+  // EventSource can't carry headers — server accepts `?token=` for this reason (its
+  // comment says "for SSE"). Without this, direct host can't reach stream, symptom is
+  // "keeps connecting".
   it("puts the token in the SSE query string, url-encoded", () => {
     const { transport, created } = makeWithHost();
     transport.connect();

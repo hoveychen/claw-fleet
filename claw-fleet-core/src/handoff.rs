@@ -234,7 +234,7 @@ pub fn render_chain(
 }
 
 /// Lightweight per-session relay position, embedded into `SessionInfo` so the
-/// session card can render the "接力 n/N" chip without an extra round-trip.
+/// session card can render the "接力" (handoff) n/N chip without an extra round-trip.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -1110,7 +1110,7 @@ mod tests {
     }
 
     /// The far more common relay has no watch at all; the prompt must not grow
-    /// a dangling "你继承了这些 watch" header for an empty list.
+    /// a dangling "you inherited these watches" header for an empty list.
     #[test]
     fn relay_without_watches_adds_nothing_to_the_prompt() {
         let (root, pdir, cdir) = fresh_dirs("watch-none");
@@ -1794,7 +1794,7 @@ mod tests {
 
     /// A late hop must open its turn already knowing where the chain started.
     /// Regression guard for the failure this exists to stop: hop 3 was asked
-    /// "回到这个 chain 最开始我的问题" and answered from the plan it was handed
+    /// "back to my original question at the start of the chain" and answered from the plan it was handed
     /// (a mid-chain spinoff), because the opening prompt gave it only its
     /// predecessor's note.
     #[test]
@@ -1818,7 +1818,7 @@ mod tests {
         let taken = take_pending_in(&pdir, "s1", 1001).unwrap();
         // Hop 1 starts the chain: nothing ran before it, so no roster is added.
         // (Anchor on the roster's own header — the standing prompt text already
-        // contains the words "接力链" in an unrelated sentence.)
+        // contains the term "handoff chain" in an unrelated sentence.)
         let first = compose_successor_prompt(&taken, chain_containing_in(&cdir, "s1").as_ref());
         assert!(!first.contains("第 1 棒"), "{first}");
         record_link_in(&cdir, &taken, "s2", 1002).unwrap();
@@ -1874,8 +1874,8 @@ mod tests {
         assert!(full.contains("老板原话：我要独立的文档库"), "{full}");
         assert!(full.contains("doc-lib"), "{full}");
         // s2's note belongs to hop 2, not hop 1.
-        // Anchor on the hop *headers* (line-initial) — "第 2 棒" also occurs
-        // inside hop 1's "交给第 2 棒时留下的 note" lead-in.
+        // Anchor on the hop *headers* (line-initial) — "2nd hop" also occurs
+        // inside hop 1's "note left for 2nd hop" lead-in.
         let h1 = full.find("\n第 1 棒").unwrap();
         let h2 = full.find("\n第 2 棒").unwrap();
         let origin = full.find("老板原话").unwrap();

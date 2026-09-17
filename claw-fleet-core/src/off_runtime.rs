@@ -5,9 +5,9 @@
 //! blocking is not allowed") — and tauri `(async)` commands run their sync
 //! bodies exactly there. Worse than the panic itself: the task harness
 //! swallows it, so the invoke promise never settles and the UI shows an
-//! eternal 「加载中…」 (the dsh detail bug that hid across three debugging
-//! sessions). Every `reqwest::blocking` construction or request that a tauri
-//! `(async)` command can reach must go through [`off_runtime`]. Current
+//! eternal "loading..." spinner (the dsh detail bug that hid across three
+//! debugging sessions). Every `reqwest::blocking` construction or request that
+//! a tauri `(async)` command can reach must go through [`off_runtime`]. Current
 //! callers: `dsh_client` (dsh RPC), `dsh_cost` (pricing fetch), the desktop's
 //! `remote::ProbeClient` (remote-workspace HTTP).
 

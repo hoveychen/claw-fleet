@@ -1,7 +1,7 @@
 //! The two invariants that keep Fleet's `~/.claude/CLAUDE.md` `@import` blocks —
 //! and the harness guidance that rides on them — from silently disappearing.
 //!
-//! Background (2026-09-07): on 老板's machine `~/.dsh/cordis.patch.yml` came
+//! Background (2026-09-07): on the user's machine `~/.dsh/cordis.patch.yml` came
 //! back as `[]`, so every dsh session ran with no Fleet context at all. The
 //! immediate cause of *that* incident — six guidance writers racing on
 //! CLAUDE.md until only one 120-byte block was left — is already fixed by
@@ -14,7 +14,7 @@
 //! 2. A single *negative* read of CLAUDE.md must never be enough to uninstall
 //!    the dsh plugin. Whatever the reason the block was momentarily missing, the
 //!    uninstall outlives it: the next self-heal restores the `@import`, but
-//!    nothing restores the plugin, which is why 老板's stayed gone for hours.
+//!    nothing restores the plugin, which is why the user's stayed gone for hours.
 
 use std::time::{Duration, Instant};
 

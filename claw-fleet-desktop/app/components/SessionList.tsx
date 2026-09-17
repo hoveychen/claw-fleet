@@ -61,12 +61,12 @@ export function SessionList() {
     toggleSecondarySidebar,
     mascotVisible,
   } = useUIStore();
-  // 终端页只有在后端启动时带了 FLEET_TERMINAL 才存在（见 core 的 feature_flags）。
-  // 关着的时候连导航项都不出，而不是让用户点进去、开 shell 时才被后端拒绝。
+  // Terminal page only exists if backend started with FLEET_TERMINAL (see core's feature_flags).
+  // When off, not even the nav item shows, rather than letting users click in and get rejected by backend.
   const terminalEnabled = useUIStore((s) => s.hostFeatures.terminal);
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
-  // Views that own a secondary sidebar (二级侧边栏). Re-clicking the nav item of
+  // Views that own a secondary sidebar (two-level sidebar). Re-clicking the nav item of
   // the already-active one collapses/expands its sidebar instead of being a
   // no-op; every other view just switches as usual.
   const navTo = useCallback(
@@ -82,12 +82,12 @@ export function SessionList() {
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const hasNewReport = useReportStore((s) => s.hasNewReport);
   // Total running workspace commands across all repos — surfaced as a badge on
-  // the 仓库 (files) nav item, mirroring the green per-repo badge in FilesView.
+  // the Files nav item, mirroring the green per-repo badge in FilesView.
   const runningProcCount = useProcStore((s) => runningProcTotal(s.procs));
-  // Which tab (舰队 / 工作) the sidebar is showing. Derived from the page rather
+  // Which tab (Fleet / Work) the sidebar is showing. Derived from the page rather
   // than stored beside it (see navGroups.ts), so the cross-page hops that bypass
   // the nav — audit → sessions, a wiki [[slug]] mention, a tray click into the
-  // 任务 page — carry the tab along instead of leaving it on a group that isn't
+  // Tasks page — carry the tab along instead of leaving it on a group that isn't
   // on screen.
   const navGroup = navGroupOf(viewMode);
   // The hidden tab's nav items take their badges with them, which is how an
@@ -95,10 +95,10 @@ export function SessionList() {
   // Roll each group's counts up onto its tab and show them there while its nav
   // is collapsed away, using the same red/green vocabulary as the items.
   const groupBadges: Record<NavGroup, { alert: number; running: number; dot: boolean }> = {
-    // 舰队 carries no count pill — a red digit on a tab you are not looking at
+    // Fleet carries no count pill — a red digit on a tab you are not looking at
     // reads as an error rather than a nudge. Its unread-critical-audit signal
     // folds into the same quiet dot the new daily report already uses; the exact
-    // count still sits on the 审计 nav item inside the tab.
+    // count still sits on the Audit nav item inside the tab.
     fleet: { alert: 0, running: 0, dot: hasNewReport || unreadCriticalCount > 0 },
     work: { alert: 0, running: runningProcCount, dot: false },
   };
@@ -141,7 +141,7 @@ export function SessionList() {
     // so far; and any future events will be caught by the listeners above.
     unlistenPromise.then(() => refresh());
     unlistenScanReady.then(() => refresh());
-    // Keep the running-command total fresh for the 仓库 nav badge even when the
+    // Keep the running-command total fresh for the repos nav badge even when the
     // files view isn't open (FilesView also polls, but only while mounted).
     const fetchProcs = useProcStore.getState().fetchProcs;
     fetchProcs();
@@ -304,12 +304,12 @@ export function SessionList() {
         <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
         <span className={styles.nav_label}>{t("view_skills")}</span>
       </button>
-      {/* 配对码属于「开着中转那条通道的那个进程」。桌面端一直是它;而云部署
-          里跑的 `fleet webui` 走的是同一个 `hooks_server::serve`,那里就有
-          `mobile_relay::ensure_ws_client()` —— 所以那台容器也有一张属于自己的
-          码,手机扫了就在聚合设备簿里多一台云主机。本地 webui 则相反:它只监听
-          回环,背后没有手机能连到的主机,出码只会得到一台连不上的设备。判据见
-          hostEnv.ts 的 showsMobilePanel。 */}
+      {/* The pairing code belongs to "the process that opens the relay channel."
+          Desktop always owns it. Cloud deployments run `fleet webui` on the same
+          `hooks_server::serve`, which has `mobile_relay::ensure_ws_client()` — so that
+          container also gets its own code; scan it and the device roster adds a cloud host.
+          Local webui is the opposite: it only listens on loopback, behind it is no host phones
+          can reach, the code only produces an unreachable device. See showsMobilePanel in hostEnv.ts. */}
       {showsMobilePanel(
         isWebBuild(),
         window.location.protocol,
@@ -399,7 +399,7 @@ export function SessionList() {
             toggle and provides a drag region around the macOS traffic lights. */}
         <div className={styles.header} data-tauri-drag-region />
 
-        {/* Collapse / expand toggle — absolute top-right of the sidebar. */}
+        {/* Collapse / expand toggle — absolute positioned top-right of the sidebar. */}
         <button
           type="button"
           className={styles.sidebar_toggle}
@@ -415,10 +415,10 @@ export function SessionList() {
         </button>
 
         {/* Sidebar nav, split into two top-level modes by the tab strip below:
-            舰队 (watching / administering — sessions, audit, report, memory,
-            skills, phone) and 工作 (what you reach for while an agent works —
+            Fleet (watching / administering — sessions, audit, report, memory,
+            skills, phone) and Work (what you reach for while an agent works —
             tasks, repos, wiki, schedules, plan trees). Plugins are a source of
-            skills, so they live under the 技能 entry as a segmented tab
+            skills, so they live under the Skills entry as a segmented tab
             (SkillsSourceTabs), not a separate nav item. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
           <div className={styles.nav_tabs} role="tablist" aria-label={t("nav_group.aria", "模式")}>

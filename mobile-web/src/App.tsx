@@ -11,9 +11,11 @@ import {
   unsubscribeChannel,
   type PushState,
 } from "./push";
-// 这里不再认识任何一个具体传输层。造哪一个由 main.tsx 按构建模式决定并注入
-// —— 那处选择是一对动态 import，同源构建把 relay 那条分支连同整棵依赖树一起
-// 消掉，而如果 App 静态 import 了 RelayClient，那套安排就白做了。
+// This module is transport-agnostic. main.tsx decides which transport to instantiate
+// based on the build mode and injects it here. The selection relies on dynamic imports
+// so that same-origin builds can tree-shake the relay branch with its entire dependency
+// tree; if App statically imported RelayClient, that would be impossible.
+
 import type { FleetTransport, TransportHandlers } from "./transport";
 import { NEEDS_PAIRING, SUPPORTS_PUSH } from "./hostMode";
 import { formatRttSplit } from "./connQuality";
@@ -37,8 +39,10 @@ import {
   type DeviceStates,
   type WithDevice,
 } from "./deviceRuntime";
-// 只取零依赖的开关。`?mock` 那个假客户端 extends RelayClient，从这里 import
-// 会把整棵 relay 依赖树静态拖进同源构建 —— 造它的活儿归 transportRelay.ts。
+// Import only the zero-dependency switch here. The `?mock` mock client extends
+// RelayClient; importing it here would statically drag the entire relay dependency
+// tree into same-origin builds — that logic belongs in transportRelay.ts instead.
+
 import { isMockMode } from "./mockMode";
 import type { RepoSummary, SessionInfo, WikiDoc } from "./types";
 import type { HostIdentity } from "./generated/types";
@@ -99,7 +103,8 @@ import { WikiView } from "./views/WikiView";
 import { WikiDocView } from "./views/WikiDocView";
 
 const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
-/** 通知横幅被撵走时**当时那个 PushState**。存状态而不是布尔位，见横幅处的注释。 */
+/** The PushState when the notification banner was last dismissed, not a boolean.
+    The reason we store state instead of a flag is explained in the banner rendering logic. */
 const PUSH_NOTICE_DISMISSED_KEY = "fleet-push-notice-dismissed";
 
 /** Compact token count: 1.2M / 34.5K / 780. */
@@ -111,8 +116,9 @@ function fmtTokens(n: number): string {
 
 type Tab = "decisions" | "tasks" | "artifacts" | "more";
 
-/** tab 的显示名。只给渲染兜底的标题与 console 标签用(底部导航的文案仍内联在
- *  各个按钮里) —— 「决策 页没能显示」比「decisions 页没能显示」有用。 */
+/** Display name of each tab. Used only for error boundary fallback titles and console
+ *  logs (bottom navigation text is still inlined in each button). Having "decisions page
+ *  failed to display" is more useful than "decisions page failed to display". */
 const TAB_LABEL: Record<Tab, string> = {
   decisions: "决策",
   tasks: "任务",
@@ -120,8 +126,9 @@ const TAB_LABEL: Record<Tab, string> = {
   more: "更多",
 };
 
-/** 一台新配对设备的默认字段。默认名走 i18n，所以它在这里而不在 devices.ts ——
- *  那一层刻意不认识 i18n，好让它整层保持可测的纯函数。 */
+/** Default fields for a newly paired device. The default name goes through i18n, so this
+ *  function lives here rather than in devices.ts — that module intentionally avoids i18n
+ *  to remain a testable pure function. */
 function newDeviceMint(book: DeviceBook): { id: string; label: string; now: number } {
   return { id: randomId(), label: nextDeviceLabel(book, translate("设备")), now: Date.now() };
 }
@@ -130,16 +137,19 @@ function newDeviceMint(book: DeviceBook): { id: string; label: string; now: numb
 // promo screen-recording pipeline and for quick UI work in a plain browser.
 const MOCK = isMockMode();
 
-/** 造出这次部署该用的传输层。由 main.tsx 按构建模式注入。 */
+/** Factory to instantiate the appropriate transport layer for this deployment.
+    Injected by main.tsx based on build mode. */
 export type TransportFactory = (
-  /** 要连的那一台。传整台而不是散参数:这台走 relay 还是走 HTTP 直连、它的
-   *  relay 地址 / baseUrl / token,全是这台设备记录自己的属性(devices.ts)。 */
+  /** The device to connect to. We pass the whole device record rather than scattered
+   *  parameters because all the routing details — relay vs HTTP direct, relay address,
+   *  baseUrl, token — are properties that each device stores about itself (devices.ts). */
   device: PairedDevice,
   handlers: TransportHandlers,
 ) => FleetTransport;
 
-/** mock / 同源形态没有配对这回事,但下游一切都以「一台设备」为单位。给它们各
- *  合成一台,整条链路就只有一种形状 —— 不必在每个视图里再分一次叉。 */
+/** Mock and same-origin deployments have no pairing, but everything downstream works in
+ *  units of "one device". We synthesize a device for each so the entire chain has a
+ *  uniform shape — no need to split logic in every view. */
 const MOCK_DEVICE: PairedDevice = {
   kind: "relay",
   id: "mock",
@@ -148,9 +158,9 @@ const MOCK_DEVICE: PairedDevice = {
   relayBase: null,
   addedAt: 0,
 };
-/** 同源形态那一台。它本来就是一台 HTTP 设备,只是 baseUrl 为空 = 就问发出这张
- *  页面的那个 origin —— 于是「按设备种类分派传输层」这一条规则同时覆盖了同源
- *  部署,不必为它留一条特例分支。 */
+/** Same-origin deployment device. It is an HTTP device with an empty baseUrl, which
+ *  means "talk to the same origin that served this page". This way the "route transport
+ *  by device kind" rule naturally covers same-origin deployments without a special case. */
 const SAME_ORIGIN_DEVICE: PairedDevice = {
   kind: "http",
   id: "same-origin",
@@ -160,19 +170,25 @@ const SAME_ORIGIN_DEVICE: PairedDevice = {
   addedAt: 0,
 };
 
-/** 还没收到过任何一帧的设备读到的状态。模块级常量:每次渲染新建一个对象会让
- *  下面那些解构出来的数组每渲染都换引用。 */
+/** State for a device that has not yet received any frame. Module-level constant:
+ *  creating a new object on every render would cause all the destructured arrays below
+ *  to change reference on every render. */
 const EMPTY_DEVICE_STATE = emptyDeviceState();
 
 export function App({ makeTransport }: { makeTransport: TransportFactory }) {
-  // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
+  // Subscribe to language changes. Re-rendering the App root propagates the change
+  // through the entire tree (there's no React.memo), and all t() calls recalculate.
+
   const { t } = useI18n();
-  // 这台手机配对过的每一台 Fleet（devices.ts）。`?mock` 与同源形态都没有配对
-  // 这回事，簿子留空，下面的 `secret` 直接给占位串。
+  // Record of every Fleet device this phone has paired with (devices.ts).
+  // Mock and same-origin builds have no pairing, so the book stays empty and the
+  // `secret` below gets a placeholder string instead.
+
   const [book, setBook] = useState<DeviceBook>(() => {
     if (MOCK || !NEEDS_PAIRING) return emptyBook();
     const stored = loadBookSync(newDeviceMint(emptyBook()));
-    // 这一次打开是不是带着配对 fragment(`#k=`)。
+    // Check if this page load came with a pairing fragment (`#k=`).
+
     const scanned = consumeHashPairing();
     if (!scanned) return stored;
     return adoptScannedDevice(
@@ -181,49 +197,61 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       newDeviceMint(stored),
       scanned.relayBase,
       {
-        // 壳的启动重注不抢焦点:用户切过去的那一台不该每次重开 app 就被打回原形。
+        // Shell boot re-injection should not steal focus: the device the user last
+        // switched to should not be reset every time the app reopens.
+
         focus: !scanned.boot,
       },
     ).book;
   });
-  // 当前作用域设备的密钥。`?mock` stands in for a pairing secret so the gate
-  // below opens and the effect that builds the client runs — it just builds a
-  // MockRelayClient. 同源形态没有配对这回事（后端就是发出这张页面的那个进程），
-  // 所以那道门整个不存在，直接给一个占位串让下面建连接的 effect 跑起来。
+  // Pairing secret for the current scoped device. `?mock` stands in for a pairing
+  // secret so the gate below opens and the effect that builds the client runs — it
+  // just builds a MockRelayClient. Same-origin has no pairing (the backend is the
+  // process that served this page), so that gate doesn't exist at all; we just give
+  // a placeholder string to let the connection-building effect proceed.
+
   const current = NEEDS_PAIRING && !MOCK ? activeDevice(book) : null;
-  /** 配对门的闸门:配对形态下一台都没有时才显示那张引导页。 */
+  /** Pairing gate guard: show the onboarding page only if pairing is needed but we have no devices. */
   const paired = !NEEDS_PAIRING || MOCK || current !== null;
-  /** 当前设备指名的 relay(仅 relay 设备有);推送要用它取 VAPID 公钥。 */
+  /** Relay address specified by the current device (relay devices only); push uses this to fetch the VAPID key. */
   const relayBase = current?.kind === "relay" ? current.relayBase : null;
-  // 本地持久化的命名空间。会话快照缓存、草稿、附件、workspace 记忆都按它分家
-  // ——那些内容只对某一台机器有意义（见 deviceScope.tsx）。mock 与同源形态不分家
-  // （它们只有一个数据源，加前缀只会让老用户已有的草稿凭空消失）。
+  // Local storage namespace. Session snapshots, drafts, attachments, and workspace
+  // memories are segmented by device — that content only makes sense for one machine
+  // (see deviceScope.tsx). Mock and same-origin don't segment (they have one data
+  // source; adding a prefix would orphan existing user drafts).
+
   const deviceId = current?.id ?? null;
 
-  // 运行时视角的设备清单：配对形态是簿子本身，mock / 同源各是一台合成设备。
+  // Runtime view of devices: pairing mode = the device book, mock/same-origin = one synthesized device.
+
   const runtimeDevices = useMemo(
     () => (MOCK ? [MOCK_DEVICE] : NEEDS_PAIRING ? book.devices : [SAME_ORIGIN_DEVICE]),
     [book.devices],
   );
   const deviceOrder = useMemo(() => runtimeDevices.map((d) => d.id), [runtimeDevices]);
-  /** 当前作用域那一台的运行时 id。 */
+  /** Runtime ID of the currently scoped device. */
   const activeDeviceId =
     MOCK || !NEEDS_PAIRING ? runtimeDevices[0].id : (deviceId ?? "");
-  // 分享菜单那条 effect 的依赖是空的（只在挂载时订阅一次），但它开火时要用**当下**
-  // 的设备，所以那一处读 ref 而不是闭包里的值。
+  // The share menu effect has empty dependencies (subscribe only once on mount), but
+  // when it fires it needs the **current** device, so we read from a ref there instead
+  // of relying on a closure value.
+
   const deviceIdRef = useRef<string | null>(deviceId);
   deviceIdRef.current = deviceId;
-  // 同理：清除全部配对那个回调的依赖是空的，但它要遍历**当下**的簿子。
+  // Similarly: the clear-all-pairing callback has empty dependencies, but it needs to
+  // iterate over the **current** book at runtime.
+
   const bookRef = useRef(book);
   bookRef.current = book;
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
-  // 配对门里的扫码取景器（原生壳限定）。
+  // Scanner viewfinder in the pairing gate (native shell only).
+
   const [scanning, setScanning] = useState(false);
   const [a2hsDismissed, setA2hsDismissed] = useState(
     () => localStorage.getItem(A2HS_DISMISSED_KEY) === "1",
   );
-  /** 上次被撵走的那条通知横幅说的是哪个状态（`null` = 没撵过）。 */
+  /** Which PushState the notification banner had the last time it was dismissed (`null` = never dismissed). */
   const [pushNoticeDismissed, setPushNoticeDismissed] = useState<string | null>(() =>
     localStorage.getItem(PUSH_NOTICE_DISMISSED_KEY),
   );
@@ -232,8 +260,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     setPushNoticeDismissed(state);
   }, []);
 
-  // localStorage wiped (iOS 7-day eviction, cache clear) but the IDB copy may
-  // have survived — re-hydrate before declaring the pairing lost.
+  // localStorage may be wiped (iOS 7-day eviction, cache clear) but the IDB copy may
+  // have survived — try to re-hydrate before declaring the pairing lost.
   useEffect(() => {
     if (paired) {
       setIdbProbed(true);
@@ -243,7 +271,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     loadBookFromIdb(newDeviceMint(emptyBook())).then((recovered) => {
       if (cancelled) return;
       if (recovered) {
-        // 把活下来的那一份写回两个存储，下次冷启动就不必再走兜底。
+        // Write the recovered copy back to both storage so cold starts next time don't
+        // need to fall back to the recovery path again.
+
         persistBook(recovered);
         setBook(recovered);
       }
@@ -254,12 +284,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     };
   }, [paired]);
 
-  /** 一次配对落地。App Link 递来的、以及用户手动粘贴的，都走这里 —— 与 PWA 的
-   *  `#k=` 路径同一个入口：去重、保留用户改过的名字、焦点落到刚配的那台，三条
-   *  规则只有一份实现（devices.ts::adoptScannedDevice）。
+  /** Pairing completion callback. Handles both App Link deliveries and manual paste inputs
+   *  through a single entry point like PWA's `#k=` path: deduplication, preserving user
+   *  edits to names, and focusing the newly paired device all have one implementation
+   *  (devices.ts::adoptScannedDevice).
    *
-   *  relayBase 必须一起传下去 —— 壳的页面 origin 是 `capacitor://localhost`，
-   *  丢了它就只能连打包时烧进去的那个 relay，自建 relay 永远配不上。 */
+   *  relayBase must be passed along — the shell's page origin is `capacitor://localhost`,
+   *  so losing it means we can only connect to the relay baked in at build time; custom
+   *  relay hosts become unreachable. */
   const adoptPaired = useCallback((paired: PairedLink) => {
     setBook(
       (prev) => adoptScannedDevice(prev, paired.secret, newDeviceMint(prev), paired.relayBase).book,
@@ -272,18 +304,22 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // scanned pairing URL here instead. No-op in the browser/PWA.
   useEffect(() => onPairingLink(adoptPaired), [adoptPaired]);
 
-  // ── 设备管理（「更多」页那一块）─────────────────────────────────────────
+  // ── Device management (the "More" page section) ─────────────────────────────────────
   //
-  // 三个动作都是「改簿子 + 落盘」，落盘紧跟状态更新，免得一次意外退出让用户
-  // 以为改过的东西没了。
+  // All three actions follow the pattern: update book + persist. Persist immediately
+  // after state updates to ensure unexpected exits don't make users think their changes
+  // were lost.
 
-  /** 清除全部配对。每台设备的退订都先记进待办（而不是在这里逐台连上去退）：
-   *  紧接着就要 reload，等不了 N 条临时连接的握手；下次启动那条重试 effect 会
-   *  把它们补掉。 */
+
+  /** Clear all pairings. Unsubscribe requests for each device are queued for later
+   *  (not sent immediately here): we're about to reload and can't wait for N temporary
+   *  connections to handshake. The retry effect on next boot will complete them. */
   const unpairAll = useCallback(() => {
     const now = Date.now();
     for (const d of bookRef.current.devices) {
-      // 只有 relay 设备有 channel 可退订;HTTP 直连那条传输层压根没有推送通道。
+      // Only relay devices have a push channel to unsubscribe from; HTTP direct
+      // connections don't have a push channel at all.
+
       if (SUPPORTS_PUSH && d.kind === "relay") {
         addPendingUnsub({ secret: d.secret, relayBase: d.relayBase, at: now });
       }
@@ -302,11 +338,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     });
   }, []);
 
-  /** 那台桌面端自报了主机名 —— 把「设备 2」换成「Harrys-MacBook-Pro」。
+  /** Desktop host reported its hostname — replace "Device 2" with "Harrys-MacBook-Pro".
    *
-   *  用户改过名的那台不会被顶掉（devices.ts::applyHostIdentity 只动自动名），所以
-   *  这里不需要任何额外判断，照单落盘即可。名字没变时 applyHostIdentity 原样返回
-   *  同一个对象，setBook 因此不会引起重渲，也不会白写一次存储。 */
+   *  User-renamed devices won't be overwritten (applyHostIdentity only updates auto-generated
+   *  names), so no extra logic needed here; just persist. When the name doesn't change,
+   *  applyHostIdentity returns the same object, so setBook won't trigger a re-render or
+   *  waste a storage write. */
   const adoptHostIdentity = useCallback((id: string, identity: HostIdentity) => {
     setBook((prev) => {
       const next = applyHostIdentity(prev, id, identity);
@@ -323,20 +360,24 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     });
   }, []);
 
-  /** 让某台设备的 relay channel 停止推送。
+  /** Stop push notifications on a device's relay channel.
    *
-   *  它可能不是当前连着的那一台，所以为它临时开一条连接。不能靠「本地退订」
-   *  代替：浏览器订阅是所有设备共用的一份，退掉它等于把其他设备的通知一起
-   *  掐掉（见 push.ts::unsubscribeChannel）。
+   *  The device might not be the one currently connected, so we open a temporary
+   *  connection for it. We can't just do a "local unsubscribe" instead: the browser's
+   *  push subscription is shared across all devices, so canceling it would also disable
+   *  notifications for other devices (see push.ts::unsubscribeChannel).
    *
-   *  返回是否退成。退不成不该拦住用户移除设备——那是他明确的意图——所以调用方
-   *  把它记进待办退订，下次启动重试。 */
+   *  Returns whether unsubscription succeeded. Even if it fails, we shouldn't block the
+   *  user from removing the device (that's their explicit intent) — the caller will queue
+   *  it for retry on next boot. */
   const stopPushFor = useCallback(
     async (device: PairedDevice): Promise<boolean> => {
-      // HTTP 直连的设备没有推送通道(pushSubscribe 恒返回 false),所以没有什么
-      // 需要退订 —— 直接算成功,免得移除它时白等一次临时连接的握手。
+      // HTTP direct devices have no push channel (pushSubscribe always returns false),
+      // so there's nothing to unsubscribe from — just return success to avoid wasting
+      // time on a temporary connection handshake.
       if (device.kind !== "relay") return true;
-      // 这台设备正连着的话直接借用它那条连接。
+      // If this device is currently connected, reuse its connection.
+
       const live = handlesRef.current[device.id]?.transport;
       if (live?.isAuthed) return unsubscribeChannel(live);
       const temp = makeTransport(device, {});
@@ -355,14 +396,17 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const removeDeviceEntry = useCallback(
     async (device: PairedDevice) => {
-      // 先退订、再改簿子：反过来的话失败重试就没有 secret 可用了（记待办那条
-      // 路仍然需要它）。
+      // Unsubscribe first, then update the book: if we reversed it, retry logic wouldn't
+      // have the secret (the queued-retry path still needs it).
+
       const unsubscribed = SUPPORTS_PUSH ? await stopPushFor(device) : true;
       if (!unsubscribed && device.kind === "relay") {
         addPendingUnsub({ secret: device.secret, relayBase: device.relayBase, at: Date.now() });
       }
-      // 这台设备的本地痕迹一并清掉：会话快照缓存 + 它命名空间下的全部草稿
-      // （新会话表单、附件路径、上次用的 repo、各会话的半截输入）。
+      // Clear all local traces for this device: session snapshot cache + all drafts
+      // in its namespace (new session form, attachment paths, last-used repo, session
+      // partial inputs).
+
       clearCachedSessions(device.id);
       clearDraftsByPrefix(scopedKey(device.id, ""));
       setBook((prev) => {
@@ -374,8 +418,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [stopPushFor],
   );
 
-  /** 上次没退成的退订，启动后补一次。失败就留着，等下次（7 天后过期，见
-   *  devices.ts）。 */
+  /** Retry queued unsubscriptions from last session. Failed ones stay queued for next
+   *  boot (they expire after 7 days, see devices.ts). */
   useEffect(() => {
     if (!SUPPORTS_PUSH || MOCK) return;
     const pending = loadPendingUnsub(Date.now());
@@ -384,8 +428,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     void (async () => {
       for (const entry of pending) {
         if (cancelled) return;
-        // 待办退订只记 relay 设备(HTTP 直连没有 channel),所以这里合成一台
-        // relay 设备去连 —— 它只活一次请求那么久。
+        // Queued unsubscriptions only exist for relay devices (HTTP direct has no
+        // channel), so we synthesize a relay device to connect with — it lives only
+        // for this one request.
+
         const temp = makeTransport(
           {
             kind: "relay",
@@ -403,8 +449,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             if (await unsubscribeChannel(temp)) dropPendingUnsub(entry.secret, Date.now());
           }
         } catch {
-          // 留着下次再试
+          // Leave failed unsubscriptions for next boot's retry.
         } finally {
+
           temp.close();
         }
       }
@@ -428,7 +475,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         const fetched = new Set(files.map((f) => f.name));
         const missed = share.files.filter((f) => !fetched.has(f.name));
         const prompt = shareToPrompt({ ...share, files: missed });
-        // 草稿按设备分家，否则从分享菜单塞进来的提示词会落进另一台的新会话表单。
+        // Drafts are segmented per device; otherwise a prompt seeded via share menu
+        // would land in another device's new session form.
         const key = scopedKey(deviceIdRef.current, NEW_SESSION_DRAFT_KEY);
         const existing = loadDraft<Record<string, unknown>>(key, {});
         saveDraft(key, { ...existing, prompt });
@@ -439,24 +487,30 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, []);
 
   const [tab, setTab] = useState<Tab>("decisions");
-  /** 头部设备切换器的下拉开着没有。 */
+  /** Whether the device switcher dropdown in the header is open. */
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
-  /// 通知点击要聚焦的决策卡。nonce 让「同一张卡被连点两次」也能触发;deviceId
-  /// 是从通知里的来源标记反查出来的(老 relay 不盖标记时为 undefined)。
+  /// Decision card to focus when notification is clicked. The nonce ensures clicking
+  /// the same card twice still triggers a focus; deviceId is reverse-looked-up from the
+  /// source mark in the notification (undefined for old relay versions without marks).
+
   const [focusDecision, setFocusDecision] = useState<{
     id: string;
     deviceId?: string;
     nonce: number;
   } | null>(null);
 
-  // ── 每台设备的运行时 ─────────────────────────────────────────────────────
+  // ── Per-device runtime ─────────────────────────────────────────────────────────
   //
-  // 从前这里是一把扁平的 useState:一个 connected、一个 sessions、一个 decisions。
-  // 那把状态把「只有一个数据源」焊死进了组件。现在每台设备一份(deviceRuntime.ts
-  // 的纯 reducer),连接则由每台一个 <DeviceConnection> 负责。
+  // This used to be flat useState: one connected, one sessions, one decisions. That
+  // locked in "single data source" at the component level. Now each device gets its
+  // own copy (pure reducer in deviceRuntime.ts), with each device's connection handled
+  // by its own <DeviceConnection>.
+
   const [states, dispatch] = useReducer(devicesReducer, {} as DeviceStates);
-  // 每台设备的操作面(transport + 主动刷新)。用 state 而不是 ref:UI 要在连接
-  // 建立那一刻重新渲染,才能把 transport 交给下面各个视图。
+  // Control surface for each device (transport + active refresh). We use state, not
+  // ref: the UI needs to re-render the instant a connection establishes so it can
+  // pass the transport to downstream views.
+
   const [handles, setHandles] = useState<Record<string, DeviceHandle>>({});
   const registerHandle = useCallback((id: string, handle: DeviceHandle | null) => {
     setHandles((prev) => {
@@ -470,12 +524,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     });
   }, []);
 
-  // stopPushFor / unpairAll 这类空依赖的回调要读**当下**的连接表。
+  // Callbacks with empty dependencies like stopPushFor / unpairAll need to read the
+  // **current** connection table.
   const handlesRef = useRef(handles);
   handlesRef.current = handles;
 
-  /** 某一台设备的传输层。合并列表里点进去的东西属于**那一台**,不是当前作用域
-   *  那一台 —— 拿错了就是一次打错地方的请求。 */
+  /** Transport for a specific device. Items from the merged list that you drill into
+   *  belong to **that device**, not the currently scoped one — grabbing the wrong one
+   *  sends a request to the wrong place. */
+
   const transportFor = useCallback(
     (id: string): FleetTransport | null => handles[id]?.transport ?? null,
     [handles],
@@ -483,8 +540,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const activeState = states[activeDeviceId] ?? EMPTY_DEVICE_STATE;
   const client = handles[activeDeviceId]?.transport ?? null;
-  // 当前这台桌面主机开了哪些可选面。是**按设备**问的:两台桌面端的
-  // FLEET_TERMINAL 可以不一样,所以切设备要重问,而不是缓一份全局的。
+  // Which optional features the current desktop host has enabled. This is a **per-device**
+  // query: two desktop instances might have FLEET_TERMINAL configured differently, so
+  // switching devices requires re-querying instead of caching globally.
+
   const hostFeatures = useHostFeatures(client);
   const {
     sessionsFrame,
@@ -492,23 +551,27 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     snapshotSources,
     authError,
   } = activeState;
-  // 首屏「正在加载任务」的闸门:有任意一台推过首帧就不再算加载中。
+  // First-screen "loading tasks" gate: once any device delivers the first frame, we
+  // stop showing the loading state.
   const sessionsLoaded = anySessionsLoaded(states, deviceOrder);
-  // 决策卡是**合并**的:全部设备的卡按到达时间排在一起,每张带着归属设备。
-  // 这就是多设备的核心价值——一个收件箱,而不是「记得去另一台看看」。
+  // Decision cards are **merged**: all devices' cards are sorted by arrival time with
+  // each card marked with its source device. This is the core value of multi-device:
+  // one inbox instead of "remember to check the other device".
   const decisions = useMemo(
     () => aggregateDecisions(states, deviceOrder),
     [states, deviceOrder],
   );
-  // 骨架屏只为**还在线、但首份快照没到**的设备转;离线的那台不守闸门(它的快照
-  // 永远不会来)。
+  // Skeleton screens only render for devices that are **online but haven't delivered
+  // their first snapshot yet**. Offline devices don't block (their snapshot never comes).
+
   const decisionsLoaded = allDecisionsLoaded(states, deviceOrder);
-  // 只配了一台时不报这个数:那种情况下「桌面端离线」本身就是整页的终态,再数一
-  // 遍只是噪音。
+  // Don't report this count for single-device setups: in that case "desktop offline"
+  // is the terminal state of the entire page; reporting it again is just noise.
   const offlineDevices =
     runtimeDevices.length > 1 ? offlineDeviceCount(states, deviceOrder) : 0;
-  /** 卡片/列表上的设备徽标。只配了一台时返回 null —— 单设备用户不该为多设备
-   *  付出一行视觉噪音。 */
+  /** Device badges on cards/lists. Returns null for single-device setups — single-device
+   *  users shouldn't pay the visual cost of multi-device features. */
+
   const deviceLabelOf = useCallback(
     (id: string): string | null => {
       if (runtimeDevices.length <= 1) return null;
@@ -516,8 +579,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     },
     [runtimeDevices],
   );
-  /** 设备切换器上每一行的那盏灯。它要的是**这一台**的连通性,与头部那盏「全体
-   *  里最好的那一条」正相反 —— 切换器存在的意义就是让用户看见哪一台掉了。 */
+  /** The indicator light on each line of the device switcher. It shows **this device's**
+   *  connectivity, opposite from the header's "best of all" light — the switcher's purpose
+   *  is to let users see which device dropped. */
   const deviceStatusOf = useCallback(
     (id: string) => {
       const s = states[id];
@@ -525,13 +589,16 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     },
     [states],
   );
-  // 头部那三样看的是**全体**:一台离线不该让整个界面显示离线,而用户感觉到的
-  // 拥塞是最卡的那条链路。花费是所有设备当日之和。
+  // The three values in the header show the **overall** state: one device being offline
+  // shouldn't show offline for the whole page, and perceived congestion is the worst
+  // connection. Cost is the sum of all devices for the day.
+
   const connected = anyConnected(states, deviceOrder);
   const agentOnline = anyAgentOnline(states, deviceOrder);
   const congestion = worstCongestion(states, deviceOrder);
   const todayUsage = totalUsage(states, deviceOrder);
-  /** 合计的设备明细（用量页里展开那几行）。名字从簿子取，与设备切换器同一份。 */
+  /** Per-device cost summaries (the rows that expand in the usage page). Labels come
+   *  from the device book, same as the device switcher. */
   const usageRows = useMemo(
     () =>
       usageByDevice(states, deviceOrder).map((r) => ({
@@ -540,8 +607,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       })),
     [states, deviceOrder, runtimeDevices],
   );
-  // header 那枚连接图标：形状/亮度由 kind 决定,原来的文案降级成它的
-  // title + aria-label(读屏与长按仍读得到,只是不再占版面)。
+  // Header connection icon: shape and brightness determined by kind. The original text
+  // is downgraded to title + aria-label (still accessible to screen readers and long-press,
+  // just not taking up layout space).
+
   const connKind = connIconKind(connected, agentOnline, congestion);
   const connText =
     connKind === "connecting"
@@ -557,8 +626,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [push, setPush] = useState<PushState>(pushState);
   // Sub-state below "granted": the user can turn notifications off even while
   // the browser permission stays granted. Persisted so it survives reloads.
-  // 静音按设备各一份。总开关看的是「是不是每一台都被关掉」——只关了一台时
-  // 横幅不该说「通知已关闭」,那会让人以为另一台也不响了。
+  // Muting is per-device. The master toggle checks "are all devices muted?" —
+  // if only one device is muted, the banner shouldn't say "notifications off" because
+  // that would make users think the other device is also silent.
+
   const [pushMuted, setPushMuted] = useState<Record<string, boolean>>({});
   useEffect(() => {
     setPushMuted((prev) => {
@@ -575,45 +646,56 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, [runtimeDevices]);
   const pushOptedOut =
     runtimeDevices.length > 0 && runtimeDevices.every((d) => pushMuted[d.id] === true);
-  // 会话详情是一条下钻链而不是单页：从 Agent 卡「打开子代理」往上叠一层子代理会话，
-  // 返回逐层退回（和知识库 wikiStack 同一套栈式浮层模型）。栈顶 id 解析出当前详情。
-  // 每一层都带上归属设备:会话 id 只在单机内唯一,而下钻要用**那一台**的
-  // transport 去拉 tail(见 itemKey 的说明)。
+  // Session detail is a drill-down chain, not a single page: clicking "open subagent" from
+  // an Agent card stacks another layer (same stack-based overlay model as wikiStack).
+  // The top ID defines the current detail. Each layer carries its device: session IDs are
+  // unique within a device, and drilling down needs that device's transport to fetch the
+  // tail (see itemKey's explanation).
   const [detailStack, setDetailStack] = useState<Array<{ deviceId: string; id: string }>>([]);
-  // 知识库文档是一条链而不是单页：`[[slug]]` 站内跳转往上叠一篇，返回逐篇退回。
+  // Wiki documents are a chain, not a single page: `[[slug]]` links stack another doc,
+  // back button pops it.
+
   const [wikiStack, setWikiStack] = useState<Array<{ deviceId: string; doc: WikiDoc }>>([]);
   const [showRepo, setShowRepo] = useState(false);
   const [repoDetail, setRepoDetail] = useState<{ deviceId: string; repo: RepoSummary } | null>(
     null,
   );
   const [showUsage, setShowUsage] = useState(false);
-  // 终端页。`{ workspace: null }` = 已打开但还没选目录（任务页筛的是「全部目录」
-  // 时进来的），null = 没开 —— 两者不能合并，否则「打开后返回选目录」这一步会
-  // 被当成没打开。
+  // Terminal page state. `{ workspace: null }` = open but directory not yet chosen (e.g.,
+  // entering from tasks page when "all workspaces" filter is active). `null` = not open.
+  // These must be distinct: otherwise "open then return to select workspace" would look like
+  // not opened.
+
   const [terminal, setTerminal] = useState<{ workspace: TerminalWorkspace | null } | null>(null);
   const [showPlans, setShowPlans] = useState(false);
   const [showWiki, setShowWiki] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
-  // 新会话开在**哪一台**上。null = 跟着当前作用域那台(每次打开 sheet 都复位成
-  // 它),用户在 sheet 里另选一台时才落一个具体 id。不复用 activeDeviceId 是因为
-  // 这两件事不同:作用域是「我在看哪台」,这里是「这一次要开在哪台」——在云端开个
-  // 会话不该逼用户先把整个界面切过去。
+  // Which device the new session opens on. null = follow the current scoped device
+  // (reset on every sheet open), unless the user explicitly picks a different device
+  // in the sheet. We don't reuse activeDeviceId because they mean different things:
+  // scope = "which device am I viewing", this = "which device should this session open
+  // on" — opening a session in the cloud shouldn't force the user to switch the whole
+  // interface to that device first.
+
   const [newSessionDeviceId, setNewSessionDeviceId] = useState<string | null>(null);
   // Files handed over by another app's share, pending upload once the
   // new-session sheet mounts (that's where the attachment state lives).
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [exitArmed, setExitArmed] = useState(false);
 
-  // 栈底（主页 tab、无浮层）按返回：先拦一次给「再按一次退出」，再按才真走。
-  // beforeunload 只覆盖刷新/关标签/地址栏跳走这些非返回路径——mock 模式不装，
-  // 免得录屏流水线被原生对话框卡住。
+  // Back at the stack base (home tab, no overlay): first press shows "press again to exit",
+  // second press actually exits. beforeunload only covers refresh/close/address bar navigation,
+  // not back — mock mode skips this to avoid stalling the screen recording pipeline with
+  // native dialogs.
+
   useEffect(() => {
     const install = () => (MOCK ? () => {} : installUnloadPrompt());
     let uninstall = install();
     let timer: number | undefined;
     const guard = new ExitGuard(setExitArmed, () => {
       uninstall();
-      // 万一没走成（本页就是历史里的第一条，退无可退），把兜底装回来。
+      // If exit fails (this page is the first in history, nowhere to exit),
+      // restore the fallback.
       timer = window.setTimeout(() => {
         uninstall = install();
       }, 1_000);
@@ -626,16 +708,20 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     };
   }, []);
 
-  /** 本机刚答完一张卡:先乐观移除,并记下时间戳,压住迟到快照把它复活
-   *  (deviceRuntime.ts 的 answered/snapshot 两个 action)。答复发给哪一台由
-   *  调用方点名 —— 收件箱是合并的,卡不一定属于当前作用域那台。 */
+  /** Card just answered on this device: optimistically remove it and record a timestamp
+   *  to suppress late snapshots from reviving it (see answered/snapshot actions in
+   *  deviceRuntime.ts). Which device gets the answer is specified by the caller — the
+   *  inbox is merged, so the card might not belong to the currently scoped device. */
+
   const markAnswered = useCallback((deviceId: string, id: string) => {
     dispatch({ deviceId, type: "answered", id, now: Date.now() });
   }, []);
 
-  // 页面可见性。多设备之后它是**连接策略**的输入而不只是一次补拉的触发:隐藏
-  // 够久就把 N 条 socket 全放掉(后台通道是推送,不是这条 socket),回到前台再
-  // 错峰重连。见 connectionPolicy.ts。
+  // Page visibility. After multi-device support, this is a **connection policy** input,
+  // not just a trigger for a one-time refetch: hide long enough and we drop all N sockets
+  // (background delivery uses push, not this socket). Coming back to the foreground will
+  // stagger reconnections. See connectionPolicy.ts.
+
   const [visibility, setVisibility] = useState<VisibilityState>(() => ({
     visible: typeof document === "undefined" || document.visibilityState === "visible",
     hiddenSince: Date.now(),
@@ -650,7 +736,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     document.addEventListener("visibilitychange", onChange);
     return () => document.removeEventListener("visibilitychange", onChange);
   }, []);
-  // 隐藏之后到了宽限期就重算一次(否则「该断开了」这件事没有任何东西来触发)。
+  // After the page goes hidden, once the grace period expires we re-evaluate (otherwise
+  // "should disconnect now" would never trigger).
+
   useEffect(() => {
     if (visibility.visible) return;
     const left = HIDDEN_DISCONNECT_MS - (Date.now() - visibility.hiddenSince);
@@ -661,9 +749,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     return () => window.clearTimeout(timer);
   }, [visibility]);
 
-  // 回到前台/重新获得焦点时重算推送状态:Notification.permission 可能在后台期间
-  // 被改过(老板在系统设置里开了或关了),而横幅只在挂载时读过一次 pushState()。
-  // 快照的补拉不在这里 —— 那是每台设备自己的事(DeviceConnection)。
+  // Recalculate push state when returning to foreground or regaining focus: Notification.permission
+  // might have changed in the background (user toggled it in system settings), but the banner
+  // only read pushState() once at mount. Snapshot re-fetching is separate — that's each
+  // device's responsibility (DeviceConnection).
+
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
@@ -691,39 +781,49 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     };
   }, []);
 
-  // 订阅本身不在这里了:它按**设备**登记(relay 的订阅是每个 channel 一份文件),
-  // 所以那段逻辑住在 DeviceConnection —— 每台设备各自在自己连上之后注册一次。
+  // Subscription registration itself is not here: it's per **device** (relay subscriptions
+  // are one file per channel), so that logic lives in DeviceConnection — each device
+  // registers once after connecting.
 
-  // 原生壳交来厂商推送 token。到达时机不定（壳要先过系统通知授权），所以只
-  // 重算一次 push 状态 —— classifyPush 见到 token 就返回 granted，随后那个
-  // "granted 且未 opt-out 就 enablePush" 的 effect 会把它注册到 relay。注册
-  // 逻辑因此只有一份，不必在这里重复一遍。
+  // Native shell delivers vendor push tokens. Arrival is unpredictable (shell must pass
+  // system notification permission first), so we just recalculate push state once.
+  // classifyPush returns "granted" when it sees a token, then the "granted && not opted
+  // out → enablePush" effect handles relay registration. Register logic is in one place,
+  // no need to duplicate here.
+
   useEffect(() => {
     return onNativePushToken(() => setPush(pushState()));
   }, []);
 
-  // 点通知 → 直达那张决策卡。三条投递路径(冷启动 URL / SW 前台补发 /
-  // 原生壳注入)都汇进 onDecisionDeepLink,这里只管拿到目标后切页+聚焦。
+  // Notification click → jump to that decision card. Three delivery paths (cold-start URL /
+  // SW foreground re-delivery / native shell injection) all funnel through onDecisionDeepLink;
+  // here we just switch tabs and focus once we have the target.
   //
-  // 用 nonce 而不是只存 id:连点同一条通知时 id 不变,单靠 id 的话 DecisionsView
-  // 那边的 effect 不会重跑,表现为「第二次点没反应」。
+  // Use nonce instead of just id: clicking the same notification twice has the same id,
+  // so the DecisionsView effect wouldn't re-run and would appear unresponsive on the
+  // second click.
+
   useEffect(() => {
     return onDecisionDeepLink((target) => {
       setTab("decisions");
       setFocusDecision({ id: target.id, nonce: Date.now() });
-      // relay 盖的来源标记是 channel id 的前缀;手机手里只有配对 secret,所以要
-      // 现算一遍每台设备的 channel id 去比对。异步(SubtleCrypto),所以先按 id
-      // 聚焦、拿到设备后再精确到那一台 —— 点击不必等一次哈希。
+      // The relay's source mark is a prefix of the channel id; we only have the pairing
+      // secret, so we recalculate each device's channel id to compare. This is async
+      // (SubtleCrypto), so we focus by id first, then refine to the specific device after
+      // getting it — clicking doesn't wait for hashing.
       //
-      // 动态 import + 直接写 define 的原表达式:relayCrypto 属于 relay 侧,而
-      // 同源(webui)产物里不许有它。经 const 中转 Rollup 就不折叠了(见
-      // main.tsx 与 hostMode.test.ts 记的那两次实测)。
+      // Dynamic import + direct define wrapping: relayCrypto lives in relay-land, and
+      // same-origin (webui) builds aren't allowed to have it. Going through a const
+      // stops Rollup from inlining (see main.tsx and hostMode.test.ts for two empirical
+      // tests).
+
       const mark = target.channelMark;
       if (!mark || import.meta.env.VITE_FLEET_HOST === "webui") return;
       void (async () => {
         const { channelIdOf } = await import("./relayCrypto");
         for (const d of bookRef.current.devices) {
-          // 只有 relay 设备有 channel;HTTP 直连的通知不经 relay,也就不会带标记。
+          // Only relay devices have a channel; HTTP direct notifications don't go
+          // through relay, so there's no mark.
           if (d.kind !== "relay") continue;
           const id = await channelIdOf(d.secret);
           if (!id.startsWith(mark)) continue;
@@ -734,8 +834,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     });
   }, []);
 
-  /** 总开关「开」:先用当前设备那条连接把系统权限问下来并注册,再把其余设备的
-   *  静音位一起清掉 —— 它们各自的 effect 会接着注册自己那份。 */
+  /** Master toggle ON: ask for system permission using the current device's connection
+   *  and register it, then clear mute flags for all other devices — their effects will
+   *  register their own subscriptions next. */
+
   const handleEnablePush = useCallback(async () => {
     const ids = runtimeDevices.map((d) => d.id);
     if (client) setPush(await enablePush(client, relayBase, activeDeviceId));
@@ -743,8 +845,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     setPushMuted(Object.fromEntries(ids.map((id) => [id, false])));
   }, [client, relayBase, activeDeviceId, runtimeDevices]);
 
-  /** 总开关「关」:每一台都要退订。只退当前那台的话,其余几台会继续推 —— 而
-   *  用户刚刚明确表示「别再响了」。 */
+  /** Master toggle OFF: unsubscribe all devices. If we only unsubscribed the current
+   *  one, the others would keep pushing — but the user just said "stop notifications". */
+
   const handleDisablePush = useCallback(async () => {
     const ids = runtimeDevices.map((d) => d.id);
     setPushOptedOut(true, ids);
@@ -752,14 +855,18 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     for (const id of ids) {
       const t = handlesRef.current[id]?.transport;
       if (!t) continue;
-      // 当前那台走 disablePush(它还会撤掉浏览器订阅本体);其余只发退订帧 ——
-      // 浏览器订阅是所有设备共用的一份,撤了就等于把还没关的那些也一起掐掉。
+      // Current device calls disablePush (which also revokes the browser subscription);
+      // others just send unsubscribe frames. The browser subscription is shared across
+      // all devices, so revoking it would also disable the ones we haven't turned off yet.
+
       if (id === activeDeviceId) await disablePush(t, id);
       else await unsubscribeChannel(t);
     }
   }, [runtimeDevices, activeDeviceId]);
 
-  /** 只关/只开某一台(设备列表里的那个开关)。这里绝不碰浏览器订阅本体。 */
+  /** Mute/unmute a single device (the device list toggle). Never touches the browser
+   *  subscription itself here. */
+
   const handleMuteDevice = useCallback(
     async (device: PairedDevice, muted: boolean) => {
       setPushMuted((prev) => ({ ...prev, [device.id]: muted }));
@@ -772,7 +879,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [],
   );
 
-  // 任务列表也是**合并**的:全部设备的会话排在一起,每条带着归属设备。
+  // Tasks list is also **merged**: all devices' sessions in one list, each marked with
+  // its source device.
   const mergedSessions = useMemo<Array<WithDevice<SessionInfo>>>(
     () =>
       aggregateSessions(states, deviceOrder).sort(
@@ -781,17 +889,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [states, deviceOrder],
   );
 
-  /** 当前作用域那一台的会话。按设备作用域的页面(新会话、计划、会话详情里的
-   *  子代理解析)用它 —— 那些页面问的是「这一台上有什么」,把别台的混进去只会
-   *  让它们看到自己拉不动的 id。 */
+  /** Sessions on the current scoped device. Used by device-scoped pages (new session,
+   *  plans, subagent resolution in session detail) — those pages ask "what's on this
+   *  device?", so mixing in others would make them see IDs they can't fetch. */
+
   const scopedSessions = useMemo(
     () => mergedSessions.filter((s) => s.deviceId === activeDeviceId),
     [mergedSessions, activeDeviceId],
   );
 
-  /** 终端页能开在哪些目录上 —— 任务里出现过的每个 workspace,按设备去重。
-   *  跨设备保留:终端进程跑在它所属的那台主机上,所以「哪台」和「哪个目录」是
-   *  一起的一件事。 */
+  /** Which directories the terminal can open in — every workspace seen in tasks,
+   *  de-duped by device. Kept cross-device: terminal processes run on their owning host,
+   *  so "which device" and "which directory" are a single unit. */
+
   const terminalWorkspaces = useMemo(() => {
     const seen = new Map<string, TerminalWorkspace>();
     for (const s of mergedSessions) {
@@ -807,28 +917,32 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [mergedSessions]);
 
-  /** 这一次新会话要开在哪台上(用户没另选就是当前作用域那台)。 */
+  /** Which device this new session opens on (defaults to currently scoped device if user hasn't picked). */
   const newSessionTargetId = newSessionDeviceId ?? activeDeviceId;
-  /** 目标设备的本地存储命名空间。与 `deviceId` 同口径 —— mock / 同源形态下只有
-   *  一个数据源,那时不加前缀(见 deviceScope.tsx)。 */
+  /** Storage namespace for the target device. Same as `deviceId` — in mock/same-origin
+   *  mode with only one data source, we don't add a prefix (see deviceScope.tsx). */
   const newSessionScopeId = MOCK || !NEEDS_PAIRING ? null : newSessionTargetId || null;
-  /** 目标设备上的会话。新会话表单只拿它来算「最近 workspace」,那是目标那台
-   *  机器上的目录,别台的路径在它上面根本不存在。 */
+  /** Sessions on the target device. The new session form uses this only to calculate
+   *  "recent workspace" — that's a directory on the target machine; paths from other
+   *  devices don't exist there. */
+
   const newSessionSessions = useMemo(
     () => mergedSessions.filter((s) => s.deviceId === newSessionTargetId),
     [mergedSessions, newSessionTargetId],
   );
 
-  // 决策卡上「这张卡属于哪个会话」的反查。键是复合键 —— 两台机器上同号的会话
-  // 是两条不同的会话。
+  // Reverse lookup: "what session owns this decision card?". The key is composite —
+  // same-numbered sessions on two devices are two different sessions.
   const workspaceOf = useMemo(() => {
     const map = new Map<string, WithDevice<SessionInfo>>();
     for (const s of mergedSessions) map.set(itemKey(s.deviceId, s.id), s);
     return (deviceId: string, sessionId: string) => map.get(itemKey(deviceId, sessionId));
   }, [mergedSessions]);
 
-  // The detail page re-derives its session from the live snapshot so status /
-  // plan chips stay fresh while it is open. Top of the drill-down stack wins.
+
+  // The detail page derives its session from the live snapshot so status/plan chips
+  // stay fresh while it's open. The top of the drill-down stack determines which one.
+
   const detailSession = useMemo(() => {
     const top = detailStack[detailStack.length - 1];
     if (!top) return null;
@@ -861,15 +975,18 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     showPlans ||
     showWiki ||
     showNewSession;
-  // Float the decision drawer over whatever the boss is looking at — EXCEPT the
-  // plain 决策 tab, which already renders the cards inline (no overlay covering
-  // it), so the drawer would only duplicate them there. Everywhere else (other
-  // tabs, or any tab with a detail page open) the drawer is the surface.
+  // Float the decision drawer over everything the user is looking at — EXCEPT the
+  // plain decisions tab, which already renders cards inline (no overlay on top of it),
+  // so the drawer would just duplicate them. Everywhere else (other tabs, or any tab
+  // with a detail page open) the drawer is the answering surface.
+
   const showDecisionDrawer =
     decisions.length > 0 && !showNewSession && (tab !== "decisions" || overlayOpen);
 
-  /** 当前打开的是哪个浮层。拿它当浮层那层渲染兜底的 resetKey —— 关掉再开、或
-   *  换到另一个浮层时自动清错重试,一次渲染失败不该把这个入口永久钉死。 */
+  /** Which overlay is currently open. Used as resetKey for the overlay layer's error
+   *  boundary — closing and reopening, or switching to a different overlay, automatically
+   *  retries on error. One render failure shouldn't lock out this entry point permanently. */
+
   const overlayKey = [
     detailSession ? `detail:${detailSession.deviceId}:${detailSession.id}` : "",
     showWiki ? "wiki" : "",
@@ -884,12 +1001,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     .filter(Boolean)
     .join("|");
 
-  /** 把所有浮层收起来,回到主界面。
+  /** Collapse all overlays and return to the main interface.
    *
-   *  只有渲染兜底用得上:浮层的 `HistoryLayer`(接系统返回键的那个)和浮层内容是
-   *  同一块 JSX,一起被 fallback 替换掉,于是返回键退不掉那个浮层(实测过)。iOS
-   *  PWA 更没有系统返回键,所以 fallback 上必须有一条自己的出路,否则崩一次就把人
-   *  困在那儿。 */
+   *  Used by the error boundary fallback: the overlay's `HistoryLayer` (which handles
+   *  the system back button) and the overlay content are the same JSX block, both replaced
+   *  by the fallback, so back button can't dismiss an errored overlay (tested). iOS PWA
+   *  doesn't have a system back button at all, so the fallback must have its own exit
+   *  path, or else one crash traps the user forever. */
+
   const closeAllOverlays = useCallback(() => {
     setDetailStack([]);
     setShowWiki(false);
@@ -904,21 +1023,24 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, []);
 
   if (!paired) {
-    // 两条不依赖地址栏的配对入口。它们本来是原生壳限定的：壳从 rawfile 启动，
-    // 没有「打开一条带 #k= 的链接」这回事；系统相机扫出来的链接由 App Link 决定
-    // 交给谁，而 App Link 只认 manifest 里编译期写死的 host，自建 relay 的 host
-    // 编译期不可知，那条路对它结构上不可用。app 内扫码拿到的是二维码原文，粘贴
-    // 更是不依赖任何 host 声明。
+    // Two pairing entry points that don't depend on the URL bar. They started as
+    // native-shell only: the shell launches from a raw file, so there's no "open a link
+    // with #k=" trick. System camera scan results are routed by App Link, which only
+    // recognizes hosts hardcoded in the manifest at compile time. Custom relay hosts are
+    // unknown at compile time, making that path structurally unavailable. In-app scanning
+    // gives the raw QR content; pasting needs no host declaration at all.
     //
-    // PWA 同样需要它们，而且是**唯一**的出路。iOS 把「添加到主屏幕」装出来的
-    // web app 放进独立的存储分区：Safari 标签页里刚落盘的那份配对不会跟过去，
-    // 而 A2HS 存的是 manifest 的 start_url（`/`），fragment 里的密钥也一并丢掉。
-    // 于是用户第一次点主屏幕图标就落在这张门上 —— 主屏幕 app 没有地址栏，没法
-    // 再开一次带 #k= 的链接，而门上一个按钮都没有，人就彻底卡死（老板 2026-09-15
-    // 反馈）。
+    // PWA needs these too, and they're the **only** way out. iOS isolates "Add to Home
+    // Screen" web apps in separate storage: the pairing just saved in Safari doesn't
+    // follow across, and A2HS stores only the manifest's start_url (`/`), losing the
+    // fragment with the secret. So on first home screen tap, the user lands here — and
+    // the home screen app has no URL bar to open an `#k=` link, and this gate has no
+    // buttons, so they're completely stuck (user feedback 2026-09-15).
     //
-    // 扫码那条按能力出：地址不是 https 时浏览器根本不暴露 getUserMedia，摆一个点
-    // 了必然失败的按钮不如当场说清原因，把人直接引到粘贴（scanAvailability.ts）。
+    // QR scanning gates on capability: if the origin isn't HTTPS, the browser won't
+    // expose getUserMedia, so a button that must fail isn't helpful. Better to explain
+    // the reason upfront and guide them to paste (scanAvailability.ts).
+
     const pairEntries = idbProbed;
     const scan = scanAvailability();
     if (scanning) {
@@ -953,9 +1075,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     );
   }
 
-  // 配对失败的整屏拦截只在**只有一台**设备时成立:多台在册时,一台密钥失效不该
-  // 把其他几台的卡一并挡在外面 —— 那一台的错误由「更多」页的连接状态如实呈现,
-  // 用户可以在设备列表里把它移除或重新扫码。
+  // Full-screen auth error interception only applies when there's **one device**. With
+  // multiple devices, one bad key shouldn't block cards from others — that device's error
+  // appears honestly in the "More" page's connection status, and the user can remove it
+  // or re-scan from the device list.
+
   if (authError && runtimeDevices.length <= 1) {
     return (
       <div className={styles.gate}>
@@ -977,11 +1101,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }
 
   return (
-    // 整棵树跑在「当前作用域设备」里：里面所有按设备分家的本地存储（草稿、附件、
-    // workspace 记忆）都从这里取命名空间，无需逐个 prop 往下传。
+    // The entire tree runs inside a "current scoped device" context: all local storage
+    // split by device (drafts, attachments, workspace memory) gets its namespace from
+    // here without needing to prop-drill it down.
     <DeviceScopeProvider deviceId={deviceId}>
-    {/* 每台设备一条连接。不渲染任何 DOM：它只是把那条 socket 的生命周期挂在
-        React 树上，设备被移除时 key 消失、清理函数自然把它关掉。 */}
+    {/* One connection per device. No DOM rendering: we're just attaching that socket's
+        lifecycle to the React tree. When the device is removed, the key disappears and
+        the cleanup function naturally closes it. */}
+
     {runtimeDevices.map((d, i) => (
       <DeviceConnection
         key={d.id}
@@ -1003,7 +1130,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     ))}
     <div className={styles.app}>
       <header className={styles.header}>
-        {/* 标题位 = 当前设备。多台在册时它是切换器,一台时退化成那台的名字。 */}
+        {/* Title position = current device. With multiple devices registered, it's a
+            switcher; with one, it's just that device's name. */}
+
         <DeviceSwitcher
           devices={runtimeDevices}
           activeId={activeDeviceId}
@@ -1024,8 +1153,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             </span>
           </span>
         )}
-        {/* 连接状态与强度收成一个图标：状态文案退居 title/aria-label，不再吃掉
-            窄屏 header 的横向空间。 */}
+        {/* Connection status and signal strength merged into one icon: the status text
+            moved to title/aria-label to stop eating horizontal space on narrow screens. */}
+
         <span
           className={styles.connIcon}
           data-kind={connKind}
@@ -1037,14 +1167,17 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </span>
       </header>
 
-      {/* 这条横幅讲的是「iOS 7 天不用会抹掉本地配对」——同源形态根本没有配对可丢
-          （后端就是发出这张页面的那个进程），显示它纯属误导。用 NEEDS_PAIRING
-          而不是 SUPPORTS_PUSH：这条说的是配对，不是推送。
+      {/* This banner warns "iOS erases local pairing after 7 days of disuse" — same-origin
+          mode has no pairing to lose (the backend is the process that served this page),
+          so showing it would be misleading. We check NEEDS_PAIRING, not SUPPORTS_PUSH:
+          this banner is about pairing, not push notifications.
 
-          文案里那句「首次打开需要再扫一次码」不是免责声明，是这条路的实情：iOS 把
-          主屏幕 web app 的存储单独分区，Safari 里的配对不会跟过去，而 A2HS 存的是
-          manifest 的 start_url，fragment 里的密钥也带不走。不先说明，用户点开图标
-          撞上配对门只会以为坏了（见配对门的注释）。 */}
+          The text "first launch needs another scan" is not a disclaimer; it's the reality:
+          iOS isolates home screen web app storage. Pairing saved in Safari won't migrate,
+          and A2HS only stores the manifest's start_url, not the fragment with the secret.
+          Without this warning, users tapping the icon and hitting the pairing gate would
+          think something broke (see the pairing gate comments). */}
+
       {NEEDS_PAIRING && !MOCK && needsA2hsForDurableStorage() && !a2hsDismissed && (
         <div className={styles.pushBanner}>
           <span>
@@ -1064,11 +1197,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </div>
       )}
 
-      {/* 这条横幅以前关不掉：`ios-needs-a2hs` 与 `denied` 两个分支连个按钮都没有，
-          而 iOS 上前者恰恰是**常驻**的（用 Safari 看就一直满足），于是每一屏顶上
-          都挂着一条撵不走的告示。关掉记的是**当时那个状态**而不是一个布尔位：
-          「先添加到主屏幕」被撵走之后，后来真的变成「权限被拒绝」时那条新消息仍
-          该出来说话。 */}
+      {/* This banner used to be non-dismissible: the `ios-needs-a2hs` and `denied` branches
+          had no buttons, and on iOS the former is **persistent** (Safari always meets that
+          condition), so a permanent notice was stuck at the top of every screen. We now
+          remember **which state** it was dismissed in, not just a boolean: after dismissing
+          "add to home screen", if it later actually becomes "permission denied", that new
+          message should still appear. */}
+
       {!MOCK &&
         push !== "granted" &&
         push !== "unsupported" &&
@@ -1098,8 +1233,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </div>
       )}
 
-      {/* 每个 tab 一层。resetKey 是 tab 名 —— 一个 tab 崩了,底部导航还在,切走
-          再切回来自动重试。以前这里任何一处抛异常都是整个 app 变白。 */}
+      {/* One error boundary per tab. resetKey is the tab name — if a tab crashes, the
+          bottom nav stays, and switching away and back retries automatically. Before this,
+          any exception here would blank out the whole app. */}
+
       <main className={styles.main}>
         <ErrorBoundary label={t("{0} 页", t(TAB_LABEL[tab]))} resetKey={tab}>
         {tab === "decisions" ? (
@@ -1162,20 +1299,27 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </ErrorBoundary>
       </main>
 
-      {/* 后退栈的底层：只要不在主页 tab，返回一次先回主页（安卓惯例，反复切 tab
-          也只占一条历史），再返回才轮到栈底的退出确认。挂在浮层之前，保证浮层始终压在它上面。 */}
+      {/* Back stack base: as long as we're not on the decisions tab, one back goes to
+          decisions (Android convention — repeated tab switches only consume one history
+          entry). Then further backs hit the exit confirmation. Rendered before overlays to
+          guarantee they stay on top. */}
       {tab !== "decisions" && <HistoryLayer onBack={() => setTab("decisions")} />}
 
-      {/* 浮层各自一层。tab 层管不到这里(浮层是 main 的兄弟),而根层接住只会
-          让整个 app 变成一张错误页 —— 已知咬过人的 sources_config 异形应答就发生
-          在新会话表单里,它正是一个浮层。resetKey 是栈顶浮层的身份,所以关掉再开
-          自动重试。 */}
+
+      {/* Each overlay gets its own error boundary. The tab layer can't reach here
+          (overlays are siblings of main), and putting it at the root would turn the
+          whole app into an error page — there's a known sources_config malform that hits
+          the new session form, which is an overlay. resetKey is the top overlay's identity,
+          so closing and reopening automatically retries. */}
+
       <ErrorBoundary
         label={t("当前页面")}
         resetKey={overlayKey}
         onDismiss={{ label: t("返回主界面"), run: closeAllOverlays }}
       >
-      {/* 每一层下钻占一层历史，但只渲染栈顶那层详情——底下几层不必挂着重复拉 tail。 */}
+      {/* Each drill-down level gets a history layer, but only render the top one's detail
+          — lower layers don't need to hang around refetching tail. */}
+
       {detailStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setDetailStack((s) => s.slice(0, i))} />
       ))}
@@ -1183,15 +1327,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <SessionDetailView
           key={sessionDetailKey(detailSession.deviceId, detailSession.id)}
           session={detailSession}
-          // 详情页解析子代理/父会话都按 id 找,所以只给它**这条会话所属那一台**的
-          // 列表 —— 混进别台的会话只会让它按同名 id 找到一条自己拉不动的记录。
+          // The detail page resolves subagents/parent sessions by id, so only give it
+          // sessions from **the device this session belongs to** — mixing in others would
+          // let it find a same-numbered id on another device that it can't fetch.
+
           sessions={mergedSessions.filter((s) => s.deviceId === detailSession.deviceId)}
           client={transportFor(detailSession.deviceId)}
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
           onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
-          // 头部那条状态轨上「N 张待决策」要靠这个数。决策卡是跨设备聚合的一个
-          // 收件箱，不挂在 SessionInfo 上，所以按 (设备, 会话) 在这里数——只数
-          // 这一台的卡，免得别台一张同名会话的卡被算进来。
+          // The "N pending decisions" count in the header timeline uses this. Decision cards
+          // are a merged cross-device inbox, not attached to SessionInfo, so we count by
+          // (device, session) here — only this device's cards, so a same-numbered session
+          // on another device doesn't get counted.
+
           pendingDecisions={
             decisions.filter(
               (d) =>
@@ -1202,8 +1350,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         />
       )}
 
-      {/* 知识库列表本身也是一层浮层（从「更多」进来），文档详情再压在它之上——
-          所以它要排在 wikiStack 之前渲染。 */}
+      {/* The wiki list itself is an overlay (entering from "More"), with document details
+          stacked on top — so render it before wikiStack. */}
+
       {showWiki && (
         <>
           <HistoryLayer onBack={() => setShowWiki(false)} />
@@ -1215,7 +1364,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </>
       )}
 
-      {/* 每篇文档占一层，但只渲染栈顶那篇——底下几篇不必挂着重复拉正文/渲 mermaid。 */}
+      {/* Each document gets a layer, but only render the top one — lower docs don't need
+          to stay around refetching content/rendering diagrams. */}
+
       {wikiStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setWikiStack((s) => s.slice(0, i))} />
       ))}
@@ -1252,7 +1403,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </>
       )}
 
-      {/* hostFeatures 默认全关,所以这一层在答案回来之前也不会闪一下 */}
+      {/* hostFeatures defaults to all-off, so this layer won't flicker before the
+          response arrives. */}
+
       {terminal && hostFeatures.terminal && (
         <>
           <HistoryLayer onBack={() => setTerminal(null)} />
@@ -1292,11 +1445,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       {showNewSession && (
         <>
           <HistoryLayer onBack={() => setShowNewSession(false)} />
-          {/* 表单整个跑在**目标设备**的作用域里,而不是当前作用域那台:里面的
-              草稿、附件、上次用的 repo 都是「某一台机器上的东西」。
-              `key` 是必需的而非优化 —— useDraft 只在挂载时读盘(见 draft.ts),
-              光换 provider 的话换设备后表单会顶着 A 的 workspace/附件,还会把
-              它们写进 B 的命名空间。重挂载让每台各自恢复自己的那份。 */}
+          {/* The form runs entirely in the **target device** scope, not the current one:
+              drafts, attachments, last-used repo inside are all "per-machine things".
+              The `key` is required, not optional — useDraft only reads disk on mount
+              (draft.ts), so changing provider alone means switching devices would show
+              A's workspace/attachments but write them to B's namespace. Re-mounting forces
+              each device to restore its own. */}
+
           <DeviceScopeProvider deviceId={newSessionScopeId}>
             <NewSessionSheet
               key={newSessionTargetId}
@@ -1309,11 +1464,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
               relayReady={states[newSessionTargetId]?.connected ?? false}
               onClose={() => {
                 setShowNewSession(false);
-                // 下次打开回到「当前作用域那台」,不记住上次挑的那台 —— 记住会
-                // 让人在 A 页面上打开表单却默默开去 B。
+                // Next open goes back to "whichever device the current scope names",
+                // not the one picked last time — remembering it would let someone open
+                // the form on page A and silently spawn on B.
                 setNewSessionDeviceId(null);
-                // Consumed by the sheet — don't re-upload them if it reopens.
+                // Consumed by the sheet — don't re-upload on reopen.
                 setSharedFiles([]);
+
               }}
             />
           </DeviceScopeProvider>

@@ -3,7 +3,7 @@ import type { ChatComposerAttachment } from "./components/ChatComposer";
 
 /** Everything a user types / picks in a NewSessionForm or ResumeComposer
  *  before submitting. Lifted out of component `useState` so it survives the
- *  form unmounting — navigating away from the "新会话" page, selecting a
+ *  form unmounting — navigating away from the New Session page, selecting a
  *  different session, or the resume dock disappearing no longer wipes the
  *  in-progress draft. */
 export interface ComposerDraft {

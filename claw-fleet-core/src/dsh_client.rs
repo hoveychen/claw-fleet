@@ -385,7 +385,7 @@ mod tests {
     /// and that is where every UI-triggered dsh RPC executes. reqwest's blocking
     /// carrier refuses that context (`wait::enter` → "Cannot drop a runtime…"),
     /// and the panic is swallowed by the task harness, so the invoke promise
-    /// hangs forever — the 「永久加载中」 bug. Construct must therefore survive
+    /// hangs forever — the "Forever Loading" bug. Construct must therefore survive
     /// inside a tokio worker: a clean transport Err (nothing listens on the
     /// probed port), never a panic. Construction is the sharper end of that
     /// contract since 0.1.2, because it now issues the token exchange itself —

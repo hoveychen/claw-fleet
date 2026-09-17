@@ -1,9 +1,9 @@
-// 知识库页：列出桌面端 `fleet wiki publish` 归档的所有文档。空搜索时按 slug
-// 虚拟目录分组；输入 ≥2 字走 relay 全文检索（wiki_search，命中正文并给 snippet）。
-// 顶部可按 workspace 筛选。点开进 WikiDocView 全屏阅读。
+// Wiki page: lists all documents archived via desktop `fleet wiki publish`. When search is empty,
+// groups by slug virtual directory; input ≥2 chars triggers relay full-text search (wiki_search,
+// hits body and returns snippet). Filter by workspace at top. Click to open WikiDocView fullscreen.
 //
-// 从「更多」页进来的全屏浮层（层级沿用 RepoView/PlansView 的 30）——它自己不登记
-// 历史层，那一层由 App 里包着它的 HistoryLayer 负责。
+// Fullscreen overlay from "More" page (z-level follows RepoView/PlansView at 30)—it doesn't
+// register its own history layer; HistoryLayer wrapping it in App handles that.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -30,19 +30,20 @@ const KIND_BADGE: Record<WikiDoc["kind"], string> = {
   htmlDir: "DIR",
 };
 
-/** 文档所属虚拟目录：slug 去掉最后一段。无 `/` 的返回空串。 */
+/** Virtual directory for document: slug minus last segment. Returns empty string if no `/`. */
 function folderOf(slug: string): string {
   const i = slug.lastIndexOf("/");
   return i < 0 ? "" : slug.slice(0, i);
 }
 
-/** 浏览态的排序：整份清单按 updatedMs 一条直线倒序，不再按 slug 虚拟目录分组。
- *  分组时组间只能按目录名字典序排，「未归类」永远钉在页首，于是打开永远先看到老文档。 */
+/** Browse-mode sort: full list by updatedMs descending, no slug directory grouping.
+ *  When grouping, can only sort groups by directory name lexically; "Uncategorized" pinned at top,
+ *  so opening always shows oldest docs first. */
 export function sortDocsByRecency(docs: WikiDoc[]): WikiDoc[] {
   return [...docs].sort((a, b) => (b.updatedMs || 0) - (a.updatedMs || 0) || a.slug.localeCompare(b.slug));
 }
 
-/** slug 最后一段，用作显示名的兜底（当 title 缺失时）。 */
+/** Last segment of slug, fallback for display name when title is missing. */
 function leafOf(slug: string): string {
   const i = slug.lastIndexOf("/");
   return i < 0 ? slug : slug.slice(i + 1);
@@ -58,7 +59,7 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
   const [docs, setDocs] = useState<WikiDoc[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [workspace, setWorkspace] = useState(""); // "" = 全部
+  const [workspace, setWorkspace] = useState(""); // "" = all
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -120,7 +121,7 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
           <span className={styles.docSnippet}>{snippet}</span>
         ) : (
           <span className={styles.docMeta}>
-            {/* 平铺清单没有目录分组头了，虚拟目录改在这一行露出。 */}
+            {/* Flat list has no directory group headers; virtual directory now shows on this line. */}
             {folderOf(doc.slug) && `${folderOf(doc.slug)} · `}
             {doc.workspaceName} · {fmtDate(doc.updatedMs)}
           </span>
@@ -187,7 +188,7 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
           />
         )}
 
-        {/* 搜索态 */}
+        {/* Search mode */}
         {!error && searchActive && (
           <>
             {searching && <div className={styles.hint}>{t("搜索中…")}</div>}
@@ -202,7 +203,7 @@ export function WikiView({ client, onOpenDoc, onBack }: Props) {
           </>
         )}
 
-        {/* 浏览态 */}
+        {/* Browse mode */}
         {!error &&
           !searchActive &&
           docs !== null &&

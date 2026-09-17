@@ -5,7 +5,7 @@ import { resolveFeature } from "./storage";
  * feature the user has not switched off, whatever the disk currently says.
  *
  * This used to live inline in `SettingsPanel`'s mount effect, which made it
- * unreachable until 老板 actually opened 设置 — `App.tsx` renders the panel as
+ * unreachable until the user actually opened Settings—`App.tsx` renders the panel as
  * `settingsOpen && <SettingsPanel/>`. The other startup path (`set_locale` →
  * `reapply_all_guidance_if_installed` in `gui/notification.rs`) only *refreshes*
  * carriers that are already installed, by design. So a newly added default-ON
@@ -87,7 +87,7 @@ export function startupSelfHealCommands(
  *    `~/.claude/CLAUDE.md`. Core now holds a lock around that region, so firing
  *    them together is no longer *corrupting* — but serializing here means they
  *    never queue on that lock in the first place. (Firing all six at once is
- *    exactly what emptied 老板's CLAUDE.md down to a single block on
+ *    exactly what emptied the user's CLAUDE.md down to a single block on
  *    2026-09-07, before the lock existed.)
  *  - `reconcile_codex_guidance` mirrors the Claude sentinels onto
  *    `~/.codex/AGENTS.md` by reading them off disk, so it has to run after the

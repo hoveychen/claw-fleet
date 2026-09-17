@@ -16,11 +16,11 @@ import styles from "./TaskLine.module.css";
 export { splitMarker, taskTip };
 
 /** Where a P-task stands in its plan. `current` is the first still-pending
- *  item — the visible answer to 「做到第几个 P 了」. */
+ *  item — the visible answer to "which P are we on". */
 export type TaskLineState = "done" | "current" | "pending";
 
 /**
- * One P-task row, shared by the 计划树 drawer and the session detail's 任务
+ * One P-task row, shared by the plan tree drawer and the session detail's task
  * facet — the two places a plan's items are read.
  *
  * Two constraints shape it. First, items routinely run to several paragraphs
@@ -41,7 +41,7 @@ export function TaskLine({
 }: {
   text: string;
   state: TaskLineState;
-  /** Open on mount — the 计划树 uses it when a click landed on this cell. */
+  /** Open on mount — the plan tree uses it when a click landed on this cell. */
   startOpen?: boolean;
 }) {
   const { marker, rest } = splitMarker(text);

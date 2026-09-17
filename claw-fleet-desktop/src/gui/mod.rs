@@ -162,9 +162,9 @@ fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
 /// in turn (GitHub API, then the China manifest), so an unreachable network
 /// parks the main thread for ~20s. Nothing UI-facing survives that: invoke
 /// *responses* are delivered through the main thread, `emit()` ends in a
-/// webview eval there, and macOS presents native panels (the 导出 save dialog)
-/// there too. On 2026-09-08 the boss lost 「用系统应用打开」/「在访达中显示」
-/// and got a dead 导出 button in the same minute this command refreshed
+/// webview eval there, and macOS presents native panels (the "导出" (Export) save dialog)
+/// there too. On 2026-09-08 the boss lost the "用系统应用打开" (Open with System App) and "在访达中显示" (Show in Finder)
+/// options and got a dead "导出" (Export) button in the same minute this command refreshed
 /// `~/.fleet/fleet-version-check.json` (checked_at 12:28:18, app launched
 /// 12:28) — see wiki `desktop/ipc-stall-forensics`.
 ///
@@ -200,7 +200,7 @@ fn get_app_version() -> String {
 }
 
 /// The git commit this desktop binary was built from (baked by build.rs, see
-/// `stamp_git_commit`). The 移动端 view compares it against each connected
+/// `stamp_git_commit`). The "移动端" (Mobile) view compares it against each connected
 /// phone's `appCommit` to flag a stale mobile bundle. Like `get_app_version`,
 /// this is a compile-time constant of the running app — not backend data — so
 /// it stays a plain command.
@@ -221,7 +221,7 @@ pub struct AppState {
     pub locale: Arc<Mutex<String>>,
     /// Notification mode: "all" | "user_action" | "none".
     pub notification_mode: Arc<Mutex<String>>,
-    /// How the assistant addresses the user (default "老板" / "Boss").
+    /// How the assistant addresses the user (default "boss").
     pub user_title: Arc<Mutex<String>>,
     /// Cached sessions for tray menu rebuilds.
     pub cached_sessions: Arc<Mutex<Vec<SessionInfo>>>,
@@ -1508,7 +1508,7 @@ pub fn run() {
             );
             // Codex parallel: same 10-minute cadence, but each tick self-gates
             // on codex being installed (no wasted `codex app-server` spawns for
-            // Claude-only users). Feeds the codex 占用率历史 chart.
+            // Claude-only users). Feeds the codex occupancy history chart.
             claw_fleet_core::codex_source::start_codex_background_sampler(
                 std::time::Duration::from_secs(600),
             );

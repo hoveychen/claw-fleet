@@ -22,12 +22,14 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('fgNonce', Date.now());
   }
 
-  /// 分享内容随 startAbility 的 want 参数一起过来（见 SharePanel）。
+  /// Shared content rides in the want parameters of startAbility (see SharePanel).
   ///
-  /// 早先走 preferences 跨进程交接，真机日志里主应用读到的一直是 (empty)：
-  /// UIExtension 与 UIAbility 是两个进程，preferences 未必落在同一沙箱路径，
-  /// 而且还要赌「extension 写完」早于「主应用读取」。want 参数跟着拉起动作
-  /// 一起过去，天然有序，也不依赖沙箱共享。
+  /// Earlier we used preferences for cross-process handoff, but real device logs
+  /// showed the main app always read (empty): UIExtension and UIAbility are two
+  /// processes, preferences might not land in the same sandbox path, and we'd have
+  /// to bet "extension write completes before main app reads". Want parameters
+  /// travel with the launch action, so they're naturally ordered and don't depend
+  /// on sandbox sharing.
   private takeSharedFromWant(want: Want): void {
     const params = want.parameters as Record<string, Object> | undefined;
     const text = params?.['fleet.share.text'];
@@ -39,8 +41,9 @@ export default class EntryAbility extends UIAbility {
     if (textStr.length === 0 && filesStr.length === 0) {
       return;
     }
-    // 文件名列表原样传给 WebShell —— 它会拼成 https://fleet.local/__shared/<name>
-    // 交给 web，由拦截器从沙箱把字节喂回去，最终走 web 既有的附件上传链路。
+    // File name list passes to WebShell as-is — it builds https://fleet.local/__shared/<name>
+    // and hands to web; an interceptor feeds bytes back from the sandbox, ending up in
+    // web's existing file upload pipeline.
     AppStorage.setOrCreate('sharedFiles', filesStr);
     AppStorage.setOrCreate('sharedText', textStr);
     const n: number = AppStorage.get<number>('sharedNonce') ?? 0;
@@ -48,13 +51,15 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'share-diag published nonce=%{public}d', n + 1);
   }
 
-  /// 点推送通知带进来的路由目标。
+  /// Route target brought in by tapping a push notification.
   ///
-  /// relay 把 notify 帧的 url 放进鸿蒙报文的 clickAction.data.fleetUrl(见
-  /// harmony_push 的 build_app_notification),Push Kit 再把整个 data 作为 want
-  /// 参数交给本 Ability —— 所以这里读的 key 就是 relay 那边写的那个。
+  /// The relay puts the notify frame's URL in the HarmonyOS message's
+  /// clickAction.data.fleetUrl (see harmony_push's build_app_notification);
+  /// Push Kit then passes the whole data as want parameters to this Ability —
+  /// so the key we read here is the one the relay writes.
   ///
-  /// 与分享同一套路数:内容跟着拉起动作走,不依赖任何跨进程存储。
+  /// Same pattern as sharing: content travels with the launch action, depends
+  /// on no cross-process storage.
   private takeDeepLinkFromWant(want: Want): void {
     const params = want.parameters as Record<string, Object> | undefined;
     const raw = params?.['fleetUrl'];
@@ -64,12 +69,13 @@ export default class EntryAbility extends UIAbility {
       return;
     }
     AppStorage.setOrCreate('deepLinkUrl', url);
-    // nonce:连点同一条通知时 url 一模一样，只看 url 的 @Watch 不会再触发。
+    // Nonce: repeatedly tapping the same notification gives identical URL;
+    // a @Watch on url alone won't fire again.
     const n: number = AppStorage.get<number>('deepLinkNonce') ?? 0;
     AppStorage.setOrCreate('deepLinkNonce', n + 1);
   }
 
-  /// app 已在后台时，分享和推送点击都走这条路而不是 onCreate。
+  /// When app is backgrounded, sharing and notification taps take this path, not onCreate.
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     this.takeSharedFromWant(want);
     this.takeDeepLinkFromWant(want);
@@ -79,12 +85,14 @@ export default class EntryAbility extends UIAbility {
     this.takeSharedFromWant(want);
     this.takeDeepLinkFromWant(want);
     const cfg = this.context.config;
-    // 语言与主题现在都归 web 层：mobile-web 自己读 navigator.language 和
-    // prefers-color-scheme。这里只保留 initTheme —— 它喂的是 AppStorage 里的
-    // resolvedTheme，原生启动画面/窗口背景仍要用，避免冷启动闪白。
+    // Language and theme are now web-layer concerns: mobile-web reads navigator.language
+    // and prefers-color-scheme itself. We keep only initTheme — it populates AppStorage's
+    // resolvedTheme, still needed by the native splash/window background to avoid a
+    // white flash on cold start.
     initTheme(isDark(cfg.colorMode));
-    // 原先这里还有一次 relay-crypto 自检；加解密已随 RelayCrypto.ets 一起交回
-    // web 层（relayCrypto.ts + crypto.subtle），自检也就没有对象了。
+    // Earlier there was a relay-crypto self-check here; encrypt/decrypt moved back to
+    // the web layer with RelayCrypto.ets (relayCrypto.ts + crypto.subtle), so the
+    // self-check is gone.
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {
@@ -110,10 +118,11 @@ export default class EntryAbility extends UIAbility {
     this.applyWindowBackground();
   }
 
-  /// 窗口底色。安全区那一条(手势条所在的位置)由**窗口**绘制，不是网页——
-  /// ArkUI 组件默认避开安全区，WebView 的底边停在手势条上沿，那条缝露出的
-  /// 是窗口默认底色(白)。给 Web 组件设背景、或在 CSS 里改，都够不着它；
-  /// 唯一管用的是 setWindowBackgroundColor。
+  /// Window background color. The safe-area band (where the gesture bar sits) is
+  /// drawn by the **window**, not the web page — ArkUI components avoid the safe
+  /// area by default, WebView's bottom stops at the gesture bar top, and the gap
+  /// exposes the window's default color (white). Setting a background on the Web
+  /// component or changing it in CSS doesn't reach it; only setWindowBackgroundColor works.
   private applyWindowBackground(): void {
     window.getLastWindow(this.context).then((win: window.Window) => {
       win.setWindowBackgroundColor(themeTokens(AppStorage.get<string>('resolvedTheme') ?? 'dark').bg);

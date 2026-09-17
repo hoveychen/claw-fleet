@@ -91,7 +91,7 @@ const LIVE_TAIL_POLL_MS = 1500;
  *  armed for this long even though the session is still flipping to `live` via
  *  the next rescan. Without this the user's optimistic bubble would just sit
  *  there while nothing polls the JSONL, so the real transcript (and the reply)
- *  would only appear once rescan翻转 status — the exact干等 we're removing. */
+ *  would only appear once rescan flips status — the exact idle wait we're removing. */
 const RESUME_GRACE_MS = 30_000;
 
 /** A pending follow-up the user just submitted, shown immediately as a user
@@ -124,11 +124,11 @@ const InlineFleetAskCard = lazy(() =>
   import("./DecisionPanel").then(({ FleetAskCard }) => ({ default: FleetAskCard })),
 );
 
-/** "由计划 X 触发" provenance chip. Shown only for sessions a one-shot schedule
- *  fired (entrypoint === SCHEDULE_ENTRYPOINT); reverse-maps the session id back
- *  to the schedule via list_schedules' firedSessionId to name the id. Clicking
- *  jumps to the Schedule page. Falls back to a generic "定时触发" label if the
- *  schedule record was cancelled/forgotten and no id is recoverable. */
+/** "Triggered by schedule X" provenance chip. Shown only for sessions
+ *  a one-shot schedule fired (entrypoint === SCHEDULE_ENTRYPOINT); reverse-maps the
+ *  session id back to the schedule via list_schedules' firedSessionId to name the id.
+ *  Clicking jumps to the Schedule page. Falls back to a generic "scheduled"
+ *  label if the schedule record was cancelled/forgotten and no id is recoverable. */
 function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
   const setViewMode = useUIStore((s) => s.setViewMode);
@@ -172,10 +172,10 @@ export function SessionDetail({
 }: {
   inline?: boolean;
   /** May this pane fold the window's chrome away when a doc reader leaves the
-   *  transcript too narrow (see useChromeYield)? True for the two hosts that
-   *  ARE the page — the standalone pane and 任务's detail column. False for the
-   *  DecisionPanel, an overlay that has no business rearranging the page it is
-   *  floating over. */
+   *  transcript too narrow (see useChromeYield)? True for the two hosts that ARE
+   *  the page—the standalone pane and Tasks detail column. False for the
+   *  DecisionPanel, an overlay that has no business rearranging the page it
+   *  floats over. */
   chromeAdaptive?: boolean;
   /** When set, the component runs in standalone mode: its own local
    *  session/messages state, independent from the global useDetailStore.
@@ -296,8 +296,8 @@ export function SessionDetail({
       })
       .catch(() => {});
     // Deadline, not abort: `get_messages_tail` can stay pending forever when the
-    // backend stops answering (proven by freezing dsh's web server — the pane
-    // sat on 「加载中…」 for 80s+ with no error). A late result still renders.
+    // backend stops answering (proven by freezing dsh's web server—the pane
+    // sat on "Loading…" for 80s+ with no error). A late result still renders.
     withStallWatch(
       withCursor.then(() =>
         invoke<RawMessage[]>("get_messages_tail", {
@@ -425,7 +425,7 @@ export function SessionDetail({
   // Called by ResumeComposer the moment a follow-up is accepted by the backend.
   // Only a *resume* is being delivered now, so only it earns a transcript bubble
   // + poller grace; an *enqueue* is merely queued (turn still running, already
-  // live), and its honest affordance is the "已排队" pending chip.
+  // live), and its honest affordance is the "Queued" pending chip.
   const handleResumed = useCallback((finalPrompt: string, mode: "resume" | "enqueue") => {
     if (mode !== "resume") return;
     const text = finalPrompt.trim();
@@ -511,9 +511,9 @@ export function SessionDetail({
      good. Beside it are two surfaces, at two different levels: a permanent rail
      of cards for what is in play right now (running subagents, docs the agent
      named), and a drawer that floats over the transcript to show one looked-up
-     thing at a time (Skills, 决策, Token, 任务, 后台任务, 临时文件, Workflow, or
-     one doc at full width). See detailAux.ts for the state and why the two are
-     no longer one tab strip. */
+     thing at a time (Skills, Decision, Token, Tasks, Background Tasks, Temp Files,
+     Workflow, or one doc at full width). See detailAux.ts for the state and why the
+     two are no longer one tab strip. */
   /* Scoped to this session: the component is re-pointed rather than remounted,
      so the hook is what keeps one conversation's doc cards out of the next
      one's rail. See useSessionAux. */
@@ -721,12 +721,12 @@ export function SessionDetail({
     setRailOverride(null);
   }, [liveSession?.id]);
 
-  // Resume entry: only for "新会话"-launched main sessions (transcript
-  // entrypoint tag) whose process has exited — spawns
-  // `claude --resume <sid> -p <追问>` detached via the generic resume chain.
-  // The form itself (prompt + attachments + model/effort/permission overrides)
-  // lives in ResumeComposer, docked at the bottom of the 对话 tab whenever the
-  // session is resumable — no separate "恢复会话" toggle to click.
+  // Resume entry: only for "New Session" entrypoint tag main sessions whose
+  // process has exited—spawns `claude --resume <sid> -p <follow-up>` detached via
+  // the generic resume chain. The form itself (prompt + attachments +
+  // model/effort/permission overrides) lives in ResumeComposer, docked at the
+  // bottom of the "Conversation" tab whenever the session is resumable—no
+  // separate "Resume Session" toggle to click.
   const canResume = !!liveSession && canResumeSession(liveSession);
   // While the turn is still running, the same dock offers to *queue* a
   // follow-up instead of resuming (which would race the live turn).
@@ -760,7 +760,7 @@ export function SessionDetail({
   }, [liveSession?.id, liveSession?.jsonlPath]);
 
   // Honor an explicit initial facet (e.g. the user clicked the card's plan row
-  // → open straight to 任务). Opens it in the aux column; the conversation is
+  // → open straight to Tasks). Opens it in the aux column; the conversation is
   // always on screen either way.
   useEffect(() => {
     if (isStandalone) return;
@@ -776,17 +776,17 @@ export function SessionDetail({
   const workspacePath = liveSession?.workspacePath;
   const sessionId = liveSession?.id;
 
-  /** Open a doc — a repo file, a wiki doc or a url the agent named — in the
+  /** Open a doc—a repo file, a wiki doc, or a URL the agent named—in the
    *  auxiliary column. Every surface that renders agent prose routes here:
    *  the thing the transcript named opens beside the sentence that named it,
-   *  instead of taking over the window (the 仓库 / 知识库 pages) or landing in
-   *  the window's tab strip, where reading it cost sight of the conversation. */
+   *  instead of taking over the window (the Repo / Wiki pages) or landing in
+   *  the window's tab strip, where reading it costs sight of the conversation. */
   const openAuxDoc = useCallback((kind: AuxDocKind, ref: string, label?: string) => {
     setAux((st) => openDoc(st, kind, ref, label));
   }, []);
 
-  /** What a transcript's ingest card (产出 / 知识库 入库) does when clicked: open
-   *  the thing in the rail, or — when it is already open there — hand it to its
+  /** What a transcript's ingest card (Artifacts / Wiki) does when clicked: open
+   *  the thing in the rail, or—when it is already open there—hand it to its
    *  page. The card reads `expanded` to tell those two apart. */
   const ingestOpen = useMemo<IngestOpenContext>(
     () => ({ open: openAuxDoc, expandedId: aux.expanded }),
@@ -1154,11 +1154,11 @@ export function SessionDetail({
   }, [dockHeight]);
 
   /** Subagents of this session family that are running *right now* — the cards
-   *  at the top of the auxiliary rail. Workflow fan-out
-   *  agents are included (unlike the scope dropdown, which excludes them to
-   *  stay a menu): "看完整个任务的所有 agent 状态" means all of them, and the
-   *  deck caps its render rather than its input. Sorted most-recently-active
-   *  first so the cap keeps the ones actually moving. */
+   *  at the top of the auxiliary rail. Workflow fan-out agents are included
+   *  (unlike the scope dropdown, which excludes them to stay a menu): "view all
+   *  agent states for this task" means all of them, and the deck caps its render
+   *  rather than its input. Sorted most-recently-active first so the cap keeps
+   *  the ones actually moving. */
   const liveSubagents = useMemo((): SessionInfo[] => {
     if (!liveSession) return [];
     const parentId = liveSession.isSubagent
@@ -1229,12 +1229,12 @@ export function SessionDetail({
     return mainSession ? [mainSession, ...ordered] : ordered;
   }, [liveSession, sessions]);
 
-  /* The session's facets — Skills, 决策, Token, 任务, 后台任务, 临时文件, 笔记,
-     Workflow — are things you go *look up*, one at a time, so they live in the
-     header's overflow menu rather than as seven permanent tabs above the panel.
-     Conditional ones appear on the same terms their old tabs did: only when the
-     session has something to show. The tab strip then carries only what the
-     session itself put there (see `auxTabs`). */
+  /* The session's facets—Skills, Decision, Token, Tasks, Background Tasks,
+     Temp Files, Notes, Workflow—are things you go *look up*, one at a time, so
+     they live in the header's overflow menu rather than as seven permanent tabs
+     above the panel. Conditional ones appear on the same terms their old tabs
+     did: only when the session has something to show. The tab strip then carries
+     only what the session itself put there (see `auxTabs`). */
   const auxFacets = useMemo((): AuxFacetItem[] => {
     const list: AuxFacetItem[] = [];
     list.push({ id: "skills", label: t("detail.tab_skills") });
@@ -1273,11 +1273,11 @@ export function SessionDetail({
     workflowTrees.length,
   ]);
 
-  // Every facet the drawer could legitimately be showing — one this session
-  // actually offers. A selection whose subject has since disappeared (the
-  // session took another turn and emptied 后台任务, say) would otherwise hold
-  // the drawer open on nothing. Docs are not in here: they live in the rail,
-  // and `closeDoc` already collapses the reader when its card goes.
+  // Every facet the drawer could legitimately show—one this session actually
+  // offers. A selection whose subject disappeared (the session took another turn
+  // and emptied Background Tasks, say) would otherwise hold the drawer open on
+  // nothing. Docs are not in here: they live in the rail, and `closeDoc` already
+  // collapses the reader when its card goes.
   const auxIds = useMemo(
     () => new Set<string>(auxFacets.map((f) => f.id)),
     [auxFacets],

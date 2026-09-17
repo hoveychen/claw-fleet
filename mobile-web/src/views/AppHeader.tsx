@@ -5,18 +5,17 @@ import styles from "./AppHeader.module.css";
 
 /** The detail-page header, in one place.
  *
- * Nine views (产出详情 / 知识库列表 / 知识库文档 / 仓库 / 仓库详情 / 计划 /
- * 用量 / 终端 / 会话详情) each hand-copied the same `.header` + `.backButton`
- * CSS block and the same JSX shape. Eight of the nine stayed in sync by luck;
- * the ninth drifted to a different padding and title size, which is what made
- * 会话详情 read as belonging to a different app. Nothing enforced the shared
- * shape because there was no shared shape — only a convention re-typed nine
- * times.
+ * Nine views ("产出详情" Artifact Details / "知识库列表" Wiki List / "知识库文档" Wiki Doc /
+ * "仓库" Repo / "仓库详情" Repo Details / "计划" Plan / "用量" Usage / "终端" Terminal /
+ * "会话详情" Session Details) each hand-copied the same `.header` + `.backButton` CSS block
+ * and the same JSX shape. Eight of the nine stayed in sync by luck; the ninth drifted to
+ * different padding and title size, which made "会话详情" read as belonging to a different
+ * app. Nothing enforced the shared shape because there was no shared shape — only a
+ * convention re-typed nine times.
  *
- * Every prop below exists because some page needs it today. There is
- * deliberately no `as`, no size variant and no colour override: all nine want
- * the same chrome, and the drift this component exists to end is exactly what
- * such escape hatches re-enable. */
+ * Every prop below exists because some page needs it today. There is deliberately no `as`,
+ * no size variant and no colour override: all nine want the same chrome, and the drift this
+ * component exists to end is exactly what such escape hatches re-enable. */
 export function AppHeader({
   onBack,
   title,
@@ -27,15 +26,15 @@ export function AppHeader({
   seamless,
 }: {
   onBack: () => void;
-  /** A plain string gets the standard title treatment. 会话详情 passes a node
-   *  because its title row also carries a subagent badge and is itself a tap
-   *  target that unfolds the info panel. */
+  /** A plain string gets the standard title treatment. "会话详情" (Session Details) passes a node
+   *  because its title row also carries a subagent badge and is itself a tap target that
+   *  unfolds the info panel. */
   title: ReactNode;
-  /** A small badge riding immediately after a string title — 知识库's entry
-   *  count. Only meaningful with a string title; a node title lays out its own
-   *  row and puts whatever it needs in there. */
+  /** A small badge riding immediately after a string title — "知识库" (Wiki)'s entry
+   *  count. Only meaningful with a string title; a node title lays out its own row and
+   *  puts whatever it needs in there. */
   titleAfter?: ReactNode;
-  /** Second line, dim and small — 仓库详情's repo path, 知识库文档's slug. */
+  /** Second line, dim and small — "仓库详情" (Repo Details) repo path, "知识库文档" (Wiki Doc) slug. */
   sub?: ReactNode;
   /** Ellipsize `sub` from the start so its tail stays readable. For paths:
    *  "…/claude-fleet/mobile-web" says which one, "/Users/hoveychen/wor…" does

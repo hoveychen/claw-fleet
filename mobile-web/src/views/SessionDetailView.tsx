@@ -238,7 +238,7 @@ interface ToolMeta {
   isError?: boolean;
   thumbs?: string[];
   /** Set on the two calls that file something into a store, so the row can show
-   *  the deliverable instead of a bare 「产出」 chip. */
+   *  the deliverable instead of a bare "产出" (Artifact) chip. */
   ingest?: IngestSummary;
 }
 
@@ -378,8 +378,9 @@ function deriveMetaLabel(body: string): string {
   return t("注入指令");
 }
 
-/** 推上来的那一面在头部显示的标题。旧 tab 条上的六个标签只剩这五个——「消息」
- *  不在里面，因为它不再是一个 tab：它就是这一页本身。 */
+/** The title displayed in the header for the active pane. Of the six labels
+ *  that used to sit on the old tab bar, only these five remain — "Messages" is
+ *  not here because it is no longer a tab, it is this page itself. */
 const PANE_TITLE: Record<DetailPane, string> = {
   decisions: "决策记录",
   plans: "计划",
@@ -398,10 +399,11 @@ interface Props {
   onBack: () => void;
   /** Push a session id as a new drill-down layer (subagent / parent nav). */
   onOpenSessionId: (id: string) => void;
-  /** 归属这条会话的待决策卡张数。决策卡是跨设备聚合的一个收件箱（App 的
-   *  `aggregateDecisions`），不在 `SessionInfo` 上，所以由 App 按 sessionId 数好
-   *  传进来——头部那条状态轨要靠它画「N 张待决策」，那是轨上唯一一颗真正
-   *  「挡着你」的 pill。 */
+  /** Count of pending decision cards for this session. Decision cards are an
+   *  aggregated inbox across devices (`App`'s `aggregateDecisions`), not stored on
+   *  `SessionInfo`, so the App counts them by sessionId and passes them here —
+   *  the status rail at the top uses this to render "N pending decisions", the
+   *  only pill that truly blocks work. */
   pendingDecisions?: number;
 }
 
@@ -648,20 +650,22 @@ function ToolStep({
   const name = b.name ?? "";
   const fleetTool = isFleetTool(name);
   const summary = meta?.ingest
-    ? // 入库调用的身份全在下面那张卡上，行里只留动作名（且 relay 把 title /
-      // slug 裁掉了，原来的模板在手机上只剩半句）。
+    ? // For ingestion calls, full identity lives on the card below; the line
+      // shows only the action name (the relay strips title/slug, so the old
+      // template is now half a sentence on mobile).
       ingestStepLabel(meta.ingest)
     : fleetTool
     ? fleetSummary(fleetTool, b.input ?? {})
     : isDecisionTool(name)
       ? decisionSummary(b)
       : name === "TaskStop"
-        ? // TaskStop 的 input 只有一个不可读的 task_id，「停掉了什么」只存在于
-          // 结果里（relay 把命令首行放进 digest.stoppedCommand）。
+        ? // TaskStop's input is just an opaque task_id; what was stopped lives only
+          // in the result (the relay puts the command's first line into digest.stoppedCommand).
           meta?.digest?.stoppedCommand
           ? t("停止后台任务：{0}", meta.digest.stoppedCommand)
           : t("停止后台任务")
-        : // TaskOutput 同理：读的是哪个任务只在结果里（digest.taskDescription）。
+        : // TaskOutput likewise: which task we're reading from lives only in the
+          // result (digest.taskDescription).
           name === "TaskOutput" && meta?.digest?.taskDescription
           ? t("读取后台任务输出：{0}", meta.digest.taskDescription)
           : toolSummary(b);
@@ -700,8 +704,9 @@ function ToolStep({
           {t("打开子代理")} →
         </button>
       )}
-      {/* 这一步产出的东西本身，铺在步骤行下面——它是这次调用的**结果**，
-          不是又一条脚手架记录，所以不必展开就能看见。 */}
+      {/* Deliverables from this step appear below the step line — they are the
+          **result** of this call, not scaffold records, so they are always visible
+          without expanding. */}
       {meta?.ingest && <IngestCard ingest={meta.ingest} client={client} />}
       {meta?.thumbs && <ThumbRow srcs={meta.thumbs} />}
       {open && expandable && (
@@ -1093,14 +1098,17 @@ export function SessionDetailView({
   onOpenSessionId,
   pendingDecisions = 0,
 }: Props) {
-  /** 推上来的那一面（旧 tab 条上的五页之一），`null` = 就在消息页上。
+  /** The active pane — one of the five tabs that used to sit on the old bar —
+   *  or `null` to stay on the message page.
    *
-   *  旧实现是一个六值的 `tab`，其中 `"messages"` 是缺省值——于是「消息」和
-   *  「Workflow」在结构上是平权的两个选项，而它们在使用上完全不平权：消息是
-   *  你来这一页的原因，其余五个是偶尔查一次的检查面。改成 `pane | null` 之后
-   *  这个不对称写进了类型里，正文也不再被一条常驻的 tab 条压着。 */
+   *  The old code had a six-valued `tab` with `"messages"` as the default,
+   *  making messages and Workflow structurally equivalent options though they
+   *  were vastly unequal in use (messages are why you came to this page; the
+   *  other five are occasional check-in views). Switching to `pane | null`
+   *  enshrines this asymmetry in the type and lets the body escape the
+   *  permanent tab bar. */
   const [pane, setPane] = useState<DetailPane | null>(null);
-  /** 「会话详情」半屏。点标题或点头部右上角都开它。 */
+  /** Session detail sheet — opened by tapping the title or the ⋮ button. */
   const [sheetOpen, setSheetOpen] = useState(false);
   const openTarget = useCallback((target: PillTarget) => {
     if (target === "sheet") setSheetOpen(true);
@@ -1164,8 +1172,9 @@ export function SessionDetailView({
   }, [session, sessions]);
 
   useEffect(() => {
-    // 钻进子代理时把半屏和推上来的那一面都收掉：它们描述的是你刚离开的那个
-    // 会话（半屏上的 chip、watch、作用域清单全是上一个会话的）。
+    // When drilling into a subagent, close the sheet and active pane: they
+    // describe the session you just left (every chip, watch, and scope list is
+    // from the previous session).
     setSheetOpen(false);
     setPane(null);
     // Never carry one session's pending echo (or a stuck in-flight flag) over.
@@ -1195,19 +1204,23 @@ export function SessionDetailView({
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
-  // 回复窗浮在转录之上、不占布局高度，所以滚动区要自己让出被遮住的那一截。
-  // 用实测值而不是写死一个数：胶囊会随输入内容、附件、排队消息一起长高。
+  // The composer floats above the transcript and doesn't consume layout space,
+  // so the scroll area needs to yield the space it occludes. Use measured values
+  // rather than hardcoding: the composer grows with input, attachments, and
+  // queued messages.
   //
-  // 胶囊**常驻**：它曾经跟着滚动方向自动滑走又滑回来（累计下滚 48px 折叠、上滚
-  // 24px 展开），代价是每进出一次就增删一整根胶囊的底部留白 —— 而留白是加在内容
-  // 下方的，scrollTop 要么跟不上（最后几行被压在胶囊底下）、要么被 clamp（整篇
-  // 文字在手指底下往下甩一截）。这两个 bug 都长在那个机制上，所以连同它的
-  // DELTA/FLOOR/SETTLE 常量、settle 窗口和「滚不动了就自动弹回」的安全网一起
-  // 拆掉了：现在这个数只随胶囊自身的内容变，滚动永远不动它。
+  // The composer is permanent; it used to auto-slide open/closed based on scroll
+  // direction (48px down to collapse, 24px up to expand), but that cost a full
+  // composer's worth of bottom padding every cycle — and padding is below content,
+  // so scrollTop either lagged (last lines hidden under the composer) or got
+  // clamped (text jumped under your finger). Both bugs lived in that mechanism,
+  // so it was torn out entirely along with its DELTA/FLOOR/SETTLE constants,
+  // settle window, and bounce-back safety net. Now this value only changes when
+  // the composer's own content changes; scrolling never touches it.
   const [composerHeight, setComposerHeight] = useState(0);
   const working = WORKING.includes(session.status);
 
-  // ── Message polling (only while the 消息 tab is showing) ──────────────
+  // ── Message polling (only while viewing messages) ──────────────
   //
   // Incremental model: bootstrap = locate the file end (`tail_delta` without
   // offset) + one full `tail` for the initial window; steady state = poll
@@ -1358,17 +1371,20 @@ export function SessionDetailView({
 
   // ── Auto-scroll: stick to bottom unless the user scrolled up ──────────
   //
-  // 这个 handler 只剩这一件事了。它曾经还兼着驱动胶囊的自动折叠（累计位移、方向
-  // 反转、settle 窗口），那套机制已整体拆除 —— 见 composerHeight 处的注释。
+  // This handler does one thing now. It used to also drive the composer's
+  // auto-collapse (accumulated distance, direction reversals, settle window),
+  // but that whole mechanism was torn out — see the comment at composerHeight.
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }, []);
 
-  // composerHeight 也在 deps 里：底部留白是加在内容**下方**的，加多少 scrollTop
-  // 都不会自己跟上。胶囊现在虽然不再随滚动进出，但仍会随输入内容、附件、排队消息
-  // 和决策折叠条长高变矮；贴底时跟着重新贴一次，最后一条消息才不会落到它底下。
+  // composerHeight is also in deps: the bottom padding is added **below** the
+  // content, so no amount of adjusting scrollTop makes it keep up on its own.
+  // The composer no longer auto-collapses with scrolling, but it still grows and
+  // shrinks with input, attachments, queued messages, and collapsed decision cards;
+  // when stuck to bottom, we re-stick and keep the last message in view.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
@@ -1472,8 +1488,9 @@ export function SessionDetailView({
     <AgentNavProvider nav={nav}>
     <InFlightToolsContext.Provider value={inFlightTools}>
     <div className={styles.page}>
-      {/* `seamless`: 头部底下紧跟着的是状态轨（自带一条底线）或 ↑来自 面包屑，
-          两者都与头部同属一层 chrome；头部再画一条底线就把一块面切成两片。
+      {/* `seamless`: below the header comes either the status rail (which has its
+          own bottom border) or the ↑from breadcrumb — both are the same chrome
+          layer; adding another border to the header would split the block in two.
           This page is why AppHeader exists: it is the one that drifted. */}
       <AppHeader
         onBack={onBack}
@@ -1482,18 +1499,19 @@ export function SessionDetailView({
           <div className={styles.headerTitle}>
             {/* Subagent identity only. The scope *switcher* that used to sit
                 here is gone — its full family list lives in the ☰ menu, and on a
-                390px header the trigger cost 83px to say "主进程" about the scope
-                you were already looking at. A subagent still says so here (the
-                ↑来自 breadcrumb below names the parent); a main session shows
-                nothing, which is where the title needs the width. */}
+                390px header the trigger cost 83px to say "主进程" (Main Process)
+                about the scope you were already looking at. A subagent still says
+                so here (the ↑来自 (from) breadcrumb below names the parent); a main
+                session shows nothing, which is where the title needs the width. */}
             {session.isSubagent && (
               <span className={styles.subagentBadge}>⎇ {session.agentType || t("子代理")}</span>
             )}
-            {/* 标题是打开「会话详情」半屏的 tap 目标——这一行省略号吃掉的东西
-                （完整标题、工作区、模型、各种 id）都在那张半屏上。它曾经展开的
-                是一块 inline 面板，那块面板的高度是从正文借的，所以只放得下五行
-                静态字段；半屏借的是临时的屏幕，于是 watch / 子代理 / 计划进度
-                终于有地方摊开。 */}
+            {/* The title is the tap target for the session detail sheet. The
+                ellipsis hides what the sheet shows (full title, workspace, model,
+                various ids). It used to expand an inline panel, whose height had to
+                borrow from the body (fitting only five static fields); the sheet
+                borrows the whole screen, so watch, subagent, and plan progress
+                finally have room to breathe. */}
             <button
               type="button"
               className={styles.titleTap}
@@ -1508,9 +1526,11 @@ export function SessionDetailView({
           </div>
         }
         actions={
-          /* 右上角那颗脉冲状态点搬到状态轨上的「运行中」pill 里去了——一颗
-             8px 的无标签圆点要靠猜，带着两个字就不用。这里只留一个开半屏的
-             按钮，跟点标题是同一个动作，为的是让它可发现。 */
+          /* The pulse status dot used to live in the top-right; it moved into the
+             "Running" pill on the status rail. A pulsing 8px unlabeled dot requires
+             guessing; two characters make it discoverable. Here we keep just the
+             sheet-open button, which does the same as tapping the title, making the
+             feature discoverable. */
           <button
             type="button"
             className={styles.moreButton}
@@ -1555,9 +1575,10 @@ export function SessionDetailView({
         </button>
       )}
 
-      {/* 推上来的那一面。整页盖住消息（而不是跟消息共享一条 tab 条），所以它
-          拿得到整个屏宽和整个屏高——「Token 与花费」那张表和 Workflow 那棵树
-          在旧的 tab 布局里都是横向不够用的。 */}
+      {/* The active pane — it overlays the full page (rather than sharing a tab
+          bar with messages), so it gets the full screen width and height. The
+          Token table and Workflow tree both need horizontal space that the old
+          tab layout couldn't spare. */}
       {pane !== null && (
         <div className={styles.pane}>
           <HistoryLayer onBack={() => setPane(null)} />

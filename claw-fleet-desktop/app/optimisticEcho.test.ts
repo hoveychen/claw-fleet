@@ -24,9 +24,9 @@ describe("landedUserTexts", () => {
 
   // dsh stores its agent-instructions, its runtime snapshot and every Fleet
   // guidance block as `user/message` records; core flags them `isMeta` and the
-  // list folds them into one 系统上下文 card. Counting one as the user's prompt
-  // retired the echo against a row nobody can see, and the submitted message
-  // disappeared from the conversation with nothing left in its place.
+  // list folds them into one system-context card. Counting one as the user's
+  // prompt retired the echo against a row nobody can see, and the submitted
+  // message disappeared from the conversation with nothing left in its place.
   it("does not count a folded meta row as the user's prompt", () => {
     const landed = landedUserTexts([user("修一下花费明细", true)]);
     expect(stillPending("修一下花费明细", landed)).toBe(true);

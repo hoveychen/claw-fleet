@@ -1,33 +1,37 @@
-// 会话详情半屏顶部那行 chip 的内容，抽成纯函数。
+// Content of the chip row at the top of the session detail half-sheet, extracted into a pure function.
 //
-// 它的前身是 header 下面那块 inline 展开的面板：五行 label/value 表格，吃掉约
-// 90px 去说五个短词。表格对齐在那里没有换来什么——这些字段都是「一眼确认」型
-// 的读数（模型对不对、在哪个工作区、烧了多少），不需要纵向对齐成列。改成一行
-// 可折行的 chip 之后，同样五项占约 26px，省下来的高度归给半屏上真正需要摊开的
-// 东西：watch 在等什么、几个子代理在跑、计划走到哪。
+// Its predecessor was an inline-expanded panel below the header: a five-row label/value table
+// consuming ~90px to display five short terms. The table alignment there provided no benefit — these
+// fields are all "at-a-glance" readings (correct model?, which workspace?, how much spent?), needing
+// no vertical column alignment. After switching to a single line of wrappable chips, the same five
+// items occupy ~26px, freeing up height for what the half-sheet really needs to unfold: what watch is
+// waiting for, how many sub-agents are running, where the plan is at.
 //
-// 构造逻辑放这里而不是组件里，是为了能被单测钉住「哪些字段在缺席时不出现」
-// ——一颗写着「模型 —」的 chip 比没有这颗更糟。
+// The construction logic is here rather than in the component so it can be pinned down by unit tests:
+// "which fields disappear when absent" — a chip saying "model —" is worse than no chip.
 //
-// 刻意只放这几项：模型、推理强度、工作区、上下文占用、花费。两条路径不在这里
-// ——它们在半屏「会话」那一节的复制行副行上原样摆着，那才是路径真正被用到的
-// 地方（复制走）；时间戳也不在，每条消息旁边就有，会话列表上还有「几分钟前」。
-// 状态、watch、子代理、计划、接力都是会变的，它们在状态轨和半屏的「此刻」/
-// 「进度」两节里，见 sessionStatusPills.ts。
+// Only these items deliberately: model, inference strength, workspace, context usage, cost. Paths are
+// not here — they sit as-is in the copy row and secondary row of the "Session" section on the
+// half-sheet, which is where paths are actually used (copied); timestamps are not here either, they're
+// beside each message, and the session list has "a few minutes ago". State, watch, sub-agents, plan,
+// handoff all change — they're in the status track and the half-sheet's "Now" / "Progress" sections;
+// see sessionStatusPills.ts.
 //
-// 桌面端的对应物是 SessionDetail.tsx 的 meta_row（那里字段更多，因为桌面横向
-// 排得下一整行 chip）。
+// The desktop equivalent is `meta_row` in SessionDetail.tsx (with more fields there, since desktop can
+// fit a full row of chips horizontally).
 
 import { t } from "../i18n";
 import { toolForAgentSource } from "../agentSource";
 import type { SessionInfo } from "../types";
 
 /**
- * 半屏顶部那行 chip 的文案，按固定顺序。缺席的字段不产出 chip（不是产出一颗
- * 空的）—— 一个还没记到模型的会话少一颗，而不是多一颗「模型 —」。
+ * Copy for the chip row at the top of the half-sheet, in fixed order. Absent fields produce no chip —
+ * produce nothing rather than an empty one — a session with no recorded model has one fewer chip, not
+ * one more "model —".
  *
- * 前三项是裸值：模型名、推理强度档位、工作区名本身就自带含义，加个标签只是
- * 重复。后两项带标签：孤零零一个「40%」说不清是上下文还是别的什么。
+ * The first three are bare values: model name, inference strength tier, workspace name are
+ * self-explanatory; adding a label would be redundant. The last two carry labels: a lone "40%" doesn't
+ * clarify whether it's context or something else.
  */
 export function buildInfoChips(s: SessionInfo): string[] {
   const chips: string[] = [];
@@ -37,16 +41,15 @@ export function buildInfoChips(s: SessionInfo): string[] {
   };
 
   push(s.model);
-  // 紧跟模型：这两个合起来才说明「这个会话在用什么算」。桌面 header 上它们
-  // 也是相邻的两颗 chip。
+  // Right after model: these two together explain "what compute this session is using". On desktop
+  // header, they're also adjacent chips.
   push(s.effort);
   push(s.workspaceName);
-  // contextPercent 是 0–1 的比值（对齐桌面 SessionDetail 的 `* 100` 用法），
-  // 不是百分数。
+  // contextPercent is a 0–1 ratio (aligning with desktop SessionDetail's `* 100` usage), not a percentage.
   if (s.contextPercent != null) {
     chips.push(t("上下文 {0}%", Math.round(s.contextPercent * 100)));
   }
-  // 半分钱以下的花费显示成 $0.00，等于没说；与桌面端同一道门槛。
+  // Costs below half a cent display as $0.00, same as not mentioning it; same threshold as desktop.
   if (s.totalCostUsd != null && s.totalCostUsd >= 0.005) {
     chips.push(`$${s.totalCostUsd.toFixed(2)}`);
   }
@@ -54,12 +57,12 @@ export function buildInfoChips(s: SessionInfo): string[] {
 }
 
 /**
- * 能贴进终端直接恢复这个会话的命令。
+ * Command that can be pasted directly into a terminal to resume this session.
  *
- * 只对 Claude 源给：`claude --resume <id>`（形状见 claw-fleet-core 的
- * session_launch.rs 顶部注释）。codex 的恢复是 `codex exec resume <id>`，那是
- * headless 形态，交互形态另说；与其给一条可能贴上去就报错的命令，不如这一项
- * 干脆不出现（返回 null，菜单据此不渲染该条）。dsh 没有 CLI 恢复入口。
+ * Only for Claude source: `claude --resume <id>` (see comment at top of `claw-fleet-core/session_launch.rs`).
+ * For Codex, resume is `codex exec resume <id>`, which is a headless form, interactive form differs; rather
+ * than provide a command that might error on paste, this item simply doesn't appear (returns null, menu doesn't
+ * render it accordingly). Dsh has no CLI resume entry.
  */
 export function resumeCommand(s: SessionInfo): string | null {
   return toolForAgentSource(s.agentSource) === "claude" ? `claude --resume ${s.id}` : null;

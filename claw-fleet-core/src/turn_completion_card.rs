@@ -147,11 +147,12 @@ fn epoch_ms_of(rfc3339: &str) -> Option<u64> {
 ///
 /// It arrives as a *user prompt*, which is the only channel a resumed session
 /// has — and a session that reads a user prompt starts a turn and looks for
-/// work to do. The first version read "下次收尾时请把结论/下一步包装成一张决策卡"
-/// and agents dutifully took it as a brief to keep going: a relay successor was
-/// observed re-planning its whole P-task off the back of it. So the text leads
-/// with what it *is* (a meta-notice about the previous turn's shape, not a new
-/// task) and names the one action it wants, before anything else.
+/// work to do. The first version asked agents to "wrap up conclusions and next
+/// steps as a decision card for next time", and agents dutifully took it as a
+/// brief to keep going: a relay successor was observed re-planning its whole
+/// P-task off the back of it. So the text leads with what it *is* (a
+/// meta-notice about the previous turn's shape, not a new task) and names the
+/// one action it wants, before anything else.
 pub fn reminder_prompt() -> String {
     "（Fleet 系统提示 —— 这不是新任务，也不是老板给你的指令）\
      上一轮任务已经结束了。这条只是告诉你：那一轮收尾用的是纯文本、没有决策卡，\
@@ -365,11 +366,11 @@ fn deliver_reminder(job: &TurnCardJob, resp: &ElicitationResponse) {
 }
 
 /// Build the reminder prompt, folding in the user's answer when it carries
-/// substance beyond a bare "收到".
+/// substance beyond a bare acknowledgement.
 fn reminder_prompt_with_answer(answer: Option<&str>) -> String {
     let notice = reminder_prompt();
     match answer {
-        // "收到" is a pure acknowledgement — re-report and stop, nothing else.
+        // Acknowledged: a pure acknowledgement — re-report and stop, nothing else.
         Some("收到") | None => format!("{notice}\n\n{REMINDER_ACTION}"),
         // The boss explicitly asked for more work, which is the one thing that
         // overrides the "do not keep working" line above.
@@ -484,7 +485,7 @@ mod tests {
         let ack = reminder_prompt_with_answer(Some("收到"));
         assert!(ack.contains("决策卡"));
         assert!(ack.contains("结束回合"));
-        // The only sentence that licenses more work is the 「继续」 exception.
+        // The only sentence that licenses more work is the "continue" ("继续") exception.
         assert!(!ack.contains("这一条是例外"));
         assert_eq!(reminder_prompt_with_answer(None), ack);
         assert!(reminder_prompt_with_answer(Some("换个方案")).contains("换个方案"));

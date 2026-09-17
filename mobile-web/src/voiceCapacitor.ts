@@ -1,14 +1,16 @@
-// Capacitor 壳（iOS / Android）的语音识别。
+// Voice recognition in the Capacitor shell (iOS / Android).
 //
-// 底下是 iOS 的 SFSpeechRecognizer 和 Android 的 SpeechRecognizer，由
-// @capgo/capacitor-speech-recognition 桥接。选这个包而不是自己写 Capacitor
-// plugin：自己写要维护 Swift + Kotlin 两套原生代码，而它活跃维护、已合入标点
-// 支持与分段会话，且同一家的 @capgo/capacitor-share-target 我们已经在用。
+// Underneath is iOS's SFSpeechRecognizer and Android's SpeechRecognizer, bridged by
+// @capgo/capacitor-speech-recognition. We chose this package over writing our own
+// Capacitor plugin: rolling our own requires maintaining Swift + Kotlin, while this
+// stays actively maintained, supports punctuation and segmented sessions, and we already
+// use its sibling @capgo/capacitor-share-target.
 //
-// **Android 上这条路依赖 GMS**：无 Google 服务的国产 ROM 上
-// `SpeechRecognizer.isRecognitionAvailable()` 为 false，插件的 available() 会
-// 如实返回 false，于是按钮整个不出现。这是既定的方案边界（不引云服务兜底），
-// 不是 bug —— 见计划 voice-input-native 的取舍。
+// **On Android, this relies on GMS**: on Chinese ROMs without Google services,
+// `SpeechRecognizer.isRecognitionAvailable()` returns false, and the plugin's available()
+// honestly returns false, so the button doesn't appear. This is the deliberate scope
+// boundary (no cloud-service fallback), not a bug — see the voice-input-native plan's
+// trade-offs.
 
 import { SpeechRecognition } from "@capgo/capacitor-speech-recognition";
 import type {
@@ -19,14 +21,16 @@ import type {
 } from "./voiceInput";
 
 /**
- * 原生错误码 → 我们的分类。
+ * Native error code → our classification.
  *
- * **插件没有文档化的错误码枚举**：`SpeechRecognitionErrorEvent.code` 是原生侧
- * 透传的字符串（Android 的 SpeechRecognizer 常量、iOS 的 NSError），两个平台
- * 各说各话。所以这里按关键词做尽力匹配，认不出的一律归到 unavailable ——
- * 宁可说得笼统，也不要把一个网络问题说成没有权限。
+ * **The plugin doesn't document an error code enum**: `SpeechRecognitionErrorEvent.code`
+ * is a pass-through string from the native side (Android's SpeechRecognizer constants,
+ * iOS's NSError), and the two platforms speak different languages. So we keyword-match
+ * here and fall back to unavailable for unknowns — it's better to be vague than misattribute
+ * a network issue as a permission failure.
  *
- * 真机验收（P6）时要拿实际打出来的码值校准这张表。
+ * On real device acceptance (P6) this table will be calibrated against actual error
+ * codes.
  */
 export function classifyNativeError(code: string): VoiceErrorKind {
   const c = code.toLowerCase();
@@ -49,13 +53,14 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
       const { available } = await SpeechRecognition.available();
       return available;
     } catch {
-      // 壳里插件没装好 / 原生侧抛了 —— 当作不可用，按钮不出现。
+      // Plugin not installed / native side threw — treat as unavailable, button doesn't appear.
       return false;
     }
   },
 
   async start(lang: string, handlers: VoiceHandlers): Promise<VoiceSession> {
-    // cancel 之后原生仍会把事件送完。调用方已经说了不要，这里之后一律咽掉。
+    // After cancel, native side still sends events. Caller said no; swallow all
+    // subsequent ones.
     let dead = false;
     const listeners: { remove: () => void }[] = [];
     const teardown = () => {
@@ -63,7 +68,8 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
       listeners.length = 0;
     };
 
-    // 权限：先查再要。iOS 上这一项同时覆盖语音识别与麦克风两个授权。
+    // Permissions: check first, then request. On iOS this covers both speech
+    // recognition and microphone authorization.
     try {
       let status = await SpeechRecognition.checkPermissions();
       if (status.speechRecognition !== "granted") {
@@ -78,8 +84,9 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
       return { stop: () => {}, cancel: () => {} };
     }
 
-    // 原生侧真的开始收音了才算就绪。'startingListening' 不算 —— 那一步还在
-    // 起识别会话，此时说的话仍然会丢。
+    // Ready only when the native side actually starts capturing. 'startingListening'
+    // doesn't count — that's still spinning up the recognition session and speech is
+    // still lost.
     listeners.push(
       await SpeechRecognition.addListener("listeningState", (e) => {
         if (dead) return;
@@ -90,8 +97,9 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
     listeners.push(
       await SpeechRecognition.addListener("partialResults", (e) => {
         if (dead) return;
-        // 连续 PTT 会话下 accumulatedText 是含本轮在内的全文，比 matches[0]
-        // 完整；没有它再退回本轮的首条匹配。
+        // In continuous PTT sessions, accumulatedText is the full text including this
+        // round, more complete than matches[0]; fall back to this round's first match
+        // if it's absent.
         const text = e.accumulatedText ?? e.matches?.[0] ?? "";
         if (text) handlers.onPartial(text);
       }),
@@ -106,13 +114,15 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
       }),
     );
 
-    // **不要 await 这个 promise**：插件的 start() 要到整段识别结束才 resolve，
-    // await 它就等于把 VoiceSession 扣到用户说完为止，UI 全程拿不到可以按停止
-    // 的句柄。发起它、挂上收尾回调，立刻把 session 交出去。
+    // **Don't await this promise**: the plugin's start() doesn't resolve until the
+    // entire recognition ends. Awaiting it would hold VoiceSession hostage until the
+    // user finishes speaking, leaving the UI with no handle to press stop. Fire it, hang
+    // the cleanup, and hand the session out immediately.
     void SpeechRecognition.start({
       language: lang,
       partialResults: true,
-      // iOS 16+ 的原生标点。语音输入的内容要直接进 prompt，没有标点很难读。
+      // iOS 16+ native punctuation. Speech input goes straight to the prompt, and it's
+      // hard to read without punctuation.
       addPunctuation: true,
     })
       .then(({ matches }) => {
@@ -121,8 +131,9 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
         teardown();
         const text = matches?.[0];
         if (text) handlers.onFinal(text);
-        // promise resolve 就是「这段识别结束了」,不管是用户按的停止还是原生
-        // 自己判定说完了。上层据此收掉「正在听」。
+        // Promise resolution means "this recognition is done", whether the user pressed
+        // stop or the native side decided speech is over. The caller uses this to close
+        // "listening".
         handlers.onEnd();
       })
       .catch((e: unknown) => {
@@ -134,7 +145,7 @@ export const capacitorVoiceProvider: VoiceInputProvider = {
       });
 
     return {
-      // stop 让原生正常收尾,上面的 .then 会拿到最终结果。
+      // stop lets the native side wrap up normally; the .then above gets the final result.
       stop: () => {
         if (dead) return;
         void SpeechRecognition.stop().catch(() => {});

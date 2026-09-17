@@ -74,7 +74,7 @@ export interface CodexUsageItem {
  *
  *  dsh is a bring-your-own-key harness: it publishes no account, quota or
  *  balance API of its own (its `/api` catalog has no `account.*` / `usage.*`),
- *  so the number can only come from whichever provider the user配置了 key.
+ *  so the number can only come from whichever provider the user configured a key for.
  *  That makes the shape money-first rather than window-first — `balance` is a
  *  remaining amount with no denominator, and only OpenRouter's per-key ceiling
  *  (`limit`/`used`) is a utilization anything can draw a bar from. */

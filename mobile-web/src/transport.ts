@@ -1,131 +1,147 @@
-// 移动端 UI 与「后端」之间的唯一接缝。
+// The only seam between mobile UI and the "backend".
 //
-// 这个 app 的所有数据都经过一个对象:视图拿到它、调 `request()`、订阅它推来的
-// 回调。在此之前那个对象只可能是 `RelayClient`,于是「经过 relay」被当成了
-// 「有数据」的同义词。它们其实是两件事:relay 解决的是「手机不在桌面端同一
-// 张网里」,而同源部署(`fleet webui` 把移动端 UI 和数据路由从同一个端口发出)
-// 根本没有这个问题——那里既没有配对密钥,也没有 WebSocket,更没有 relay。
+// All data in this app flows through a single object: the view acquires it, calls `request()`,
+// and subscribes to callbacks it pushes. Until now, that object could only be `RelayClient`,
+// so "via relay" became a synonym for "has data". But they are actually two separate things:
+// relay solves "the phone is not on the same network as the desktop", while same-origin
+// deployment (`fleet webui` emits both the mobile UI and data routes from the same port)
+// has no such problem — no pairing keys, no WebSocket, no relay at all.
 //
-// 所以接缝在这里显形:`FleetTransport` 是视图真正依赖的那一小块面,
-// `RelayClient` 只是它的第一个实现。第二个实现走同源 HTTP,并且**不 import
-// 本文件之外的任何 relay 代码**——这一点是硬约束而非风格偏好:`relay.ts`
-// 在模块加载时就会执行 `resolveRelayBase()` 去解析一个 relay 地址,浏览器构建
-// 只要碰到它,就会带着一个自己永远不会用的 relay 客户端上路。
+// So the seam manifests here: `FleetTransport` is the small surface the view actually depends
+// on, and `RelayClient` is just its first implementation. The second implementation uses
+// same-origin HTTP, and imports no relay code outside this file — this is a hard constraint,
+// not a style preference: `relay.ts` runs `resolveRelayBase()` at module load time to resolve
+// a relay address, and any browser build that touches it will ship a relay client it never uses.
 //
-// 因此凡是与「怎么把字节送出去」无关的东西——错误分类、慢方法的超时预算——
-// 都住在这里,而不是住在某一个实现里。`relay.ts` re-export 它们,老的 import
-// 路径继续有效。
+// Therefore, anything not directly tied to "how to send bytes" — error classification, timeout
+// budgets for slow methods — lives here, not in any one implementation. `relay.ts` re-exports
+// them, and old import paths stay valid.
 
 import type { DecisionKind, SessionInfo } from "./types";
 
-/** 一次失败的 `request()`,带上「失败发生在哪一层」。
+/** A failed `request()`, tagged with "which layer did the failure occur at".
  *
- *  `remote: true` —— 主机收到了请求、做了判断、说不行(`ok:false` 回复)。
- *  消息是主机自己的文本。重试或等待都不会改变结果,直接展示给用户。
+ *  `remote: true` — the host received the request, made a decision, and declined it
+ *  (`ok:false` reply). The message is the host's own text. Retrying or waiting won't
+ *  change the outcome; show it to the user directly.
  *
- *  `remote: false` —— 请求压根没拿到裁决:超时、连接断了、回复帧丢了。
- *  主机很可能已经把活干了,所以调用方有权在宣告失败前用别的方式确认一次
- *  (见 `waitForSessionId`)。
+ *  `remote: false` — the request never reached a decision: timeout, connection lost, reply
+ *  frame dropped. The host may well have already done the work, so the caller has the right
+ *  to verify once more by another means before declaring failure (see `waitForSessionId`).
  *
- *  这个区分对两个传输层同样成立,所以它属于接口而不属于任何一个实现:HTTP 的
- *  `ok:false` 与 relay 的 `reply{ok:false}` 是同一件事,fetch 抛错与 WebSocket
- *  掉线也是同一件事。 */
+ *  This distinction applies equally to both transport layers, so it belongs in the interface,
+ *  not in any one implementation: HTTP's `ok:false` and relay's `reply{ok:false}` are the
+ *  same thing, and fetch errors and WebSocket disconnects are also the same thing. */
 export class TransportError extends Error {
   constructor(
     message: string,
     readonly remote: boolean,
   ) {
     super(message);
-    // 保持既有值:历史上这个类叫 RelayRequestError,而 `name` 会进日志和
-    // 上报。改掉它只会让新旧记录对不上,换不来任何东西。
+    // Preserve the existing value: historically this class was called RelayRequestError, and
+    // `name` goes into logs and error reports. Changing it would only cause old and new records
+    // to misalign, with no benefit.
     this.name = "RelayRequestError";
   }
 }
 
-/** 主机明确拒绝了请求 —— 与「回复根本没到」相对。有降级兜底的调用方必须在
- *  这个为 false 时才启用兜底,否则会为一个主机早就给了答复的错误白等一整个
- *  宽限窗口。 */
+/** The host explicitly rejected the request — as opposed to "the reply never arrived".
+ *  Callers with fallback logic must only enable the fallback when this is false; otherwise
+ *  they'll waste a whole grace window waiting for recovery from an error the host already
+ *  responded to. */
 export function isDesktopRejection(e: unknown): e is TransportError {
   return e instanceof TransportError && e.remote;
 }
 
-/** 资源类请求(决策卡预览图、知识库附件)的超时。
+/** Timeout for resource requests (decision card preview images, wiki attachments).
  *
- *  控制类请求小,默认的十几秒绰绰有余;资源请求要搬 MB 级数据过可能很慢的
- *  移动链路,用默认值会在弱网上假性中止——pending 条目被丢掉、迟到的回复被
- *  丢弃,而卡片上的 `<img>` 就永远吊在那里,连个错误都没有(见
- *  decisionAsset.test.ts 与对应的 e2e 复现)。 */
+ *  Control requests are small, and the default of several seconds is more than enough; resource
+ *  requests must move megabytes over potentially slow mobile links. Using the default value
+ *  causes spurious timeouts on weak networks — pending entries are discarded, late replies are
+ *  dropped, and `<img>` tags on the card hang forever with no error signal (see
+ *  decisionAsset.test.ts and the corresponding e2e repro). */
 export const ASSET_REQUEST_TIMEOUT_MS = 60_000;
-/** 上传的超时预算。同上,只是方向相反且通常更大。 */
+/** Timeout budget for uploads. Same reasoning as above, just in the opposite direction and
+ *  typically larger. */
 export const UPLOAD_REQUEST_TIMEOUT_MS = 120_000;
-/** `answerViaReq` 放弃前重发答复的次数。主机按决策 id 去重,所以丢了回复之后
- *  的重发是幂等的;这个数值限定的是「弱网要重试多久才让卡片退回可重试态」。 */
+/** Number of times `answerViaReq` will resend the reply before giving up. The host deduplicates
+ *  by decision ID, so resends after a dropped reply are idempotent; this value caps how long
+ *  to retry on weak networks before letting the card fall back to a retryable state. */
 export const ANSWER_MAX_ATTEMPTS = 3;
 
-/** 一次往返,拆成成因各不相同的几段。
+/** One round trip, divided into segments with different root causes.
  *
- *  光看 `totalMs` 说不出卡顿到底是这台手机的网络、主机的网络,还是主机自己的
- *  handler——三种修法毫不相干,所以这个拆分本身就是测量的全部意义。
+ *  Looking only at `totalMs` doesn't tell whether the stall is the phone's network, the host's
+ *  network, or the host's own handler — the three fixes are unrelated, so this breakdown is
+ *  the entire point of the measurement.
  *
- *  两段都可选,因为任一来源都可能缺席:快链路上 relay 的 `msg_ack` 可能输给
- *  回复本身,而不带 `handle_ms` 的旧主机什么都不报。缺一段只会让 UI 退化成更
- *  粗的答案,不会让它编一个出来。 */
+ *  Both segments are optional because either source can be absent: on a fast link, relay's
+ *  `msg_ack` may arrive after the reply itself, and old hosts without `handle_ms` report nothing
+ *  at all. Missing one segment just degrades the UI to a coarser answer; it doesn't invent one. */
 export interface RttSample {
-  /** 请求→回复,全程按这台手机自己的时钟计。 */
+  /** Request to reply, measured by this phone's own clock for the entire round trip. */
   totalMs: number;
-  /** 手机↔中转的往返。同源 HTTP 没有中转这一段,恒为 null。 */
+  /** Phone ↔ relay round trip. Same-origin HTTP has no relay leg, so always null. */
   phoneRelayMs: number | null;
-  /** 主机报告自己在 handler 里花掉的时间(`handle_ms`),它用自己的时钟量,
-   *  所以不涉及任何时钟同步。 */
+  /** Time the host reports it spent in the handler (`handle_ms`), measured on the host's own
+   *  clock, so no clock synchronization is involved. */
   desktopHandleMs: number | null;
 }
 
-/** 传输层推给 UI 的事件。
+/** Events pushed from the transport layer to the UI.
  *
- *  每个实现都得把自己那套底层信号翻译成这组回调:relay 翻译 WebSocket 帧,
- *  HTTP 实现翻译 SSE 事件。有些信号在某个传输层下没有对应物(同源部署里
- *  「主机是否在线」和「页面是否加载出来」是同一件事),那就让它恒定或永不触发
- *  ——**不要伪造一个变化**,UI 会把它当真。 */
+ *  Each implementation must translate its own set of low-level signals into this callback set:
+ *  relay translates WebSocket frames, HTTP implementations translate SSE events. Some signals
+ *  have no counterpart in a given transport layer (in same-origin deployment, "is the host
+ *  online" and "did the page load" are the same event), so let it remain constant or never
+ *  fire — **don't fake a change**; the UI treats it as real. */
 export interface TransportHandlers {
-  /** 这台设备到数据源的连通性。 */
+  /** Connectivity from this device to the data source. */
   onStatus?: (connected: boolean) => void;
-  /** 主机侧的连通性。relay 下是「桌面端有没有连上中转」;同源下主机就是发出
-   *  这张页面的那个进程,所以只要页面活着它就是在线。 */
+  /** Connectivity on the host side. Under relay, this is "did the desktop connect to the
+   *  relay"; under same-origin, the host is the process that sent this page, so it's online
+   *  as long as the page is alive. */
   onAgentOnline?: (online: boolean) => void;
   onDecisionCreated?: (kind: DecisionKind, request: unknown) => void;
   onDecisionResolved?: (kind: DecisionKind, id: string) => void;
   onSessions?: (sessions: SessionInfo[]) => void;
-  /** 刚落地的会话帧是哪一种 —— `full`(整份快照)还是 `delta`(增量增删)。
-   *  让 UI 能显示主机的增量通道是否真的启用了。每次会话更新都触发。 */
+  /** What kind of session frame just landed — `full` (entire snapshot) or `delta`
+   *  (incremental additions/deletions). Lets the UI show whether the host's delta channel is
+   *  really enabled. Fires on every session update. */
   onSessionsKind?: (kind: "full" | "delta") => void;
-  /** 一次请求→回复的往返采样。弱链路拥塞信号,也是区分「链路慢」与「主机慢」
-   *  的唯一途径。 */
+  /** A round-trip sample from request to reply. One of two weak-link congestion signals, and
+   *  the only way to distinguish "link slow" from "host slow". */
   onRttSample?: (sample: RttSample) => void;
-  /** 每次连接掉线并安排重连时触发 —— 第二个弱链路信号(频繁重连 ⇒ 拥塞)。 */
+  /** Fires each time the connection drops and a reconnect is scheduled — the second weak-link
+   *  signal (frequent reconnects ⇒ congestion). */
   onReconnect?: () => void;
   onAuthError?: (message: string) => void;
 }
 
-/** 视图层真正依赖的那一小块面。
+/** The small surface the view layer actually depends on.
  *
- *  刻意保持得小:每多一个方法,第二个实现就多一份要么照做要么撒谎的义务。
- *  这里的每一项都有 UI 里实打实的调用点在撑着。 */
+ *  Deliberately kept small: each additional method adds an obligation for the second
+ *  implementation to either replicate or lie. Every item here has real call sites in the UI
+ *  backing it. */
 export interface FleetTransport {
-  /** 开始连接 / 开始接收推送。幂等。 */
+  /** Start connecting / start receiving pushes. Idempotent. */
   connect(): void;
-  /** 断开并停止一切后台活动。 */
+  /** Disconnect and stop all background activity. */
   close(): void;
-  /** 尽力而为的「我走了」,让主机不必等超时就把这台设备摘掉。 */
+  /** Best-effort "I'm leaving": lets the host remove this device without waiting for timeout. */
   sayGoodbye(): void;
-  /** 数据面是否可用。UI 拿它当轮询和「链路是否活着」的闸门。 */
+  /** Whether the data plane is available. The UI uses this as a gate for polling and
+   *  "is the link alive". */
   readonly isAuthed: boolean;
-  /** 「我连到哪」的人类可读形式,给「更多」页显示一行。
+  /** Human-readable "what I'm connected to", for the "More" page to display one line.
    *
-   *  在接口上而不是让 UI 自己去问 relay:这一行的答案随传输层而变(relay 答
-   *  中转主机名,同源答自己的 origin),而「更多」页不该为了显示一行字就 import
-   *  一个具体实现 —— 那正是会把 relay 拖进同源构建的那类依赖。 */
+   *  On the interface instead of having the UI ask relay directly: the answer varies by
+   *  transport layer (relay answers with the relay hostname, same-origin answers with its own
+   *  origin), and the "More" page shouldn't have to import a concrete implementation just to
+   *  display one line — that's exactly the kind of dependency that would drag relay into the
+   *  same-origin build. */
   readonly endpointLabel: string;
-  /** 向主机发一次数据请求(pending_snapshot / task_plans / …)。 */
+  /** Send a data request to the host (pending_snapshot / task_plans / …). */
   request<T>(
     method: string,
     params?: Record<string, unknown>,
@@ -133,19 +149,21 @@ export interface FleetTransport {
     onAck?: () => void,
     ackIsDelivery?: boolean,
   ): Promise<T>;
-  /** 发后不管的答复。布尔值只表示「送出去了」,不代表主机收到。 */
+  /** Fire-and-forget reply. The boolean only means "sent", not "received by host". */
   answer(kind: DecisionKind, id: string, fields: Record<string, unknown>): boolean;
-  /** 可靠答复路径:拿到真正的投递裁决,丢帧则重发(主机按决策 id 去重,重发
-   *  幂等)。决策 UI 一律走这条,免得丢一帧就把卡片吊死。 */
+  /** Reliable reply path: get an actual delivery decision, resend if a frame is dropped (host
+   *  deduplicates by decision ID, so resends are idempotent). Decision UI always uses this
+   *  path to avoid having the card hang forever if a frame is lost. */
   answerViaReq(
     kind: DecisionKind,
     id: string,
     fields: Record<string, unknown>,
     opts?: { attempts?: number; timeoutMs?: number },
   ): Promise<void>;
-  /** 注册推送订阅。传输层没有推送通道时返回 false —— 调用方据此决定是否显示
-   *  推送开关,所以这里必须诚实地说不,而不是假装成功。 */
+  /** Register a push subscription. Returns false if the transport layer has no push channel —
+   *  the caller uses this to decide whether to show the push toggle, so it must be honest
+   *  "no", not pretend success. */
   pushSubscribe(subscription: unknown): boolean;
-  /** 注销先前注册的订阅。 */
+  /** Unregister a previously registered subscription. */
   pushUnsubscribe(subscription: unknown): boolean;
 }

@@ -13,10 +13,10 @@ import { isWebBuild } from "./hostEnv";
  * agreement: `markdown/pathLinks` (the path chip in every transcript),
  * `SkillsView`, `PluginsView`, `HistoryView`, `SessionHeaderMenu`,
  * `MemoryView`, both of `FilesView`'s (context menu + external-path
- * button), and 产出's detail bar. Some of them had grown the check and some
+ * button), and Artifacts' detail bar. Some of them had grown the check and some
  * had not.
  *
- * 产出 is also why this must stay a *synchronous* predicate: its two OS
+ * The Artifacts page is also why this must stay a *synchronous* predicate: its two OS
  * actions used to be gated on an `artifact_local_path` invoke instead, so a
  * single slow or rejected call made both buttons vanish with no explanation
  * and no retry.

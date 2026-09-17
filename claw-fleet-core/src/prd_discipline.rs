@@ -1573,7 +1573,7 @@ mod tests {
     }
 
     /// Two failure modes seen on one relay (mslug3 chain, 2026-09-14): hop 73
-    /// registered its handoff and *then* asked 老板 which side the next hop
+    /// registered its handoff and *then* asked the boss which side the next hop
     /// should prioritise — an answer that can no longer reach the frozen note —
     /// while hop 72 had told its successor to re-arm a watch, leaving two
     /// watches for one condition. Rule 5 has to say both out loud, in both

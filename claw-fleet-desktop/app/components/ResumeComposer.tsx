@@ -51,7 +51,7 @@ export function ResumeComposer({
   /** Fired the moment the backend accepts the follow-up, with the final prompt
    *  text (including any appended attachment context) and which mode delivered
    *  it. The parent echoes a resume as an optimistic user bubble while
-   *  `claude --resume` cold-starts; an enqueue keeps its "已排队" chip instead. */
+   *  `claude --resume` cold-starts; an enqueue keeps its "queued" chip instead. */
   onResumed: (finalPrompt: string, mode: "resume" | "enqueue") => void;
   /** `"resume"`: the turn ended, submit spawns `claude --resume` now.
    *  `"enqueue"`: the turn is still running, submit queues the message to be

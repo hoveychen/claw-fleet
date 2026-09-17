@@ -1,20 +1,20 @@
-// 终端面板的客户端：把 proc_runner 的 pty 主机搬到手机/浏览器上。
+// Terminal panel client: brings the proc_runner's pty host to phone/browser.
 //
-// 后端(claw-fleet-core/src/proc_runner.rs)本来就是一个完整的交互式终端 —— 分离的
-// pty host、stdin 转发、resize、killpg 整组杀、按 offset 增量读输出。桌面端经
-// Backend trait 用它，这里经 serve_request 的 proc_* 方法用同一套，所以两端看到的
-// 是同一批进程。
+// The backend (claw-fleet-core/src/proc_runner.rs) is already a full interactive terminal
+// — separate pty host, stdin forwarding, resize, group killpg, incremental output reads
+// by offset. Desktop uses it via Backend trait; here we use the same proc_* methods via
+// serve_request, so both ends see the same processes.
 //
-// 关键性质：**pty host 是分离的**。关掉这个页面、退出浏览器、甚至换一台设备，
-// 命令都还在桌面端跑着 —— 所以重开面板要先 `listProcs` 把它们接回来，而不是每次
-// 都开一个新 shell。
+// Key property: **the pty host is separate**. Close this page, quit the browser, even
+// switch devices — commands keep running on the desktop. So reopening the panel must
+// `listProcs` to bring them back, not start a fresh shell each time.
 
 import type { FleetTransport } from "./transport";
 import type { ProcOutputChunk, ProcRecord } from "./types";
 
 export type { ProcRecord, ProcOutputChunk, ProcStatus } from "./types";
 
-/** 这台主机上所有的终端进程，最新的在前。传 workspacePath 只看某个工作区的。 */
+/** All terminal processes on this host, newest first. Pass workspacePath to filter by workspace. */
 export function listProcs(
   client: FleetTransport,
   workspacePath?: string,
@@ -22,7 +22,7 @@ export function listProcs(
   return client.request<ProcRecord[]>("procs", workspacePath ? { workspacePath } : {});
 }
 
-/** 在 workspacePath 下开一个新的 pty，跑 command。 */
+/** Open a new pty under workspacePath and run command. */
 export function runProc(
   client: FleetTransport,
   workspacePath: string,
@@ -33,10 +33,10 @@ export function runProc(
   return client.request<ProcRecord>("proc_run", { workspacePath, command, cols, rows });
 }
 
-/** 从 offset 起增量读输出；不传 offset 表示「从最近的一段开始跟」。
+/** Read output incrementally from offset; omit offset to mean "from the most recent chunk".
  *
- *  回来的 chunk 自带 record，所以「命令退了没 / 退出码多少」不需要第二条轮询 ——
- *  桌面端的 ProcTerminal 也是这么用的。 */
+ *  The returned chunk carries its record, so "did the command exit / what's the exit code"
+ *  needs no second poll — desktop's ProcTerminal uses it the same way. */
 export function readProcOutput(
   client: FleetTransport,
   id: string,
@@ -45,7 +45,7 @@ export function readProcOutput(
   return client.request<ProcOutputChunk>("proc_output", offset === null ? { id } : { id, offset });
 }
 
-/** 把按键原样送进 pty(base64 的原始字节，不是文本行)。 */
+/** Send keystrokes straight to the pty (raw base64 bytes, not text lines). */
 export function writeProcInput(
   client: FleetTransport,
   id: string,
@@ -54,7 +54,7 @@ export function writeProcInput(
   return client.request<void>("proc_input", { id, dataB64 });
 }
 
-/** 告诉 pty 新的窗口尺寸，vim/htop 这类全屏程序靠它重排。 */
+/** Tell the pty the new window size; full-screen programs like vim/htop redraw with it. */
 export function resizeProc(
   client: FleetTransport,
   id: string,
@@ -64,48 +64,52 @@ export function resizeProc(
   return client.request<void>("proc_resize", { id, cols, rows });
 }
 
-/** 杀掉命令的整个进程组。force 跳过 SIGTERM 宽限直接 SIGKILL。 */
+/** Kill the command's entire process group. force skips SIGTERM grace and goes straight to SIGKILL. */
 export function killProc(client: FleetTransport, id: string, force = false): Promise<void> {
   return client.request<void>("proc_kill", { id, force });
 }
 
-/** 删掉一个已退出进程的记录与日志，免得重连列表越积越长。 */
+/** Delete an exited process's record and logs so reconnect lists don't bloat. */
 export function clearProc(client: FleetTransport, id: string): Promise<{ cleared: number }> {
   return client.request<{ cleared: number }>("proc_clear", { id });
 }
 
-/** 退出后再多读几轮：host 先把 `<id>.out` 写完才把记录翻成 exited，不多读就会
- *  丢掉最后几行(往往正是报错)。 */
+/** After exit, read a few more rounds: the host finishes writing `<id>.out` before flipping the
+ *  record to exited, and missing those reads drops the last lines (often the actual error). */
 export const EXIT_DRAIN_POLLS = 3;
 
 export interface OutputPumpDeps {
-  /** 读一段增量输出。offset 为 null 表示「从最近的一段开始跟」。 */
+  /** Read incremental output. offset null means "start following from the most recent". */
   read: (offset: number | null) => Promise<ProcOutputChunk>;
-  /** 把解出来的字节喂给终端。 */
+  /** Feed decoded bytes to the terminal. */
   write: (bytes: Uint8Array) => void;
   onRecord?: (record: ProcRecord) => void;
 }
 
 export interface OutputPump {
-  /** 跑一轮增量读。定时器每个 tick 调一次。 */
+  /** Run one round of incremental read. Timer calls this once per tick. */
   poll: () => Promise<void>;
-  /** 面板卸载：之后的响应一律丢弃，不再推进 offset。 */
+  /** Panel unmount: discard all subsequent responses, stop advancing offset. */
   stop: () => void;
 }
 
-/** 输出泵：按 offset 增量读 pty 输出，喂给终端。
+/** Output pump: read pty output incrementally by offset and feed it to the terminal.
  *
- *  从 TerminalPane 里抽出来单测，因为它有一个只在慢链路上才现形的坑：`poll` 是
- *  异步的，而 offset 只在 await 回来之后才推进。定时器不等上一轮结束就发下一轮，
- *  于是**响应慢于轮询间隔时两轮会带着同一个 offset 出去，同一段输出被写两遍** ——
- *  手机经 relay 打回桌面端正是这种链路，敲 `ls` 屏幕上会显示 `llss`(pty 收到的
- *  仍是 `ls`，所以回车照样执行)。桌面端走本地 IPC 够快，几乎撞不上。 */
+ *  Extracted from TerminalPane for unit testing because it has a trap that only shows on
+ *  slow links: `poll` is async, and offset only advances after await returns. The timer
+ *  doesn't wait for the previous round to finish, so **when response is slower than the
+ *  poll interval, two rounds send the same offset, and the same output gets written twice**
+ *  — phone over relay to desktop is exactly that link type, and typing `ls` shows `llss`
+ *  on screen (the pty still gets `ls`, so Enter still works). Desktop over local IPC is
+ *  fast enough that it almost never happens. */
 export function createOutputPump({ read, write, onRecord }: OutputPumpDeps): OutputPump {
   let offset: number | null = null;
   let drainPolls = 0;
   let stopped = false;
-  // 在途闸：一轮没回来就不发下一轮。定时器只管催，真正的节奏由链路快慢决定 ——
-  // 慢链路上轮询自然退化成「一问一答」，而不是几轮拿着同一个 offset 抢着上屏。
+  // In-flight gate: don't send the next round until this one returns. The timer just
+  // prods; the actual pace is set by link speed — on slow links polling naturally
+  // degrades to "one question, one answer", not multiple rounds racing to fill the screen
+  // with the same offset.
   let inFlight = false;
 
   return {
@@ -120,7 +124,8 @@ export function createOutputPump({ read, write, onRecord }: OutputPumpDeps): Out
         onRecord?.(chunk.record);
         if (chunk.record.status === "exited") drainPolls += 1;
       } catch {
-        // 进程记录在面板开着的时候被清掉了 —— 停止推进，别把错误刷成满屏。
+        // Process record was cleared while the panel was open — stop advancing, don't
+        // spam the error all over the screen.
         drainPolls = EXIT_DRAIN_POLLS;
       } finally {
         inFlight = false;
@@ -132,10 +137,11 @@ export function createOutputPump({ read, write, onRecord }: OutputPumpDeps): Out
   };
 }
 
-/** 把 xterm 的 onData 字符串编成后端要的 base64 原始字节。
+/** Encode xterm's onData string into the raw base64 bytes the backend expects.
  *
- *  不能直接 `btoa(data)`：btoa 只接受 latin1，任何非 ASCII 输入(中文、emoji，
- *  以及 IME 上屏的整段文字)都会抛 InvalidCharacterError，按键就静默丢了。 */
+ *  Can't just `btoa(data)`: btoa only accepts latin1, and any non-ASCII input (Chinese,
+ *  emoji, IME-committed whole phrases) throws InvalidCharacterError and silently loses
+ *  the keystroke. */
 export function encodeInput(data: string): string {
   const bytes = new TextEncoder().encode(data);
   let bin = "";
@@ -143,16 +149,17 @@ export function encodeInput(data: string): string {
   return btoa(bin);
 }
 
-/** base64 的 pty 输出还原成字节喂给 xterm。 */
+/** Decode base64 pty output back to bytes to feed xterm. */
 export function decodeOutput(dataB64: string): Uint8Array {
   return Uint8Array.from(atob(dataB64), (c) => c.charCodeAt(0));
 }
 
-/** 把一个字符折成它的控制码：Ctrl-A..Z 是 0x01..0x1a，另有几个符号也有定义。
+/** Fold a character into its control code: Ctrl-A..Z are 0x01..0x1a, plus a few symbols.
  *
- *  软键盘上没有 Ctrl，所以它由键位条上的粘滞按钮提供，作用到下一个敲下去的
- *  字符上 —— 这个函数就是那一步。不认识的字符原样返回：Ctrl 对它没有定义，
- *  吞掉只会让人以为按键丢了。 */
+ *  The soft keyboard has no Ctrl key, so a sticky button in the key row provides it,
+ *  acting on the next character typed — this function does that step. Unrecognized
+ *  characters pass through as-is: Ctrl has no definition for them, and dropping them
+ *  would make it look like the keystroke was lost. */
 export function applyCtrl(data: string): string {
   if (data.length !== 1) return data;
   const c = data.toUpperCase();

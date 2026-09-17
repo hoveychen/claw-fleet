@@ -2,7 +2,7 @@
 //!
 //! The `parent="..."` backtrack ([`crate::prd_tasks::resolve_backtrack_target`])
 //! could only ever *advise*: on completing a child plan it re-pointed the focus
-//! record and printed "继续执行,不要结束 turn". Nothing stopped the agent from
+//! record and printed "Continue execution, don't end the turn". Nothing stopped the agent from
 //! reading that line and stopping anyway, which is why a plan tree was never
 //! observed to run to completion — the mechanism was a suggestion, not a gate.
 //!

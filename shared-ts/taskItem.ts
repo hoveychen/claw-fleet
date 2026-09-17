@@ -8,7 +8,7 @@
  *  doesn't match the marker shape keeps its text verbatim rather than being
  *  mangled by a half-baked markdown pass.
  *
- *  Shared by the desktop (任务 facet + 计划树 drawer, via `TaskLine`) and the
+ *  Shared by the desktop (Task facet + Plan Tree drawer, via `TaskLine`) and the
  *  phone (`PlanItemLine`) so a P-task reads the same on both. It had been
  *  hand-copied three times over, and the copies had already drifted: two
  *  stripped the emphasis markers instead of rendering them, and the desktop's
@@ -20,7 +20,7 @@ export function splitMarker(text: string): { marker: string | null; rest: string
 }
 
 /** A P-task flattened to one line of plain prose, for a `title` tooltip and for
- *  the 计划树's matrix cells. Markdown emphasis/code markers are dropped here
+ *  the Plan Tree's matrix cells. Markdown emphasis/code markers are dropped here
  *  because a tooltip renders nothing — it would only show the syntax. */
 export function taskTip(text: string, max = 160): string {
   const { marker, rest } = splitMarker(text);

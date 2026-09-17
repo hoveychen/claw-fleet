@@ -16,7 +16,7 @@ import { messageToText } from "./messageRows";
  * `isMeta` rows are excluded. They are harness injections that happen to be
  * stored as user records — dsh writes its agent-instructions, its runtime
  * snapshot and every Fleet guidance block as `user/message`, codex has its own
- * preamble — and the list folds a run of them into one collapsed 系统上下文 card
+ * preamble — and the list folds a run of them into one collapsed "System Context" card
  * rather than a bubble. Treating one as "the prompt landed" retires the echo
  * against a row the reader cannot see, and the send vanishes from the
  * conversation with nothing left in its place.

@@ -185,7 +185,7 @@ pub(crate) fn start_watching_session(
 #[tauri::command(async)]
 pub(crate) fn stop_watching_session(state: tauri::State<'_, AppState>) {
     // Same write lock, and it runs *before* the fetch on every `open()` — a hang
-    // here delays the pane before it ever says 「加载中…」.
+    // here delays the pane before it ever says "Loading…".
     let probe = crate::cmd_probe::CmdProbe::start_watched("stop_watching_session", "");
     let backend = &state.backend;
     backend.stop_watch();

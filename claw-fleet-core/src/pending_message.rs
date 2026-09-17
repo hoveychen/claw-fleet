@@ -19,7 +19,7 @@
 //! decision card is answered — the only difference is the trigger ("process went
 //! idle" instead of "user answered a card").
 //!
-//! **Combine, don't queue N turns** (老板 decision 2026-07-14): several messages
+//! **Combine, don't queue N turns** (user decision 2026-07-14): several messages
 //! typed while the turn runs are joined into one resume prompt, so a burst of
 //! quick follow-ups becomes one coherent turn rather than N sequential
 //! `claude --resume` spawns.

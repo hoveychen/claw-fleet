@@ -185,8 +185,8 @@ describe("shouldFollowSession", () => {
   });
 
   it("keeps following while the process is alive, whatever the status says", () => {
-    // Regression (2026-07-16 "codex 假死"): a long codex turn misread as Idle
-    // disarmed the detail poller — "自动跟随中" stopped pulling new messages
+    // Regression (2026-07-16 "codex hung"): a long codex turn misread as Idle
+    // disarmed the detail poller — auto-follow stopped pulling new messages
     // while the codex process was still working. A live process can produce new
     // transcript writes regardless of the scan-computed status, so status alone
     // must never stop the follow poller.
@@ -205,8 +205,8 @@ describe("isLiveMember", () => {
 
   it("drops a subagent whose turn ended — its end_turn is the final report", () => {
     // Regression (2026-09-06): a finished Explore agent sat in the panel
-    // titled 运行中的 Agent wearing 等待输入 for the full 300s window that
-    // `determine_status` holds WaitingInput. A subagent has no user to wait
+    // titled "Running Agent" wearing "Waiting Input" for the full 300s window
+    // that `determine_status` holds WaitingInput. A subagent has no user to wait
     // for, so end_turn means done, not parked.
     expect(
       isLiveMember(session({ isSubagent: true, status: "waitingInput" })),

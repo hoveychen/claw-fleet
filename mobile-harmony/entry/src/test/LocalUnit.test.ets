@@ -3,14 +3,16 @@ import { waitForSessionId } from '../main/ets/common/SpawnConfirm';
 import { SessionInfo, isFleetOwnedEntrypoint, canResumeSession, CODEX_FLEET_ORIGINATOR }
   from '../main/ets/models/Types';
 
-// 只需要 id 参与匹配,其余字段用 as 补齐,避免造整个 SessionInfo。
+// Only id participates in matching; fill other fields with as to avoid
+// constructing the whole SessionInfo.
 function sess(id: string): SessionInfo {
   return { id } as SessionInfo;
 }
 
 export default function localUnitTest() {
   describe('localUnitTest', () => {
-    // ── waitForSessionId:ack/reply 都丢时的宽限期兜底(对齐 spawnConfirm.test.ts)──
+    // ── waitForSessionId: grace period fallback when both ack/reply are lost
+    //    (aligned with spawnConfirm.test.ts) ──
     it('waitForSessionId_present_immediately', 0, async (done: () => void) => {
       let slept = 0;
       const ok = await waitForSessionId('abc', () => [sess('x'), sess('abc')], {
@@ -47,8 +49,8 @@ export default function localUnitTest() {
       done();
     });
 
-    // ── isFleetOwnedEntrypoint / canResumeSession:Fleet 起的 codex 会话应被认作
-    //    自有会话且可续接(对齐 mobile-web types.test.ts)──────────────────────
+    // ── isFleetOwnedEntrypoint / canResumeSession: codex sessions started by Fleet
+    //    should be recognized as Fleet-owned and resumable (aligned with mobile-web types.test.ts)
     it('isFleetOwnedEntrypoint_claude_and_codex', 0, () => {
       expect(isFleetOwnedEntrypoint('claw-fleet-newsession')).assertTrue();
       expect(isFleetOwnedEntrypoint('claw-fleet-handoff')).assertTrue();

@@ -132,7 +132,7 @@ pub fn list_thread_images(thread_id: &str) -> Vec<GeneratedImage> {
 // registered on the image launch, so the agent hit `not a function` and fell
 // back, which is the headless behaviour we want. Then
 // `turn_completion_card::maybe_raise` saw a task session whose process had
-// exited without raising a card, put up a 「任务已完成」 card, and on the answer
+// exited without raising a card, put up a "Task Complete" card, and on the answer
 // resumed the thread through `agent_source::resume_session` — the *normal*
 // session path, which does register the fleet MCP server and does bypass the
 // sandbox. That sixth turn dutifully produced a decision card, on a headless

@@ -2,7 +2,7 @@
  * Local images inside agent markdown.
  *
  * Agents report visual work as plain markdown image refs pointing at host
- * paths — `![开场](/Users/me/shots/01.png)`. Left to react-markdown that
+ * paths — e.g. `![Opening shot](/Users/me/shots/01.png)`. Left to react-markdown that
  * becomes a bare `<img src="/Users/…">`, and the webview resolves it against
  * its own origin (`tauri://localhost`), which serves only the bundled
  * frontend: every such image renders as a broken placeholder even though the
@@ -10,13 +10,13 @@
  *
  * Fleet has no asset protocol on purpose — the desktop may be pointed at a
  * remote backend, where the file lives on the probe host and no `file://` URL
- * could reach it. So the bytes come back the same way the 文件 page gets them,
+ * could reach it. So the bytes come back the same way the file browser gets them,
  * through the Backend: `read_external_file` is already implemented on both
  * transports and returns an image as base64 (up to `IMAGE_PREVIEW_CAP`), which
  * this turns into a data URL.
  *
  * Reused by both component maps — `safeMarkdownComponents` (decision cards,
- * wiki, 日报) and `TextBlock`'s own (conversation) — so the fix lands on every
+ * wiki, daily report) and `TextBlock`'s own (conversation) — so the fix lands on every
  * markdown surface at once rather than just the one that was reported.
  */
 

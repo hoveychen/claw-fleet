@@ -30,9 +30,9 @@ use serde_json::Value;
 
 use crate::frames::PushPayload;
 
-/// Account service-notification send endpoint base (元服务 channel).
+/// Account service-notification send endpoint base (atomic service channel).
 const SVC_API_BASE: &str = "https://push-api.cloud.huawei.com/v1";
-/// Device-token send endpoint base (普通应用 channel). Same host, same JWT auth,
+/// Device-token send endpoint base (app channel). Same host, same JWT auth,
 /// different major version and a completely different body shape — see
 /// [`build_app_notification`].
 const APP_API_BASE: &str = "https://push-api.cloud.huawei.com/v3";
@@ -59,7 +59,7 @@ const SUCCESS_CODE: &str = "80000000";
 ///     re-authorises — and re-authorising re-subscribes, which writes a *new*
 ///     record. So the old one can never deliver again, and keeping it means
 ///     re-sending to it on every single notify. Observed live: one channel
-///     carried a leftover 元服务 OpenID subscription alongside the device token
+///     carried a leftover atomic service OpenID subscription alongside the device token
 ///     that replaced it, and logged this code on every notify for a day while
 ///     the token leg delivered fine.
 ///
@@ -95,18 +95,18 @@ fn is_dead_token_code(code: &str) -> bool {
 
 /// Notification category for the app channel.
 ///
-/// `WORK` matches what the 元服务 template (「工作事项提醒」) was approved for and
-/// is the right classification for a decision card — it is a work item awaiting
-/// the user, not marketing.
+/// `WORK` matches what the atomic-service template ("Work Item Reminder") was
+/// approved for and is the right classification for a decision card — it is a
+/// work item awaiting the user, not marketing.
 ///
 /// CAVEAT (unverified on device): Huawei gates every category except `MARKETING`
-/// behind 自分类权益 approval, applied for per app in AGC. Without it the send is
-/// expected to fail — loudly, as a `Transient` error in the logs, which is why
-/// this defaults to the value we actually want rather than silently degrading.
-/// `MARKETING` does get accepted without approval but is rate-limited to a
-/// handful of messages per device per day, which would drop decision cards on
-/// the floor and look like a bug. Override with `RELAY_HARMONY_CATEGORY` if the
-/// approval is still pending.
+/// behind "self-category rights" (自分类权益) approval, applied for per app in AGC.
+/// Without it the send is expected to fail — loudly, as a `Transient` error in the
+/// logs, which is why this defaults to the value we actually want rather than
+/// silently degrading. `MARKETING` does get accepted without approval but is
+/// rate-limited to a handful of messages per device per day, which would drop
+/// decision cards on the floor and look like a bug. Override with
+/// `RELAY_HARMONY_CATEGORY` if the approval is still pending.
 const DEFAULT_CATEGORY: &str = "WORK";
 
 /// `push-type` header value for a user-visible notification message on the app
@@ -119,7 +119,7 @@ const PUSH_TYPE_NOTIFICATION: &str = "0";
 pub enum SendError {
     /// Push Kit reported this recipient as permanently invalid / unsubscribed —
     /// the caller should remove the subscription. Which codes count depends on
-    /// the channel: [`DEAD_OPENID_CODES`] for 元服务, [`DEAD_TOKEN_CODES`] for the
+    /// the channel: [`DEAD_OPENID_CODES`] for atomic service, [`DEAD_TOKEN_CODES`] for the
     /// app channel.
     DeadRecipient(String),
     /// Transport / auth / unknown-code failure — keep the subscription, retry
@@ -165,7 +165,7 @@ pub struct HarmonyPush {
     /// Application-side App ID — goes into the request body's `appId`.
     app_id: String,
     /// Subscription template id claimed in AGC — the body's `templateId`.
-    /// 元服务 channel only; the app channel has no templates.
+    /// Atomic service channel only; the app channel has no templates.
     template_id: String,
     /// Notification category for the app channel — see [`DEFAULT_CATEGORY`].
     category: String,
@@ -280,7 +280,7 @@ impl HarmonyPush {
         // rejected with 80100003 "Illegal payload, The header does not contain
         // valid push-type" — a header problem reported as a payload problem,
         // which is exactly why this is worth a comment. Observed live on
-        // 2026-08-18 before the header was added. The 元服务 endpoint takes no
+        // 2026-08-18 before the header was added. The atomic service endpoint takes no
         // such header, hence `Option`.
         if let Some(pt) = push_type {
             req = req.header("push-type", pt);
@@ -357,7 +357,7 @@ fn gen_msg_id() -> String {
 /// the visible content comes from the claimed template's params: `thing_0` is
 /// the reminder content (the decision preview) and `thing_4` the publishing
 /// unit (the workspace title). This matches the AGC template `1BAAD76B2A818700`
-/// (「工作事项提醒」) verified on-device.
+/// ("Work Item Reminder") verified on-device.
 fn build_service_notification(
     msg_id: &str,
     app_id: &str,
@@ -379,7 +379,7 @@ fn build_service_notification(
 
 /// App-channel notification body.
 ///
-/// Nothing is shared with the 元服务 shape: no `msgId`, no `appId`, no template —
+/// Nothing is shared with the atomic service shape: no `msgId`, no `appId`, no template —
 /// the title/body are free-form, and the recipient is a device token array.
 ///
 /// `clickAction.actionType: 0` means "open the app's default ability" — the

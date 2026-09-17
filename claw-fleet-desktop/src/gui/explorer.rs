@@ -4,7 +4,7 @@ use super::*;
 
 // ── User-added browse paths ───────────────────────────────────────────────────
 //
-// The 仓库 page's hand-added / just-cloned cards. These live on the backend
+// The explorer page's hand-added / just-cloned cards. These live on the backend
 // (see `claw_fleet_core::browse_paths`) rather than in the front-end store:
 // they widen what the explorer will read, and the UI store is neither
 // persistent nor authoritative for a remote host.
@@ -63,7 +63,7 @@ pub(crate) fn read_explorer_file(
         .read_explorer_file(&workspace, &root, &rel_path)
 }
 
-/// Locate a file by the tail of its path. The 仓库 page's fallback when the
+/// Locate a file by the tail of its path. The explorer page's fallback when the
 /// literal path a chip resolved to reveals nothing.
 #[tauri::command(async)]
 pub(crate) fn find_explorer_path(

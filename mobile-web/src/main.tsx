@@ -14,8 +14,8 @@ import "./index.css";
 
 initTheme();
 initWakeLock();
-// 壳里没有标准 wakeLock 时补一条原生兜底（iOS 18.4 以下）。异步、失败静默：
-// 装上之后 wakeLock 模块会自己重新对齐持锁状态。
+// When the shell lacks standard wakeLock, add native fallback (iOS 18.4 and below). Async, fails silently:
+// After installation, wakeLock module re-aligns lock state itself.
 void installNativeWakeLock();
 lockZoom();
 
@@ -23,23 +23,23 @@ const cloudMode = import.meta.env.MODE === "cloud";
 
 if (!cloudMode && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    // BASE_URL 而不是写死 "/"：同源形态挂在 `/m/` 下，注册 `/sw.js` 会去要一个
-    // 根目录下并不存在的文件，SW 静默不生效。
+    // Use BASE_URL instead of hardcoding "/": same-origin form is under `/m/`, registering `/sw.js` tries
+    // to fetch a file that doesn't exist in root, SW silently fails to activate.
     navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {
       // dev over plain http (non-localhost) has no SW; the app still works
     });
   });
 }
 
-// 整套「同源构建里不许有 relay」就落在这一对动态 import 上。`IS_WEBUI` 是编译期
-// 常量（见 hostMode.ts），所以 Rollup 会把没走到的那条分支连同它拉起的整棵依赖
-// 树一并消掉 —— relay 客户端、加密、配对存储，一个都不会进 webui 产物。
-// 换成运行时判断的话两边都会被打进去，那正是要避免的。
-// 条件里直接写 `import.meta.env.VITE_FLEET_HOST`，而不是用 hostMode 的 IS_WEBUI：
-// vite 的 define 只替换字面出现的那个表达式，折叠成 `"webui" === "webui"` 之后
-// Rollup 才必定消掉另一条分支。经过 hostMode 那层 const 中转时它不会消 ——
-// 实测过：dist-webui 里照样落出一个 relay-*.js chunk（能搜到 resolveRelayBase
-// 和 fleet-relay/hkdf/v1）。IS_WEBUI 在别处仍然好用，只有这一处对折叠敏感。
+// The whole 'no relay in same-origin builds' rule hinges on this dynamic import pair. `IS_WEBUI` is a
+// compile-time constant (see hostMode.ts), so Rollup drops the unused branch along with its entire
+// dependency tree — relay client, encryption, pairing storage, none of it enters the webui build.
+// If we switched to runtime checks, both sides would be bundled, which is what we're avoiding.
+// Write `import.meta.env.VITE_FLEET_HOST` directly in the condition, not hostMode's IS_WEBUI:
+// Vite's define only replaces the literal expression, and after folding to `"webui" === "webui"`
+// Rollup must drop the other branch. When routed through hostMode's const layer it won't drop —
+// verified: dist-webui still outputs a relay-*.js chunk (can find resolveRelayBase and
+// fleet-relay/hkdf/v1). IS_WEBUI works fine elsewhere, only this spot is sensitive to folding.
 const { makeTransport }: { makeTransport: TransportFactory } =
   import.meta.env.VITE_FLEET_HOST === "webui"
     ? await import("./transportWebui")
@@ -47,10 +47,10 @@ const { makeTransport }: { makeTransport: TransportFactory } =
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {/* 最外层兜底。里面还有两层更细的(每个 tab、每张决策卡),这一层只接那些
-        没被它们围住的东西 —— app 外壳本身、各个浮层、以及云端形态。没有它的话,
-        那些位置一抛异常就是纯白页面 + 空控制台,手机上完全没法诊断。
-        resetKey 不传:根崩了没有「换一张」可言,用户点重试或者重开。 */}
+    {/* Outermost error boundary. Inside are two finer layers (per tab, per decision card); this layer
+        catches what they don't surround — the app shell itself, various overlays, and cloud forms. Without it,
+        exceptions at those positions become blank white page + empty console, impossible to diagnose on mobile.
+        resetKey not passed: if root crashes, there's no 'retry card', user clicks retry or reopens. */}
     <ErrorBoundary label={t("Fleet")}>
       <ConfirmProvider>
         {cloudMode ? (

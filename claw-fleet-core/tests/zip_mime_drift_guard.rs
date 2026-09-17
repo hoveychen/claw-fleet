@@ -1,6 +1,6 @@
 //! Drift-guard for the zip browser's mime table.
 //!
-//! The 产出 page can open a .zip and preview a member inside it. The member
+//! The artifacts page can open a .zip and preview a member inside it. The member
 //! never passes through the store, so nothing derives its mime in Rust — the
 //! frontend types it from its own copy of the extension table, in
 //! `shared-ts/zipDir.ts`. If that copy drifts from `wiki::mime_for_path`, the

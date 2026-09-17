@@ -7,17 +7,18 @@ import styles from "./DirPicker.module.css";
 
 interface DirPickerProps {
   client: FleetTransport | null;
-  /** 起点目录；空字符串从桌面端的 home 开始。 */
+  /** Starting directory; empty string begins from desktop home. */
   initialPath: string;
   onPick: (path: string) => void;
   onClose: () => void;
 }
 
-/** 在手机上挑一个桌面机器上的目录当 workspace。
+/** Pick a directory on the desktop machine as workspace on mobile.
  *
- *  取代原来那个裸输入框——手机用户看不见桌面上有什么目录，让他盲敲绝对路径
- *  本来就是个坏交互。桌面端的 `browse_dir` 每次只回一层子目录，「能不能往上翻」
- *  也由它判断（parent 为 null 即到达可浏览边界），所以这里不做任何路径拼接。 */
+ *  Replaces the original bare input box—mobile users cannot see which directories
+ *  exist on the desktop, forcing them to type absolute paths blindly, which is poor UX.
+ *  Desktop's `browse_dir` returns only one level of subdirectories each time, and it decides
+ *  whether we can go up (parent is null at the browsable boundary), so no path joining here. */
 export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerProps) {
   const [data, setData] = useState<BrowseDirResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,16 +32,17 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
       try {
         setData(await client.request<BrowseDirResponse>("browse_dir", path ? { path } : {}));
       } catch (e) {
-        // 失败保留上一屏，用户还能往回退，不至于卡在空白页。
+        // Keep the previous screen on failure so user can go back; avoid blank page.
         setError(e instanceof Error ? e.message : t("读取目录失败"));
-        // 但**起点**打不开时没有上一屏——手输框里可能是个早就删掉的路径，
-        // 列表空空如也，连一行可点的都没有，用户只能关掉重来。回退到 home
-        // 保证选择器永远走得动；错误照旧留在屏上解释为什么跳了。
+        // But when the initial path fails, there is no previous screen—the user may have typed
+        // a path that was deleted, the list is empty with no clickable rows, and they'd have to
+        // close and retry. Fall back to home to ensure the picker always works; error stays to explain.
+
         if (fallbackToHome && path) {
           try {
             setData(await client.request<BrowseDirResponse>("browse_dir", {}));
           } catch {
-            // home 也读不到，没有更靠后的退路了。
+            // Home is also unreadable; no further fallback.
           }
         }
       } finally {
@@ -54,10 +56,10 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
     void load(initialPath || undefined, true);
   }, [load, initialPath]);
 
-  // 新建子目录。只能往下走的选择器，在一台目录树是空的机器上没有任何可选项——
-  // 新开的云端容器 `/home/fleet` 底下什么都没有，列表只有一行「这里没有子目录」，
-  // 于是整个选择器无解。主机端 `create_dir` 建完直接回新目录的 listing，所以这里
-  // 一次往返就站进了新目录，再按「用这个目录」即可。
+  // Create subdirectory. A downward-only picker has no options when the directory tree is empty—
+  // a new cloud container has nothing under `/home/fleet`, list shows only "no subdirectories",
+  // making the picker unusable. Desktop's `create_dir` returns the listing of the new directory,
+  // so one round trip puts us inside it, then we can click "use this directory".
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -74,14 +76,14 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
       setNewName("");
       setCreating(false);
     } catch (e) {
-      // 名字重了、没权限——留在输入态，用户改个名就能重试。
+      // Duplicate name or no permission—stay in input mode, user can retry with a different name.
       setError(e instanceof Error ? e.message : t("新建目录失败"));
     } finally {
       setSaving(false);
     }
   };
 
-  // 路径比屏幕长时，有意义的是尾部（当前在哪个目录），不是 `/Users` 那一截。
+  // When path is longer than screen, the meaningful part is the tail (current directory), not the `/Users` prefix.
   const crumbRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = crumbRef.current;
@@ -130,8 +132,9 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
             <button
               className={styles.newCancel}
               onClick={() => {
-                // 退出输入态时把错误一并清掉——「已存在」说的是刚才那次尝试，
-                // 留在屏上会像是当前目录本身有问题。
+                // Clear the error when leaving the input state — "already exists"
+                // described that one attempt, and leaving it on screen would read as
+                // if the current directory itself were broken.
                 setError(null);
                 setCreating(false);
               }}
@@ -155,18 +158,18 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
         )}
 
         <div className={styles.list}>
-          {/* 站在一个根里时没有「上一级」可点——根不暴露自己的父目录。云端容器
-              的起点就是这样一个根（持久卷），home 在另一个根上，所以这里把其余
-              的根直接列成可点的行，否则用户只能靠手敲路径才能换根。 */}
+          {/* When standing in a root, there is no "parent" to click—roots don't expose their parent.
+              Cloud container's starting point is such a root (persistent volume), home is on another,
+              so we list other roots as clickable rows; otherwise users can only switch roots by typing. */}
           {!data?.parent &&
             (data?.roots ?? [])
               .filter((r) => r !== data?.path)
               .map((r) => (
                 <button key={r} className={styles.row} onClick={() => void load(r)}>
                   <HardDrive size={16} className={styles.icon} />
-                  {/* 目录名在前：整条路径塞进一行会被从尾部截断，而尾部恰恰是
-                      认出它的那一截（`/private/tmp/claude-501/-Users-…` 什么也
-                      没说明）。完整路径跟在后面，截断了也不影响识别。 */}
+                  {/* Directory name first: full path in one line gets truncated from the tail,
+                      which is exactly the part that identifies it (`/private/tmp/claude-501/-Users-…` says nothing).
+                      Full path follows after; even if truncated, identification is unaffected. */}
                   <span className={styles.name}>{r.split("/").filter(Boolean).pop() ?? r}</span>
                   <span className={styles.rowPath}>{r}</span>
                 </button>

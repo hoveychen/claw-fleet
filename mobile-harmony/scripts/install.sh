@@ -1,31 +1,32 @@
 #!/usr/bin/env bash
-# ClawFleet 一键 构建 + 安装 + 启动(真机)。
+# ClawFleet one-command build + install + launch (physical device).
 #
-# 用法:
-#   bash scripts/install.sh                # 构建后装到第一台已连接设备并启动
-#   bash scripts/install.sh <hdc-target>   # 指定设备(hdc list targets 里的串号)
-#   bash scripts/install.sh --no-build     # 跳过构建,直接装当前产物
-#   bash scripts/install.sh --no-web       # 跳过 web 同步(只重编 ArkTS 时用)
+# Usage:
+#   bash scripts/install.sh                # Build, install on first connected device, launch
+#   bash scripts/install.sh <hdc-target>   # Specify device (serial from hdc list targets)
+#   bash scripts/install.sh --no-build     # Skip build, install current artifact
+#   bash scripts/install.sh --no-web       # Skip web sync (use when only recompiling ArkTS)
 #
-# 依赖 DevEco Studio 默认安装路径;签名材料来自 build-profile.json5(本地
-# 未提交的 signingConfigs,发布仓里是剥离的——没有它产物是未签名 hap,装不上)。
+# Requires DevEco Studio default install path; signing material from build-profile.json5 (local
+# uncommitted signingConfigs, stripped in release repo—without it, artifact is unsigned hap, won't install).
 
 set -e
 cd "$(dirname "$0")/.."
 
-# DevEco 自带 Node 18,而 pnpm 要 22+ —— 下面会把 DevEco 的 node 顶到 PATH 最
-# 前面(hvigor 需要它),所以先留一份系统 PATH 给 web 构建用,否则 sync-web 会以
-# "pnpm requires at least Node.js v22" 挂掉。
+# DevEco comes with Node 18, but pnpm needs 22+. Below we'll put DevEco's node first in PATH
+# (hvigor needs it), so we save system PATH for web build first, else sync-web fails with
+# "pnpm requires at least Node.js v22".
 SYSTEM_PATH="$PATH"
 DEVECO="/Applications/DevEco-Studio.app/Contents/tools"
 export DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
 export JAVA_HOME="/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home"
 export PATH="$DEVECO/node/bin:$DEVECO/ohpm/bin:$JAVA_HOME/bin:$PATH"
 HDC="$DEVECO_SDK_HOME/default/openharmony/toolchains/hdc"
-# 从 app.json5 读,不再写死 —— 换包名时只改一处。
+# Read from app.json5, not hardcoded—change bundle name in one place.
 BUNDLE=$(sed -n 's/.*"bundleName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' AppScope/app.json5 | head -1)
-# 元服务时代的旧包名。换成普通应用后它不会被覆盖安装,留着会在桌面上多一个
-# 装不进新数据的僵尸图标,所以每次安装前顺手清掉(没装过则静默跳过)。
+# Old bundle name from Element Services era. After switching to regular app, it won't be
+# overwritten on install, leaving a zombie icon on desktop that can't hold new data.
+# Clean it before each install (silent if never installed).
 LEGACY_BUNDLE="com.atomicservice.6917610791622358675"
 HAP="entry/build/default/outputs/default/entry-default-signed.hap"
 
@@ -50,15 +51,15 @@ fi
 echo "→ 设备: $TARGET"
 
 if (( BUILD && SYNC_WEB )); then
-  # 必须在 assembleHap 之前:rawfile 是构建的输入,晚同步就会把旧 web 打进包里。
-  # 用系统 PATH 跑,避开 DevEco 的 Node 18。
+  # Must run before assembleHap: rawfile is build input, late sync bakes old web into package.
+  # Use system PATH to avoid DevEco's Node 18.
   PATH="$SYSTEM_PATH" bash scripts/sync-web.sh
 fi
 
 if (( BUILD )); then
   echo "→ 构建 assembleHap …"
-  # 日志走文件而不是管道:`hvigorw | grep` 会把退出码换成 grep 的,构建失败也
-  # 看起来成功,然后把上一次的旧 hap 装上去 —— 查这种"改了没生效"要命。
+  # Log to file, not pipe: `hvigorw | grep` changes exit code to grep's, failed build looks
+  # successful, old hap from last time gets installed—debugging "no effect" issues is a nightmare.
   set +e
   node "$DEVECO/hvigor/bin/hvigorw.js" assembleHap --mode module -p product=default --no-daemon \
     > /tmp/hvigor-install.log 2>&1

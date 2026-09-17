@@ -74,7 +74,7 @@ export const MAX_THUMB_BYTES = 4 * 1024 * 1024;
  *
  * pdf.js also needs the whole file before it can lay out page 1, so the trade
  * is the same shape — but a PDF is the format this grid is most made of
- * (reports, 提案, 访谈脚本), and a scanned 12 MB one is ordinary rather than
+ * (reports, proposals, interview transcripts), and a scanned 12 MB one is ordinary rather than
  * pathological. Capping those at 4 MB would leave the icon wall this exists to
  * remove. Downloads are a local protocol read, not a network fetch.
  */
@@ -90,7 +90,7 @@ export const MAX_PDF_THUMB_BYTES = 32 * 1024 * 1024;
  * atom sits at the *end* (anything not written with faststart) forces the
  * player to fetch to the tail before it can decode anything. This cap is what
  * keeps that case from quietly pulling a multi-gigabyte render into a 190px
- * card; a render that big keeps its icon.
+ * card; a render that big stays with its icon.
  */
 export const MAX_VIDEO_THUMB_BYTES = 256 * 1024 * 1024;
 

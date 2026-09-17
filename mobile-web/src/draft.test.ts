@@ -7,7 +7,7 @@ import {
   type DraftStorage,
 } from "./draft";
 
-// node 环境没有 window.localStorage，用内存实现注入。顺带断言 key 带上了命名空间前缀。
+// Node environment lacks window.localStorage, so inject an in-memory implementation. Also verify that keys include the namespace prefix.
 function memStore(): DraftStorage & { map: Map<string, string> } {
   const map = new Map<string, string>();
   return {
@@ -54,7 +54,7 @@ describe("draft store", () => {
   });
 
   it("schema 漂移：旧草稿缺字段时，缺的字段取 fallback 默认值（浅合并）", () => {
-    saveDraft("new-session", { prompt: "老草稿" }, store); // 当时还没有 effort 字段
+    saveDraft("new-session", { prompt: "老草稿" }, store); // effort field didn't exist at that time
     const loaded = loadDraft("new-session", { prompt: "", effort: "medium" }, store);
     expect(loaded).toEqual({ prompt: "老草稿", effort: "medium" });
   });
@@ -84,11 +84,11 @@ describe("draft store", () => {
   });
 });
 
-// 移除一台设备时要扫掉它那个命名空间下的全部草稿（新会话表单、附件路径、上次
-// 用的 repo、各会话的半截输入）。不清的话每移除一台就留下一堆永远不会再被读到
-// 的键；清错了则会连累另一台设备的草稿。
+// When removing a device, must clear all its drafts under its namespace (new session forms, attachment paths,
+// last used repo, partial inputs from each session). Without clearing, each device removal leaves orphaned keys
+// never to be read again; wrong clearing could wipe another device's drafts.
 describe("clearDraftsByPrefix", () => {
-  /** 可枚举的内存 storage —— clearDraftsByPrefix 需要 length/key(i)。 */
+  /** Enumerable in-memory storage—clearDraftsByPrefix requires length/key(i). */
   function enumerableStore() {
     const map = new Map<string, string>();
     return {
@@ -118,7 +118,7 @@ describe("clearDraftsByPrefix", () => {
     expect(loadDraft("tasks:search", "", store)).toBe("全局偏好");
   });
 
-  // 注入的内存实现通常没有 length/key —— 那种情况下什么都不做，而不是抛。
+  // Injected in-memory implementations typically lack length/key—in that case do nothing instead of throwing.
   it("is a no-op on a storage that cannot be enumerated", () => {
     const plain = memStore();
     saveDraft("d/d1/new-session", { prompt: "a" }, plain);

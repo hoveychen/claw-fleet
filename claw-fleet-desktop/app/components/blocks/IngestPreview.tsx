@@ -8,7 +8,7 @@
  * said a file was stored, not what was in it.
  *
  * So the ingest card resolves the id/slug back into the stored thing and shows
- * its first screen, using the same renderers the 产出 grid uses — an
+ * its first screen, using the same renderers the artifacts grid uses — an
  * `ArtifactThumb` well, or a plain `<img>` for an image. Clicking it opens the
  * entry on its own page.
  *
@@ -40,7 +40,7 @@ import styles from "./IngestPreview.module.css";
  * Two stages on purpose. The first click opens the deliverable in the
  * auxiliary rail — beside the conversation that produced it, which is the
  * whole reason the rail exists — and only a second click, once it is already
- * open there, hands it to the 产出 / 知识库 page. Jumping pages on the first
+ * open there, hands it to the artifacts / wiki page. Jumping pages on the first
  * click would make "let me see what that is" cost losing your place in the
  * transcript.
  *
@@ -57,8 +57,8 @@ function useTwoStageOpen(kind: "artifact" | "wiki", ref: string, label: string, 
   };
 }
 
-/** Same lazy boundary as the 产出 grid: the document renderers are heavy and a
- *  transcript that contains no ingest must not pay for them. */
+/** Same lazy boundary as the artifacts grid: the document renderers are heavy
+ *  and a transcript that contains no ingest must not pay for them. */
 const ArtifactThumb = lazy(() => import("../ArtifactThumb"));
 
 export function ArtifactIngestPreview({ artifact }: { artifact: ArtifactAdded }) {
@@ -117,7 +117,7 @@ export function ArtifactIngestPreview({ artifact }: { artifact: ArtifactAdded })
   );
 }
 
-/** Same three labels the 知识库 list uses; they are format names, not prose,
+/** Same three labels the wiki list uses; they are format names, not prose,
  *  so they are not translated there either. */
 const WIKI_KIND_LABEL: Record<IngestedWikiDoc["kind"], string> = {
   markdown: "Markdown",

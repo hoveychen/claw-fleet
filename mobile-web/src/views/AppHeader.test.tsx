@@ -6,8 +6,8 @@ const noop = () => {};
 
 describe("AppHeader", () => {
   it("字符串标题走标准包装，节点标题原样透传", () => {
-    // 会话详情的标题行自带 subagent 徽标和一个展开详情面板的 tap 目标，
-    // 它必须能整块塞进来而不被再包一层标题样式 —— 否则 flex 权重全乱。
+    // Session detail title row comes with subagent badge and tap target to expand detail panel,
+    // it must fit in whole without wrapping in another layer of title styling — else flex weights break.
     const asString = renderToStaticMarkup(<AppHeader onBack={noop} title="终端" />);
     expect(asString).toContain("终端");
     expect(asString).toMatch(/class="[^"]*title[^"]*"/);
@@ -20,7 +20,7 @@ describe("AppHeader", () => {
   });
 
   it("没传 sub / actions 就不渲染那两个容器", () => {
-    // 空的 flex 子项会连带 .header 的 gap 一起占位，把标题往左挤。
+    // Empty flex children occupy space along with .header gap, pushing title left.
     const bare = renderToStaticMarkup(<AppHeader onBack={noop} title="仓库" />);
     expect(bare).not.toMatch(/class="[^"]*sub[^"]*"/);
     expect(bare).not.toMatch(/class="[^"]*actions[^"]*"/);
@@ -42,12 +42,13 @@ describe("AppHeader", () => {
   });
 
   it("titleAfter 与字符串标题同行，且标题才是那个会收缩的", () => {
-    // 知识库的条目数紧贴标题；标题长了应该是标题被截断，而不是把计数挤走。
+    // Wiki entry count sits tight against title; when title is long, title should truncate,
+    // not get pushed away by count.
     const html = renderToStaticMarkup(
       <AppHeader onBack={noop} title="知识库" titleAfter={<span id="n">42</span>} />,
     );
     expect(html).toMatch(/class="[^"]*titleRow[^"]*"/);
-    // 计数是 titleRow 的直接子节点，不在 .title 内部（否则会跟着一起被 ellipsis 吃掉）。
+    // Count is direct child of titleRow, not inside .title (else would be consumed by ellipsis too).
     expect(html).toMatch(/class="[^"]*title[^"]*">知识库<\/div><span id="n">/);
   });
 

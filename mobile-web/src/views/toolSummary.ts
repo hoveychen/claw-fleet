@@ -25,7 +25,7 @@ function parsePatchFiles(patch: string): PatchFile[] {
   return files;
 }
 
-/** Compact mobile label for the V4A body reconstructed from patch_apply_end. */
+/** Compact mobile label for the tool body reconstructed from patch_apply_end. */
 export function patchToolSummary(command: string, tr: Translate = t): string | null {
   const files = parsePatchFiles(command);
   if (files.length === 0) return null;
@@ -37,8 +37,8 @@ export function patchToolSummary(command: string, tr: Translate = t): string | n
 }
 
 /**
- * Human-readable label (i18n source string) for each Fleet MCP tool, keyed by
- * the tail of its wire name (`mcp__fleet__fleet__<tail>`). Mirrors the desktop
+ * Human-readable i18n label for each Fleet MCP tool, keyed by the suffix of its
+ * wire name (`mcp__fleet__fleet__<tail>`). Mirrors the desktop's
  * `FLEET_TOOL_LABEL_KEYS` map.
  */
 const FLEET_TOOL_LABELS: Record<string, string> = {
@@ -62,11 +62,11 @@ const FLEET_TOOL_LABELS: Record<string, string> = {
 };
 
 /**
- * Friendly label for a raw tool id in a ToolSearch `select:` list. Fleet MCP
- * tools (`mcp__fleet__fleet__ask`, …) map to a translated label; any other MCP
- * tool (`mcp__<server>__<tool>`) drops the `mcp__server__` prefix and renders
- * `server·tool`; a plain tool name passes through unchanged. Mirrors the
- * desktop `friendlyToolName`.
+ * Friendly label for a raw tool id from a ToolSearch `select:` list. Fleet MCP
+ * tools (`mcp__fleet__fleet__ask`, …) map to a translated label; other MCP
+ * tools (`mcp__<server>__<tool>`) drop the `mcp__server__` prefix and show
+ * `server·tool`; plain tool names pass through unchanged. Mirrors the desktop's
+ * `friendlyToolName`.
  */
 export function friendlyToolName(rawId: string, tr: Translate = t): string {
   const id = rawId.trim();
@@ -82,9 +82,9 @@ export function friendlyToolName(rawId: string, tr: Translate = t): string {
 
 /**
  * Collapsed rail line for a decision card. The card body never reaches the
- * phone (the relay's input whitelist drops `questions`), so the gist rides on
- * the block as `_ask` — without it every decision chip in a session reads the
- * same bare 「决策卡」 and the reader cannot tell which question was which.
+ * phone (the relay's input whitelist drops `questions`), so the summary rides
+ * in the block as `_ask`. Without it, every decision chip in a session shows
+ * the same bare label, and the reader can't distinguish between questions.
  */
 export function decisionSummary(block: ContentBlock, tr: Translate = t): string {
   const label = tr("决策卡");
@@ -94,17 +94,16 @@ export function decisionSummary(block: ContentBlock, tr: Translate = t): string 
   return count > 1 ? tr("{0}（{1} 题）", head, count) : head;
 }
 
-/** The readable one-line label shown beside a mobile transcript tool icon. */
+/** The readable one-line label shown next to a mobile transcript tool icon. */
 export function toolSummary(block: ContentBlock): string {
   const input = block.input;
   if (input === undefined) return "";
 
-  // Bash / PowerShell / Agent all carry a model-written `description`: a
-  // one-line summary for the shells, a 3-5 word task name for Agent. Prefer it
-  // over the fallback loop below — a raw shell command is often a long escaped
-  // grep, and Agent has no compact field at all. Mirrors the desktop
-  // `ToolUseBlock`, including PowerShell (the Windows shell tool, same
-  // `description`/`command` shape as Bash).
+  // Bash, PowerShell, and Agent all carry a model-written `description`: a
+  // one-line summary for shells, a 3-5 word task name for Agent. Prefer it over
+  // the fallback loop—raw shell commands are often long escaped greps, and Agent
+  // has no compact field. Mirrors desktop's `ToolUseBlock`, including PowerShell
+  // (Windows shell tool with the same `description`/`command` shape as Bash).
   if (block.name === "Bash" || block.name === "PowerShell" || block.name === "Agent") {
     const description = input.description;
     if (typeof description === "string" && description.trim()) return description.trim();
@@ -118,8 +117,8 @@ export function toolSummary(block: ContentBlock): string {
     }
   }
 
-  // ToolSearch loads deferred tool schemas; its raw query ("select:AskUserQuestion",
-  // "notebook jupyter") is opaque, so relabel it the same way the desktop does.
+  // ToolSearch loads deferred tool schemas. Its raw query ("select:AskUserQuestion",
+  // "notebook jupyter") is opaque, so relabel it like the desktop does.
   if (block.name === "ToolSearch") {
     const query = typeof input.query === "string" ? input.query.trim() : "";
     if (query) {
@@ -149,10 +148,10 @@ export function toolSummary(block: ContentBlock): string {
 }
 
 /**
- * dsh's tools with no Claude counterpart. They keep their own names through
- * `dsh_messages.rs`, and none of their inputs carries a `TOOL_SUMMARY_FIELDS`
- * key — so without this every one of them rendered as a bare icon with no text
- * at all. Mirrors the desktop's `dshToolSummary`.
+ * dsh tools with no Claude equivalent. They keep their own names through
+ * `dsh_messages.rs`, and their inputs lack `TOOL_SUMMARY_FIELDS` keys, so
+ * without this every one renders as a bare icon with no text. Mirrors the
+ * desktop's `dshToolSummary`.
  */
 function dshToolSummary(name: string | undefined, input: Record<string, unknown>): string {
   const first = (key: string) => {

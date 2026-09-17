@@ -1,5 +1,5 @@
 /**
- * Office viewers for the 产出 stage — docx, xlsx and pptx.
+ * Office viewers for the artifacts stage — docx, xlsx and pptx.
  *
  * ## Why this file is loaded lazily, and loads its own libraries lazily again
  *

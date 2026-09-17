@@ -1,9 +1,10 @@
-// 终端页：任务页顶栏「终端」进来的整页浮层。
+// Terminal page: full-page overlay entered via "Terminal" in task page top bar.
 //
-// 一个工作区可以同时开几个 pty，顶部标签在它们之间切。**进程活在桌面端主机上，
-// 不活在这个页面里** —— pty host 是分离的，关掉页面、退出浏览器、换台设备，
-// 命令都还在跑。所以进来第一件事是 `listProcs` 把还活着的接回来，只有一个都没有
-// 时才开新的；否则每次打开面板都会多一个孤儿 shell。
+// A workspace can have multiple ptys open; top tabs switch between them. **Processes
+// run on the desktop machine, not this page**—pty host is separate, and closing the
+// page, quitting the browser, or switching devices leaves commands running. So first
+// thing: `listProcs` reconnects to live ones; only spawn new if none exist. Otherwise
+// each panel open adds an orphan shell.
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Folder, Plus, Square, Trash2 } from "lucide-react";
@@ -15,11 +16,13 @@ import { isDefaultShellCommand } from "../../../shared-ts/procShell";
 import styles from "./TerminalView.module.css";
 import { AppHeader } from "./AppHeader";
 
-// xterm 及其 CSS 只在真的开了终端时才下载 —— 见 TerminalPane 顶部的说明。
+// xterm and its CSS only download when a terminal actually opens — see the note at
+// the top of TerminalPane.
 const TerminalPane = lazy(() => import("./TerminalPane"));
 
-/** 一个可开终端的工作区。deviceId 决定这条命令落在哪台主机上 —— 多设备时两台
- *  机器可以有同名甚至同路径的工作区，只带路径会开错机器。 */
+/** A workspace that can open a terminal. deviceId determines which host this command
+ *  runs on — with multiple devices, two machines can have workspaces with the same
+ *  name or path; using only the path opens on the wrong machine. */
 export interface TerminalWorkspace {
   deviceId: string;
   path: string;
@@ -27,15 +30,16 @@ export interface TerminalWorkspace {
 }
 
 interface Props {
-  /** 可选工作区（取自任务列表里出现过的那些）。 */
+  /** Available workspaces (taken from those appearing in the task list). */
   workspaces: TerminalWorkspace[];
-  /** 任务页里已经筛好了某个目录时带进来，省掉一次选择。 */
+  /** When task page has pre-filtered a directory, pass it to skip one selection. */
   initial?: TerminalWorkspace | null;
   clientFor: (deviceId: string) => FleetTransport | null;
   onBack: () => void;
 }
 
-/** 键位条：软键盘上没有的键。发的是完整转义序列，不再经粘滞 Ctrl 折一次。 */
+/** Key bar: keys missing from soft keyboard. Sends full escape sequences, no longer
+ *  folded through sticky Ctrl. */
 const KEYS: Array<{ label: string; data: string }> = [
   { label: "Esc", data: "\x1b" },
   { label: "Tab", data: "\t" },
@@ -47,16 +51,18 @@ const KEYS: Array<{ label: string; data: string }> = [
   { label: "→", data: "\x1b[C" },
 ];
 
-/** 软键盘遮住的高度。
+/** Height occupied by soft keyboard.
  *
- *  iOS 上软键盘不会缩小布局视口，它是盖上来的 —— 而这个页面是 `position:fixed;
- *  inset:0`，于是键位条和终端底部会整个被盖住，正在输入的那一行反而看不见。
- *  visualViewport 是唯一能问出「实际还剩多少可视高度」的接口。 */
+ *  On iOS, soft keyboard doesn't shrink layout viewport—it overlays. This page is
+ *  `position:fixed; inset:0`, so key bar and terminal bottom get fully covered; the
+ *  typing line becomes invisible. visualViewport is the only API that tells "how much
+ *  viewport height actually remains". */
 function useKeyboardInset(): number {
   const [inset, setInset] = useState(0);
   useEffect(() => {
     const vv = window.visualViewport;
-    if (!vv) return; // 老浏览器：退回布局视口，键盘弹起时自然缩小（安卓多数如此）
+    if (!vv) return; // Older browsers: fall back to layout viewport, which shrinks
+                     // naturally when keyboard pops (most Android behavior)
     const apply = () => {
       setInset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
     };
@@ -71,11 +77,13 @@ function useKeyboardInset(): number {
   return inset;
 }
 
-/** 标签上显示的命令名：默认 shell 显示成「shell」，其余取第一个词，太长再截断。
+/** Command name shown on tab: default shell displays as "shell", others take first word,
+ *  truncate if too long.
  *
- *  「是不是默认 shell」的判断跟桌面端共用一份（shared-ts/procShell.ts）——这里曾经
- *  各存一份正则，core 把默认命令从 `$SHELL` 改成绝对路径之后只同步了一份，另一份就
- *  把默认 shell 显示成了「exec」。截断长度是移动端自己的（窄屏 14 而不是 16）。 */
+ *  "Is this the default shell?" check is shared with desktop (shared-ts/procShell.ts).
+ *  We once had separate regexes; after core changed default command from `$SHELL` to
+ *  absolute path, only one was synced, so the other showed default shell as "exec".
+ *  Truncation length is mobile-specific (14 chars vs desktop's 16). */
 function procLabel(proc: ProcRecord): string {
   const cmd = proc.command.trim();
   if (isDefaultShellCommand(cmd)) return t("shell");
@@ -89,10 +97,11 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // 一个工作区只自动开一次 shell：接回列表是异步的，没有这道闸，
-  // 「列表空 → 开一个」会在第二次渲染时再开一个。
+  // Auto-spawn shell at most once per workspace: fetching the list is async, and without
+  // this gate, "list empty → spawn one" would spawn again on second render.
   const autoSpawned = useRef<string | null>(null);
-  // 键位条 → 当前终端的通道。TerminalPane 挂上时把 send 交过来，卸载时交 null。
+  // Key bar → current terminal's channel. TerminalPane passes send on mount, null on
+  // unmount.
   const sendRef = useRef<((data: string) => void) | null>(null);
   const [ctrl, setCtrl] = useState(false);
   const keyboardInset = useKeyboardInset();
@@ -104,8 +113,9 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
     setBusy(true);
     setError(null);
     try {
-      // 空命令 = 让主机自己决定用哪个交互式 shell（unix `$SHELL -i`，
-      // Windows `cmd`）。80x24 只是个起点，面板挂上去会立刻发真实尺寸。
+      // Empty command = let host choose which interactive shell (unix `$SHELL -i`,
+      // Windows `cmd`). 80x24 is just a starting point; panel sends real size
+      // immediately on mount.
       const rec = await runProc(client, ws.path, "", 80, 24);
       setProcs((prev) => [rec, ...prev]);
       setActiveId(rec.id);
@@ -116,7 +126,7 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
     }
   }, [client, ws, busy]);
 
-  // 换工作区 → 接回它已有的终端。
+  // Switch workspace → reconnect its existing terminals.
   useEffect(() => {
     if (!client || !ws) return;
     let stale = false;
@@ -139,14 +149,15 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
     return () => {
       stale = true;
     };
-    // spawn 依赖 busy，会在每次开新终端时变引用；这个 effect 只该在换工作区/
-    // 换设备时跑，所以刻意不把它列进来。
+    // spawn depends on busy, reference changes each terminal spawn; this effect should
+    // only run on workspace/device change, so intentionally omit it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, ws?.path]);
 
   const active = procs.find((p) => p.id === activeId) ?? null;
 
-  /** 输出轮询顺便带回来的最新记录 —— 拿它更新标签上的存活状态。 */
+  /** Output polling incidentally brings back latest record—use it to update tab alive
+   *  state. */
   const onRecord = useCallback((rec: ProcRecord) => {
     setProcs((prev) => prev.map((p) => (p.id === rec.id ? rec : p)));
   }, []);
@@ -160,7 +171,7 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
     }
   }, [client, active]);
 
-  /** 关掉一个已退出的终端：删记录 + 从标签里摘掉。 */
+  /** Close an exited terminal: delete record + remove from tabs. */
   const handleClear = useCallback(async () => {
     if (!client || !active) return;
     try {
@@ -175,7 +186,7 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
     }
   }, [client, active]);
 
-  // ── 还没选工作区：先选 ────────────────────────────────────────────────
+  // ── No workspace selected yet: choose first ──────────────────────────────
   if (!ws) {
     return (
       <div className={styles.page}>
@@ -205,9 +216,9 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
 
   return (
     <div className={styles.page} style={{ bottom: keyboardInset }}>
-      {/* The title doubles as the way back to the workspace picker, so it stays a
-          node rather than a plain string. `seamless` tracks the tab strip below:
-          with more than one process this header and .tabs are one panel. */}
+      {/* Title doubles as the back button to workspace picker, so it stays a node
+          not a string. `seamless` tracks the tab strip below: with multiple
+          processes, header and .tabs form one panel. */}
       <AppHeader
         onBack={onBack}
         seamless={procs.length > 1}
@@ -282,9 +293,9 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
           <button
             className={styles.key}
             data-sticky={ctrl}
-            // onPointerDown + preventDefault:按下就发，且不让浏览器把焦点从
-            // xterm 的隐藏 textarea 上挪走 —— 焦点一丢，软键盘就收起来了，
-            // 而键位条本来就是配着软键盘用的。
+            // onPointerDown + preventDefault: fire on press, and prevent the browser
+            // from moving focus away from xterm's hidden textarea — losing focus makes
+            // the soft keyboard close, and the key bar is meant to be used with it.
             onPointerDown={(e) => {
               e.preventDefault();
               setCtrl((v) => !v);

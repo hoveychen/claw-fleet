@@ -40,7 +40,7 @@ pub struct PlanNode {
     pub items: Vec<TaskItem>,
     pub done: u32,
     pub total: u32,
-    /// Relay chains whose `plan_id` names this plan — the "接力 n/N" the view
+    /// Relay chains whose `plan_id` names this plan — the "relay chain n/N" the view
     /// folds into a single node.
     pub chains: Vec<HandoffChain>,
     pub children: Vec<PlanNode>,

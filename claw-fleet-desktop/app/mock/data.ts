@@ -456,7 +456,7 @@ const MOCK_SESSIONS_SEED: Array<
 
   // ── 9. Pure-chat session: the `~/.fleet/chat` workspace, not a project ──
   // Its workspacePath must match the mock `chat_workspace` command, which is
-  // what the launchpad's 「仅聊天 / 隐藏聊天」 filter keys off.
+  // what the launchpad's "chat only / hide chat" filter keys off.
   {
     id: "sess-chat-idle",
     workspacePath: MOCK_CHAT_WORKSPACE,
@@ -496,7 +496,7 @@ const MOCK_SESSIONS_SEED: Array<
   // Parked on one long tool call (a build, a background-task wait), so
   // `determine_status` aged it past the 60s tool_use window down to `idle`
   // while the CLI process keeps running. The row must wear the faded-green dot
-  // (`isQuietAlive`), NOT read as ended — the detail composer says 会话运行中
+  // (`isQuietAlive`), NOT read as ended — the detail composer says "session running"
   // for this exact session, and the two must not contradict each other.
   {
     id: "sess-quiet-alive",
@@ -547,7 +547,7 @@ export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
   compactPostTokens: 0,
   compactCostUsd: 0,
   pendingMessages: [],
-  // Fleet-owned mock sessions: the launchpad seed is all "新会话"-style tasks.
+  // Fleet-owned mock sessions: the launchpad seed is all "New Session"-style tasks.
   fleetSpawned: true,
   // Mocks don't model a live subagent tree, so the aggregate activity just
   // tracks the session's own and nothing is "running".
@@ -894,7 +894,7 @@ for (const main of MOCK_SESSIONS) {
   );
 }
 
-// ── Handoff chains (drives the 接力 chip + expanded chain panel) ─────────────
+// ── Handoff chains (drives the handoff badge + expanded chain panel) ─────────────
 
 export const MOCK_HANDOFF_CHAINS: Record<string, HandoffChain> = {
   "chain-billing": {
@@ -960,7 +960,7 @@ export const MOCK_HANDOFF_CHAINS: Record<string, HandoffChain> = {
   },
 };
 
-// ── Plan forest (计划树 view) ────────────────────────────────────────────────
+// ── Plan forest (plan tree view) ────────────────────────────────────────────────
 // One live root three levels deep with a relay folded onto it, plus a finished
 // root — enough to exercise every fold the view draws. One item deliberately
 // carries a multi-paragraph implementation note: real P-tasks routinely run
@@ -1160,7 +1160,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
             type: "text",
             // The `/tmp/…` chip is load-bearing for the demo, not decoration:
             // it is the out-of-workspace path case, so clicking it exercises the
-            // 文件 page's external-file preview rather than the tree.
+            // Files page's external-file preview rather than the tree.
             text: "I'll create a mock mode that intercepts Tauri IPC calls and returns realistic demo data. I dumped the call graph to `/tmp/mock-ipc-callgraph.md` first; the app source itself is under `src/store.ts`.",
           },
         ],
@@ -2656,8 +2656,8 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
               '一个是**“一年一两次、口径每年变”这个特征本身**。所有 SaaS 的商业模式都建立在“你会持续用我”上。\n\n' +
               "鉴权失败的时序是这样的：\n\n" +
               "```mermaid\nsequenceDiagram\n    participant C as Client\n    participant G as Gateway\n    participant A as Auth\n    C->>G: 带旧 issuer 的 token\n    G->>A: 校验 issuer\n    A-->>G: 拒绝 (api-server ≠ api-server-v2)\n    G-->>C: 401\n```\n\n" +
-              // 窄图。宽图（上面那张时序图）永远比正文列宽，看不出缩放有没有失控；
-              // 只有自然宽装得进容器的图，才会暴露「svg 被拉满整列、字跟着放大」。
+              // Narrow diagram. Wide diagrams (like the sequence diagram above) are always wider than the text column,
+              // so scaling issues are hidden; only diagrams whose natural width fits in the container expose the "svg filled the column, text scaled up" problem.
               "换发路径本身很短：\n\n" +
               "```mermaid\nflowchart TD\n  A[token ids] --> B[hash]\n  B --> C[bucket]\n```\n\n" +
               "重试退避是指数的：$t_n = t_0 \\cdot 2^{n}$，所以第 5 次已经等到\n\n$$t_5 = 100\\text{ms} \\cdot 2^5 = 3.2\\text{s}$$\n\n" +
@@ -4212,8 +4212,8 @@ export function mockCreateDir(path: string | null | undefined, name: string) {
   return MOCK_BROWSE_TREE[child];
 }
 
-// ── 任务 facet (session detail's TASKS.md panel) ─────────────────────────────
-// `get_task_plans` used to answer `[]` in mock mode, which hid the 任务 facet
+// ── Tasks facet (session detail's TASKS.md panel) ─────────────────────────────
+// `get_task_plans` used to answer `[]` in mock mode, which hid the tasks facet
 // altogether — the panel could not be looked at, let alone designed, without a
 // live session that happened to own a TASKS.md. That is most of why it stayed
 // the one un-designed panel in the app for as long as it did.

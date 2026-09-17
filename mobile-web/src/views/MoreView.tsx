@@ -1,5 +1,5 @@
-// 「更多」tab：把原来散在 header 齿轮 / 顶部横幅里的设置项收纳到一处——
-// 语言 / 主题、桌面端连接状态、通知开关、重新配对、关于/版本。
+// "More" tab: consolidates settings items scattered in header gear / top banner—
+// language/theme, desktop connection status, notification toggle, re-pair, about/version.
 
 import { useState } from "react";
 import {
@@ -37,11 +37,13 @@ const LANG_CHOICES: Array<[Lang, string]> = [
 ];
 
 interface Props {
-  /** 「我连到哪」，由传输层自己回答（relay 主机名 / 同源 origin）。这里不去
-   *  问某个具体实现，否则显示一行字就会把 relay 客户端拖进同源构建。 */
+  /** "Where am I connected to", answered by transport layer (relay host / same-origin
+   *  origin). Don't ask a specific implementation here or displaying one line would pull
+   *  the relay client into the same-origin build. */
   endpointLabel: string;
-  /** 这条部署有没有推送通道。同源形态没有（VAPID 订阅登记在 relay 上），
-   *  开关整块隐掉而不是摆一个开了也不响的。 */
+  /** Whether this deployment has push channels. Same-origin doesn't (VAPID subscription
+   *  lives on relay), so hide the toggle entirely rather than show a non-functional
+   *  one. */
   supportsPush: boolean;
   connected: boolean;
   agentOnline: boolean;
@@ -65,26 +67,28 @@ interface Props {
   onOpenWiki: () => void;
   onOpenUsage: () => void;
   onOpenTerminal: () => void;
-  /** 这台桌面主机开了终端面没有（后端的 FLEET_TERMINAL，见 useHostFeatures）。
-   *  关着时整行不出：入口在、点进去开不出 shell 才是更差的体验。 */
+  /** Whether this desktop machine has terminal UI (backend FLEET_TERMINAL, see
+   *  useHostFeatures). When off, don't show the row: entry exists but opening can't
+   *  spawn shell is worse UX. */
   terminalEnabled: boolean;
-  /** 这台手机配对过的每一台 Fleet，按加入顺序。 */
+  /** Every Fleet this phone has paired, in join order. */
   devices: PairedDevice[];
-  /** 当前作用域那一台的 id；一台都没配对时 null（同源形态恒为 null）。 */
+  /** Id of the current scope device; null when no pairing (same-origin always null). */
   activeDeviceId: string | null;
-  /** 当前那台走哪条路。只影响「我连到哪」那一行的标题。 */
+  /** Which route the current device takes. Only affects "where I'm connected" title. */
   activeKind: "relay" | "http";
   onSwitchDevice: (id: string) => void;
   onRenameDevice: (id: string, label: string) => void;
   onRemoveDevice: (device: PairedDevice) => void;
-  /** 这台设备的通知是不是被关掉了。 */
+  /** Whether this device's notifications are muted. */
   deviceMuted: (deviceId: string) => boolean;
-  /** 只开/只关某一台的通知。整部手机的总开关在上面「连接与通知」那一块。 */
+  /** Toggle just one device's notifications. Whole-phone toggle is in "Connection &
+   *  Notification" section above. */
   onMuteDevice: (device: PairedDevice, muted: boolean) => void;
-  /** 再加一台。与配对门共用 App 的 adoptPaired —— 去重、保留改过的名字、焦点
-   *  转移那三条规则只有一份实现。 */
+  /** Add another device. Shares App's adoptPaired with pairing gate—dedup, preserve
+   *  renamed labels, move focus have one implementation. */
   onAddDevice: (paired: PairedLink) => void;
-  /** 清除全部配对并重载。 */
+  /** Clear all pairings and reload. */
   onUnpairAll: () => void;
 }
 
@@ -119,21 +123,22 @@ export function MoreView({
 }: Props) {
   const { lang, setLang, t } = useI18n();
   const confirm = useConfirm();
-  // 正在改名的那台（内联输入，不用 window.prompt —— 鸿蒙 ArkWeb 里那个对话框
-  // 未必可用，而这里没有任何理由依赖它）。
+  // Device being renamed (inline input, not window.prompt—HarmonyOS ArkWeb dialog
+  // may not be available, no reason to depend on it).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
-  // 「扫码添加设备」的取景器。鸿蒙壳走它自己那条（scanPairing 会重载 WebView 并
-  // 注入 #k=），其余形态都用页面里这个。
+  // Camera viewfinder for "scan device QR". HarmonyOS shell uses its own path
+  // (scanPairing reloads WebView and injects #k=); other surfaces use this page one.
   const [scanning, setScanning] = useState(false);
-  /** 壳有没有自带扫码桥（鸿蒙）——有的话相机归系统管，不受页面的安全上下文限制。 */
+  /** Whether shell has a built-in scan bridge (HarmonyOS)—if so, system manages camera,
+   *  not constrained by page security context. */
   const shellScan = canScanPairing();
-  /** 没有壳桥时，页面自己能不能开摄像头。 */
+  /** Without shell bridge, can the page itself open the camera? */
   const scan = scanAvailability();
   const { setting, setTheme } = useTheme();
   const wakeLock = useWakeLock();
-  // Task-list handoff grouping — same "tasks:groupHandoff" draft the task page
-  // reads on remount. Default on.
+  // Task-list handoff grouping—same "tasks:groupHandoff" draft that task page reads
+  // on remount. On by default.
   const [groupHandoff, setGroupHandoff] = useDraft<boolean>("tasks:groupHandoff", true);
 
   const themeChoices: Array<[ThemeSetting, string]> = [
@@ -142,13 +147,13 @@ export function MoreView({
     ["dark", t("暗色")],
   ];
 
-  // 决策卡来源诊断。正常只有一条（桌面端）；出现第二条、或有空快照被忽略过，
-  // 说明频道里有别的 agent 在替桌面端作答 —— 卡片自己消失就是它干的。
+  // Diagnose decision card source. Normally one (desktop); second source or ignored
+  // snapshots signal another agent answering in the channel—that agent causes cards to disappear.
   const trustedSource = snapshotSources.find((s) => s.trusted);
   const foreignSources = snapshotSources.filter((s) => s !== trustedSource);
   const ignoredTotal = snapshotSources.reduce((n, s) => n + s.ignored, 0);
-  // 同一个桌面端重启只是换了 pid（身份键不含 pid），台账把它并成一条 —— 这里把
-  // 换过几个进程原样说出来，免得「pid 和我 ps 到的不一样」再被当成李鬼。
+  // One desktop restart is just a pid change (identity key has no pid), so records merge—
+  // report process count honestly so "my ps shows different pid" isn't mistaken for impostor.
   const agentLabel = (s: SnapshotSource) => {
     if (!s.agent) return t("未署名");
     const base = `${s.agent.host ?? "?"} · pid ${s.agent.pid ?? "?"}`;
@@ -164,8 +169,8 @@ export function MoreView({
       ? t("桌面端在线")
       : t("桌面端离线");
 
-  // 取景器整屏盖住（position: fixed），所以放在最外层而不是设备那一块里面 ——
-  // 它一出现，「更多」页在它底下原样留着，取消就回到原处。
+  // Viewfinder full-screen cover (position: fixed) lives at top level, not inside
+  // devices section—when visible, "More" page stays below; cancel returns to it.
   if (scanning) {
     return (
       <PairScanner
@@ -180,7 +185,7 @@ export function MoreView({
 
   return (
     <div className={styles.view}>
-      {/* ── 工具 ── */}
+      {/* ── Tools ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("工具")}</div>
         <div className={styles.card}>
@@ -247,7 +252,7 @@ export function MoreView({
         </div>
       </div>
 
-      {/* ── 设置 ── */}
+      {/* ── Settings ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("设置")}</div>
         <div className={styles.card}>
@@ -329,23 +334,23 @@ export function MoreView({
         </div>
       </div>
 
-      {/* ── 连接与通知 ── */}
+      {/* ── Connection & Notifications ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("连接与通知")}</div>
         <div className={styles.card}>
           <div className={styles.row}>
-            {/* 「我连到哪」的那一行标题跟着**当前设备的种类**走:经中转的那台
-                标 Relay(专名,中英一致,不进字典),直连的那台标「服务端」——
-                同一份构建里两种设备并存,标错就是在骗人。 */}
+            {/* "Where I'm connected" title tracks **current device kind**: relay-routed device
+                shows "Relay" (proper noun, consistent across languages, not in i18n),
+                direct-connected shows "Server"—two devices, same build; wrong label lies. */}
             <span className={styles.rowLabel}>
               {supportsPush && activeKind !== "http" ? "Relay" : t("服务端")}
             </span>
             <span className={styles.relayValue}>{endpointLabel}</span>
           </div>
-          {/* 同源形态才有得切：桌面版和这套移动端是同一个服务器发出来的两份
-              产物。判定按屏幕短边走（见桌面 index.html 的 mobile-redirect），
-              大屏手机或折叠屏上有可能判反 —— 给个出口，别让人卡死在这一边。
-              `?desktop` 会被那段脚本记进 localStorage，所以只需选一次。 */}
+          {/* Same-origin deployment choice only: desktop and mobile are two builds from
+              same server. Detection by screen short edge (see desktop index.html mobile-redirect);
+              large phones or folding phones mis-detect—provide exit so users aren't stuck.
+              `?desktop` saved to localStorage by that script, choice needed once. */}
           {!supportsPush && (
             <>
               <div className={styles.divider} />
@@ -370,9 +375,9 @@ export function MoreView({
               <span className={styles.connLabel}>{connLabel}</span>
             </span>
           </div>
-          {/* 一个请求的往返被拆成三段。哪一段大，要修的东西完全不同：手机段大
-              是这台手机的网络，桌面链路段大是桌面到 relay（或 relay 排队），处理段
-              大是桌面 handler 自己慢。未测到的段不显示，不拿 0 冒充。 */}
+          {/* One request round-trip split three ways. Which segment is large says what to fix:
+              phone large = phone network, desktop link large = desktop to relay (or relay queueing),
+              handler large = desktop handler slow. Unmeasured segments don't show, never use 0. */}
           <div className={styles.divider} />
           <div className={styles.row}>
             <span className={styles.rowLabel}>{t("链路耗时")}</span>
@@ -412,11 +417,10 @@ export function MoreView({
               )}
             </span>
           </div>
-          {/* 这块诊断整个是**中转**语义的:它回答的是「同一频道里是不是有别的
-              agent 在替桌面端作答」,而 relay 会把每个请求广播给频道里所有 agent。
-              直连一台 HTTP 主机时没有频道、没有广播,答的只可能是那台主机自己 ——
-              照搬这块只会给出一句「另有 N 个 agent」的假警报,而用户按它去查是查
-              不到东西的。 */}
+          {/* This diagnostic is purely **relay** semantics: answers "is another agent answering
+              in the same channel instead of desktop?"—relay broadcasts each request to all agents.
+              Direct HTTP host has no channel, no broadcast, can only answer itself—copying this
+              would give false "N other agents" alarms users can't trace. */}
           {activeKind === "relay" && snapshotSources.length > 0 && (
             <>
               <div className={styles.divider} />
@@ -463,9 +467,9 @@ export function MoreView({
               )}
             </>
           )}
-          {/* 同源形态没有推送通道（VAPID 订阅登记在 relay 上，而这条部署按设计
-              不碰 relay）。整块隐掉，而不是显示一个「不支持」——那读起来像是
-              浏览器的毛病，其实是这条部署本来就没有这项能力。 */}
+          {/* Same-origin deployment has no push channels (VAPID subscription lives on relay,
+              which this deployment deliberately doesn't touch). Hide the entire section, not show
+              "unsupported"—that reads like a browser bug; really this deployment just lacks it. */}
           {supportsPush && (
             <>
           <div className={styles.divider} />
@@ -518,7 +522,7 @@ export function MoreView({
         </div>
       </div>
 
-      {/* ── 设备 ── */}
+      {/* ── Devices ── */}
       {devices.length > 0 && (
         <div className={styles.section}>
           <div className={styles.sectionLabel}>{t("设备")}</div>
@@ -555,7 +559,8 @@ export function MoreView({
                   </div>
                 ) : (
                   <div className={styles.deviceRow}>
-                    {/* 整行可点 = 切到这台。当前那台不再可点，避免一次无效重连。 */}
+                    {/* Whole row tappable = switch to this device. Current device not tappable
+                    to avoid pointless reconnection. */}
                     <button
                       className={styles.deviceMain}
                       disabled={d.id === activeDeviceId}
@@ -566,9 +571,9 @@ export function MoreView({
                       </span>
                       <span className={styles.deviceLabel}>{d.label}</span>
                     </button>
-                    {/* 只关这一台的通知。家里那台在跑长任务、公司那台半夜发卡,
-                        这两件事应该能分开处置 —— 而不是只有一个「全关」。 */}
-                    {/* HTTP 直连那条传输层没有推送通道,给它一个开关就是骗人。 */}
+                    {/* Toggle just this device's notifications. Home machine has long tasks,
+                        work machine sends cards at midnight—handle separately, not one all-off. */}
+                    {/* Direct HTTP transport has no push channels; switch would be misleading. */}
                     {supportsPush && d.kind === "relay" && (
                       <button
                         className={styles.deviceBtn}
@@ -606,16 +611,18 @@ export function MoreView({
               </div>
             ))}
           </div>
-          {/* 「加第二台」要么开一个带 #k= 的网址,要么在 app 里扫码。前者对三种
-              形态都不成立:原生壳从 rawfile 启动没有地址栏;iOS 的主屏幕 web app
-              同样没有地址栏,而且它的存储与 Safari 分区隔离,回 Safari 开链接加进
-              去的那台它也看不见。所以这两行对**所有**形态都必须在。
+          {/* "Add second device" is either open a #k=-bearing URL or scan in app. Former
+              doesn't work on any form: native shell from rawfile has no address bar; iOS
+              home screen web app also has no address bar, and storage partitions from
+              Safari separately—link scanned back to Safari doesn't exist to it. So both
+              lines must be on **every** form.
 
-              扫码优先用壳自己的(鸿蒙壳会重载 WebView 并注入 #k=,相机由系统接管,
-              所以它不受下面那条 https 限制);没有那座桥就用页面里的取景器,而那条
-              要 getUserMedia —— 非 https 的地址上浏览器压根不给,于是整行不画,由
-              下面那句说清原因。粘贴是相机被拒/不可用时的兜底,也是自建 relay 的
-              唯一入口(二维码扫出来的链接系统交不到 app 手上)。 */}
+              QR scan prefers shell's own (HarmonyOS shell reloads WebView and injects
+              #k=, system manages camera, not bound by https below); without that bridge
+              use page viewfinder needing getUserMedia—browsers refuse non-https addresses
+              entirely, so line won't render, explanation follows. Paste is fallback when
+              camera is rejected/unavailable and sole entry for self-hosted relay
+              (system can't hand QR-scanned URLs to app). */}
           {(shellScan || scan === "ok") && (
             <div className={styles.card} style={{ marginTop: 8 }}>
               <button
@@ -648,7 +655,7 @@ export function MoreView({
         </div>
       )}
 
-      {/* ── 配对 ── */}
+      {/* ── Pairing ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("配对")}</div>
         <div className={styles.card}>
@@ -669,7 +676,7 @@ export function MoreView({
         </div>
       </div>
 
-      {/* ── 关于 ── */}
+      {/* ── About ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("关于")}</div>
         <div className={styles.card}>
@@ -677,11 +684,11 @@ export function MoreView({
             <span className={styles.rowLabel}>Fleet Mobile</span>
             <span className={styles.rowValue}>v{__APP_VERSION__}</span>
           </div>
-          {/* 构建 commit：报问题时「哪个构建」比「哪个版本」精确——package.json
-              的版本号很少动，而这个 bundle 每次发布都不同。桌面端已经拿它比对
-              手机 bundle 是否过期（hello 帧的 appCommit），这里只是把同一个值
-              显示给人看。无 commit 来源时它是 "unknown"，那不是 commit，整行
-              不渲染。 */}
+          {/* Build commit: for bug reports, "which build" is more precise than "which version"—
+              package.json version changes rarely, but this bundle differs each release. Desktop
+              already uses it to check if phone bundle is stale (hello frame's appCommit); here
+              we just display the same value. When source is "unknown", that's not a commit, so
+              the line doesn't render. */}
           {BUILD_COMMIT && (
             <>
               <div className={styles.divider} />

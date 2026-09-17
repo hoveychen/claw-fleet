@@ -148,7 +148,7 @@ pub fn rotate_secret() -> Result<MobileRelayConfig, String> {
     Ok(cfg)
 }
 
-/// Render the pairing URL as an SVG QR code for the 「移动端」 view. `lang`
+/// Render the pairing URL as an SVG QR code for the Mobile view. `lang`
 /// carries the desktop's current UI language into the encoded URL (see
 /// [`pairing_url`]).
 /// The pairing URL as text, for copy-to-clipboard.
@@ -185,7 +185,7 @@ pub fn qr_svg(lang: Option<&str>) -> Result<String, String> {
         .build())
 }
 
-// ── Status (for the desktop 「移动端」 view) ─────────────────────────────────
+// ── Status (for the desktop Mobile view) ─────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -957,7 +957,7 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "status",
     "isSubagent",
     // Subagent drill-down: the phone keeps subagent rows (id `agent-<uuid>`) in
-    // its session array purely as a lookup table for "打开子代理" navigation, so
+    // its session array purely as a lookup table for "open subagent" navigation, so
     // it needs the parent link to attach them and the type/count to label them.
     // The Tasks list still hides them via `!isSubagent`, so these never surface
     // as tasks. Absent (skipped) on every non-subagent row.
@@ -973,7 +973,8 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "createdAtMs",
     "jsonlPath",
     "model",
-    // 手机面板的「推理强度」一行；不放行的话字段过不了快照白名单。
+    // Mobile panel's "reasoning effort" row; without it, the field fails the
+    // snapshot whitelist.
     "effort",
     "agentSource",
     "contextPercent",
@@ -984,9 +985,10 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "pidPrecise",
     "entrypoint",
     "userMark",
-    // v3 任务终态(completed / abandoned)。手机上的任务行要和桌面一样能一眼看出
-    // 「这个任务是干完了还是放弃了」;没放行的话字段会被白名单静默裁掉。只有终结
-    // 过的会话才有,其余整个字段缺席。
+    // v3 task outcome (completed / abandoned). The mobile task row should show at
+    // a glance whether the task is done or abandoned, just like the desktop row.
+    // Without it, the field silently disappears through the whitelist. Only present
+    // on sessions that have completed; absent for all others.
     "taskOutcome",
     "procAlive",
     // Relay-chain position (hop/chainLen) — the mobile task row shows the same
@@ -1007,9 +1009,11 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // file names. Absent for every session with a clean mirror, which is all of
     // them in normal operation.
     "mirrorWrite",
-    // 账号额度耗尽（codex 的 usage_limit_exceeded）。它没有 status，只有这个字段，
-    // 白名单不放行手机上就完全看不出「这活是被余额掐停的」——而手机恰恰是最可能
-    // 发现它的地方（充值也在手机上）。正常会话整个字段缺席。
+    // Account credits exhausted (codex's usage_limit_exceeded). It has no status
+    // field, only this one. Without the whitelist allowing it, the phone has no
+    // way to see that "this task was stopped due to insufficient credits" — and
+    // the phone is where the user is most likely to notice (recharge is also on
+    // mobile). Absent for normal sessions.
     "outOfCredits",
 ];
 
@@ -1114,7 +1118,7 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
 // bodies, token usage, cwd/sessionId/parentUuid bookkeeping. On one real
 // session that made a single `tail` reply 2.4 MB — 1.7 MB even gzipped — while
 // the client's `RawMessage` doesn't even declare `toolUseResult`, and an
-// `image` block renders as the literal string "[图片]". The phone downloaded
+// `image` block renders as the literal string "[Image]". The phone downloaded
 // megabytes, inflated them, and dropped them on the floor (on a 15s request
 // timeout). Slimming to the rendered field set takes that reply to ~13 KB.
 //
@@ -1308,8 +1312,8 @@ fn truncate_chars(s: &str, max: usize) -> String {
 /// Summarize a decision card's `input` for the collapsed tool chip: the first
 /// question's opening line plus the question count. The whole card (`questions`)
 /// is far too big to ship in the skeleton stream and the input whitelist drops
-/// it, which otherwise leaves every decision chip in a session reading the same
-/// bare 「决策卡」. The opening line is exactly the right gist — Fleet's
+/// it, which otherwise leaves every decision chip in a session with the same bare
+/// "decision card" label. The opening line is exactly the right summary — Fleet's
 /// interaction mode requires each question to start with a one-line summary
 /// above a lone `---` divider.
 fn ask_summary(input: &Map<String, Value>) -> Option<Value> {
@@ -1330,9 +1334,9 @@ const INGEST_TITLE_MAX_CHARS: usize = 80;
 /// Gist of a `fleet__artifact add` / `fleet__wiki publish` confirmation, for
 /// the phone's ingest preview card.
 ///
-/// The subject of these two calls — the deliverable that just landed in the
-/// 产出 store, the doc that just landed in the 知识库 — is the one thing in a
-/// run the reader actually wants to see, and the phone can see none of it: the
+/// The subject of these two calls — the artifact that just landed in the output
+/// store, or the doc that just landed in the knowledge base — is the one thing in
+/// a run the reader actually wants to see, and the phone can see none of it: the
 /// id lives in the *result* text, which the tail strips, and the title lives in
 /// `input.title`, which [`TAIL_TOOL_INPUT_FIELDS`] drops. So it is recovered
 /// here, the same way `_ask` recovers a decision card's opening line.
@@ -1475,7 +1479,7 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
     if let Some(status) = obj.get("status").and_then(Value::as_str) {
         d.insert("agentStatus".into(), status.into());
         // The subagent's session id (`agent-<uuid>` is scanned from `agentId`);
-        // it's the only handle the phone's "打开子代理" button has to look the
+        // it's the only handle the phone's "open subagent" button has to look the
         // subagent up in the session array and drill into its transcript.
         if let Some(id) = obj.get("agentId").and_then(Value::as_str) {
             d.insert("agentId".into(), id.into());
@@ -1565,7 +1569,7 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
 /// sheds its original base64 `source` — the biggest and least compressible part
 /// of a transcript — and carries a server-side ~256px JPEG thumbnail instead
 /// (`_thumb: true`); an undecodable image keeps only its `type` and renders as
-/// the "[图片]" placeholder. A `tool_result` block's body stays stripped, but
+/// the "[Image]" placeholder. A `tool_result` block's body stays stripped, but
 /// any images inside it surface as a capped `_thumbs` list.
 fn slim_tail_block(block: &Value) -> Value {
     let Some(obj) = block.as_object() else {
@@ -1870,7 +1874,7 @@ pub fn publish_sessions(sessions: &Value) {
 // ── Inbound: answers and requests from mobile clients ────────────────────────
 
 /// Business frame acknowledging that a write `req` reached the desktop, sent
-/// before the final `reply` (方案 A early ack). Carries the same `req_id` so the
+/// before the final `reply` (Plan A early ack). Carries the same `req_id` so the
 /// client can correlate it.
 fn ack_frame(req_id: &Value) -> Value {
     json!({ "event": "ack", "req_id": req_id })
@@ -2021,7 +2025,7 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
                 .unwrap_or_default();
             let cancelled = payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false);
             // v3 terminal button: the phone sends `taskOutcome` alongside
-            // `cancelled: true` when the user pressed 结束任务 / 放弃任务, so the
+            // `cancelled: true` when the user pressed "end task" / "abandon task", so the
             // phone stamps the same session terminal state the desktop does.
             let task_outcome = payload
                 .get("taskOutcome")
@@ -2165,14 +2169,14 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "decision_answer" => serve_decision_answer(params),
         "attachments_exist" => serve_attachments_exist(params),
         "user_attachment" => serve_user_attachment(params),
-        // ── Repository "仓库" surface ─────────────────────────────────────
+        // ── Repository (warehouse) surface ────────────────────────────────────
         "repo_list" => serve_repo_list(params),
         "repo_detail" => serve_repo_detail(params),
         "repo_push" => serve_repo_push(params),
         "repo_pull" => serve_repo_pull(params),
-        // ── Terminal 「终端」 surface ──────────────────────────────────────
+        // ── Terminal surface ──────────────────────────────────────────────────────
         // Asked first, at connect: the whole surface below is off unless this
-        // host was started with FLEET_TERMINAL, and the phone hides its 终端
+        // host was started with FLEET_TERMINAL, and the phone hides its terminal
         // entries rather than opening a panel whose first spawn is refused.
         "host_features" => serve_host_features(params),
         "host_identity" => serve_host_identity(params),
@@ -2296,7 +2300,7 @@ fn serve_task_plans(params: &Value) -> Result<Value, String> {
     serde_json::to_value(plans).map_err(|e| e.to_string())
 }
 
-/// The whole repo's plan forest — the same join the desktop 计划树 renders,
+/// The whole repo's plan forest — the same join the desktop plan tree renders,
 /// which `task_plans` cannot express: it returns a flat per-session list with
 /// no `parent` links, no relay chains and no done/total counters.
 fn serve_plan_forest(params: &Value) -> Result<Value, String> {
@@ -2615,7 +2619,7 @@ fn serve_today_usage_breakdown(_params: &Value) -> Result<Value, String> {
     serde_json::to_value(breakdown).map_err(|e| e.to_string())
 }
 
-// Account + rate-limit usage for the mobile 「账号与用量」 page: the Claude
+// Account + rate-limit usage for the mobile "Account & Usage" page: the Claude
 // account/plan with its 5h/7d bars, plus a normalised bar set for every
 // other available source. Runs on a plain thread rather than this ws
 // blocking task because every fetch inside builds its own tokio runtime
@@ -2753,8 +2757,8 @@ fn serve_artifact_list(_params: &Value) -> Result<Value, String> {
 /// The user's folders, so the phone can group by the same tree the desktop
 /// shows — including a folder that is still empty, which no artifact reveals.
 ///
-/// Read-only on purpose: filing and folder管理 are desk work (the phone's
-/// 产出 tab has never had an edit affordance at all), and a write arm nothing
+/// Read-only on purpose: filing and folder management are desk work (the phone's
+/// output tab has never had an edit affordance at all), and a write arm nothing
 /// calls is a surface to keep in sync for nothing.
 fn serve_artifact_folders(_params: &Value) -> Result<Value, String> {
     serde_json::to_value(crate::artifacts::list_folders()).map_err(|e| e.to_string())
@@ -3222,7 +3226,7 @@ fn serve_user_attachment(params: &Value) -> Result<Value, String> {
     }))
 }
 
-// ── Repository "仓库" surface ─────────────────────────────────────
+// ── Repository surface ─────────────────────────────────────
 // A loose-ends view over every git repo reachable from a known session
 // workspace: worktrees with commits not merged back into main, and the
 // main branch ahead of its upstream (unpushed). Access envelope matches
@@ -3258,7 +3262,7 @@ fn serve_repo_pull(params: &Value) -> Result<Value, String> {
     serde_json::to_value(res).map_err(|e| e.to_string())
 }
 
-// ── Terminal (mobile / webui 「终端」 panel) ─────────────────────────────────
+// ── Terminal (mobile / webui panel) ─────────────────────────────────
 //
 // Thin wrappers over [`crate::proc_runner`], which is already a full
 // interactive pty host (stdin, resize, killpg, offset-addressed output). The
@@ -3277,8 +3281,9 @@ fn serve_host_features(_params: &Value) -> Result<Value, String> {
     serde_json::to_value(crate::feature_flags::host_features()).map_err(|e| e.to_string())
 }
 
-/// 这台主机叫什么 —— 手机端给这台设备起名字用(见 `host_identity.rs`)。纯展示,
-/// 不 gate 任何面,所以与上面的能力开关分开一个方法。
+/// What the host is called — used by mobile to name this device (see
+/// `host_identity.rs`). Display-only, does not gate any surface, so it gets its
+/// own method separate from the capabilities above.
 fn serve_host_identity(_params: &Value) -> Result<Value, String> {
     serde_json::to_value(crate::host_identity::host_identity()).map_err(|e| e.to_string())
 }
@@ -3361,7 +3366,7 @@ fn serve_proc_clear(params: &Value) -> Result<Value, String> {
     }
 }
 
-// ── Account & usage (mobile 「账号与用量」 page) ─────────────────────────────────
+// ── Account & usage (mobile "Account & Usage" page) ────────────────────────────
 
 /// Bucket width for the mobile occupancy chart. Every usage fetch appends a
 /// snapshot, so the raw series runs at a ~10s median cadence — a 24h window is
@@ -4051,7 +4056,7 @@ mod tests {
         assert_eq!(runs.get(), 2);
     }
 
-    // ── spawn_session idempotent-resend dedup (方案 C 桌面去重) ──────────────
+    // ── spawn_session idempotent-resend dedup (Plan C desktop dedup) ──────────────
 
     #[test]
     fn dedup_unknown_id_is_none() {
@@ -4072,7 +4077,7 @@ mod tests {
         assert_eq!(spawned_session_pid("dedup-phone-preassigned"), None);
     }
 
-    // ── 方案 A early submit-ack ──────────────────────────────────────────────
+    // ── Plan A early submit-ack ──────────────────────────────────────────────────
 
     #[test]
     fn ackable_covers_writes_not_reads() {
@@ -4119,7 +4124,7 @@ mod tests {
         assert_eq!(f["req_id"], "abc-7");
     }
 
-    // ── decision_answer idempotent-resend dedup (弱网答复重传去重) ────────────
+    // ── decision_answer idempotent-resend dedup (weak network answer resend dedup) ──
 
     #[test]
     fn decision_answer_dedup_primitive_records_and_isolates() {
@@ -4133,7 +4138,7 @@ mod tests {
         assert!(!decision_already_answered("dedup-decision-primitive-unrelated"));
     }
 
-    // ── resume_session idempotent-resend dedup (弱网重发双跑去重) ──────────────
+    // ── resume_session idempotent-resend dedup (weak network double-run resend dedup) ──
 
     #[test]
     fn resume_dedup_primitive_records_and_isolates() {
@@ -4833,7 +4838,7 @@ mod tests {
     /// the shape that made one real session's `tail` reply 2.4 MB (1.7 MB even
     /// after gzip, because base64 doesn't compress). The mobile client renders
     /// none of it: `toolUseResult` isn't in its `RawMessage` at all, and an
-    /// `image` block renders as the literal string "[图片]".
+    /// `image` block renders as the literal string "[Image]".
     fn fat_record() -> Value {
         let blob = "A".repeat(4096); // stands in for base64 image data
         json!({
@@ -4889,7 +4894,7 @@ mod tests {
 
             let blocks = m["message"]["content"].as_array().expect("content blocks");
             assert_eq!(blocks.len(), 3, "block count preserved");
-            // image: type kept (renders as "[图片]"), base64 payload dropped
+            // image: type kept (renders as "[Image]"), base64 payload dropped
             assert_eq!(blocks[0]["type"], "image");
             assert!(blocks[0].get("source").is_none(), "image base64 must be stripped");
             // text: kept verbatim
@@ -5741,8 +5746,8 @@ mod tests {
         // bug where titleOverride was absent from SNAPSHOT_FIELDS.
         assert_eq!(list[1]["titleOverride"], "手动重命名");
         assert_eq!(list[1]["userMark"], "done");
-        // The phone's info panel has a 推理强度 row; a field missing from the
-        // whitelist never crosses the relay, so the row would silently never
+        // The phone's info panel has a "reasoning effort" row; a field missing from
+        // the whitelist never crosses the relay, so the row would silently never
         // appear (which is how `model` shipped alone in the first place).
         assert_eq!(list[1]["effort"], "high");
         assert_eq!(list[1]["lastMessagePreview"], "短预览");
@@ -5798,7 +5803,7 @@ mod tests {
     #[test]
     fn tool_result_digest_carries_agent_id() {
         // The Agent toolUseResult shape: status + the subagent's agentId, which
-        // the phone's "打开子代理" button needs to look the subagent up.
+        // the phone's "open subagent" button needs to look the subagent up.
         let meta = json!({
             "status": "completed",
             "agentId": "abc-123",
@@ -5823,7 +5828,7 @@ mod tests {
         let d = tool_result_digest(&meta).expect("digest");
         assert_eq!(d["stoppedCommand"], "until ! pgrep -f go; do sleep 5; done");
         // An agent task carries no command → no field (the phone shows the
-        // plain 「停止后台任务」 label).
+        // plain "stop background task" label).
         let agent = json!({"task_id": "b5v", "task_type": "local_agent"});
         assert!(tool_result_digest(&agent).is_none());
     }
@@ -6306,7 +6311,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// The phone's repo-level 计划 page needs the *forest*, not `task_plans`'s
+    /// The phone's repo-level plan page needs the *forest*, not `task_plans`'s
     /// flat per-session list: only the forest carries `parent` links, done/total
     /// counters and the relay chains. Regression pin for the method table — it
     /// shipped without this entry, so the mobile view had no way to ask.
@@ -7150,7 +7155,7 @@ mod tests {
 
     /// The two ingest confirmations survive the strip as a tiny `_ingest`, so
     /// the phone can show what a run actually produced instead of a bare
-    /// 「产出」 chip. Everything the card needs — id/slug and title — lives in
+    /// "output" chip. Everything the card needs — id/slug and title — lives in
     /// text the tail otherwise drops.
     #[test]
     fn slim_tail_summarizes_an_ingest() {
@@ -7306,9 +7311,9 @@ mod tests {
     /// A decision card (`AskUserQuestion` / `fleet__ask` / codex's
     /// `request_user_input`) keeps its whole card in `input.questions`, which
     /// the input whitelist drops — so without `_ask` every decision chip in a
-    /// session reads the same bare 「决策卡」. Ship the first question's opening
-    /// line (the TTS summary line, above the `---` divider) plus the question
-    /// count, and digest the chosen answer off `toolUseResult`.
+    /// session reads the same bare "decision card" label. Ship the first question's
+    /// opening line (the TTS summary line, above the `---` divider) plus the
+    /// question count, and digest the chosen answer off `toolUseResult`.
     #[test]
     fn slim_tail_summarizes_decision_cards() {
         let ask_use = |name: &str| {
@@ -7650,22 +7655,24 @@ mod tests {
         });
     }
 
-    /// 手机端拿这一份给配对设备起名字。`platform` 必须在、必须是字符串 ——
-    /// 缺了它客户端连「macOS 设备」这种兜底名都编不出来,只能退回「设备 N」。
+    /// Mobile uses this payload to name the paired device. `platform` must be
+    /// present and must be a string — without it, the client can't even generate
+    /// a fallback name like "macOS device" and has to resort to "device N".
     #[test]
     fn host_identity_always_carries_a_platform_string() {
         with_temp_home(|| {
             let data = serve_request("host_identity", &json!({})).expect("host_identity");
             let platform = data.get("platform").expect("platform key present");
             assert_eq!(platform.as_str(), Some(std::env::consts::OS));
-            // hostname 允许缺席(容器、取不到名字的系统),但在场就必须是非空字符串
+            // Hostname is optional (containers, systems without a name), but if present
+            // must be a non-empty string.
             if let Some(h) = data.get("hostname") {
                 assert!(h.as_str().is_some_and(|s| !s.is_empty()), "bad hostname: {data}");
             }
         });
     }
 
-    /// What the phone hides its 终端 entries on. The payload must carry the
+    /// Gate for showing the phone's terminal entries. The payload must carry the
     /// `terminal` key under exactly that (camelCase) name and as a boolean —
     /// a missing key reads as `undefined` on the client, which is falsy and
     /// would hide the surface on a host that actually has it enabled.

@@ -1,16 +1,18 @@
-// 每台设备的运行时状态,以及把它们并成一份的选择器。
+// Runtime state per device, plus selectors that merge them into one view.
 //
-// 在此之前这些状态是 App 里一把扁平的 useState:一个 connected、一个 sessions、
-// 一个 decisions、一对 ref 记着「谁是可信 agent」。那套写法把「只有一个数据源」
-// 焊死进了组件——多设备之后每一项都要按设备各来一份。
+// Before this, these states lived as a flat useState in App: one connected, one sessions,
+// one decisions, a pair of refs tracking "who's the trusted agent". That approach hardwired
+// "single source of truth" into the component — multi-device needs each state per device.
 //
-// 这里刻意把状态迁移写成**纯 reducer** 而不是散在 handler 里的 setState:
-//   * 迁移规则本身是有内容的(快照对账、可信 agent 判定、乐观答复的抑制窗口、
-//     拥塞判级),值得被单测钉住,而这些规则不需要 React 才能跑。
-//   * 组件那一层因此只剩下「把传输层的回调翻译成 action」,那部分没有分支。
+// Deliberately write state transitions as a **pure reducer** rather than scattered setState in
+// handlers:
+//   * The transition rules themselves have substance (snapshot reconcile, trusted-agent logic,
+//     optimistic-answer suppression window, congestion grading) that deserves unit tests,
+//     and these rules don't need React.
+//   * The component layer thus becomes only "translate transport callbacks to actions", with no branches.
 //
-// 与 devices.ts 的分工:那边是**配对了哪些设备**(持久化),这里是**这些设备此刻
-// 怎么样**(内存,进程内)。
+// Division of labor with devices.ts: that file covers "which devices are paired" (persistent),
+// this file covers "what's happening with them right now" (in-memory, per-process).
 
 import {
   computeCongestion,
@@ -30,32 +32,32 @@ import type {
   TodayUsage,
 } from "./types";
 
-/** 一台设备此刻的全部运行时状态。 */
+/** Complete runtime state for one device right now. */
 export interface DeviceRuntimeState {
-  /** 这台设备到中转的连通性。 */
+  /** Connectivity from this device to the relay. */
   connected: boolean;
-  /** 那台桌面端在不在线。 */
+  /** Whether the desktop is online. */
   agentOnline: boolean;
   sessions: SessionInfo[];
-  /** 首份 sessions 帧是否到过 —— 用来区分「还在等第一帧」与「推过了,确实空」。 */
+  /** Whether the first sessions frame arrived — distinguishes "waiting for first" from "got empty". */
   sessionsLoaded: boolean;
   decisions: PendingDecision[];
   decisionsLoaded: boolean;
   todayUsage: TodayUsage | null;
-  /** 最近一帧 sessions 是全量还是增量,以及各自累计数(诊断用)。 */
+  /** Latest sessions frame type (full/delta) and cumulative counts (diagnostic). */
   sessionsFrame: { last: "full" | "delta" | null; full: number; delta: number };
   rttSplit: RttSplit | null;
   congestion: Congestion;
   authError: string | null;
-  /** 回过快照的每一个 agent(诊断用:正常只有一个)。 */
+  /** Every agent that's returned a snapshot (diagnostic: normally just one). */
   snapshotSources: SnapshotSource[];
-  /** 在本机答过、但答复还在路上的卡 id → 时间戳。 */
+  /** Card IDs answered on this phone but replies still in flight, mapped to timestamps. */
   answeredAt: Map<string, number>;
-  /** 被采信为「就是这台桌面端」的 agent 指纹。 */
+  /** Agent fingerprint trusted as "this is the desktop". */
   trustedAgentKey?: string;
-  /** 最近一次往返耗时(拥塞判级用的原始信号)。 */
+  /** Latest round-trip latency (raw signal for congestion grading). */
   lastRttMs: number | null;
-  /** 最近一个窗口内的重连时刻。 */
+  /** Recent reconnects within the window. */
   recentReconnects: number[];
 }
 
@@ -79,23 +81,23 @@ export function emptyDeviceState(): DeviceRuntimeState {
   };
 }
 
-/** 设备 id → 它的运行时状态。 */
+/** Device id → its runtime state. */
 export type DeviceStates = Record<string, DeviceRuntimeState>;
 
 export type DeviceAction =
-  /** 这台设备进入运行(幂等:已在册就原样返回)。 */
+  /** Device enters operation (idempotent: already active returns unchanged). */
   | { type: "attach" }
-  /** 这台设备被移除,连同它的状态一起丢掉。 */
+  /** Device is removed, state discarded with it. */
   | { type: "detach" }
   | { type: "status"; connected: boolean }
   | { type: "agentOnline"; online: boolean }
   | { type: "sessions"; list: SessionInfo[] }
-  /** 冷启动时从缓存画一笔:只在还没有实时数据时生效,免得把刚到的真数据盖掉。 */
+  /** Cold-start cache draw: only works before live data arrives, doesn't overwrite fresh data. */
   | { type: "cachedSessions"; list: SessionInfo[] }
   | { type: "sessionsKind"; kind: "full" | "delta" }
   | { type: "decisionCreated"; kind: DecisionKind; request: DecisionRequest; now: number }
   | { type: "decisionResolved"; id: string }
-  /** 本机刚答完一张卡:先乐观移除,并记下时间戳压住迟到快照的复活。 */
+  /** This phone just answered a card: optimistically remove and record timestamp to suppress late snapshot resurrection. */
   | { type: "answered"; id: string; now: number }
   | {
       type: "snapshot";
@@ -108,7 +110,7 @@ export type DeviceAction =
   | { type: "reconnect"; now: number }
   | { type: "authError"; message: string };
 
-/** 单台设备的状态迁移。 */
+/** State transition for a single device. */
 export function deviceReducer(
   state: DeviceRuntimeState,
   action: DeviceAction,
@@ -128,7 +130,7 @@ export function deviceReducer(
     case "sessions":
       return { ...state, sessions: action.list, sessionsLoaded: true };
     case "cachedSessions":
-      // 实时快照已经到过就不动它 —— 缓存永远比实时旧。
+      // Once live snapshot arrives, don't touch it — cache is always older than live.
       return state.sessionsLoaded || state.sessions.length > 0
         ? state
         : { ...state, sessions: action.list };
@@ -142,8 +144,8 @@ export function deviceReducer(
         },
       };
     case "decisionCreated": {
-      // 一帧实时决策卡本身就证明管道在投递 —— 即使首份快照还没回来,骨架屏也
-      // 该退场。
+      // One frame of live decision cards proves the pipeline is delivering — even if
+      // the first snapshot hasn't arrived, the skeleton should disappear.
       if (!action.request?.id) return state;
       if (state.decisions.some((d) => d.id === action.request.id)) {
         return state.decisionsLoaded ? state : { ...state, decisionsLoaded: true };
@@ -163,7 +165,7 @@ export function deviceReducer(
       };
     }
     case "decisionResolved": {
-      // 权威解决(桌面端或另一台手机)——本机那条「答复在路上」的记账作废。
+      // Resolved authoritatively (desktop or another phone) — this phone's "answer in flight" record is void.
       const answeredAt = new Map(state.answeredAt);
       answeredAt.delete(action.id);
       return {
@@ -232,7 +234,7 @@ export function deviceReducer(
   }
 }
 
-/** 整本簿子的迁移。action 带上是哪一台。 */
+/** State transition for the whole book. Action carries which device. */
 export function devicesReducer(
   states: DeviceStates,
   action: DeviceAction & { deviceId: string },
@@ -250,23 +252,24 @@ export function devicesReducer(
   return { ...states, [deviceId]: after };
 }
 
-// ── 聚合选择器 ───────────────────────────────────────────────────────────────
+// ── Aggregated selectors ───────────────────────────────────────────────────────────
 //
-// 收件箱与任务列表是**跨设备合并**的,所以每一项都必须带上它属于哪一台:下钻要
-// 用那一台的 transport,答复要发回那一台,徽标也要显示那一台的名字。id 只在单机
-// 内唯一,所以 UI 侧一律用 (deviceId, id) 复合键。
+// Inbox and task list are **merged cross-device**, so every item must carry which device
+// it belongs to: drill-down uses that device's transport, reply goes back there, badges
+// show that device's name. IDs are unique only per device, so the UI always uses
+// (deviceId, id) composite keys.
 
-/** 合并列表里的一项:原对象 + 归属设备。 */
+/** One item in merged list: the object plus its device. */
 export type WithDevice<T> = T & { deviceId: string };
 
-/** 复合键。跨设备撞 id 时它是唯一能区分两张卡的东西 —— React key、去重、
- *  「刚答过的是哪一张」全都用它。 */
+/** Composite key. When IDs collide across devices, this is the only way to distinguish
+ *  two cards — React key, dedup, "which card did I just answer" all use it. */
 export function itemKey(deviceId: string, id: string): string {
   return `${deviceId}::${id}`;
 }
 
-/** 所有设备的待决策卡,按到达时间排(新的在后,与单设备时代一致)。
- *  `order` 给出设备顺序,用于同一时刻到达时的稳定排序。 */
+/** All pending-decision cards across devices, sorted by arrival time (newest last, matching
+ *  single-device era). `order` gives device order for stable sort when arrival times match. */
 export function aggregateDecisions(
   states: DeviceStates,
   order: string[],
@@ -282,7 +285,7 @@ export function aggregateDecisions(
   });
 }
 
-/** 所有设备的会话,按最近活动时间倒序(与任务页原本的排序口径一致)。 */
+/** All sessions across devices, reverse-sorted by recent activity (matches original task page). */
 export function aggregateSessions(
   states: DeviceStates,
   order: string[],
@@ -294,26 +297,26 @@ export function aggregateSessions(
   return out;
 }
 
-/** 有没有任何一台在线。头部那盏灯用它:一台离线不该让整个界面显示「离线」,
- *  因为其他几台还在正常推数据。 */
+/** Is any device's agent online? Header light uses this: one offline shouldn't make the whole
+ *  UI show "offline" when others are pushing data normally. */
 export function anyAgentOnline(states: DeviceStates, order: string[]): boolean {
   return order.some((id) => states[id]?.agentOnline);
 }
 
-/** 有没有任何一台连着中转。 */
+/** Is any device connected to the relay? */
 export function anyConnected(states: DeviceStates, order: string[]): boolean {
   return order.some((id) => states[id]?.connected);
 }
 
-/** 全部设备的今日花费之和;一台都没报过就是 null(而不是 0 —— 那会显示成
- *  「今天没花钱」,和「还不知道」是两回事)。 */
+/** Total spend across all devices today; null if none have reported (not 0, which shows "no spend",
+ *  different from "unknown"). */
 export function totalUsage(states: DeviceStates, order: string[]): TodayUsage | null {
   let sum: TodayUsage | null = null;
   for (const id of order) {
     const u = states[id]?.todayUsage;
     if (!u) continue;
     if (!sum) {
-      // 第一台的那份原样收下(date 之类的非数值字段取它的),后面的只累加数值。
+      // Take the first device's fields as-is (for non-numeric fields like date), then accumulate numbers.
       sum = { ...u };
       continue;
     }
@@ -330,22 +333,21 @@ export function totalUsage(states: DeviceStates, order: string[]): TodayUsage | 
   return sum;
 }
 
-/** 合计里某一台出了多少。`usage` 为 `null` = 这台还没报过(离线/刚连上),
- *  与「这台今天没花钱」是两回事,所以留给渲染层去区分。 */
+/** This device's contribution to the total. `usage` is `null` = device hasn't reported yet
+ *  (offline/just connected), different from "spent zero today"; renderer distinguishes them. */
 export interface DeviceUsage {
   id: string;
   usage: TodayUsage | null;
 }
 
-/** 把合计拆回每台一行。顺序跟 `order` 走,和设备切换器上的顺序一致。
- *
- *  存在的理由是 `totalUsage` 把两台加成了一个数,而那个数回答不了「哪一台在烧
- *  钱」——尤其两台登的不是同一个账号时。 */
+/** Break down total usage to one row per device. Order follows `order`, matching the device
+ *  switcher. Exists because `totalUsage` sums all devices into one number, which doesn't answer
+ *  "which device is spending" — especially when they're logged into different accounts. */
 export function usageByDevice(states: DeviceStates, order: string[]): DeviceUsage[] {
   return order.map((id) => ({ id, usage: states[id]?.todayUsage ?? null }));
 }
 
-/** 最差的那一档拥塞 —— 头部只有一盏灯,而用户感觉到的是最卡的那条链路。 */
+/** Worst congestion grade — the header has one light, and users feel the slowest link. */
 export function worstCongestion(states: DeviceStates, order: string[]): Congestion {
   let level: Congestion = "good";
   for (const id of order) {
@@ -356,12 +358,13 @@ export function worstCongestion(states: DeviceStates, order: string[]): Congesti
   return level;
 }
 
-/** 首屏骨架屏的闸门:还有设备**有可能**回快照、但还没回过时才算「还在等」。
+/** First-screen skeleton gate: "still waiting" only when devices **could** return snapshot
+ *  but haven't yet.
  *
- *  只有 `connected && agentOnline` 的设备才守着这道闸门。一台配过但此刻离线的
- *  设备永远不会回快照,让它守闸门等于让骨架屏永远转下去——多设备且其中一台离线
- *  时,决策卡页就是这样卡在骨架屏、连「桌面端离线 / 没有待处理的决策」的提示都
- *  出不来的。 */
+ *  Only `connected && agentOnline` devices guard this gate. A paired-but-offline device never
+ *  returns a snapshot; letting it guard means the skeleton spins forever — with multiple devices
+ *  where one is offline, the decision page gets stuck spinning, unable to show even
+ *  "desktop offline / no decisions". */
 export function allDecisionsLoaded(states: DeviceStates, order: string[]): boolean {
   if (order.length === 0) return false;
   return !order.some((id) => {
@@ -371,8 +374,8 @@ export function allDecisionsLoaded(states: DeviceStates, order: string[]): boole
   });
 }
 
-/** 桌面端不在线的设备数。合并收件箱只会显示在线设备的卡,所以「都答完了」这句
- *  话在有设备离线时是不完整的 —— 这个数就是补上那半句用的。 */
+/** Count of offline devices (agent not online). Merged inbox shows only online devices' cards,
+ *  so "all answered" is incomplete when devices are offline — this number completes the picture. */
 export function offlineDeviceCount(states: DeviceStates, order: string[]): number {
   return order.filter((id) => !states[id]?.agentOnline).length;
 }

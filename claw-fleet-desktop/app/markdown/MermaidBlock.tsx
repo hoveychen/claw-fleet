@@ -30,9 +30,11 @@ export function MermaidBlock({ code }: { code: string }) {
         const mermaid = (await import("mermaid")).default;
         mermaid.initialize({
           startOnLoad: false,
-          // mermaid 的内置 default/dark 色板（姜黄 subgraph、淡紫节点）是全应用
-          // 唯一不吃 App.css token 的地方，改走 base + 自己的变量表。字体栈也在
-          // 那里（量宽和画宽必须解析成同一个栈，见 mermaidTheme 注释）。
+          // mermaid's built-in default/dark color palette (amber subgraph, light
+          // purple nodes) is the only place in the app that doesn't consume App.css
+          // tokens; switch to base + custom variable table. Font stack lives there
+          // too (measured width and drawn width must parse to the same stack; see
+          // mermaidTheme comments).
           ...mermaidThemeConfig(theme),
           // mermaid runs its own DOMPurify pass at this level, so labels
           // carrying HTML can't smuggle script into the SVG we inject below.
@@ -40,8 +42,9 @@ export function MermaidBlock({ code }: { code: string }) {
         });
         const { svg } = await mermaid.render(`mermaid-${seq++}`, code);
         if (cancelled) return;
-        // 对比度自愈烤进字符串：一张按深色主题硬编码 `style X fill:#4a3728` 的
-        // 图，在 light 主题下标签仍是主题色 #333，整块糊成黑砖（见 mermaidContrast）。
+        // Contrast self-healing is baked into the string: a diagram hard-coded
+        // for dark theme with `style X fill:#4a3728` becomes unreadable on light
+        // theme where labels stay at theme color #333 (see mermaidContrast).
         setSvg(repairMermaidContrastInSvg(svg));
         setError(null);
       } catch (e) {
@@ -55,8 +58,10 @@ export function MermaidBlock({ code }: { code: string }) {
     };
   }, [code, theme]);
 
-  // 宽图别缩到读不了：装不下时按下限钉宽，让 .diagram 的 overflow-x 接管。
-  // 挂 ResizeObserver 是因为分屏/侧栏折叠会改容器宽，一次性量完就过期了。
+  // Don't shrink wide diagrams until unreadable: when it doesn't fit, pin width
+  // to a minimum and let .diagram's overflow-x take over. ResizeObserver is needed
+  // because split screen/sidebar collapse changes container width; one-time
+  // measurement expires.
   useEffect(() => {
     const host = hostRef.current;
     if (!host || svg === null) return;

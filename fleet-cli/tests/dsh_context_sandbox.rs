@@ -6,9 +6,9 @@
 //! allow-list — three modes, bounded by the session's own cwd — so the only way
 //! to let `~/.fleet` through is to turn the file sandbox off for that session.
 //!
-//! 老板 took that trade **only for the sessions Fleet drives**. A session he
-//! opens in dsh himself must keep dsh's boundary and the confirmation it puts in
-//! front of him, so the escalation is gated on Fleet ownership. This test drives
+//! The user accepts that trade **only for the sessions Fleet drives**. A session they
+//! open in dsh themselves must keep dsh's boundary and the confirmation it puts in
+//! front of them, so the escalation is gated on Fleet ownership. This test drives
 //! the real binary, because the gate is only worth anything end to end: the
 //! knowledge of who spawned a session lives on Fleet's side, and this command is
 //! where it reaches the plugin.

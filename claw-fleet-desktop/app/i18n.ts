@@ -19,14 +19,17 @@ export function isSupportedLanguage(code: string | null | undefined): code is Su
 }
 
 /**
- * 界面语言的初值。三级,和精简模式同构:这个客户端存过的**显式**选择最高,其次
- * 是这台主机上次给出的默认值(后端的 `FLEET_LOCALE`,经 host_features 送来),
- * 都没有才回落到浏览器自己的语言。
+ * Detect the initial interface language. Three-tier precedence (same as simplified mode):
+ * explicit choice stored on this client is highest; second is the host default from last boot
+ * (backend's `FLEET_LOCALE`, delivered via `host_features`); if neither, fall back to the
+ * browser's own language.
  *
- * 为什么要缓存主机的答案:`host_features` 是启动后一次异步请求,而语言必须在
- * i18next init 时同步定下来 —— 只等那次请求的话,每次打开都会先画一帧英文界面
- * 再跳成中文。缓存让第二次之后的加载直接就位;主机的答案每次加载都会刷新这份
- * 缓存,所以主机改口(或不再表态)时它跟着改口,不会变成一个撤不掉的粘滞开关。
+ * Why cache the host answer: `host_features` is an async request after boot, but language
+ * must resolve synchronously at i18next init time. Waiting for that request means the first
+ * page load draws the English UI, then switches to Chinese. Caching lets subsequent loads
+ * start in the right language. The cache refreshes at each boot, so when the host changes
+ * its mind (or stops expressing one), the cache follows — it never becomes a sticky toggle
+ * the user can't undo.
  */
 function detectLanguage(): string {
   const saved = getItem("lang");

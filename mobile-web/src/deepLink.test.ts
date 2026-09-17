@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// deepLink.ts 只在原生壳里活着，两个 Capacitor 模块在 node 下都不可用，所以
-// 整个替掉：`isNativePlatform` 恒真（否则 onPairingLink 直接短路成 no-op），
-// App 则由每个用例注入自己的启动 URL。
+// deepLink.ts only lives in native shells; both Capacitor modules are unavailable under node,
+// so mock them entirely: `isNativePlatform` always true (otherwise onPairingLink short-circuits
+// to no-op), and App gets its launch URL injected by each test case.
 const launchUrl = { value: undefined as string | undefined };
 
 vi.mock("@capacitor/core", () => ({
@@ -17,14 +17,14 @@ vi.mock("@capacitor/app", () => ({
 
 const { onPairingLink } = await import("./deepLink");
 
-/** 跑一次冷启动路径，拿到 handler 收到的东西。 */
+/** Run the cold start path once, get what the handler receives. */
 async function deliver(url: string | undefined): Promise<unknown> {
   launchUrl.value = url;
   let received: unknown = "__never_called__";
   const unsubscribe = onPairingLink((paired) => {
     received = paired;
   });
-  // getLaunchUrl 是 promise，让它的 .then 排到微任务队尾。
+  // getLaunchUrl is a promise, let its .then queue at the end of microtasks.
   await Promise.resolve();
   await Promise.resolve();
   unsubscribe();
@@ -38,11 +38,12 @@ describe("onPairingLink", () => {
     launchUrl.value = undefined;
   });
 
-  // 这是本次修复的核心：二维码的 host 由**桌面端**所在地区/自建配置决定
-  // （claw-fleet-core::relay_region + 设置面板里可改的「Relay 地址」），所以扫到
-  // 的那个 origin 就是这台设备该连的 relay。壳此前只取 secret、把 origin 扔了，
-  // 于是扫了自建 relay 的码照样去连打包时烧进去的官方 relay，现象只是「一直
-  // 连不上」。参见鸿蒙壳 WebShell.ets 里同一个坑的注释。
+  // Core of this fix: the QR code host is determined by **desktop** region/custom config
+  // (claw-fleet-core::relay_region + "Relay Address" editable in settings panel), so the
+  // origin scanned is the relay this device should connect to. The shell previously only
+  // took secret and discarded origin, so scanning a self-hosted relay's QR still connected
+  // to the official relay baked in at build time—the symptom was just "always connect fails".
+  // See the same pit's comment in Harmony shell's WebShell.ets.
   it("交出扫到的 relay origin，而不只是 secret", async () => {
     const received = await deliver(`https://relay.corp.example.com/#k=${SECRET}`);
     expect(received).toEqual({ secret: SECRET, relayBase: "https://relay.corp.example.com" });
@@ -56,9 +57,10 @@ describe("onPairingLink", () => {
     });
   });
 
-  // 鸿蒙壳会显式写 `&relay=`（它的页面 origin 是假域名 fleet.local）。安卓壳走
-  // App Link 时 origin 本身就是真的，但显式参数描述的是「这一次配对」，更具体，
-  // 所以它优先——与 relayBase.ts::resolveRelayBase 的优先级保持一致。
+  // Harmony shell explicitly writes `&relay=` (its page origin is fake domain fleet.local).
+  // Android shell's App Link origin is already real, but explicit parameter describes
+  // "this pairing session", more specific, so it takes priority — consistent with
+  // relayBase.ts::resolveRelayBase priority.
   it("显式的 &relay= 胜过 URL 自身的 origin", async () => {
     const received = await deliver(
       `https://fleet.local/index.html#k=${SECRET}&relay=${encodeURIComponent("http://192.168.1.9:18080")}`,
@@ -66,8 +68,8 @@ describe("onPairingLink", () => {
     expect(received).toEqual({ secret: SECRET, relayBase: "http://192.168.1.9:18080" });
   });
 
-  // 自定义 scheme 之类没有可用 origin 的链接：仍然要能配对，只是没有指名
-  // relay，落到设备簿里就是 `relayBase: null`（relayBaseFor 会给它构建默认值）。
+  // Links with no available origin (like custom scheme): must still pair, just not
+  // naming a relay; in device registry becomes `relayBase: null` (relayBaseFor builds default).
   it("拿不到 http(s) origin 时 relayBase 为 null，但 secret 仍交出", async () => {
     const received = await deliver(`fleet://pair#k=${SECRET}`);
     expect(received).toEqual({ secret: SECRET, relayBase: null });

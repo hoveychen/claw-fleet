@@ -1,41 +1,49 @@
-//! 跨源访问:只给**手机直连**需要的那两条路,而且只在有 token 门时才开。
+//! Cross-origin access: only enabled for the two mobile-direct paths, and
+//! only when a token gate is active.
 //!
-//! 为什么需要:手机上那个页面的 origin 是中转的域名(或原生壳的假域名),它去问
-//! 一台 `fleet serve` 主机就是跨源请求。没有 `Access-Control-Allow-Origin`,浏览器
-//! 会在页面读到响应之前把它拦掉 —— 服务端明明答了 200,前端只看到一个网络错误。
+//! Why it's needed: the page's origin on the phone is a relay domain (or a
+//! fake origin in a native shell). Querying a `fleet serve` host from there
+//! is a cross-origin request. Without `Access-Control-Allow-Origin`, the browser
+//! blocks it before the page sees the response — the backend returns 200 but
+//! the frontend only sees a network error.
 //!
-//! 为什么只开两条路:手机的数据面只有 `POST /mobile_rpc` 与 `GET /events`。其余
-//! 几百个路由(proc exec、settings、凭证、文件浏览)没有任何跨源使用者,给它们开
-//! CORS 只是白扩暴露面。
+//! Why only two paths: the mobile data plane has `POST /mobile_rpc` and
+//! `GET /events` only. The other hundreds of routes (proc exec, settings,
+//! credentials, file browser) have no cross-origin users; enabling CORS for
+//! them just expands the attack surface unnecessarily.
 //!
-//! 为什么以 token 门为条件:`fleet webui` 那个端口**本身没有认证**(它自己的启动
-//! 日志就写着「这个端口能起 agent 会话,必须自己在前面放网关」)。在那种端口上无
-//! 条件回 `Allow-Origin: *`,等于让用户浏览器里**任何一个网页**都能驱动他的 Fleet。
-//! 所以:认证开着(有 admin/scoped token 要验)才发 CORS 头;认证关掉的部署要跨源
-//! 就得在它自己的网关上配 —— 那本来也是那种部署的既定分工。
+//! Why gate it on a token: the `fleet webui` port **has no auth of its own**
+//! (the startup log says so: "this port launches agent sessions; you must put
+//! a gateway in front"). Returning `Allow-Origin: *` on an unauth port means
+//! **any webpage in the user's browser** can drive their Fleet. So: CORS headers
+//! go out only when auth is on (admin/scoped tokens are checked); deployments
+//! with auth off must handle cross-origin at their own gateway — which is
+//! already their responsibility anyway.
 //!
-//! 用 `*` 而不是回写请求的 Origin,是因为这里**不用 cookie**:凭证走
-//! `Authorization: Bearer`(或 SSE 的 `?token=`),而带 `*` 的响应浏览器不会附带
-//! cookie。所以 `*` 在这里不构成「凭浏览器身份被冒用」那类风险,而回写 Origin 反倒
-//! 要多维护一张名单。
+//! We use `*` instead of echoing the request Origin because **no cookies are
+//! in play here**: credentials go in `Authorization: Bearer` (or `?token=` for
+//! SSE), and browsers don't send cookies with responses carrying `*`. So `*`
+//! here poses no "browser identity spoofing" risk, while echoing Origin would
+//! require maintaining an allowlist.
 
 use tiny_http::Header;
 
-/// 允许跨源的路径 —— 手机数据面的全部。
+/// Paths that allow cross-origin access — the entire mobile data plane.
 const CORS_PATHS: [&str; 2] = [crate::routes::MOBILE_RPC, "/events"];
 
 pub fn is_cors_path(path: &str) -> bool {
     CORS_PATHS.contains(&path)
 }
 
-/// 这个部署是否对外开放跨源。`auth_disabled` 为真(前面有自己的网关)时不开 ——
-/// 见模块头的理由。
+/// Whether this deployment enables cross-origin access externally. When
+/// `auth_disabled` is true (there is a gateway in front), it stays disabled —
+/// see the module header for the reasoning.
 pub fn cors_enabled(auth_disabled: bool) -> bool {
     !auth_disabled
 }
 
-/// 该加到响应上的 CORS 头。不开放时是空的 —— 调用方照常 `with_header` 遍历,
-/// 不必分叉。
+/// The CORS headers to add to the response. Empty when disabled — callers still
+/// iterate with `with_header` as usual, no branching needed.
 pub fn headers(auth_disabled: bool, path: &str) -> Vec<Header> {
     if !cors_enabled(auth_disabled) || !is_cors_path(path) {
         return Vec::new();
@@ -43,16 +51,17 @@ pub fn headers(auth_disabled: bool, path: &str) -> Vec<Header> {
     header_set()
 }
 
-/// 预检要回的那一组头。`Authorization` 与 `Content-Type` 必须在 allow 列表里:
-/// 前者是 token,后者是 `application/json`(它让 POST 变成「非简单请求」,于是浏览器
-/// 才会先发 OPTIONS)。
+/// The set of headers to return for a preflight. Both `Authorization` and
+/// `Content-Type` must be in the allow list: the former is the token, the
+/// latter is `application/json` (which makes POST a "non-simple request", so
+/// the browser issues OPTIONS first).
 fn header_set() -> Vec<Header> {
     [
         "Access-Control-Allow-Origin: *",
         "Access-Control-Allow-Methods: GET, POST, OPTIONS",
         "Access-Control-Allow-Headers: authorization, content-type",
-        // 预检结果缓存 10 分钟:手机每次请求前都多一个往返,在移动链路上是实打实
-        // 的延迟。
+        // Preflight results cached for 10 minutes: every mobile request adds an
+        // extra round trip, real latency on a mobile link.
         "Access-Control-Max-Age: 600",
     ]
     .iter()
@@ -60,16 +69,18 @@ fn header_set() -> Vec<Header> {
     .collect()
 }
 
-/// 这是不是一次该由我们直接回掉的预检。
+/// Is this a preflight request we should answer directly?
 ///
-/// **预检必须在认证之前答**:浏览器发 OPTIONS 时**不带** `Authorization` 头(那正是
-/// 它要问「带这个头行不行」的东西)。放到认证之后,预检会拿到 401,于是真正的请求
-/// 永远发不出去 —— 而症状只是「跨源请求失败」,看不出是预检死在门口。
+/// **Preflight MUST be answered before auth**: when the browser sends OPTIONS,
+/// it does NOT include the `Authorization` header (that's what it's asking
+/// about). If we put this after auth, the preflight gets 401, and the real
+/// request never goes out — but the symptom just looks like "cross-origin
+/// request failed", hiding that preflight died at the gate.
 pub fn is_preflight(method: &tiny_http::Method, path: &str, auth_disabled: bool) -> bool {
     cors_enabled(auth_disabled) && method == &tiny_http::Method::Options && is_cors_path(path)
 }
 
-/// 回一个 204 预检响应。
+/// Return a 204 preflight response.
 pub fn preflight_response() -> tiny_http::Response<std::io::Empty> {
     let mut res = tiny_http::Response::empty(204);
     for h in header_set() {
@@ -86,14 +97,16 @@ mod tests {
     fn opens_only_the_two_mobile_paths() {
         assert!(is_cors_path("/mobile_rpc"));
         assert!(is_cors_path("/events"));
-        // 其余路由没有跨源使用者 —— 给它们开只是白扩暴露面。
+        // Other routes have no cross-origin users — enabling CORS just expands
+        // the attack surface.
         assert!(!is_cors_path("/settings"));
         assert!(!is_cors_path("/proc/exec"));
         assert!(!is_cors_path("/v1/sessions"));
         assert!(!is_cors_path("/"));
     }
 
-    /// 无认证的端口不发 CORS 头:否则任何网页都能驱动这台 Fleet。
+    /// Port with no auth does not send CORS headers: otherwise any webpage can
+    /// drive this Fleet.
     #[test]
     fn stays_shut_when_auth_is_disabled() {
         assert!(!cors_enabled(true));
@@ -111,8 +124,8 @@ mod tests {
             .map(|h| format!("{}: {}", h.field.as_str().as_str(), h.value.as_str()))
             .collect();
         assert!(rendered.iter().any(|h| h == "Access-Control-Allow-Origin: *"));
-        // token 与 JSON 的 content-type 必须在 allow 列表里,否则预检就把请求
-        // 判死在门口。
+        // Token and JSON content-type must be in the allow list, or preflight
+        // will reject the request at the gate.
         assert!(rendered
             .iter()
             .any(|h| h.to_ascii_lowercase().contains("authorization")

@@ -45,7 +45,7 @@ export function useDocCardWidth(paneRef: RefObject<HTMLElement | null>, enabled:
     return RATIO_DEFAULT;
   });
   // Measured rather than assumed: it changes with the window, the sidebar, and
-  // the 任务 page's 4-way split.
+  // the task page's four-way split.
   const [paneW, setPaneW] = useState(0);
 
   useEffect(() => {

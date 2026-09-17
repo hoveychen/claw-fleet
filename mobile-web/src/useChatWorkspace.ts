@@ -1,14 +1,15 @@
-// 纯聊天 workspace 的绝对路径。它在**桌面主机**的 home 下，手机端推导不出来，
-// 所以向 relay 要（mobile_relay.rs::serve_request 的 `chat_workspace`）。
+// Absolute path to the pure-chat workspace. It lives under the home directory on the **desktop host**
+// and cannot be derived on mobile, so we request it from relay (mobile_relay.rs::serve_request's
+// `chat_workspace`).
 //
-// 两处都要用：新会话弹层把它钉在目录选项首位（它没有「最近会话」可被发现），
-// 任务页拿它把聊天会话从项目任务里筛出去。桌面端有一个同名的对应物
-// (claw-fleet-desktop/app/hooks/useChatWorkspace.ts)。
+// Used in two places: the new-session modal pins it at the top of directory options (it has no
+// "recent sessions" to be discovered), and the task page uses it to filter chat sessions out of
+// project tasks. The desktop has a corresponding function (claw-fleet-desktop/app/hooks/useChatWorkspace.ts).
 import { useEffect, useMemo, useState } from "react";
 import type { FleetTransport } from "./transport";
 
-/** `null` 表示还没拿到——relay 未连上、请求在途，或桌面端版本老到不认这个方法。
- *  调用方必须把 null 当作「不知道」而不是「没有聊天目录」。 */
+/** `null` means we haven't fetched it yet — relay not connected, request in flight, or desktop version
+ *  too old to recognize this method. Callers must treat null as "unknown", not "no chat workspace". */
 export function useChatWorkspace(client: FleetTransport | null): string | null {
   const [path, setPath] = useState<string | null>(null);
   useEffect(() => {
@@ -30,19 +31,21 @@ export function useChatWorkspace(client: FleetTransport | null): string | null {
 }
 
 /**
- * 同上，但**每台设备各问一次**。任务页的列表是多设备合并的，聊天分区置顶要对每台
- * 机器都成立：远端主机的聊天目录是它自己 home 下的路径（`/root/.fleet/chat`），拿
- * 本机那一条去比永远比不中，那台机器的 Chat 分区就沉在项目中间。
+ * Like the above, but query **once per device**. The task page lists sessions from multiple devices,
+ * and pinning the chat section at the top must hold for every machine: a remote host's chat workspace
+ * is the path under its own home (e.g. `/root/.fleet/chat`), so comparing it to this machine's path
+ * never matches, and that machine's Chat section sinks into the project list.
  *
- * 返回 deviceId → 路径的映射；某台还没拿到（或桌面端老到不认这个方法）就没有这个
- * 键，调用方按「不知道」处理。已拿到的结果留着，不会因为一次快照重渲染而重问。
+ * Returns a deviceId → path map; if a device hasn't been fetched (or the desktop is too old to
+ * recognize this method), it won't have a key here — callers treat that as "unknown". Fetched results
+ * persist and are not re-requested on subsequent renders.
  */
 export function useChatWorkspaces(
   deviceIds: readonly string[],
   clientFor: (deviceId: string) => FleetTransport | null,
 ): Record<string, string> {
   const [paths, setPaths] = useState<Record<string, string>>({});
-  // 依赖用拼好的字符串：调用方每次快照都会给出一个新数组，但设备集合基本不变。
+  // Dependency as a joined string: callers provide a new array on each render, but device set rarely changes.
   const key = useMemo(() => [...deviceIds].sort().join(" "), [deviceIds]);
   useEffect(() => {
     if (!key) return;
@@ -56,7 +59,7 @@ export function useChatWorkspaces(
           if (alive && r?.path) setPaths((prev) => (prev[id] === r.path ? prev : { ...prev, [id]: r.path }));
         })
         .catch(() => {
-          /* 老版本桌面端不认这个方法 —— 那台就没有置顶，不是错误 */
+          /* Older desktop versions don't recognize this method — that device just has no pinned chat, not an error. */
         });
     }
     return () => {

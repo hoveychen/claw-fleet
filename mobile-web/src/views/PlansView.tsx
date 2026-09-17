@@ -1,8 +1,9 @@
-// 仓库级「计划」页：桌面端计划树的手机版。一行一个计划、一格一个 P-task，
-// 列对齐；点行或点格子从底部升起详情，正文只在那里出现。数据走 relay 的
-// `plan_forest`（claw-fleet-core/src/mobile_relay.rs），和桌面 计划树 同源 ——
-// 会话详情里的「任务计划」页签用的是 `task_plans`，那是扁平的按会话列表，
-// 没有 parent 关系、没有 done/total、没有接力链。
+// Repo-level plan view: phone version of the desktop plan tree. One row per plan,
+// one cell per P-task, columns aligned; tapping a row or cell brings up details from
+// the bottom, with full text shown only there. Data comes from `plan_forest` via relay
+// (claw-fleet-core/src/mobile_relay.rs), same source as the desktop plan tree — the
+// "task plans" tab in session details uses `task_plans` instead, which is flat per-session
+// list with no parent relationships, done/total, or handoff chains.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronRight, GitBranch, ListTree, RefreshCw, TriangleAlert, X } from "lucide-react";
@@ -36,9 +37,9 @@ interface Repo {
   lastMs: number;
 }
 
-/** Repos to offer, newest first. Derived from the sessions the phone already
- *  holds rather than `repo_list` — that one shells out to git for every repo,
- *  and all this page needs is a path to read TASKS.md under. */
+/** Repos to offer, newest first. Derived from sessions the phone already has
+ *  rather than `repo_list` — that one shells out to git for every repo, and all
+ *  this page needs is a path to read TASKS.md from. */
 function distinctRepos(sessions: SessionInfo[]): Repo[] {
   const byPath = new Map<string, Repo>();
   for (const s of sessions) {
@@ -73,8 +74,8 @@ export function PlansView({ sessions, client, onBack }: Props) {
   const [collapsedKeys, setCollapsedKeys] = useState<string[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [focusItem, setFocusItem] = useState<number | null>(null);
-  // Measured on the row strip's container: a phone in portrait has ~330px to
-  // spend and the metrics decide how it is split between title and cells.
+  // Measured on the row strip's container: a phone in portrait has ~330px available
+  // and the metrics decide how to split it between title and cells.
   const [boardW, setBoardW] = useState(0);
 
   useEffect(() => {
@@ -112,7 +113,7 @@ export function PlansView({ sessions, client, onBack }: Props) {
     [liveRoots, doneRoots, showDone],
   );
 
-  // Same default as the desktop: a branch with nothing left to do folds away.
+  // Same default as desktop: a branch with no pending tasks collapses by default.
   const collapsed = useMemo(() => {
     const overrides = new Set(collapsedKeys);
     const out = new Set<string>();
@@ -157,10 +158,11 @@ export function PlansView({ sessions, client, onBack }: Props) {
       <AppHeader
         onBack={onBack}
         title={t("计划")}
-        // repoRow 自己带一条 border-bottom，与 header 的 hairline 叠在一起就是
-        // 两条线把同一块 chrome 切成两片（会话详情页的 tab 条正是因为这个才要
-        // seamless）。**条件**给：仓库只有一个时那一行根本不渲染，此时 header
-        // 的 hairline 就是唯一那条封口线，撤掉它会让页顶和正文糊成一块。
+        // repoRow has its own border-bottom, which overlays with the header's hairline
+        // to create two lines that divide the same chrome area in two (session details'
+        // tab bar requires seamless for this reason). The condition: when there is only
+        // one repo, this row doesn't render at all, so the header's hairline is the only
+        // border, and removing it would blur the page top and content together.
         seamless={repos.length > 1}
         actions={
           <HeaderAction
@@ -293,7 +295,7 @@ export function PlansView({ sessions, client, onBack }: Props) {
   );
 }
 
-/** The only place P-task prose appears: one plan, from the bottom, on demand. */
+/** The only place P-task prose appears: one plan, slid up from the bottom, on demand. */
 function PlanSheet({
   node,
   focusItem,
@@ -305,8 +307,9 @@ function PlanSheet({
 }) {
   const [doneShown, setDoneShown] = useState(false);
   const [titleOpen, setTitleOpen] = useState(false);
-  // 和产出预览同理：sheet 是压在计划页之上的第二层，自己不登记一层历史，
-  // 返回键就会把整个计划页弹掉，人一步退回「更多」。
+  // Like the artifact preview: sheet is a second layer overlaid on the plan page,
+  // and it does not register its own history level, so back dismisses the entire
+  // plan page and returns to the parent view in one step.
   useHistoryLayer(onClose);
   const indexed = node.items.map((item, i) => ({ item, i }));
   const pendingItems = indexed.filter((x) => !x.item.done);

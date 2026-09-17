@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** 谁托管这份 bundle:`"relay"`(缺省)或 `"webui"`。见 hostMode.ts —— 它
-   *  必须是编译期常量,否则 relay 客户端会被打进同源构建里。 */
+  /** Who hosts this bundle: `"relay"` (default) or `"webui"`. See hostMode.ts — it
+   *  must be a compile-time constant, otherwise the relay client gets bundled into same-origin builds. */
   readonly VITE_FLEET_HOST?: string;
-  /** 开发期指向本地 relay 的覆盖值(relay 形态用)。 */
+  /** Development-time override pointing to a local relay (relay mode only). */
   readonly VITE_RELAY_URL?: string;
 }
 

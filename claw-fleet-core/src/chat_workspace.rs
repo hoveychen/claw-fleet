@@ -354,7 +354,7 @@ mod tests {
     /// `fleet__set_session_title`" instruction lives, so the agent never learned
     /// to name itself — and Claude Code stopped writing its own `ai-title`
     /// record on 2026-09-06, leaving `last_message_preview` as the only
-    /// fallback. Verified in the transcript at the time: `会话标题` appeared 0
+    /// fallback. Verified in the transcript at the time: `会话标题` (session title) appeared 0
     /// times and the tool was never called.
     #[test]
     fn brief_carries_the_session_title_instruction_when_installed() {

@@ -161,7 +161,7 @@ describe("ChatComposer paste — spreadsheet selection", () => {
   it("inserts the table at the caret, keeping the text around it", async () => {
     const { onChange, textarea } = await mount({ value: "看这个：\n\n收尾" });
     textarea.value = "看这个：\n\n收尾";
-    textarea.setSelectionRange(5, 5); // 「看这个：\n」之后
+    textarea.setSelectionRange(5, 5); // after "看这个：\n"
     const ev = pasteEvent({ html: EXCEL_HTML, text: EXCEL_TSV, files: [] });
 
     await act(async () => {

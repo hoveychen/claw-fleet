@@ -44,7 +44,7 @@ pub(crate) fn get_task_plans(
 }
 
 /// The workspace's whole execution chain — plan forest with handoff chains
-/// folded onto their plan nodes. Backs the top-level 计划树 view.
+/// folded onto their plan nodes. Backs the top-level plan-tree view.
 #[tauri::command(async)]
 pub(crate) fn get_plan_forest(
     workspace_path: String,

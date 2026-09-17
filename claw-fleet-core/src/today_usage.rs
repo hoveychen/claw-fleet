@@ -1,17 +1,17 @@
 //! "Today's cumulative usage" aggregation for the desktop nav-bar / mobile
 //! header counter.
 //!
-//! Attribution口径 (revised by Boss 2026-08-27): "today" = every **turn**
+//! Attribution basis (revised by Boss 2026-08-27): "today" = every **turn**
 //! whose own `timestamp` falls in today's local day, whenever its session
 //! started. Agent spend only — Fleet's own LLM overhead is excluded (see the
 //! note inside [`build_today_usage_cached`]).
 //!
-//! The original口径 (Boss 2026-07-12) was "sessions **created** today", summing
+//! The original basis (Boss 2026-07-12) was "sessions **created** today", summing
 //! each session's live `SessionInfo.total_cost_usd`. It was replaced because a
 //! session that outlived midnight — every handoff chain, every long-running
 //! agent — had its post-midnight spend attributed nowhere: the badge showed $37
-//! on 2026-08-27 against $225 actually spent, and the receipt's own "近 7 天"
-//! view (which already folded per turn) disagreed with its "今天" page by 7.7×.
+//! on 2026-08-27 against $225 actually spent, and the receipt's own "Last 7 days"
+//! view (which already folded per turn) disagreed with its "Today" page by 7.7×.
 //!
 //! Both the badge ([`today_usage`]) and the receipt
 //! ([`today_usage_breakdown`]) are now derived from the same per-turn
@@ -33,10 +33,10 @@ pub struct TodayUsage {
     pub date: String,
     /// Input tokens across today's turns (input + cache creation + cache read,
     /// cache re-reads included) — the "tokens sent to the API" total, on the same
-    /// 口径 as cost. **Agent sessions only** — Fleet's own LLM calls are excluded
+    /// basis as cost. **Agent sessions only** — Fleet's own LLM calls are excluded
     /// (see [`today_usage`]). NOTE: this is cache-read-dominated and can reach
     /// billions/day — it is NOT the daily report's old last-turn snapshot (the
-    /// report sums cumulatively too, so both agree on口径, though the sidebar also
+    /// report sums cumulatively too, so both agree on basis, though the sidebar also
     /// counts Codex which the Claude-only report does not).
     pub input_tokens: u64,
     /// Output tokens across today's turns.
@@ -79,7 +79,7 @@ fn day_bounds_ms(now_ms: i64) -> (i64, i64, String) {
 }
 
 /// Count the top-level (non-subagent) sessions that actually spent tokens on
-/// `date`. This is the badge's "N sessions" figure, on the same per-turn口径 as
+/// `date`. This is the badge's "N sessions" figure, on the same per-turn basis as
 /// the cost beside it: a session counts on every day it burned tokens, not only
 /// on the day its transcript was born.
 fn count_sessions_active_on(
@@ -123,7 +123,7 @@ fn build_today_usage(sessions: &[SessionInfo], now_ms: i64) -> TodayUsage {
 }
 
 /// Pure core of [`today_usage`], with `now_ms` and the projection cache injected
-/// so the badge口径 is unit-testable without a global cache or a wall clock.
+/// so the badge basis is unit-testable without a global cache or a wall clock.
 ///
 /// The badge is derived from the very receipt it opens
 /// ([`build_breakdown_cached`]) rather than from a parallel fold, so
@@ -234,9 +234,9 @@ pub fn cloud_usage(sessions: &[SessionInfo]) -> CloudUsage {
 // "receipt" that itemises that same figure per model: how many input /
 // cache-write / cache-read / output tokens each model consumed today, the
 // model's official unit prices ($/Mtok), and the line cost. The receipt total
-// is built on the **exact same口径** as [`today_usage`] — sessions **created
-// today** (every SessionInfo, subagents included, each counted once), agent
-// spend only — so `Σ line.cost_usd == TodayUsage.cost_usd` to the cent. Because per-model pricing is linear, folding a model's tokens and
+// is built on the **exact same basis** as [`today_usage`] — turns **timestamped today**
+// (every SessionInfo, subagents included), agent spend only — so
+// `Σ line.cost_usd == TodayUsage.cost_usd` to the cent. Because per-model pricing is linear, folding a model's tokens and
 // pricing once equals summing each turn's cost; we still accumulate per-turn
 // cost directly so the total reconciles with `SessionInfo.total_cost_usd`
 // (which `StatsAcc` folds the same way) regardless of mid-session model swaps.
@@ -358,7 +358,7 @@ impl LineAcc {
     }
 }
 
-/// Build today's per-model receipt on the same口径 as [`today_usage`].
+/// Build today's per-model receipt on the same basis as [`today_usage`].
 ///
 /// `sessions` is the already-scanned session list (subagents included). Every
 /// finalized turn **timestamped today** contributes, whenever its session
@@ -1373,7 +1373,7 @@ static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// 1361 sessions held this lock for the whole fold, and every `today_usage`
 /// invoke queued on it — 11 of them, each pinning one of Tauri's `num_cpus`
 /// async-runtime workers. With all 10 workers parked, *every* `(async)` command
-/// starved, including `get_messages_tail` (task detail stuck on 「加载中…」) and
+/// starved, including `get_messages_tail` (task detail stuck on "Loading...") and
 /// Tauri's own `plugin:event|listen` (32s). The window was ~47s, i.e. exactly
 /// one cold fold. Batching keeps the fold's total work identical but caps how
 /// long any one waiter can be stuck behind it.
@@ -1525,10 +1525,10 @@ fn fold_report_days(
 }
 
 /// Fold one report day's `(model, ModelTokens)` entry into the receipt
-/// accumulators. Split out of [`fold_report_days`] so the口径 conversion below
+/// accumulators. Split out of [`fold_report_days`] so thebasis conversion below
 /// is testable without a report DB on disk.
 ///
-/// **The口径 conversion:** `ModelTokens::input_tokens` is
+/// **Thebasis conversion:** `ModelTokens::input_tokens` is
 /// `Σ(input + cache_write + cache_read)` — every token sent to the API, matching
 /// the stored `cost_usd`. The receipt itemises input *separately* from the two
 /// cache rows, so the cache figures must be netted out or the Input row shows
@@ -1545,7 +1545,7 @@ fn fold_report_model(
     use crate::model_cost::{turn_cost_usd, TurnUsage};
 
     // saturating_sub: a v0/legacy report whose `input_tokens` predates the
-    // all-inclusive口径 can be smaller than its own cache figures; clamping to 0
+    // all-inclusivebasis can be smaller than its own cache figures; clamping to 0
     // is the honest answer there rather than wrapping to ~1.8e19.
     let net_input = mt
         .input_tokens
@@ -1683,7 +1683,7 @@ fn build_range_breakdown_cached(
     }
 
     // Header `from_date` = the earliest day we actually have data for, not the
-    // raw requested lower bound. The "全部" preset requests `from_ms = 0`, which
+    // raw requested lower bound. The "全部" (All) preset requests `from_ms = 0`, which
     // would otherwise render a misleading `1970-01-01`; the real floor is the
     // first day present in the trend (report-backfilled or live).
     let actual_from_date = by_day
@@ -2088,7 +2088,7 @@ mod breakdown_tests {
     }
 
     /// The sidebar badge must agree with the receipt it opens, on the same
-    /// per-turn口径 — including the carry-over session above. `today_usage`
+    /// per-turnbasis — including the carry-over session above. `today_usage`
     /// summed `SessionInfo.total_cost_usd` for sessions *created* today, so a
     /// session that outlived midnight vanished from the badge for the rest of
     /// its life.
@@ -2123,7 +2123,7 @@ mod breakdown_tests {
     /// The badge's cost / output figures cover exactly today's turns, and its
     /// session count covers exactly the non-subagent sessions that spent
     /// something today. (Replaces the retired `sums_only_sessions_created_today`,
-    /// which asserted the birth-day口径.)
+    /// which asserted the birth-daybasis.)
     #[test]
     fn badge_counts_only_today_dated_turns() {
         let yesterday_iso =
@@ -2989,7 +2989,7 @@ mod range_breakdown_tests {
         assert_eq!(b.daily[0].output_tokens, 2_000);
     }
 
-    /// The sidebar's "今日累计" must not count Fleet's own overhead either. This
+    /// The sidebar's "今日累计" (Today's Total) must not count Fleet's own overhead either. This
     /// one drives the real `today_usage()` (which reads
     /// `$FLEET_HOME/.fleet/fleet_llm_usage.jsonl`) rather than a pure helper, so
     /// it seeds a today-stamped entry under a temp home and asserts the badge
@@ -3026,7 +3026,7 @@ mod range_breakdown_tests {
         assert_eq!(u.output_tokens, 0, "Fleet's output tokens leaked in");
     }
 
-    /// Same exclusion on the "today" preset, which is the口径 the sidebar badge
+    /// Same exclusion on the "today" preset, which is thebasis the sidebar badge
     /// reconciles against. Drives the public `today_usage_breakdown` under a temp
     /// `$FLEET_HOME` holding a real fleet entry — so it proves the receipt never
     /// consults `fleet_llm_usage.jsonl`, not merely that a parameter is unused.
@@ -3185,7 +3185,7 @@ mod range_breakdown_tests {
         assert!((by_model.values().next().unwrap().cost - 62.42).abs() < 1e-9);
     }
 
-    /// A legacy report whose `input_tokens` predates the all-inclusive口径 can be
+    /// A legacy report whose `input_tokens` predates the all-inclusivebasis can be
     /// smaller than its own cache figures; the fold must clamp to 0 rather than
     /// wrap a u64 subtraction into ~1.8e19 tokens.
     #[test]

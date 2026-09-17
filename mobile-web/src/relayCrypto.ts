@@ -1,4 +1,4 @@
-// End-to-end encryption for the mobile relay (方案A). The peer of
+// End-to-end encryption for the mobile relay. The peer of
 // claw-fleet-core/src/relay_crypto.rs — every parameter here must match that
 // module byte-for-byte or pairing silently fails. Implemented on the browser's
 // native SubtleCrypto so there is zero JS crypto dependency.
@@ -134,12 +134,13 @@ export async function open(encKey: CryptoKey, sealed: SealedBox): Promise<string
   return dec.decode(await openBytes(encKey, sealed));
 }
 
-/** relay 用来路由这条 channel 的 id —— `hex(sha256(channelToken))`,与
- *  `fleet-relay/src/registry.rs::channel_id` 逐字节一致(它哈希的是 token 的
- *  **十六进制字符串**的字节,不是解码后的字节)。
+/** The relay's routing ID for this channel: `hex(sha256(channelToken))`, matching
+ *  `fleet-relay/src/registry.rs::channel_id` byte-for-byte (it hashes the
+ *  **hex string** bytes of the token, not the decoded bytes).
  *
- *  手机端要它是为了反查「这条通知来自哪一台设备」:relay 在通知的点击目标上盖
- *  的是这个 id 的前缀(见 notify_target.rs),而手机手里只有配对 secret。 */
+ *  The phone needs this for reverse-lookup ("which device sent this notification"):
+ *  relay stamps notification click targets with a prefix of this ID (see notify_target.rs),
+ *  and the phone only holds the pairing secret. */
 export async function channelIdOf(secret: string): Promise<string> {
   const { channelToken } = await deriveKeys(secret);
   const digest = await crypto.subtle.digest("SHA-256", enc.encode(channelToken));

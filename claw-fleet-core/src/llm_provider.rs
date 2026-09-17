@@ -362,7 +362,7 @@ fn parse_claude_json_response(raw: &str) -> Option<Completion> {
     let usage = v.get("usage").map(|u| {
         // `usage` reports only the LAST iteration's raw input/output, while
         // `total_cost_usd` is billed over the whole call — reading tokens from
-        // one and cost from the other leaves them on different 口径 and Fleet's
+        // one and cost from the other leaves them on different bases and Fleet's
         // receipt lines can never reconcile (real probe: `usage.input_tokens`
         // 10 against `modelUsage.inputTokens` 530). `modelUsage` is the
         // per-model aggregate the cost is computed from, so prefer it and sum
@@ -1276,7 +1276,7 @@ mod tests {
     /// `usage` in the `-p` result carries only the LAST iteration's raw input,
     /// while `total_cost_usd` is billed over the whole call — so reading tokens
     /// from `usage` and cost from `total_cost_usd` puts the two on different
-    /// 口径 and Fleet's own receipt lines can never reconcile. `modelUsage` is
+    /// bases and Fleet's own receipt lines can never reconcile. `modelUsage` is
     /// the per-model aggregate the cost is actually computed from; prefer it.
     ///
     /// Shape and numbers captured from a real

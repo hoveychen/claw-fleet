@@ -264,7 +264,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                   border: "1px solid var(--decision-card-border, #ccc)",
                   borderRadius: "0.4rem",
                   // Transparent + color-scheme, same as the live card: an
-                  // opaque白 frame turns a transparent-body preview authored
+                  // opaque white frame turns a transparent-body preview authored
                   // for the dark theme into unreadable light-on-white.
                   background: "transparent",
                   colorScheme: theme,

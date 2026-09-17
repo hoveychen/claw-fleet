@@ -14,18 +14,18 @@ const base: SessionInfo = {
 };
 
 describe("buildInfoChips", () => {
-  it("给出工作区名", () => {
+  it("shows workspace name", () => {
     expect(buildInfoChips(base)).toEqual(["proj"]);
   });
 
-  it("路径与时间不进这行 chip：路径在半屏的复制行副行上，时间在每条消息旁", () => {
+  it("excludes path and time: path is in the copy row beside half-screen, time is beside each message", () => {
     const chips = buildInfoChips(base).join("|");
     expect(chips).not.toContain("/Users/x/workspace/proj");
     expect(chips).not.toContain(".jsonl");
     expect(chips).not.toContain("1700000000000");
   });
 
-  it("会变的那些不搬进来——它们在状态轨和半屏的「此刻」/「进度」两节里", () => {
+  it("excludes dynamic fields—they live in the status bar and the 'now'/'progress' sections", () => {
     const rich: SessionInfo = {
       ...base,
       pid: 42,
@@ -35,33 +35,33 @@ describe("buildInfoChips", () => {
       handoff: { chainId: "c1", hop: 2, chainLen: 3 },
       watches: [{ id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 1, structuralFailStreak: 0 }],
     };
-    // 会话 id 也不在这行 chip 上：它太长，且它真正被用到的方式是复制走。
+    // Session id also skips this chip row: it's too long and its actual use is copying it out.
     expect(buildInfoChips(rich)).toEqual(["proj"]);
   });
 
-  it("缺席的字段不产出 chip（不是产出一颗空的）", () => {
+  it("missing fields produce no chip (not an empty one)", () => {
     expect(buildInfoChips(base)).not.toContain("claude-opus-5");
     expect(buildInfoChips({ ...base, model: "claude-opus-5" })[0]).toBe("claude-opus-5");
   });
 
-  it("effort 紧跟在模型后面（桌面 header 有这颗 chip，手机不能没有）", () => {
+  it("effort immediately follows model (desktop header has this chip, phone must too)", () => {
     expect(buildInfoChips(base)).not.toContain("high");
     const chips = buildInfoChips({ ...base, model: "claude-opus-5", effort: "high" });
     expect(chips.indexOf("high")).toBe(chips.indexOf("claude-opus-5") + 1);
   });
 
-  it("contextPercent 按 0–1 比值换算成百分比", () => {
+  it("converts contextPercent from 0–1 ratio to percentage", () => {
     expect(buildInfoChips({ ...base, contextPercent: 0.72 }).join("|")).toContain("72%");
   });
 
-  it("半分钱以下的花费不占一颗 chip", () => {
+  it("suppresses chips for costs below half a cent", () => {
     expect(buildInfoChips({ ...base, totalCostUsd: 0.001 }).join("|")).not.toContain("$");
     expect(buildInfoChips({ ...base, totalCostUsd: 4.331 })).toContain("$4.33");
   });
 });
 
 describe("resumeCommand", () => {
-  it("只给 Claude 会话；codex / dsh 不给可能贴上去就报错的命令", () => {
+  it("only for Claude sessions; codex/dsh skip commands that might error if pasted", () => {
     expect(resumeCommand(base)).toBe("claude --resume abc-123");
     expect(resumeCommand({ ...base, agentSource: "codex" })).toBeNull();
     expect(resumeCommand({ ...base, agentSource: "dsh" })).toBeNull();

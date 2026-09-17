@@ -44,32 +44,38 @@ import { countChainUnits } from "../../../shared-ts/chainUnits";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
 import styles from "./TasksView.module.css";
 
-/** 文档级滚动条被所有 tab 共享，任务页又会随 tab 卸载重挂（见 App 里按 `tab` 的条件
- *  渲染），加上 iOS PWA 前后台切换、重连时推来的全量快照，都可能把 window.scrollY
- *  打回 0。这里记住用户停留的位置，重挂或意外回顶后恢复它，且绝不和正在滚动的用户较劲。
- *  位置存模块级变量：切 tab 重挂时 JS 未重载、位置还在；整页刷新时自然归零——一次全新
- *  加载理应从顶端开始。 */
+/** Document-level scrollbar is shared by all tabs; the task view unmounts/remounts with
+ *  the tab (see conditional rendering in App), and iOS PWA background/foreground switches
+ *  plus reconnection full-state snapshots can reset window.scrollY to 0. This module
+ *  remembers user scroll position and restores it on remount or accidental return to top,
+ *  without fighting a scrolling user. Position stored in module state: tab switches don't
+ *  reload JS so position persists; full page refresh naturally resets to zero, which is
+ *  the right behavior. */
 let savedTasksScrollY = 0;
 
-/** 页面当前的最大可滚动距离；<= 4px 视作「短到不必滚动」，此时既不记录也不恢复。 */
+/** Maximum scrollable distance on the page; <= 4px is considered "too short to need scrolling",
+ *  so position is neither recorded nor restored. */
 function maxScroll(): number {
   return document.documentElement.scrollHeight - window.innerHeight;
 }
 
-/** 滚动停下后顺序继续冻结多久。滚动本身也在冻结区间内（每个 scroll 事件都会把
- *  这个计时重新推后），所以实际含义是「滚动期间 + 停手后 5 秒」。 */
+/** How long after scroll stops the sort order stays frozen. Scrolling itself resets this
+ *  timer (every scroll event pushes it back), so the real meaning is "during scroll + 5s
+ *  after user stops". */
 const ORDER_FREEZE_MS = 5000;
 
 /**
- * 冻结期内保持列表顺序不变。
+ * Preserve list order during the freeze window.
  *
- * 任务栏按 lastActivityMs 降序排，而桌面端每隔几秒推一次全量快照：手指还在列表
- * 上滑的时候一次重排，会把手指底下那张卡换成另一张，抬手点下去开的就是别的会话。
- * `frozen` 是冻结那一刻屏幕上的键序（`itemKey`），传 null 表示没冻结、原样透传。
+ * The task bar sorts by descending lastActivityMs, and the desktop pushes a full snapshot
+ * every few seconds. While fingers are swiping on the list, a reorder swaps the card under
+ * the finger for another—releasing and tapping opens the wrong session. `frozen` holds the
+ * key sequence (`itemKey`) as it was at freeze time; null means unfrozen, pass-through.
  *
- * 冻结后才出现的会话追加在**末尾**而不是插回它本该在的位置——它按活跃时间本该
- * 排第一，插进去会把每一张卡都顶下一格，正是要避免的那种位移。冻结键序里已经
- * 消失的会话（被筛掉/被清理）直接跳过。
+ * Sessions appearing after freeze are appended to the end, not inserted at their sorted
+ * position—they'd rank first by activity, shifting every card down, which is exactly the
+ * tap-miss we avoid. Sessions that vanished from the frozen key sequence (filtered/cleaned)
+ * are skipped.
  */
 export function applyFrozenOrder<T extends SessionInfo & { deviceId?: string }>(
   rows: T[],
@@ -82,7 +88,7 @@ export function applyFrozenOrder<T extends SessionInfo & { deviceId?: string }>(
   const taken = new Set<string>();
   for (const key of frozen) {
     const s = byKey.get(key);
-    if (!s) continue; // 这条已经不在列表里了
+    if (!s) continue; // Already removed from the list
     out.push(s);
     taken.add(key);
   }
@@ -193,33 +199,39 @@ function markBucket(s: SessionInfo): SessionMark {
   return s.userMark === "done" ? "done" : "pending";
 }
 
-/** 任务列表的一个文件夹分区 —— 与桌面端启动台的仓库分组同构。 */
+/** One folder partition in the task list, isomorphic to the repository groups on the
+ *  desktop launchpad. */
 export interface TaskSection {
-  /** 分区键,同时也是目录下拉的选项值(`workspaceFilterValue` 编码)。 */
+  /** Partition key, also used as the directory dropdown option value (encoded by
+   *  `workspaceFilterValue`). */
   key: string;
-  /** 表头文案:多设备时前缀设备名。 */
+  /** Header label: prefixed with device name when multi-device. */
   name: string;
-  /** 仓库根路径(worktree 已折回)。 */
+  /** Repository root path (worktrees folded back). */
   path: string;
   deviceId: string;
   sessions: Array<WithDevice<SessionInfo>>;
 }
 
 /**
- * 把已排好序的会话切成文件夹分区。分区内**不重排**,保持传入顺序 —— 上面那套
- * 冻结顺序的用心在这里必须原样守住。分区之间按名字字母序(桌面端
- * `groupSessionsByWorkspace` 同款):文件夹是稳定的目录清单,始终在同一个位置,
- * 只有文件夹里的任务随活跃时间浮动。字母序与活跃度无关,所以不会破坏冻结。
+ * Slice a pre-sorted session list into folder partitions. Partitions are **not resorted**
+ * internally; input order is preserved—the frozen-order machinery above must stay intact
+ * here. Partitions sort alphabetically by name (same logic as desktop `groupSessionsByWorkspace`):
+ * folders form a stable directory listing always in the same position, only sessions within
+ * a folder float by activity. Alphabetic order is independent of activity, so it won't
+ * break the freeze.
  *
- * 纯聊天工作区恒定置顶(桌面端 `groupSessionsByWorkspace` 的 `pinnedPath` 同款):
- * 它是最常回去的一个,不该因为某个项目更活跃就沉到列表深处。多设备时每台机器的
- * 聊天目录各成一个分区,一并提到前面。
+ * Pure-chat workspaces always pin to the top (same as desktop `groupSessionsByWorkspace`'s
+ * `pinnedPath`): it's the most-revisited one and shouldn't sink deep when another project
+ * gets active. Multi-device: each machine's chat directory is its own partition, all pinned
+ * to the front.
  */
 export function groupTaskSections(
   rows: Array<WithDevice<SessionInfo>>,
   opts: {
-    /** 某台设备的聊天目录，null = 还不知道。按设备问，因为远端主机的聊天目录是
-     *  它自己 home 下的路径，与本机那一条不同。 */
+    /** Chat directory for a given device; null = not yet determined. Query per-device
+     *  because remote hosts have their own chat directory path under their home,
+     *  different from this machine's. */
     chatPathOf: (deviceId: string) => string | null;
     multiDevice: boolean;
     deviceLabelOf?: (deviceId: string) => string | null | undefined;
@@ -253,7 +265,8 @@ export function groupTaskSections(
   return [...chat, ...sections.filter((sec) => !isChat(sec))];
 }
 
-/** 目录筛选项的值。单设备时就是路径本身(与从前一致,老的草稿值继续有效)。 */
+/** Value of a directory filter option. Single-device: the path itself (for backward
+ *  compatibility, old draft values still work). */
 export function workspaceFilterValue(
   deviceId: string | undefined,
   workspacePath: string,
@@ -287,8 +300,9 @@ function chainTip<T extends SessionInfo>(members: T[]): T {
 
 /** One entry in the rendered task list: either a standalone session or a
  *  collapsed handoff-relay chain. */
-// 泛型是为了让 deviceId 一路带到渲染:调用方传进来的是 WithDevice<SessionInfo>,
-// 折叠成接力组之后每一项仍然要知道自己属于哪一台设备。
+// Generic parameter ensures deviceId flows through to render: caller passes
+// WithDevice<SessionInfo>, and after folding into relay groups each item still needs
+// to know which device it belongs to.
 type RenderItem<T extends SessionInfo = SessionInfo> =
   | { kind: "single"; key: string; session: T }
   | {
@@ -313,10 +327,10 @@ export function buildRenderItems<T extends SessionInfo & { deviceId?: string }>(
   rows: T[],
   group: boolean,
 ): Array<RenderItem<T>> {
-  // 合并列表里 id 只在单机内唯一,所以分组键与 React key 都带上归属设备。
-  // 不带的话两台机器上碰巧同 chainId 的接力链会被折进同一组,展开后是一串
-  // 属于不同机器的会话 —— 点进去就是拿错设备的 transport 去拉一条它不认识的
-  // 会话。
+  // In merged lists, id is unique only per-machine, so group key and React key both
+  // include the owning device. Without it, relay chains with the same chainId on two
+  // machines would fold into one group; expanding would show sessions from different
+  // machines—opening would use the wrong device's transport to fetch an unknown session.
   const scope = (s: T) => s.deviceId ?? "";
   if (!group)
     return rows.map((s) => ({ kind: "single", key: `${scope(s)}::${s.id}`, session: s }));
@@ -359,14 +373,16 @@ export function buildRenderItems<T extends SessionInfo & { deviceId?: string }>(
 }
 
 interface Props {
-  /** 合并列表:每条会话都带着它属于哪一台设备(deviceRuntime.ts 的 WithDevice)。
-   *  id 只在单机内唯一,所以 React key 与「打开这一条」都必须带上 deviceId。 */
+  /** Merged list: each session carries its device (WithDevice from deviceRuntime.ts).
+   *  Id is unique only per-machine, so React key and "open this one" must include
+   *  deviceId. */
   sessions: Array<WithDevice<SessionInfo>>;
-  /** 某一条会话所属设备的传输层。任务页**不持有**当前作用域那一台的 client:
-   *  列表是合并的,所以每一次**写**(标记/中断/停止)以及每一次按会话取数(搜索、
-   *  聊天目录)都必须按设备取,否则请求会打到当前选中的那台机器上:标记落在别的
-   *  主机 → 下一次快照推回来 userMark 还是空 → 卡片复活;停止更糟,pid 会被发到
-   *  一台毫不相干的主机上执行。 */
+  /** Transport for the device a session belongs to. TasksView does **not** hold the
+   *  current scope's client: the list is merged, so every write (mark/interrupt/stop)
+   *  and every per-session lookup (search, chat directory) must query per-device, or the
+   *  request goes to the currently selected machine. Mark on wrong host → next snapshot
+   *  has empty userMark → card comes back; stop is worse, pid gets sent to an unrelated
+   *  machine. */
   clientFor: (deviceId: string) => FleetTransport | null;
   /** WS link phone↔relay. */
   connected: boolean;
@@ -376,12 +392,14 @@ interface Props {
    *  Distinguishes "still waiting for the first push" from "pushed, but empty". */
   sessionsLoaded: boolean;
   onOpenSession: (session: WithDevice<SessionInfo>) => void;
-  /** 这台设备的显示名。整个 prop 缺席 = 只配了一台,徽标与「设备 · 目录」的
-   *  筛选项都不出现 —— 单设备用户不该为多设备付出任何一处视觉噪音。 */
+  /** Display label for this device. Prop absent = only one configured, so badge and
+   *  "device · directory" filter don't appear—single-device users shouldn't pay
+   *  any visual noise tax for multi-device. */
   deviceLabelOf?: (deviceId: string) => string | null;
 }
 
-// 新会话入口由 App 底部导航中间的凸起按钮统一持有，任务页内不再重复放置。
+// New session entry point is owned by the raised button in the center of App's bottom
+// navigation; no duplicate in the task page.
 export function TasksView({
   sessions,
   clientFor,
@@ -392,9 +410,10 @@ export function TasksView({
   onOpenSession,
 }: Props) {
   const confirm = useConfirm();
-  // 筛选状态落到 localStorage（复用 Composer 草稿那套 useDraft），这样切标签页
-  // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/分段都保持不变，
-  // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
+  // Filter state persists in localStorage (reusing the Composer draft pattern via useDraft),
+  // so tab switches unmount/remount, iOS PWA background/foreground, all preserve search terms,
+  // directories, and segments—no reset on every return to the task page. busyOp and
+  // markOverride are transient, using plain useState.
   const [search, setSearch] = useDraft<string>("tasks:search", "");
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
   // Group handoff-relay chains into one collapsible card. Default on; the setter
@@ -405,19 +424,21 @@ export function TasksView({
   // Optimistic mark overrides, dropped once the server snapshot catches up.
   const [markOverride, setMarkOverride] = useState<Record<string, SessionMark | null>>({});
 
-  /** 列表里出现过的设备。搜索与聊天目录都是**逐台**问的。 */
+  /** Devices appearing in the list. Search and chat directory both query per-device. */
   const deviceIds = useMemo(() => [...new Set(sessions.map((s) => s.deviceId))], [sessions]);
 
   // Full-text search over the relay — same FTS the desktop launchpad uses,
-  // 每台设备各问一次自己的索引。
+  // querying each device's own index.
   const { searching, ftsMatchKeys, snippetByKey } = useRelaySearch(deviceIds, clientFor, search);
 
-  // 滚动期间（及停手后 ORDER_FREEZE_MS 内）冻住的键序，null = 未冻结。
-  // 状态用于让下面的 useMemo 重算；ref 是滚动回调里的唯一真相（回调闭包读不到
-  // 最新 state，而这里必须在同一批 scroll 事件里立刻知道「已经冻上了」）。
+  // Key sequence frozen during scroll (and ORDER_FREEZE_MS after), null = unfrozen.
+  // State lets useMemos below recalculate; ref is the one source of truth for scroll
+  // callbacks (callback closures don't see fresh state, but here we must immediately
+  // know "already frozen" within the same scroll-event batch).
   const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
   const frozenRef = useRef<string[] | null>(null);
-  /** 最近一次渲染出的键序 —— 冻结时按它取样，也就是用户此刻真正看到的顺序。 */
+  /** Most recent rendered key sequence—used to sample during freeze, i.e., user's actual
+   *  view order at freeze time. */
   const renderedOrderRef = useRef<string[]>([]);
 
   // Scope to Fleet-launched sessions (新会话 / handoff relay), exactly like the
@@ -451,8 +472,9 @@ export function TasksView({
     [chatPaths],
   );
 
-  // 列表按文件夹分区展示（Chat 置顶），所以任务页不再有目录下拉：要看哪个目录
-  // 就折叠掉别的分区。「终端」按钮因此不带初始目录，由终端页自己的目录选择器接手。
+  // List displays partitioned by folder (Chat pinned to top), so the task page
+  // has no directory dropdown: to see a directory, collapse others. The "Terminal"
+  // button thus carries no initial directory; that page's own picker takes over.
   const multiDevice = deviceLabelOf !== undefined;
 
   // Everything except the mark filter — the segment counts are taken over this
@@ -505,7 +527,8 @@ export function TasksView({
 
   const setMark = useCallback(
     (s: WithDevice<SessionInfo>, mark: SessionMark | null) => {
-      // 会话所属那一台,不是当前作用域那一台 —— 打错主机的标记等于没标记。
+      // Mark on the session's own machine, not the scoped one — marking on the
+      // wrong host gets no effect.
       const transport = clientFor(s.deviceId);
       if (!transport) return;
       const key = itemKey(s.deviceId, s.id);
@@ -568,8 +591,9 @@ export function TasksView({
     [setMark],
   );
 
-  // 文件夹分区是列表的一级层次；接力链分组退到分区之内（与桌面端启动台同构），
-  // 所以 buildRenderItems 逐分区跑，不会把两个目录的会话串成一条链。
+  // Folder partitions form the top level of the list; relay-chain grouping nests inside
+  // partitions (isomorphic to desktop launchpad), so buildRenderItems runs per-partition,
+  // never chains sessions from two directories.
   const sections = useMemo(
     () =>
       groupTaskSections(visible, { chatPathOf, multiDevice, deviceLabelOf }).map((sec) => ({
@@ -579,9 +603,10 @@ export function TasksView({
     [visible, chatPathOf, multiDevice, deviceLabelOf, groupHandoff],
   );
 
-  // 折叠起来的分区键。默认全展开——手机上一进来就该看到会话本身。
-  // 与搜索/筛选同样落 localStorage：标签页切走会卸载本视图，不持久化的话折叠状态
-  // 每次回任务页都被复位成全展开。Set 不能 JSON 序列化，故盘上存字符串数组。
+  // Collapsed partition keys. Default all expanded—phone users should see sessions
+  // on entry. Like search/filter, persists to localStorage: tab switches unmount this view,
+  // and without persistence collapse state resets to all-expanded on every return.
+  // Set can't JSON-serialize, so we store a string array on disk.
   const [collapsedKeys, setCollapsedKeys] = useDraft<string[]>("tasks:collapsedSections", []);
   const collapsedSections = useMemo(() => new Set(collapsedKeys), [collapsedKeys]);
   const toggleSection = useCallback(
@@ -595,8 +620,8 @@ export function TasksView({
 
   const handleStop = useCallback(
     async (s: WithDevice<SessionInfo>) => {
-      // pid / workspacePath 只在**它自己那台主机**上有意义:发到别的设备上,轻则
-      // 停不掉,重则按 pid 打到一个毫不相干的进程。
+      // pid and workspacePath only make sense on **their own machine**: sent to a different
+      // device, stop may fail at best, or at worst targets an unrelated process by pid.
       const transport = clientFor(s.deviceId);
       if (!transport || busyOp) return;
       setBusyOp(itemKey(s.deviceId, s.id));
@@ -611,20 +636,24 @@ export function TasksView({
     [clientFor, busyOp, confirm],
   );
 
-  // ——— 滚动位置稳定化（详见文件顶部 savedTasksScrollY 的注释）———
+  // ——— Scroll position stabilization (see savedTasksScrollY comment at file top) ———
   const restore = useCallback(() => {
-    // 只在「已经意外回到顶部、但记忆位置在下方、且页面够长能容纳」时纠回，这样
-    // 主动滚到顶的用户不会被硬拽下去，内容没坍缩的正常刷新（scrollY 不为 0）也不受扰。
+    // Only restore when "already accidentally back at top, but saved position is below,
+    // and page is long enough to hold it"—this way users who intentionally scroll to top
+    // won't be yanked down, and normal refresh with unfallen content (scrollY != 0) isn't
+    // disturbed.
     if (window.scrollY < 4 && savedTasksScrollY > 4 && maxScroll() >= savedTasksScrollY - 4) {
       window.scrollTo(0, savedTasksScrollY);
     }
   }, []);
 
-  // 滚动停歇 150ms 后才记录「用户真正停留的位置」。若某个外部事件把 scrollY 瞬间
-  // 夹到 0，下面的恢复会在停歇前把它纠回，所以那个瞬时 0 永远不会被记下来。
+  // Wait 150ms after scroll stops to record "user's true position". If an external event
+  // instantly resets scrollY to 0, the restore logic below corrects it before that
+  // 150ms fires, so the momentary zero never gets recorded.
   //
-  // 同一个监听里还负责冻结排序：第一个 scroll 事件把当前键序拍下来，之后每个
-  // 事件把解冻计时推后，停手 ORDER_FREEZE_MS 后才放开重排。
+  // The same listener also manages sort-order freezing: the first scroll event snapshots
+  // the current key sequence; each event thereafter pushes back the thaw timer; after
+  // ORDER_FREEZE_MS of user inaction, order resorting resumes.
   useEffect(() => {
     let idle: ReturnType<typeof setTimeout> | undefined;
     let thaw: ReturnType<typeof setTimeout> | undefined;
@@ -652,21 +681,24 @@ export function TasksView({
     };
   }, []);
 
-  // 挂载时（切 tab 回到任务页）无条件恢复到上次停留处——此刻 window.scrollY 属于刚
-  // 离开的那个 tab，并非任务页意图。列表在 all.length>0 时已同步渲染出完整高度，故
-  // useLayoutEffect 里能立即定位、绘制前完成，无闪烁。
+  // On mount (tab return to task page), unconditionally restore to last scroll position—at
+  // this moment window.scrollY belongs to the tab we just left, not the task page's intent.
+  // The list renders full height synchronously when all.length > 0, so useLayoutEffect can
+  // position immediately before paint, flicker-free.
   useLayoutEffect(() => {
     if (savedTasksScrollY > 4 && maxScroll() >= savedTasksScrollY - 4) {
       window.scrollTo(0, savedTasksScrollY);
     }
   }, []);
 
-  // 每次数据刷新后，若 scrollY 被外部事件意外打回顶部就纠回（guard 保证只在真回顶时动）。
+  // After each data refresh, if scrollY was accidentally reset to top by external events,
+  // correct it (guard ensures it only moves on true return-to-top).
   useLayoutEffect(() => {
     restore();
   }, [sessions, restore]);
 
-  // PWA 从后台回到前台时同样纠一次——iOS 常在恢复前台时重置文档滚动。
+  // Do the same when PWA returns from background—iOS often resets document scroll on
+  // foreground restoration.
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") restore();
@@ -675,11 +707,11 @@ export function TasksView({
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [restore]);
 
-  // Distinguish the reasons the list can be empty, so a blank screen never
-  // leaves 老板 guessing "是错了还是在加载". Order matters: connectivity first
-  // (can we even get data?), then whether the first snapshot has landed, then
-  // a genuine "no tasks". Only the last is a true empty; the others are
-  // transient/among-actionable states with their own copy and a spinner.
+  // Distinguish reasons the list is empty so a blank screen never leaves users
+  // guessing "is this broken or loading?". Order matters: connectivity first
+  // (can we even get data?), then whether first snapshot arrived, then genuine "no
+  // tasks". Only the last is truly empty; others are transient/actionable states with
+  // own messaging and spinner.
   if (all.length === 0) {
     if (!connected) {
       return (
@@ -780,9 +812,10 @@ export function TasksView({
           )}
         </div>
         <div className={styles.metaRow}>
-          {/* 目录名不再逐行重复——它就写在这张卡所属分区的表头上。 */}
-          {/* 合并列表里必须一眼看出这条会话在哪台机器上 —— 同名项目在两台机器
-              上很常见,而点进去拉的是那一台的 transcript。 */}
+          {/* Directory name no longer repeats per-row—it's in the partition header for
+              this card's section. */}
+          {/* In merged lists, device must be recognizable at a glance—same-named projects
+              on two machines are common, and opening fetches that machine's transcript. */}
           {deviceLabelOf?.(s.deviceId) && (
             <span className={styles.device}>
               <MonitorSmartphone size={11} />
@@ -795,8 +828,8 @@ export function TasksView({
               {s.handoff.hop}/{s.handoff.chainLen}
             </span>
           )}
-          {/* 远端 ssh 隧道断了、会话被 Fleet 停掉 —— 手机上只看到一个红点会
-              以为是普通报错,必须把「哪台机器没了」直接写出来。 */}
+          {/* Remote SSH tunnel died and Fleet stopped the session—a red dot alone would
+              look like a generic error; must explicitly say which machine is gone. */}
           {s.remoteDisconnect && (
             <span
               className={styles.remoteLost}
@@ -808,7 +841,8 @@ export function TasksView({
                 : t("{0} 断开,agent 未停", s.remoteDisconnect.hostLabel ?? t("远端"))}
             </span>
           )}
-          {/* 输出落在了错的机器上 —— 会话本身跑得好好的,不提就没人会发现。 */}
+          {/* Output ended up on the wrong machine—the session itself is fine, silent until
+              mentioned. */}
           {s.mirrorWrite && (
             <span
               className={styles.remoteLost}
@@ -822,9 +856,10 @@ export function TasksView({
               {t("{0} 个文件留在本机", String(s.mirrorWrite.total))}
             </span>
           )}
-          {/* 账号额度耗尽 —— 它没有 status(也没有 reset 时刻,等的是有人去充值),
-              所以这行在手机上看起来和正常跑完一模一样,只有这枚标签会说。实心,
-              和上面两枚描边的区分开:这个状态自己不会好。 */}
+          {/* Account credits exhausted—no status field (no reset time either; waiting for
+              recharge), so on phone this looks identical to normal completion; only this
+              badge says otherwise. Solid badge (not outlined like the two above) signals:
+              this state won't resolve on its own. */}
           {s.outOfCredits && (
             <span className={styles.outOfCredits} title={s.outOfCredits}>
               <CreditCard size={11} />
@@ -963,7 +998,8 @@ export function TasksView({
               >
                 <Folder size={13} className={styles.workspaceFolder} />
                 <span className={styles.workspaceName}>{section.name}</span>
-                {/* 折叠后的组数：一条折叠的接力链算一组，与桌面端二级侧栏同义。 */}
+                {/* Item count when collapsed: a collapsed handoff chain counts as one,
+                    same meaning as the desktop secondary sidebar. */}
                 <span className={styles.workspaceCount}>{section.items.length}</span>
                 <ChevronRight
                   size={14}

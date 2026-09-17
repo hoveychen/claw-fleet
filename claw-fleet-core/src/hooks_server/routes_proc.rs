@@ -11,7 +11,7 @@ use super::*;
 /// `GET /host_features` — the launch-time feature flags of *this* host.
 ///
 /// Lives beside the proc routes because the only flag so far gates them: a
-/// browser build that shows a 终端 page against a backend started without
+/// browser build that shows a Terminal page against a backend started without
 /// `FLEET_TERMINAL` would offer a shell it cannot open. The answer comes from
 /// the same `feature_flags::terminal_enabled()` that `proc_runner` enforces, so
 /// UI and enforcement cannot disagree.
@@ -26,10 +26,11 @@ pub(crate) fn route_host_features(
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
-/// `GET /host_identity` —— 这台主机的展示身份(主机名 + 平台)。
+/// `GET /host_identity` — the display identity of this host (hostname + platform).
 ///
-/// 和上面那条一样是「一次性、启动后就不变」的元信息,所以放在一起;但它不 gate
-/// 任何面 —— 客户端拿不到时退回一个平台名,而不是把某个入口藏起来。
+/// Like the route above, it's one-time, immutable metadata from startup, so kept together;
+/// but it doesn't gate any surface — when the client can't fetch it, it falls back to just
+/// a platform name, not hiding any entry point.
 pub(crate) fn route_host_identity(
     ctx: &ServeCtx,
     request: tiny_http::Request,

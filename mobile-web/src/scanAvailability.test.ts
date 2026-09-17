@@ -3,17 +3,18 @@ import { describe, expect, it } from "vitest";
 import { classifyScan } from "./scanAvailability";
 
 describe("classifyScan", () => {
-  it("安全上下文 + 有 getUserMedia = 能扫", () => {
+  it("secure context + has getUserMedia = can scan", () => {
     expect(classifyScan({ secureContext: true, hasGetUserMedia: true })).toBe("ok");
   });
 
-  it("非安全上下文单独成一档，而不是被归成「没有摄像头」", () => {
-    // http 页面里 mediaDevices 整个不存在,所以这一组入参就是真实的 http 现场。
-    // 归错档的代价是让用户去系统设置里找一个不存在的开关。
+  it("insecure context is its own bucket, not grouped as 'no camera'", () => {
+    // On http pages mediaDevices doesn't exist at all, so this input combo is the real
+    // http scenario. Misclassifying forces the user to dig in system settings for a
+    // switch that doesn't exist.
     expect(classifyScan({ secureContext: false, hasGetUserMedia: false })).toBe("insecure-origin");
   });
 
-  it("安全上下文但没有 getUserMedia = 这台设备用不了摄像头", () => {
+  it("secure context but no getUserMedia = this device has no camera API", () => {
     expect(classifyScan({ secureContext: true, hasGetUserMedia: false })).toBe("no-camera-api");
   });
 });

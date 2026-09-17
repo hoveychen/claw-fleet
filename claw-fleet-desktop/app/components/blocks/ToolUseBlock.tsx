@@ -355,14 +355,14 @@ export function codexToolSummary(
  * Collapsed one-liner for Claude Code built-in tools whose input carries none
  * of formatInput's recognised keys (command/cmd/file_path/pattern/path/query/
  * url) and so would otherwise dump their raw `{ … }` object into the row (the
- * blob 老板 flagged for `Skill`). Sits between codexToolSummary and formatInput
+ * blob the user flagged for `Skill`). Sits between codexToolSummary and formatInput
  * in the summary chain; returns null for anything it doesn't handle so control
  * falls through.
  *
  * Note some of these tools already have a dedicated *expanded* body
  * (ExitPlanMode → PlanModeInput, Skill → SkillInput) — this only fixes the
  * *collapsed* row, which was never wired up. The SKILL.md body itself is a
- * separate meta turn (MetaFoldBlock's "已加载 SKILL" card), not this call.
+ * separate meta turn (MetaFoldBlock's "SKILL loaded" card), not this call.
  */
 export function claudeToolSummary(
   name: string,
@@ -1245,7 +1245,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   const awaitingResult = (isPartial || (!!block.id && inFlight.has(block.id))) && !resultProp;
 
   // A `Bash` launched with `run_in_background` returns its shell id instantly
-  // and the turn ends — the card looks finished, the status reads 等待输入, and
+  // and the turn ends — the card looks finished, the status reads "waiting for input", and
   // the command keeps running with nothing on screen saying so.
   const isBackgroundShell =
     block.name === "Bash" && (block.input as { run_in_background?: unknown }).run_in_background === true;

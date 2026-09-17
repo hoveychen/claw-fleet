@@ -1,24 +1,31 @@
-// 「我现在看的是哪一台」—— 供 UI 侧读取的设备作用域。
+// "Which device am I looking at right now?" — device scope for UI to read.
 //
-// 为什么是 context 而不是 prop:需要它的东西不是一两处,而是散在各处的**本地
-// 持久化**——新会话草稿、附件、上次用的 repo、继续会话的输入框、任务页的
-// workspace 筛选。这些键此前是全局的,单设备时代那没问题;多设备之后它们全都
-// 是「属于某一台机器的东西」:A 机的 workspace 路径在 B 机上根本不存在,而
-// 会话 id 只在单机内唯一,所以 `resume:<id>` 这种键跨设备会直接撞车。
+// Why context and not a prop: what needs it isn't one or two places, it's
+// local persistence scattered throughout — new session drafts, attachments,
+// last-used repo, resume input, task page workspace filter. These keys used to
+// be global, fine in the single-device era; post multi-device they're all
+// "things that belong to a specific machine". A workspace path on machine A
+// doesn't exist on B, and session ids are unique only per machine, so keys like
+// `resume:<id>` would collide across devices.
 //
-// 用 context 的第二个理由是它对下一阶段是对的:聚合收件箱之后,从合并列表点进
-// 去的详情页属于**那一台**而不是当前作用域那一台,于是那处下钻只要用归属设备
-// 的 id 再包一层 provider,里面所有草稿就自动落到对的命名空间。换成 prop 或
-// 模块级全局都做不到这一点(后者会在两台设备同时在场时静默读错)。
+// A second reason for context: it's right for the next phase. After inbox
+// aggregation, drilling into a detail page from a merged list belongs to **that
+// device**, not the current scope's device. That drill needs just one more
+// Provider wrapping its piece, keyed to the belonging device, and all drafts
+// inside automatically land in the right namespace. A prop or module global
+// can't do this (the latter silently reads wrong when two devices are both
+// present).
 //
-// 与传输层的分工:transport 是「数据从哪来」,这里是「本地存储写到哪」。前者
-// 仍走 prop（见 transport.ts 的接缝说明）。
+// Division of labor with the transport layer: transport asks "where does data
+// come from", this asks "where does local storage write to". Transport still
+// uses props (see transport.ts for the seam).
 
 import { createContext, useContext, type ReactNode } from "react";
 import { useDraft } from "./draft";
 
-/** 设备作用域的键前缀。`null`(未配对 / 同源形态 / mock)时不加前缀 —— 那些
- *  形态下只有一个数据源,加了前缀只是让老用户的草稿凭空消失。 */
+/** Device scope key prefix. When `null` (unpaired / same-origin / mock), no
+ *  prefix is added — those modes have only one data source, and a prefix would
+ *  cause existing user drafts to vanish. */
 export function scopedKey(deviceId: string | null, key: string): string {
   return deviceId ? `d/${deviceId}/${key}` : key;
 }
@@ -37,14 +44,15 @@ export function DeviceScopeProvider({
   );
 }
 
-/** 当前作用域设备的 id,没有则 `null`。 */
+/** The id of the current scope's device, or `null` if none. */
 export function useDeviceScope(): string | null {
   return useContext(DeviceScopeContext);
 }
 
-/** `useDraft` 的设备作用域版本。凡是内容只对某一台机器有意义的草稿都用它 ——
- *  纯 UI 偏好(排序、折叠、筛选开关这类)仍用 `useDraft`,它们属于这台手机而不
- *  属于某台 Fleet。 */
+/** Device-scoped version of `useDraft`. Use this for drafts where content is
+ *  meaningful only to a specific machine — pure UI preferences (sorting,
+ *  collapsing, filter toggles) still use plain `useDraft`, as they belong to
+ *  this phone, not to a specific Fleet. */
 export function useDeviceDraft<T>(
   key: string,
   fallback: T,

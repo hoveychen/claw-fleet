@@ -22,14 +22,16 @@ const ALL_KEYS = [
   "theme",
   "viewMode",
   "simplified-mode",
-  // 这台主机上次给出的精简模式默认值(后端的 FLEET_SIMPLIFIED_MODE)。不是用户
-  // 的选择,是一份缓存:`host_features` 是异步的,而初始布局必须同步定下来,
-  // 没有它每次打开都会先闪一帧全功能界面。必须能在启动时读回,否则那一闪永远
-  // 在。上面的 "simplified-mode"(用户的显式选择)优先于它。
+  // This machine's last simplified-mode default value (backend's
+  // FLEET_SIMPLIFIED_MODE). Not a user choice, but a cache: `host_features` is
+  // async, but initial layout must be determined synchronously. Without it,
+  // every open flashes one frame of the full-featured interface. Must be
+  // readable on boot, or that flash persists. The "simplified-mode" above
+  // (user's explicit choice) takes precedence over this.
   "simplified-mode-host-default",
   // Which session sub-view (list vs gallery) the unified "Sessions" nav returns to.
   "lastSessionViewMode",
-  // Last page visited under each sidebar tab (舰队 / 工作), as a JSON blob. The
+  // Last page visited under each sidebar tab (Fleet / Work), as a JSON blob. The
   // active tab itself is derived from "viewMode", so it is not stored.
   "nav-group-last-view",
   // One-shot flag: existing users' stored "list" has been flipped to the new
@@ -42,16 +44,17 @@ const ALL_KEYS = [
   // the user has since chosen.
   "feature-tristate-migrated",
   "lang",
-  // 这台主机上次给出的界面语言默认值(后端的 FLEET_LOCALE)。和上面的
-  // "simplified-mode-host-default" 同理:不是用户的选择,是一份缓存,因为
-  // `host_features` 是异步的而 i18next 的 lng 必须同步定下来,没有它每次打开
-  // 都会先闪一帧英文。上面的 "lang"(用户的显式选择)优先于它。
+  // This machine's last UI language default value (backend's FLEET_LOCALE).
+  // Same reasoning as "simplified-mode-host-default" above: not a user choice,
+  // but a cache, because `host_features` is async but i18next's lng must be
+  // determined synchronously. Without it, every open flashes one frame in
+  // English. The "lang" above (user's explicit choice) takes precedence over this.
   "lang-host-default",
   "sidebar-width",
   "sidebar-collapsed",
   // Per-view collapse map for the secondary sidebars, stored as a JSON blob.
   "secondary-sidebar-collapsed",
-  // Secondary sidebar (二级侧边栏) widths — one per view that owns one.
+  // Secondary sidebar widths — one per view that owns one.
   "history-rail-width",
   "memory-rail-width",
   "wiki-rail-width",
@@ -64,7 +67,7 @@ const ALL_KEYS = [
   "plans-rail-width",
   "artifacts-rail-width",
   "simplified-rail-width",
-  // 计划树 folds + repo selection. The view's whole value is that the finished
+  // Plan tree folds + repo selection. The view's whole value is that finished
   // plans stay folded; an unregistered key here means re-folding on every boot.
   "plans-workspace",
   "plans-expand-overrides",
@@ -80,7 +83,7 @@ const ALL_KEYS = [
   // Commands pinned to the top of the repository command runner.
   "proc-shortcuts",
   "scratchpad-tree-width",
-  // 启动台 (HistoryView) rail filters — the search box is deliberately absent,
+  // Launchpad (HistoryView) rail filters — the search box is deliberately absent,
   // it stays in-memory only.
   "history-mark-filter",
   "history-workspace-filter",
@@ -122,20 +125,20 @@ const ALL_KEYS = [
   // Read-state for audit entries, stored as a JSON blob.
   "audit-read-keys",
   // The most recent daily-report date the user has viewed (YYYY-MM-DD). Drives
-  // the "new report" red dot on the 每日报告 nav item.
+  // the "new report" red dot on the daily-report nav item.
   "daily-report-last-seen",
   // The newest daily-report date already shown in the auto-popup overlay, and
   // the toggle that governs it. The former must survive a restart, otherwise
   // every launch re-pops the same day's report.
   "daily-report-last-popped",
   "daily-report-auto-popup",
-  // The 任务 (HistoryView) detail column's open tabs: {tabIds, activeId}.
+  // The task history detail column's open tabs: {tabIds, activeId}.
   // Restored on boot and pruned against the first scan, so ids of sessions that
   // have since been deleted drop out instead of accumulating forever.
-  // Which session (or the new-session composer) the 任务 page detail column
+  // Which session (or the new-session composer) the task page detail column
   // was showing when the app last closed.
   "launchpad-open",
-  // 产出 page: thumbnail grid or dense sortable list, and how that list is
+  // Artifacts page: thumbnail grid or dense sortable list, and how that list is
   // ordered. Persisted because it is a working preference — someone who
   // manages deliverables in the list view wants it back on next launch.
   "artifacts-layout",
@@ -148,7 +151,7 @@ const ALL_KEYS = [
 // Adding a new ID here will trigger a "What's New" overlay for existing users.
 export const ONBOARDING_FEATURES = [
   // Not a toggle like the rest — it tells upgrading users that the sidebar now
-  // has two modes and which pages moved behind the 工作 tab.
+  // has two modes and which pages moved behind the Work tab.
   "nav_modes",
   "appearance",
   "notifications",
@@ -224,7 +227,7 @@ export function setItem(key: string, value: string): void {
 }
 
 /** Delete from both cache and Tauri store (async, fire-and-forget). Used by the
- *  tristate "默认/default" state, which is represented by the ABSENCE of a
+ *  tristate "default" state, which is represented by the ABSENCE of a
  *  stored value so the feature follows FEATURE_DEFAULTS. */
 export function removeItem(key: string): void {
   cache.delete(key);

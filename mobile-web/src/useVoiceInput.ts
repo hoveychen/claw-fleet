@@ -1,7 +1,8 @@
-// 语音输入的状态机。UI（VoiceButton）只管画，识别的生命周期都在这里。
+// Voice input state machine. UI (VoiceButton) only renders; recognition lifecycle lives here.
 //
-// provider 由 currentVoiceProvider() 挑，本 hook 不认环境。三条实现在这一层之下
-// 是等价的，所以 P4/P5 接进 Capacitor 和鸿蒙时这个文件不用动。
+// Provider is chosen by currentVoiceProvider(); this hook is environment-agnostic.
+// Three implementations below are equivalent at this layer, so P4/P5 integrations
+// with Capacitor and Harmony won't need changes to this file.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "./i18n";
@@ -11,29 +12,32 @@ import { createTailGuard, type TailGuard } from "./voiceTail";
 import { holdWakeLock } from "./wakeLock";
 
 export type VoiceState =
-  /** 还在问 provider 能不能用。按钮此时不显示，避免闪一下又消失。 */
+  /** Still probing the provider for availability. Button is not shown to avoid flicker. */
   | "probing"
-  /** 这个环境没有可用的识别服务。按钮整个不出现。 */
+  /** No available recognition service in this environment. Button doesn't appear. */
   | "unsupported"
   | "idle"
   /**
-   * 已经发起，但麦克风还没真的开始收音。
+   * Recognition started, but the microphone hasn't actually begun capturing audio yet.
    *
-   * 三条实现都要先跨一段异步（起识别会话 / 查权限 / createEngine），这段空窗里
-   * 用户说的话全丢。以前这一段被画成「正在听」，于是用户只会觉得「前半句怎么
-   * 没识别出来」。分出这一态，界面才能老实说「准备中」。
+   * All three implementations must first cross an async boundary (starting recognition
+   * session / checking permissions / createEngine). During this gap, user input is lost.
+   * Previously this gap was displayed as "Listening", which confused users ("Why didn't
+   * the first half get recognized?"). Breaking it into its own state lets the UI
+   * honestly say "Preparing".
    */
   | "preparing"
   | "listening"
   | "error";
 
-/** 出错时给用户看的话。没必要区分得太细 —— 用户能做的动作只有那么几种。 */
+/** Error text shown to users. No need for fine-grained distinctions — users only have a few actions anyway. */
 export function voiceErrorText(kind: VoiceErrorKind): string {
   switch (kind) {
     case "no-permission":
-      // 「请在系统设置里允许」这半句挪到 voiceErrorHint 去了:能把用户送过去的
-      // 环境根本不需要这句话(按钮就是那个动作),送不过去的环境则需要说清楚是
-      // *哪个*设置 —— 浏览器和壳里根本不是同一个地方。
+      // "Please allow in system settings" was moved to voiceErrorHint: environments
+      // that can send users there don't actually need this text (the button is the action),
+      // while environments that can't need to clearly say which *specific* settings —
+      // browsers and shells have completely different places.
       return t("没有麦克风权限");
     case "no-speech":
       return t("没听到声音");
@@ -47,14 +51,17 @@ export function voiceErrorText(kind: VoiceErrorKind): string {
 }
 
 /**
- * 错误提示的第二行：**这一刻用户能做什么**。
+ * Second line of error hint: **what the user can do right now**.
  *
- * 为什么要分环境写：「请在系统设置里允许麦克风」在浏览器里是错的（那是站点权限，
- * 不在系统设置里），在能直接拉起授权面板的壳里则是多余的（旁边就有按钮）。一条
- * 指向错地方的指引比不给指引更糟 —— 用户会真的翻一遍设置，然后回来发现没用。
+ * Why environment-specific: "Please allow the microphone in system settings" is wrong
+ * in browsers (that's site permission, not system settings), and redundant in shells
+ * that can directly launch the permission panel (there's a button right there). A hint
+ * pointing the wrong way is worse than no hint — users really will dig through settings
+ * and come back finding nothing worked.
  *
- * @param canOpenSettings 这个环境能不能直接把用户送去授权（壳里能，浏览器不能）。
- * @param providerId 当前实现，决定「权限在哪」这句话怎么说。
+ * @param canOpenSettings Whether this environment can directly send users to the permission grant
+ *   (shells can; browsers cannot).
+ * @param providerId The current implementation; determines how to phrase "where permissions are".
  */
 export function voiceErrorHint(
   kind: VoiceErrorKind,
@@ -62,7 +69,7 @@ export function voiceErrorHint(
   providerId: VoiceProviderId | null,
 ): string | null {
   if (kind === "no-permission") {
-    // 有按钮就别再写字了,按钮本身就是那句指引。
+    // If there's a button, don't also write text—the button itself is the instruction.
     if (canOpenSettings) return null;
     return providerId === "web-speech"
       ? t("在浏览器地址栏左侧的站点设置里，把麦克风改成「允许」")
@@ -74,15 +81,17 @@ export function voiceErrorHint(
 }
 
 /**
- * 这台设备能不能语音输入。
+ * Whether this device can do voice input.
  *
- * 单独抽出来是因为**有两处必须用同一个判断**：语音按钮（不可用就整个不出现）
- * 和输入框的 placeholder（「发消息或按住说话」）。两边各写一套的话，无 GMS 的
- * 国产安卓机上就会出现「提示说能按住说话，按钮却不在」——一句指向不存在的
- * 控件的说明，比不提更糟。
+ * Extracted separately because **two places must use the same logic**: the voice button
+ * (not shown if unavailable) and the input field placeholder ("Send a message or press
+ * and hold to talk"). If we checked differently in each place, devices without GMS
+ * would show "You can press and hold to talk" with no button present — a hint pointing
+ * to nonexistent UI is worse than no hint.
  *
- * 异步是因为原生侧要查权限和服务：Android 的 isRecognitionAvailable() 在无
- * Google 服务的 ROM 上返回 false，只有问过才知道。
+ * Async because the native side must check permissions and services: Android's
+ * isRecognitionAvailable() returns false on ROMs without Google services, so we only
+ * know by asking.
  */
 export function useVoiceAvailable(): "probing" | "ready" | "unsupported" {
   const [status, setStatus] = useState<"probing" | "ready" | "unsupported">("probing");
@@ -105,69 +114,75 @@ export function useVoiceAvailable(): "probing" | "ready" | "unsupported" {
 
 export interface UseVoiceInput {
   state: VoiceState;
-  /** 说话过程中的实时回显，未定稿。 */
+  /** Real-time interim result from speech recognition, not yet final. */
   partial: string;
-  /** state 为 error 时的原因。 */
+  /** The reason when state is "error". */
   error: VoiceErrorKind | null;
-  /** 收音已停，还在等引擎把最后一段定稿吐出来。这期间 partial 仍要显示。 */
+  /** Audio has stopped, waiting for the engine to finalize the last segment. partial still displays. */
   settling: boolean;
   start(): void;
-  /** 停止收音，保留已识别的内容。 */
+  /** Stop recording and keep the recognized content. */
   stop(): void;
-  /** 丢弃本次识别。 */
+  /** Discard this recognition attempt. */
   cancel(): void;
-  /** 收掉错误提示回到待命。cancel 不做这件事：它只管收麦克风，报出去的错该
-   *  留在屏幕上，直到用户自己看过。 */
+  /** Clear the error and return to idle. cancel() doesn't do this: it only stops the
+   *  microphone; the error should stay on screen until the user has seen it. */
   clearError(): void;
-  /** 这个环境能不能把用户送去开麦克风权限。false 时 UI 只能给一句指引文案，
-   *  不该画一个按下去什么都不会发生的按钮。 */
+  /** Whether this environment can send the user to grant microphone permission.
+   *  When false, the UI should only show explanatory text, not a button that does nothing. */
   canOpenSettings: boolean;
-  /** 拉起授权入口，返回用户是否授权了。canOpenSettings 为 false 时恒 false。 */
+  /** Open the permission grant interface; returns whether the user granted it.
+   *  Always false when canOpenSettings is false. */
   openSettings(): Promise<boolean>;
-  /** 当前在用哪条实现。错误提示要靠它说清「权限在哪」。 */
+  /** Which implementation is currently active. Error messages use this to clarify "where permissions are". */
   providerId: VoiceProviderId | null;
 }
 
 /**
- * @param lang 识别语言，如 `zh-CN`。
- * @param onText 定稿的一段文字。一次识别可能回调多次（引擎自己断句）。
+ * @param lang Recognition language, e.g., `zh-CN`.
+ * @param onText Finalized text segment. A single recognition may trigger multiple callbacks (engine does its own segmentation).
  */
 export function useVoiceInput(lang: string, onText: (text: string) => void): UseVoiceInput {
   const [state, setState] = useState<VoiceState>("probing");
   const [partial, setPartial] = useState("");
   const [error, setError] = useState<VoiceErrorKind | null>(null);
-  /** 停止之后还在等最后一段定稿。这期间那段字必须留在屏幕上，见 voiceTail.ts。 */
+  /** Stopped but still waiting for the last segment to finalize. That text must stay on screen; see voiceTail.ts. */
   const [settling, setSettling] = useState(false);
   const sessionRef = useRef<VoiceSession | null>(null);
 
-  // onText 每次渲染都是新函数（调用方基本都写内联箭头）。放进 ref，start 的
-  // 回调就不必把它列进依赖，也不会因为父组件重渲染而作废一次进行中的识别。
+  // onText is a fresh function on each render (callers usually write inline arrows).
+  // Storing in a ref means start() callbacks don't need to list it as a dependency,
+  // and a parent re-render won't invalidate an in-progress recognition.
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
 
-  // 开机探一次可用性。
+  // Probe availability once on mount.
   const probe = useVoiceAvailable();
   useEffect(() => {
     if (probe === "probing") return;
     setState((s) => (s === "probing" ? (probe === "ready" ? "idle" : "unsupported") : s));
   }, [probe]);
 
-  // 录音全程强制常亮，不管用户的常亮开关开没开。
+  // Force the screen to stay on during recording, regardless of the user's screen-on preference.
   //
-  // 手机默认几十秒无触摸就自动息屏，而说话时手根本不碰屏幕——说一段长一点的话
-  // 必然撞上。屏一灭，WebView 被系统挂起，识别会话当场断掉：用户抬头一看，应用
-  // 像是被杀掉了，刚才说的全没了，而且没有任何提示。所以这不是「顺手加个体验」，
-  // 是这条路径能不能用完的问题。
+  // Phones default to turning off after ~30 seconds of no touch, but hands don't touch
+  // the screen while talking — a longer utterance will definitely trigger it. When the
+  // screen goes off, the WebView is suspended by the OS, and the recognition session
+  // stops immediately. From the user's perspective, the app looks killed, everything
+  // they just said is gone, and there's no explanation. This isn't a "nice to have"—
+  // it's critical to whether this flow works at all.
   //
-  // preparing 也算在内：那一段正是用户已经开口、引擎还没开麦的空窗，息屏同样致命。
-  // 松开时机跟着 state 走，出错 / 停止 / 卸载都会走到这个 effect 的清理。
+  // "preparing" counts too: that gap is when the user has started speaking but the engine
+  // hasn't opened the mic yet—screen off is just as fatal. Release timing follows state;
+  // error, stop, or unmount will all trigger cleanup.
   useEffect(() => {
     if (state !== "listening" && state !== "preparing") return;
     return holdWakeLock();
   }, [state]);
 
-  // 停止时还没定稿的那一段的兜底，见 voiceTail.ts。补交的文字与引擎自己的定稿
-  // 走同一条出口 —— 调用方分不出来，也不该分得出来。
+  // Fallback for text that hasn't finalized when recording stops; see voiceTail.ts.
+  // Finalized text from this fallback and from the engine use the same callback —
+  // the caller can't (and shouldn't) tell them apart.
   const tailRef = useRef<TailGuard | null>(null);
   if (tailRef.current === null) {
     tailRef.current = createTailGuard((text) => onTextRef.current(text), {
@@ -179,7 +194,7 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
   }
   const tail = tailRef.current;
 
-  // 卸载时收掉进行中的识别，否则麦克风会一直开着。
+  // Clean up any in-progress recognition on unmount, or the microphone stays open.
   useEffect(() => {
     return () => {
       sessionRef.current?.cancel();
@@ -188,18 +203,21 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     };
   }, [tail]);
 
-  // 每次 start / stop / cancel 都换一代号。provider.start 是异步的，等它 resolve
-  // 时用户可能已经取消了；比对代号就知道手上这次结果还算不算数。
+  // Bump a generation number on each start / stop / cancel. provider.start() is async,
+  // so by the time it resolves, the user may have already cancelled. Comparing generations
+  // tells us whether the result still counts.
   //
-  // 不能改看 state：setState 是异步的，取消后紧接着 resolve 的那一帧里 state 仍是
-  // "listening"，守卫会漏掉，麦克风就留在开着的状态。
+  // We can't just check state: setState is async, so in the frame right after cancel,
+  // before the state update lands, state is still "listening". A guard that only checks
+  // state would miss the cancel, leaving the microphone open.
   const genRef = useRef(0);
 
   const start = useCallback(() => {
     const provider = currentVoiceProvider();
     if (!provider || sessionRef.current) return;
     const gen = ++genRef.current;
-    // 新一轮作废上一轮还挂着的补交：那段字属于上次录音，用户已经不要了。
+    // A new round cancels any tail finalization still pending from the last round:
+    // that text belongs to the previous recording, which the user has abandoned.
     tail.cancel();
     setSettling(false);
     setError(null);
@@ -211,11 +229,12 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
           if (gen !== genRef.current) return;
           setState((s) => (s === "preparing" ? "listening" : s));
         },
-        // 三个回调都先验代号。web-speech provider 自己在 cancel 后就闭嘴了，
-        // 但那是它的实现细节；这一层不该依赖每个 provider 都同样严谨 —— 漏一个
-        // 就是「取消之后文字仍然往输入框里蹦」。
-        // 出字了就一定已经在收音 —— 万一某条实现漏了 onReady，这里兜住，
-        // 不至于把界面永远钉在「准备中」。
+        // All three callbacks check the generation first. The web-speech provider
+        // goes silent after cancel on its own, but that's an implementation detail;
+        // this layer shouldn't rely on every provider being equally careful—miss one
+        // and you get "text keeps appearing in the input after cancel". Text arriving
+        // means recording has started, so if some implementation forgot onReady, this
+        // catches it and prevents the UI from getting stuck on "Preparing".
         onPartial: (text) => {
           if (gen !== genRef.current) return;
           setState((s) => (s === "preparing" ? "listening" : s));
@@ -226,17 +245,19 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
           if (gen !== genRef.current) return;
           setState((s) => (s === "preparing" ? "listening" : s));
           setPartial("");
-          // 定稿接管了这一段，待补交的作废，否则同一句话会进两遍。
+          // Finalization takes over this segment; discard any pending tail text,
+          // or the same utterance arrives twice.
           tail.final();
           onTextRef.current(text);
         },
-        // 引擎自己收工了（鸿蒙 VAD 静默 3 秒、Web Speech 自行结束、原生识别
-        // 跑完）。这不是错误,也不是用户的动作 —— 界面该像被按了停止一样收场,
-        // 而不是继续假装在听。最后那段还没定稿的话走和停止同一条补交路径。
+        // The engine finished on its own (HarmonyOS VAD detects 3s silence,
+        // Web Speech auto-ends, native recognition completes). This isn't an error
+        // or a user action—the UI should wind down as if Stop was pressed, not keep
+        // pretending to listen. Any unfinal text follows the same finalization path as Stop.
         onEnd: () => {
           if (gen !== genRef.current) return;
-          // 会话句柄还没拿到、或我们自己已经停过了 —— 那两种情况下这一声是
-          // 回声,不该再收一次场。
+          // Session handle not yet acquired, or we already stopped it—this callback
+          // is an echo and shouldn't trigger cleanup again.
           if (!sessionRef.current) return;
           sessionRef.current = null;
           const awaiting = tail.stop();
@@ -250,7 +271,7 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
           setPartial("");
           tail.cancel();
           setSettling(false);
-          // 用户自己取消的不是错误,静默回到待命。
+          // User-initiated cancel isn't an error; silently return to idle.
           if (kind === "aborted") {
             setState("idle");
             return;
@@ -260,8 +281,9 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
         },
       })
       .then((session) => {
-        // 等它 resolve 的这段时间里用户已经取消了 —— 立刻把会话收掉,否则麦克风
-        // 留在开着的状态,而 UI 早已回到待命,用户完全看不出来。
+        // By the time this resolves, the user may have already cancelled.
+        // If so, immediately clean up the session, or the microphone stays open
+        // while the UI has already returned to idle—completely invisible to the user.
         if (gen !== genRef.current) {
           session.cancel();
           return;
@@ -276,17 +298,20 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
       });
   }, [lang, tail]);
 
-  // 注意 stop **不**换代号:引擎在 stop 之后还要把最后一段定稿吐出来,换了代号
-  // 那一段就被守卫挡掉了 —— 表现为「说完按停止,最后一句没进输入框」。
-  // 只有 cancel(丢弃)和 start(新一轮作废旧的)才换。
+  // Note: stop does NOT bump the generation: the engine still needs to finalize
+  // the last segment after stop, and if we bumped it, that finalization would be
+  // dropped—showing up as "I pressed Stop after speaking, but the last sentence
+  // didn't appear". Only cancel (discard) and start (new round invalidates old) bump it.
   const stop = useCallback(() => {
     sessionRef.current?.stop();
     sessionRef.current = null;
-    // 屏幕上那段还没定稿的字先记着：引擎补了定稿就用它的，没补就到点自己交上去。
-    // 少了这一步，「说完按停止、文字整段消失」就取决于原生两个回调谁先到。
+    // Snapshot any unfinal text from the screen: if the engine provides finalization,
+    // use that; otherwise finalize it when the timeout fires. Without this, whether
+    // text appears depends on race conditions between the two callbacks.
     //
-    // 注意**不**在这里清 partial：等待期间那段字要一直留在输入框里，否则用户看到
-    // 的还是「先消失、过一会儿再冒出来」。清空交给 onSettle。
+    // Critically, do NOT clear partial here: the text must stay in the input field
+    // while waiting, or the user sees "text disappears, then reappears". Clearing
+    // happens in onSettle.
     const awaiting = tail.stop();
     setSettling(awaiting);
     if (!awaiting) setPartial("");
@@ -308,8 +333,9 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     setState((s) => (s === "error" ? "idle" : s));
   }, []);
 
-  // 只有原生壳实现得了(浏览器没有打开站点权限设置的 API)。探测放在渲染期而不是
-  // state 里:provider 是同步取的,而这个值只影响错误块画按钮还是画一句话。
+  // Only native shells can implement this (browsers have no API to open site permission settings).
+  // Detection happens at render time, not in state: provider is fetched synchronously,
+  // and this value only controls whether the error block shows a button or just text.
   const provider = currentVoiceProvider();
   const canOpenSettings = typeof provider?.openPermissionSettings === "function";
   const providerId = provider?.id ?? null;
@@ -318,7 +344,8 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     const provider = currentVoiceProvider();
     if (typeof provider?.openPermissionSettings !== "function") return false;
     const granted = await provider.openPermissionSettings();
-    // 授权成功了就把错误撤掉 —— 那条提示已经不成立了,留着只会让用户以为没生效。
+    // If permission was granted, clear the error—that message no longer applies,
+    // and leaving it would make the user think the grant didn't work.
     if (granted) {
       setError(null);
       setState((s) => (s === "error" ? "idle" : s));

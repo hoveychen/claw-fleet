@@ -1,23 +1,22 @@
 import { appTasks, OhosAppContext, OhosPluginId } from '@ohos/hvigor-ohos-plugin';
 import { hvigor } from '@ohos/hvigor';
 
-// 从环境变量注入发布签名 —— 不走 build-profile.json5 里的本地材料。
+// Inject release signing from environment variables — does not use local materials in build-profile.json5.
 //
-// 为什么不能直接把签名材料提交进 build-profile.json5:
-//   1. 公开仓不能带密钥;仓里那份 signingConfigs 是空数组,本地那份靠
-//      `git update-index --skip-worktree` 挡着(所以本机开 DevEco 照常能签)。
-//   2. DevEco 写进 keyPassword/storePassword 的是它自己加密的密文,而这个加密
-//      是平台相关的 —— macOS 上加密出来的串搬到 Linux CI 不保证能解。所以 CI
-//      只能走明文密码 + 环境变量这条路。
+// Why we cannot directly commit signing materials to build-profile.json5:
+//   1. Public repos must not contain keys; the signingConfigs in the repo is an empty array, and the local
+//      version is protected by `git update-index --skip-worktree` (so DevEco on this machine can still sign normally).
+//   2. DevEco encrypts keyPassword/storePassword with its own platform-specific encryption — the string
+//      encrypted on macOS may not decrypt on Linux CI. So CI can only use plaintext passwords + environment variables.
 //
-// 需要的环境变量(缺任何一个就整个跳过,保持 build-profile.json5 原样):
-//   FLEET_OHOS_STORE_FILE       .p12 密钥库
-//   FLEET_OHOS_CERT_PATH        .cer 发布证书
-//   FLEET_OHOS_PROFILE_PATH     .p7b 发布 Profile
-//   FLEET_OHOS_KEY_ALIAS        密钥别名
-//   FLEET_OHOS_STORE_PASSWORD   密钥库口令(明文)
-//   FLEET_OHOS_KEY_PASSWORD     密钥口令(明文,缺省同 STORE_PASSWORD)
-//   FLEET_OHOS_SIGN_ALG         缺省 SHA256withECDSA
+// Required environment variables (if any are missing, the entire process is skipped and build-profile.json5 remains unchanged):
+//   FLEET_OHOS_STORE_FILE       .p12 keystore
+//   FLEET_OHOS_CERT_PATH        .cer release certificate
+//   FLEET_OHOS_PROFILE_PATH     .p7b release Profile
+//   FLEET_OHOS_KEY_ALIAS        key alias
+//   FLEET_OHOS_STORE_PASSWORD   keystore password (plaintext)
+//   FLEET_OHOS_KEY_PASSWORD     key password (plaintext, defaults to STORE_PASSWORD)
+//   FLEET_OHOS_SIGN_ALG         defaults to SHA256withECDSA
 const REQUIRED = [
   'FLEET_OHOS_STORE_FILE',
   'FLEET_OHOS_CERT_PATH',
@@ -31,12 +30,12 @@ const SIGNING_CONFIG_NAME = 'fleet-env';
 hvigor.getRootNode().afterNodeEvaluate(node => {
   const missing = REQUIRED.filter(k => !process.env[k]);
   if (missing.length === REQUIRED.length) {
-    // 没打算用 env 签名(本机 DevEco 日常开发就是这条路),静默放过。
+    // Not planning to use env signing (local DevEco development uses this path by default), silently skip.
     return;
   }
   if (missing.length > 0) {
-    // 半套材料比没有更危险:hvigor 对缺失的签名配置的反应是产出 *unsigned*
-    // 包而不是报错,于是"我明明配了签名"会一路走到装不上/传不上才现形。
+    // Partial materials are more dangerous than none: hvigor produces an *unsigned* package instead of erroring
+    // when signing config is missing, so "I clearly configured signing" won't surface until install/upload fails.
     throw new Error(
       `[fleet] 发布签名环境变量不完整,缺: ${missing.join(', ')}。` +
       `要么把它们补全,要么全部不设(改回 build-profile.json5 的本地签名)。`
@@ -62,10 +61,10 @@ hvigor.getRootNode().afterNodeEvaluate(node => {
     },
   ];
 
-  // 光写 signingConfigs 是不够的 —— 每个 product 还要显式引用它。DevEco 自己
-  // 就漏过这一步(2026-08-18 实测):材料在、引用不在,hvigor 报
-  // "No signingConfig found for product default"、SignHap 空跑 2ms,只产出
-  // entry-default-unsigned.hap。所以这里一并补上。
+  // Setting signingConfigs alone is insufficient — each product must explicitly reference it. DevEco itself
+  // misses this step (tested 2026-08-18): materials present but reference missing, hvigor reports
+  // "No signingConfig found for product default", SignHap idles 2ms, produces only
+  // entry-default-unsigned.hap. So we add the reference here as well.
   for (const product of profileOpt['app']['products'] ?? []) {
     product['signingConfig'] = SIGNING_CONFIG_NAME;
   }

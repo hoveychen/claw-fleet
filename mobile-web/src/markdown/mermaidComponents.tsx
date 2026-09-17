@@ -3,13 +3,14 @@ import { MermaidBlock } from "./MermaidBlock";
 import { isMermaidPre } from "./mermaidPre";
 
 /**
- * 让一个 markdown 渲染面认得 ```mermaid fence：把它换成渲染好的图，并脱掉
- * react-markdown 给 fence 生成的外层 `<pre>`（普通 fence 的 `<pre>` 照留，脱了
- * 空白会被折叠）。
+ * Make a markdown renderer recognize ```mermaid fences: replace them with
+ * rendered diagrams and strip the outer `<pre>` that react-markdown generates
+ * for fences (ordinary fences keep their `<pre>`; stripping would collapse whitespace).
  *
- * 每个渲染面 spread 这一份，不要再各写各的 —— 之前五处各抄一遍 `code` 覆写，
- * 结果决策/计划 tab、工具详情、Fleet 工具结果三处漏了，同一张图桌面出图、手机
- * 上是一块原始代码。
+ * Every renderer should spread this — don't rewrite it in each one. Previously
+ * five places each copied `code` overrides, but decision/plan tabs, tool details,
+ * and Fleet tool results missed it. Result: same diagram rendered on desktop,
+ * raw code block on mobile.
  */
 export const mermaidMarkdownComponents: Components = {
   code: ({ className, children, ...rest }) =>

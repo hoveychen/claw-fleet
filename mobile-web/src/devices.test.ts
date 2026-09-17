@@ -29,7 +29,8 @@ function mint(id: string) {
   return { id, label: "设备 1", now: 1000 };
 }
 
-/** 断言用:把一台设备窄化成 relay 设备(测试里造的都是 relay 那一种)。 */
+/** Helper for assertions: narrow a device down to a relay device
+ *  (all test instances are relay type). */
 function asRelay(d: PairedDevice): RelayDevice {
   if (d.kind !== "relay") throw new Error("expected a relay device");
   return d;
@@ -171,7 +172,7 @@ describe("applyHostIdentity", () => {
     book = renameDevice(book, "d1", "公司 Mac");
     const next = applyHostIdentity(book, "d1", { hostname: "build-box", platform: "linux" });
     expect(next.devices[0].label).toBe("公司 Mac");
-    // 平台仍然收下 —— 它只驱动图标，和用户取的名字不冲突
+    // Platform is still accepted — it only drives the icon and doesn't conflict with the user's chosen name
     expect(next.devices[0].platform).toBe("linux");
   });
 
@@ -183,11 +184,11 @@ describe("applyHostIdentity", () => {
     expect(book.devices.map((d) => d.label)).toEqual(["mac-mini", "mac-mini 2"]);
   });
 
-  it("keeps 设备 N when the host cannot name itself", () => {
+  it("keeps Device N when the host cannot name itself", () => {
     const book = addDevice(emptyBook(), { secret: A, label: "设备 1", id: "d1", now: 1 }).book;
     const next = applyHostIdentity(book, "d1", { hostname: null, platform: "linux" });
     expect(next.devices[0].label).toBe("设备 1");
-    // 名字没变但平台变了 —— 仍然是一本新簿子
+    // Name unchanged but platform changed — still produces a new book
     expect(next.devices[0].platform).toBe("linux");
   });
 
@@ -267,13 +268,13 @@ describe("loadBookSync", () => {
   it("migrates the single-device era secret into a one-entry book", () => {
     localStorage.setItem("fleet-relay-secret", A);
     const book = loadBookSync(mint("d1"));
-    // 迁移出来的记录带上 kind:"relay" —— 单设备时代只有中转一条路。
+    // Migrated records include kind:"relay" — the single-device era had only the relay path.
     expect(book.devices).toEqual([
       {
         kind: "relay",
         id: "d1",
         label: "设备 1",
-        // 迁移过来的那台从没被取过名 —— 等它连上就换成主机名
+        // The migrated device has never been given a name — it'll be renamed to the hostname when it connects
         auto: true,
         secret: A,
         relayBase: null,
@@ -359,9 +360,9 @@ describe("clearBook", () => {
   });
 });
 
-// 移除一台设备时要告诉它的 relay channel 停止推送。那一步会失败（relay 不可达、
-// 手机离线），而失败的后果是用户明明删掉了一台设备却继续收到它的通知。所以退订
-// 不上就记下来，下次启动重试。
+// When removing a device, tell its relay channel to stop pushing. That step may fail (relay unreachable,
+// phone offline), and the failure consequence is the user gets notifications from a device they deleted.
+// So if unsubscribe fails, record it and retry on the next boot.
 describe("pending unsubscribe ledger", () => {
   const NOW = 1_700_000_000_000;
 
@@ -381,7 +382,7 @@ describe("pending unsubscribe ledger", () => {
     expect(all[0].relayBase).toBe("https://r.example.com");
   });
 
-  // 一条永远失败的记录不该在每次启动时都去拨一个连不上的地址。
+  // A permanently failing record shouldn't dial an unreachable address on every boot.
   it("expires entries older than the retry window", () => {
     addPendingUnsub({ secret: A, relayBase: null, at: NOW });
     const eightDays = 8 * 24 * 60 * 60 * 1000;
@@ -396,9 +397,9 @@ describe("pending unsubscribe ledger", () => {
   });
 });
 
-// 簿子里的 http 记录已经没有「添加设备」入口了(直连那条路撤了),但反序列化
-// 仍然认它:老用户手填加过的那台不该因为入口撤了就连不上。同源形态那一台不进
-// 簿子 —— 它是 App 里的模块常量 SAME_ORIGIN_DEVICE。
+// The book no longer has an "add device" entry for http records (the direct-connect path was removed),
+// but deserialization still accepts them: a device an old user manually added shouldn't become unreachable just because
+// the UI entry was removed. The same-origin variant doesn't go in the book — it's the App's constant SAME_ORIGIN_DEVICE.
 describe("http device records in a stored book", () => {
   beforeEach(() => localStorage.clear());
 
@@ -416,7 +417,7 @@ describe("http device records in a stored book", () => {
     expect(d.token).toBe("t0");
   });
 
-  // 旧记录没有 kind 字段 —— 那个年代只有中转一条路。
+  // Old records have no kind field — that era had only the relay path.
   it("reads a pre-kind record as a relay device", () => {
     const raw = JSON.stringify({
       devices: [{ id: "d1", secret: A, label: "Mac", relayBase: null, addedAt: 1 }],
@@ -438,5 +439,5 @@ describe("http device records in a stored book", () => {
 });
 
 
-// 桌面端「直连」那张码编的就是这个 fragment(core 的 direct_host::direct_url)。
-// 两端的格式必须逐字对齐 —— 差一个参数名,扫码就只是打开一个什么都不做的页面。
+// The desktop's "direct connect" QR encodes this fragment (core's direct_host::direct_url).
+// The format on both ends must align exactly — off by one parameter name and scanning just opens a no-op page.

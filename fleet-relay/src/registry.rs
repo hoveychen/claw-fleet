@@ -328,11 +328,12 @@ mod tests {
         out
     }
 
-    // ── store-and-forward:agent 离线时暂存 client 帧,上线后转投 ──────────────
+    // ── store-and-forward: buffer client frames when agent is offline, deliver after going online ──
     //
-    // 治的是「收得到卡、发不出答复」的不对称:收卡只要单向一瞬,答复要一次完整
-    // 往返 + 双方同时在线。手机连接常常只活几秒,等不到桌面重连,所以让 relay
-    // 先接管这一帧。
+    // This addresses the asymmetry of "receiving decision cards vs. delivering answers":
+    // receiving cards only needs an instant one-way delivery, but answers need a complete
+    // round-trip with both sides online at the same time. Mobile connections often only
+    // last seconds and can't wait for desktop reconnection, so relay buffers this frame first.
 
     fn text(v: serde_json::Value) -> OutMsg {
         OutMsg::Text(v.to_string())

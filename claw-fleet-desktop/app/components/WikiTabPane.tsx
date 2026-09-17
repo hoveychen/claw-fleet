@@ -18,15 +18,16 @@ import styles from "./TabPanes.module.css";
 /**
  * One wiki doc as an auxiliary-rail reader.
  *
- * The body is the same `WikiDocBody` the 知识库 page renders, so a doc looks
- * identical wherever it is open. The header used to carry only a version picker
- * and a link to that page; 复制引用 and 导出 — both already implemented there —
- * are now on the bar and in the card's right-click menu, and the density line
- * says which slug, which version of how many, and how stale the doc is.
+ * The body is the same `WikiDocBody` the Knowledge Base page renders,
+ * so a doc looks identical wherever it is open. The header used to carry only a
+ * version picker and a link to that page; "copy reference" and "export"
+ * — both already implemented there — are now on the bar and in the
+ * card's right-click menu, and the density line says which slug, which version
+ * of how many, and how stale the doc is.
  *
  * The version choice remains the shared `versionBySlug` state, so a doc pinned
- * to an old version on the 知识库 page opens at that version here too, and vice
- * versa. Move and delete stay on that page, which owns their dialogs.
+ * to an old version on the Knowledge Base page opens at that version here too, and
+ * vice versa. Move and delete stay on that page, which owns their dialogs.
  */
 export function WikiTabPane({
   doc: card,
@@ -56,7 +57,7 @@ export function WikiTabPane({
   }, [loaded, doc, slug, refetchForMissingSlug]);
 
   // Cross-doc links resolve against the whole list, so a link to a doc hidden by
-  // the 知识库 page's current filter is still live here.
+  // the Knowledge Base page's current filter is still live here.
   const wikiLinks = useMemo(() => {
     const slugs = new Set(docs.map((d) => d.slug));
     return {

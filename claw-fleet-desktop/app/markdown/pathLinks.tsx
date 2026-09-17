@@ -10,8 +10,8 @@ import styles from "./markdown.module.css";
  * Clickable file paths inside agent prose.
  *
  * Only inline-code spans are considered (see pathRef.ts for why). A span that
- * parses as a path renders as a chip: click opens it in the 文件 page, right
- * click offers "reveal in Finder" — the latter only for a local connection,
+ * parses as a path renders as a chip: click opens it in the Files page, right
+ * click offers "Reveal in Finder"—the latter only for a local connection,
  * since a remote workspace's files are not on this machine.
  */
 
@@ -27,10 +27,10 @@ export interface PathLinkContext {
   /** Workspace root that relative paths resolve against. */
   workspaceRoot: string;
   /**
-   * Open in the 文件 page. `absPath` is already resolved.
+   * Open in the Files page. `absPath` is already resolved.
    *
    * `tried` is passed only when *no* reading of the path existed, and lists
-   * every one that was stat'ed — so the surface that ends up showing an error
+   * every one that was stat'ed—so the surface that ends up showing an error
    * can say where it looked instead of naming one guess.
    */
   openInFiles: (absPath: string, line: number | null, tried?: string[]) => void;
@@ -59,19 +59,19 @@ export function PathChip({
   const [tried, setTried] = useState<string[]>([]);
 
   // resolvePathRef returns null only for `~` with no home dir. We pass none:
-  // a `~` path lies outside the workspace anyway (so the 文件 page can't show
+  // a `~` path lies outside the workspace anyway (so the Files page can't show
   // it), and reveal_path expands `~` host-side. Keeping it as-written is right.
   const absPath = resolvePathRef(pathRef.path, ctx.workspaceRoot, null) ?? pathRef.path;
 
   // Three ways a chip learns it is broken: the right-click reveal rejected it,
-  // a previous left click reached the 仓库 page and found nothing there, or the
+  // a previous left click reached the Repo page and found nothing there, or the
   // click's own resolution came back with no reading that exists.
   const failed = revealFailed || tried.length > 0 || (ctx.unresolved?.includes(absPath) ?? false);
 
   // The join here is a *guess*: agents write paths relative to whatever
   // directory they had in mind, which is often a subdirectory of the workspace
-  // — or its parent — so `absPath` may name a file that does not exist.
-  // Asserting it in the tooltip ("打开 /Users/…/public/app-icon.png") stated
+  // — or its parent—so `absPath` may name a file that does not exist.
+  // Asserting it in the tooltip ("Open /Users/…/public/app-icon.png") stated
   // that guess as fact. Before a click, say what was written and where we will
   // look; after a failed one, say every place we actually looked.
   const hint = tried.length
