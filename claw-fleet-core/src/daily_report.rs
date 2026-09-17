@@ -2394,15 +2394,28 @@ mod tests {
         assert!(out.contains("[plan-approval]"));
     }
 
+    /// A db path no other test in this process can collide with.
+    ///
+    /// The counter is what makes that true, and it is not redundant with the
+    /// timestamp: `SystemTime` is only microsecond-granular on macOS (measured:
+    /// the smallest nonzero step between two consecutive `now()` calls is
+    /// 1000ns, and 97% of consecutive calls return the *same* value), so two of
+    /// these tests entering this function in the same microsecond used to get
+    /// byte-identical paths. They then opened the same sqlite file, and
+    /// whichever finished first deleted it in its own cleanup — the other one
+    /// failed its next statement with "disk I/O error". Intermittent, and only
+    /// under the parallelism of a full `cargo test` run.
     fn temp_db_path() -> std::path::PathBuf {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!("fleet_test_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         dir.join(format!(
-            "test_{}.db",
+            "test_{}_{}.db",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ))
     }
 
