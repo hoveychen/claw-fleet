@@ -301,6 +301,20 @@ pub fn is_interaction_mode_installed() -> bool {
     content.contains(BEGIN_MARKER) && content.contains(END_MARKER)
 }
 
+/// Whether the guidance file on disk is byte-identical to what this build
+/// renders. False also when it is missing or unreadable.
+///
+/// The sentinel block in `CLAUDE.md` says the feature is *installed*; it says
+/// nothing about the *wording* of the file it points at. A Fleet upgrade that
+/// edits the guidance text leaves every existing host on the old copy, because
+/// the appliers only run on install/toggle. This is what lets `heal` notice.
+pub fn guidance_file_is_current(user_title: &str, locale: &str) -> bool {
+    let Some(path) = guidance_file_path() else {
+        return true;
+    };
+    matches!(fs::read_to_string(&path), Ok(on_disk) if on_disk == render_guidance(user_title, locale))
+}
+
 /// Thin wrapper over [`crate::claude_md_block::strip`] — the markers are this
 /// module's, the blank-line accounting is shared.
 fn strip_sentinel_block(content: &str) -> String {

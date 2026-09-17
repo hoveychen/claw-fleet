@@ -1492,6 +1492,19 @@ fn remove_prd_discipline_inner() -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the guidance file on disk is byte-identical to what this build
+/// renders. False also when it is missing or unreadable.
+///
+/// The sentinel block in `CLAUDE.md` says the feature is *installed*; it says
+/// nothing about the *wording* of the file it points at. See
+/// `interaction_mode::guidance_file_is_current` for the whole story.
+pub fn guidance_file_is_current(user_title: &str, locale: &str) -> bool {
+    let Some(path) = guidance_file_path() else {
+        return true;
+    };
+    matches!(fs::read_to_string(&path), Ok(on_disk) if on_disk == render_guidance(user_title, locale))
+}
+
 /// Whether the sentinel block is present in `~/.claude/CLAUDE.md`.
 pub fn is_prd_discipline_installed() -> bool {
     let Some(claude_md) = claude_md_path() else {
