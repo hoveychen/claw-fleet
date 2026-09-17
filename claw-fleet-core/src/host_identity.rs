@@ -85,6 +85,18 @@ fn scutil_name() -> Option<String> {
     None
 }
 
+/// Is this "hostname" really just a MAC address (`de:e8:92:d6:ca:71`)?
+///
+/// That is what DHCP/reverse DNS hands back over a phone hotspot with "Private Wi-Fi Address" on
+/// — see [`scutil_name`]. macOS is covered by asking `scutil` first, but Linux and Windows have no
+/// equivalent, so reject the shape everywhere: reporting no name at all leaves the client on its
+/// own default ("Device 2"), which beats naming the machine after a MAC address.
+fn looks_like_mac_address(name: &str) -> bool {
+    let sep = if name.contains(':') { ':' } else { '-' };
+    let parts: Vec<&str> = name.split(sep).collect();
+    parts.len() == 6 && parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
 /// The identity of this machine. Every client calls this one function (the desktop Tauri side
 /// doesn't need it yet — the desktop shows itself, not "which one to pick"), so the relay method
 /// and `/host_identity` route will never drift.
@@ -92,7 +104,7 @@ pub fn host_identity() -> HostIdentity {
     let hostname = scutil_name()
         .or_else(sysinfo::System::host_name)
         .map(|h| trim_host_suffix(&h))
-        .filter(|h| !h.is_empty());
+        .filter(|h| !h.is_empty() && !looks_like_mac_address(h));
     HostIdentity {
         hostname,
         platform: std::env::consts::OS.to_string(),
@@ -113,6 +125,17 @@ mod tests {
         assert_eq!(trim_host_suffix("build.local.example"), "build.local.example");
         // Malformed name with only the suffix stays as-is, not truncated to empty string
         assert_eq!(trim_host_suffix(".local"), ".local");
+    }
+
+    #[test]
+    fn recognizes_a_mac_address_masquerading_as_a_hostname() {
+        assert!(looks_like_mac_address("de:e8:92:d6:ca:71"));
+        assert!(looks_like_mac_address("DE-E8-92-D6-CA-71"));
+        // Real names that merely contain hex or separators stay names
+        assert!(!looks_like_mac_address("Harrys-MacBook-Pro"));
+        assert!(!looks_like_mac_address("ab:cd:ef"));
+        assert!(!looks_like_mac_address("de:e8:92:d6:ca:71:99"));
+        assert!(!looks_like_mac_address("nas"));
     }
 
     #[test]

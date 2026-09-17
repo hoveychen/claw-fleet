@@ -185,7 +185,20 @@ export function deviceById(book: DeviceBook, id: string): PairedDevice | null {
  *  Once the field exists, read it directly. */
 
 export function looksAutoLabel(label: string): boolean {
-  return label.trim() === "" || /^(设备|Device)\s*\d+$/i.test(label.trim());
+  const trimmed = label.trim();
+  return trimmed === "" || /^(设备|Device)\s*\d+$/i.test(trimmed) || looksMacAddressLabel(trimmed);
+}
+
+/** Is this label a bare MAC address (`de:e8:92:d6:ca:71`)?
+ *
+ *  Such a label is never something a person typed — it is what a host reported as its hostname
+ *  when the transient hostname had drifted to the network-assigned one (see the `scutil` comment
+ *  in core's `host_identity.rs`). The host side no longer reports those, but a phone that paired
+ *  before that fix still has the MAC address stored as the device's name, and `applyHostIdentity`
+ *  would normally protect it as a user-chosen name. Recognizing the shape is what lets the record
+ *  heal itself the next time the desktop reports a real name. */
+export function looksMacAddressLabel(label: string): boolean {
+  return /^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i.test(label.trim());
 }
 
 /** The naming-usable part of the host-reported identity.
@@ -194,17 +207,26 @@ export function looksAutoLabel(label: string): boolean {
  *  Platform and OS version do **not** participate in naming — "macOS device" is no better than
  *  "Device 2" when multiple Macs are paired, it just confuses more. Keep those fields for
  *  icons and details. Return `null` if no hostname, leaving the default "Device N" instead of
- *  fabricating one. */
+ *  fabricating one.
+ *
+ *  A hostname that is a bare MAC address is rejected as if it were absent: a desktop old enough
+ *  to still read its drifting transient hostname reports one over a phone hotspot, and "Device 2"
+ *  is a better name than a MAC address. */
 export function hostDisplayName(identity: { hostname?: string | null } | null): string | null {
   const raw = identity?.hostname?.trim();
-  return raw ? raw : null;
+  if (!raw || looksMacAddressLabel(raw)) return null;
+  return raw;
 }
 
 /** The desktop reported its identity — store its name and platform in the book.
  *
  *  Three rules:
  *  1. **Only override auto names** (`auto !== false`). A name the user edited in "More"
- *     is explicit intent; can't be clobbered by reconnection.
+ *     is explicit intent; can't be clobbered by reconnection. The one exception is a label that
+ *     is a bare MAC address: no user types that, it can only have come from a host whose
+ *     transient hostname had drifted, and without this exception such a record stays poisoned
+ *     forever — the phone keeps showing `de:e8:92:d6:ca:71` even after the host learns its
+ *     real name.
  *  2. **Disambiguate duplicates**. When two hostnames collide (both "mac-mini"), give
  *     the later one a number, or the device switcher shows two identical entries.
  *  3. **Platform always updates**, exempt from rule 1 — it only drives the icon,
@@ -218,7 +240,8 @@ export function applyHostIdentity(
   if (!target) return book;
   const platform = identity.platform?.trim() || target.platform;
   const name = hostDisplayName(identity);
-  const keepLabel = target.auto === false || !name;
+  const userNamed = target.auto === false && !looksMacAddressLabel(target.label);
+  const keepLabel = userNamed || !name;
   const label = keepLabel ? target.label : uniqueLabel(book, id, name);
   if (label === target.label && platform === target.platform) return book;
   return {
