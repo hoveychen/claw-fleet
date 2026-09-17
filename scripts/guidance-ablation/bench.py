@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -30,6 +31,33 @@ BASE_CFG = Path.home() / ".guidance-probe" / "cfg"
 RUNS = Path.home() / ".guidance-probe" / "runs"
 CONDITIONS_DIR = HERE / "conditions"
 REAL_CLAUDE = Path.home() / ".claude"
+
+_CRED_LOCK = threading.Lock()
+_LAST_SYNC = [0.0]
+
+
+def sync_credentials():
+    """Re-copy the live OAuth credential from the keychain into the probe cfg.
+
+    Foxy rotates the account behind `~/.claude` between pooled logins, so a
+    credential copied once goes stale: the probe keeps presenting an exhausted
+    pool account and gets a 429 long after the interactive session recovered.
+    Re-reading the keychain picks up whatever foxy rotated to.
+    """
+    with _CRED_LOCK:
+        if time.time() - _LAST_SYNC[0] < 60:  # one sync per burst of failures
+            return
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials",
+             "-a", os.environ.get("USER", ""), "-w"],
+            capture_output=True, text=True,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            dst = BASE_CFG / ".credentials.json"
+            dst.write_text(out.stdout)
+            dst.chmod(0o600)
+            _LAST_SYNC[0] = time.time()
+
 
 MODELS = {
     "sonnet": "claude-sonnet-5",
@@ -334,29 +362,42 @@ def one_run(scen_id: str, cond: str, model: str, idx: int, force: bool):
         "--model", MODELS[model],
         "--max-turns", str(scen["max_turns"]),
     ]
+
+    def attempt():
+        p = subprocess.run(cmd, cwd=ws, env=env, capture_output=True, text=True,
+                           timeout=900)
+        tools, result_text, usage, available = [], "", {}, []
+        api_error = False
+        for line in p.stdout.splitlines():
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if ev.get("type") == "system" and ev.get("subtype") == "init":
+                available = ev.get("tools", [])
+            if ev.get("type") == "assistant":
+                for blk in ev.get("message", {}).get("content", []):
+                    if blk.get("type") == "tool_use":
+                        tools.append({"name": blk.get("name"),
+                                      "input": blk.get("input", {})})
+            if ev.get("type") == "result":
+                result_text = ev.get("result", "") or ""
+                usage = ev.get("usage", {})
+                api_error = bool(ev.get("is_error")) and not tools
+        return p, tools, result_text, usage, available, api_error
+
     t0 = time.time()
-    proc = subprocess.run(cmd, cwd=ws, env=env, capture_output=True, text=True,
-                          timeout=900)
+    proc, tools, result_text, usage, available, api_error = attempt()
+    if api_error and "session limit" in result_text:
+        # The pooled account behind this credential is exhausted; foxy has
+        # likely already rotated ~/.claude to a fresh one. Re-read it and
+        # retry once rather than recording a rate limit as non-compliance.
+        sync_credentials()
+        stub_log.write_text("")
+        cli_log.write_text("")
+        proc, tools, result_text, usage, available, api_error = attempt()
     (run_dir / "stream.jsonl").write_text(proc.stdout)
     (run_dir / "stderr.txt").write_text(proc.stderr)
-
-    tools, result_text, usage, available = [], "", {}, []
-    api_error = False
-    for line in proc.stdout.splitlines():
-        try:
-            ev = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if ev.get("type") == "system" and ev.get("subtype") == "init":
-            available = ev.get("tools", [])
-        if ev.get("type") == "assistant":
-            for blk in ev.get("message", {}).get("content", []):
-                if blk.get("type") == "tool_use":
-                    tools.append({"name": blk.get("name"), "input": blk.get("input", {})})
-        if ev.get("type") == "result":
-            result_text = ev.get("result", "") or ""
-            usage = ev.get("usage", {})
-            api_error = bool(ev.get("is_error")) and not tools
 
     rec = {
         "run_id": run_id, "scenario": scen_id, "condition": cond,
