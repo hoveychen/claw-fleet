@@ -18,7 +18,9 @@
 //! ([`crate::chat_workspace::is_chat_workspace`]) is chat, everything else is a
 //! task. A task turn that ends without having raised any decision card gets the
 //! completion card; a turn that already raised one (ask / plan / fleet-ask)
-//! already notified and is skipped.
+//! already notified and is skipped — as is a turn that ends within minutes of
+//! the user answering a card by hand, because then the user is at the panel and
+//! there is no notification left to deliver (see [`answered_card_within`]).
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
@@ -98,6 +100,38 @@ pub fn raised_card_since(session_id: &str, since_epoch_ms: u64) -> bool {
                 DecisionHistoryRecord::UserPrompt(_) => return false,
             };
             epoch_ms_of(requested_at).is_some_and(|t| t >= since_epoch_ms)
+        })
+}
+
+/// How recently the user must have answered one of this session's cards for the
+/// completion card to be considered redundant. See [`answered_card_within`].
+const RECENT_ANSWER_WINDOW_MS: u64 = 3 * 60 * 1000;
+
+/// Whether the user resolved any of this session's decision cards within the
+/// last [`RECENT_ANSWER_WINDOW_MS`].
+///
+/// This is the "the boss is right here" gate. `raised_card_since` only looks at
+/// the turn that just ended, so the shape it cannot see is: the agent raises a
+/// report card, the user answers it with something that means "we're done"
+/// (「不用，东西都在就行」), and the agent spends its next turn on the one-line
+/// plain-text acknowledgement the interaction-mode session-end exemption asks
+/// for. That acknowledgement turn raises no card, so the detector reads it as an
+/// unnotified finish — 29 seconds after the user typed into a card by hand.
+/// Wrapping it pushes a notification at someone who is demonstrably watching the
+/// panel, and answering it resumes a session the user just closed out.
+fn answered_card_within(session_id: &str, window_ms: u64, now_ms: u64) -> bool {
+    decision_history::list_session_records(session_id)
+        .iter()
+        .any(|record| {
+            let resolved_at = match record {
+                DecisionHistoryRecord::Elicitation(e) => &e.resolved_at,
+                DecisionHistoryRecord::PlanApproval(p) => &p.resolved_at,
+                DecisionHistoryRecord::FleetAsk(f) => &f.resolved_at,
+                // Not a card — the user's own typed prompt. A fresh prompt is a
+                // new brief, not a sign the task just ended.
+                DecisionHistoryRecord::UserPrompt(_) => return false,
+            };
+            epoch_ms_of(resolved_at).is_some_and(|t| now_ms.saturating_sub(t) < window_ms)
         })
 }
 
@@ -193,6 +227,12 @@ pub fn maybe_raise(
         return Ok(None);
     }
     if raised_card_since(&session.id, since_epoch_ms) {
+        return Ok(None);
+    }
+    // The user answered one of this session's cards moments ago, so they are at
+    // the panel and already know where the task stands — the notification this
+    // card exists to fire has nothing left to deliver.
+    if answered_card_within(&session.id, RECENT_ANSWER_WINDOW_MS, now_ms()) {
         return Ok(None);
     }
     // A registered relay is a legitimate card-less exit, and the *only* correct
@@ -482,6 +522,59 @@ mod tests {
         .expect("register must succeed");
         assert!(crate::handoff::has_relayed(&s.id));
         assert!(matches!(maybe_raise(&s, "done", 0), Ok(None)));
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A session whose card the user answered seconds ago must not be wrapped:
+    /// the user is at the panel, and resuming the session would undo the
+    /// wrap-up they just asked for.
+    #[test]
+    fn a_just_answered_session_gets_no_completion_card() {
+        let _env_guard = crate::session::fleet_home_lock();
+        let home = std::env::temp_dir().join(format!("fleet-turncard-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &home);
+
+        let s = session("/p");
+        // `requested_at` always sits well before the turn boundary we pass to
+        // `maybe_raise`, so the card belongs to an *earlier* turn and the
+        // `raised_card_since` gate stays out of the way — this test is about
+        // `answered_card_within` alone.
+        let record = |resolved_at: chrono::DateTime<chrono::Utc>| {
+            DecisionHistoryRecord::FleetAsk(crate::decision_history::FleetAskRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                session_id: s.id.clone(),
+                workspace_name: s.workspace_name.clone(),
+                ai_title: None,
+                requested_at: (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339(),
+                resolved_at: resolved_at.to_rfc3339(),
+                outcome: crate::decision_history::FleetAskOutcome::Answered,
+                questions: Vec::new(),
+                answers: Default::default(),
+            })
+        };
+
+        // Answered an hour ago: the task genuinely ran on unattended since, so
+        // the completion card still fires.
+        crate::decision_history::append_record(&record(
+            chrono::Utc::now() - chrono::Duration::hours(1),
+        ))
+        .expect("append must succeed");
+        let card = maybe_raise(&s, "done", now_ms()).expect("raise must not error");
+        assert!(card.is_some(), "an hour-old answer must not suppress");
+        if let Some(id) = card {
+            crate::elicitation::cleanup(&id);
+        }
+
+        // Answered seconds ago: the user is right here — stay quiet.
+        crate::decision_history::append_record(&record(chrono::Utc::now())).expect("append");
+        assert!(matches!(maybe_raise(&s, "done", now_ms()), Ok(None)));
 
         match prev {
             Some(v) => std::env::set_var("FLEET_HOME", v),
