@@ -361,24 +361,6 @@ pub fn fleet_ask_to_url(
     CreateElicitationRequest::url(session_id, message, req.id.clone(), url)
 }
 
-/// An A2UI card as a URL-mode elicitation.
-///
-/// A2UI is its own rendering protocol with no ACP equivalent, so the only
-/// honest options are "render it somewhere and link" or "do not show it at
-/// all". This is the former.
-pub fn a2ui_to_url(
-    session_id: &str,
-    req: &crate::mcp_a2ui_ipc::A2uiRenderRequest,
-    url: String,
-) -> CreateElicitationRequest {
-    CreateElicitationRequest::url(
-        session_id,
-        "Fleet rendered an interactive view".to_string(),
-        req.id.clone(),
-        url,
-    )
-}
-
 /// How a card can be delivered, given what the client said it supports.
 ///
 /// The spec is explicit that an agent **MUST NOT** use URL mode against a

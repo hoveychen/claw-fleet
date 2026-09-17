@@ -414,12 +414,6 @@ fn update_in(
     Ok(rec)
 }
 
-/// Record which session an iteration produced, for `fleet loop list`.
-pub fn record_iteration_session(id: &str, session_id: &str) {
-    let Some(dir) = loops_dir() else { return };
-    record_iteration_session_in(&dir, id, session_id, now_ms());
-}
-
 fn record_iteration_session_in(dir: &Path, id: &str, session_id: &str, now: u64) {
     if let Some(mut rec) = get_in(dir, id) {
         rec.last_session_id = Some(session_id.to_string());
@@ -557,22 +551,6 @@ fn claim_skip_in(
     rec.next_fire_at = now + rec.interval_secs * 1000;
     write_record(dir, &rec).map_err(|_| ClaimError::Gone)?;
     Ok(rec)
-}
-
-/// Loops that are due now and still live — the reconcile sweep's input, for
-/// fires missed while the machine was asleep or Fleet wasn't running.
-pub fn due_loops(now: u64) -> Vec<LoopRecord> {
-    let Some(dir) = loops_dir() else {
-        return Vec::new();
-    };
-    due_loops_in(&dir, now)
-}
-
-fn due_loops_in(dir: &Path, now: u64) -> Vec<LoopRecord> {
-    list_in(dir)
-        .into_iter()
-        .filter(|r| r.is_due(now) && r.is_live(now))
-        .collect()
 }
 
 // ── iteration spawn + timer ────────────────────────────────────────────────────
@@ -1225,16 +1203,6 @@ mod tests {
         make(d.path(), "l1", 0);
         let err = claim_fire_in(d.path(), "l1", 0, EXPIRY_MS + 1).unwrap_err();
         assert_eq!(err, ClaimError::Exhausted);
-    }
-
-    #[test]
-    fn due_loops_selects_only_live_and_due() {
-        let d = dir();
-        make(d.path(), "soon", 0); // due at 300_000
-        create_in(d.path(), "/ws", "p", None, 3600, None, None, None, None, None, None, "later", 0).unwrap();
-        let due = due_loops_in(d.path(), 400_000);
-        assert_eq!(due.len(), 1);
-        assert_eq!(due[0].id, "soon");
     }
 
     use std::cell::RefCell;

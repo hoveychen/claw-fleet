@@ -72,7 +72,6 @@ pub fn tick(fleet_path: &str) {
 mod tests {
     use crate::mcp_injector;
     use crate::permissions_injector;
-    use crate::session::fleet_home_lock;
     use std::fs;
 
     fn with_temp_home<F: FnOnce()>(f: F) {

@@ -11,7 +11,6 @@ use axum::{
 };
 use futures_util::stream;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use std::{convert::Infallible, sync::Arc};
@@ -468,12 +467,4 @@ async fn audited_result<T>(
         }
         Err(error) => Err(ApiError::from_store(error)),
     }
-}
-
-pub fn example_create_task() -> serde_json::Value {
-    json!({
-        "prompt": "run the Fleet Cloud spike",
-        "workspace_selector": { "labels": { "repo": "claude-fleet" } },
-        "agent_profile": { "tool": "codex", "required_capabilities": [] }
-    })
 }

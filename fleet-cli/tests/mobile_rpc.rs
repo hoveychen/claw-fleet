@@ -109,30 +109,6 @@ fn wait_for_port(path: &Path, serve: &mut ServeGuard) -> u16 {
     }
 }
 
-/// Minimal HTTP/1.0 GET with a bearer token.
-fn get(port: u16, path: &str, bearer: Option<&str>) -> (u16, String) {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-    stream
-        .set_read_timeout(Some(Duration::from_secs(30)))
-        .unwrap();
-    let auth = match bearer {
-        Some(t) => format!("Authorization: Bearer {t}\r\n"),
-        None => String::new(),
-    };
-    let req = format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n{auth}\r\n");
-    std::io::Write::write_all(&mut stream, req.as_bytes()).unwrap();
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).unwrap();
-    let text = String::from_utf8_lossy(&raw).to_string();
-    let status = text
-        .lines()
-        .next()
-        .and_then(|l| l.split_whitespace().nth(1))
-        .and_then(|c| c.parse().ok())
-        .unwrap_or(0);
-    (status, text)
-}
-
 /// Minimal HTTP/1.0 request with an arbitrary method and no body — for the CORS
 /// preflight, which is an `OPTIONS` carrying only headers.
 fn options(port: u16, path: &str) -> (u16, String) {

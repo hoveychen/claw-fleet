@@ -283,18 +283,6 @@ pub async fn fetch_custody() -> FoxyCustody {
     }
 }
 
-/// Blocking bridge for [`fetch_custody`], same runtime handling as
-/// [`fetch_in_use_codex_account_blocking`].
-pub fn fetch_custody_blocking() -> FoxyCustody {
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        tokio::task::block_in_place(|| handle.block_on(fetch_custody()))
-    } else {
-        tokio::runtime::Runtime::new()
-            .map(|rt| rt.block_on(fetch_custody()))
-            .unwrap_or_default()
-    }
-}
-
 /// Fetch the in-use account's usage from a running foxy daemon, or `None` if
 /// foxy isn't reachable. Two requests: `/api/cred/status` (cheap, instant) for
 /// the in-use account id, then `/api/accounts` (can take a few seconds) for the

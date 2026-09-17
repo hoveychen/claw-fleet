@@ -358,39 +358,6 @@ impl LineAcc {
     }
 }
 
-/// Fold one codex session's cumulative token usage into `by_model` under the
-/// `("codex", model)` key. Unlike Claude's per-turn deltas, codex reports a
-/// single cumulative `total_token_usage` snapshot per session, so this
-/// contributes one folded figure: full-price input (`raw − cached`), cached
-/// input billed at the cache-read rate, and output (already incl. reasoning).
-///
-/// `uri` is the session's stored `jsonl_path`, which for codex is a `codex://`
-/// URI (not a filesystem path) that may point at a zstd-compressed rollout — so
-/// this delegates to [`crate::codex_source::codex_token_breakdown`], which
-/// resolves + decompresses + parses it, rather than reading the path directly.
-/// That reuse also keeps the cost here in lock-step with the per-session
-/// `CodexTokenPanel`.
-#[cfg(test)]
-fn fold_codex_session(
-    uri: &str,
-    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
-) {
-    let Ok(bd) = crate::codex_source::codex_token_breakdown(uri) else {
-        return;
-    };
-    if bd.total_tokens == 0 {
-        return;
-    }
-    // `bd.input_tokens` is already the full-price portion (cached excluded);
-    // codex has no cache-write bucket so `cache_creation` stays 0. `bd.cost_usd`
-    // is the canonical cost from the same price tier the panel uses.
-    let key_model = bd.model.clone().unwrap_or_else(|| "gpt".to_string());
-    by_model
-        .entry(("codex".to_string(), key_model))
-        .or_default()
-        .add(bd.input_tokens, 0, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
-}
-
 /// Build today's per-model receipt on the same口径 as [`today_usage`].
 ///
 /// `sessions` is the already-scanned session list (subagents included). Every
@@ -749,36 +716,6 @@ fn fold_session_turns_range(
             cost,
         );
     }
-}
-
-/// Fold a Codex session into the range breakdown, attributing its whole
-/// cumulative snapshot to `attribute_ms`'s local day (see the module comment on
-/// why Codex can't be split per turn). Returns `true` if it contributed.
-#[cfg(test)]
-fn fold_codex_session_range(
-    uri: &str,
-    attribute_ms: i64,
-    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
-    by_day: &mut std::collections::BTreeMap<String, LineAcc>,
-) -> bool {
-    let Ok(bd) = crate::codex_source::codex_token_breakdown(uri) else {
-        return false;
-    };
-    if bd.total_tokens == 0 {
-        return false;
-    }
-    let key_model = bd.model.clone().unwrap_or_else(|| "gpt".to_string());
-    // `bd.input_tokens` is already full-price (cached excluded); no cache-write
-    // bucket for codex, so `cache_creation` stays 0.
-    by_model
-        .entry(("codex".to_string(), key_model))
-        .or_default()
-        .add(bd.input_tokens, 0, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
-    by_day
-        .entry(local_date_str(attribute_ms))
-        .or_default()
-        .add(bd.input_tokens, 0, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
-    true
 }
 
 // ── Cache-ready per-session projection ───────────────────────────────────────
@@ -3052,7 +2989,6 @@ mod range_breakdown_tests {
         assert_eq!(b.daily[0].output_tokens, 2_000);
     }
 
-    #[test]
     /// The sidebar's "今日累计" must not count Fleet's own overhead either. This
     /// one drives the real `today_usage()` (which reads
     /// `$FLEET_HOME/.fleet/fleet_llm_usage.jsonl`) rather than a pure helper, so

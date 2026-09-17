@@ -3999,7 +3999,7 @@ mod tests {
     #[test]
     fn different_idempotency_keys_both_run() {
         let runs = std::cell::Cell::new(0);
-        let mut run_once = |k: &str| {
+        let run_once = |k: &str| {
             let p = idem_params(k);
             idempotent_write("resume_session", &p, || {
                 runs.set(runs.get() + 1);

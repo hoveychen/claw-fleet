@@ -30,7 +30,7 @@
 //! line-buffered on a tty, so they reach the tail live rather than in one dump
 //! at exit.
 
-use claw_fleet_core::harness_install::{self, InstallError, InstallErrorCode};
+use claw_fleet_core::harness_install::{self, InstallError};
 
 /// Prefix of the machine-readable final line. Also parsed by the browser
 /// build's transport (`harnessInstall.ts`) and asserted by tests on both
@@ -118,6 +118,9 @@ fn parse_marker(stdout: &str) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the test below constructs an `InstallError` by hand; importing the
+    // code enum at module scope would be unused in a non-test build.
+    use claw_fleet_core::harness_install::InstallErrorCode;
 
     /// The marker is found on the *last* matching line and parses back to the
     /// same JSON — the property the browser transport depends on. Guards the

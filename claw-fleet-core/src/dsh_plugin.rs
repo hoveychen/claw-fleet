@@ -75,11 +75,6 @@ pub fn plugin_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("dsh-plugin"))
 }
 
-/// The plugin entrypoint a loader entry's `name` points at.
-pub fn plugin_entry_path() -> Option<PathBuf> {
-    plugin_dir().map(|d| d.join("index.js"))
-}
-
 /// dsh's home-level user patch layer.
 fn patch_path() -> Option<PathBuf> {
     crate::session::get_dsh_dir().map(|d| d.join("cordis.patch.yml"))

@@ -400,18 +400,6 @@ pub fn spawn_resume_prompt(
     )
 }
 
-/// Like [`spawn_resume`] but invokes `on_exit(success)` from the reaper thread
-/// when the spawned process exits. The auto-resume scheduler uses this to
-/// decrement its in-flight counter (concurrency cap) and to record consecutive
-/// failures for backoff — see `maybe_fire_auto_resume`.
-pub fn spawn_resume_tracked(
-    session_id: &str,
-    workspace_path: &str,
-    on_exit: impl FnOnce(bool) + Send + 'static,
-) -> Result<(), String> {
-    spawn_resume_tracked_prompt(session_id, workspace_path, "continue", None, None, None, on_exit)
-}
-
 /// Full-featured Claude resume: `claude --resume <id> -p <prompt>` with
 /// optional `--model` / `--effort` / `--permission-mode` overrides, live-thinking
 /// tee, and a reaper that invokes `on_exit(success)`. All the other

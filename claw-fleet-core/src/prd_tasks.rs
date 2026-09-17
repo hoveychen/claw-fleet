@@ -705,11 +705,6 @@ pub fn is_pending_task_line(line: &str) -> bool {
     top_level_checkbox(line) == Some(false)
 }
 
-/// True iff a line is a top-level completed P-task (`- [x]` / `- [X]`).
-pub fn is_done_task_line(line: &str) -> bool {
-    top_level_checkbox(line) == Some(true)
-}
-
 /// `Some(true)` for `- [x]`, `Some(false)` for `- [ ]`, `None` for anything
 /// else (including indented sub-items). Top-level only: a checkbox line must
 /// start at column 0 so nested detail bullets don't inflate the count.

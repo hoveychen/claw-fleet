@@ -2485,7 +2485,6 @@ mod tests {
         })
     }
 
-    #[test]
     /// A dsh session Fleet spawned must read back as a Fleet-owned task, or the
     /// desktop's "新建会话" dialog spins forever.
     ///

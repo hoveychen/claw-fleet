@@ -330,14 +330,6 @@ impl SourcesConfig {
             .unwrap_or(true)
     }
 
-    /// Check if a source is explicitly enabled in config. Returns false if missing.
-    pub fn is_explicitly_enabled(&self, name: &str) -> bool {
-        self.sources
-            .get(name)
-            .map(|e| e.enabled)
-            .unwrap_or(false)
-    }
-
     /// Check if a source is enabled, accepting both config names ("claude-code")
     /// and API/short names ("claude").
     pub fn is_source_enabled(&self, name: &str) -> bool {

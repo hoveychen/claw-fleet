@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -370,21 +369,6 @@ pub fn try_read_response(id: &str) -> Option<FleetAskResponse> {
     }
     let content = fs::read_to_string(&path).ok()?;
     serde_json::from_str::<FleetAskResponse>(&content).ok()
-}
-
-/// Blocking poll for a response. Returns `None` on timeout.
-pub fn poll_response(id: &str, timeout: Duration) -> Option<FleetAskResponse> {
-    let start = std::time::Instant::now();
-    let interval = Duration::from_millis(200);
-    loop {
-        if let Some(r) = try_read_response(id) {
-            return Some(r);
-        }
-        if start.elapsed() > timeout {
-            return None;
-        }
-        std::thread::sleep(interval);
-    }
 }
 
 /// Write a response file. Called by the desktop / fleet serve after the

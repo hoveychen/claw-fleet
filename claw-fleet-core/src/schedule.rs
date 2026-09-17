@@ -665,22 +665,6 @@ fn record_fired_session_in(dir: &Path, id: &str, session_id: &str) {
     }
 }
 
-/// Schedules that are due now and still pending — the reconcile sweep's input,
-/// for fires missed while the machine was asleep or Fleet wasn't running.
-pub fn due_schedules(now: u64) -> Vec<ScheduleRecord> {
-    let Some(dir) = schedules_dir() else {
-        return Vec::new();
-    };
-    due_schedules_in(&dir, now)
-}
-
-fn due_schedules_in(dir: &Path, now: u64) -> Vec<ScheduleRecord> {
-    list_in(dir)
-        .into_iter()
-        .filter(|r| r.is_claimable(now))
-        .collect()
-}
-
 // ── fire spawn + timer ───────────────────────────────────────────────────────
 
 /// `CLAUDE_CODE_ENTRYPOINT` for scheduled fires, so the scanner and transcript
@@ -1235,21 +1219,6 @@ mod tests {
         make(d.path(), "s1", 0, 300_000);
         let err = claim_fire_in(d.path(), "s1", 0, 100_000).unwrap_err();
         assert_eq!(err, ClaimError::NotDue { due_in_ms: 200_000 });
-    }
-
-    #[test]
-    fn due_schedules_selects_only_pending_and_due() {
-        let d = dir();
-        make(d.path(), "soon", 0, 300_000);
-        make(d.path(), "later", 0, 3_600_000);
-        // a fired one must not appear even though it's "due"
-        let mut fired = make(d.path(), "done", 0, 100_000);
-        fired.status = ScheduleStatus::Fired;
-        write_record(d.path(), &fired).unwrap();
-
-        let due = due_schedules_in(d.path(), 400_000);
-        assert_eq!(due.len(), 1);
-        assert_eq!(due[0].id, "soon");
     }
 
     use std::cell::RefCell;
