@@ -250,6 +250,21 @@ pub fn render_chain(
         chain.plan_id.as_deref().unwrap_or("-"),
         chain.workspace_path
     );
+    // The finish line goes above the hops: a reader who came here to answer
+    // "is this chain done?" should not have to reconstruct it from 26 notes.
+    if let Some(goal) = chain.goal.as_deref() {
+        out.push_str(&format!("\n本链目标：{goal}\n"));
+        // Only revisions — the initial setting is the goal itself, already above.
+        for rev in chain.goal_history.iter().filter(|r| r.from.is_some()) {
+            out.push_str(&format!(
+                "  改于第 {} 棒：「{}」→「{}」，理由：{}\n",
+                rev.hop,
+                rev.from.as_deref().unwrap_or(""),
+                rev.to,
+                rev.reason.as_deref().unwrap_or("（未说明）"),
+            ));
+        }
+    }
     for (i, sid) in ids.iter().enumerate() {
         let mut marks = Vec::new();
         if i == 0 {
@@ -1305,6 +1320,51 @@ mod tests {
         let chain = chain_containing_in(&cdir, "s2").unwrap();
         assert_eq!(chain.goal, None);
         assert!(chain.goal_history.is_empty());
+    }
+
+    #[test]
+    fn render_chain_leads_with_the_goal_and_its_revisions() {
+        let chain = HandoffChain {
+            chain_id: "c1".into(),
+            workspace_path: "/ws".into(),
+            plan_id: None,
+            goal: Some("新目标".into()),
+            goal_history: vec![
+                GoalRevision {
+                    hop: 1,
+                    session_id: "s1".into(),
+                    from: None,
+                    to: "原目标".into(),
+                    reason: None,
+                    at: 1,
+                },
+                GoalRevision {
+                    hop: 2,
+                    session_id: "s2".into(),
+                    from: Some("原目标".into()),
+                    to: "新目标".into(),
+                    reason: Some("老板改了路线".into()),
+                    at: 2,
+                },
+            ],
+            links: vec![HandoffLink {
+                from_session_id: "s1".into(),
+                to_session_id: "s2".into(),
+                note: "n".into(),
+                plan_id: None,
+                next_task: None,
+                handed_at: 1,
+            }],
+        };
+        let out = render_chain(&chain, None, None);
+        assert!(out.contains("本链目标：新目标"), "{out}");
+        assert!(
+            out.contains("改于第 2 棒"),
+            "the revision is visible: {out}"
+        );
+        assert!(out.contains("老板改了路线"), "with its reason: {out}");
+        // The initial setting is the goal itself, not a "change" worth a line.
+        assert!(!out.contains("改于第 1 棒"), "{out}");
     }
 
     fn fresh_dirs(tag: &str) -> (PathBuf, PathBuf, PathBuf) {

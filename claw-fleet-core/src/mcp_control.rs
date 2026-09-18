@@ -190,7 +190,9 @@ fn handoff_tool_def() -> Value {
                 "plan": {"type": "string", "description": "Plan id to attribute the successor to."},
                 "next": {"type": "string", "description": "P-task the successor resumes at (requires plan)."},
                 "model": {"type": "string", "description": "Override the successor's model (else inherits this session's). Naming another harness's model relays on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh. Effort then resets to that harness's default unless you pass one."},
-                "effort": {"type": "string", "description": "Override the successor's effort (low|medium|high|max)."}
+                "effort": {"type": "string", "description": "Override the successor's effort (low|medium|high|max)."},
+                "goal": {"type": "string", "description": "What this whole relay chain is for — one sentence of \"the work is done when …\". Set it on the FIRST hop: you are registering at the end of your turn, so you already know what the boss settled on even if it only emerged mid-conversation. Later hops inherit it and are judged against it rather than against the plan they happen to hold. Omit (or repeat the same text) to leave it alone."},
+                "goalReason": {"type": "string", "description": "Why you are replacing a goal the chain already has. Required for a change, refused as unnecessary for setting the first one. Changing course is fine — the boss does it; silently narrowing the chain's objective down to your current plan is what this makes impossible. Tell the boss you changed it."}
             },
             "required": ["action"],
             "additionalProperties": false
