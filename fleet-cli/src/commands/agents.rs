@@ -18,10 +18,7 @@ pub(crate) fn cmd_agents(show_all: bool, as_json: bool) {
         .collect();
 
     if as_json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&filtered).unwrap_or_default()
-        );
+        println!("{}", serde_json::to_string_pretty(&filtered).unwrap_or_default());
         return;
     }
 
@@ -84,7 +81,8 @@ pub(crate) fn cmd_agent(id_prefix: &str, as_json: bool) {
     let matched: Vec<&SessionInfo> = sessions
         .iter()
         .filter(|s| {
-            s.id.starts_with(id_prefix) || s.workspace_name.to_lowercase().contains(&needle)
+            s.id.starts_with(id_prefix)
+                || s.workspace_name.to_lowercase().contains(&needle)
         })
         .collect();
 
@@ -95,10 +93,7 @@ pub(crate) fn cmd_agent(id_prefix: &str, as_json: bool) {
 
     if matched.len() > 1 {
         if as_json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&matched).unwrap_or_default()
-            );
+            println!("{}", serde_json::to_string_pretty(&matched).unwrap_or_default());
             return;
         }
         eprintln!("Multiple agents match '{id_prefix}':");
@@ -126,10 +121,7 @@ pub(crate) fn cmd_agent(id_prefix: &str, as_json: bool) {
     kv("Workspace:", &s.workspace_path);
 
     let sc = c_status(&s.status);
-    kv(
-        "Status:",
-        &format!("{sc}{}{r}", format_status(&s.status), r = c_reset()),
-    );
+    kv("Status:", &format!("{sc}{}{r}", format_status(&s.status), r = c_reset()));
 
     kv("Harness:", short_harness(&s.agent_source));
     kv("Token Speed:", &format!("{:.1} tok/s", s.token_speed));
@@ -186,7 +178,8 @@ fn resolve_agent(id_prefix: &str, verb: &str) -> (SessionInfo, u32) {
     let matched: Vec<&SessionInfo> = sessions
         .iter()
         .filter(|s| {
-            s.id.starts_with(id_prefix) || s.workspace_name.to_lowercase().contains(&needle)
+            s.id.starts_with(id_prefix)
+                || s.workspace_name.to_lowercase().contains(&needle)
         })
         .collect();
 
@@ -347,7 +340,10 @@ fn signal_agent(pid: u32, force: bool) -> Result<(), String> {
 pub(crate) fn cmd_speed(as_json: bool) {
     let sessions = load_sessions();
     let total: f64 = sessions.iter().map(|s| s.token_speed).sum();
-    let active: Vec<&SessionInfo> = sessions.iter().filter(|s| s.token_speed > 0.1).collect();
+    let active: Vec<&SessionInfo> = sessions
+        .iter()
+        .filter(|s| s.token_speed > 0.1)
+        .collect();
 
     if as_json {
         let agents: Vec<serde_json::Value> = sessions
@@ -377,7 +373,10 @@ pub(crate) fn cmd_speed(as_json: bool) {
     let b = c_bold();
     let r = c_reset();
 
-    println!("{b}Aggregate speed:{r}  {} tok/s", format!("{:.0}", total));
+    println!(
+        "{b}Aggregate speed:{r}  {} tok/s",
+        format!("{:.0}", total)
+    );
     println!("{b}Active agents:{r}   {}", active.len());
 
     if !active.is_empty() {
@@ -441,10 +440,7 @@ mod stop_tests {
             .spawn()
             .expect("spawn");
         std::thread::sleep(Duration::from_millis(300));
-        assert!(
-            pgrep(marker),
-            "precondition: the tool child must be running"
-        );
+        assert!(pgrep(marker), "precondition: the tool child must be running");
 
         signal_agent(child.id(), false).expect("signal");
         std::thread::sleep(Duration::from_millis(600));
@@ -452,10 +448,7 @@ mod stop_tests {
         let leaked = pgrep(marker);
         let _ = child.kill();
         let _ = child.wait();
-        Command::new("pkill")
-            .args(["-9", "-f", marker])
-            .output()
-            .ok();
+        Command::new("pkill").args(["-9", "-f", marker]).output().ok();
 
         assert!(!leaked, "fleet stop orphaned the agent's tool child");
     }

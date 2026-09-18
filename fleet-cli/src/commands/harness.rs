@@ -91,8 +91,8 @@ pub(crate) fn cmd_harness_update(source: &str) -> ! {
 /// dsh's npm prerequisite on a blank machine. Prints the npm path as its ok
 /// payload.
 pub(crate) fn cmd_harness_install_node() -> ! {
-    let result =
-        harness_install::install_node(&progress).map(|npm| npm.to_string_lossy().into_owned());
+    let result = harness_install::install_node(&progress)
+        .map(|npm| npm.to_string_lossy().into_owned());
     finish(result)
 }
 
@@ -101,10 +101,7 @@ pub(crate) fn cmd_harness_install_node() -> ! {
 /// what it changed without opening a browser.
 pub(crate) fn cmd_harness_status() {
     let statuses = claw_fleet_core::harness_status::probe_all();
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&statuses).unwrap_or_default()
-    );
+    println!("{}", serde_json::to_string_pretty(&statuses).unwrap_or_default());
 }
 
 /// Shape the marker line carries, so both sides of the wire agree in one place.

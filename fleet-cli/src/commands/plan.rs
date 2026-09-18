@@ -12,26 +12,15 @@ pub(crate) fn cmd_plan(action: PlanCommands, session: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let sid = resolve_session_id(session);
     let result: Result<(), String> = match action {
-        PlanCommands::Check { plan_id, task } => emit(plan_ops::mutate_checkbox(
-            &cwd,
-            &plan_id,
-            &task,
-            true,
-            sid.as_deref(),
-        )),
-        PlanCommands::Uncheck { plan_id, task } => emit(plan_ops::mutate_checkbox(
-            &cwd,
-            &plan_id,
-            &task,
-            false,
-            sid.as_deref(),
-        )),
-        PlanCommands::Resume { plan_id, task } => emit(plan_ops::resume(
-            &cwd,
-            &plan_id,
-            task.as_deref(),
-            sid.as_deref(),
-        )),
+        PlanCommands::Check { plan_id, task } => {
+            emit(plan_ops::mutate_checkbox(&cwd, &plan_id, &task, true, sid.as_deref()))
+        }
+        PlanCommands::Uncheck { plan_id, task } => {
+            emit(plan_ops::mutate_checkbox(&cwd, &plan_id, &task, false, sid.as_deref()))
+        }
+        PlanCommands::Resume { plan_id, task } => {
+            emit(plan_ops::resume(&cwd, &plan_id, task.as_deref(), sid.as_deref()))
+        }
         PlanCommands::Create {
             plan_id,
             title,
@@ -49,11 +38,9 @@ pub(crate) fn cmd_plan(action: PlanCommands, session: Option<&str>) {
             claw_fleet_core::prd_tasks::PlanKind::from_attr(Some(&kind)),
             sid.as_deref(),
         )),
-        PlanCommands::Add {
-            plan_id,
-            task,
-            text,
-        } => emit(plan_ops::add(&cwd, &plan_id, &task, &text)),
+        PlanCommands::Add { plan_id, task, text } => {
+            emit(plan_ops::add(&cwd, &plan_id, &task, &text))
+        }
         PlanCommands::Migrate { path } => emit(plan_ops::migrate(&cwd, path)),
         PlanCommands::List => plan_list(&cwd),
         PlanCommands::Get { plan_id } => plan_get(&cwd, &plan_id),

@@ -66,9 +66,7 @@ pub(crate) fn cmd_handoff(
         std::process::exit(2);
     };
     let Some(sid) = resolve_session_id(session) else {
-        eprintln!(
-            "Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)."
-        );
+        eprintln!("Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set).");
         std::process::exit(2);
     };
     if next.is_some() && plan.is_none() {

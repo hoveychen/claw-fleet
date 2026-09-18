@@ -59,11 +59,7 @@ pub(crate) fn cmd_bootstrap(
     json: bool,
 ) {
     let settings = resolve_settings(locale, title, model);
-    let Settings {
-        locale,
-        title,
-        model,
-    } = &settings;
+    let Settings { locale, title, model } = &settings;
     let steps = control_plane::install_all(&settings);
 
     let failed = steps.iter().filter(|s| s.result.is_err()).count();

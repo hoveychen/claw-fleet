@@ -11,13 +11,7 @@ use claw_fleet_core::artifacts;
 
 pub(crate) fn cmd_artifact(action: ArtifactCommands) {
     match action {
-        ArtifactCommands::Add {
-            path,
-            title,
-            note,
-            workspace,
-            json,
-        } => {
+        ArtifactCommands::Add { path, title, note, workspace, json } => {
             let workspace = workspace.unwrap_or_else(|| {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             });
@@ -77,10 +71,7 @@ pub(crate) fn cmd_artifact(action: ArtifactCommands) {
                 return;
             }
             if items.is_empty() {
-                println!(
-                    "No artifacts{}.",
-                    if all { "" } else { " from this workspace" }
-                );
+                println!("No artifacts{}.", if all { "" } else { " from this workspace" });
                 if !all {
                     println!("{}  (--all lists every workspace){}", c_dim(), c_reset());
                 }
@@ -98,11 +89,7 @@ pub(crate) fn cmd_artifact(action: ArtifactCommands) {
                     c_reset(),
                     format_wiki_size(a.size_bytes),
                     a.workspace_name,
-                    if a.drifted {
-                        "  (source rewritten since)"
-                    } else {
-                        ""
-                    },
+                    if a.drifted { "  (source rewritten since)" } else { "" },
                 );
             }
         }
@@ -171,16 +158,14 @@ fn export_streamed(id: &str, dest: &std::path::Path) -> Result<u64, String> {
 
     const CHUNK: u64 = artifacts::MAX_RANGE_CHUNK;
     let size = artifacts::get(id)?.size_bytes;
-    let mut file =
-        std::fs::File::create(dest).map_err(|e| format!("create '{}': {e}", dest.display()))?;
+    let mut file = std::fs::File::create(dest)
+        .map_err(|e| format!("create '{}': {e}", dest.display()))?;
     let mut offset: u64 = 0;
     while offset < size {
         let slice = artifacts::read_bytes(id, Some((offset, offset + CHUNK - 1)))?;
         let read = slice.bytes.len() as u64;
         if read == 0 {
-            return Err(format!(
-                "artifact '{id}' returned no bytes at offset {offset}"
-            ));
+            return Err(format!("artifact '{id}' returned no bytes at offset {offset}"));
         }
         file.write_all(&slice.bytes)
             .map_err(|e| format!("write '{}': {e}", dest.display()))?;

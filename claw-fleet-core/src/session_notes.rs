@@ -82,9 +82,7 @@ fn validate_session_id(session_id: &str) -> Result<(), String> {
         .chars()
         .any(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
     {
-        return Err(format!(
-            "session id `{session_id}` is not a plain identifier"
-        ));
+        return Err(format!("session id `{session_id}` is not a plain identifier"));
     }
     Ok(())
 }
@@ -101,28 +99,20 @@ pub fn validate_path(path: &str) -> Result<Vec<String>, String> {
         return Err("note path is empty".to_string());
     }
     if path.starts_with('/') {
-        return Err(format!(
-            "note path `{path}` must be relative (paths are virtual, not filesystem paths)"
-        ));
+        return Err(format!("note path `{path}` must be relative (paths are virtual, not filesystem paths)"));
     }
     if path.contains('\\') || path.contains('\0') {
-        return Err(format!(
-            "note path `{path}` contains an unsupported character"
-        ));
+        return Err(format!("note path `{path}` contains an unsupported character"));
     }
     if path.starts_with('~') {
-        return Err(format!(
-            "note path `{path}` must not start with `~` (no shell expansion)"
-        ));
+        return Err(format!("note path `{path}` must not start with `~` (no shell expansion)"));
     }
     let mut parts = Vec::new();
     for comp in path.split('/') {
         match comp {
             "" => return Err(format!("note path `{path}` has an empty component")),
             "." | ".." => {
-                return Err(format!(
-                    "note path `{path}` must not contain `.` or `..` components"
-                ))
+                return Err(format!("note path `{path}` must not contain `.` or `..` components"))
             }
             _ => parts.push(comp.to_string()),
         }
@@ -145,10 +135,7 @@ fn resolve(root: &Path, session_id: &str, path: &str) -> Result<PathBuf, String>
 /// Sessions whose notes `session_id` may read: itself first, then its handoff
 /// predecessors from the nearest hop back to the chain's origin.
 pub fn readable_sessions(session_id: &str) -> Vec<String> {
-    readable_sessions_with(
-        session_id,
-        crate::handoff::chain_containing(session_id).as_ref(),
-    )
+    readable_sessions_with(session_id, crate::handoff::chain_containing(session_id).as_ref())
 }
 
 /// Pure core of [`readable_sessions`]: `chain` is the relay chain the session
@@ -207,12 +194,7 @@ pub fn append(session_id: &str, path: &str, text: &str) -> Result<NoteFile, Stri
     append_in(&root, session_id, path, text)
 }
 
-pub fn append_in(
-    root: &Path,
-    session_id: &str,
-    path: &str,
-    text: &str,
-) -> Result<NoteFile, String> {
+pub fn append_in(root: &Path, session_id: &str, path: &str, text: &str) -> Result<NoteFile, String> {
     let full = resolve(root, session_id, path)?;
     let existing = fs::metadata(&full).map(|m| m.len() as usize).unwrap_or(0);
     if existing + text.len() > MAX_NOTE_FILE_BYTES {
@@ -263,13 +245,7 @@ pub fn read(
     stop_line: Option<i64>,
 ) -> Result<String, String> {
     let root = notes_root().ok_or("cannot determine home dir")?;
-    read_in(
-        &root,
-        &readable_sessions(session_id),
-        path,
-        start_line,
-        stop_line,
-    )
+    read_in(&root, &readable_sessions(session_id), path, start_line, stop_line)
 }
 
 pub fn read_in(
@@ -282,8 +258,7 @@ pub fn read_in(
     for sid in readable {
         let full = resolve(root, sid, path)?;
         if full.is_file() {
-            let text =
-                fs::read_to_string(&full).map_err(|e| format!("read {}: {e}", full.display()))?;
+            let text = fs::read_to_string(&full).map_err(|e| format!("read {}: {e}", full.display()))?;
             return Ok(slice_lines(&text, start_line, stop_line));
         }
     }
@@ -342,11 +317,7 @@ pub fn list(session_id: &str, prefix: Option<&str>) -> Result<Vec<NoteFile>, Str
     list_in(&root, &readable_sessions(session_id), prefix)
 }
 
-pub fn list_in(
-    root: &Path,
-    readable: &[String],
-    prefix: Option<&str>,
-) -> Result<Vec<NoteFile>, String> {
+pub fn list_in(root: &Path, readable: &[String], prefix: Option<&str>) -> Result<Vec<NoteFile>, String> {
     let prefix = prefix.map(str::trim).filter(|p| !p.is_empty());
     let mut out = Vec::new();
     for sid in readable {
@@ -362,11 +333,7 @@ pub fn list_in(
             .into_iter()
             .filter_map(|(rel, full)| stat(root, sid, &rel, &full).ok())
             .collect();
-        entries.sort_by(|a, b| {
-            b.updated_ms
-                .cmp(&a.updated_ms)
-                .then_with(|| a.path.cmp(&b.path))
-        });
+        entries.sort_by(|a, b| b.updated_ms.cmp(&a.updated_ms).then_with(|| a.path.cmp(&b.path)));
         out.extend(entries);
     }
     Ok(out)
@@ -380,10 +347,7 @@ fn walk(base: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
             walk(base, &p, out);
         } else if p.is_file() {
             // Skip in-flight temp files from `write_in`.
-            if p.extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.starts_with("tmp-"))
-            {
+            if p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.starts_with("tmp-")) {
                 continue;
             }
             if let Ok(rel) = p.strip_prefix(base) {
@@ -448,9 +412,7 @@ pub fn search_in(
             break;
         }
         let full = resolve(root, &file.session_id, &file.path)?;
-        let Ok(text) = fs::read_to_string(&full) else {
-            continue;
-        };
+        let Ok(text) = fs::read_to_string(&full) else { continue };
         let mut matched = 0usize;
         for (i, line) in text.lines().enumerate() {
             if line.contains(query) {
@@ -502,11 +464,7 @@ pub fn render_hint_in(root: &Path, session_id: &str, readable: &[String]) -> Opt
     );
     out.push_str(&format!("Files ({}):\n", files.len()));
     for f in &files {
-        let owner = if f.session_id == session_id {
-            "own"
-        } else {
-            "predecessor"
-        };
+        let owner = if f.session_id == session_id { "own" } else { "predecessor" };
         out.push_str(&format!("  {}  {} bytes  [{owner}]\n", f.path, f.bytes));
     }
     // Most recent write overall — a checkpoint written right before the
@@ -515,8 +473,7 @@ pub fn render_hint_in(root: &Path, session_id: &str, readable: &[String]) -> Opt
         if let Ok(full) = resolve(root, &latest.session_id, &latest.path) {
             if let Ok(text) = fs::read_to_string(&full) {
                 out.push_str(&format!("--- {} (latest) ---\n", latest.path));
-                let budget =
-                    MAX_HINT_BYTES.saturating_sub(out.len() + "</fleet_notes>\n".len() + 64);
+                let budget = MAX_HINT_BYTES.saturating_sub(out.len() + "</fleet_notes>\n".len() + 64);
                 out.push_str(&clip_bytes(&text, budget));
                 if !out.ends_with('\n') {
                     out.push('\n');
@@ -575,19 +532,10 @@ mod tests {
         let readable = vec!["s2".to_string(), "s1".to_string()];
 
         // The agent's view resolves to its own file …
-        assert_eq!(
-            read_in(&root, &readable, "checkpoint.md", None, None).unwrap(),
-            "successor"
-        );
+        assert_eq!(read_in(&root, &readable, "checkpoint.md", None, None).unwrap(), "successor");
         // … while a reader that picked the predecessor's row gets that file.
-        assert_eq!(
-            read_owned_in(&root, "s1", "checkpoint.md").unwrap(),
-            "predecessor"
-        );
-        assert_eq!(
-            read_owned_in(&root, "s2", "checkpoint.md").unwrap(),
-            "successor"
-        );
+        assert_eq!(read_owned_in(&root, "s1", "checkpoint.md").unwrap(), "predecessor");
+        assert_eq!(read_owned_in(&root, "s2", "checkpoint.md").unwrap(), "successor");
 
         assert!(read_owned_in(&root, "s1", "missing.md").is_err());
         // Path validation still applies — a note path can never escape the dir.
@@ -635,10 +583,7 @@ mod tests {
         let own = vec!["s1".to_string()];
         write_in(&root, "s1", "progress.md", "goal: x\n").unwrap();
         append_in(&root, "s1", "progress.md", "next: y\n").unwrap();
-        assert_eq!(
-            read_in(&root, &own, "progress.md", None, None).unwrap(),
-            "goal: x\nnext: y\n"
-        );
+        assert_eq!(read_in(&root, &own, "progress.md", None, None).unwrap(), "goal: x\nnext: y\n");
         let listed = list_in(&root, &own, None).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].path, "progress.md");
@@ -660,21 +605,8 @@ mod tests {
     #[test]
     fn path_traversal_and_bad_shapes_are_refused() {
         let root = fresh_root("trav");
-        for bad in [
-            "../x",
-            "a/../x",
-            "/etc/passwd",
-            "",
-            ".",
-            "a//b",
-            "a\\b",
-            "~/x",
-            "a/./b",
-        ] {
-            assert!(
-                write_in(&root, "s1", bad, "x").is_err(),
-                "should refuse `{bad}`"
-            );
+        for bad in ["../x", "a/../x", "/etc/passwd", "", ".", "a//b", "a\\b", "~/x", "a/./b"] {
+            assert!(write_in(&root, "s1", bad, "x").is_err(), "should refuse `{bad}`");
         }
         // Nothing escaped the root.
         assert!(!root.parent().unwrap().join("x").exists());
@@ -723,14 +655,8 @@ mod tests {
         write_in(&root, "a", "only-a.md", "a only").unwrap();
         write_in(&root, "b", "checkpoint.md", "from b").unwrap();
         let readable = readable_sessions_with("b", Some(&chain(&["a", "b"])));
-        assert_eq!(
-            read_in(&root, &readable, "checkpoint.md", None, None).unwrap(),
-            "from b"
-        );
-        assert_eq!(
-            read_in(&root, &readable, "only-a.md", None, None).unwrap(),
-            "a only"
-        );
+        assert_eq!(read_in(&root, &readable, "checkpoint.md", None, None).unwrap(), "from b");
+        assert_eq!(read_in(&root, &readable, "only-a.md", None, None).unwrap(), "a only");
         let paths: Vec<(String, String)> = list_in(&root, &readable, None)
             .unwrap()
             .into_iter()
@@ -769,14 +695,7 @@ mod tests {
         let capped = search_in(&root, &own, "Alpha", None, 10, 1).unwrap();
         assert_eq!(capped.len(), 2);
         let one_file = search_in(&root, &own, "Alpha", None, 1, 10).unwrap();
-        assert_eq!(
-            one_file
-                .iter()
-                .map(|h| h.path.as_str())
-                .collect::<std::collections::HashSet<_>>()
-                .len(),
-            1
-        );
+        assert_eq!(one_file.iter().map(|h| h.path.as_str()).collect::<std::collections::HashSet<_>>().len(), 1);
         let scoped = search_in(&root, &own, "nothing", Some("other/"), 10, 10).unwrap();
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].line, 1);

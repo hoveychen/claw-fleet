@@ -131,11 +131,7 @@ fn lan_banner(bind_host: &str, port: u16, has_mobile: bool) -> String {
             .to_string();
     };
     let root = format!("http://{host}:{port}/");
-    let scan = if has_mobile {
-        format!("{root}m/")
-    } else {
-        root.clone()
-    };
+    let scan = if has_mobile { format!("{root}m/") } else { root.clone() };
 
     let mut out = String::from("\n[fleet webui] 同一局域网内可访问：\n");
     out.push_str(&format!("  桌面 UI  {root}\n"));
@@ -317,10 +313,7 @@ mod tests {
             resolve_webui_host(Some("10.0.0.5".into()), false, Some("0.0.0.0".into())),
             "10.0.0.5"
         );
-        assert_eq!(
-            resolve_webui_host(None, false, Some("0.0.0.0".into())),
-            "0.0.0.0"
-        );
+        assert_eq!(resolve_webui_host(None, false, Some("0.0.0.0".into())), "0.0.0.0");
         assert_eq!(resolve_webui_host(None, false, None), DEFAULT_WEBUI_HOST);
     }
 
@@ -352,10 +345,7 @@ mod tests {
     #[test]
     fn advertised_host_resolves_wildcards_only() {
         // A named address is already what the phone types.
-        assert_eq!(
-            advertised_host("192.168.1.5").as_deref(),
-            Some("192.168.1.5")
-        );
+        assert_eq!(advertised_host("192.168.1.5").as_deref(), Some("192.168.1.5"));
         // The wildcards are not connectable, so they resolve to the LAN IP —
         // or to None on a machine that has none (CI containers, offline).
         for wildcard in ["0.0.0.0", "::"] {
@@ -386,16 +376,10 @@ mod tests {
 
     #[test]
     fn port_flag_beats_env_beats_default() {
-        assert_eq!(
-            resolve_webui_port(Some(9000), Some("8080".into())),
-            Ok(9000)
-        );
+        assert_eq!(resolve_webui_port(Some(9000), Some("8080".into())), Ok(9000));
         assert_eq!(resolve_webui_port(None, Some("8080".into())), Ok(8080));
         assert_eq!(resolve_webui_port(None, None), Ok(DEFAULT_WEBUI_PORT));
-        assert_eq!(
-            resolve_webui_port(None, Some(String::new())),
-            Ok(DEFAULT_WEBUI_PORT)
-        );
+        assert_eq!(resolve_webui_port(None, Some(String::new())), Ok(DEFAULT_WEBUI_PORT));
     }
 
     #[test]
@@ -411,16 +395,12 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
 
         let missing = dir.path().join("nope");
-        assert!(bundle_problem(&missing)
-            .unwrap_err()
-            .contains("not a directory"));
+        assert!(bundle_problem(&missing).unwrap_err().contains("not a directory"));
 
         // A directory is not enough — an empty one would 404 every page.
         let empty = dir.path().join("empty");
         std::fs::create_dir(&empty).unwrap();
-        assert!(bundle_problem(&empty)
-            .unwrap_err()
-            .contains("no index.html"));
+        assert!(bundle_problem(&empty).unwrap_err().contains("no index.html"));
 
         std::fs::write(empty.join("index.html"), b"<html></html>").unwrap();
         assert_eq!(bundle_problem(&empty), Ok(()));
@@ -433,10 +413,7 @@ mod tests {
                 Err(e) => e,
                 Ok(p) => panic!("{raw:?} must be rejected, was parsed as {p}"),
             };
-            assert!(
-                err.contains(raw),
-                "message should quote the bad value: {err}"
-            );
+            assert!(err.contains(raw), "message should quote the bad value: {err}");
         }
     }
 }

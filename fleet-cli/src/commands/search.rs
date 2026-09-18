@@ -27,10 +27,7 @@ pub(crate) fn cmd_search(query: &str, limit: usize, as_json: bool) {
     let hits = index.search(query, limit).unwrap_or_default();
 
     if as_json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&hits).unwrap_or_default()
-        );
+        println!("{}", serde_json::to_string_pretty(&hits).unwrap_or_default());
         return;
     }
 
@@ -49,10 +46,7 @@ pub(crate) fn cmd_search(query: &str, limit: usize, as_json: bool) {
     let r = c_reset();
     let d = c_dim();
 
-    println!(
-        "{b}Search results for '{query}'{r} — {} hit(s)\n",
-        hits.len()
-    );
+    println!("{b}Search results for '{query}'{r} — {} hit(s)\n", hits.len());
 
     for (i, hit) in hits.iter().enumerate() {
         let ws = session_map

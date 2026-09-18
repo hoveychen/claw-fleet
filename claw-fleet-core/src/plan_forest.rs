@@ -208,7 +208,11 @@ fn take_subtree(
 /// Would making `parent` the parent of `id` close a cycle? True when `id` is
 /// reachable by walking `parent`'s own declared-parent chain (including
 /// `parent == id`, a self-loop).
-fn closes_cycle(id: &str, parent: &str, declared: &HashMap<String, Option<String>>) -> bool {
+fn closes_cycle(
+    id: &str,
+    parent: &str,
+    declared: &HashMap<String, Option<String>>,
+) -> bool {
     let mut seen: HashSet<&str> = HashSet::new();
     let mut cursor = Some(parent);
     while let Some(cur) = cursor {
@@ -267,21 +271,9 @@ mod tests {
     #[test]
     fn builds_nested_tree_with_chains_on_their_own_plans() {
         let blocks = [
-            block(
-                Some("root"),
-                "**Plan:** Root\n\n- [x] **P1** — a\n- [ ] **P2** — b\n",
-                None,
-            ),
-            block(
-                Some("mid"),
-                "**Plan:** Mid\n\n- [ ] **P1** — m\n",
-                Some("root"),
-            ),
-            block(
-                Some("leaf"),
-                "**Plan:** Leaf\n\n- [x] **P1** — l\n",
-                Some("mid"),
-            ),
+            block(Some("root"), "**Plan:** Root\n\n- [x] **P1** — a\n- [ ] **P2** — b\n", None),
+            block(Some("mid"), "**Plan:** Mid\n\n- [ ] **P1** — m\n", Some("root")),
+            block(Some("leaf"), "**Plan:** Leaf\n\n- [x] **P1** — l\n", Some("mid")),
         ];
         let forest = build_from(
             &blocks,
@@ -321,11 +313,8 @@ mod tests {
             None,
         );
         assert_eq!(forest.roots[0].chains.len(), 1);
-        let mut unattached: Vec<&str> = forest
-            .unattached_chains
-            .iter()
-            .map(|c| c.chain_id.as_str())
-            .collect();
+        let mut unattached: Vec<&str> =
+            forest.unattached_chains.iter().map(|c| c.chain_id.as_str()).collect();
         unattached.sort();
         assert_eq!(unattached, vec!["free", "ghost"]);
     }
@@ -379,11 +368,7 @@ mod tests {
             block(None, "another legacy block\n", None),
         ];
         let forest = build_from(&blocks, vec![], None);
-        assert_eq!(
-            forest.roots.len(),
-            1,
-            "anonymous blocks are not tree members"
-        );
+        assert_eq!(forest.roots.len(), 1, "anonymous blocks are not tree members");
         assert_eq!(forest.roots[0].id, "done");
         assert_eq!(forest.roots[0].pending(), 0);
         assert_eq!(forest.anonymous, 2);
@@ -402,15 +387,7 @@ mod tests {
         let forest = build_from(&blocks, vec![], None);
         let roots: Vec<&str> = forest.roots.iter().map(|n| n.id.as_str()).collect();
         assert_eq!(roots, vec!["r1", "r2"]);
-        let kids: Vec<&str> = forest.roots[0]
-            .children
-            .iter()
-            .map(|n| n.id.as_str())
-            .collect();
-        assert_eq!(
-            kids,
-            vec!["c2", "c1"],
-            "children keep file order, not sorted"
-        );
+        let kids: Vec<&str> = forest.roots[0].children.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(kids, vec!["c2", "c1"], "children keep file order, not sorted");
     }
 }

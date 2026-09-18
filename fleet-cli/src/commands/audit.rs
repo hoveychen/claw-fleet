@@ -14,10 +14,7 @@ pub(crate) fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
         "high" => AuditRiskLevel::High,
         "critical" => AuditRiskLevel::Critical,
         other => {
-            eprintln!(
-                "Error: unknown risk level '{}'. Use: medium, high, critical",
-                other
-            );
+            eprintln!("Error: unknown risk level '{}'. Use: medium, high, critical", other);
             std::process::exit(1);
         }
     };
@@ -30,7 +27,10 @@ pub(crate) fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
         let n = needle.to_lowercase();
         sessions
             .iter()
-            .filter(|s| s.id.starts_with(needle) || s.workspace_name.to_lowercase().contains(&n))
+            .filter(|s| {
+                s.id.starts_with(needle)
+                    || s.workspace_name.to_lowercase().contains(&n)
+            })
             .collect()
     } else {
         // Default: non-idle sessions
@@ -62,10 +62,7 @@ pub(crate) fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
             "events": all_events,
             "totalSessionsScanned": total,
         });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&summary).unwrap_or_default()
-        );
+        println!("{}", serde_json::to_string_pretty(&summary).unwrap_or_default());
         return;
     }
 
@@ -89,9 +86,7 @@ pub(crate) fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
     );
 
     let risk_color = |level: &AuditRiskLevel| -> &'static str {
-        if !use_color() {
-            return "";
-        }
+        if !use_color() { return ""; }
         match level {
             AuditRiskLevel::Critical => "\x1b[31m", // red
             AuditRiskLevel::High => "\x1b[33m",     // yellow

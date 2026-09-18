@@ -9,10 +9,7 @@ pub(crate) fn cmd_account(as_json: bool) {
     match fetch_account_info() {
         Ok(info) => {
             if as_json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&info).unwrap_or_default()
-                );
+                println!("{}", serde_json::to_string_pretty(&info).unwrap_or_default());
                 return;
             }
             print_account(&info);
@@ -29,15 +26,9 @@ fn print_account(info: &AccountInfo) {
     let r = c_reset();
 
     println!("{b}Account{r}");
-    println!(
-        "  {b}{:<16}{r}  {} <{}>",
-        "Name:", info.full_name, info.email
-    );
+    println!("  {b}{:<16}{r}  {} <{}>", "Name:", info.full_name, info.email);
     if !info.organization_name.is_empty() {
-        println!(
-            "  {b}{:<16}{r}  {}",
-            "Organization:", info.organization_name
-        );
+        println!("  {b}{:<16}{r}  {}", "Organization:", info.organization_name);
     }
     println!("  {b}{:<16}{r}  {}", "Plan:", info.plan);
     let source = match info.usage_source.as_str() {
@@ -48,8 +39,9 @@ fn print_account(info: &AccountInfo) {
     };
     println!("  {b}{:<16}{r}  {}", "Usage source:", source);
 
-    let has_usage =
-        info.five_hour.is_some() || info.seven_day.is_some() || !info.seven_day_scoped.is_empty();
+    let has_usage = info.five_hour.is_some()
+        || info.seven_day.is_some()
+        || !info.seven_day_scoped.is_empty();
 
     if has_usage {
         println!();
@@ -58,26 +50,14 @@ fn print_account(info: &AccountInfo) {
         let print_stat = |label: &str, stat: &UsageStats| {
             let bar = print_usage_bar(stat);
             let resets = format_resets_at(&stat.resets_at);
-            let prev = stat
-                .prev_utilization
-                .map(|p| {
-                    let arrow = if p < stat.utilization { "↑" } else { "↓" };
-                    format!(
-                        "  {d}(prev {:.1}% {arrow}){r}",
-                        p * 100.0,
-                        d = c_dim(),
-                        r = c_reset()
-                    )
-                })
-                .unwrap_or_default();
+            let prev = stat.prev_utilization.map(|p| {
+                let arrow = if p < stat.utilization { "↑" } else { "↓" };
+                format!("  {d}(prev {:.1}% {arrow}){r}", p * 100.0, d = c_dim(), r = c_reset())
+            }).unwrap_or_default();
             println!(
                 "  {b}{:<16}{r}  {}  {d}resets {}{r}{}",
-                label,
-                bar,
-                resets,
-                prev,
-                d = c_dim(),
-                r = c_reset()
+                label, bar, resets, prev,
+                d = c_dim(), r = c_reset()
             );
         };
 
@@ -97,10 +77,6 @@ fn print_account(info: &AccountInfo) {
         }
     } else {
         println!();
-        println!(
-            "  {d}No usage data available.{r}",
-            d = c_dim(),
-            r = c_reset()
-        );
+        println!("  {d}No usage data available.{r}", d = c_dim(), r = c_reset());
     }
 }
