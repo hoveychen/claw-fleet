@@ -16,6 +16,7 @@ pub mod claude_analyze;
 pub mod claude_binary;
 pub mod claude_cli;
 pub mod claude_source;
+pub mod chain_completion_gate;
 pub mod chat_workspace;
 pub mod cmd_ast;
 pub mod codex_guidance;
