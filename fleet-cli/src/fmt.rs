@@ -7,8 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // ── Color helpers ─────────────────────────────────────────────────────────────
 
 pub(crate) fn use_color() -> bool {
-    std::env::var("NO_COLOR").is_err()
-        && std::env::var("TERM").map_or(true, |t| t != "dumb")
+    std::env::var("NO_COLOR").is_err() && std::env::var("TERM").map_or(true, |t| t != "dumb")
 }
 
 fn status_color(status: &SessionStatus) -> &'static str {
@@ -28,19 +27,35 @@ fn status_color(status: &SessionStatus) -> &'static str {
 }
 
 pub(crate) fn c_reset() -> &'static str {
-    if use_color() { "\x1b[0m" } else { "" }
+    if use_color() {
+        "\x1b[0m"
+    } else {
+        ""
+    }
 }
 
 pub(crate) fn c_bold() -> &'static str {
-    if use_color() { "\x1b[1m" } else { "" }
+    if use_color() {
+        "\x1b[1m"
+    } else {
+        ""
+    }
 }
 
 pub(crate) fn c_dim() -> &'static str {
-    if use_color() { "\x1b[2m" } else { "" }
+    if use_color() {
+        "\x1b[2m"
+    } else {
+        ""
+    }
 }
 
 pub(crate) fn c_status(status: &SessionStatus) -> &'static str {
-    if use_color() { status_color(status) } else { "" }
+    if use_color() {
+        status_color(status)
+    } else {
+        ""
+    }
 }
 
 // ── Format helpers ─────────────────────────────────────────────────────────────

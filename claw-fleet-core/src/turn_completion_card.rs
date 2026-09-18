@@ -518,6 +518,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
             "claude-code",
         )
         .expect("register must succeed");

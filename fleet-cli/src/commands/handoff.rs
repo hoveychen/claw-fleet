@@ -13,6 +13,8 @@ pub(crate) fn cmd_handoff(
     next: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
+    goal: Option<&str>,
+    goal_reason: Option<&str>,
     action: Option<HandoffCommands>,
     session: Option<&str>,
 ) {
@@ -64,7 +66,9 @@ pub(crate) fn cmd_handoff(
         std::process::exit(2);
     };
     let Some(sid) = resolve_session_id(session) else {
-        eprintln!("Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set).");
+        eprintln!(
+            "Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)."
+        );
         std::process::exit(2);
     };
     if next.is_some() && plan.is_none() {
@@ -111,6 +115,8 @@ pub(crate) fn cmd_handoff(
         next,
         route.model.as_deref(),
         route.effort.as_deref(),
+        goal,
+        goal_reason,
         &route.agent_source,
     ) {
         Ok(rec) => println!(

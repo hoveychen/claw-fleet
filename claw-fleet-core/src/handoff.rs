@@ -61,6 +61,24 @@ pub struct PendingHandoff {
     /// `model`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub effort: Option<String>,
+    /// The chain's objective as this hop states it — one sentence of "the work
+    /// is done when …", carried forward for every later hop to be judged
+    /// against. `None` leaves whatever the chain already has untouched.
+    ///
+    /// Written at *registration*, i.e. at the END of a hop, which is what makes
+    /// it usable even when the objective was only settled mid-conversation:
+    /// hop 1 writes it knowing everything hop 1 learned. Auto-extracting the
+    /// session's first user message would instead capture whatever question
+    /// opened the conversation.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub goal: Option<String>,
+    /// Why this hop is changing an objective the chain already had. Required by
+    /// [`register`] for a change, refused for the first time a goal is set (it
+    /// revises nothing). A changed objective is legitimate — the boss changes
+    /// course — so the rule is not immutability but that the change is
+    /// explicit, attributable and visible in [`HandoffChain::goal_history`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub goal_reason: Option<String>,
     /// Chain this handoff extends; a fresh uuid when the session starts one.
     pub chain_id: String,
     /// 1-based position of the *source* session in the chain.
@@ -97,6 +115,32 @@ pub struct HandoffLink {
     pub handed_at: u64,
 }
 
+/// One recorded change to a chain's objective.
+///
+/// The first entry (the objective being set at all) carries `from: None` and no
+/// `reason`; every later one carries both. That difference is the whole point:
+/// a chain whose objective narrowed with no reason on record is an agent
+/// quietly redefining the work as the plan in front of it, which is exactly the
+/// failure [`crate::chain_completion_gate`] exists to catch.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct GoalRevision {
+    /// 1-based hop of the session that made the change.
+    pub hop: u32,
+    pub session_id: String,
+    /// The objective being replaced; `None` the first time one is set.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub from: Option<String>,
+    pub to: String,
+    /// Why, in the words of the hop that changed it. `None` only on the first
+    /// entry.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub reason: Option<String>,
+    /// Epoch ms the change was recorded.
+    pub at: u64,
+}
+
 /// A full relay chain. `links.len()` handoffs connect `links.len() + 1`
 /// sessions; session N's transcript ends where session N+1's begins.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -108,6 +152,15 @@ pub struct HandoffChain {
     /// Plan of the most recent plan-bound link, for grouping in the UI.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub plan_id: Option<String>,
+    /// What this chain is for, as of its latest revision. The plan a hop holds
+    /// is a step; this is the finish line. `None` for a chain nobody has stated
+    /// one for — a purely exploratory chain legitimately has no finish line, and
+    /// chains recorded before this field existed have none either.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub goal: Option<String>,
+    /// Every change to `goal`, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub goal_history: Vec<GoalRevision>,
     pub links: Vec<HandoffLink>,
 }
 
@@ -290,6 +343,8 @@ pub fn register(
     next_task: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
+    goal: Option<&str>,
+    goal_reason: Option<&str>,
     agent_source: &str,
 ) -> Result<PendingHandoff, String> {
     let pdir = pending_dir().ok_or("cannot determine home dir")?;
@@ -305,9 +360,39 @@ pub fn register(
         next_task,
         model,
         effort,
+        goal,
+        goal_reason,
         agent_source,
         now_ms(),
     )
+}
+
+/// Refuse a goal change that arrives without a reason.
+///
+/// `current` is what the chain already carries. Setting one for the first time
+/// needs no reason (nothing is being revised) and neither does restating the
+/// same one; replacing a different, non-empty objective does.
+fn check_goal_change(
+    current: Option<&str>,
+    goal: &str,
+    reason: Option<&str>,
+) -> Result<(), String> {
+    let current = current.map(str::trim).filter(|c| !c.is_empty());
+    let Some(current) = current else {
+        return Ok(());
+    };
+    if current == goal {
+        return Ok(());
+    }
+    if reason.map(str::trim).is_some_and(|r| !r.is_empty()) {
+        return Ok(());
+    }
+    Err(format!(
+        "this chain's goal is already \"{current}\" and you are changing it to \"{goal}\" \
+         without saying why. Changing course is allowed — silently narrowing the chain's \
+         objective down to the plan in front of you is what this refuses. Pass a reason \
+         alongside the new goal, and tell the boss you changed it."
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -322,6 +407,8 @@ fn register_in(
     next_task: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
+    goal: Option<&str>,
+    goal_reason: Option<&str>,
     agent_source: &str,
     now: u64,
 ) -> Result<PendingHandoff, String> {
@@ -329,6 +416,7 @@ fn register_in(
     if note.is_empty() {
         return Err("handoff note is required".to_string());
     }
+    let goal = goal.map(str::trim).filter(|g| !g.is_empty());
     // Continue the chain this session was itself handed, if any.
     let (chain_id, hop) = match chain_containing_in(chain_dir, session_id) {
         Some(chain) => {
@@ -349,6 +437,9 @@ fn register_in(
                     chain.chain_id, hop, MAX_CHAIN_HOPS
                 ));
             }
+            if let Some(g) = goal {
+                check_goal_change(chain.goal.as_deref(), g, goal_reason)?;
+            }
             (chain.chain_id, hop)
         }
         None => (uuid::Uuid::new_v4().to_string(), 1),
@@ -365,6 +456,8 @@ fn register_in(
         next_task: next_task.map(str::to_string),
         model: model.filter(|m| !blank(m)).map(str::to_string),
         effort: effort.filter(|e| !blank(e)).map(str::to_string),
+        goal: goal.map(str::to_string),
+        goal_reason: goal_reason.filter(|r| !blank(r)).map(str::to_string),
         chain_id,
         hop,
         created: now,
@@ -432,10 +525,28 @@ fn record_link_in(
         chain_id: pending.chain_id.clone(),
         workspace_path: pending.workspace_path.clone(),
         plan_id: None,
+        goal: None,
+        goal_history: Vec::new(),
         links: Vec::new(),
     });
     if pending.plan_id.is_some() {
         chain.plan_id = pending.plan_id.clone();
+    }
+    // The goal lands here rather than at registration because the chain file is
+    // only created once a handoff is actually consumed; a registration that is
+    // cancelled must leave no trace on the chain.
+    if let Some(goal) = pending.goal.as_deref() {
+        if chain.goal.as_deref() != Some(goal) {
+            chain.goal_history.push(GoalRevision {
+                hop: pending.hop,
+                session_id: pending.from_session_id.clone(),
+                from: chain.goal.clone(),
+                to: goal.to_string(),
+                reason: pending.goal_reason.clone(),
+                at: now,
+            });
+            chain.goal = Some(goal.to_string());
+        }
     }
     chain.links.push(HandoffLink {
         from_session_id: pending.from_session_id.clone(),
@@ -454,7 +565,9 @@ fn record_link_in(
 /// no links is deleted rather than kept as an empty shell.
 fn unlink_in(dir: &Path, chain_id: &str, from_session_id: &str, to_session_id: &str) {
     let path = dir.join(format!("{chain_id}.json"));
-    let Some(mut chain) = read_chain_file(&path) else { return };
+    let Some(mut chain) = read_chain_file(&path) else {
+        return;
+    };
     chain
         .links
         .retain(|l| !(l.from_session_id == from_session_id && l.to_session_id == to_session_id));
@@ -564,9 +677,7 @@ pub fn session_handoff_index() -> std::collections::HashMap<String, SessionHando
     session_handoff_index_in(&dir)
 }
 
-fn session_handoff_index_in(
-    dir: &Path,
-) -> std::collections::HashMap<String, SessionHandoffInfo> {
+fn session_handoff_index_in(dir: &Path) -> std::collections::HashMap<String, SessionHandoffInfo> {
     let mut map = std::collections::HashMap::new();
     for chain in list_chains_in(dir) {
         let ids = chain.session_ids();
@@ -659,7 +770,9 @@ pub fn compose_successor_prompt(p: &PendingHandoff, prior: Option<&HandoffChain>
                 "本次接力属于 TASKS.md plan `{plan}`，Fleet 已把你归属到该 plan。从第一个未完成的 P 继续执行，直到整个 plan 完成。\n"
             )),
         }
-        out.push_str("plan 的完整任务清单会由 prd-context hook 自动注入你的上下文，以 TASKS.md 为准。\n");
+        out.push_str(
+            "plan 的完整任务清单会由 prd-context hook 自动注入你的上下文，以 TASKS.md 为准。\n",
+        );
         out.push_str(
             "若该 plan 是子 plan（sentinel 带 `parent=`），做完最后一个 P 后 Fleet 会把你的焦点\
              切回父 plan 并指示下一个 P——按提示继续，别因为子 plan 完成就收工。\n",
@@ -724,11 +837,15 @@ fn attribute_successor_in(dir: &Path, pending: &PendingHandoff, to_sid: &str) {
     // `register` stores the raw cwd, which may be a worktree. Stamp the main
     // checkout instead, matching what `fleet plan resume/check` record — the
     // card's workspace check compares main roots.
-    let ws_root = crate::prd_tasks::discover_main_checkout_root(ws)
-        .unwrap_or_else(|| ws.to_path_buf());
-    if let Err(e) =
-        crate::task_progress::set_current_in(dir, to_sid, &ws_root.to_string_lossy(), plan_id, current)
-    {
+    let ws_root =
+        crate::prd_tasks::discover_main_checkout_root(ws).unwrap_or_else(|| ws.to_path_buf());
+    if let Err(e) = crate::task_progress::set_current_in(
+        dir,
+        to_sid,
+        &ws_root.to_string_lossy(),
+        plan_id,
+        current,
+    ) {
         crate::log_debug(&format!(
             "handoff: could not attribute successor {to_sid} to plan {plan_id}: {e}"
         ));
@@ -959,6 +1076,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
             "codex",
             now_ms(),
         )
@@ -996,6 +1115,198 @@ mod tests {
         let _ = fs::remove_dir_all(&ws);
     }
 
+    /// Hop 1 states the chain's objective; hop 2 inherits it and is recorded
+    /// as revision 1 with no reason (nothing was revised).
+    #[test]
+    fn the_first_goal_needs_no_reason_and_carries_to_the_chain() {
+        let (_root, pdir, cdir) = fresh_dirs("goal-first");
+        register_in(
+            &pdir,
+            &cdir,
+            "s1",
+            "/ws",
+            None,
+            "note",
+            None,
+            None,
+            None,
+            None,
+            Some("27 页前端全重写并切到 Go 后端上线"),
+            None,
+            "claude-code",
+            1000,
+        )
+        .unwrap();
+        let taken = take_pending_in(&pdir, "s1", 1001).unwrap();
+        record_link_in(&cdir, &taken, "s2", 1002).unwrap();
+
+        let chain = chain_containing_in(&cdir, "s2").unwrap();
+        assert_eq!(
+            chain.goal.as_deref(),
+            Some("27 页前端全重写并切到 Go 后端上线")
+        );
+        assert_eq!(chain.goal_history.len(), 1);
+        let rev = &chain.goal_history[0];
+        assert_eq!(rev.hop, 1);
+        assert_eq!(rev.from, None, "nothing was replaced");
+        assert_eq!(rev.reason, None, "setting the first goal revises nothing");
+    }
+
+    /// The failure mode the goal exists to catch: a later hop silently swapping
+    /// the chain's objective for the corner task it happens to hold.
+    #[test]
+    fn a_later_hop_cannot_change_the_goal_without_saying_why() {
+        let (_root, pdir, cdir) = fresh_dirs("goal-silent");
+        register_in(
+            &pdir,
+            &cdir,
+            "s1",
+            "/ws",
+            None,
+            "note",
+            None,
+            None,
+            None,
+            None,
+            Some("整个二期上线"),
+            None,
+            "claude-code",
+            1000,
+        )
+        .unwrap();
+        let taken = take_pending_in(&pdir, "s1", 1001).unwrap();
+        record_link_in(&cdir, &taken, "s2", 1002).unwrap();
+
+        let err = register_in(
+            &pdir,
+            &cdir,
+            "s2",
+            "/ws",
+            None,
+            "note",
+            None,
+            None,
+            None,
+            None,
+            Some("理掉 alembic 双 head"),
+            None,
+            "claude-code",
+            2000,
+        )
+        .expect_err("a silent narrowing must be refused");
+        assert!(
+            err.contains("整个二期上线") && err.contains("alembic"),
+            "{err}"
+        );
+
+        // Restating the same goal is not a change, so it needs no reason.
+        register_in(
+            &pdir,
+            &cdir,
+            "s2",
+            "/ws",
+            None,
+            "note",
+            None,
+            None,
+            None,
+            None,
+            Some("整个二期上线"),
+            None,
+            "claude-code",
+            2000,
+        )
+        .expect("restating the same goal is allowed");
+    }
+
+    /// The boss changing course mid-chain is legitimate; it just has to leave a
+    /// record. Chain 1f783a5d did exactly this at hop 22.
+    #[test]
+    fn a_reasoned_change_is_allowed_and_recorded() {
+        let (_root, pdir, cdir) = fresh_dirs("goal-revise");
+        register_in(
+            &pdir,
+            &cdir,
+            "s1",
+            "/ws",
+            None,
+            "note",
+            None,
+            None,
+            None,
+            None,
+            Some("原目标"),
+            None,
+            "claude-code",
+            1000,
+        )
+        .unwrap();
+        let t1 = take_pending_in(&pdir, "s1", 1001).unwrap();
+        record_link_in(&cdir, &t1, "s2", 1002).unwrap();
+
+        register_in(
+            &pdir,
+            &cdir,
+            "s2",
+            "/ws",
+            None,
+            "note",
+            None,
+            None,
+            None,
+            None,
+            Some("新目标"),
+            Some("老板本回合改了路线"),
+            "claude-code",
+            2000,
+        )
+        .unwrap();
+        let t2 = take_pending_in(&pdir, "s2", 2001).unwrap();
+        record_link_in(&cdir, &t2, "s3", 2002).unwrap();
+
+        let chain = chain_containing_in(&cdir, "s3").unwrap();
+        assert_eq!(chain.goal.as_deref(), Some("新目标"));
+        assert_eq!(
+            chain.goal_history.len(),
+            2,
+            "both the set and the change are on record"
+        );
+        let rev = chain.goal_history.last().unwrap();
+        assert_eq!(rev.hop, 2);
+        assert_eq!(rev.from.as_deref(), Some("原目标"));
+        assert_eq!(rev.reason.as_deref(), Some("老板本回合改了路线"));
+    }
+
+    /// A chain nobody stated an objective for keeps working exactly as before —
+    /// a purely exploratory chain legitimately has no finish line.
+    #[test]
+    fn a_chain_with_no_goal_stays_untouched() {
+        let (_root, pdir, cdir) = fresh_dirs("goal-absent");
+        register_in(
+            &pdir,
+            &cdir,
+            "s1",
+            "/ws",
+            None,
+            "note",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "claude-code",
+            1000,
+        )
+        .unwrap();
+        let taken = take_pending_in(&pdir, "s1", 1001).unwrap();
+        record_link_in(&cdir, &taken, "s2", 1002).unwrap();
+
+        let chain = chain_containing_in(&cdir, "s2").unwrap();
+        assert_eq!(chain.goal, None);
+        assert!(chain.goal_history.is_empty());
+    }
+
     fn fresh_dirs(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!(
             "fleet-handoff-{}-{}-{}",
@@ -1026,6 +1337,8 @@ mod tests {
             note,
             Some("my-plan"),
             Some("P4"),
+            None,
+            None,
             None,
             None,
             "claude-code",
@@ -1065,6 +1378,8 @@ mod tests {
             None,
             Some("claude-opus-5"),
             Some("high"),
+            None,
+            None,
             "claude-code",
             1000,
         )
@@ -1171,6 +1486,8 @@ mod tests {
             None,
             Some("claude-fable-5"),
             Some("high"),
+            None,
+            None,
             "claude-code",
             1000,
         )
@@ -1221,7 +1538,8 @@ mod tests {
     fn codex_handoff_relays_on_codex() {
         let (root, pdir, cdir) = fresh_dirs("codex-relay");
         register_in(
-            &pdir, &cdir, "t1", "/ws", None, "note", None, None, None, None, "codex", 1000,
+            &pdir, &cdir, "t1", "/ws", None, "note", None, None, None, None, None, None, "codex",
+            1000,
         )
         .unwrap();
 
@@ -1268,7 +1586,10 @@ mod tests {
             1001,
             |_src, _w, _p, _m, _e, _pm, _ep, sid| {
                 let sid = sid.expect("a Claude successor gets a pre-assigned id");
-                assert!(uuid::Uuid::parse_str(sid).is_ok(), "pre-assigned id is a uuid: {sid}");
+                assert!(
+                    uuid::Uuid::parse_str(sid).is_ok(),
+                    "pre-assigned id is a uuid: {sid}"
+                );
                 let chain = chain_containing_in(&cdir, "s1")
                     .expect("chain must already exist when the spawner runs");
                 assert_eq!(
@@ -1287,7 +1608,11 @@ mod tests {
 
         assert_eq!(to, seen.into_inner(), "consume returns the pre-assigned id");
         let chain = chain_containing_in(&cdir, "s1").unwrap();
-        assert_eq!(chain.links.len(), 1, "exactly one link, not a pre-link plus a post-link");
+        assert_eq!(
+            chain.links.len(),
+            1,
+            "exactly one link, not a pre-link plus a post-link"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1299,9 +1624,15 @@ mod tests {
         let (root, pdir, cdir) = fresh_dirs("link-rollback");
         register_simple(&pdir, &cdir, "s1", "note", 1000).unwrap();
 
-        let err = consume_and_spawn_in(&pdir, &cdir, None, None, "s1", 1001, |_, _, _, _, _, _, _, _| {
-            Err("claude binary missing".to_string())
-        })
+        let err = consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            None,
+            "s1",
+            1001,
+            |_, _, _, _, _, _, _, _| Err("claude binary missing".to_string()),
+        )
         .unwrap_err();
         assert!(err.contains("claude binary missing"));
         assert!(
@@ -1320,17 +1651,29 @@ mod tests {
     fn codex_successor_is_linked_after_spawn_from_the_returned_id() {
         let (root, pdir, cdir) = fresh_dirs("codex-link-after");
         register_in(
-            &pdir, &cdir, "t1", "/ws", None, "note", None, None, None, None, "codex", 1000,
+            &pdir, &cdir, "t1", "/ws", None, "note", None, None, None, None, None, None, "codex",
+            1000,
         )
         .unwrap();
-        let to = consume_and_spawn_in(&pdir, &cdir, None, None, "t1", 1001, |_, _, _, _, _, _, _, sid| {
-            assert!(sid.is_none(), "Codex cannot take a pre-assigned id");
-            assert!(chain_containing_in(&cdir, "t1").is_none(), "nothing linked before spawn");
-            Ok(crate::session_launch::SpawnSessionResponse {
-                pid: 7,
-                session_id: Some("t2".to_string()),
-            })
-        })
+        let to = consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            None,
+            "t1",
+            1001,
+            |_, _, _, _, _, _, _, sid| {
+                assert!(sid.is_none(), "Codex cannot take a pre-assigned id");
+                assert!(
+                    chain_containing_in(&cdir, "t1").is_none(),
+                    "nothing linked before spawn"
+                );
+                Ok(crate::session_launch::SpawnSessionResponse {
+                    pid: 7,
+                    session_id: Some("t2".to_string()),
+                })
+            },
+        )
         .unwrap();
         assert_eq!(to.as_deref(), Some("t2"));
         let chain = chain_containing_in(&cdir, "t1").unwrap();
@@ -1355,6 +1698,8 @@ mod tests {
             chain_id: "c1".into(),
             workspace_path: "/ws".into(),
             plan_id: None,
+            goal: None,
+            goal_history: Vec::new(),
             links: vec![HandoffLink {
                 from_session_id: "hop8".into(),
                 to_session_id: "hop9".into(),
@@ -1367,7 +1712,10 @@ mod tests {
         fs::write(cdir.join("c1.json"), serde_json::to_string(&chain).unwrap()).unwrap();
 
         // The predecessor has relayed — retired, must not be resumed.
-        assert_eq!(successor_session_of_in(&cdir, "hop8").as_deref(), Some("hop9"));
+        assert_eq!(
+            successor_session_of_in(&cdir, "hop8").as_deref(),
+            Some("hop9")
+        );
         // The successor owns the work and has not relayed: still resumable.
         assert_eq!(successor_session_of_in(&cdir, "hop9"), None);
 
@@ -1434,6 +1782,8 @@ mod tests {
             next_task: next.map(str::to_string),
             model: None,
             effort: None,
+            goal: None,
+            goal_reason: None,
             chain_id: "c1".into(),
             hop: 1,
             created: 1,
@@ -1633,13 +1983,21 @@ mod tests {
         record_link_in(&cdir, &rec, "s2", 1001).unwrap();
 
         let spawned = std::cell::Cell::new(false);
-        let out = consume_and_spawn_in(&pdir, &cdir, None, None, "s1", 1002, |_, _, _, _, _, _, _, _| {
-            spawned.set(true);
-            Ok(crate::session_launch::SpawnSessionResponse {
-                pid: 1,
-                session_id: Some("s3".to_string()),
-            })
-        })
+        let out = consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            None,
+            "s1",
+            1002,
+            |_, _, _, _, _, _, _, _| {
+                spawned.set(true);
+                Ok(crate::session_launch::SpawnSessionResponse {
+                    pid: 1,
+                    session_id: Some("s3".to_string()),
+                })
+            },
+        )
         .unwrap();
 
         assert!(out.is_none(), "must not spawn a second successor for s1");
@@ -1731,6 +2089,8 @@ mod tests {
             next_task: Some("P4".into()),
             model: None,
             effort: None,
+            goal: None,
+            goal_reason: None,
             chain_id: "c1".into(),
             hop: 2,
             created: 1,
@@ -1781,7 +2141,10 @@ mod tests {
         record_link_in(&cdir, &taken, "new2", 5002).unwrap();
 
         let out = render_chain_list(&list_chains_in(&cdir));
-        assert!(!out.contains("秘密便条"), "notes must not be listed:\n{out}");
+        assert!(
+            !out.contains("秘密便条"),
+            "notes must not be listed:\n{out}"
+        );
         assert!(out.contains("1. new1") && out.contains("2. new2"), "{out}");
         assert!(out.contains("[2 棒]"), "{out}");
         assert!(
@@ -1809,6 +2172,8 @@ mod tests {
             "老板原话：我要独立的文档库，能搜索，能支持 RAG",
             Some("doc-lib"),
             Some("P1"),
+            None,
+            None,
             None,
             None,
             "claude-code",
@@ -1842,7 +2207,10 @@ mod tests {
             "{prompt}"
         );
         // Codex relays get no ~/.claude transcript hint — wrong store for them.
-        let codex = PendingHandoff { agent_source: "codex".into(), ..taken };
+        let codex = PendingHandoff {
+            agent_source: "codex".into(),
+            ..taken
+        };
         let cprompt = compose_successor_prompt(&codex, chain_containing_in(&cdir, "s3").as_ref());
         assert!(cprompt.contains("第 1 棒  s1"), "{cprompt}");
         assert!(!cprompt.contains("~/.claude/projects"), "{cprompt}");
@@ -1856,8 +2224,20 @@ mod tests {
     fn render_chain_shows_origin_and_attributes_notes_to_the_hop_that_wrote_them() {
         let (root, pdir, cdir) = fresh_dirs("render");
         register_in(
-            &pdir, &cdir, "s1", "/ws", None, "老板原话：我要独立的文档库", Some("doc-lib"),
-            Some("P1"), None, None, "claude-code", 1000,
+            &pdir,
+            &cdir,
+            "s1",
+            "/ws",
+            None,
+            "老板原话：我要独立的文档库",
+            Some("doc-lib"),
+            Some("P1"),
+            None,
+            None,
+            None,
+            None,
+            "claude-code",
+            1000,
         )
         .unwrap();
         let taken = take_pending_in(&pdir, "s1", 1001).unwrap();
@@ -1879,7 +2259,10 @@ mod tests {
         let h1 = full.find("\n第 1 棒").unwrap();
         let h2 = full.find("\n第 2 棒").unwrap();
         let origin = full.find("老板原话").unwrap();
-        assert!(h1 < origin && origin < h2, "note attributed to wrong hop:\n{full}");
+        assert!(
+            h1 < origin && origin < h2,
+            "note attributed to wrong hop:\n{full}"
+        );
         // The last hop wrote no note yet — nothing is invented for it.
         assert!(!full.contains("交给第 4 棒"), "{full}");
 

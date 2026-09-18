@@ -354,6 +354,16 @@ enum Commands {
         /// Overrides the value otherwise inherited from CLAUDE_EFFORT.
         #[arg(long)]
         effort: Option<String>,
+        /// What this whole relay chain is for — one sentence of "the work is
+        /// done when ...". Set it on the first hop; later hops inherit it and
+        /// are judged against it rather than against the plan they hold. Repeat
+        /// the same text to leave it alone; omit to leave it alone too.
+        #[arg(long)]
+        goal: Option<String>,
+        /// Why you are replacing the chain's existing goal. Required to change
+        /// one that is already set; not needed to set the first one.
+        #[arg(long)]
+        goal_reason: Option<String>,
         #[command(subcommand)]
         action: Option<HandoffCommands>,
         /// The session handing off. Normally read from the environment
@@ -1339,6 +1349,8 @@ fn main() {
             next,
             model,
             effort,
+            goal,
+            goal_reason,
             action,
             session,
         } => commands::handoff::cmd_handoff(
@@ -1347,6 +1359,8 @@ fn main() {
             next.as_deref(),
             model.as_deref(),
             effort.as_deref(),
+            goal.as_deref(),
+            goal_reason.as_deref(),
             action,
             session.as_deref(),
         ),

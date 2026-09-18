@@ -208,6 +208,8 @@ mod tests {
             chain_id: "c-gate".into(),
             workspace_path: "/tmp/ws".into(),
             plan_id: None,
+            goal: None,
+            goal_history: Vec::new(),
             links: vec![
                 link("s1", "s2", "老板要把 27 页前端一次性全重写"),
                 link("s2", "s3", "顺手理掉 alembic 双 head"),
@@ -243,6 +245,8 @@ mod tests {
             chain_id: "c1".into(),
             workspace_path: "/tmp/ws".into(),
             plan_id: None,
+            goal: None,
+            goal_history: Vec::new(),
             links: vec![
                 link("s1", "s2", "origin note"),
                 link("s2", "s3", "later note"),
