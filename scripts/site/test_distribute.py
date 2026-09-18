@@ -323,4 +323,58 @@ class DistributionTests(unittest.TestCase):
         for value in ('http://example.com','https://u:p@example.com','https://example.com/?token=x','https://example.com/../bad'):
             with self.subTest(value=value),self.assertRaises(ValueError): d.validate_base_url(value)
 
+class NewestDownloadableReleaseTests(unittest.TestCase):
+    """Both publication targets must follow the newest *downloadable* release.
+
+    A tag push creates the release record immediately, so `releases/latest` is
+    assetless for as long as the Release workflow takes to sign and upload --
+    the window that broke v2.10.3's Pages deploy on 2026-09-18, and that the
+    Shenzhen mirror would otherwise waste a round on.
+    """
+
+    def release(self, tag, published, *, assets=True):
+        release, _ = fixture()
+        release["tag_name"] = tag
+        release["published_at"] = published
+        if assets:
+            for asset in release["assets"]:
+                asset["browser_download_url"] = asset["browser_download_url"].replace(
+                    "/v2.6.0/", f"/{tag}/"
+                )
+        else:
+            release["assets"] = []
+        return release
+
+    def test_freshly_tagged_release_without_assets_is_skipped(self):
+        complete = self.release("v2.10.3", "2026-09-17T20:02:37Z")
+        just_tagged = self.release("v2.10.4", "2026-09-18T03:30:27Z", assets=False)
+
+        picked = d.newest_downloadable_release([just_tagged, complete])
+
+        self.assertEqual(picked["tag_name"], "v2.10.3")
+
+    def test_newest_complete_release_wins_regardless_of_list_order(self):
+        older = self.release("v2.10.2", "2026-09-16T22:05:08Z")
+        newer = self.release("v2.10.3", "2026-09-17T20:02:37Z")
+
+        picked = d.newest_downloadable_release([older, newer])
+
+        self.assertEqual(picked["tag_name"], "v2.10.3")
+
+    def test_prereleases_and_drafts_are_never_picked(self):
+        stable = self.release("v2.10.3", "2026-09-17T20:02:37Z")
+        prerelease = self.release("v2.11.0", "2026-09-18T01:00:00Z")
+        prerelease["prerelease"] = True
+        draft = self.release("v2.12.0", "2026-09-18T02:00:00Z")
+        draft["draft"] = True
+
+        picked = d.newest_downloadable_release([draft, prerelease, stable])
+
+        self.assertEqual(picked["tag_name"], "v2.10.3")
+
+    def test_no_downloadable_release_is_an_error_rather_than_a_blank_manifest(self):
+        with self.assertRaises(ValueError):
+            d.newest_downloadable_release([self.release("v2.10.4", "2026-09-18T03:30:27Z", assets=False)])
+
+
 if __name__=='__main__': unittest.main()

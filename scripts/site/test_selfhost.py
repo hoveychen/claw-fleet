@@ -195,5 +195,20 @@ class SelfhostTests(unittest.TestCase):
         self.assertEqual((self.root / 'current').resolve(), self.old)
 
 
+class UpstreamReleaseTests(unittest.TestCase):
+    def test_a_round_starts_on_the_newest_release_that_has_assets(self):
+        """A tag pushed minutes ago is "latest" with nothing to download yet."""
+        complete, _ = fixture()
+        just_tagged = copy.deepcopy(complete)
+        just_tagged.update(tag_name='v2.7.0', published_at='2026-09-18T03:30:27Z', assets=[])
+        complete['published_at'] = '2026-09-17T20:02:37Z'
+        listing = io.BytesIO(json.dumps([just_tagged, complete]).encode())
+
+        with patch.object(selfhost.urllib.request, 'urlopen', return_value=listing) as network:
+            self.assertEqual(selfhost.upstream_release()['tag_name'], complete['tag_name'])
+
+        self.assertIn('/releases?', network.call_args.args[0].full_url)
+
+
 if __name__ == '__main__':
     unittest.main()

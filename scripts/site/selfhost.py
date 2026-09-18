@@ -20,13 +20,19 @@ def version(tag):
     return tuple(map(int, tag[1:].split('.')))
 
 
-def latest_release():
+def upstream_release():
+    """The newest release the mirror can actually copy.
+
+    Deliberately the release list rather than `releases/latest`: a just-pushed
+    tag is already "latest" while its assets are still being built, and a round
+    that starts on one has nothing to download and only aborts.
+    """
     request = urllib.request.Request(
-        f'https://api.github.com/repos/{distribute.REPO}/releases/latest',
+        f'https://api.github.com/repos/{distribute.REPO}/releases?per_page=30',
         headers={'User-Agent': 'Claw-Fleet-selfhost', 'Accept': 'application/vnd.github+json'},
     )
     with urllib.request.urlopen(request, timeout=30) as response:
-        return json.load(response)
+        return distribute.newest_downloadable_release(json.load(response))
 
 
 def staging_directory(deployments, tag):
@@ -137,7 +143,7 @@ def main():
         except BlockingIOError:
             print('Another update is running; skipped', flush=True)
             return
-        sync(args.root, args.public_url, latest_release(), rebuild_current=args.rebuild_current)
+        sync(args.root, args.public_url, upstream_release(), rebuild_current=args.rebuild_current)
 
 
 if __name__ == '__main__':
