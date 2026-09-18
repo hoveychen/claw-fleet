@@ -59,6 +59,38 @@ def build_manifest(release, mirror, public_url):
     return result
 
 
+def select_release(releases):
+    """Return the newest stable release whose assets are all published.
+
+    `releases/latest` is not usable here: GitHub flips a release to "latest"
+    the moment its record exists, which on this repo is the instant the tag is
+    pushed — long before the Release workflow signs and uploads the assets. On
+    2026-09-18 v2.10.3's Pages deploy failed that way, because tag v2.10.4 had
+    landed 92 seconds earlier and its assetless record was already "latest".
+    Walking newest-first and taking the first release that validates keeps the
+    manifest on the newest version users can actually download, and it can
+    never move the site backwards past a complete release.
+    """
+    ordered = sorted(
+        releases,
+        key=lambda release: release.get("published_at") or release.get("created_at") or "",
+        reverse=True,
+    )
+    rejected = []
+    for release in ordered:
+        try:
+            distribute.validate_release(release)
+        except (ValueError, KeyError, TypeError) as error:
+            rejected.append(f'{release.get("tag_name")}: {error}')
+            continue
+        if rejected:
+            print("Skipped newer releases that are not downloadable yet:")
+            for line in rejected:
+                print("  -", line)
+        return release
+    raise ValueError("No stable release carries a complete asset set: " + "; ".join(rejected))
+
+
 def fetch_json(url):
     headers = {"User-Agent": "Claw-Fleet-Pages", "Accept": "application/vnd.github+json"}
     if os.environ.get("GH_TOKEN") and url.startswith("https://api.github.com/"):
@@ -71,14 +103,14 @@ def fetch_json(url):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--release-url",
-        default=f"https://api.github.com/repos/{distribute.REPO}/releases/latest",
+        "--releases-url",
+        default=f"https://api.github.com/repos/{distribute.REPO}/releases?per_page=30",
     )
     parser.add_argument("--mirror-url", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
-    release = fetch_json(args.release_url)
+    release = select_release(fetch_json(args.releases_url))
     public_url = args.mirror_url.removesuffix("/downloads.json").rstrip("/")
     try:
         mirror = fetch_json(args.mirror_url)
