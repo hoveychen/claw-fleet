@@ -219,6 +219,19 @@ fn resolve_agent(id_prefix: &str, verb: &str) -> (SessionInfo, u32) {
     (s.clone(), pid)
 }
 
+/// Queue a follow-up turn for another Fleet-owned session, delivered the moment
+/// its current turn ends. CLI face of `fleet__control action=send`; both go
+/// through the same core function so the guards cannot drift apart.
+pub(crate) fn cmd_send(id_prefix: &str, text: &str) {
+    match claw_fleet_core::mcp_inspect::send_message(id_prefix, text) {
+        Ok(msg) => println!("{msg}"),
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Interrupt the agent's in-flight tool call. The session survives and stays
 /// resumable, so unlike `stop` this refuses to act on an ambiguous pid: it
 /// would abort a sibling session's turn with no confirmation step.
