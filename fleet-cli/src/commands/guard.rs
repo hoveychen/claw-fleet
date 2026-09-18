@@ -11,14 +11,15 @@ fn is_headless_codex_source(source: Option<&str>) -> bool {
 pub(crate) fn cmd_guard_list_rules(json: bool) {
     let rules = claw_fleet_core::audit::list_guard_allow_rules();
     if json {
-        let body = serde_json::to_string_pretty(&rules)
-            .unwrap_or_else(|_| "[]".to_string());
+        let body = serde_json::to_string_pretty(&rules).unwrap_or_else(|_| "[]".to_string());
         println!("{}", body);
         return;
     }
     if rules.is_empty() {
         println!("No guard allow rules configured.");
-        println!("(They get added when you click \"始终允许\" / \"Always allow\" on a guard card.)");
+        println!(
+            "(They get added when you click \"始终允许\" / \"Always allow\" on a guard card.)"
+        );
         return;
     }
     println!("{:<38}  {:<24}  {}", "ID", "SOURCE TAG", "PREFIX");
@@ -93,10 +94,7 @@ pub(crate) fn cmd_guard() {
             }
             return;
         }
-        GuardClassification::NeedsConfirmation {
-            command,
-            risk_tags,
-        } => {
+        GuardClassification::NeedsConfirmation { command, risk_tags } => {
             // No live consumer (Fleet app not running / no SSE client on
             // `fleet serve`) — fall through silently so Claude isn't blocked
             // by a request nobody will answer.
@@ -105,10 +103,13 @@ pub(crate) fn cmd_guard() {
             let status = consumer_heartbeat::consumer_status(liveness_window);
             if !status.is_alive() {
                 if codex_fail_closed {
-                    println!("{}", serde_json::json!({
-                        "decision": "block",
-                        "reason": "Fleet Guard: no live Fleet decision consumer for headless Codex"
-                    }));
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "decision": "block",
+                            "reason": "Fleet Guard: no live Fleet decision consumer for headless Codex"
+                        })
+                    );
                     return;
                 }
                 claw_fleet_core::log_debug(&format!(
@@ -132,7 +133,7 @@ pub(crate) fn cmd_guard() {
                 id: request_id.clone(),
                 session_id,
                 workspace_name: String::new(), // Desktop app resolves from session_id
-                ai_title: None, // Desktop app resolves from session_id
+                ai_title: None,                // Desktop app resolves from session_id
                 tool_name: "Bash".to_string(),
                 command: command.clone(),
                 command_summary: guard::truncate_command(&command, 120),
@@ -197,10 +198,13 @@ pub(crate) fn cmd_guard() {
                 if !status.is_alive() {
                     if codex_fail_closed {
                         guard::cleanup(&request_id);
-                        println!("{}", serde_json::json!({
-                            "decision": "block",
-                            "reason": "Fleet Guard: Fleet decision consumer disconnected while headless Codex was waiting"
-                        }));
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "decision": "block",
+                                "reason": "Fleet Guard: Fleet decision consumer disconnected while headless Codex was waiting"
+                            })
+                        );
                         return;
                     }
                     // Head went away while we waited — fall through silently.
@@ -235,7 +239,7 @@ mod tests {
 pub(crate) fn cmd_elicitation() {
     use claw_fleet_core::consumer_heartbeat;
     use claw_fleet_core::decision_history::{
-        self, DecisionHistoryRecord, ElicitationOutcome, build_elicitation_record,
+        self, build_elicitation_record, DecisionHistoryRecord, ElicitationOutcome,
     };
     use claw_fleet_core::decision_panel_config::DecisionPanelConfig;
     use claw_fleet_core::elicitation::{self, ElicitationRequest};
@@ -360,7 +364,9 @@ pub(crate) fn cmd_elicitation() {
                 &std::collections::HashMap::new(),
                 chrono::Utc::now().to_rfc3339(),
             );
-            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::Elicitation(rec)) {
+            if let Err(e) =
+                decision_history::append_record(&DecisionHistoryRecord::Elicitation(rec))
+            {
                 eprintln!("decision_history append (heartbeat-lost): {e}");
             }
             elicitation::cleanup(&request_id);
@@ -381,7 +387,9 @@ pub(crate) fn cmd_elicitation() {
                 &resp.answers,
                 chrono::Utc::now().to_rfc3339(),
             );
-            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::Elicitation(rec)) {
+            if let Err(e) =
+                decision_history::append_record(&DecisionHistoryRecord::Elicitation(rec))
+            {
                 eprintln!("decision_history append: {e}");
             }
             elicitation::cleanup(&request_id);
@@ -398,8 +406,7 @@ pub(crate) fn cmd_elicitation() {
             } else {
                 // Build updatedInput with original questions + user answers.
                 let mut updated_input = tool_input.clone();
-                updated_input["answers"] =
-                    serde_json::to_value(&resp.answers).unwrap_or_default();
+                updated_input["answers"] = serde_json::to_value(&resp.answers).unwrap_or_default();
                 let out = serde_json::json!({
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
@@ -422,7 +429,9 @@ pub(crate) fn cmd_elicitation() {
                 &std::collections::HashMap::new(),
                 chrono::Utc::now().to_rfc3339(),
             );
-            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::Elicitation(rec)) {
+            if let Err(e) =
+                decision_history::append_record(&DecisionHistoryRecord::Elicitation(rec))
+            {
                 eprintln!("decision_history append (timeout): {e}");
             }
             elicitation::cleanup(&request_id);
@@ -504,8 +513,7 @@ pub(crate) fn cmd_wakeup_guard() {
     }
     let fleet_owned = launch_spec::was_fleet_spawned(session_id);
 
-    let Some(reason) = wakeup_guard::decide(hook_input.tool_name.as_deref(), fleet_owned)
-    else {
+    let Some(reason) = wakeup_guard::decide(hook_input.tool_name.as_deref(), fleet_owned) else {
         return;
     };
 
@@ -522,7 +530,7 @@ pub(crate) fn cmd_wakeup_guard() {
 pub(crate) fn cmd_plan_approval() {
     use claw_fleet_core::consumer_heartbeat;
     use claw_fleet_core::decision_history::{
-        self, DecisionHistoryRecord, PlanApprovalOutcome, build_plan_approval_record,
+        self, build_plan_approval_record, DecisionHistoryRecord, PlanApprovalOutcome,
     };
     use claw_fleet_core::decision_panel_config::DecisionPanelConfig;
     use claw_fleet_core::guard::{self, HookInput};
@@ -642,7 +650,9 @@ pub(crate) fn cmd_plan_approval() {
                 None,
                 chrono::Utc::now().to_rfc3339(),
             );
-            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::PlanApproval(rec)) {
+            if let Err(e) =
+                decision_history::append_record(&DecisionHistoryRecord::PlanApproval(rec))
+            {
                 eprintln!("decision_history append (heartbeat-lost): {e}");
             }
             plan_approval::cleanup(&request_id);
@@ -668,7 +678,9 @@ pub(crate) fn cmd_plan_approval() {
                 Some(&resp),
                 chrono::Utc::now().to_rfc3339(),
             );
-            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::PlanApproval(rec)) {
+            if let Err(e) =
+                decision_history::append_record(&DecisionHistoryRecord::PlanApproval(rec))
+            {
                 eprintln!("decision_history append: {e}");
             }
             plan_approval::cleanup(&request_id);
@@ -714,7 +726,9 @@ pub(crate) fn cmd_plan_approval() {
                 None,
                 chrono::Utc::now().to_rfc3339(),
             );
-            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::PlanApproval(rec)) {
+            if let Err(e) =
+                decision_history::append_record(&DecisionHistoryRecord::PlanApproval(rec))
+            {
                 eprintln!("decision_history append (timeout): {e}");
             }
             plan_approval::cleanup(&request_id);

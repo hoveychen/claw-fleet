@@ -26,11 +26,20 @@ pub(crate) fn cmd_notes(action: NotesCommands, session: Option<&str>) {
     let args = match action {
         NotesCommands::Write { path, text } => json!({"action":"write","path":path,"text":text}),
         NotesCommands::Append { path, text } => json!({"action":"append","path":path,"text":text}),
-        NotesCommands::Read { path, start_line, stop_line } => {
+        NotesCommands::Read {
+            path,
+            start_line,
+            stop_line,
+        } => {
             json!({"action":"read","path":path,"start_line":start_line,"stop_line":stop_line})
         }
         NotesCommands::List { prefix } => json!({"action":"list","prefix":prefix}),
-        NotesCommands::Search { query, prefix, max_files, max_matches_per_file } => json!({
+        NotesCommands::Search {
+            query,
+            prefix,
+            max_files,
+            max_matches_per_file,
+        } => json!({
             "action":"search","query":query,"prefix":prefix,
             "max_files":max_files,"max_matches_per_file":max_matches_per_file
         }),
@@ -57,7 +66,9 @@ pub(crate) fn cmd_notes_hint() {
         .map(str::to_string)
         .or_else(read_fleet_session_id);
     let Some(sid) = session_id else { return };
-    let Some(hint) = claw_fleet_core::session_notes::render_hint(&sid) else { return };
+    let Some(hint) = claw_fleet_core::session_notes::render_hint(&sid) else {
+        return;
+    };
     let out = json!({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
@@ -72,7 +83,12 @@ pub(crate) fn cmd_history(action: HistoryCommands) {
         HistoryCommands::Search { query, limit } => {
             json!({"action":"search","query":query.join(" "),"limit":limit})
         }
-        HistoryCommands::Read { line_no, session, offset_chars, limit_chars } => json!({
+        HistoryCommands::Read {
+            line_no,
+            session,
+            offset_chars,
+            limit_chars,
+        } => json!({
             "action":"read","line_no":line_no,"session":session,
             "offset_chars":offset_chars,"limit_chars":limit_chars
         }),

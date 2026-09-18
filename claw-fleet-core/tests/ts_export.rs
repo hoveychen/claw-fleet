@@ -141,6 +141,7 @@ fn build_bundle() -> String {
         claw_fleet_core::prd_tasks::TaskItem,
         claw_fleet_core::prd_tasks::TaskPlanDetail,
         claw_fleet_core::handoff::HandoffLink,
+        claw_fleet_core::handoff::GoalRevision,
         claw_fleet_core::handoff::HandoffChain,
         claw_fleet_core::handoff::SessionHandoffInfo,
         claw_fleet_core::prd_tasks::PlanKind,

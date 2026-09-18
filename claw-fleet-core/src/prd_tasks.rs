@@ -313,7 +313,13 @@ pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<Se
             if let Some((open_id, _, _, _, _)) = current.take() {
                 problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
             }
-            current = Some((attrs.id, attrs.version, attrs.parent, attrs.kind, String::new()));
+            current = Some((
+                attrs.id,
+                attrs.version,
+                attrs.parent,
+                attrs.kind,
+                String::new(),
+            ));
             continue;
         }
         if let Some(attrs) = parse_sentinel(trimmed, "end") {
@@ -386,13 +392,20 @@ pub fn parse_sentinel(line: &str, kind: &str) -> Option<SentinelAttrs> {
     let rest = line.strip_prefix(&prefix)?;
     let inner = rest.strip_suffix("-->")?.trim();
     let attrs = parse_attr_map(inner)?;
-    let id = attrs.iter().find(|(k, _)| k == "id").map(|(_, v)| v.clone());
+    let id = attrs
+        .iter()
+        .find(|(k, _)| k == "id")
+        .map(|(_, v)| v.clone());
     if let Some(idv) = &id {
         if idv.is_empty() {
             return None;
         }
     }
-    let version = match attrs.iter().find(|(k, _)| k == "v").map(|(_, v)| v.as_str()) {
+    let version = match attrs
+        .iter()
+        .find(|(k, _)| k == "v")
+        .map(|(_, v)| v.as_str())
+    {
         Some("2") => 2,
         _ => 1,
     };
@@ -478,7 +491,11 @@ fn join_preserving_eol(lines: Vec<String>, original: &str) -> String {
     // `str::lines()` (used by every caller to split `original`) drops the `\r`
     // of a `\r\n` pair, so re-joining with a bare `"\n"` silently flattens a
     // CRLF file to LF. Re-emit the source's line ending instead.
-    let eol = if original.contains("\r\n") { "\r\n" } else { "\n" };
+    let eol = if original.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     let mut s = lines.join(eol);
     if original.ends_with('\n') {
         s.push_str(eol);
@@ -525,9 +542,13 @@ mod eol_tests {
         // (a mixed-ending file that the next mutation then flattens wholesale).
         let content = "# TASKS\r\n\r\n<!-- fleet:prd:begin id=\"a\" v=\"2\" -->\r\n\r\n\
                        **Plan:** A\r\n\r\n<!-- fleet:prd:end id=\"a\" -->\r\n";
-        let out = super::create_plan(content, "b", "B", None, PlanKind::Exec).expect("create_plan failed");
+        let out = super::create_plan(content, "b", "B", None, PlanKind::Exec)
+            .expect("create_plan failed");
         let lone_lf = out.matches('\n').count() - out.matches("\r\n").count();
-        assert_eq!(lone_lf, 0, "every LF must be part of a CRLF pair, got: {out:?}");
+        assert_eq!(
+            lone_lf, 0,
+            "every LF must be part of a CRLF pair, got: {out:?}"
+        );
     }
 }
 
@@ -603,12 +624,7 @@ pub fn set_checkbox(
 
 /// Append a new pending task `- [ ] **<p_label>** — <text>` just before the
 /// end sentinel of `plan_id`. Errors when the plan isn't found.
-pub fn add_task(
-    content: &str,
-    plan_id: &str,
-    p_label: &str,
-    text: &str,
-) -> Result<String, String> {
+pub fn add_task(content: &str, plan_id: &str, p_label: &str, text: &str) -> Result<String, String> {
     let mut out: Vec<String> = Vec::new();
     let mut in_target = false;
     let mut seen_plan = false;
@@ -669,7 +685,11 @@ pub fn create_plan(
     // Match the existing file's line ending so appending a plan to a CRLF
     // TASKS.md doesn't leave lone LFs (a mixed-ending file the next mutation
     // then flattens wholesale).
-    let eol = if content.contains("\r\n") { "\r\n" } else { "\n" };
+    let eol = if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     let block = format!(
         "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\"{parent_attr}{kind_attr} -->{eol}{eol}**Plan:** {title}{eol}{eol}<!-- fleet:prd:end id=\"{plan_id}\" -->{eol}"
     );
@@ -990,18 +1010,14 @@ pub fn render_with_sources(blocks: &[SourcedBlock], main_root: Option<&Path>) ->
 /// whoever appended their block last — while a focus record means a session
 /// claimed that plan with `fleet plan create/resume/check`, which is the best
 /// signal available for "this is live work".
-fn order_by_focus(
-    blocks: Vec<SourcedBlock>,
-    focus: &HashMap<String, u64>,
-) -> Vec<SourcedBlock> {
+fn order_by_focus(blocks: Vec<SourcedBlock>, focus: &HashMap<String, u64>) -> Vec<SourcedBlock> {
     let mut indexed: Vec<(usize, SourcedBlock)> = blocks.into_iter().enumerate().collect();
     indexed.sort_by_key(|(i, b)| {
         // Newest focus first: negate so a bigger timestamp sorts earlier.
-        let recency = b
-            .id
-            .as_deref()
-            .and_then(|id| focus.get(id))
-            .map(|t| -(*t as i128));
+        let recency =
+            b.id.as_deref()
+                .and_then(|id| focus.get(id))
+                .map(|t| -(*t as i128));
         (recency.is_none(), recency.unwrap_or(0), *i)
     });
     indexed.into_iter().map(|(_, b)| b).collect()
@@ -1152,7 +1168,11 @@ fn render_cursor_neighborhood(
             "\n\n---\n\n本 workspace 另有 {} 个 active plan **未展开**(它们不是你当前的工作,\
              除非老板明确改派,不要挑其中的任务做):{}。需要全景时跑 `fleet plan list`。",
             other_active.len(),
-            if ids.is_empty() { "(无 id)".to_string() } else { ids }
+            if ids.is_empty() {
+                "(无 id)".to_string()
+            } else {
+                ids
+            }
         ));
     }
 
@@ -1183,11 +1203,7 @@ fn render_plans_body(
         .cloned()
         .collect();
 
-    let focused = focused_id.filter(|id| {
-        active
-            .iter()
-            .any(|b| b.id.as_deref() == Some(*id))
-    });
+    let focused = focused_id.filter(|id| active.iter().any(|b| b.id.as_deref() == Some(*id)));
 
     let Some(id) = focused else {
         return (render_with_sources(&active, main_root), false, active);
@@ -1266,10 +1282,7 @@ pub fn render_problem_warning(problems: &[(PathBuf, SentinelProblem)]) -> Option
 /// longer active. A workspace's other active plans are never guessed at from
 /// mtime; the detail Tasks tab (`list_workspace_task_plans`) hides on the same
 /// terms.
-pub fn summarize_workspace_tasks(
-    cwd: &Path,
-    session_id: Option<&str>,
-) -> Option<TaskPlanSummary> {
+pub fn summarize_workspace_tasks(cwd: &Path, session_id: Option<&str>) -> Option<TaskPlanSummary> {
     // Reading the side-channel is the only impure step; the scan + focus
     // resolution below is pure, so it unit-tests without touching `~/.fleet`
     // (or racing the process-global FLEET_HOME that other suites mutate).
@@ -1433,8 +1446,7 @@ pub fn resolve_current_task(
 ) -> Result<Option<String>, String> {
     let path = find_plan_source(cwd, plan_id)
         .ok_or_else(|| format!("plan '{plan_id}' not found in any TASKS.md"))?;
-    let content =
-        fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let content = fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let body = plan_body(&content, plan_id).ok_or_else(|| format!("plan '{plan_id}' not found"))?;
     Ok(match task {
         Some(t) => parse_task_items(&body)
@@ -1483,6 +1495,42 @@ fn backtrack_backstop(cwd: &Path, session_id: Option<&str>) -> Option<String> {
 /// nothing to inject (no TASKS.md anywhere, or a clean file with no active plan
 /// and no structural problem) — callers then no-op.
 pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Option<String> {
+    let goal = render_chain_goal_block(session_id);
+    match (goal, render_plans_reminder_body(cwd, session_id)) {
+        (None, body) => body,
+        (Some(g), None) => Some(format!("<system-reminder>\n{g}\n</system-reminder>")),
+        // Above the plans, not below: the finish line is what the next task is
+        // measured against, and a reader who stops early should hit it first.
+        (Some(g), Some(body)) => Some(body.replacen(
+            "<system-reminder>\n",
+            &format!("<system-reminder>\n{g}\n\n"),
+            1,
+        )),
+    }
+}
+
+/// The chain-goal line injected above the plans, for a session on a relay chain
+/// whose chain has a stated objective.
+///
+/// Sits in the per-turn injection rather than only in the successor's opening
+/// prompt because the opening prompt is the first thing a compaction summarises
+/// away — and a 26-hop chain is exactly where the objective gets lost. Costs one
+/// line against the reminder's 12 KB ceiling.
+fn render_chain_goal_block(session_id: Option<&str>) -> Option<String> {
+    let sid = session_id?;
+    let chain = crate::handoff::chain_containing(sid)?;
+    let goal = chain.goal.as_deref()?;
+    let hop = chain.hop_of(sid)?;
+    Some(format!(
+        "本链目标（你是第 {hop}/{len} 棒）：{goal}\n\
+         这是收工的判据——**不是**你手上这个 plan 做完。计划树全勾了，只要这件事没达成，\
+         就不要把决策卡标成 `taskComplete: true`。目标真的变了（老板改了路线、或这件事已经\
+         不成立），用 `fleet__handoff` 的 `goal` + `goalReason` 显式改，并在卡里告诉老板。",
+        len = chain.session_ids().len(),
+    ))
+}
+
+fn render_plans_reminder_body(cwd: &Path, session_id: Option<&str>) -> Option<String> {
     let main_root = discover_main_checkout_root(cwd);
     let sources = collect_task_sources(cwd, main_root.as_deref());
     if sources.is_empty() {
@@ -1871,7 +1919,10 @@ trailing notes outside\n";
 - [ ] **P4** — later\n";
         let blocks = vec![sb(Some("big"), body, &main.join("TASKS.md"), UNIX_EPOCH)];
         let out = render_with_sources(&blocks, Some(&main));
-        assert_eq!(out, "## Plan: big — Big plan (2/4)\n- [ ] **P3** — the next thing");
+        assert_eq!(
+            out,
+            "## Plan: big — Big plan (2/4)\n- [ ] **P3** — the next thing"
+        );
         assert!(!out.contains("sub bullet"));
         assert!(!out.contains("P4"));
         assert!(!out.contains("done one"));
@@ -1900,7 +1951,10 @@ trailing notes outside\n";
         ];
         let out = dedup_blocks_keep_latest_mtime(blocks);
         assert_eq!(out.len(), 2);
-        let shared = out.iter().find(|b| b.id.as_deref() == Some("shared")).unwrap();
+        let shared = out
+            .iter()
+            .find(|b| b.id.as_deref() == Some("shared"))
+            .unwrap();
         assert_eq!(shared.body, "worktree copy");
         assert_eq!(shared.source, wt);
         assert!(out.iter().any(|b| b.id.as_deref() == Some("solo")));
@@ -1931,6 +1985,55 @@ trailing notes outside\n";
         let out = dedup_blocks_keep_latest_mtime(blocks);
         let ids: Vec<&str> = out.iter().filter_map(|b| b.id.as_deref()).collect();
         assert_eq!(ids, vec!["b", "a", "c"]);
+    }
+
+    /// The chain's finish line rides the per-turn injection, above the plans —
+    /// the opening prompt is the first thing a compaction drops, and a long
+    /// chain is exactly where the objective goes missing.
+    #[test]
+    fn the_chain_goal_leads_the_reminder_and_names_the_hop() {
+        let dir = tempfile::tempdir().unwrap();
+        let _home = crate::paths::fleet_home_guard(dir.path());
+        let cdir = crate::session::get_fleet_dir()
+            .unwrap()
+            .join("handoffs")
+            .join("chain");
+        std::fs::create_dir_all(&cdir).unwrap();
+        let chain = crate::handoff::HandoffChain {
+            chain_id: "c1".into(),
+            workspace_path: "/ws".into(),
+            plan_id: None,
+            goal: Some("27 页前端全重写并切到 Go 后端上线".into()),
+            goal_history: Vec::new(),
+            links: vec![crate::handoff::HandoffLink {
+                from_session_id: "s1".into(),
+                to_session_id: "s2".into(),
+                note: "n".into(),
+                plan_id: None,
+                next_task: None,
+                handed_at: 0,
+            }],
+        };
+        std::fs::write(cdir.join("c1.json"), serde_json::to_string(&chain).unwrap()).unwrap();
+
+        // No TASKS.md in this temp cwd: the goal alone is still worth injecting.
+        let ws = dir.path().join("ws-no-tasks");
+        std::fs::create_dir_all(&ws).unwrap();
+        let out = render_active_plans_reminder(&ws, Some("s2")).expect("goal alone injects");
+        assert!(out.contains("本链目标（你是第 2/2 棒）"), "{out}");
+        assert!(out.contains("27 页前端全重写"), "{out}");
+        assert!(
+            out.contains("taskComplete"),
+            "names the flag it governs: {out}"
+        );
+
+        // A session on no chain gets nothing extra.
+        assert!(render_active_plans_reminder(&ws, Some("stranger")).is_none());
+        // Neither does a chain with no stated goal.
+        assert!(
+            render_chain_goal_block(Some("s1")).is_some(),
+            "hop 1 sees it too"
+        );
     }
 
     #[test]
@@ -1974,7 +2077,9 @@ trailing notes outside\n";
                  **Plan:** 计划 {i}\n\n- [ ] **P1** — 第一个任务\n"
             ));
             for j in 0..filler_lines {
-                md.push_str(&format!("  - 备注 {j}:一条足够长的验收说明,用来把这个块撑大\n"));
+                md.push_str(&format!(
+                    "  - 备注 {j}:一条足够长的验收说明,用来把这个块撑大\n"
+                ));
             }
             md.push_str(&format!("\n<!-- fleet:prd:end id=\"plan-{i}\" -->\n\n"));
         }
@@ -2079,7 +2184,11 @@ trailing notes outside\n";
     fn render_active_plans_reminder_none_for_clean_file_without_plan() {
         let tmp = tempfile::tempdir().unwrap();
         // A TASKS.md with no sentinel block and no structural problem → no-op.
-        std::fs::write(tmp.path().join("TASKS.md"), "# TASKS\n\njust notes, no plan\n").unwrap();
+        std::fs::write(
+            tmp.path().join("TASKS.md"),
+            "# TASKS\n\njust notes, no plan\n",
+        )
+        .unwrap();
         assert!(render_active_plans_reminder(tmp.path(), None).is_none());
     }
 
@@ -2128,7 +2237,10 @@ trailing notes outside\n";
         let main = tmp.path().canonicalize().unwrap();
         std::fs::create_dir_all(main.join(".git")).unwrap();
         std::fs::create_dir_all(main.join("sub")).unwrap();
-        assert_eq!(discover_main_checkout_root(&main.join("sub")), Some(main.clone()));
+        assert_eq!(
+            discover_main_checkout_root(&main.join("sub")),
+            Some(main.clone())
+        );
         assert_eq!(discover_main_checkout_root(&main), Some(main));
     }
 
@@ -2142,7 +2254,11 @@ trailing notes outside\n";
         std::fs::create_dir_all(&wt_path).unwrap();
         let wt_gitdir = main_gitdir.join("worktrees").join("feat");
         std::fs::create_dir_all(&wt_gitdir).unwrap();
-        std::fs::write(wt_path.join(".git"), format!("gitdir: {}", wt_gitdir.display())).unwrap();
+        std::fs::write(
+            wt_path.join(".git"),
+            format!("gitdir: {}", wt_gitdir.display()),
+        )
+        .unwrap();
         std::fs::write(wt_gitdir.join("commondir"), "../..").unwrap();
         let resolved = discover_main_checkout_root(&wt_path);
         assert_eq!(resolved, Some(main));
@@ -2177,7 +2293,10 @@ trailing notes outside\n";
 
     #[test]
     fn parse_sentinel_handles_id_and_legacy() {
-        assert_eq!(parse_sentinel_line("<!-- fleet:prd:begin -->", "begin"), Some(None));
+        assert_eq!(
+            parse_sentinel_line("<!-- fleet:prd:begin -->", "begin"),
+            Some(None)
+        );
         assert_eq!(
             parse_sentinel_line("<!-- fleet:prd:begin id=\"foo\" -->", "begin"),
             Some(Some("foo".to_string()))
@@ -2187,7 +2306,10 @@ trailing notes outside\n";
             Some(Some("foo".to_string()))
         );
         assert_eq!(parse_sentinel_line("<!-- fleet:prd:end -->", "begin"), None);
-        assert_eq!(parse_sentinel_line("<!-- fleet:prd:begin id=\"\" -->", "begin"), None);
+        assert_eq!(
+            parse_sentinel_line("<!-- fleet:prd:begin id=\"\" -->", "begin"),
+            None
+        );
         assert_eq!(parse_sentinel_line("# TASKS", "begin"), None);
     }
 
@@ -2209,7 +2331,11 @@ trailing notes outside\n";
         assert_eq!(anon.id, None);
         assert_eq!(anon.version, 1);
         // unknown attrs tolerated (forward-compat)
-        let fut = parse_sentinel("<!-- fleet:prd:begin id=\"x\" v=\"2\" foo=\"bar\" -->", "begin").unwrap();
+        let fut = parse_sentinel(
+            "<!-- fleet:prd:begin id=\"x\" v=\"2\" foo=\"bar\" -->",
+            "begin",
+        )
+        .unwrap();
         assert_eq!(fut.version, 2);
         // malformed → None
         assert!(parse_sentinel("<!-- fleet:prd:begin id=\"x -->", "begin").is_none());
@@ -2242,7 +2368,11 @@ trailing notes outside\n";
     #[test]
     fn migrate_leaves_anonymous_and_v2_untouched() {
         let anon = "<!-- fleet:prd:begin -->\n- [ ] P1\n<!-- fleet:prd:end -->\n";
-        assert_eq!(migrate_v1_to_v2(anon), anon, "anonymous legacy block left as-is");
+        assert_eq!(
+            migrate_v1_to_v2(anon),
+            anon,
+            "anonymous legacy block left as-is"
+        );
         let v2 = "<!-- fleet:prd:begin id=\"x\" v=\"2\" -->\n- [ ] P1\n<!-- fleet:prd:end id=\"x\" -->\n";
         assert_eq!(migrate_v1_to_v2(v2), v2, "already-v2 block unchanged");
     }
@@ -2252,7 +2382,10 @@ trailing notes outside\n";
         let v1 = "  <!-- fleet:prd:begin id=\"x\" -->\n- [ ] P1\n  <!-- fleet:prd:end id=\"x\" -->";
         let migrated = migrate_v1_to_v2(v1);
         assert!(migrated.contains("  <!-- fleet:prd:begin id=\"x\" v=\"2\" -->"));
-        assert!(!migrated.ends_with('\n'), "no trailing newline added when source had none");
+        assert!(
+            !migrated.ends_with('\n'),
+            "no trailing newline added when source had none"
+        );
     }
 
     // ── Mutation helpers ────────────────────────────────────────────────────
@@ -2383,8 +2516,14 @@ trailing notes outside\n";
         assert_eq!(blocks[0].kind, PlanKind::Explore);
 
         let exec = create_plan("", "build", "Build it", None, PlanKind::Exec).unwrap();
-        assert!(exec.contains("id=\"build\" v=\"2\" -->"), "no kind attr: {exec}");
-        assert!(!exec.contains("kind="), "exec is the implied default: {exec}");
+        assert!(
+            exec.contains("id=\"build\" v=\"2\" -->"),
+            "no kind attr: {exec}"
+        );
+        assert!(
+            !exec.contains("kind="),
+            "exec is the implied default: {exec}"
+        );
         assert_eq!(extract_prd_blocks(&exec)[0].kind, PlanKind::Exec);
     }
 
@@ -2448,7 +2587,10 @@ trailing notes outside\n";
         let (out, _, _) = render_plans_body(&blocks, None, None);
         assert!(out.contains("## Plan: look [explore] — L"), "{out}");
         assert!(out.contains("## Plan: build — B"), "exec unmarked: {out}");
-        assert!(!out.contains("build [explore]"), "exec must not be marked: {out}");
+        assert!(
+            !out.contains("build [explore]"),
+            "exec must not be marked: {out}"
+        );
     }
 
     // ── Cursor-neighborhood rendering (P1) ────────────────────────────────────
@@ -2475,7 +2617,10 @@ trailing notes outside\n";
         assert!(cursor, "focus on an active plan ⇒ cursor mode");
         assert_eq!(active.len(), 2, "both plans are still active");
 
-        assert!(out.contains("你当前归属的 plan: mine"), "focused plan headed: {out}");
+        assert!(
+            out.contains("你当前归属的 plan: mine"),
+            "focused plan headed: {out}"
+        );
         assert!(out.contains("**P2** — the real task"));
         assert!(
             out.contains("备注:这条 note 必须进上下文"),
@@ -2488,7 +2633,10 @@ trailing notes outside\n";
             "unfocused plan's task text must not appear: {out}"
         );
         assert!(out.contains("另有 1 个 active plan"));
-        assert!(out.contains("theirs"), "collapsed line still names the id: {out}");
+        assert!(
+            out.contains("theirs"),
+            "collapsed line still names the id: {out}"
+        );
     }
 
     /// A focused child renders its path to the root, including an ancestor that
@@ -2497,8 +2645,16 @@ trailing notes outside\n";
     #[test]
     fn cursor_mode_renders_ancestor_path_including_completed_rungs() {
         let blocks = [
-            sbp("root", "**Plan:** Root goal\n\n- [ ] **P9** — root tail\n", None),
-            sbp("mid", "**Plan:** Middle\n\n- [x] **P1** — mid done\n", Some("root")),
+            sbp(
+                "root",
+                "**Plan:** Root goal\n\n- [ ] **P9** — root tail\n",
+                None,
+            ),
+            sbp(
+                "mid",
+                "**Plan:** Middle\n\n- [x] **P1** — mid done\n",
+                Some("root"),
+            ),
             sbp(
                 "leaf",
                 "**Plan:** Leaf\n\n- [ ] **P1** — leaf task\n",
@@ -2508,8 +2664,14 @@ trailing notes outside\n";
         let (out, cursor, _) = render_plans_body(&blocks, Some("leaf"), None);
         assert!(cursor);
         assert!(out.contains("你在计划树里的位置"), "path header: {out}");
-        assert!(out.contains("父 `mid` — Middle (1/1)"), "completed rung shown: {out}");
-        assert!(out.contains("父 `root` — Root goal (0/1)"), "root rung shown: {out}");
+        assert!(
+            out.contains("父 `mid` — Middle (1/1)"),
+            "completed rung shown: {out}"
+        );
+        assert!(
+            out.contains("父 `root` — Root goal (0/1)"),
+            "root rung shown: {out}"
+        );
         assert!(out.contains("**P1** — leaf task"), "focused body expanded");
         assert!(
             !out.contains("root tail"),
@@ -2624,13 +2786,15 @@ trailing notes outside\n";
 
     #[test]
     fn distill_excludes_fully_completed_plan() {
-        let body = "**Plan:** all done\n\n- [x] **P1** — first\n  - detail a\n- [x] **P2** — second\n";
+        let body =
+            "**Plan:** all done\n\n- [x] **P1** — first\n  - detail a\n- [x] **P2** — second\n";
         assert_eq!(distill_active_block(body), None);
     }
 
     #[test]
     fn distill_keeps_plan_with_pending_task() {
-        let body = "**Plan:** mixed\n\n- [x] **P1** — done\n- [ ] **P2** — todo\n  - actionable detail\n";
+        let body =
+            "**Plan:** mixed\n\n- [x] **P1** — done\n- [ ] **P2** — todo\n  - actionable detail\n";
         let out = distill_active_block(body).expect("active plan kept");
         assert!(out.contains("**Plan:** mixed"));
         assert!(out.contains("- [ ] **P2** — todo"));
@@ -2640,7 +2804,11 @@ trailing notes outside\n";
     /// Build a focus record without touching `~/.fleet`, so these tests neither
     /// pollute the developer's real records nor race the process-global
     /// FLEET_HOME that `session_launch`'s tests mutate.
-    fn focus_rec(ws: &Path, plan_id: &str, task: Option<&str>) -> crate::task_progress::TaskProgressRecord {
+    fn focus_rec(
+        ws: &Path,
+        plan_id: &str,
+        task: Option<&str>,
+    ) -> crate::task_progress::TaskProgressRecord {
         crate::task_progress::TaskProgressRecord {
             workspace_path: ws.to_string_lossy().into_owned(),
             plan_id: plan_id.to_string(),
@@ -2812,7 +2980,10 @@ trailing notes outside\n";
     #[test]
     fn extract_plan_name_reads_plan_marker() {
         let body = "intro\n\n**Plan:** Migrate auth crate\n\n- [ ] P1\n";
-        assert_eq!(extract_plan_name(body).as_deref(), Some("Migrate auth crate"));
+        assert_eq!(
+            extract_plan_name(body).as_deref(),
+            Some("Migrate auth crate")
+        );
         assert_eq!(extract_plan_name("no plan line\n- [ ] P1\n"), None);
     }
 

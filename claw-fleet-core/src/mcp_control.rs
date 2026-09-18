@@ -68,14 +68,26 @@ pub const PARENT_SCOPED_CONTROL_TOOLS: [(&str, &str); 5] = [
         "registered a relay on your PARENT session — it would be replaced by a fresh session \
          carrying your note the moment it ends its turn",
     ),
-    ("fleet__watch", "registered a watch that resumes your PARENT session"),
-    ("fleet__loop", "attached a recurring loop to your PARENT session"),
-    ("fleet__schedule", "attached a scheduled run to your PARENT session"),
+    (
+        "fleet__watch",
+        "registered a watch that resumes your PARENT session",
+    ),
+    (
+        "fleet__loop",
+        "attached a recurring loop to your PARENT session",
+    ),
+    (
+        "fleet__schedule",
+        "attached a scheduled run to your PARENT session",
+    ),
 ];
 
 /// `Some(effect clause)` when `name` writes against the calling session's id.
 pub fn parent_scoped_effect(name: &str) -> Option<&'static str> {
-    PARENT_SCOPED_CONTROL_TOOLS.iter().find(|(n, _)| *n == name).map(|(_, e)| *e)
+    PARENT_SCOPED_CONTROL_TOOLS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, e)| *e)
 }
 
 /// The control-tool definitions, appended to `tools/list` for Fleet-owned
@@ -178,7 +190,9 @@ fn handoff_tool_def() -> Value {
                 "plan": {"type": "string", "description": "Plan id to attribute the successor to."},
                 "next": {"type": "string", "description": "P-task the successor resumes at (requires plan)."},
                 "model": {"type": "string", "description": "Override the successor's model (else inherits this session's). Naming another harness's model relays on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh. Effort then resets to that harness's default unless you pass one."},
-                "effort": {"type": "string", "description": "Override the successor's effort (low|medium|high|max)."}
+                "effort": {"type": "string", "description": "Override the successor's effort (low|medium|high|max)."},
+                "goal": {"type": "string", "description": "What this whole relay chain is for — one sentence of \"the work is done when …\". Set it on the FIRST hop: you are registering at the end of your turn, so you already know what the boss settled on even if it only emerged mid-conversation. Later hops inherit it and are judged against it rather than against the plan they happen to hold. Omit (or repeat the same text) to leave it alone."},
+                "goalReason": {"type": "string", "description": "Why you are replacing a goal the chain already has. Required for a change, refused as unnecessary for setting the first one. Changing course is fine — the boss does it; silently narrowing the chain's objective down to your current plan is what this makes impossible. Tell the boss you changed it."}
             },
             "required": ["action"],
             "additionalProperties": false
@@ -356,7 +370,11 @@ pub fn render_note_files(files: &[crate::session_notes::NoteFile], own: &str) ->
     }
     let mut out = format!("{} note file(s):\n", files.len());
     for f in files {
-        let owner = if f.session_id == own { "own" } else { "predecessor" };
+        let owner = if f.session_id == own {
+            "own"
+        } else {
+            "predecessor"
+        };
         out.push_str(&format!(
             "  {}  {} bytes  {}  [{owner} {}]\n",
             f.path,
@@ -395,11 +413,19 @@ fn handle_notes(args: &Value, sid: Option<&str>) -> Result<String, String> {
             } else {
                 notes::append(sid, &path, text)?
             };
-            Ok(format!("ok: {} {} ({} bytes)", action, file.path, file.bytes))
+            Ok(format!(
+                "ok: {} {} ({} bytes)",
+                action, file.path, file.bytes
+            ))
         }
         "read" => {
             let path = req(args, "path")?;
-            notes::read(sid, &path, int_arg(args, "start_line")?, int_arg(args, "stop_line")?)
+            notes::read(
+                sid,
+                &path,
+                int_arg(args, "start_line")?,
+                int_arg(args, "stop_line")?,
+            )
         }
         "list" => {
             let files = notes::list(sid, arg(args, "prefix").as_deref())?;
@@ -558,8 +584,13 @@ fn handle_plan(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, St
             &req(args, "text")?,
         )
         .map(render_plan_outcome),
-        "resume" => po::resume(cwd, &req(args, "plan_id")?, arg(args, "task").as_deref(), sid)
-            .map(render_plan_outcome),
+        "resume" => po::resume(
+            cwd,
+            &req(args, "plan_id")?,
+            arg(args, "task").as_deref(),
+            sid,
+        )
+        .map(render_plan_outcome),
         "migrate" => po::migrate(cwd, None).map(render_plan_outcome),
         "list" => {
             let plans = crate::prd_tasks::list_workspace_task_plans(cwd, None);
@@ -589,7 +620,11 @@ fn handle_plan(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, St
                 .ok_or_else(|| format!("plan '{plan_id}' not found"))?;
             let mut out = String::new();
             for it in &p.items {
-                out.push_str(&format!("{} {}\n", if it.done { "[x]" } else { "[ ]" }, it.text));
+                out.push_str(&format!(
+                    "{} {}\n",
+                    if it.done { "[x]" } else { "[ ]" },
+                    it.text
+                ));
             }
             Ok(out.trim_end().to_string())
         }
@@ -604,9 +639,8 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
     let action = action_of(args)?;
     match action.as_str() {
         "register" => {
-            let sid = sid.ok_or(
-                "no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)",
-            )?;
+            let sid = sid
+                .ok_or("no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)")?;
             let note = req(args, "note").map_err(|_| {
                 "`note` is required — the successor only knows what you write here.".to_string()
             })?;
@@ -641,6 +675,8 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
                 next.as_deref(),
                 route.model.as_deref(),
                 route.effort.as_deref(),
+                arg(args, "goal").as_deref(),
+                arg(args, "goalReason").as_deref(),
                 &route.agent_source,
             )?;
             Ok(format!(
@@ -675,9 +711,8 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
             }
         }
         "cancel" => {
-            let sid = sid.ok_or(
-                "no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)",
-            )?;
+            let sid = sid
+                .ok_or("no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)")?;
             handoff::cancel_pending(sid);
             Ok("ok: pending handoff cancelled (if any)".to_string())
         }
@@ -748,7 +783,9 @@ fn handle_watch(args: &Value, sid: Option<&str>) -> Result<String, String> {
         "stop" => {
             let id = req(args, "id")?;
             if watch::stop(&id) {
-                Ok(format!("ok: watch {id} stopped (its timer exits on next poll)"))
+                Ok(format!(
+                    "ok: watch {id} stopped (its timer exits on next poll)"
+                ))
             } else {
                 Err(format!("no watch with id {id}"))
             }
@@ -803,7 +840,9 @@ fn handle_loop(args: &Value, sid: Option<&str>) -> Result<String, String> {
         "stop" => {
             let id = req(args, "id")?;
             if agent_loop::stop(&id) {
-                Ok(format!("ok: loop {id} stopped (its timer exits on next wake)"))
+                Ok(format!(
+                    "ok: loop {id} stopped (its timer exits on next wake)"
+                ))
             } else {
                 Err(format!("no loop with id {id}"))
             }
@@ -943,7 +982,9 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
         "cancel" => {
             let id = req(args, "id")?;
             if schedule::cancel(&id) {
-                Ok(format!("ok: schedule {id} cancelled (its timer exits on next wake)"))
+                Ok(format!(
+                    "ok: schedule {id} cancelled (its timer exits on next wake)"
+                ))
             } else {
                 Err(format!("no schedule with id {id}"))
             }
@@ -976,7 +1017,10 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 ..Default::default()
             })?;
             let _ = schedule::arm_timer(&rec);
-            Ok(format!("ok: schedule {} updated — fires at epoch-ms {}。计时器已重挂。", rec.id, rec.fire_at))
+            Ok(format!(
+                "ok: schedule {} updated — fires at epoch-ms {}。计时器已重挂。",
+                rec.id, rec.fire_at
+            ))
         }
         "get" => {
             let id = req(args, "id")?;
@@ -1029,7 +1073,11 @@ fn handle_artifact(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result
                 a.title,
                 a.kind,
                 a.size_bytes,
-                if a.hardlinked { ", hard-linked" } else { ", copied" }
+                if a.hardlinked {
+                    ", hard-linked"
+                } else {
+                    ", copied"
+                }
             ))
         }
         "list" => {
@@ -1056,7 +1104,11 @@ fn handle_artifact(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result
                     a.kind,
                     a.size_bytes,
                     a.workspace_name,
-                    if a.drifted { "  (source rewritten since)" } else { "" }
+                    if a.drifted {
+                        "  (source rewritten since)"
+                    } else {
+                        ""
+                    }
                 ));
             }
             Ok(out)
@@ -1127,7 +1179,11 @@ fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
                 fmt_ms(doc.updated_ms),
             );
             for v in &doc.versions {
-                let marker = if v.id == doc.current_version { "*" } else { " " };
+                let marker = if v.id == doc.current_version {
+                    "*"
+                } else {
+                    " "
+                };
                 out.push_str(&format!(
                     "   {marker} {}  {} file(s)  {} bytes  {}\n",
                     v.id,
@@ -1210,7 +1266,11 @@ fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
             let mut out = String::new();
             for h in &hits {
                 let doc = &by_slug[&h.slug];
-                let matched = if h.snippet.is_empty() { &doc.title } else { &h.snippet };
+                let matched = if h.snippet.is_empty() {
+                    &doc.title
+                } else {
+                    &h.snippet
+                };
                 out.push_str(&format!("{}  [{}]  {}\n", h.slug, h.field, matched));
             }
             Ok(out.trim_end().to_string())
@@ -1250,9 +1310,19 @@ mod tests {
     /// gets a schema-level error rather than a half-applied write.
     #[test]
     fn notes_and_history_refuse_without_session_and_validate_ints() {
-        let no_sid = handle("fleet__notes", &json!({"action":"list"}), None, Path::new("."));
+        let no_sid = handle(
+            "fleet__notes",
+            &json!({"action":"list"}),
+            None,
+            Path::new("."),
+        );
         assert!(no_sid.unwrap_err().contains("no session id"));
-        let no_sid = handle("fleet__history", &json!({"action":"search","query":"x"}), None, Path::new("."));
+        let no_sid = handle(
+            "fleet__history",
+            &json!({"action":"search","query":"x"}),
+            None,
+            Path::new("."),
+        );
         assert!(no_sid.unwrap_err().contains("no session id"));
 
         let bad = handle(
@@ -1394,8 +1464,13 @@ mod tests {
     #[test]
     fn handoff_show_without_session_id_errors() {
         let tmp = tempfile::tempdir().unwrap();
-        let err = handle("fleet__handoff", &json!({"action": "show"}), None, tmp.path())
-            .unwrap_err();
+        let err = handle(
+            "fleet__handoff",
+            &json!({"action": "show"}),
+            None,
+            tmp.path(),
+        )
+        .unwrap_err();
         assert!(err.contains("no session id"), "{err}");
     }
 
@@ -1544,7 +1619,10 @@ mod tests {
 
     #[test]
     fn build_schedule_gate_absent_is_none() {
-        assert_eq!(build_schedule_gate(&json!({"action": "create"})).unwrap(), None);
+        assert_eq!(
+            build_schedule_gate(&json!({"action": "create"})).unwrap(),
+            None
+        );
         // blank until ⇒ no gate
         assert_eq!(build_schedule_gate(&json!({"until": "   "})).unwrap(), None);
     }
@@ -1552,7 +1630,9 @@ mod tests {
     #[test]
     fn build_schedule_gate_defaults_and_parses() {
         // until alone ⇒ defaults for poll/timeout
-        let g = build_schedule_gate(&json!({"until": "test -f /tmp/x"})).unwrap().unwrap();
+        let g = build_schedule_gate(&json!({"until": "test -f /tmp/x"}))
+            .unwrap()
+            .unwrap();
         assert_eq!(g.until_cmd, "test -f /tmp/x");
         assert_eq!(g.poll_secs, crate::schedule::DEFAULT_GATE_POLL_SECS);
         assert_eq!(g.timeout_secs, crate::schedule::DEFAULT_GATE_TIMEOUT_SECS);

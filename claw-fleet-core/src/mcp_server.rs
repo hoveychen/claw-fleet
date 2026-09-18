@@ -1674,6 +1674,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
             "claude",
         )
         .expect("register handoff");

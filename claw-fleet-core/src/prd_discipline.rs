@@ -158,10 +158,12 @@ git worktree add -b prd/<task-id> .worktrees/<task-id> main
 上下文在计划中途拉长时，不要死磕到窗口耗尽、不要悄悄提前收尾、也不要留下没人执行的「交给下一个会话」的便条：
 
 ```
-fleet handoff --note "<换班简报：什么做完了、什么在飞、关键文件、坑、下一个具体步骤>" [--plan <plan-id>] [--next <P>] [--model <模型>] [--effort <档位>]
+fleet handoff --note "<换班简报：什么做完了、什么在飞、关键文件、坑、下一个具体步骤>" [--goal <本链目标>] [--plan <plan-id>] [--next <P>] [--model <模型>] [--effort <档位>]
 ```
 
 - `--note` 强制。`--plan/--next` 让 Fleet 把后继者自动归属到该计划和 P。`--model/--effort` 可选，不传就继承当前会话。
+- **第一棒交接时用 `--goal` 写下这条链的目标**——一句话的「什么做完了这条链才算完」。你是在回合*末尾*登记的，所以哪怕这活是聊到一半才定下来的，此刻你也已经知道{title}要什么了。它会被每轮注入到后继者眼前，并成为**收工的判据**：计划树全勾了、只要 goal 没达成，就不该把决策卡标成 `taskComplete: true`。
+- **目标变了是正常的**（{title}中途改路线、或原目标已不成立），改就是了——但要用 `--goal <新目标> --goal-reason <为什么>` 显式改，并在卡里告诉{title}。没有理由的改动会被拒：那条规则挡的不是「目标变了」，而是把链的目标**悄悄缩成你手上那个 plan**，然后宣布达成。纯探索、本来就没有终点的链，不写 goal 也完全可以。
 - 登记后**干净地结束回合**（先按 Rule 3 提交 worktree 进度）。Stop hook 消费登记并 spawn 后继者，开场 prompt 就是你的便条。
 - **叙述一次交接不等于登记一次。**在回复文本里写「接下来我起下一棒」什么都不做：没真的调用工具就没有后继者，计划在你交出的那一刻悄然死掉。结束这样一个回合前的最后一件事就是那个调用本身，等 `ok: handoff registered` 回来才停。
 - **登记就是把便条定稿了，也是本回合最后一个动作。之后一张决策卡都不要再发**（连不带决策的收尾卡也不要）：接力靠回合*结束*触发，卡会把回合挂住等人点，后继者就起不来；卡上的答案也进不了已冻结的 note，会被静默丢弃。要问就先问、拿到答案、再按答案写 note 去登记。
@@ -357,10 +359,12 @@ Two mechanisms now enforce this rhythm. **Focused injection**: once you are attr
 When your context window grows long mid-plan, do not grind it to exhaustion, do not quietly wrap up early, and do not leave a "for the next session" note nobody will execute:
 
 ```
-fleet handoff --note "<shift briefing: what is done, what is in flight, key files, traps, the next concrete step>" [--plan <plan-id>] [--next <P>] [--model <model>] [--effort <tier>]
+fleet handoff --note "<shift briefing: what is done, what is in flight, key files, traps, the next concrete step>" [--goal <chain goal>] [--plan <plan-id>] [--next <P>] [--model <model>] [--effort <tier>]
 ```
 
 - `--note` is mandatory. `--plan/--next` let Fleet attribute the successor to that plan and P. `--model/--effort` are optional and otherwise inherited.
+- **On the first baton, state the chain's goal with `--goal`** — one sentence of "this chain is done when …". You register at the *end* of your turn, so even when the work only took shape mid-conversation you already know what {title} settled on. It is injected in front of every later baton and becomes **the test for finishing**: with the goal unmet, a fully ticked plan tree is still not grounds for `taskComplete: true`.
+- **A goal changing is normal** ({title} changes course, or the original no longer holds) — just change it explicitly with `--goal <new> --goal-reason <why>`, and tell {title} on a card. A change with no reason is refused: the rule does not forbid the goal moving, it forbids **quietly shrinking it down to the plan in your hands** and then declaring victory. A purely exploratory chain with no finish line can leave the goal unset.
 - Then **end the turn cleanly** (commit worktree progress first, per Rule 3). The Stop hook consumes the registration and spawns a successor whose opening prompt is your note.
 - **Narrating a handoff is not registering one.** Writing "I'll start the next baton" in your reply does nothing: with no actual tool call there is no successor and the plan dies the moment you stop. So the last thing you do in such a turn is that call itself — wait for `ok: handoff registered` before stopping.
 - **Registering freezes the note, and it is the last action of the turn. Afterwards raise **no decision card at all** — not even a decision-free closing card. Here is why: the relay fires when the turn *ends*; a card holds the turn open waiting to be clicked, so the successor never starts, and an answer on that card cannot reach the already-frozen note — it is silently dropped. Ask first, get the answer, then write the note and register.

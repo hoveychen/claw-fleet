@@ -282,8 +282,16 @@ kind: PlanKind, items: Array<TaskItem>, };
 export type HandoffLink = { fromSessionId: string, toSessionId: string, note: string, planId?: string | null, nextTask?: string | null, 
 handedAt: number, };
 
+export type GoalRevision = { 
+hop: number, sessionId: string, 
+from?: string | null, to: string, 
+reason?: string | null, 
+at: number, };
+
 export type HandoffChain = { chainId: string, workspacePath: string, 
-planId?: string | null, links: Array<HandoffLink>, };
+planId?: string | null, 
+goal?: string | null, 
+goalHistory?: Array<GoalRevision>, links: Array<HandoffLink>, };
 
 export type SessionHandoffInfo = { chainId: string, 
 hop: number, 
