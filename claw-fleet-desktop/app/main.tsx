@@ -14,7 +14,11 @@ const promoScene = promoSceneFromSearch(window.location.search);
 // recording opens straight onto the populated board.
 const demoMode = params.has("demo");
 
-if (isMockMode && (promoScene || demoMode || params.has("website"))) {
+// `?mock&qa` fires a decision card 900ms after boot (see `triggerMockQaScenario`),
+// which is the only way to eyeball the DecisionPanel without waiting for a real
+// one — but the welcome page sat on top of it, so the card was unreachable
+// unless you hand-primed localStorage first. Skip onboarding here too.
+if (isMockMode && (promoScene || demoMode || mockQaMode || params.has("website"))) {
   primePromoStorage(window.localStorage);
 }
 // The promo screencast is an English piece — pin the UI language so no chrome
