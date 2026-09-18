@@ -40,7 +40,13 @@ fn nudged_dir() -> Option<PathBuf> {
 fn nudged_path(session_id: &str) -> Option<PathBuf> {
     let safe: String = session_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     nudged_dir().map(|d| d.join(format!("{safe}.marker")))
 }
@@ -107,9 +113,17 @@ pub fn refusal_for(session_id: &str, task_complete: bool) -> Option<String> {
     if already_nudged(session_id) {
         return None;
     }
-    let first_note = chain.links.first().map(|l| l.note.as_str()).unwrap_or_default();
+    let first_note = chain
+        .links
+        .first()
+        .map(|l| l.note.as_str())
+        .unwrap_or_default();
     mark_nudged(session_id);
-    Some(refusal_text(hop, chain.session_ids().len() as u32, first_note))
+    Some(refusal_text(
+        hop,
+        chain.session_ids().len() as u32,
+        first_note,
+    ))
 }
 
 #[cfg(test)]
@@ -131,10 +145,22 @@ mod tests {
     #[test]
     fn refusal_names_the_hop_and_quotes_the_origin() {
         let text = refusal_text(26, 26, "# 接力简报\n\n老板要把 27 页前端一次性全重写");
-        assert!(text.contains("第 26/26 棒"), "hop position is named: {text}");
-        assert!(text.contains("27 页前端一次性全重写"), "origin is quoted: {text}");
-        assert!(text.contains("action=\"show\""), "points at the chain reader: {text}");
-        assert!(text.contains("taskComplete"), "names the flag to reconsider: {text}");
+        assert!(
+            text.contains("第 26/26 棒"),
+            "hop position is named: {text}"
+        );
+        assert!(
+            text.contains("27 页前端一次性全重写"),
+            "origin is quoted: {text}"
+        );
+        assert!(
+            text.contains("action=\"show\""),
+            "points at the chain reader: {text}"
+        );
+        assert!(
+            text.contains("taskComplete"),
+            "names the flag to reconsider: {text}"
+        );
     }
 
     #[test]
@@ -161,7 +187,10 @@ mod tests {
     /// Write `chain` where [`crate::handoff::chain_containing`] will find it
     /// under the currently claimed `FLEET_HOME`.
     fn seed_chain(chain: &HandoffChain) {
-        let dir = crate::session::get_fleet_dir().unwrap().join("handoffs").join("chain");
+        let dir = crate::session::get_fleet_dir()
+            .unwrap()
+            .join("handoffs")
+            .join("chain");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join(format!("{}.json", chain.chain_id)),
@@ -192,11 +221,20 @@ mod tests {
         // the note that was handed to it, which is the corner task).
         let first = refusal_for("s3", true).expect("later hop is gated");
         assert!(first.contains("第 3/3 棒"), "names the hop: {first}");
-        assert!(first.contains("27 页前端一次性全重写"), "quotes hop 1's note: {first}");
-        assert!(!first.contains("alembic"), "does not quote the corner task: {first}");
+        assert!(
+            first.contains("27 页前端一次性全重写"),
+            "quotes hop 1's note: {first}"
+        );
+        assert!(
+            !first.contains("alembic"),
+            "does not quote the corner task: {first}"
+        );
 
         // Re-sending the same card goes through: the agent has looked once.
-        assert!(refusal_for("s3", true).is_none(), "second attempt is not gated");
+        assert!(
+            refusal_for("s3", true).is_none(),
+            "second attempt is not gated"
+        );
     }
 
     #[test]
@@ -205,7 +243,10 @@ mod tests {
             chain_id: "c1".into(),
             workspace_path: "/tmp/ws".into(),
             plan_id: None,
-            links: vec![link("s1", "s2", "origin note"), link("s2", "s3", "later note")],
+            links: vec![
+                link("s1", "s2", "origin note"),
+                link("s2", "s3", "later note"),
+            ],
         };
         assert_eq!(chain.hop_of("s1"), Some(1), "first hop is not gated");
         assert_eq!(chain.hop_of("s3"), Some(3));
