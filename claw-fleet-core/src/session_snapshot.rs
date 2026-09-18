@@ -338,8 +338,25 @@ mod tests {
             started.elapsed(),
         );
         // …and it must have started the scan, or nothing would ever warm it.
-        std::thread::sleep(Duration::from_millis(700));
-        assert_eq!(scans.load(Ordering::SeqCst), 1, "cold read must kick a background scan");
+        //
+        // Waited for, not slept through: the claim is "the background scan lands
+        // and the next read is warm", which says nothing about *when*. A fixed
+        // sleep turns that into a bet on the scheduler — one full-suite run on a
+        // loaded machine lost it, with the 400ms scan still in flight after the
+        // 700ms sleep, and reported a flake against code that was fine.
+        // `age()` is the observation point on purpose: it is a pure read, while
+        // `sessions_if_scanned` kicks a refresh of its own, and polling *that*
+        // would race the very "exactly one scan" claim below.
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while snap.age().is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "the background scan never landed; {} scans ran",
+                scans.load(Ordering::SeqCst),
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(scans.load(Ordering::SeqCst), 1, "exactly one background scan, not one per read");
         assert_eq!(
             snap.sessions_if_scanned().map(|s| s.len()),
             Some(1),
