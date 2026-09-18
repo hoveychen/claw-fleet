@@ -402,14 +402,43 @@ mod tests {
         s
     }
 
+    /// Run `f` against a private `~/.fleet`.
+    ///
+    /// **`FLEET_HOME`, not `HOME`.** `pending_dir` resolves through
+    /// [`crate::session::real_home_dir`], which on macOS falls through to
+    /// `getpwuid` and ignores `$HOME` outright — so setting `HOME` isolated
+    /// nothing here. Every test in this module was reading and writing the
+    /// developer's real `~/.fleet/pending-messages` (confirmed 2026-09-17: a
+    /// suite run left `sess-live.json`, `sess-rl.json`, `sess-rm.json` and
+    /// `sess-rm2.json` sitting in it). That is both litter and a race: a Fleet
+    /// desktop running on the same machine drains that directory on every tick,
+    /// and a drain that claimed the queue between this test's `write_queue` and
+    /// its `drain_if_idle` is what made `combines_messages_and_clears_when_idle`
+    /// fail once in a full-suite run and never in isolation.
+    ///
+    /// The directory name carries a per-call counter as well as the pid: two
+    /// `SystemTime::now()` stamps taken inside one microsecond are equal on
+    /// macOS, so a timestamp alone is not a unique name.
     fn with_temp_home<F: FnOnce()>(f: F) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+
         let _guard = fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!("fleet-pending-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-pending-test-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
-        std::env::set_var("HOME", &tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by fleet_home_lock.
+        std::env::set_var("FLEET_HOME", &tmp);
         f();
-        std::env::remove_var("HOME");
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -423,6 +452,22 @@ mod tests {
             log.borrow_mut().push((sid.to_string(), prompt.to_string()));
             Ok(())
         }
+    }
+
+    /// The isolation itself, asserted — because when it broke, nothing failed:
+    /// the tests kept passing against the developer's real `~/.fleet` and only
+    /// showed up as litter in it and as an occasional race with a live desktop.
+    #[test]
+    fn temp_home_actually_redirects_the_queue_directory() {
+        with_temp_home(|| {
+            let dir = pending_dir().expect("pending dir resolves");
+            assert!(
+                dir.starts_with(std::env::temp_dir()),
+                "the queue directory must live under the temp home, got {dir:?} — \
+                 setting HOME alone does not isolate this (macOS resolves the real \
+                 home via getpwuid), it has to be FLEET_HOME"
+            );
+        });
     }
 
     #[test]
@@ -666,7 +711,12 @@ mod tests {
             let s = base_session("sess-idle", SessionStatus::WaitingInput, false);
             drain_if_idle(&s, recording_spawn(&log));
             let fired = log.borrow();
-            assert_eq!(fired.len(), 1, "burst combines into ONE resume");
+            assert_eq!(
+                fired.len(),
+                1,
+                "burst combines into ONE resume (queue dir was {:?})",
+                pending_dir(),
+            );
             assert_eq!(fired[0].0, "sess-idle");
             assert_eq!(fired[0].1, "first\n\nsecond", "messages joined in order");
             assert!(get("sess-idle").is_none(), "queue cleared after firing");
