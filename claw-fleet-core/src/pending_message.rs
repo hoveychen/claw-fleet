@@ -166,7 +166,41 @@ pub fn remove_at(session_id: &str, index: usize) -> Result<(), String> {
 /// Only Fleet-owned sessions can be resumed headlessly, so this rejects sessions
 /// Fleet didn't launch — the same gate [`crate::parked::parkable_workspace`]
 /// uses, so a message never gets queued for a session that can never drain it.
+/// Follow the handoff chain from `session_id` to the hop that still owns the
+/// work, or `None` when this session never handed its baton over.
+///
+/// A retired hop must never be resumed: its successor is already running the
+/// plan, and waking the predecessor puts a second agent on the same work with a
+/// context that ends at "I just registered a handoff" (see
+/// [`crate::handoff::successor_session_of`]). For a queued follow-up the right
+/// answer is not to drop it but to re-address it — the message was meant for
+/// whoever is doing the work, and that is the live baton.
+fn live_baton_of(session_id: &str) -> Option<String> {
+    let mut current = crate::handoff::successor_session_of(session_id)?;
+    // Chains are short and acyclic; the bound is only so a corrupted store
+    // cannot spin the scan thread forever.
+    for _ in 0..64 {
+        match crate::handoff::successor_session_of(&current) {
+            Some(next) => current = next,
+            None => break,
+        }
+    }
+    Some(current)
+}
+
+/// The session a follow-up addressed to `session_id` will actually land on —
+/// itself, or the live end of its handoff chain. Front ends call this to report
+/// the redirect rather than silently queueing somewhere else.
+pub fn live_target(session_id: &str) -> String {
+    live_baton_of(session_id).unwrap_or_else(|| session_id.to_string())
+}
+
 pub fn enqueue(session_id: &str, workspace_path: &str, text: &str) -> Result<(), String> {
+    // Re-address ahead of every other check: a retired hop is not a valid
+    // destination, and the Fleet-owned gate below has to run against the hop
+    // that will actually be resumed.
+    let redirected = live_baton_of(session_id.trim());
+    let session_id = redirected.as_deref().unwrap_or(session_id);
     let session_id = session_id.trim();
     let text = text.trim();
     if text.is_empty() {
@@ -175,6 +209,15 @@ pub fn enqueue(session_id: &str, workspace_path: &str, text: &str) -> Result<(),
     if crate::parked::parkable_workspace(session_id).is_none() {
         return Err("session is not Fleet-owned; cannot queue a follow-up".into());
     }
+    append_to_queue(session_id, workspace_path, text)
+}
+
+/// [`enqueue`] without the Fleet-owned gate, for text that has already passed
+/// it once and is only being re-addressed (the retired-hop move in
+/// [`drain_if_idle`]). A successor is Fleet-spawned by construction, but its
+/// transcript may not be on disk yet the moment the predecessor's queue is
+/// moved — failing the gate there would drop the message rather than delay it.
+fn append_to_queue(session_id: &str, workspace_path: &str, text: &str) -> Result<(), String> {
     let path = queue_path(session_id).ok_or("bad session id")?;
     let mut q = get(session_id).unwrap_or_else(|| PendingQueue {
         session_id: session_id.to_string(),
@@ -295,6 +338,31 @@ where
     };
     if q.messages.is_empty() {
         let _ = clear(&session.id);
+        return;
+    }
+    // A session can retire *after* its queue was written — that is the whole
+    // window this covers: `enqueue` redirects at write time, so anything still
+    // sitting on a retired hop got there before the handoff registered. Resuming
+    // it would run the predecessor alongside the successor that owns the work,
+    // so hand the messages to the live baton instead of firing or dropping them.
+    if let Some(live) = live_baton_of(&session.id) {
+        let Some(q) = claim_queue(&session.id) else {
+            return;
+        };
+        for m in &q.messages {
+            if let Err(e) = append_to_queue(&live, &q.workspace_path, m) {
+                crate::log_debug(&format!(
+                    "pending_message: could not move a queued msg from retired {} to {live}: {e}",
+                    session.id
+                ));
+            }
+        }
+        crate::log_debug(&format!(
+            "pending_message: moved {} queued msg(s) from retired {} to its live baton {live}",
+            q.messages.len(),
+            session.id
+        ));
+        release_claim(&session.id);
         return;
     }
     if !is_drainable(session) {
@@ -720,6 +788,82 @@ mod tests {
             assert_eq!(fired[0].0, "sess-idle");
             assert_eq!(fired[0].1, "first\n\nsecond", "messages joined in order");
             assert!(get("sess-idle").is_none(), "queue cleared after firing");
+        });
+    }
+
+    /// Write a handoff chain into the (already isolated) FLEET_HOME so the
+    /// retirement lookups have something to read.
+    fn write_chain(hops: &[(&str, &str)]) {
+        let dir = crate::session::real_home_dir()
+            .unwrap()
+            .join(".fleet")
+            .join("handoffs")
+            .join("chain");
+        fs::create_dir_all(&dir).unwrap();
+        let links: Vec<serde_json::Value> = hops
+            .iter()
+            .map(|(from, to)| {
+                serde_json::json!({
+                    "fromSessionId": from,
+                    "toSessionId": to,
+                    "note": "n",
+                    "handedAt": 1u64,
+                })
+            })
+            .collect();
+        let chain = serde_json::json!({
+            "chainId": "c1",
+            "workspacePath": "/ws",
+            "links": links,
+        });
+        fs::write(dir.join("c1.json"), chain.to_string()).unwrap();
+    }
+
+    /// A queue written before its session handed the baton over must not fire:
+    /// resuming a retired hop runs a second agent beside the successor that owns
+    /// the work. The messages are not dropped either — they are for whoever is
+    /// doing the work, so they move to the live end of the chain.
+    #[test]
+    fn a_retired_hop_moves_its_queue_to_the_live_baton_instead_of_firing() {
+        with_temp_home(|| {
+            write_chain(&[("hop-a", "hop-b"), ("hop-b", "hop-c")]);
+            write_queue(
+                &queue_path("hop-a").unwrap(),
+                &PendingQueue {
+                    session_id: "hop-a".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["steer left".into(), "and then right".into()],
+                },
+            )
+            .unwrap();
+
+            let log = std::cell::RefCell::new(Vec::new());
+            let s = base_session("hop-a", SessionStatus::WaitingInput, false);
+            drain_if_idle(&s, recording_spawn(&log));
+
+            assert!(log.borrow().is_empty(), "the retired hop must not be resumed");
+            assert!(get("hop-a").is_none(), "its queue is gone");
+            let moved = get("hop-c").expect("messages landed on the live baton");
+            assert_eq!(moved.messages, vec!["steer left", "and then right"]);
+
+            // And the live baton itself still drains normally.
+            let live = base_session("hop-c", SessionStatus::WaitingInput, false);
+            drain_if_idle(&live, recording_spawn(&log));
+            assert_eq!(log.borrow().len(), 1);
+            assert_eq!(log.borrow()[0].0, "hop-c");
+        });
+    }
+
+    /// `live_target` is what the front ends report, so it has to name the hop the
+    /// message actually lands on — itself when the session never relayed.
+    #[test]
+    fn live_target_follows_the_chain_to_its_end() {
+        with_temp_home(|| {
+            write_chain(&[("hop-a", "hop-b"), ("hop-b", "hop-c")]);
+            assert_eq!(live_target("hop-a"), "hop-c");
+            assert_eq!(live_target("hop-b"), "hop-c");
+            assert_eq!(live_target("hop-c"), "hop-c");
+            assert_eq!(live_target("unrelated"), "unrelated");
         });
     }
 
