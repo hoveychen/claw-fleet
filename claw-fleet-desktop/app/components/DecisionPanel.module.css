@@ -79,8 +79,13 @@
 .panel_with_detail {
   flex-direction: row-reverse;
   align-items: stretch;
+  /* The embedded SessionDetail needs a definite height to hang its internal
+   * scroll off, so this variant is height-driven rather than content-driven.
+   * Fill the same envelope the content-sized panel is capped at — an earlier
+   * 80vh here made expanding the detail column visibly SHORTEN a tall card and
+   * drop its top edge, since the panel is anchored at `bottom: 12px`. */
+  height: calc(100vh - 56px);
   max-height: calc(100vh - 56px);
-  height: 80vh;
 }
 
 .detail_column {
@@ -123,8 +128,9 @@
 .panel_with_detail_stacked {
   flex-direction: column-reverse;
   align-items: stretch;
+  /* Same height contract as `.panel_with_detail` — see the note there. */
+  height: calc(100vh - 56px);
   max-height: calc(100vh - 56px);
-  height: 80vh;
 }
 
 .panel_with_detail_stacked .detail_column,
