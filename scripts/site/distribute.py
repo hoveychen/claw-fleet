@@ -62,6 +62,40 @@ def validate_release(release):
     return tag, assets
 
 
+def newest_downloadable_release(releases):
+    """Return the newest stable release whose assets are all published.
+
+    `releases/latest` cannot be trusted for this: GitHub marks a release
+    "latest" as soon as its record exists, which on this repo is the instant
+    the tag is pushed -- the assets only arrive once the Release workflow has
+    signed and uploaded them. v2.10.3's Pages deploy failed in exactly that
+    window on 2026-09-18, because tag v2.10.4 had landed 92 seconds earlier
+    and its assetless record was already "latest".
+
+    Walking newest-first and taking the first release that validates keeps
+    both publication targets on the newest version users can actually
+    download, and it can never step backwards past a complete release.
+    """
+    ordered = sorted(
+        releases,
+        key=lambda release: release.get('published_at') or release.get('created_at') or '',
+        reverse=True,
+    )
+    rejected = []
+    for release in ordered:
+        try:
+            validate_release(release)
+        except (ValueError, KeyError, TypeError) as error:
+            rejected.append(f'{release.get("tag_name")}: {error}')
+            continue
+        if rejected:
+            print('Skipped newer releases that are not downloadable yet:', flush=True)
+            for line in rejected:
+                print('  -', line, flush=True)
+        return release
+    raise ValueError('No stable release carries a complete asset set: ' + '; '.join(rejected))
+
+
 def verify(path, asset):
     digest = hashlib.sha256()
     with path.open('rb') as stream:
