@@ -41,6 +41,11 @@ fleet stop <id> --force
 # Interrupt the in-flight tool call, leaving the session resumable
 fleet interrupt <id>
 
+# Queue a message for another Fleet-owned session — delivered as a new turn the
+# moment its current turn ends. Use this to steer a running headless session:
+# it has no live stdin, and it is not a Claude Code cross-session peer.
+fleet send <id> "prefer fanning the mutation batches out to subagents"
+
 # Show account info and rate-limit usage
 fleet account
 
@@ -121,8 +126,9 @@ Use `--level high` to filter out medium-risk noise. Use `--filter` to scope to a
 - **Monitor overall throughput**: `fleet speed`
 - **Stop a runaway agent**: `fleet stop <id>`
 - **Unwedge a `Stuck` agent without killing it**: `fleet interrupt <id>`
+- **Redirect a session that is mid-turn**: `fleet send <id> "<instruction>"` — the only lever that does not cost the target its work, and the only one that reaches a headless session at all
 - **Check rate limits before heavy work**: `fleet account`
 - **Find which session discussed a topic**: `fleet search "database migration"`
 - **Review what risky commands agents ran**: `fleet audit`
 - **Check for critical-only risks**: `fleet audit --level critical`
-- **Get machine-readable output**: append `--json` to the read commands (`agents`, `agent`, `account`, `speed`, `search`, `audit`). `stop` and `interrupt` have no `--json`.
+- **Get machine-readable output**: append `--json` to the read commands (`agents`, `agent`, `account`, `speed`, `search`, `audit`). `stop`, `interrupt` and `send` have no `--json`.

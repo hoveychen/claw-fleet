@@ -47,12 +47,13 @@ pub fn inspect_tool_def() -> Value {
 pub fn control_tool_def() -> Value {
     json!({
         "name": "fleet__control",
-        "description": "Signal another agent session. DESTRUCTIVE — `stop` terminates the target's whole process tree (SIGTERM, or SIGKILL with `force: true`) and `interrupt` aborts its in-flight tool call. Neither is undoable; confirm with the user before signalling a session you did not start. Use this instead of the `fleet stop` / `fleet interrupt` CLI. Actions: stop (`id` required), interrupt (`id` required). To find ids first, use `fleet__inspect` action=list.",
+        "description": "Signal another agent session. `send` queues a follow-up message for a Fleet-owned session — it is delivered as a new turn the moment that session's current turn ends, so it is the way to steer a headless session that is already running (those do not appear in `ListAgents` and `SendMessage` cannot reach them). The other two are DESTRUCTIVE and not undoable: `stop` terminates the target's whole process tree (SIGTERM, or SIGKILL with `force: true`) and `interrupt` aborts its in-flight tool call; confirm with the user before signalling a session you did not start. Use this instead of the `fleet send` / `fleet stop` / `fleet interrupt` CLI. Actions: send (`id` + `text`), stop (`id`), interrupt (`id`). To find ids first, use `fleet__inspect` action=list.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["stop", "interrupt"]},
+                "action": {"type": "string", "enum": ["send", "stop", "interrupt"]},
                 "id": {"type": "string", "description": "Agent id or workspace-name prefix. Required."},
+                "text": {"type": "string", "description": "Message to deliver at the end of the target's current turn (send only). Required for send."},
                 "force": {"type": "boolean", "description": "SIGKILL instead of SIGTERM (stop only)."}
             },
             "required": ["action", "id"],
@@ -378,8 +379,76 @@ fn render_audit(level: &str, filter: Option<&str>) -> Result<String, String> {
 
 // ── control ──────────────────────────────────────────────────────────────────
 
+/// Pick the session a `send` should queue for, refusing the two targets that
+/// make the delivery meaningless rather than merely useless.
+///
+/// A subagent shares its parent's transcript, so queueing for one would resume
+/// the parent — name the parent instead. Queueing for *yourself* would hand your
+/// own next turn a message you already know, which is at best a wasted turn and
+/// at worst a self-resume loop, so it is refused too; `self_id` is the caller's
+/// own session id when it has one.
+fn vet_send_target<'a>(
+    sessions: &'a [SessionInfo],
+    needle: &str,
+    self_id: Option<&str>,
+) -> Result<&'a SessionInfo, String> {
+    let target = resolve(sessions, needle)?;
+    if target.is_subagent {
+        return Err(format!(
+            "{} is a subagent — it shares its parent's transcript, so send to the parent session instead",
+            short_id(&target.id)
+        ));
+    }
+    if self_id == Some(target.id.as_str()) {
+        return Err(
+            "that is this session — write the note down yourself instead of queueing it".to_string(),
+        );
+    }
+    Ok(target)
+}
+
+/// Queue `text` as a follow-up turn for another session, delivered when its
+/// current turn ends.
+///
+/// The one lever an agent has for steering a session that is *already running*:
+/// Fleet's sessions are one-shot headless `claude -p` processes with no live
+/// stdin (see [`crate::pending_message`]), and they never register as Claude
+/// Code cross-session peers, so `SendMessage` cannot address them. Shared by the
+/// `fleet__control action=send` tool and the `fleet send` CLI.
+pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
+    let sessions = load_sessions();
+    let self_id = crate::codex_launch::resolve_fleet_session_id_from_env();
+    let target = vet_send_target(&sessions, needle, self_id.as_deref())?;
+    // `enqueue` itself refuses a session Fleet does not own — one it cannot
+    // `claude --resume` without putting a second process on somebody's
+    // transcript — so that gate is not repeated here.
+    crate::pending_message::enqueue(&target.id, &target.workspace_path, text)?;
+    // A retired hop is re-addressed to whoever inherited its work, so report the
+    // landing session rather than the one that was asked for.
+    let landed = crate::pending_message::live_target(&target.id);
+    let queued = crate::pending_message::get(&landed)
+        .map(|q| q.messages.len())
+        .unwrap_or(1);
+    let relayed = if landed == target.id {
+        String::new()
+    } else {
+        format!(
+            " (that hop has handed its baton on; queued for its successor {} instead)",
+            short_id(&landed)
+        )
+    };
+    Ok(format!(
+        "ok: queued for {} ({}){relayed}; {queued} message(s) pending, delivered when its current turn ends",
+        short_id(&target.id),
+        target.workspace_name
+    ))
+}
+
 pub fn handle_control(args: &Value, action: &str) -> Result<String, String> {
     let id = crate::mcp_control::req(args, "id")?;
+    if action == "send" {
+        return send_message(&id, &crate::mcp_control::req(args, "text")?);
+    }
     let sessions = load_sessions();
     let target = resolve(&sessions, &id)?;
     // The CLI's guards, carried over verbatim — they are the difference between
@@ -520,5 +589,57 @@ mod tests {
     #[test]
     fn search_rejects_an_empty_query() {
         assert!(render_search("   ", 20).unwrap_err().contains("empty"));
+    }
+
+    /// A send to a subagent would resume its parent (they share a transcript),
+    /// and a send to yourself is either a wasted turn or a self-resume loop.
+    /// Both have to be refused before the message reaches the queue.
+    #[test]
+    fn vet_send_target_refuses_subagents_and_self() {
+        let mut sub = sample("aaaaaaaa-1", "alpha", SessionStatus::Executing);
+        sub.is_subagent = true;
+        let s = vec![sub, sample("bbbbbbbb-2", "beta", SessionStatus::Executing)];
+
+        let err = vet_send_target(&s, "aaaa", None).unwrap_err();
+        assert!(err.contains("subagent") && err.contains("parent"), "{err}");
+
+        let err = vet_send_target(&s, "bbbb", Some("bbbbbbbb-2")).unwrap_err();
+        assert!(err.contains("this session"), "{err}");
+
+        // A different session, addressed by either handle, goes through.
+        let ok = vet_send_target(&s, "bbbb", Some("cccccccc-3")).unwrap();
+        assert_eq!(ok.id, "bbbbbbbb-2");
+        assert_eq!(vet_send_target(&s, "beta", None).unwrap().id, "bbbbbbbb-2");
+    }
+
+    /// Ambiguity must be refused here too — queueing a steering message for the
+    /// wrong session is silent, unlike a stray SIGTERM.
+    #[test]
+    fn vet_send_target_refuses_ambiguous_prefixes() {
+        let s = vec![
+            sample("abc11111", "alpha", SessionStatus::Active),
+            sample("abc22222", "beta", SessionStatus::Active),
+        ];
+        let err = vet_send_target(&s, "abc", None).unwrap_err();
+        assert!(err.contains("matches 2 agents"), "{err}");
+    }
+
+    /// `send` must not inherit the pid requirement the signalling actions have:
+    /// the whole point is to reach a session whose turn is running or over, and
+    /// a missing pid is neither a reason to refuse nor a panic.
+    #[test]
+    fn control_send_needs_text_not_a_pid() {
+        let err = handle_control(&json!({"action": "send", "id": "whatever"}), "send").unwrap_err();
+        assert!(err.contains("text"), "{err}");
+    }
+
+    /// The advertised schema is the only thing an agent reads before calling —
+    /// an action the handler accepts but the enum omits is unreachable.
+    #[test]
+    fn control_tool_def_advertises_send() {
+        let def = control_tool_def();
+        let actions = &def["inputSchema"]["properties"]["action"]["enum"];
+        assert!(actions.to_string().contains("send"), "{actions}");
+        assert!(def["inputSchema"]["properties"]["text"].is_object());
     }
 }

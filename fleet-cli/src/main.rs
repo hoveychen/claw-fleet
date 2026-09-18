@@ -52,6 +52,16 @@ enum Commands {
         /// Session ID prefix or workspace name
         id: String,
     },
+    /// Queue a message for another Fleet-owned session, delivered as a new turn
+    /// the moment its current turn ends. The way to steer a headless session
+    /// that is already running: it has no live stdin to type into, and it never
+    /// registers as a Claude Code cross-session peer.
+    Send {
+        /// Session ID prefix or workspace name
+        id: String,
+        /// The message (remaining arguments are joined with spaces)
+        text: Vec<String>,
+    },
     /// Show account info and rate-limit usage
     Account {
         /// Output raw JSON
@@ -1210,6 +1220,7 @@ fn main() {
         Commands::Agent { id, json } => commands::agents::cmd_agent(&id, json),
         Commands::Stop { id, force } => commands::agents::cmd_stop(&id, force),
         Commands::Interrupt { id } => commands::agents::cmd_interrupt(&id),
+        Commands::Send { id, text } => commands::agents::cmd_send(&id, &text.join(" ")),
         Commands::Account { json } => commands::account::cmd_account(json),
         Commands::Harness { action } => match action {
             HarnessCommands::Install { source } => commands::harness::cmd_harness_install(&source),
