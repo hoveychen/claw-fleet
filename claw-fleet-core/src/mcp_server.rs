@@ -855,6 +855,21 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
     }
 
+    // A dropped 「收工」-style option *was* the agent's terminal intent, so fold
+    // it into the flag the permanent button actually reads. An explicit
+    // `taskComplete: true` still wins over a dropped 「放弃任务」.
+    let task_complete = args.get("taskComplete").and_then(|v| v.as_bool()).unwrap_or(false)
+        || stripped.implies_complete;
+
+    // Chain-completion gate: a `taskComplete: true` card from a session that is
+    // not the first hop of its relay chain gets bounced once, quoting the
+    // chain's origin — see `chain_completion_gate` for the 2026-09-18 case.
+    // After the sidechain guard, so a subagent's call is refused for being a
+    // subagent rather than burning the *parent's* one-per-session nudge.
+    if let Some(nudge) = crate::chain_completion_gate::refusal_for(&session_id, task_complete) {
+        return Ok(tool_error(nudge));
+    }
+
     let request_id = crate::guard::new_request_id();
 
     // In-flight guard: `has_parked_for_session` only catches a card that already
@@ -888,14 +903,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         ai_title: None,
         timestamp: chrono::Utc::now().to_rfc3339(),
         parked: false,
-        // A dropped 「收工」-style option *was* the agent's terminal intent, so
-        // fold it into the flag the permanent button actually reads. An
-        // explicit `taskComplete: true` still wins over a dropped 「放弃任务」.
-        task_complete: args
-            .get("taskComplete")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-            || stripped.implies_complete,
+        task_complete,
         questions,
         review_docs,
     };
