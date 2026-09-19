@@ -1,12 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   MAX_RELAY_BYTES,
+  downloadArtifact,
   formatBytes,
   isFetchable,
   previewKind,
   previewKindFor,
 } from "./artifacts";
+import type { FleetTransport } from "./transport";
 import type { Artifact } from "./types";
 
 function make(over: Partial<Artifact>): Artifact {
@@ -183,5 +185,100 @@ describe("formatBytes", () => {
     expect(formatBytes(1_468_006)).toBe("1.4 MB");
     expect(formatBytes(412_663_296)).toBe("394 MB");
     expect(formatBytes(0)).toBe("0 B");
+  });
+});
+
+describe("downloadArtifact", () => {
+  /** A host that serves the file in slices, clamping like the real store does. */
+  function hostServing(bytes: Uint8Array, opts: { clampTo?: number; omitTotal?: boolean } = {}) {
+    const calls: Array<{ offset: number; length: number }> = [];
+    const transport = {
+      request: vi.fn(async (_method: string, params: Record<string, number>) => {
+        const offset = params.offset ?? 0;
+        const want = Math.min(params.length ?? bytes.length, opts.clampTo ?? bytes.length);
+        const slice = bytes.slice(offset, offset + want);
+        calls.push({ offset, length: slice.length });
+        return {
+          filename: "render.mp4",
+          mime: "video/mp4",
+          base64: btoa(String.fromCharCode(...slice)),
+          offset,
+          length: slice.length,
+          ...(opts.omitTotal ? {} : { totalSize: bytes.length }),
+        };
+      }),
+    } as unknown as FleetTransport;
+    return { transport, calls };
+  }
+
+  const payload = Uint8Array.from({ length: 10_000 }, (_, i) => i % 251);
+
+  it("reassembles a file the single-frame path would have refused", async () => {
+    // The point of the whole path: size is no longer a reason to say no.
+    const { transport, calls } = hostServing(payload, { clampTo: 4096 });
+    const out = await downloadArtifact(transport, "a1");
+
+    expect(out.filename).toBe("render.mp4");
+    expect(out.mime).toBe("video/mp4");
+    expect(new Uint8Array(await out.blob.arrayBuffer())).toEqual(payload);
+    // Three slices: the host clamped below what was asked for, and the reader
+    // followed the bytes it actually got rather than the length it requested.
+    expect(calls).toEqual([
+      { offset: 0, length: 4096 },
+      { offset: 4096, length: 4096 },
+      { offset: 8192, length: 1808 },
+    ]);
+  });
+
+  it("reports progress against the total the host named", async () => {
+    const { transport } = hostServing(payload, { clampTo: 4096 });
+    const seen: Array<[number, number | null]> = [];
+    await downloadArtifact(transport, "a1", {
+      onProgress: (p) => seen.push([p.received, p.total]),
+    });
+    expect(seen).toEqual([
+      [4096, 10_000],
+      [8192, 10_000],
+      [10_000, 10_000],
+    ]);
+  });
+
+  it("takes an old host's whole-file answer as the whole file", async () => {
+    // A host that predates ranged reads ignores `offset` and answers with
+    // everything. Appending it to the next chunk would silently double the
+    // download, so the absence of `totalSize` ends the loop.
+    const { transport, calls } = hostServing(payload, { omitTotal: true });
+    const out = await downloadArtifact(transport, "a1");
+    expect(new Uint8Array(await out.blob.arrayBuffer())).toEqual(payload);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("gives up instead of spinning when a chunk comes back empty", async () => {
+    const { transport } = hostServing(new Uint8Array(0));
+    // Zero bytes with a non-zero total is a host that will never advance; the
+    // loop must not keep asking forever.
+    const stalling = {
+      request: vi.fn(async () => ({
+        filename: "x",
+        mime: "application/octet-stream",
+        base64: "",
+        offset: 0,
+        length: 0,
+        totalSize: 100,
+      })),
+    } as unknown as FleetTransport;
+    void transport;
+    await expect(downloadArtifact(stalling, "a1")).rejects.toThrow(/stalled/);
+  });
+
+  it("stops between chunks when aborted", async () => {
+    const { transport, calls } = hostServing(payload, { clampTo: 4096 });
+    const ctrl = new AbortController();
+    const p = downloadArtifact(transport, "a1", {
+      signal: ctrl.signal,
+      onProgress: () => ctrl.abort(),
+    });
+    await expect(p).rejects.toThrow();
+    expect(calls).toHaveLength(1);
   });
 });

@@ -468,6 +468,12 @@ export interface ArtifactBlobPayload {
   filename: string;
   mime: string;
   base64: string;
+  /** Byte offset this slice starts at. 0 for a whole-file fetch. */
+  offset?: number;
+  /** Bytes actually served — the host clamps, so it may be under what was asked. */
+  length?: number;
+  /** Size of the whole blob, so a chunked reader knows when it is done. */
+  totalSize?: number;
 }
 
 /** One full-text search hit from `wiki_search`. */

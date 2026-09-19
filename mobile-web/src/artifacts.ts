@@ -2,11 +2,12 @@
 // desktop into ~/.fleet/artifacts and read over the relay via `artifact_list` /
 // `artifact_blob` (see claw-fleet-core/src/mobile_relay.rs).
 //
-// The phone deliberately handles only the small half. The relay's one shape for
-// bytes is a base64 payload inside a single JSON frame, and base64 adds a third
-// on top — there is no honest way to push a rendered video through it. So
-// anything over `MAX_RELAY_BYTES` shows its card and points at the desktop's
-// export instead of pretending it can fetch it.
+// Two ways to get bytes, and the difference is the whole of this file's design.
+// `fetchArtifact` is one base64 payload in one JSON frame, which is what every
+// preview uses and why previews stop at `MAX_RELAY_BYTES` — a preview has to
+// fit in memory anyway. `downloadArtifact` walks the same method by byte range,
+// so the limit on a download is the device, not the wire; that is what lets a
+// rendered video off the desktop at all.
 //
 // The desktop's list view and multi-select batch actions (Move / Export / Delete)
 // have no counterpart here, on purpose. A sortable four-column table is a
@@ -28,15 +29,16 @@ import type { Artifact, ArtifactBlobPayload } from "./types";
 export type { Artifact } from "./types";
 
 /**
- * Largest artifact the phone will fetch through the relay.
+ * Largest artifact the phone will fetch in a single frame.
  *
  * Mirrors `mobile_relay::MAX_ARTIFACT_FRAME_BYTES`. Kept here as well rather
- * than asked for at runtime so the list can render the "too big" state without
- * a round trip — the server enforces the same number as a backstop.
+ * than asked for at runtime so the list can render the "too big to preview"
+ * state without a round trip — the server enforces the same number as a
+ * backstop. Downloads are not subject to it: they go chunk by chunk.
  */
 export const MAX_RELAY_BYTES = 16 * 1024 * 1024;
 
-/** Whether this artifact's bytes can cross the relay at all. */
+/** Whether this artifact fits in one frame — i.e. whether it can be previewed. */
 export function isFetchable(a: Artifact): boolean {
   return a.sizeBytes <= MAX_RELAY_BYTES;
 }
@@ -147,8 +149,94 @@ export async function fetchArtifact(
 }
 
 function base64ToBytes(b64: string): Uint8Array {
+  // Safari 18.2+ / Chrome 133+ decode natively, which matters here: the manual
+  // loop below is per-character JS on the main thread, and a download walks
+  // hundreds of megabytes through it.
+  const native = (Uint8Array as unknown as { fromBase64?: (s: string) => Uint8Array }).fromBase64;
+  if (native) return native(b64);
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+/**
+ * Bytes asked for per chunk.
+ *
+ * Under the host's own `artifacts::MAX_RANGE_CHUNK` (8 MiB) on purpose: that is
+ * a ceiling, not a target, and the smaller ask buys two things on a phone —
+ * progress that moves often enough to read, and a smaller base64 string alive
+ * at any one moment. Each chunk still costs one round trip, so going much below
+ * this trades throughput for nothing.
+ */
+export const DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+
+export interface DownloadProgress {
+  /** Bytes reassembled so far. */
+  received: number;
+  /** Total size the host reported. Null until the first chunk lands. */
+  total: number | null;
+}
+
+/**
+ * The whole artifact, walked over the transport a chunk at a time.
+ *
+ * This is what the download button uses, and it is deliberately not
+ * `fetchArtifact`: that one is a single frame and so inherits
+ * `MAX_RELAY_BYTES`, which is exactly the rule that made a rendered video
+ * undownloadable. Chunking moves the limit off the wire and onto the device —
+ * the parts are assembled into a `Blob`, which the browser is free to spill to
+ * disk, rather than into one contiguous `Uint8Array`.
+ *
+ * `onProgress` exists because the honest answer to "why is it still preparing"
+ * is a number. Without it the button sits on one indeterminate label for the
+ * entire transfer, which is the bug this path was written to fix.
+ *
+ * `signal` aborts between chunks rather than mid-chunk: the transport's
+ * `request` has no cancel, so the in-flight frame still arrives and is dropped.
+ * That bounds the wasted work at one chunk instead of the whole file.
+ */
+export async function downloadArtifact(
+  client: FleetTransport,
+  id: string,
+  opts: { onProgress?: (p: DownloadProgress) => void; signal?: AbortSignal; version?: string } = {},
+): Promise<{ filename: string; mime: string; blob: Blob }> {
+  const parts: Uint8Array[] = [];
+  let received = 0;
+  let total: number | null = null;
+  let filename = "";
+  let mime = "application/octet-stream";
+
+  do {
+    if (opts.signal?.aborted) throw new DOMException("aborted", "AbortError");
+    const params: Record<string, unknown> = {
+      id,
+      offset: received,
+      length: DOWNLOAD_CHUNK_BYTES,
+    };
+    if (opts.version) params.version = opts.version;
+    const payload = await client.request<ArtifactBlobPayload>(
+      "artifact_blob",
+      params,
+      ASSET_REQUEST_TIMEOUT_MS,
+    );
+    filename = payload.filename;
+    mime = payload.mime;
+    const bytes = base64ToBytes(payload.base64);
+    // A host that ignores `offset` answers with the whole file. Taking its word
+    // and appending would silently double the download, so trust the bytes:
+    // what came back is everything, and the loop is over.
+    if (payload.totalSize == null) {
+      return { filename, mime, blob: new Blob([bytes as BlobPart], { type: mime }) };
+    }
+    if (bytes.length === 0) {
+      throw new Error(`download stalled at ${received} of ${payload.totalSize} bytes`);
+    }
+    parts.push(bytes);
+    received += bytes.length;
+    total = payload.totalSize;
+    opts.onProgress?.({ received, total });
+  } while (total == null || received < total);
+
+  return { filename, mime, blob: new Blob(parts as BlobPart[], { type: mime }) };
 }
