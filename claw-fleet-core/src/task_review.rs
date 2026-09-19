@@ -209,6 +209,38 @@ impl TaskReviewStore {
             .ok()?;
         stmt.query_row(params![root_session_id], row_to_review).ok()
     }
+
+    /// The newest reviews for one workspace, for the recent-context block.
+    ///
+    /// Filtered on `workspace_name` rather than `workspace_path` because that
+    /// column is already worktree-folded (`session::workspace_name` collapses
+    /// `<repo>/.worktrees/<task-id>` to the repo), so a plan's reviews come
+    /// back alongside the repo's. Two unrelated repos sharing a basename would
+    /// also match, so callers re-filter on
+    /// [`crate::session::same_repo_root`] — that is a cheap exact check on a
+    /// handful of rows, whereas doing it in SQL is not expressible.
+    pub fn recent_for_workspace_name(
+        &self,
+        workspace_name: &str,
+        limit: usize,
+    ) -> Result<Vec<TaskReview>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT root_session_id, session_ids, workspace_name, workspace_path, outcome,
+                        agent_claimed_complete, title, summary, lessons, terminated_at, generated_at
+                 FROM task_reviews
+                 WHERE workspace_name = ?1
+                 ORDER BY terminated_at DESC
+                 LIMIT ?2",
+            )
+            .map_err(|e| format!("prepare: {e}"))?;
+        let rows = stmt
+            .query_map(params![workspace_name, limit as i64], row_to_review)
+            .map_err(|e| format!("query: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("row: {e}"))
+    }
 }
 
 /// Shared row → [`TaskReview`] mapper for every query in this module. Column
