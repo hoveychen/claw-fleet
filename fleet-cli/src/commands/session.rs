@@ -338,13 +338,11 @@ pub(crate) fn resolve_workspace_dir(flag: Option<&str>) -> Result<std::path::Pat
     }
 }
 
-/// Normalise a caller-supplied `--workspace` and insist it exists.
+/// Normalise a caller-supplied `--workspace` and insist it exists. Delegates to
+/// core so the CLI flag and the MCP tools' `workspace` argument accept and
+/// reject exactly the same paths.
 fn normalize_existing_dir(raw: &str) -> Result<String, String> {
-    let path = claw_fleet_core::session_launch::normalize_workspace_path(raw)?;
-    if !std::path::Path::new(&path).is_dir() {
-        return Err(format!("--workspace {path} is not a directory"));
-    }
-    Ok(path)
+    claw_fleet_core::session_launch::resolve_workspace_override(Some(raw), "")
 }
 
 pub(crate) fn inherit_context_maybe_scanning(

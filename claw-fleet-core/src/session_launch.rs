@@ -200,6 +200,29 @@ fn normalize_workspace_path_with_home(input: &str, home: Option<&Path>) -> Resul
     Ok(resolved.to_string_lossy().into_owned())
 }
 
+/// Resolve where a spawn-flavoured command should land: a caller-supplied
+/// workspace override if there is one, else `default_path` (the creating
+/// session's own workspace, or the process cwd).
+///
+/// Shared by the CLI's `--workspace` and the MCP tools' `workspace` argument so
+/// both accept exactly the same paths and reject the same ones. An override is
+/// normalised (`~`, bare-relative → `$HOME`) and must already exist: a typo
+/// would otherwise produce a session whose cwd does not exist, failing far from
+/// the mistake.
+pub fn resolve_workspace_override(
+    override_path: Option<&str>,
+    default_path: &str,
+) -> Result<String, String> {
+    let Some(raw) = override_path.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(default_path.to_string());
+    };
+    let path = normalize_workspace_path(raw)?;
+    if !Path::new(&path).is_dir() {
+        return Err(format!("workspace {path} is not a directory"));
+    }
+    Ok(path)
+}
+
 /// `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions launched by the "New Session"
 /// button. The CLI writes it verbatim into each `user` record's `entrypoint`
 /// field, which is what the history panel filters on.

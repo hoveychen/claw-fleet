@@ -31,7 +31,8 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Names of the control tools, in `tools/list` order.
-pub const CONTROL_TOOL_NAMES: [&str; 11] = [
+pub const CONTROL_TOOL_NAMES: [&str; 12] = [
+    "fleet__spawn",
     "fleet__plan",
     "fleet__handoff",
     "fleet__watch",
@@ -94,6 +95,7 @@ pub fn parent_scoped_effect(name: &str) -> Option<&'static str> {
 /// sessions only.
 pub fn control_tool_defs() -> Vec<Value> {
     vec![
+        spawn_tool_def(),
         plan_tool_def(),
         handoff_tool_def(),
         watch_tool_def(),
@@ -169,7 +171,8 @@ fn plan_tool_def() -> Value {
                 "root": {"type": "boolean", "description": "Start a new top-level tree instead of attaching to the plan you are currently executing (create only). Needs root_reason whenever you are on a plan; with no plan in flight it is the default anyway and this flag is a no-op."},
                 "root_reason": {"type": "string", "description": "Why this work does not belong under the plan you are currently executing (create only). Required alongside root while you are on a plan, so leaving its tree costs a moment's thought instead of being the path of least resistance. Never valid with parent."},
                 "kind": {"type": "string", "enum": ["exec", "explore"], "description": "What the P-tasks are for (create only, default exec). `exec` changes code; `explore` investigates and its deliverable is the exec child plans it spawns, not edits of its own — use it so an exploration's findings can't silently redefine the implementation."},
-                "text": {"type": "string", "description": "Task text. Required for add."}
+                "text": {"type": "string", "description": "Task text. Required for add."},
+                "workspace": workspace_arg_schema("whose TASKS.md to act on")
             },
             "required": ["action"],
             "additionalProperties": false
@@ -234,7 +237,8 @@ fn loop_tool_def() -> Value {
                 "interval": {"type": "string", "description": "Interval between runs, e.g. 5m / 1h. Required for create."},
                 "max": {"type": "integer", "description": "Optional cap on iterations."},
                 "until": {"type": "string", "description": "Optional non-LLM gate: a shell command checked at each interval tick. The iteration spawns only when it exits 0; otherwise the tick is skipped (no session, no iteration consumed) and re-checked next interval."},
-                "id": {"type": "string", "description": "Loop id. Required for stop/update/get/run."}
+                "id": {"type": "string", "description": "Loop id. Required for stop/update/get/run."},
+                "workspace": workspace_arg_schema("each iteration runs in (create only)")
             },
             "required": ["action"],
             "additionalProperties": false
@@ -259,7 +263,8 @@ fn schedule_tool_def() -> Value {
                 "until": {"type": "string", "description": "Optional non-LLM gate: once due, this shell command is polled and the session spawns only when it exits 0. If it never passes within the timeout the schedule is abandoned (no session)."},
                 "poll": {"type": "string", "description": "Seconds between gate polls once due, e.g. 30s / 2m (min 5s, default 30s). Only with `until`."},
                 "timeout": {"type": "string", "description": "Give up on an unmet gate after this long past due, e.g. 30m / 2h (default 2h, max 7d). Only with `until`."},
-                "id": {"type": "string", "description": "Schedule id. Required for cancel/update/get/run."}
+                "id": {"type": "string", "description": "Schedule id. Required for cancel/update/get/run."},
+                "workspace": workspace_arg_schema("the fired session runs in (create only)")
             },
             "required": ["action"],
             "additionalProperties": false
@@ -324,6 +329,7 @@ pub fn handle(
     cwd: &Path,
 ) -> Result<String, String> {
     match name {
+        "fleet__spawn" => handle_spawn(args, session_id),
         "fleet__plan" => handle_plan(args, session_id, cwd),
         "fleet__handoff" => handle_handoff(args, session_id, cwd),
         "fleet__watch" => handle_watch(args, session_id),
@@ -554,11 +560,115 @@ fn render_plan_outcome(o: crate::plan_ops::PlanOutcome) -> String {
     out
 }
 
+// ── spawn ────────────────────────────────────────────────────────────────────
+
+fn spawn_tool_def() -> Value {
+    json!({
+        "name": "fleet__spawn",
+        "description": "Start a detached session RIGHT NOW — optionally in another workspace. The immediate sibling of `fleet__schedule` (fires once, later) and `fleet__loop` (fires repeatedly): reach for this when work should begin immediately somewhere other than here, e.g. handing a freshly written plan to a session in that plan's own project. The new session is Fleet-owned, so `fleet__control` can steer (send) or interrupt it by the session id this returns. Model / effort / harness are inherited from you unless overridden. Use this instead of the `fleet spawn` CLI. Required: prompt.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "The prompt the new session opens with — its full brief, since nobody is there to answer follow-up questions. Name the plan id, the background docs to read, and what 'done' means."},
+                "workspace": workspace_arg_schema("the new session runs in"),
+                "title": {"type": "string", "description": "Name the new session up front, so it is labelled in the task list before it has produced any output to name itself by. Strongly recommended."},
+                "model": {"type": "string", "description": "Override model (else inherits yours). Naming another harness's model spawns on THAT harness: `gpt-…` / `profile:<name>` → codex, `claude-…` → claude, `<provider>/<model>` → dsh."},
+                "effort": {"type": "string", "description": "Override reasoning effort (low/medium/high/xhigh/max)."}
+            },
+            "required": ["prompt"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn handle_spawn(args: &Value, sid: Option<&str>) -> Result<String, String> {
+    let prompt = req(args, "prompt")?;
+    let ctx = crate::session::inherit_launch_context(sid);
+    let workspace = crate::session_launch::resolve_workspace_override(
+        workspace_arg(args)?.as_deref(),
+        &ctx.workspace,
+    )?;
+    let route = crate::agent_source::route_launch(
+        &ctx,
+        arg(args, "model").as_deref(),
+        arg(args, "effort").as_deref(),
+    )?;
+    let resp = crate::agent_source::spawn_session(
+        &route.agent_source,
+        &crate::agent_source::SpawnSpec {
+            workspace_path: workspace.clone(),
+            prompt,
+            model: route.model.clone(),
+            effort: route.effort.clone(),
+            permission_mode: None,
+            session_id: None,
+            entrypoint: crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string(),
+            images: Vec::new(),
+        },
+    )?;
+    if let (Some(title), Some(new_sid)) = (
+        arg(args, "title").filter(|t| !t.trim().is_empty()),
+        resp.session_id.as_deref(),
+    ) {
+        let _ = crate::session_title::set_title(new_sid, &workspace, Some(title));
+    }
+    let ws_name = crate::wiki::workspace_name_of(&workspace);
+    Ok(match resp.session_id.as_deref() {
+        Some(new_sid) => format!(
+            "ok: session {new_sid} started in {ws_name} ({workspace}), model={}{}, pid {}。\
+             要转达或打断它用 fleet__control（send / interrupt，id={new_sid}）。",
+            route.model.as_deref().unwrap_or("<CLI 默认>"),
+            route.switch_note(),
+            resp.pid,
+        ),
+        // Codex mints its own rollout id; the scanner picks the session up once
+        // the rollout file appears.
+        None => format!(
+            "ok: session started in {ws_name} ({workspace}), model={}{}, pid {}。",
+            route.model.as_deref().unwrap_or("<CLI 默认>"),
+            route.switch_note(),
+            resp.pid,
+        ),
+    })
+}
+
+/// Read the optional `workspace` argument the spawn-flavoured tools share.
+/// `Ok(None)` means the caller did not override it, so the default — the
+/// session's own workspace / cwd — stands.
+fn workspace_arg(args: &Value) -> Result<Option<String>, String> {
+    match arg(args, "workspace") {
+        None => Ok(None),
+        Some(raw) => crate::session_launch::resolve_workspace_override(Some(&raw), "").map(Some),
+    }
+}
+
+/// JSON-schema blurb for that argument, so all four tools describe it the same.
+fn workspace_arg_schema(what: &str) -> Value {
+    json!({
+        "type": "string",
+        "description": format!(
+            "Workspace (project directory) {what}. Defaults to this session's own workspace. \
+             `~/foo` and bare relative paths resolve against $HOME; the directory must already exist."
+        )
+    })
+}
+
 // ── plan ─────────────────────────────────────────────────────────────────────
 
 fn handle_plan(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, String> {
     use crate::plan_ops as po;
     let action = action_of(args)?;
+    // `workspace` re-points every plan action at another project's TASKS.md.
+    // The CLI can `cd`; this tool cannot, so without the argument a plan that
+    // belongs to another repo could only be filed by dropping to Bash.
+    let cwd_owned;
+    let cwd: &Path = match workspace_arg(args)? {
+        Some(w) => {
+            cwd_owned = std::path::PathBuf::from(w);
+            &cwd_owned
+        }
+        None => cwd,
+    };
     match action.as_str() {
         "check" => po::mutate_checkbox(cwd, &req(args, "plan_id")?, &req(args, "task")?, true, sid)
             .map(render_plan_outcome),
@@ -814,8 +924,12 @@ fn handle_loop(args: &Value, sid: Option<&str>) -> Result<String, String> {
             let max = args.get("max").and_then(Value::as_u64).map(|v| v as u32);
             let until = arg(args, "until").filter(|c| !c.trim().is_empty());
             let ctx = crate::session::inherit_launch_context(sid);
-            let rec = agent_loop::create(
+            let workspace = crate::session_launch::resolve_workspace_override(
+                workspace_arg(args)?.as_deref(),
                 &ctx.workspace,
+            )?;
+            let rec = agent_loop::create(
+                &workspace,
                 &prompt,
                 arg(args, "title").as_deref(),
                 interval_secs,
@@ -955,8 +1069,12 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 arg(args, "effort").as_deref(),
             )?;
             let gate = build_schedule_gate(args)?;
-            let rec = schedule::create(
+            let workspace = crate::session_launch::resolve_workspace_override(
+                workspace_arg(args)?.as_deref(),
                 &ctx.workspace,
+            )?;
+            let rec = schedule::create(
+                &workspace,
                 &prompt,
                 arg(args, "title").as_deref(),
                 fire_at,
@@ -1288,10 +1406,19 @@ mod tests {
         let defs = control_tool_defs();
         let names: Vec<&str> = defs.iter().filter_map(|d| d["name"].as_str()).collect();
         assert_eq!(names, CONTROL_TOOL_NAMES);
-        // Each carries an object inputSchema with a required `action`.
+        // Each carries an object inputSchema whose first required field is
+        // `action` — except the single-action tools, where an `action` enum of
+        // one value would be pure noise for the caller to fill in.
+        const SINGLE_ACTION: [(&str, &str); 1] = [("fleet__spawn", "prompt")];
         for d in &defs {
             assert_eq!(d["inputSchema"]["type"], "object");
-            assert_eq!(d["inputSchema"]["required"][0], "action");
+            let name = d["name"].as_str().unwrap();
+            let want = SINGLE_ACTION
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, f)| *f)
+                .unwrap_or("action");
+            assert_eq!(d["inputSchema"]["required"][0], want, "{name}");
         }
     }
 
@@ -1395,6 +1522,43 @@ mod tests {
                 .is_some(),
             "root_reason must be a declared property (additionalProperties is false): {schema}"
         );
+    }
+
+    #[test]
+    fn plan_workspace_arg_writes_the_other_workspaces_tasks_md() {
+        let here = tempfile::tempdir().unwrap();
+        let there = tempfile::tempdir().unwrap();
+        handle(
+            "fleet__plan",
+            &json!({
+                "action": "create", "plan_id": "elsewhere", "title": "Over there",
+                "root": true, "workspace": there.path().to_string_lossy(),
+            }),
+            None,
+            here.path(),
+        )
+        .unwrap();
+        assert!(
+            there.path().join("TASKS.md").exists(),
+            "the plan must land in the named workspace"
+        );
+        assert!(
+            !here.path().join("TASKS.md").exists(),
+            "the caller's own workspace must be left alone"
+        );
+    }
+
+    #[test]
+    fn workspace_arg_rejects_a_path_that_does_not_exist() {
+        let here = tempfile::tempdir().unwrap();
+        let err = handle(
+            "fleet__plan",
+            &json!({"action": "list", "workspace": "/definitely/not/here"}),
+            None,
+            here.path(),
+        )
+        .unwrap_err();
+        assert!(err.contains("not a directory"), "{err}");
     }
 
     #[test]
@@ -1658,7 +1822,12 @@ mod tests {
     /// A new tool added to CONTROL_TOOL_NAMES fails here until someone decides.
     #[test]
     fn parent_scoped_control_tools_are_classified() {
-        const SESSION_AGNOSTIC: [&str; 6] = [
+        const SESSION_AGNOSTIC: [&str; 7] = [
+            // `fleet__spawn` reads the caller's id only to inherit model /
+            // effort / workspace; it writes nothing against that session, so a
+            // subagent calling it starts a *new* session rather than disturbing
+            // its parent.
+            "fleet__spawn",
             "fleet__wiki",
             "fleet__artifact",
             "fleet__inspect",

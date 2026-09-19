@@ -77,6 +77,7 @@ pub const INJECT_RULES: &[&str] = &[
     "mcp__fleet__fleet__ask",
     "mcp__fleet__fleet__render_a2ui",
     "mcp__fleet__fleet__set_session_title",
+    "mcp__fleet__fleet__spawn",
     "mcp__fleet__fleet__plan",
     "mcp__fleet__fleet__handoff",
     "mcp__fleet__fleet__watch",
