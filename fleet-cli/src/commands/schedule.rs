@@ -166,7 +166,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
                 std::process::exit(1);
             }
         },
-        ScheduleCommands::Create { at, r#in, prompt, title, model: model_flag, effort: effort_flag, until, poll, timeout } => {
+        ScheduleCommands::Create { at, r#in, prompt, workspace, title, model: model_flag, effort: effort_flag, until, poll, timeout } => {
             let now = now_ms_wall();
             // Exactly one of --at / --in.
             let fire_at = match (at.as_deref(), r#in.as_deref()) {
@@ -204,6 +204,19 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
             // cwd (not a worktree that may later be removed).
             let sid = resolve_session_id(session);
             let ctx = inherit_context_maybe_scanning(sid.as_deref(), session.is_some());
+            // …except the workspace, which an explicit --workspace re-points at
+            // another project — otherwise scheduling work "over there" means
+            // unsetting FLEET_SESSION_ID to defeat the inheritance.
+            let workspace_path = match crate::commands::session::resolve_workspace_flag(
+                workspace.as_deref(),
+                &ctx,
+            ) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(2);
+                }
+            };
             // An explicit --model/--effort flag overrides the value inherited from
             // the creating session (mirrors handoff's --model/--effort override),
             // and a model naming another harness re-points the fired session at
@@ -259,7 +272,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
             };
 
             match schedule::create(
-                &ctx.workspace,
+                &workspace_path,
                 prompt,
                 title.as_deref(),
                 fire_at,

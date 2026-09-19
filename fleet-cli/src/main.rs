@@ -577,11 +577,17 @@ impl From<SkillRuntime> for claw_fleet_core::skill_sync::SkillTarget {
 
 #[derive(Subcommand)]
 pub(crate) enum LoopCommands {
-    /// Create a loop that re-runs <prompt> every <interval> in this workspace.
+    /// Create a loop that re-runs <prompt> every <interval>, by default in this
+    /// workspace (`--workspace` puts the iterations in another project).
     Create {
         /// Interval between iterations, e.g. `5m`, `30m`, `2h`, `1d` (min 60s).
         #[arg(long)]
         interval: String,
+        /// Workspace (project directory) each iteration runs in. Defaults to
+        /// the creating session's own workspace. `~/foo` and bare relative
+        /// paths resolve against $HOME; the directory must already exist.
+        #[arg(long)]
+        workspace: Option<String>,
         /// The prompt each iteration runs.
         #[arg(long)]
         prompt: String,
@@ -723,6 +729,11 @@ pub(crate) enum ScheduleCommands {
         /// The prompt the fired session runs — the schedule's full context.
         #[arg(long)]
         prompt: String,
+        /// Workspace (project directory) the fired session runs in. Defaults to
+        /// the creating session's own workspace. `~/foo` and bare relative
+        /// paths resolve against $HOME; the directory must already exist.
+        #[arg(long)]
+        workspace: Option<String>,
         /// Short human label shown in `fleet schedule list` and the desktop
         /// Schedule view instead of the first lines of the prompt. Strongly
         /// recommended — a list of prompts is unreadable.

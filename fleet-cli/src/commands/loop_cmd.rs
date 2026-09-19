@@ -140,6 +140,7 @@ pub(crate) fn cmd_loop(action: LoopCommands, session: Option<&str>) {
         },
         LoopCommands::Create {
             interval,
+            workspace,
             prompt,
             title,
             max,
@@ -165,10 +166,22 @@ pub(crate) fn cmd_loop(action: LoopCommands, session: Option<&str>) {
             // codex session wakes up as codex.
             let sid = resolve_session_id(session);
             let ctx = inherit_context_maybe_scanning(sid.as_deref(), session.is_some());
+            // …except the workspace, which an explicit --workspace re-points at
+            // another project.
+            let workspace_path = match crate::commands::session::resolve_workspace_flag(
+                workspace.as_deref(),
+                &ctx,
+            ) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(2);
+                }
+            };
             let until = until.as_deref().filter(|c| !c.trim().is_empty());
 
             match agent_loop::create(
-                &ctx.workspace,
+                &workspace_path,
                 prompt,
                 title.as_deref(),
                 interval_secs,
