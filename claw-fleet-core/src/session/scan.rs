@@ -902,6 +902,12 @@ pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -
             sessions.extend(source.scan_sessions());
         }
     }
+    // Every source that discovers subagents of its own has to be in the list
+    // before the tree aggregates can be right, so the rollup runs here rather
+    // than inside any one source. The Claude scan has already rolled up its own
+    // slice by now; `aggregate_subagent_rollup` is idempotent precisely so this
+    // second pass costs it nothing.
+    aggregate_subagent_rollup(&mut sessions);
     enrich_all(&mut sessions);
     sort_sessions(&mut sessions);
     sessions
