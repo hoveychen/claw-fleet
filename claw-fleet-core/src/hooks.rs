@@ -725,6 +725,30 @@ fn apply_prd_context_hook_inner() -> Result<(), String> {
         hooks_obj.insert("SessionStart".to_string(), json!([notes_hint_group]));
     }
 
+    // Companion: the recent-sessions SessionStart hook. Same event, its own
+    // entry — Claude Code keeps the `additionalContext` of every matching hook
+    // and hands them to the model together, so this block gets its own byte
+    // budget instead of eating into the notes summary's.
+    //
+    // Longer timeout than its neighbours because it pays for a full session
+    // scan: about two seconds against a warm on-disk scan cache, but tens of
+    // seconds on a machine that has never built one. Timing out costs the
+    // block, not the session.
+    let mut recent_sessions_hook = fleet_subcommand_hook(&fleet_bin, "recent-sessions");
+    recent_sessions_hook["timeout"] = json!(20000);
+    let recent_sessions_group = json!({
+        "matcher": RECENT_SESSIONS_MATCHER,
+        "hooks": [recent_sessions_hook]
+    });
+    if let Some(existing) = hooks_obj.get_mut("SessionStart") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.retain(|group| !is_recent_sessions_group(group));
+            arr.push(recent_sessions_group);
+        }
+    } else {
+        hooks_obj.insert("SessionStart".to_string(), json!([recent_sessions_group]));
+    }
+
     // Companion: the context-pressure PostToolUse hook. Same feature for the
     // same reason — it exists so a session notices the window filling *before*
     // a compaction summarises its macro state away. It hangs off PostToolUse
@@ -752,8 +776,18 @@ fn apply_prd_context_hook_inner() -> Result<(), String> {
 /// the session's notes: `compact` (the case this exists for), `resume` (a
 /// `claude --resume` — Fleet's auto-resume and relays), `startup` (a fresh
 /// session; only matters for a handoff successor, which inherits notes).
-/// `clear` is left out: the user asked for an empty slate.
+/// `clear` is left out: the user asked for an empty slate. `fork` is left out
+/// for the neighbouring reason — a forked session starts with its parent's
+/// context, so whatever this hook would inject is already in front of it.
+/// (Those five — `startup`, `resume`, `clear`, `compact`, `fork` — are the
+/// whole set Claude Code emits.)
 pub const NOTES_HINT_MATCHER: &str = "compact|resume|startup";
+
+/// Sources the recent-sessions block fires on. Same set as
+/// [`NOTES_HINT_MATCHER`] and for the same reasons — a context window with no
+/// history of this workspace in it — kept as its own constant because the two
+/// hooks answer to different features and either may need to move alone.
+pub const RECENT_SESSIONS_MATCHER: &str = "compact|resume|startup";
 
 /// Remove the PRD-context hook from settings.json.
 pub fn remove_prd_context_hook() -> Result<(), String> {
@@ -786,7 +820,7 @@ fn remove_prd_context_hook_inner() -> Result<(), String> {
         .get_mut("SessionStart")
         .and_then(|v| v.as_array_mut())
     {
-        arr.retain(|group| !is_notes_hint_group(group));
+        arr.retain(|group| !is_notes_hint_group(group) && !is_recent_sessions_group(group));
         if arr.is_empty() {
             hooks_obj.remove("SessionStart");
         }
@@ -808,8 +842,9 @@ fn remove_prd_context_hook_inner() -> Result<(), String> {
     write_settings(&settings)
 }
 
-/// All three parts must be present: the UserPromptSubmit injection, its
-/// SessionStart companion, and the PostToolUse context-pressure reminder. A
+/// All four parts must be present: the UserPromptSubmit injection, its two
+/// SessionStart companions (notes hint, recent sessions), and the PostToolUse
+/// context-pressure reminder. A
 /// settings.json from a build that predates a companion therefore reads as
 /// "not installed", which is what makes `control_plane::heal` add the missing
 /// group instead of leaving upgraded hosts without it forever.
@@ -820,6 +855,7 @@ fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
         .map(|arr| arr.iter().any(|group| is_prd_context_group(group)))
         .unwrap_or(false)
         && has_notes_hint_hook(hooks_obj)
+        && has_recent_sessions_hook(hooks_obj)
         && has_ctx_reminder_hook(hooks_obj)
 }
 
@@ -849,6 +885,18 @@ fn has_notes_hint_hook(hooks_obj: &Map<String, Value>) -> bool {
 
 fn is_notes_hint_group(group: &Value) -> bool {
     group_invokes_fleet_subcommand(group, "notes-hint")
+}
+
+fn has_recent_sessions_hook(hooks_obj: &Map<String, Value>) -> bool {
+    hooks_obj
+        .get("SessionStart")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(is_recent_sessions_group))
+        .unwrap_or(false)
+}
+
+fn is_recent_sessions_group(group: &Value) -> bool {
+    group_invokes_fleet_subcommand(group, "recent-sessions")
 }
 
 // ── Wakeup guard hook (ScheduleWakeup / CronCreate interception) ────────
@@ -2114,7 +2162,7 @@ mod tests {
         let mut start_arr = vec![user_start.clone(), notes_hint_group_for("/old/fleet"), hint.clone()];
         start_arr.retain(|g| !is_notes_hint_group(g));
         assert_eq!(start_arr, vec![user_start.clone()]);
-        hooks.insert("SessionStart".into(), json!([user_start, hint]));
+        hooks.insert("SessionStart".into(), json!([user_start.clone(), hint.clone()]));
         assert!(has_notes_hint_hook(&hooks));
         assert!(
             !has_prd_context_hook(&hooks),
@@ -2136,7 +2184,41 @@ mod tests {
         assert!(!is_ctx_reminder_group(&prd));
         hooks.insert("PostToolUse".into(), json!([logging, ctx]));
         assert!(has_ctx_reminder_hook(&hooks));
+        assert!(
+            !has_prd_context_hook(&hooks),
+            "still not installed until the recent-sessions companion exists"
+        );
+
+        // Current shape: all four. The two SessionStart companions are separate
+        // entries; each marker must catch only its own, or installing one would
+        // evict the other on every apply.
+        let recent = recent_sessions_group_for(bin);
+        assert!(is_recent_sessions_group(&recent));
+        assert!(!is_recent_sessions_group(&hint));
+        assert!(!is_notes_hint_group(&recent));
+        let mut start_arr = vec![
+            user_start.clone(),
+            recent_sessions_group_for("/old/fleet"),
+            recent.clone(),
+            hint.clone(),
+        ];
+        start_arr.retain(|g| !is_recent_sessions_group(g));
+        assert_eq!(start_arr, vec![user_start.clone(), hint.clone()]);
+        hooks.insert("SessionStart".into(), json!([user_start, hint, recent]));
+        assert!(has_recent_sessions_hook(&hooks));
+        assert!(has_notes_hint_hook(&hooks));
         assert!(has_prd_context_hook(&hooks));
+    }
+
+    fn recent_sessions_group_for(bin: &str) -> Value {
+        json!({
+            "matcher": RECENT_SESSIONS_MATCHER,
+            "hooks": [{
+                "type": "command",
+                "command": fault_tolerant_command(bin, "recent-sessions"),
+                "timeout": 20000
+            }]
+        })
     }
 
     fn ctx_reminder_group_for(bin: &str) -> Value {
