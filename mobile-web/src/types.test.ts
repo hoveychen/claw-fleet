@@ -29,6 +29,11 @@ describe("isFleetOwnedEntrypoint", () => {
     expect(isFleetOwnedEntrypoint("claw-fleet-handoff")).toBe(true);
   });
 
+  it("认得计划 / 循环触发的会话（桌面任务页收录，手机端曾漏掉）", () => {
+    expect(isFleetOwnedEntrypoint("claw-fleet-schedule")).toBe(true);
+    expect(isFleetOwnedEntrypoint("claw-fleet-loop")).toBe(true);
+  });
+
   it("认得 Fleet 起的 Codex 会话（originator === \"fleet\"）", () => {
     expect(isFleetOwnedEntrypoint(CODEX_FLEET_ORIGINATOR)).toBe(true);
     expect(isFleetOwnedEntrypoint("fleet")).toBe(true);
@@ -58,6 +63,15 @@ describe("isFleetOwnedTask", () => {
   it("旧 relay 不带 fleetSpawned 时按非泄漏处理（fail-open，不隐藏真会话）", () => {
     expect(
       isFleetOwnedTask(mk({ entrypoint: "claw-fleet-newsession" })),
+    ).toBe(true);
+  });
+
+  it("收录计划 / 循环触发的任务", () => {
+    expect(
+      isFleetOwnedTask(mk({ entrypoint: "claw-fleet-schedule", fleetSpawned: true })),
+    ).toBe(true);
+    expect(
+      isFleetOwnedTask(mk({ entrypoint: "claw-fleet-loop", fleetSpawned: true })),
     ).toBe(true);
   });
 
