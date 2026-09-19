@@ -945,8 +945,9 @@ fn handle_loop(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 Err(e) => format!("但计时器启动失败: {e}(Stop hook reconcile 会补上)"),
             };
             Ok(format!(
-                "ok: loop {} created — model={}. {armed}。停止用 action=stop id={}。",
+                "ok: loop {} created — in {}, model={}. {armed}。停止用 action=stop id={}。",
                 rec.id,
+                crate::wiki::workspace_name_of(&rec.workspace_path),
                 rec.model.as_deref().unwrap_or("<CLI 默认>"),
                 rec.id
             ))
@@ -1089,9 +1090,10 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 Err(e) => format!("但计时器启动失败: {e}(Stop hook reconcile 会补上)"),
             };
             Ok(format!(
-                "ok: schedule {} created — fires at epoch-ms {}, model={}{}. {armed}。取消用 action=cancel id={}。",
+                "ok: schedule {} created — fires at epoch-ms {} in {}, model={}{}. {armed}。取消用 action=cancel id={}。",
                 rec.id,
                 rec.fire_at,
+                crate::wiki::workspace_name_of(&rec.workspace_path),
                 rec.model.as_deref().unwrap_or("<CLI 默认>"),
                 route.switch_note(),
                 rec.id

@@ -22,7 +22,12 @@ pub(crate) fn cmd_loop(action: LoopCommands, session: Option<&str>) {
                 return;
             }
             let now = now_ms_wall();
-            println!("{:<10}  {:<8}  {:<8}  {:<10}  TITLE / PROMPT", "ID", "EVERY", "DONE", "NEXT");
+            // WHERE, like `fleet schedule list`: which project each iteration
+            // runs in, without a hand-grep of ~/.fleet.
+            println!(
+                "{:<10}  {:<8}  {:<8}  {:<10}  {:<16}  TITLE / PROMPT",
+                "ID", "EVERY", "DONE", "NEXT", "WHERE"
+            );
             for l in loops {
                 let cap = l
                     .max_iterations
@@ -43,11 +48,12 @@ pub(crate) fn cmd_loop(action: LoopCommands, session: Option<&str>) {
                     prompt
                 };
                 println!(
-                    "{:<10}  {:<8}  {:<8}  {:<10}  {}",
+                    "{:<10}  {:<8}  {:<8}  {:<10}  {:<16}  {}",
                     l.id,
                     fmt_interval_secs(l.interval_secs),
                     cap,
                     next,
+                    claw_fleet_core::wiki::workspace_name_of(&l.workspace_path),
                     prompt
                 );
             }
@@ -202,11 +208,12 @@ pub(crate) fn cmd_loop(action: LoopCommands, session: Option<&str>) {
                     // reconcile will pick it up — so warn, don't fail.
                     match agent_loop::arm_timer(&rec) {
                         Ok(pid) => println!(
-                            "ok: loop {} created — every {}, next in {}, model={}.{} \
+                            "ok: loop {} created — every {}, next in {}, in {}, model={}.{} \
                              计时器已启动 (pid {})。停止用 `fleet loop stop {}`。",
                             rec.id,
                             fmt_interval_secs(rec.interval_secs),
                             fmt_interval_secs(rec.interval_secs),
+                            claw_fleet_core::wiki::workspace_name_of(&rec.workspace_path),
                             rec.model.as_deref().unwrap_or("<CLI 默认>"),
                             gate,
                             pid,
