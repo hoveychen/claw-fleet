@@ -98,6 +98,7 @@ export function HandoffChainModal({
         </div>
         <div className={styles.scroll_area}>
           {loading && <div className={styles.handoff_note}>{t("card.handoff_loading")}</div>}
+          {!loading && chain && <ChainGoal chain={chain} />}
           {!loading && chain && legIds.map((sid, i) => (
             <div key={sid}>
               <div
@@ -148,6 +149,38 @@ export function HandoffChainModal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * The chain's goal and the revisions it went through, above the legs.
+ *
+ * Mirrors `render_chain` in `claw-fleet-core/src/handoff.rs`: the first
+ * setting of a goal (`from: null`) is the goal itself, already shown as the
+ * headline, so only real changes get a revision line. A chain with no goal
+ * renders nothing at all — history chains and explore chains legitimately have
+ * none, and a "（未设定）" placeholder on every one of them is noise.
+ */
+function ChainGoal({ chain }: { chain: HandoffChain }) {
+  const { t } = useTranslation();
+  const goal = chain.goal?.trim();
+  if (!goal) return null;
+  const revisions = (chain.goalHistory ?? []).filter((r) => r.from != null);
+  return (
+    <div className={styles.goal_box}>
+      <span className={styles.goal_label}>{t("card.handoff_goal")}</span>
+      <span className={styles.goal_text}>{goal}</span>
+      {revisions.map((r, i) => (
+        <span className={styles.goal_revision} key={`${r.hop}-${i}`}>
+          {t("card.handoff_goal_revision", { hop: r.hop, from: r.from, to: r.to })}
+          <span className={styles.goal_revision_reason}>
+            {t("card.handoff_goal_reason", {
+              reason: r.reason?.trim() || t("card.handoff_goal_reason_missing"),
+            })}
+          </span>
+        </span>
+      ))}
+    </div>
   );
 }
 
