@@ -259,6 +259,10 @@ enum Commands {
     /// injects a bounded summary of the session's private notes
     #[command(name = "notes-hint", hide = true)]
     NotesHint,
+    /// [internal] Recent-sessions hook — on SessionStart (compact/resume/startup)
+    /// injects what this workspace has been worked on lately
+    #[command(name = "recent-sessions", hide = true)]
+    RecentSessions,
     /// [internal] dsh plugin content source — the sections to inject on one `agent/pre-step`
     #[command(hide = true)]
     DshContext {
@@ -1329,6 +1333,7 @@ fn main() {
         Commands::PrdContext => commands::prd::cmd_prd_context(),
         Commands::CtxReminder => commands::prd::cmd_ctx_reminder(),
         Commands::NotesHint => commands::notes::cmd_notes_hint(),
+        Commands::RecentSessions => commands::recent_sessions::cmd_recent_sessions(),
         Commands::DshContext {
             cwd,
             session,

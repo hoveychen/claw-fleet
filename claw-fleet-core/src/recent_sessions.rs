@@ -311,6 +311,48 @@ pub fn render(rows: &[RecentRow], workspace_path: &str) -> Option<String> {
     Some(out)
 }
 
+/// The whole block for one workspace, ready to inject: scan, layer, render.
+///
+/// The IO edge of this module — the three clients (the Claude `SessionStart`
+/// hook, the codex prompt-prepend, the dsh section) all call this so the text
+/// they deliver is byte-identical and cannot drift.
+///
+/// Costs a full `scan_all_sources`: ~2s warm against the on-disk scan cache,
+/// tens of seconds cold on a machine whose cache was never built. That is why
+/// every caller treats a slow or absent block as normal — the hook carries a
+/// generous timeout and simply emits nothing if it runs out.
+///
+/// Reviews are fetched by `workspace_name` (the only index the table has) and
+/// then re-filtered by repo root, because two unrelated checkouts can share a
+/// directory name and a stranger's summary is worse than no summary.
+pub fn render_for_workspace(workspace_path: &str, exclude_session_id: Option<&str>) -> Option<String> {
+    let sources = crate::agent_source::build_sources();
+    let sessions = crate::session::scan_all_sources(&sources);
+    let mut query = RecentQuery::new(workspace_path);
+    if let Some(id) = exclude_session_id {
+        query = query.excluding(id);
+    }
+    let reviews = load_reviews(workspace_path);
+    let rows = build_rows(&sessions, &query, &reviews, DEFAULT_SUMMARY_DEPTH);
+    render(&rows, workspace_path)
+}
+
+/// Task reviews for this repo, newest first. Any failure (no database yet on a
+/// fresh install, a locked file) degrades to no summaries rather than to no
+/// block: the titles are 99% of the value.
+fn load_reviews(workspace_path: &str) -> Vec<crate::task_review::TaskReview> {
+    let name = crate::session::workspace_name(workspace_path);
+    let Ok(store) = crate::task_review::TaskReviewStore::open() else {
+        return Vec::new();
+    };
+    store
+        .recent_for_workspace_name(&name, DEFAULT_LIMIT)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|review| crate::session::same_repo_root(&review.workspace_path, workspace_path))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
