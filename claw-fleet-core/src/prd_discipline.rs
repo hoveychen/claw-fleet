@@ -197,6 +197,9 @@ fleet handoff --note "<换班简报：什么做完了、什么在飞、关键文
 - **未来某个绝对时刻只跑一次 → `fleet schedule`**（`--at` / `--in`）。
 - **等一个外部条件满足后继续*本*会话 → `fleet watch`**：`fleet watch create --until '<完成时退出 0 的命令>' --capture '<其 stdout 你想被报告的命令>' --note '<你在等什么>'`，然后结束回合；条件触发时 Fleet 会 `claude --resume` 这个会话，把捕获的结果喂给你的下一回合。`fleet watch stop <id>` 取消。
 - **把工作交给全新后继者 → `fleet handoff`**。
+- **现在就在另一个 workspace 起一个会话干活 → `fleet spawn`**（MCP 工具 `fleet__spawn`）：`fleet spawn --workspace <项目目录> --prompt '<完整简报>' --title <几个字>`。当场 spawn 一个 detached 会话并把它的 session id 回给你（之后用 `fleet send <id>` 转达、`fleet interrupt <id>` 打断）。刚写完一个属于别的项目的计划、想立刻交给那个项目的会话去执行，就用它——别拿 `fleet schedule --in 60s` 当「立刻」使。
+
+**要落在别的 workspace，用 `--workspace`，不要 `cd` + 清 `FLEET_SESSION_ID`。**`fleet spawn` / `loop create` / `schedule create` / `plan`（以及对应的 MCP 工具）都接受它；不给就沿用你自己的 workspace。路径支持 `~/foo`，目录不存在会当场报错。
 
 `fleet loop` / `fleet schedule` 创建时**务必给 `--title <几个字>`**，否则计划任务列表只显示 prompt 的头两行。两者的可选 `--until <shell 命令>` 是廉价的非 LLM 门：每个 tick 先跑这条便宜探测，只有它退出 0 才 spawn 会花钱的 LLM 会话。别默认每个 tick 都起一个 LLM 会话。
 
@@ -407,6 +410,9 @@ A handoff changes *who*; this section covers one session crossing context window
 - **Run once at an absolute future time → `fleet schedule`** (`--at` / `--in`).
 - **Wait for an external condition and then continue *this* session → `fleet watch`**: `fleet watch create --until '<command that exits 0 when done>' --capture '<command whose stdout you want reported>' --note '<what you are waiting for>'`, then end the turn. Fleet polls in the background and `claude --resume`s this session with the captured result. `fleet watch stop <id>` cancels it.
 - **Hand the work to a fresh successor → `fleet handoff`**.
+- **Start a session working in another workspace right now → `fleet spawn`** (MCP tool `fleet__spawn`): `fleet spawn --workspace <project dir> --prompt '<full briefing>' --title <a few words>`. It spawns a detached session immediately and hands you its session id (then `fleet send <id>` to relay, `fleet interrupt <id>` to interrupt). Reach for it when you have just written a plan that belongs to another project and want that project's session on it now — do not use `fleet schedule --in 60s` as a stand-in for "now".
+
+**To land work in another workspace pass `--workspace`, do not `cd` and unset `FLEET_SESSION_ID`.** `fleet spawn` / `loop create` / `schedule create` / `plan` all take it (as do the matching MCP tools); omit it and your own workspace is used. `~/foo` works, and a directory that does not exist is rejected on the spot.
 
 Always pass `--title <a few words>` when creating a `fleet loop` or `fleet schedule`, or the scheduled-task list can only show the prompt's first two lines. Both also take an optional `--until <shell command>` as a cheap non-LLM gate: each tick runs that cheap probe first and only spawns the expensive LLM session when it exits 0. Do not default to spawning an LLM session every tick.
 
