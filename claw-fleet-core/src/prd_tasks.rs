@@ -1485,6 +1485,18 @@ fn backtrack_backstop(cwd: &Path, session_id: Option<&str>) -> Option<String> {
     ))
 }
 
+/// Phrase every rendering of the plan reminder contains, and nothing else
+/// Fleet injects does.
+///
+/// [`crate::prd_context_dedup`] recognises an already-injected reminder by
+/// this substring, so the two headers below are only free to differ in ways
+/// that keep it intact. It lives here, next to the text it describes, because
+/// the previous marker was a whole sentence copied into the dedup module: the
+/// cursor-focus header was later reworded, the copy was not, and every
+/// attributed session — which is to say every session doing work — re-sent up
+/// to 12 KB on every single prompt with nothing noticing.
+pub const PLAN_REMINDER_MARK: &str = "Fleet PRD Discipline mode";
+
 /// Build the `<system-reminder>` block that re-injects a workspace's active
 /// TASKS.md plans (merged across the main checkout and sibling worktrees).
 ///
