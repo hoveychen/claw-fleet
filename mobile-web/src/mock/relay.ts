@@ -219,13 +219,16 @@ export class MockRelayClient extends RelayClient {
         return MOCK_ARTIFACTS;
       // A 1x1 red PNG, so the image preview path renders something real rather
       // than an empty <img> that looks the same as a broken blob URL.
-      case "artifact_blob":
-        return {
-          filename: "封面.png",
-          mime: "image/png",
-          base64:
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-        };
+      case "artifact_blob": {
+        // Answers the ranged shape too, so the download path's loop terminates
+        // here the same way it does against a real host. Without `totalSize` a
+        // client cannot tell a chunk from a whole file, and demo mode would
+        // exercise only the legacy branch.
+        const base64 =
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+        const length = atob(base64).length;
+        return { filename: "封面.png", mime: "image/png", base64, offset: 0, length, totalSize: length };
+      }
       case "wiki_list":
         return MOCK_WIKI_DOCS;
       // The doc reader's body. Version-agnostic on purpose: the fixture has two

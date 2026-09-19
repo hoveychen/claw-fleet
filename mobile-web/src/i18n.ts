@@ -846,18 +846,20 @@ const DICT: Record<string, string> = {
   "还没有产出": "No artifacts yet",
   "Agent 把交付物存进产出库后会出现在这里。":
     "Deliverables an agent stores in the library show up here.",
-  仅桌面: "Desktop only",
+  仅下载: "Download only",
   "源文件已被改写": "Source rewritten",
   "入库时是硬链接，之后源文件被就地重写过。":
     "Hard-linked at ingest, and the source has been rewritten in place since.",
   "这个格式手机上看不了": "This format has no viewer on a phone",
   "可以分享出去，或到桌面端用系统应用打开。":
     "Share it out, or open it with a system app on the desktop.",
-  "这份产出太大，手机拿不动": "Too large for the phone",
-  "手机与桌面之间只能整块传，几百 MB 的文件过不来。到桌面端的产出页导出它。":
-    "Phone and desktop only exchange whole files, so a few hundred MB cannot cross. Export it from the desktop's Artifacts page.",
+  "这份产出太大，预览不了": "Too large to preview",
+  "可以下载到手机，只是没法在这里打开看。": "You can still download it — it just cannot be opened here.",
   "分享 / 保存": "Share / Save",
   "准备中…": "Preparing…",
+  "下载中 {0}%": "Downloading {0}%",
+  "点一下取消": "Tap to cancel",
+  // "Cancelled" is already defined above — reuse it.
   // "Load failed" already defined elsewhere — reuse it.
 
   // ── Repositories tab ──
