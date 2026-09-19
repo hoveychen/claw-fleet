@@ -2793,12 +2793,13 @@ fn serve_session_search(params: &Value) -> Result<Value, String> {
 
 // Wiki knowledge base: every published doc, newest-updated first
 // (mirrors the desktop's `list_wiki_docs` Tauri command).
-/// Ceiling on an artifact the phone may fetch through the relay.
+/// Ceiling on a **whole-file** artifact fetch through the relay.
 ///
 /// Matches `serve_wiki_file`'s per-file cap rather than `wiki_export`'s 64 MiB:
 /// both are "one file in one frame", and 16 MiB of base64 is already ~21 MiB on
 /// the wire. Images, PDFs and decks sit well under it; renders do not, which is
-/// the intended split.
+/// the intended split — for those the client asks by `offset` and reassembles,
+/// a path this cap does not apply to (see `serve_artifact_blob`).
 pub const MAX_ARTIFACT_FRAME_BYTES: u64 = 16 * 1024 * 1024;
 
 // Every artifact's metadata. Small enough to send whole: the list carries no
@@ -2818,20 +2819,25 @@ fn serve_artifact_folders(_params: &Value) -> Result<Value, String> {
     serde_json::to_value(crate::artifacts::list_folders()).map_err(|e| e.to_string())
 }
 
-/// One artifact's bytes, base64-framed — but only for artifacts small enough
-/// to cross the relay in a single frame.
+/// One artifact's bytes, base64-framed — whole, or one byte range of it.
 ///
 /// The relay has exactly one shape for bytes: a base64 payload inside one JSON
-/// frame. A rendered video is hundreds of megabytes, and base64 adds a third on
-/// top, so there is no honest way to hand a phone a big deliverable over this
-/// transport. Rather than invent a chunked reassembly protocol for a case the
-/// user asked us not to solve, the cap is explicit: under it the phone can
-/// preview and download; over it the phone shows the card and says to export
-/// from the desktop.
+/// frame. Asking for a whole 300 MB render in one of those is not a thing a
+/// phone (or the relay's 32 MiB message cap) survives, so the whole-file form
+/// keeps its [`MAX_ARTIFACT_FRAME_BYTES`] gate — it is what previews use, and a
+/// preview that cannot fit in memory is not a preview.
 ///
-/// The client already knows `sizeBytes` from `artifact_list`, so it can render
-/// that state without asking. This check is the backstop for a client that asks
-/// anyway — and the error names the size so the message can stay specific.
+/// Passing `offset` switches to the ranged form, which is how download works:
+/// the client walks the file a chunk at a time, each response bounded by
+/// `artifacts::MAX_RANGE_CHUNK` regardless of what it asked for, and reassembles
+/// on its side. No whole-file gate applies there — the size that matters is the
+/// chunk's, and that one is bounded by construction. This mirrors the `Range`
+/// header the `fleet serve` route has always honoured (`route_artifact_blob`);
+/// the relay just spells the range in JSON because it has no headers.
+///
+/// The reply names `totalSize` and the served `offset`/`length` so the client
+/// can drive the loop off the answer rather than off `artifact_list`'s
+/// `sizeBytes`, which may be a version or a rewrite behind.
 fn serve_artifact_blob(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
     let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
@@ -2839,28 +2845,43 @@ fn serve_artifact_blob(params: &Value) -> Result<Value, String> {
     // history read-only, so this is the whole of its version support.
     let version = params.get("version").and_then(Value::as_str).filter(|v| !v.is_empty());
     let artifact = crate::artifacts::get(id)?;
-    // The size gate has to name the version actually being fetched: an old
-    // version can be far bigger (or smaller) than what is current.
-    let size = match version {
-        Some(v) => artifact
-            .versions
-            .iter()
-            .find(|entry| entry.id == v)
-            .map(|entry| entry.size_bytes)
-            .ok_or_else(|| format!("artifact '{id}' has no version '{v}'"))?,
-        None => artifact.size_bytes,
-    };
-    if size > MAX_ARTIFACT_FRAME_BYTES {
-        return Err(format!(
-            "artifact is {size} bytes, over the {MAX_ARTIFACT_FRAME_BYTES}-byte relay limit — \
-             export it from the desktop instead"
-        ));
+    let offset = params.get("offset").and_then(Value::as_u64);
+    let range = offset.map(|start| {
+        // `length` is a request, not a promise: the store clamps to
+        // MAX_RANGE_CHUNK and to EOF, and the reply reports what it served.
+        let want = params.get("length").and_then(Value::as_u64).unwrap_or(u64::MAX);
+        (start, start.saturating_add(want.max(1)).saturating_sub(1))
+    });
+
+    if range.is_none() {
+        // The size gate has to name the version actually being fetched: an old
+        // version can be far bigger (or smaller) than what is current.
+        let size = match version {
+            Some(v) => artifact
+                .versions
+                .iter()
+                .find(|entry| entry.id == v)
+                .map(|entry| entry.size_bytes)
+                .ok_or_else(|| format!("artifact '{id}' has no version '{v}'"))?,
+            None => artifact.size_bytes,
+        };
+        if size > MAX_ARTIFACT_FRAME_BYTES {
+            return Err(format!(
+                "artifact is {size} bytes, over the {MAX_ARTIFACT_FRAME_BYTES}-byte relay limit \
+                 for a whole-file fetch — request it by `offset` instead"
+            ));
+        }
     }
-    let blob = crate::artifacts::read_version_bytes(id, version, None)?;
+
+    let blob = crate::artifacts::read_version_bytes(id, version, range)?;
+    let served = blob.bytes.len() as u64;
     Ok(json!({
         "filename": artifact.name,
         "mime": blob.mime,
         "base64": base64::engine::general_purpose::STANDARD.encode(&blob.bytes),
+        "offset": blob.range.map(|(start, _)| start).unwrap_or(0),
+        "length": served,
+        "totalSize": blob.total_size,
     }))
 }
 
@@ -4432,6 +4453,57 @@ mod tests {
             !orphan.is_file(),
             "the answer must not be filed for a producer that no longer exists"
         );
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    /// A download must not be refused for being big. The whole-file form keeps
+    /// its single-frame ceiling — that one feeds previews, which have to fit in
+    /// memory anyway — but asking by `offset` walks the file in bounded chunks,
+    /// which is the only way a phone ever gets a rendered video.
+    #[test]
+    fn ranged_artifact_blob_serves_a_file_over_the_whole_file_ceiling() {
+        let _guard = crate::session::fleet_home_lock();
+        let home = std::env::temp_dir()
+            .join(format!("fleet-artifact-range-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by fleet_home_lock.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+
+        let total = MAX_ARTIFACT_FRAME_BYTES + 4096;
+        let src = home.join("render.mp4");
+        fs::write(&src, vec![7u8; total as usize]).unwrap();
+        let artifact = crate::artifacts::add(&src, None, None, &home, None).unwrap();
+
+        // Whole-file: still refused, and the message points at the way out.
+        let err = serve_artifact_blob(&json!({ "id": artifact.id })).unwrap_err();
+        assert!(err.contains("offset"), "the refusal must name the ranged form: {err}");
+
+        // Ranged: served, clamped to the store's chunk cap, and self-describing
+        // enough to drive the next request without consulting `artifact_list`.
+        let first = serve_artifact_blob(&json!({ "id": artifact.id, "offset": 0 })).unwrap();
+        assert_eq!(first["offset"], json!(0));
+        assert_eq!(first["totalSize"], json!(total));
+        let served = first["length"].as_u64().unwrap();
+        assert_eq!(served, crate::artifacts::MAX_RANGE_CHUNK);
+
+        // The tail chunk closes the file out exactly — no short read, no overrun.
+        let mut at = served;
+        while at < total {
+            let next =
+                serve_artifact_blob(&json!({ "id": artifact.id, "offset": at })).unwrap();
+            assert_eq!(next["offset"].as_u64().unwrap(), at);
+            at += next["length"].as_u64().unwrap();
+        }
+        assert_eq!(at, total);
 
         unsafe {
             match prev {

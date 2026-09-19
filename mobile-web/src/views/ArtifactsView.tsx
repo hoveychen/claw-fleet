@@ -4,11 +4,11 @@
 // scrolling with messages), tapping an artifact opens ArtifactDetail as a
 // fullscreen overlay.
 //
-// Mobile handles only the smaller half. The relay ships bytes as single-frame
-// base64, which bloats by a third — there is no honest way to stream a chunk
-// that way. Artifacts over MAX_RELAY_BYTES show up here as cards with metadata
-// only, explicitly saying "export from desktop" rather than pretending we can
-// fetch them.
+// Preview and download part ways above MAX_RELAY_BYTES. A preview is one frame
+// of base64 and has to fit in memory, so over that size the card says so and
+// shows metadata only. Downloading has no such ceiling — it walks the file by
+// byte range (see `downloadArtifact`) — so the button stays live at any size,
+// and reports a percentage while it works.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -29,6 +29,7 @@ import { useHistoryLayer } from "../useNavStack";
 import type { FleetTransport } from "../transport";
 import type { Artifact } from "../types";
 import {
+  downloadArtifact,
   fetchArtifact,
   formatBytes,
   isFetchable,
@@ -134,8 +135,10 @@ function ArtifactRow({ artifact, onOpen }: { artifact: Artifact; onOpen: () => v
         </span>
       </span>
       {/* Stated on the card, not discovered after a failed fetch: the list
-          already carries sizeBytes, so the phone knows before it asks. */}
-      {!isFetchable(artifact) && <span className={styles.tooBig}>{t("仅桌面")}</span>}
+          already carries sizeBytes, so the phone knows before it asks. It no
+          longer means "desktop only" — the bytes can come over in chunks; what
+          is off the table is opening it here. */}
+      {!isFetchable(artifact) && <span className={styles.tooBig}>{t("仅下载")}</span>}
     </button>
   );
 }
@@ -158,7 +161,11 @@ export function ArtifactDetail({
   // A .zip is fetched as a whole and parsed locally (see the comment at the top
   // of ZipBrowser).
   const [zipBytes, setZipBytes] = useState<Uint8Array | null>(null);
-  const [busy, setBusy] = useState(false);
+  // A download in flight, and how far along it is. Null when idle; `progress`
+  // stays null until the first chunk lands, which is the one stretch that is
+  // honestly indeterminate.
+  const [abort, setAbort] = useState<AbortController | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const kind = previewKind(artifact);
 
@@ -239,18 +246,33 @@ export function ArtifactDetail({
     [shareFile],
   );
 
+  // Tapping the button while a download runs cancels it. A transfer that can
+  // take minutes needs a way out that is not "close the app".
   const share = useCallback(async () => {
-    if (!client || busy) return;
-    setBusy(true);
-    try {
-      const { filename, mime, bytes } = await fetchArtifact(client, artifact.id);
-      await shareFile(new File([bytes as BlobPart], filename, { type: mime }), artifact.title);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+    if (!client) return;
+    if (abort) {
+      abort.abort();
+      return;
     }
-  }, [client, artifact.id, artifact.title, busy, shareFile]);
+    const ctrl = new AbortController();
+    setAbort(ctrl);
+    setProgress(0);
+    try {
+      const { filename, mime, blob } = await downloadArtifact(client, artifact.id, {
+        signal: ctrl.signal,
+        onProgress: ({ received, total }) =>
+          setProgress(total ? Math.min(99, Math.floor((received / total) * 100)) : 0),
+      });
+      await shareFile(new File([blob], filename, { type: mime }), artifact.title);
+    } catch (e) {
+      // The user pressed cancel; say so plainly rather than as a failure.
+      const name = e instanceof DOMException ? e.name : "";
+      setErr(name === "AbortError" ? t("已取消") : e instanceof Error ? e.message : String(e));
+    } finally {
+      setAbort(null);
+      setProgress(null);
+    }
+  }, [client, artifact.id, artifact.title, abort, shareFile]);
 
   const Icon = KIND_ICON[artifact.kind] ?? FileText;
   const source: PreviewSource = { kind, title: artifact.title, blobUrl, blob, text };
@@ -282,12 +304,12 @@ export function ArtifactDetail({
           <div className={styles.noPreview}>
             <Icon size={34} strokeWidth={1.1} />
             <div className={styles.noPreviewTitle}>
-              {isFetchable(artifact) ? t("这个格式手机上看不了") : t("这份产出太大，手机拿不动")}
+              {isFetchable(artifact) ? t("这个格式手机上看不了") : t("这份产出太大，预览不了")}
             </div>
             <div className={styles.noPreviewHint}>
               {isFetchable(artifact)
                 ? t("可以分享出去，或到桌面端用系统应用打开。")
-                : t("手机与桌面之间只能整块传，几百 MB 的文件过不来。到桌面端的产出页导出它。")}
+                : t("可以下载到手机，只是没法在这里打开看。")}
             </div>
           </div>
         )}
@@ -308,12 +330,19 @@ export function ArtifactDetail({
           </div>
         )}
         <div className={styles.actions}>
+          {/* Never disabled for size any more: a 400 MB render is exactly what
+              the chunked path exists to deliver. */}
           <button
             className={styles.action}
             onClick={share}
-            disabled={!isFetchable(artifact) || busy || !client}
+            disabled={!client}
+            title={abort ? t("点一下取消") : undefined}
           >
-            {busy ? t("准备中…") : t("分享 / 保存")}
+            {abort == null
+              ? t("分享 / 保存")
+              : progress == null
+                ? t("准备中…")
+                : t("下载中 {0}%", progress)}
           </button>
         </div>
       </div>
