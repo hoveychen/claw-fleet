@@ -377,10 +377,46 @@ fn render_image_result(result: &crate::codex_image::GenerateImageResult) -> Valu
     if !result.agent_message.trim().is_empty() {
         text.push_str(&format!("\nAgent note: {}", result.agent_message.trim()));
     }
+    let mut content = vec![json!({ "type": "text", "text": text })];
+    content.extend(result_thumbnails(result));
     json!({
-        "content": [{ "type": "text", "text": text }],
+        "content": content,
         "isError": false,
     })
+}
+
+/// One squeezed thumbnail per generated image, as MCP image blocks.
+///
+/// Without these the agent is drawing blind — it can only iterate on
+/// `fleet__image_edit` from its own description of what it asked for, never
+/// from what came back. They are thumbnails rather than originals because an
+/// image's token cost scales with its *dimensions*: the squeeze lands around
+/// 320px, roughly 150 tokens, while a 4K original would be thousands. The same
+/// blocks are what the desktop and the phone already render as `_thumbs`, so
+/// attaching them here lights up all three clients with no renderer change.
+fn result_thumbnails(result: &crate::codex_image::GenerateImageResult) -> Vec<Value> {
+    use base64::Engine as _;
+    /// Cap the blocks per result: `n` can be 10, and ten thumbnails is already
+    /// more than anyone reads back.
+    const MAX_THUMBS: usize = 4;
+    result
+        .images
+        .iter()
+        .take(MAX_THUMBS)
+        .filter_map(|img| {
+            let bytes = std::fs::read(&img.path).ok()?;
+            let mime = crate::wiki::mime_for_path(std::path::Path::new(&img.path));
+            let (small, mime) = fleet_image::downscale_decision_asset(bytes, mime);
+            Some(json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime,
+                    "data": base64::engine::general_purpose::STANDARD.encode(&small),
+                }
+            }))
+        })
+        .collect()
 }
 
 /// Bridge `fleet__image` to [`crate::codex_image::generate_image`].
@@ -395,6 +431,20 @@ fn handle_image_call(params: &Value) -> Result<Value, JsonRpcError> {
     let description = required_str(&args, "description")?;
     let (images, model, workspace) = image_common_args(&args);
 
+    // Native by default. The Codex path stays reachable for two callers: one
+    // that pinned FLEET_IMAGE_BACKEND=codex, and one still passing a routing
+    // model like `gpt-5.6-luna` — which is what every caller written against
+    // the old tool passes.
+    if !crate::image_api::wants_codex_backend(model.as_deref()) {
+        let mut req = image_request_from_args(&description, &args);
+        req.images = images.iter().map(std::path::PathBuf::from).collect();
+        let owner = current_session_id();
+        return match crate::image_api::run(&req, Some(owner.as_str())) {
+            Ok(result) => Ok(render_image_result(&result)),
+            Err(e) => Ok(tool_error(e)),
+        };
+    }
+
     match crate::codex_image::generate_image(
         &workspace.to_string_lossy(),
         &description,
@@ -406,12 +456,31 @@ fn handle_image_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 }
 
-/// Bridge `fleet__image_edit` to [`crate::codex_image::edit_image`].
+/// Bridge `fleet__image_edit` to whichever backend owns this handle.
+///
+/// Routing is by handle shape, not by preference: an `img-` handle came from
+/// the native store and has no Codex thread to resume, and a bare UUID is a
+/// Codex thread whose previous image the native path cannot see.
 fn handle_image_edit_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     let thread_id = required_str(&args, "thread_id")?;
     let instruction = required_str(&args, "instruction")?;
     let (images, model, workspace) = image_common_args(&args);
+
+    if crate::image_api::is_native_handle(&thread_id) {
+        let template = image_request_from_args(&instruction, &args);
+        let owner = current_session_id();
+        return match crate::image_api::run_edit(
+            &thread_id,
+            &instruction,
+            &images,
+            &template,
+            Some(owner.as_str()),
+        ) {
+            Ok(result) => Ok(render_image_result(&result)),
+            Err(e) => Ok(tool_error(e)),
+        };
+    }
 
     match crate::codex_image::edit_image(
         &workspace.to_string_lossy(),
@@ -435,13 +504,65 @@ fn image_shared_properties() -> Value {
         },
         "model": {
             "type": "string",
-            "description": "Routing model that drives the turn (default gpt-5.6-luna). Generation is always gpt-image-2 regardless, so the cheap tier is usually right."
+            "enum": ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2"],
+            "description": "Image model. `gpt-image-2.5-flare` (default) is the fast tier; `gpt-image-2.5-sunburst` costs the same but renders slower and sharper — use it for final assets, dense text and identity-sensitive edits."
+        },
+        "quality": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "xhigh", "max", "auto"],
+            "description": "Render effort. `low` for drafts and thumbnails; `high` and up for final assets. `xhigh` and `max` exist only on the 2.5 models."
+        },
+        "size": {
+            "type": "string",
+            "description": "`auto`, or WIDTHxHEIGHT. Edges must be multiples of 16px and at most 3840px, aspect ratio at most 3:1, total pixels between 655,360 and 8,294,400. Common: 1024x1024, 1536x1024, 2048x1152, 3840x2160."
+        },
+        "background": {
+            "type": "string",
+            "enum": ["transparent", "opaque", "auto"],
+            "description": "Output transparency. `transparent` needs output_format png or webp. This is the alpha channel, not the scene's backdrop — describe that in the prompt."
+        },
+        "output_format": {
+            "type": "string",
+            "enum": ["png", "jpeg", "webp"],
+            "description": "File format, png by default."
+        },
+        "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Variants of THIS prompt, 1-10. Distinct assets want distinct calls, not a higher n."
         },
         "workspace_path": {
             "type": "string",
-            "description": "Workspace to run in. Defaults to the calling session's workspace; you rarely need to set this."
+            "description": "Workspace to run in. Only used by the legacy Codex fallback; you rarely need to set this."
         }
     })
+}
+
+/// Build an [`crate::image_api::ImageRequest`] from tool arguments.
+///
+/// Every knob is optional and every unset one is left absent rather than
+/// defaulted, so the API's own default applies — pinning them to `auto` is the
+/// exact limitation of the Codex built-in tool this replaces.
+fn image_request_from_args(prompt: &str, args: &Value) -> crate::image_api::ImageRequest {
+    let str_arg = |field: &str| {
+        args.get(field)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    let mut req = crate::image_api::ImageRequest::new(prompt);
+    req.model = str_arg("model");
+    req.quality = str_arg("quality");
+    req.size = str_arg("size");
+    req.background = str_arg("background");
+    req.output_format = str_arg("output_format");
+    req.n = args
+        .get("n")
+        .and_then(Value::as_u64)
+        .and_then(|n| u8::try_from(n).ok());
+    req
 }
 
 fn image_tool_def() -> Value {
@@ -452,7 +573,7 @@ fn image_tool_def() -> Value {
     });
     json!({
         "name": "fleet__image",
-        "description": "Generate a NEW raster image (illustration, sprite, mockup, hero image, texture) by borrowing Codex's built-in image_gen tool — model `gpt-image-2`, billed against the ChatGPT plan quota, no OPENAI_API_KEY needed. Use this instead of hand-writing SVG/HTML/CSS when the deliverable is genuinely a bitmap; prefer editing repo-native vectors when extending an existing icon or logo system. Returns a `thread_id` plus absolute paths on this machine — keep the thread_id and call fleet__image_edit to revise the result instead of regenerating from scratch. The file stays put, so pass the path to fleet__ask `images` to show it, fleet__artifact to hand it over, or copy it into the repo yourself. Blocks for tens of seconds. Size notes for the prompt: edges must be multiples of 16px, max 3840px, aspect ratio at most 3:1; gpt-image-2 cannot do transparent backgrounds.",
+        "description": "Generate a NEW raster image (illustration, sprite, mockup, hero image, texture) through the OpenAI Images API — `gpt-image-2.5-flare` by default, with `quality`, `size`, `background` and `n` under your control. Authenticates with OPENAI_API_KEY when one is set, otherwise with the local Codex ChatGPT session (plan quota). Use this instead of hand-writing SVG/HTML/CSS when the deliverable is genuinely a bitmap; prefer editing repo-native vectors when extending an existing icon or logo system. Returns a `thread_id` plus absolute paths on this machine — keep it and call fleet__image_edit to revise instead of regenerating from scratch. The file stays put, so pass the path to fleet__ask `images` to show it, fleet__artifact to hand it over, or copy it into the repo yourself. Blocks for tens of seconds, longer at high quality or 4K.",
         "inputSchema": {
             "type": "object",
             "properties": properties,
@@ -474,7 +595,7 @@ fn image_edit_tool_def() -> Value {
     });
     json!({
         "name": "fleet__image_edit",
-        "description": "Revise an image you generated earlier with fleet__image, in the same Codex thread — this is the \"keep tweaking until it's right\" path. Because the thread still holds the previous image, the edit builds on it rather than starting over. Returns only the images THIS round produced, plus a timeline of what the agent did. Requires the thread_id from the earlier call; if you don't have one, use fleet__image first. Note: revising a plain local image file that Fleet did not generate is not supported here — attach it via `images` on fleet__image instead.",
+        "description": "Revise an image you generated earlier with fleet__image — this is the \"keep tweaking until it's right\" path. The previous image is resent as the edit target, so the change builds on it rather than starting over, and everything you don't mention is preserved. Accepts the same quality/size/background/model controls as fleet__image. Returns only the images THIS round produced, under a new thread_id; the original is left intact to revise again if this round went the wrong way. Requires the thread_id from the earlier call; if you don't have one, use fleet__image first. To revise a plain local file Fleet did not generate, attach it via `images` on fleet__image instead.",
         "inputSchema": {
             "type": "object",
             "properties": properties,
@@ -1375,18 +1496,54 @@ mod tests {
             &vec![json!("description")],
             "model and workspace_path must stay optional"
         );
-        for optional in ["model", "workspace_path"] {
+        for optional in [
+            "model",
+            "quality",
+            "size",
+            "background",
+            "output_format",
+            "n",
+            "workspace_path",
+        ] {
             assert!(
                 schema["properties"][optional].is_object(),
                 "{optional} must be declared"
             );
         }
-        // The description is the agent's only guidance on the hard constraints;
-        // losing them means silently-rejected sizes and bogus transparency asks.
-        let desc = def["description"].as_str().unwrap();
-        assert!(desc.contains("gpt-image-2"), "must name the model");
-        assert!(desc.contains("16px"), "must state the size granularity");
-        assert!(desc.contains("transparent"), "must flag the transparency limit");
+        // The hard constraints are the agent's only guard against
+        // silently-rejected sizes and bogus transparency asks. They live on the
+        // properties that own them rather than buried in the tool blurb.
+        let size = schema["properties"]["size"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(size.contains("16px"), "size must state the granularity");
+        assert!(size.contains("3840"), "size must state the edge ceiling");
+        let background = schema["properties"]["background"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(
+            background.contains("png"),
+            "background must state the alpha-format requirement"
+        );
+        // Both 2.5 tiers must be offerable, or the whole point of the native
+        // path is lost.
+        let models = schema["properties"]["model"]["enum"].as_array().unwrap();
+        for model in [
+            crate::image_api::MODEL_FLARE,
+            crate::image_api::MODEL_SUNBURST,
+        ] {
+            assert!(
+                models.iter().any(|m| m.as_str() == Some(model)),
+                "{model} must be offerable"
+            );
+        }
+        let quality = schema["properties"]["quality"]["enum"].as_array().unwrap();
+        for tier in ["xhigh", "max"] {
+            assert!(
+                quality.iter().any(|q| q.as_str() == Some(tier)),
+                "{tier} must be offerable"
+            );
+        }
     }
 
     #[test]
