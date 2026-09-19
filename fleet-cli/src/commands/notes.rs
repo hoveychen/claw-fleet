@@ -57,6 +57,12 @@ pub(crate) fn cmd_notes_hint() {
         .map(str::to_string)
         .or_else(read_fleet_session_id);
     let Some(sid) = session_id else { return };
+    // Piggy-backed on the same firing rather than given its own hook: this is
+    // the one Fleet hook that runs for every session at the start of every
+    // turn, which is exactly the cadence the token needs (each turn is a new
+    // process with a new socket and a new token). Runs before the notes early
+    // return — most sessions have no notes, but every session needs this.
+    claw_fleet_core::live_inject::record_session_token(&sid);
     let Some(hint) = claw_fleet_core::session_notes::render_hint(&sid) else { return };
     let out = json!({
         "hookSpecificOutput": {
