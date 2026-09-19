@@ -64,6 +64,43 @@
   line-height: 1.4;
 }
 
+/* The chain's stated finish line, above the legs — a reader asking "is this
+   chain done?" should not have to reconstruct it from 26 relay notes. Absent
+   on history chains and explore chains, where the block renders nothing. */
+.goal_box {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-secondary);
+}
+
+.goal_label {
+  display: block;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-secondary);
+  margin-bottom: 2px;
+}
+
+.goal_text {
+  color: var(--color-text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.goal_revision {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.goal_revision_reason {
+  opacity: 0.8;
+}
+
 .handoff_leg {
   display: flex;
   align-items: center;
