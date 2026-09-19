@@ -123,12 +123,30 @@ fn collect_images_in(dir: &Path) -> Vec<GeneratedImage> {
     out
 }
 
-/// Images produced by a given Codex thread, largest first. Empty when the
-/// thread generated none (or `$CODEX_HOME` can't be resolved).
-pub fn list_thread_images(thread_id: &str) -> Vec<GeneratedImage> {
-    thread_images_dir(thread_id)
+/// Images reachable from `id`, largest first.
+///
+/// `id` is read two ways, because the UI has only ever had one to give:
+///
+/// - as a **handle** — a native `img-<uuid>` or a Codex thread id — listing
+///   that one generation's output;
+/// - as a **session id**, additionally collecting every native generation that
+///   session asked for. The Codex path got this for free (the generating thread
+///   *was* a session, so `<SessionImages sessionId={session.id}/>` matched by
+///   construction); a native call has no session of its own, so attribution is
+///   recorded at save time and resolved here.
+///
+/// A native handle skips the session sweep: it cannot also be a session id, and
+/// the sweep would be a directory walk for nothing.
+pub fn list_thread_images(id: &str) -> Vec<GeneratedImage> {
+    let mut out = thread_images_dir(id)
         .map(|d| collect_images_in(&d))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if !crate::image_api::is_native_handle(id) {
+        out.extend(crate::image_api::images_owned_by_session(id));
+    }
+    out.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
+    out.dedup_by(|a, b| a.path == b.path);
+    out
 }
 
 // ── Internal-thread marking ─────────────────────────────────────────────────

@@ -576,6 +576,51 @@ pub fn handle_dir(handle: &str) -> Option<PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join("generated_images").join(handle))
 }
 
+/// Filename recording which session asked for this handle's images.
+///
+/// Without it a native generation is unreachable from the UI. The Codex path
+/// got session attribution for free — the generating thread *was* a session, so
+/// `<SessionImages sessionId={session.id}/>` found its pictures by construction.
+/// A native call has no session of its own, so the owner is written down.
+const OWNER_FILE: &str = "owner";
+
+/// Which session owns this handle, if it recorded one.
+pub fn owner_of(handle: &str) -> Option<String> {
+    let dir = handle_dir(handle)?;
+    let raw = std::fs::read_to_string(dir.join(OWNER_FILE)).ok()?;
+    let owner = raw.trim().to_string();
+    (!owner.is_empty()).then_some(owner)
+}
+
+/// Every image generated on behalf of `session`, largest first.
+///
+/// Walks the store rather than keeping a reverse index: the directory holds one
+/// entry per generation, which is orders of magnitude smaller than the session
+/// list this is displayed next to. Revisit if that stops being true.
+pub fn images_owned_by_session(session: &str) -> Vec<crate::codex_image::GeneratedImage> {
+    let session = session.trim();
+    if session.is_empty() {
+        return Vec::new();
+    }
+    let Some(root) = crate::session::get_fleet_dir().map(|d| d.join("generated_images")) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let Some(handle) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if owner_of(&handle).as_deref() != Some(session) {
+            continue;
+        }
+        out.extend(crate::codex_image::list_thread_images(&handle));
+    }
+    out
+}
+
 /// Write one turn's images into the handle's directory.
 ///
 /// Names are `1.png`, `2.png`, … in the order the API returned them, which
@@ -585,9 +630,15 @@ pub fn save_images(
     handle: &str,
     images: &[ImageBytes],
     output_format: Option<&str>,
+    owner: Option<&str>,
 ) -> Result<Vec<crate::codex_image::GeneratedImage>, String> {
     let dir = handle_dir(handle).ok_or_else(|| format!("invalid image handle '{handle}'"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    if let Some(owner) = owner.map(str::trim).filter(|o| !o.is_empty()) {
+        // Best-effort: a picture that cannot be attributed is still a picture,
+        // and the caller already has its absolute path.
+        let _ = std::fs::write(dir.join(OWNER_FILE), owner);
+    }
     let ext = match output_format.unwrap_or("png") {
         "jpeg" => "jpg",
         other => other,
@@ -641,11 +692,17 @@ fn provenance(auth: &ImageAuth, req: &ImageRequest) -> String {
 }
 
 /// Run one request end to end: authenticate, call, save, describe.
-pub fn run(req: &ImageRequest) -> Result<crate::codex_image::GenerateImageResult, String> {
+///
+/// `owner` is the calling session, recorded so the picture can be found again
+/// from the session it belongs to rather than only from the handle.
+pub fn run(
+    req: &ImageRequest,
+    owner: Option<&str>,
+) -> Result<crate::codex_image::GenerateImageResult, String> {
     let auth = load_auth(None)?;
     let handle = new_handle();
     let images = execute(req, &auth, &handle, DEFAULT_TIMEOUT)?;
-    let saved = save_images(&handle, &images, req.output_format.as_deref())?;
+    let saved = save_images(&handle, &images, req.output_format.as_deref(), owner)?;
     Ok(crate::codex_image::GenerateImageResult {
         thread_id: handle,
         images: saved,
@@ -669,6 +726,7 @@ pub fn run_edit(
     instruction: &str,
     extra_images: &[String],
     template: &ImageRequest,
+    owner: Option<&str>,
 ) -> Result<crate::codex_image::GenerateImageResult, String> {
     let previous = crate::codex_image::list_thread_images(handle);
     let target = previous
@@ -679,7 +737,10 @@ pub fn run_edit(
     req.images = std::iter::once(PathBuf::from(&target.path))
         .chain(extra_images.iter().map(PathBuf::from))
         .collect();
-    run(&req)
+    // Inherit the original's owner when the caller has no session of its own,
+    // so a revision stays findable from the same place as what it revises.
+    let owner = owner.map(str::to_string).or_else(|| owner_of(handle));
+    run(&req, owner.as_deref())
 }
 
 #[cfg(test)]
@@ -961,7 +1022,7 @@ mod tests {
                 generation_id: None,
             },
         ];
-        let saved = save_images(&handle, &images, None).unwrap();
+        let saved = save_images(&handle, &images, None, None).unwrap();
         assert_eq!(saved.len(), 2);
         // Order is API order, not size order — the Codex path had to sort by
         // size because it could not tell variants apart; we can.
@@ -983,9 +1044,9 @@ mod tests {
             bytes: b"x".to_vec(),
             generation_id: None,
         }];
-        let saved = save_images(&handle, &images, Some("jpeg")).unwrap();
+        let saved = save_images(&handle, &images, Some("jpeg"), None).unwrap();
         assert!(saved[0].path.ends_with("1.jpg"), "{}", saved[0].path);
-        let saved = save_images(&handle, &images, Some("webp")).unwrap();
+        let saved = save_images(&handle, &images, Some("webp"), None).unwrap();
         assert!(saved[0].path.ends_with("1.webp"), "{}", saved[0].path);
     }
 
@@ -1003,6 +1064,7 @@ mod tests {
                 bytes: b"\x89PNG\r\n\x1a\n".to_vec(),
                 generation_id: None,
             }],
+            None,
             None,
         )
         .unwrap();
@@ -1063,6 +1125,78 @@ mod tests {
     }
 
     #[test]
+    fn a_session_finds_the_images_it_asked_for() {
+        // This is what makes a native generation visible at all: the desktop
+        // mounts <SessionImages sessionId={session.id}/>, so a picture nobody
+        // can reach from a session id is a picture nobody sees.
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = crate::paths::fleet_home_guard(tmp.path());
+        let png = ImageBytes {
+            bytes: b"\x89PNG\r\n\x1a\n".to_vec(),
+            generation_id: None,
+        };
+        let mine_a = new_handle();
+        let mine_b = new_handle();
+        let theirs = new_handle();
+        save_images(&mine_a, &[png.clone()], None, Some("sess-1")).unwrap();
+        save_images(&mine_b, &[png.clone()], None, Some("sess-1")).unwrap();
+        save_images(&theirs, &[png.clone()], None, Some("sess-2")).unwrap();
+
+        assert_eq!(owner_of(&mine_a).as_deref(), Some("sess-1"));
+        // Two generations, one session: both surface, and the other session's
+        // does not.
+        let found = crate::codex_image::list_thread_images("sess-1");
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().all(|i| !i.path.contains(&theirs)));
+        assert_eq!(crate::codex_image::list_thread_images("sess-2").len(), 1);
+        assert_eq!(crate::codex_image::list_thread_images("sess-3").len(), 0);
+        // The handle itself still resolves to just its own output.
+        assert_eq!(crate::codex_image::list_thread_images(&mine_a).len(), 1);
+    }
+
+    #[test]
+    fn an_unattributed_generation_is_still_readable_by_handle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = crate::paths::fleet_home_guard(tmp.path());
+        let handle = new_handle();
+        save_images(
+            &handle,
+            &[ImageBytes {
+                bytes: b"\x89PNG\r\n\x1a\n".to_vec(),
+                generation_id: None,
+            }],
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(owner_of(&handle), None);
+        assert_eq!(crate::codex_image::list_thread_images(&handle).len(), 1);
+    }
+
+    #[test]
+    fn the_owner_marker_is_never_served_as_an_image() {
+        // It lives in the same directory as the pictures, so the extension
+        // gate has to keep it out of both the listing and the byte reader.
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = crate::paths::fleet_home_guard(tmp.path());
+        let handle = new_handle();
+        save_images(
+            &handle,
+            &[ImageBytes {
+                bytes: b"\x89PNG\r\n\x1a\n".to_vec(),
+                generation_id: None,
+            }],
+            None,
+            Some("sess-1"),
+        )
+        .unwrap();
+        let listed = crate::codex_image::list_thread_images(&handle);
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].path.ends_with("1.png"));
+        assert!(crate::codex_image::read_thread_image(&handle, OWNER_FILE).is_err());
+    }
+
+    #[test]
     fn editing_an_unknown_handle_fails_before_the_request_is_spent() {
         let tmp = tempfile::tempdir().unwrap();
         let _guard = crate::paths::fleet_home_guard(tmp.path());
@@ -1071,6 +1205,7 @@ mod tests {
             "make it blue",
             &[],
             &ImageRequest::new("ignored"),
+            None,
         )
         .unwrap_err();
         assert!(err.contains("no image found"), "{err}");

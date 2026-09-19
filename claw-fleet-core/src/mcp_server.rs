@@ -377,10 +377,46 @@ fn render_image_result(result: &crate::codex_image::GenerateImageResult) -> Valu
     if !result.agent_message.trim().is_empty() {
         text.push_str(&format!("\nAgent note: {}", result.agent_message.trim()));
     }
+    let mut content = vec![json!({ "type": "text", "text": text })];
+    content.extend(result_thumbnails(result));
     json!({
-        "content": [{ "type": "text", "text": text }],
+        "content": content,
         "isError": false,
     })
+}
+
+/// One squeezed thumbnail per generated image, as MCP image blocks.
+///
+/// Without these the agent is drawing blind — it can only iterate on
+/// `fleet__image_edit` from its own description of what it asked for, never
+/// from what came back. They are thumbnails rather than originals because an
+/// image's token cost scales with its *dimensions*: the squeeze lands around
+/// 320px, roughly 150 tokens, while a 4K original would be thousands. The same
+/// blocks are what the desktop and the phone already render as `_thumbs`, so
+/// attaching them here lights up all three clients with no renderer change.
+fn result_thumbnails(result: &crate::codex_image::GenerateImageResult) -> Vec<Value> {
+    use base64::Engine as _;
+    /// Cap the blocks per result: `n` can be 10, and ten thumbnails is already
+    /// more than anyone reads back.
+    const MAX_THUMBS: usize = 4;
+    result
+        .images
+        .iter()
+        .take(MAX_THUMBS)
+        .filter_map(|img| {
+            let bytes = std::fs::read(&img.path).ok()?;
+            let mime = crate::wiki::mime_for_path(std::path::Path::new(&img.path));
+            let (small, mime) = fleet_image::downscale_decision_asset(bytes, mime);
+            Some(json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime,
+                    "data": base64::engine::general_purpose::STANDARD.encode(&small),
+                }
+            }))
+        })
+        .collect()
 }
 
 /// Bridge `fleet__image` to [`crate::codex_image::generate_image`].
@@ -402,7 +438,8 @@ fn handle_image_call(params: &Value) -> Result<Value, JsonRpcError> {
     if !crate::image_api::wants_codex_backend(model.as_deref()) {
         let mut req = image_request_from_args(&description, &args);
         req.images = images.iter().map(std::path::PathBuf::from).collect();
-        return match crate::image_api::run(&req) {
+        let owner = current_session_id();
+        return match crate::image_api::run(&req, Some(owner.as_str())) {
             Ok(result) => Ok(render_image_result(&result)),
             Err(e) => Ok(tool_error(e)),
         };
@@ -432,7 +469,14 @@ fn handle_image_edit_call(params: &Value) -> Result<Value, JsonRpcError> {
 
     if crate::image_api::is_native_handle(&thread_id) {
         let template = image_request_from_args(&instruction, &args);
-        return match crate::image_api::run_edit(&thread_id, &instruction, &images, &template) {
+        let owner = current_session_id();
+        return match crate::image_api::run_edit(
+            &thread_id,
+            &instruction,
+            &images,
+            &template,
+            Some(owner.as_str()),
+        ) {
             Ok(result) => Ok(render_image_result(&result)),
             Err(e) => Ok(tool_error(e)),
         };
