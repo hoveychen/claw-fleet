@@ -16,7 +16,9 @@ libc = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.9"
 iana-time-zone = "0.1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+# `multipart` is what `images/edits` needs: the Images API takes edit targets
+# and masks as file parts, not as base64 in a JSON body.
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "multipart", "rustls-tls"] }
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 tiny_http = "0.12"
 percent-encoding = "2"

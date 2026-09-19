@@ -67,6 +67,7 @@ pub mod hooks_server;
 pub mod host_identity;
 pub mod idle;
 pub mod idle_spin;
+pub mod image_api;
 pub mod injector_watchdog;
 pub mod interaction_mode;
 pub mod interaction_mode_diagnostics;
