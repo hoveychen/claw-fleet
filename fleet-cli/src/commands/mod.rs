@@ -25,5 +25,6 @@ pub(crate) mod search;
 pub(crate) mod serve;
 pub(crate) mod session;
 pub(crate) mod skill;
+pub(crate) mod spawn;
 pub(crate) mod watch;
 pub(crate) mod wiki;

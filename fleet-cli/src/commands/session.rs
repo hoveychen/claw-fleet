@@ -305,6 +305,46 @@ pub(crate) fn resolve_session_id(explicit: Option<&str>) -> Option<String> {
 /// Hence the gate is `explicit`, not "source is missing" — a hand-started Claude
 /// session also has no `FLEET_AGENT_SOURCE`, and making *it* pay for a full scan
 /// to rediscover the default source would be a plain regression.
+/// Resolve where a spawn-flavoured command (`fleet spawn` / `schedule create` /
+/// `loop create` / `plan`) should land: an explicit `--workspace` wins, and
+/// without one the creating session's own workspace is inherited as before.
+///
+/// Every one of those commands used to have only the inherited path, which made
+/// "start work over in *that* project" an incantation — `cd <dir> && env -u
+/// FLEET_SESSION_ID -u CLAUDE_CODE_SESSION_ID fleet …` — because unsetting the
+/// session id was the only way to stop the inheritance. An agent that guessed
+/// wrong landed the work in the wrong repo with nothing on screen saying so.
+///
+/// The flag is normalised (`~`, bare-relative → `$HOME`) and must name a real
+/// directory: a typo'd path would otherwise spawn a session whose cwd does not
+/// exist, which fails much later and much less legibly.
+pub(crate) fn resolve_workspace_flag(
+    flag: Option<&str>,
+    ctx: &claw_fleet_core::session::LaunchContext,
+) -> Result<String, String> {
+    match flag.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(ctx.workspace.clone()),
+        Some(raw) => normalize_existing_dir(raw),
+    }
+}
+
+/// [`resolve_workspace_flag`] for commands whose default is the process cwd
+/// rather than an inherited launch context — `fleet plan`, which edits the
+/// TASKS.md of whatever directory it stands in.
+pub(crate) fn resolve_workspace_dir(flag: Option<&str>) -> Result<std::path::PathBuf, String> {
+    match flag.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+        Some(raw) => normalize_existing_dir(raw).map(std::path::PathBuf::from),
+    }
+}
+
+/// Normalise a caller-supplied `--workspace` and insist it exists. Delegates to
+/// core so the CLI flag and the MCP tools' `workspace` argument accept and
+/// reject exactly the same paths.
+fn normalize_existing_dir(raw: &str) -> Result<String, String> {
+    claw_fleet_core::session_launch::resolve_workspace_override(Some(raw), "")
+}
+
 pub(crate) fn inherit_context_maybe_scanning(
     sid: Option<&str>,
     explicit: bool,
@@ -316,6 +356,40 @@ pub(crate) fn inherit_context_maybe_scanning(
             claw_fleet_core::session::inherit_launch_context_from_roster(sid, &sessions)
         }
         _ => claw_fleet_core::session::inherit_launch_context(sid),
+    }
+}
+
+#[cfg(test)]
+mod workspace_flag_tests {
+    use super::resolve_workspace_flag;
+
+    fn ctx(ws: &str) -> claw_fleet_core::session::LaunchContext {
+        claw_fleet_core::session::LaunchContext {
+            workspace: ws.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn absent_or_blank_flag_inherits_the_session_workspace() {
+        let c = ctx("/repos/alpha");
+        assert_eq!(resolve_workspace_flag(None, &c).unwrap(), "/repos/alpha");
+        assert_eq!(resolve_workspace_flag(Some("   "), &c).unwrap(), "/repos/alpha");
+    }
+
+    #[test]
+    fn explicit_flag_overrides_the_inherited_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let got = resolve_workspace_flag(Some(&path), &ctx("/repos/alpha")).unwrap();
+        assert_eq!(got, path);
+    }
+
+    #[test]
+    fn a_path_that_is_not_a_directory_is_rejected() {
+        let err = resolve_workspace_flag(Some("/definitely/not/here"), &ctx("/repos/alpha"))
+            .unwrap_err();
+        assert!(err.contains("not a directory"), "{err}");
     }
 }
 

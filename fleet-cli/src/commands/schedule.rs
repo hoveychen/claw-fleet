@@ -24,7 +24,13 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
                 return;
             }
             let now = now_ms_wall();
-            println!("{:<10}  {:<16}  {:<9}  {:<10}  TITLE / PROMPT", "ID", "WHEN", "STATUS", "IN");
+            // WHERE and SESSION answer the two questions the list used to force
+            // a hand-grep of ~/.fleet/schedules/*.json for: which project will
+            // this run in, and did it actually produce a session?
+            println!(
+                "{:<10}  {:<16}  {:<9}  {:<10}  {:<16}  {:<10}  TITLE / PROMPT",
+                "ID", "WHEN", "STATUS", "IN", "WHERE", "SESSION"
+            );
             for s in items {
                 let status = match s.status {
                     schedule::ScheduleStatus::Pending => "pending",
@@ -47,12 +53,21 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
                 } else {
                     prompt
                 };
+                let where_col = claw_fleet_core::wiki::workspace_name_of(&s.workspace_path);
+                let session_col = match &s.fired_session_id {
+                    // Short prefix: enough to feed `fleet agent` / `fleet send`,
+                    // which prefix-match, without swamping the row.
+                    Some(sid) => sid.chars().take(8).collect::<String>(),
+                    None => "—".to_string(),
+                };
                 println!(
-                    "{:<10}  {:<16}  {:<9}  {:<10}  {}",
+                    "{:<10}  {:<16}  {:<9}  {:<10}  {:<16}  {:<10}  {}",
                     s.id,
                     fmt_local(s.fire_at),
                     status,
                     when_col,
+                    where_col,
+                    session_col,
                     prompt
                 );
             }
@@ -166,7 +181,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
                 std::process::exit(1);
             }
         },
-        ScheduleCommands::Create { at, r#in, prompt, title, model: model_flag, effort: effort_flag, until, poll, timeout } => {
+        ScheduleCommands::Create { at, r#in, prompt, workspace, title, model: model_flag, effort: effort_flag, until, poll, timeout } => {
             let now = now_ms_wall();
             // Exactly one of --at / --in.
             let fire_at = match (at.as_deref(), r#in.as_deref()) {
@@ -204,6 +219,19 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
             // cwd (not a worktree that may later be removed).
             let sid = resolve_session_id(session);
             let ctx = inherit_context_maybe_scanning(sid.as_deref(), session.is_some());
+            // …except the workspace, which an explicit --workspace re-points at
+            // another project — otherwise scheduling work "over there" means
+            // unsetting FLEET_SESSION_ID to defeat the inheritance.
+            let workspace_path = match crate::commands::session::resolve_workspace_flag(
+                workspace.as_deref(),
+                &ctx,
+            ) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(2);
+                }
+            };
             // An explicit --model/--effort flag overrides the value inherited from
             // the creating session (mirrors handoff's --model/--effort override),
             // and a model naming another harness re-points the fired session at
@@ -259,7 +287,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
             };
 
             match schedule::create(
-                &ctx.workspace,
+                &workspace_path,
                 prompt,
                 title.as_deref(),
                 fire_at,
@@ -271,11 +299,12 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands, session: Option<&str>) {
             ) {
                 Ok(rec) => match schedule::arm_timer(&rec) {
                     Ok(pid) => println!(
-                        "ok: schedule {} created — fires {} (in {}), model={}{}.{} \
+                        "ok: schedule {} created — fires {} (in {}) in {}, model={}{}.{} \
                          计时器已启动 (pid {})。取消用 `fleet schedule cancel {}`。",
                         rec.id,
                         fmt_local(rec.fire_at),
                         fmt_duration_ms(rec.due_in_ms(now)),
+                        claw_fleet_core::wiki::workspace_name_of(&rec.workspace_path),
                         rec.model.as_deref().unwrap_or("<CLI 默认>"),
                         route.switch_note(),
                         match &rec.until_cmd {

@@ -8,8 +8,14 @@ use crate::commands::session::resolve_session_id;
 use crate::PlanCommands;
 use claw_fleet_core::plan_ops;
 
-pub(crate) fn cmd_plan(action: PlanCommands, session: Option<&str>) {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+pub(crate) fn cmd_plan(action: PlanCommands, workspace: Option<&str>, session: Option<&str>) {
+    let cwd = match crate::commands::session::resolve_workspace_dir(workspace) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(2);
+        }
+    };
     let sid = resolve_session_id(session);
     let result: Result<(), String> = match action {
         PlanCommands::Check { plan_id, task } => {

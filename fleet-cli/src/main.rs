@@ -318,12 +318,54 @@ enum Commands {
     Plan {
         #[command(subcommand)]
         action: PlanCommands,
+        /// Which workspace's TASKS.md to act on. Defaults to the current
+        /// directory. Use it to file a plan into another project without
+        /// `cd`-ing there — and because the `fleet__plan` MCP tool has no cwd
+        /// of its own to change.
+        #[arg(long, global = true)]
+        workspace: Option<String>,
         /// The session these commands act for. Normally read from the
         /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here
         /// when your harness has no per-session environment — every dsh session
         /// runs inside one shared `dsh web`, so a dsh agent must pass its own
         /// session id (its per-turn Fleet context tells it what that is).
         #[arg(long, global = true)]
+        session: Option<String>,
+    },
+    /// Start a detached session RIGHT NOW, optionally in another workspace —
+    /// the immediate sibling of `fleet schedule` (once, later) and `fleet loop`
+    /// (repeatedly). Reach for this for "go work on that, over there": pass
+    /// `--workspace <path>` and the new session runs in that project instead of
+    /// this one. Prints the new session id, which `fleet send` / `fleet
+    /// interrupt` / `fleet agent` take. Model / effort / harness are inherited
+    /// from the creating session unless overridden (reads FLEET_SESSION_ID).
+    Spawn {
+        /// The prompt the new session opens with — its full brief, since
+        /// nobody is there to answer follow-up questions.
+        #[arg(long)]
+        prompt: String,
+        /// Workspace (project directory) the session runs in. Defaults to the
+        /// creating session's own workspace. `~/foo` and bare relative paths
+        /// resolve against $HOME; the directory must already exist.
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Name the new session up front, so it is labelled in the task list
+        /// before it has produced any output to name itself by.
+        #[arg(long)]
+        title: Option<String>,
+        /// Model for the new session (e.g. `claude-opus-5`, `gpt-5.6-sol`).
+        /// Overrides the inherited value, and a model belonging to another
+        /// harness also switches the session to that harness.
+        #[arg(long)]
+        model: Option<String>,
+        /// Reasoning effort for the new session (`low`..`max`). Overrides the
+        /// inherited value.
+        #[arg(long)]
+        effort: Option<String>,
+        /// The session this command acts for. Normally read from the
+        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it
+        /// here when your harness has no per-session environment.
+        #[arg(long)]
         session: Option<String>,
     },
     /// Register a session handoff: when this session next ends its turn, Fleet
@@ -541,11 +583,17 @@ impl From<SkillRuntime> for claw_fleet_core::skill_sync::SkillTarget {
 
 #[derive(Subcommand)]
 pub(crate) enum LoopCommands {
-    /// Create a loop that re-runs <prompt> every <interval> in this workspace.
+    /// Create a loop that re-runs <prompt> every <interval>, by default in this
+    /// workspace (`--workspace` puts the iterations in another project).
     Create {
         /// Interval between iterations, e.g. `5m`, `30m`, `2h`, `1d` (min 60s).
         #[arg(long)]
         interval: String,
+        /// Workspace (project directory) each iteration runs in. Defaults to
+        /// the creating session's own workspace. `~/foo` and bare relative
+        /// paths resolve against $HOME; the directory must already exist.
+        #[arg(long)]
+        workspace: Option<String>,
         /// The prompt each iteration runs.
         #[arg(long)]
         prompt: String,
@@ -687,6 +735,11 @@ pub(crate) enum ScheduleCommands {
         /// The prompt the fired session runs — the schedule's full context.
         #[arg(long)]
         prompt: String,
+        /// Workspace (project directory) the fired session runs in. Defaults to
+        /// the creating session's own workspace. `~/foo` and bare relative
+        /// paths resolve against $HOME; the directory must already exist.
+        #[arg(long)]
+        workspace: Option<String>,
         /// Short human label shown in `fleet schedule list` and the desktop
         /// Schedule view instead of the first lines of the prompt. Strongly
         /// recommended — a list of prompts is unreadable.
@@ -1342,7 +1395,19 @@ fn main() {
                 commands::session::cmd_codex_notify(&payload)
             }
         },
-        Commands::Plan { action, session } => commands::plan::cmd_plan(action, session.as_deref()),
+        Commands::Plan { action, workspace, session } => {
+            commands::plan::cmd_plan(action, workspace.as_deref(), session.as_deref())
+        }
+        Commands::Spawn { prompt, workspace, title, model, effort, session } => {
+            commands::spawn::cmd_spawn(
+                &prompt,
+                workspace.as_deref(),
+                title.as_deref(),
+                model.as_deref(),
+                effort.as_deref(),
+                session.as_deref(),
+            )
+        }
         Commands::Handoff {
             note,
             plan,
