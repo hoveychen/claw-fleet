@@ -214,6 +214,15 @@ fleet handoff --note "<换班简报：什么做完了、什么在飞、关键文
 
 本规则无论多步还是单步都适用。
 
+## Rule 7 —— 并发：依赖允许的地方尽量派满 subagent
+
+Claude Code 的 harness 默认是「除非用户、CLAUDE.md 或 skill 要求，否则不要用 Agent 工具或 workflow」。**本文件就是那份 CLAUDE.md，本规则就是那个要求**——在下面两道闸之内，并发是被明确许可的，不必每次再问一遍，也不要因为那条默认而退回单线程。
+
+- **先画依赖，再决定并行度。**动手前把活拆成块，逐块只回答一个问题：它要不要用到另一块的产出？答「否」的那些**放同一条消息里一起派出去**；答「是」的排在其后，等前一块的结果回来再开。**没想清楚依赖就铺开是最贵的错法**——彼此依赖的 agent 会各自基于猜测往下做，回来的结论对不上，整批工作要推倒重来。
+- **依赖允许的部分，尽量派满。**别为了「一件一件来比较稳」把本可并行的工作排成队。多份互不相干的文件调查、多个独立模块的改动、一批需要分别验证的假设，都该同时开。注意**多个 agent 必须在同一条消息里发出才是真并发**，分几条消息发就退化成串行了。
+- **但简单的事自己做。**并行是有税的：切分输入、写清 prompt、读回报告、交叉验证结论，这些成本基本固定。一次 grep、读两三个文件、改一处调用点——自己做几秒就完了，派出去反而更慢，而且多一层转述就多一层失真。**当这笔税接近甚至超过活本身时，并发就是在拿质量和速度换热闹。**
+- 一句话判据：**这块活值不值得一个独立的上下文？**要翻很多文件才能回答、而回答完只需留下一个结论、过程细节不必进主线的，适合派出去；一两步就做完的，或者你必须亲眼看到原始内容才能往下判断的，自己做。
+
 ## worktree 工作流的推荐工具
 
 Rule 3 给每个计划一个干净的 checkout，所以按项目存包的工具会为每个 worktree 重装一遍。这些是推荐，不是硬规则；{title}为某项目明确挑了别的工具就照那个来。
@@ -414,6 +423,15 @@ The most expensive failure in a long plan is not slowness, it is building the wr
 - Needing a design doc is not a sin; treating it as an approved requirements contract and implementing it verbatim is. Review the enumerable requirement list (each marked stated / derived / mine), not the prose that merely reads well.
 
 This rule applies whether multi-step or single-step.
+
+## Rule 7 — Concurrency: fan out as far as the dependencies allow
+
+Claude Code's harness ships a default that says "do not use the Agent tool, workflows, or deep-research unless the user, a CLAUDE.md file, or a skill asks for it". **This file is that CLAUDE.md, and this rule is that ask** — within the two gates below, concurrency is explicitly authorised. Do not ask for permission each time, and do not fall back to single-threaded work on account of that default.
+
+- **Map the dependencies first, then pick the width.** Before starting, split the work into chunks and ask exactly one question of each: does it need another chunk's output? Everything answering "no" goes out **in a single message, together**; everything answering "yes" queues behind the chunk it needs. **Fanning out before you have thought the dependencies through is the expensive way to be wrong** — mutually dependent agents each guess at the missing half, come back with conclusions that do not line up, and the whole batch has to be redone.
+- **Where the dependencies allow it, fan out fully.** Do not queue parallelisable work just because one-at-a-time feels safer. Several unrelated file investigations, edits to independent modules, a batch of hypotheses that each need checking — start them all at once. Note that **agents are only actually concurrent when they go out in the same message**; spread across several messages they degrade back into a serial chain.
+- **But do the simple things yourself.** Parallelism is taxed: splitting the input, writing a clear prompt, reading the report back, cross-checking the conclusion — that cost is roughly fixed. One grep, reading two or three files, changing a single call site — doing it yourself takes seconds, delegating it is slower, and every extra layer of retelling loses fidelity. **When the tax approaches the size of the job, fanning out trades quality and speed for the appearance of activity.**
+- The one-line test: **is this chunk worth its own context?** Work that takes many files to answer, leaves behind a single conclusion, and whose intermediate detail does not belong in the main thread is a good delegation. Work that takes one or two steps, or where you must see the raw content yourself to judge what comes next, is not.
 
 ## Recommended tooling for the worktree workflow
 
@@ -1311,6 +1329,53 @@ mod tests {
         assert!(
             r6_body.contains("RFC") && r6_body.contains("scope audit"),
             "Rule 6 must reframe the 'I need an RFC' urge as a scope-audit trigger, not a design contract"
+        );
+    }
+
+    /// Rule 7 exists to override a harness default that reads "do not use the
+    /// Agent tool ... unless ... a CLAUDE.md file ... asks for it". An override
+    /// only works if it is explicit about being one, so the counter-text is
+    /// asserted here rather than left to prose drift.
+    #[test]
+    fn render_includes_rule_7_concurrency() {
+        for locale in ["en", "zh"] {
+            let g = render_guidance("Boss", locale);
+            let r7_pos = g
+                .find("## Rule 7")
+                .unwrap_or_else(|| panic!("[{locale}] Rule 7 section must exist"));
+            let r7_body = &g[r7_pos..];
+            assert!(
+                r7_body.contains("Agent") && r7_body.contains("CLAUDE.md"),
+                "[{locale}] Rule 7 must name the harness default it overrides, so the override is recognisable as one"
+            );
+        }
+
+        let g = render_guidance("Boss", "en");
+        let r7_body = &g[g.find("## Rule 7").expect("Rule 7 must exist")..];
+        assert!(
+            r7_body.contains("dependencies") && r7_body.contains("single message"),
+            "Rule 7 must gate fan-out on dependency analysis and say same-message is what makes agents concurrent"
+        );
+        assert!(
+            r7_body.contains("simple things yourself"),
+            "Rule 7 must carry the parallelism-tax gate, or it reads as unconditional fan-out"
+        );
+    }
+
+    /// Rule 7 authorises fan-out; Rule 5 governs serial cross-turn continuation.
+    /// Keeping them apart matters because the tools differ (Agent vs handoff),
+    /// so neither section may absorb the other's mechanics.
+    #[test]
+    fn rule_7_does_not_absorb_rule_5_handoff_mechanics() {
+        let g = render_guidance("Boss", "en");
+        let r7_pos = g.find("## Rule 7").expect("Rule 7 must exist");
+        let r7_end = g[r7_pos..]
+            .find("## Recommended tooling")
+            .expect("the tooling section must follow Rule 7");
+        let r7_body = &g[r7_pos..r7_pos + r7_end];
+        assert!(
+            !r7_body.contains("fleet handoff") && !r7_body.contains("fleet watch"),
+            "Rule 7 is about same-turn fan-out; cross-turn continuation stays in Rule 5"
         );
     }
 }
