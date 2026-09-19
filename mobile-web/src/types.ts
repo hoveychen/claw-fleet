@@ -166,14 +166,19 @@ export interface SessionInfo {
  *  carry `originator === "fleet"` — mirrors codex_launch::CODEX_FLEET_ORIGINATOR. */
 export const CODEX_FLEET_ORIGINATOR = "fleet";
 
-/** Sessions Fleet spawned itself (new session / handoff relay / Fleet-launched Codex
- *  session)—the only ones where SIGINT means "abort the tool call" instead of
- *  "quit", and the only ones the launchpad lists and the detail view can resume.
+/** Sessions Fleet spawned itself (new session / handoff relay / a fired schedule or
+ *  loop iteration / Fleet-launched Codex session)—the only ones where SIGINT means
+ *  "abort the tool call" instead of "quit", and the only ones the task list shows and
+ *  the detail view can resume. Schedule and loop fires are headless `-p` spawns just
+ *  like the "New Session" button, so they belong here too — leaving them out is what
+ *  made a fired scheduled task visible on the desktop but absent from the phone.
  *  Mirrors claw-fleet-desktop/app/types.ts. */
 export function isFleetOwnedEntrypoint(entrypoint: string | null | undefined): boolean {
   return (
     entrypoint === "claw-fleet-newsession" ||
     entrypoint === "claw-fleet-handoff" ||
+    entrypoint === "claw-fleet-schedule" ||
+    entrypoint === "claw-fleet-loop" ||
     entrypoint === CODEX_FLEET_ORIGINATOR
   );
 }
