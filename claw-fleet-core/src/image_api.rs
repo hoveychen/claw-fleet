@@ -605,6 +605,83 @@ pub fn save_images(
     Ok(out)
 }
 
+// ── Turn-level entry points ─────────────────────────────────────────────────
+//
+// These return [`crate::codex_image::GenerateImageResult`] rather than a type
+// of their own, so the MCP renderer, the desktop and the `fleet serve` routes
+// keep speaking one shape no matter which backend produced the picture.
+
+/// Force a backend from the environment. `codex` sends the call back through
+/// the old agent-driven path; anything else is ignored.
+pub const BACKEND_ENV: &str = "FLEET_IMAGE_BACKEND";
+
+/// Should this call go through the legacy Codex path instead?
+///
+/// Two reasons it might: the operator pinned `FLEET_IMAGE_BACKEND=codex`, or
+/// the caller asked for a routing model (`gpt-5.6-luna`, …) rather than an
+/// image model, which is what every pre-existing caller passes.
+pub fn wants_codex_backend(model: Option<&str>) -> bool {
+    if std::env::var(BACKEND_ENV).is_ok_and(|v| v.trim().eq_ignore_ascii_case("codex")) {
+        return true;
+    }
+    model.is_some_and(|m| !m.trim().starts_with("gpt-image"))
+}
+
+/// One-line summary of what actually ran, surfaced to the agent so a surprising
+/// result (wrong tier, unexpected backend) is visible rather than inferred.
+fn provenance(auth: &ImageAuth, req: &ImageRequest) -> String {
+    let mut note = format!("{} via {}", req.effective_model(), auth.label());
+    if let Some(q) = &req.quality {
+        note.push_str(&format!(", quality {q}"));
+    }
+    if let Some(s) = &req.size {
+        note.push_str(&format!(", size {s}"));
+    }
+    note
+}
+
+/// Run one request end to end: authenticate, call, save, describe.
+pub fn run(req: &ImageRequest) -> Result<crate::codex_image::GenerateImageResult, String> {
+    let auth = load_auth(None)?;
+    let handle = new_handle();
+    let images = execute(req, &auth, &handle, DEFAULT_TIMEOUT)?;
+    let saved = save_images(&handle, &images, req.output_format.as_deref())?;
+    Ok(crate::codex_image::GenerateImageResult {
+        thread_id: handle,
+        images: saved,
+        agent_message: String::new(),
+        timeline: vec![crate::codex_image::TurnEvent {
+            kind: "image".to_string(),
+            text: provenance(&auth, req),
+        }],
+    })
+}
+
+/// Revise an earlier native generation.
+///
+/// The Images API has no conversation, so "keep tweaking" means resending the
+/// previous picture as the edit target. The result lands under a *fresh*
+/// handle, which preserves the old path's contract that an edit returns only
+/// the images this round produced — and leaves the original intact to revise
+/// again if this round went the wrong way.
+pub fn run_edit(
+    handle: &str,
+    instruction: &str,
+    extra_images: &[String],
+    template: &ImageRequest,
+) -> Result<crate::codex_image::GenerateImageResult, String> {
+    let previous = crate::codex_image::list_thread_images(handle);
+    let target = previous
+        .first()
+        .ok_or_else(|| format!("no image found for handle '{handle}' to revise"))?;
+    let mut req = template.clone();
+    req.prompt = instruction.to_string();
+    req.images = std::iter::once(PathBuf::from(&target.path))
+        .chain(extra_images.iter().map(PathBuf::from))
+        .collect();
+    run(&req)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -935,6 +1012,68 @@ mod tests {
         let read = crate::codex_image::read_thread_image(&handle, "1.png").unwrap();
         assert_eq!(read.bytes, b"\x89PNG\r\n\x1a\n");
         assert_eq!(read.mime, "image/png");
+    }
+
+    #[test]
+    fn a_routing_model_still_reaches_the_legacy_codex_path() {
+        // Every caller written against the old tool passes a routing model
+        // like gpt-5.6-luna. Sending that to the Images API as an image model
+        // would be a hard 400, so it has to keep meaning "use the agent path".
+        assert!(wants_codex_backend(Some("gpt-5.6-luna")));
+        assert!(wants_codex_backend(Some("gpt-5.6-sol")));
+        // An image model, or none at all, goes native.
+        assert!(!wants_codex_backend(None));
+        assert!(!wants_codex_backend(Some(MODEL_FLARE)));
+        assert!(!wants_codex_backend(Some(MODEL_SUNBURST)));
+        assert!(!wants_codex_backend(Some(MODEL_GPT_IMAGE_2)));
+    }
+
+    #[test]
+    fn the_backend_can_be_pinned_back_to_codex_from_the_environment() {
+        // Takes the process-wide env lock: FLEET_IMAGE_BACKEND is global, and
+        // a sibling test reading it mid-write would see either value.
+        let _lock = crate::paths::fleet_home_lock();
+        let prev = std::env::var_os(BACKEND_ENV);
+        // SAFETY: serialised on the lock held above.
+        unsafe { std::env::set_var(BACKEND_ENV, "codex") };
+        let pinned = wants_codex_backend(Some(MODEL_FLARE));
+        // SAFETY: same critical section.
+        unsafe {
+            match &prev {
+                Some(v) => std::env::set_var(BACKEND_ENV, v),
+                None => std::env::remove_var(BACKEND_ENV),
+            }
+        }
+        assert!(pinned, "FLEET_IMAGE_BACKEND=codex must win over the model");
+    }
+
+    #[test]
+    fn provenance_names_the_model_backend_and_tier() {
+        let mut req = ImageRequest::new("a cat");
+        req.model = Some(MODEL_SUNBURST.into());
+        req.quality = Some("max".into());
+        req.size = Some("3840x2160".into());
+        let note = provenance(&ImageAuth::ApiKey("k".into()), &req);
+        assert!(note.contains(MODEL_SUNBURST), "{note}");
+        assert!(note.contains("api-key"), "{note}");
+        assert!(note.contains("max"), "{note}");
+        assert!(note.contains("3840x2160"), "{note}");
+        // The secret never appears.
+        assert!(!note.contains('k') || !note.contains("Bearer"), "{note}");
+    }
+
+    #[test]
+    fn editing_an_unknown_handle_fails_before_the_request_is_spent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = crate::paths::fleet_home_guard(tmp.path());
+        let err = run_edit(
+            &new_handle(),
+            "make it blue",
+            &[],
+            &ImageRequest::new("ignored"),
+        )
+        .unwrap_err();
+        assert!(err.contains("no image found"), "{err}");
     }
 
     #[test]
