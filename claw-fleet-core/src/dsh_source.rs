@@ -722,6 +722,33 @@ fn roster_selection(projections: &Value) -> Option<RosterSelection> {
     })
 }
 
+/// The last thing the agent said, for [`SessionInfo::last_message_preview`] —
+/// the line under a session card and under each live subagent card.
+///
+/// dsh's `turnOutline` projection already holds a per-turn `response` excerpt,
+/// so the preview costs nothing extra: the alternative is fetching a
+/// transcript per session, and the roster carries 430 of them on this machine.
+/// The excerpt is shorter than the 200 characters Claude's parse keeps and
+/// arrives with its own ellipsis, which is a fair trade for not making the
+/// roster N times more expensive.
+///
+/// A session that has not answered yet — and one dsh killed mid-turn — has no
+/// `turnOutline` at all, which is why this returns `None` rather than an empty
+/// string: the card then shows nothing instead of a blank quote.
+fn roster_preview(projections: &Value) -> Option<String> {
+    let outline = projections
+        .get("values")
+        .and_then(|v| v.get("turnOutline"))
+        .and_then(Value::as_array)?;
+    outline
+        .last()?
+        .get("response")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// A roster item's subagent identity, or `None` when the item is a main
 /// session.
 ///
@@ -889,6 +916,7 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         created_at_ms: updated_at,
         jsonl_path: format!("{DSH_URI_PREFIX}{id}"),
         agent_source: "dsh".to_string(),
+        last_message_preview: roster_preview(&projections),
         is_subagent: subagent.is_some(),
         parent_session_id: subagent.as_ref().and_then(|s| s.parent_session_id.clone()),
         agent_type: subagent.as_ref().and_then(|s| s.agent_type.clone()),
@@ -2698,6 +2726,34 @@ mod tests {
                 "subagent": { "mode": "one-shot", "label": "Read secret.txt token", "seq": 5 }
             }}
         })
+    }
+
+    #[test]
+    fn the_last_turns_response_becomes_the_card_preview() {
+        let mut item = live_list_item();
+        item["projections"]["values"]["turnOutline"] = json!([
+            { "turn": 1, "seq": 3, "prompt": "first", "response": "an older answer" },
+            { "turn": 2, "seq": 9, "prompt": "second", "response": "stdout: `done` — exit code 0…" },
+        ]);
+        let info = session_info_from_list_item(&item).expect("mapped");
+        assert_eq!(
+            info.last_message_preview.as_deref(),
+            Some("stdout: `done` — exit code 0…")
+        );
+    }
+
+    /// A session dsh killed mid-turn, and one that has not answered yet, carry
+    /// no outline. The card shows nothing rather than an empty quote.
+    #[test]
+    fn a_session_that_never_answered_has_no_preview() {
+        let info = session_info_from_list_item(&live_list_item()).expect("mapped");
+        assert_eq!(info.last_message_preview, None);
+
+        let mut empty = live_list_item();
+        empty["projections"]["values"]["turnOutline"] =
+            json!([{ "turn": 1, "seq": 3, "prompt": "asked", "response": "   " }]);
+        let info = session_info_from_list_item(&empty).expect("mapped");
+        assert_eq!(info.last_message_preview, None);
     }
 
     #[test]
