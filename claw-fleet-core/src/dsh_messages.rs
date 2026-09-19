@@ -51,6 +51,13 @@ struct Delegation {
     mode: Option<String>,
     label: Option<String>,
     called_at_ms: i64,
+    /// Did the parent fork its own context into the child (`subagent_fork`)
+    /// rather than start it clean (`subagent`)?
+    ///
+    /// The catalog cannot answer this: measured 2026-09-19, a fork and a plain
+    /// delegation both report `mode: "one-shot"`. The calling tool's name is
+    /// the only place the distinction survives.
+    forked: bool,
 }
 
 /// Pair every delegating `tool/call` with the `subagent/catalog` that answered
@@ -66,7 +73,7 @@ struct Delegation {
 /// *label* across simultaneous delegations. It cannot mis-pair the set, and the
 /// alternative — publishing no card metadata at all — was the status quo.
 fn index_delegations(events: &[Value]) -> HashMap<String, Delegation> {
-    let mut pending: VecDeque<(String, i64)> = VecDeque::new();
+    let mut pending: VecDeque<(String, i64, bool)> = VecDeque::new();
     let mut by_call = HashMap::new();
     for event in events {
         let data = event.get("data").unwrap_or(&Value::Null);
@@ -80,13 +87,13 @@ fn index_delegations(events: &[Value]) -> HashMap<String, Delegation> {
                     continue;
                 };
                 let at = event.get("time").and_then(Value::as_i64).unwrap_or(0);
-                pending.push_back((call_id.to_string(), at));
+                pending.push_back((call_id.to_string(), at, name == "subagent_fork"));
             }
             Some("subagent/catalog") => {
                 let Some(child_id) = data.get("childId").and_then(Value::as_str) else {
                     continue;
                 };
-                let Some((call_id, called_at_ms)) = pending.pop_front() else {
+                let Some((call_id, called_at_ms, forked)) = pending.pop_front() else {
                     continue;
                 };
                 let text = |key: &str| {
@@ -103,6 +110,7 @@ fn index_delegations(events: &[Value]) -> HashMap<String, Delegation> {
                         mode: text("mode"),
                         label: text("label"),
                         called_at_ms,
+                        forked,
                     },
                 );
             }
@@ -133,8 +141,13 @@ fn delegation_result(delegation: &Delegation, block: &Value, result_at_ms: i64) 
         "agentId": delegation.child_id,
         "content": tool_result_text(block.get("content")),
     });
-    if let Some(mode) = &delegation.mode {
-        out["agentType"] = json!(mode);
+    // Both delegating tools rename to `Agent`, so the ⎇ chip is the only place
+    // left that can say a child inherited its parent's context.
+    match (&delegation.mode, delegation.forked) {
+        (Some(mode), true) => out["agentType"] = json!(format!("{mode} fork")),
+        (Some(mode), false) => out["agentType"] = json!(mode),
+        (None, true) => out["agentType"] = json!("fork"),
+        (None, false) => {}
     }
     if let Some(label) = &delegation.label {
         out["prompt"] = json!(label);
@@ -235,7 +248,11 @@ fn canonical_tool_name(name: &str) -> &str {
         "lsp" => "LSP",
         "web_search" => "WebSearch",
         "web_fetch" => "WebFetch",
-        "subagent" => "Agent",
+        // Both spawn a child session and both take `description` / `prompt`
+        // (measured 2026-09-19), so the argument shapes really are identical —
+        // which is this function's whole admission criterion. Which of the two
+        // was called survives on the card as the `agentType` chip.
+        "subagent" | "subagent_fork" => "Agent",
         "todo_write" => "TodoWrite",
         "ask_user_question" => "AskUserQuestion",
         "exit_plan_mode" => "ExitPlanMode",
@@ -1103,6 +1120,32 @@ mod tests {
             catalog("child", 23, 1_010, "in flight"),
         ]);
         assert!(out.is_empty());
+    }
+
+    /// A fork carries the same `mode: "one-shot"` as a plain delegation
+    /// (measured), so the chip has to name the tool to stay distinguishable.
+    #[test]
+    fn a_fork_is_labelled_apart_from_a_plain_delegation() {
+        let mut call = delegating_call("call_00", 22, 1_000);
+        call["data"]["name"] = json!("subagent_fork");
+        let out = normalize(&[
+            call,
+            catalog("child", 23, 1_010, "Fork reads fork.txt"),
+            settled("call_00", 24, 1_500, false),
+        ]);
+        assert_eq!(out[0]["toolUseResult"]["agentType"], "one-shot fork");
+    }
+
+    /// Both delegating tools take `description` / `prompt`, so both are safe to
+    /// rename onto Claude's Agent card.
+    #[test]
+    fn both_delegating_tools_render_as_the_agent_card() {
+        for name in ["subagent", "subagent_fork"] {
+            assert_eq!(canonical_tool_name(name), "Agent", "{name}");
+        }
+        // dsh's workflow is not Claude's, and Claude's Workflow card promises a
+        // session-level DAG tab dsh has nothing to fill.
+        assert_eq!(canonical_tool_name("workflow"), "workflow");
     }
 
     /// Two delegations in one turn settle against their own calls: the queue
