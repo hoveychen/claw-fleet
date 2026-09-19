@@ -761,6 +761,7 @@ export function HandoffTab({
         {t("接力 {0} 棒", hops.length)}
         {hops.includes(session.id) && ` · ${t("当前第 {0} 棒", hops.indexOf(session.id) + 1)}`}
       </div>
+      <ChainGoal chain={data} />
       {data.links.map((l, i) => (
         <HandoffLinkCard
           key={i}
@@ -770,6 +771,34 @@ export function HandoffTab({
           // with every other note collapsed until tapped.
           defaultOpen={l.fromSessionId === session.id || l.toSessionId === session.id}
         />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The chain's goal and the revisions it went through, above the legs.
+ *
+ * Same cut as `render_chain` in claw-fleet-core/src/handoff.rs and the desktop
+ * modal: the goal leads, and only revisions carrying a `from` get a line — the
+ * first setting of a goal is the goal itself, already the headline. A chain
+ * with no goal renders nothing; exploratory chains and chains recorded before
+ * the field existed legitimately have none, and a placeholder on every one of
+ * them would be noise on a phone-sized screen.
+ */
+function ChainGoal({ chain }: { chain: HandoffChain }) {
+  const goal = chain.goal?.trim();
+  if (!goal) return null;
+  const revisions = (chain.goalHistory ?? []).filter((r) => r.from != null);
+  return (
+    <div className={styles.goalCard}>
+      <div className={styles.goalLabel}>{t("本链目标")}</div>
+      <div className={styles.goalText}>{goal}</div>
+      {revisions.map((r, i) => (
+        <div className={styles.goalRevision} key={`${r.hop}-${i}`}>
+          {t("改于第 {0} 棒：「{1}」→「{2}」", r.hop, r.from ?? "", r.to)}
+          {t("，理由：{0}", r.reason?.trim() || t("（未说明）"))}
+        </div>
       ))}
     </div>
   );

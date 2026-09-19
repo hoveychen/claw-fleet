@@ -5139,6 +5139,15 @@ mod tests {
                 json!({
                     "chainId": "c1",
                     "workspacePath": "/ws",
+                    "goal": "把读路径切到 v2",
+                    "goalHistory": [
+                        {"hop": 1, "sessionId": "s1", "to": "把读路径切到 v2", "at": 1},
+                        {
+                            "hop": 2, "sessionId": "s2",
+                            "from": "把读路径切到 v2", "to": "把读路径切到 v2 并观察 24h",
+                            "reason": "老板追加了验收闸门", "at": 2
+                        }
+                    ],
                     "links": [{
                         "fromSessionId": "s1", "toSessionId": "s2",
                         "note": "交接", "handedAt": 1
@@ -5150,6 +5159,11 @@ mod tests {
             let data = request_ok("handoff_chain", json!({"sessionId": "s2"}));
             assert_eq!(data["chainId"], "c1");
             assert_eq!(data["links"][0]["fromSessionId"], "s1");
+            // The phone renders the chain's goal, so the relay has to carry it
+            // through — including the revision history with its reasons.
+            assert_eq!(data["goal"], "把读路径切到 v2");
+            assert_eq!(data["goalHistory"][1]["from"], "把读路径切到 v2");
+            assert_eq!(data["goalHistory"][1]["reason"], "老板追加了验收闸门");
 
             let data = request_ok("handoff_chain", json!({"sessionId": "unknown"}));
             assert!(data.is_null());
