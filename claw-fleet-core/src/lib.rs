@@ -100,6 +100,7 @@ pub mod off_runtime;
 pub mod orphan_reaper;
 pub mod parked;
 pub mod pending_decisions;
+pub mod live_inject;
 pub mod pending_message;
 pub mod pattern_update;
 pub mod permission_prompt_ipc;
