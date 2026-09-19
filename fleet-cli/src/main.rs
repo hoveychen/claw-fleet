@@ -326,6 +326,42 @@ enum Commands {
         #[arg(long, global = true)]
         session: Option<String>,
     },
+    /// Start a detached session RIGHT NOW, optionally in another workspace —
+    /// the immediate sibling of `fleet schedule` (once, later) and `fleet loop`
+    /// (repeatedly). Reach for this for "go work on that, over there": pass
+    /// `--workspace <path>` and the new session runs in that project instead of
+    /// this one. Prints the new session id, which `fleet send` / `fleet
+    /// interrupt` / `fleet agent` take. Model / effort / harness are inherited
+    /// from the creating session unless overridden (reads FLEET_SESSION_ID).
+    Spawn {
+        /// The prompt the new session opens with — its full brief, since
+        /// nobody is there to answer follow-up questions.
+        #[arg(long)]
+        prompt: String,
+        /// Workspace (project directory) the session runs in. Defaults to the
+        /// creating session's own workspace. `~/foo` and bare relative paths
+        /// resolve against $HOME; the directory must already exist.
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Name the new session up front, so it is labelled in the task list
+        /// before it has produced any output to name itself by.
+        #[arg(long)]
+        title: Option<String>,
+        /// Model for the new session (e.g. `claude-opus-5`, `gpt-5.6-sol`).
+        /// Overrides the inherited value, and a model belonging to another
+        /// harness also switches the session to that harness.
+        #[arg(long)]
+        model: Option<String>,
+        /// Reasoning effort for the new session (`low`..`max`). Overrides the
+        /// inherited value.
+        #[arg(long)]
+        effort: Option<String>,
+        /// The session this command acts for. Normally read from the
+        /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it
+        /// here when your harness has no per-session environment.
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Register a session handoff: when this session next ends its turn, Fleet
     /// spawns a fresh successor session in the same workspace to continue the
     /// work, opening with your --note. Use when your context is running long
@@ -1343,6 +1379,16 @@ fn main() {
             }
         },
         Commands::Plan { action, session } => commands::plan::cmd_plan(action, session.as_deref()),
+        Commands::Spawn { prompt, workspace, title, model, effort, session } => {
+            commands::spawn::cmd_spawn(
+                &prompt,
+                workspace.as_deref(),
+                title.as_deref(),
+                model.as_deref(),
+                effort.as_deref(),
+                session.as_deref(),
+            )
+        }
         Commands::Handoff {
             note,
             plan,
