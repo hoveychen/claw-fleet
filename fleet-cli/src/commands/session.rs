@@ -322,9 +322,24 @@ pub(crate) fn resolve_workspace_flag(
     flag: Option<&str>,
     ctx: &claw_fleet_core::session::LaunchContext,
 ) -> Result<String, String> {
-    let Some(raw) = flag.map(str::trim).filter(|s| !s.is_empty()) else {
-        return Ok(ctx.workspace.clone());
-    };
+    match flag.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(ctx.workspace.clone()),
+        Some(raw) => normalize_existing_dir(raw),
+    }
+}
+
+/// [`resolve_workspace_flag`] for commands whose default is the process cwd
+/// rather than an inherited launch context — `fleet plan`, which edits the
+/// TASKS.md of whatever directory it stands in.
+pub(crate) fn resolve_workspace_dir(flag: Option<&str>) -> Result<std::path::PathBuf, String> {
+    match flag.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+        Some(raw) => normalize_existing_dir(raw).map(std::path::PathBuf::from),
+    }
+}
+
+/// Normalise a caller-supplied `--workspace` and insist it exists.
+fn normalize_existing_dir(raw: &str) -> Result<String, String> {
     let path = claw_fleet_core::session_launch::normalize_workspace_path(raw)?;
     if !std::path::Path::new(&path).is_dir() {
         return Err(format!("--workspace {path} is not a directory"));

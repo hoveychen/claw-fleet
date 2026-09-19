@@ -318,6 +318,12 @@ enum Commands {
     Plan {
         #[command(subcommand)]
         action: PlanCommands,
+        /// Which workspace's TASKS.md to act on. Defaults to the current
+        /// directory. Use it to file a plan into another project without
+        /// `cd`-ing there — and because the `fleet__plan` MCP tool has no cwd
+        /// of its own to change.
+        #[arg(long, global = true)]
+        workspace: Option<String>,
         /// The session these commands act for. Normally read from the
         /// environment (FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID); name it here
         /// when your harness has no per-session environment — every dsh session
@@ -1389,7 +1395,9 @@ fn main() {
                 commands::session::cmd_codex_notify(&payload)
             }
         },
-        Commands::Plan { action, session } => commands::plan::cmd_plan(action, session.as_deref()),
+        Commands::Plan { action, workspace, session } => {
+            commands::plan::cmd_plan(action, workspace.as_deref(), session.as_deref())
+        }
         Commands::Spawn { prompt, workspace, title, model, effort, session } => {
             commands::spawn::cmd_spawn(
                 &prompt,
