@@ -754,18 +754,22 @@ pub fn scan_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionIn
 
 /// Roll every subagent's contribution up onto its parent main session, keyed by
 /// `parent_session_id`. Four aggregates land here in one pass over the list:
+/// `agent_total_cost_usd`, `agent_token_speed`, `agent_last_activity_ms` and
+/// `running_subagent_count`.
 ///
-/// - `agent_total_cost_usd` / `agent_token_speed` — *accumulators*: a main
-///   session already holds its own value from parse (cached pre-aggregation so
-///   no double-count on a cache hit) and gains the sum of every subagent's.
-/// - `agent_last_activity_ms` / `running_subagent_count` — *overwrites*: the
-///   freshest activity across the parent and any subagent, and the count of
-///   subagents working right now. Recomputed from scratch each scan, so they are
-///   immune to the cached seed being stale.
+/// **All four are recomputed from the parent's own value, never accumulated
+/// onto whatever the field already held.** The `agent_*` pair used to be `+=`,
+/// which made the function safe to call exactly once per list. That was true
+/// while only [`scan_claude_sessions`] called it; it stopped being a property
+/// worth relying on the moment the merged [`scan_all_sources`] needed a second
+/// pass to reach the sources that scan themselves. Assigning makes a second
+/// call a no-op instead of a double-count, and costs nothing: every source
+/// seeds `agent_total_cost_usd`/`agent_token_speed` from the session's own
+/// `total_cost_usd`/`token_speed`, which is exactly what this recomputes from.
 ///
 /// Every subagent counts — including the hidden workflow fan-out agents — so the
 /// per-card rollup reconciles with the global aggregate.
-fn aggregate_subagent_rollup(sessions: &mut [SessionInfo]) {
+pub(crate) fn aggregate_subagent_rollup(sessions: &mut [SessionInfo]) {
     let mut cost_by_parent: HashMap<String, f64> = HashMap::new();
     let mut speed_by_parent: HashMap<String, f64> = HashMap::new();
     let mut activity_by_parent: HashMap<String, u64> = HashMap::new();
@@ -796,12 +800,10 @@ fn aggregate_subagent_rollup(sessions: &mut [SessionInfo]) {
         if session.is_subagent {
             continue;
         }
-        if let Some(extra) = cost_by_parent.get(&session.id) {
-            session.agent_total_cost_usd += *extra;
-        }
-        if let Some(extra) = speed_by_parent.get(&session.id) {
-            session.agent_token_speed += *extra;
-        }
+        session.agent_total_cost_usd =
+            session.total_cost_usd + cost_by_parent.get(&session.id).copied().unwrap_or(0.0);
+        session.agent_token_speed =
+            session.token_speed + speed_by_parent.get(&session.id).copied().unwrap_or(0.0);
         let sub_activity = activity_by_parent.get(&session.id).copied().unwrap_or(0);
         session.agent_last_activity_ms = session.last_activity_ms.max(sub_activity);
         session.running_subagent_count =
@@ -975,5 +977,52 @@ mod rollup_tests {
         let mut sessions = vec![sub_row];
         aggregate_subagent_rollup(&mut sessions);
         assert_eq!(sessions[0].running_subagent_count, 0);
+    }
+
+    /// The merged scan rolls up after every source has contributed, and the
+    /// Claude scan has already rolled up its own slice by then — so the second
+    /// pass has to land on the same numbers as the first. Back when the
+    /// `agent_*` pair accumulated, it doubled a parent's tree cost and speed.
+    #[test]
+    fn rolling_up_twice_lands_on_the_same_numbers() {
+        let mut main = test_session("main");
+        main.last_activity_ms = 1_000;
+        main.total_cost_usd = 0.10;
+        main.agent_total_cost_usd = 0.10;
+        main.token_speed = 5.0;
+        main.agent_token_speed = 5.0;
+        let mut sessions = vec![
+            main,
+            sub("a", "main", SessionStatus::Executing, 9_000, 0.03, 2.0),
+            sub("b", "main", SessionStatus::Thinking, 3_000, 0.03, 1.0),
+        ];
+
+        aggregate_subagent_rollup(&mut sessions);
+        let once = sessions[0].clone();
+        aggregate_subagent_rollup(&mut sessions);
+        let twice = &sessions[0];
+
+        assert!((once.agent_total_cost_usd - 0.16).abs() < 1e-9, "{once:?}");
+        assert!((once.agent_token_speed - 8.0).abs() < 1e-9, "{once:?}");
+        assert!((twice.agent_total_cost_usd - once.agent_total_cost_usd).abs() < 1e-9);
+        assert!((twice.agent_token_speed - once.agent_token_speed).abs() < 1e-9);
+        assert_eq!(twice.running_subagent_count, once.running_subagent_count);
+        assert_eq!(twice.agent_last_activity_ms, once.agent_last_activity_ms);
+    }
+
+    /// A source that never seeded `agent_total_cost_usd` (dsh leaves it at its
+    /// `Default`) still gets a truthful tree cost, because the rollup recomputes
+    /// from `total_cost_usd` rather than adding onto whatever was there.
+    #[test]
+    fn an_unseeded_parent_still_gets_its_own_cost_back() {
+        let mut main = test_session("main");
+        main.total_cost_usd = 0.42;
+        main.agent_total_cost_usd = 0.0;
+        main.token_speed = 7.0;
+        main.agent_token_speed = 0.0;
+        let mut sessions = vec![main];
+        aggregate_subagent_rollup(&mut sessions);
+        assert!((sessions[0].agent_total_cost_usd - 0.42).abs() < 1e-9);
+        assert!((sessions[0].agent_token_speed - 7.0).abs() < 1e-9);
     }
 }
