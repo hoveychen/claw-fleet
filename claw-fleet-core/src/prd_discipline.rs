@@ -13,6 +13,14 @@
 //! Install strategy mirrors `interaction_mode`:
 //!   1. Render `~/.claude/fleet-prd-discipline.md`.
 //!   2. Sentinel-wrap an `@import` in `~/.claude/CLAUDE.md`.
+//!
+//! **Rule 7 (concurrency) is deliberately Claude-only.** The compact codex and
+//! dsh PRD blocks in `codex_guidance` / `dsh_guidance` do not mirror it: neither
+//! harness has an Agent/subagent tool to fan out to, and neither ships the
+//! harness default that Rule 7 exists to override. Those two blocks also run
+//! their own rule numbering (codex's Rule 7 is already the `exec` summary
+//! comment), so they are not a section-for-section mirror of this file — do not
+//! "sync" a rule across by number.
 
 use std::fs;
 use std::path::PathBuf;
