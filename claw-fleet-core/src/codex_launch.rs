@@ -1049,6 +1049,22 @@ fn maybe_prepend_active_plans(
     prepend_reminder(reminder.as_deref(), rollout.as_deref(), prompt)
 }
 
+/// Prepend the recent-sessions block — what this repository has been worked on
+/// lately — to a brand-new codex thread's first prompt.
+///
+/// The codex arm of the `fleet recent-sessions` SessionStart hook, sharing its
+/// renderer so the two harnesses inject identical text. Fires on spawn only,
+/// because one codex thread is one context window: the block describes the
+/// repo, not the turn, and nothing in it is worth ~5 KB on every resume.
+///
+/// Silent when the workspace has no other sessions to report.
+fn prepend_recent_sessions(workspace_path: &str, prompt: &str) -> String {
+    match crate::recent_sessions::render_for_workspace(workspace_path, None) {
+        Some(block) => format!("{block}\n\n{prompt}"),
+        None => prompt.to_string(),
+    }
+}
+
 /// Decide the final prompt from the rendered reminder and the thread's rollout.
 ///
 /// Split out from [`maybe_prepend_active_plans`] so the fallbacks are testable
@@ -1134,6 +1150,11 @@ pub fn spawn_new_codex_session(
     // Channel B: prepend the workspace's active TASKS.md plans (new session has
     // no thread id yet, so no backtrack backstop — pass None).
     let prompt = maybe_prepend_active_plans(&workspace_path, None, prompt);
+    // The recent-sessions block, codex's arm of Claude's `SessionStart` hook.
+    // Only on spawn: a codex thread is one context, and unlike the plan
+    // reminder this block is background about the repo, not turn state, so
+    // re-sending it on every resume would be ~5 KB per turn for nothing.
+    let prompt = prepend_recent_sessions(&workspace_path, &prompt);
     pre_prompt.extend(codex_image_args(images));
     let args = build_codex_exec_args(&workspace_path, &prompt, model, effort, &pre_prompt);
 

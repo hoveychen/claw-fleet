@@ -94,6 +94,27 @@ pub(crate) fn cmd_dsh_context(
         sections.push(serde_json::json!({ "name": "fleet-prd", "text": reminder }));
     }
 
+    // What this repository has been worked on lately — the dsh arm of the
+    // `fleet recent-sessions` SessionStart hook, same renderer so all three
+    // harnesses inject identical text.
+    //
+    // Claimed once per session on this side rather than left to the plugin's
+    // dedup: that compares section text, and this block's timestamps and
+    // `[running]` marker change between steps, so it would look fresh all day.
+    // Claiming first also skips the session scan, which is the costly half of
+    // rendering it.
+    if session
+        .as_deref()
+        .is_some_and(claw_fleet_core::recent_sessions::claim_once)
+    {
+        if let Some(block) = claw_fleet_core::recent_sessions::render_for_workspace(
+            &cwd.to_string_lossy(),
+            session.as_deref(),
+        ) {
+            sections.push(serde_json::json!({ "name": "fleet-recent-sessions", "text": block }));
+        }
+    }
+
     // Context pressure — the dsh arm of the reminder Claude gets from the
     // `fleet ctx-reminder` PostToolUse hook.
     //

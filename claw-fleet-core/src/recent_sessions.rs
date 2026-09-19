@@ -337,6 +337,53 @@ pub fn render_for_workspace(workspace_path: &str, exclude_session_id: Option<&st
     render(&rows, workspace_path)
 }
 
+/// Name of the ledger recording which sessions were already sent the block.
+const CLAIM_FILE_NAME: &str = "recent-sessions-sent.json";
+
+/// Entries older than this are dropped when the ledger is rewritten. A session
+/// id is never reused, so an old entry can only be dead weight.
+const CLAIM_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+
+/// Has `session_id` already been sent the block? Records it if not.
+///
+/// For clients whose delivery channel fires on every step rather than once per
+/// context window — dsh, whose plugin is asked for sections at each pre-step.
+/// The plugin's own dedup compares section *text*, which never matches here:
+/// the block carries timestamps and a `[running]` marker, so it differs on
+/// almost every step and would be re-injected all day. Claiming on this side
+/// also spares the caller the scan, which is the expensive half.
+///
+/// Returns `true` exactly once per session. Ledger trouble (unreadable file,
+/// no home dir) resolves to `false` — a missing block beats one on every step.
+pub fn claim_once(session_id: &str) -> bool {
+    use std::collections::BTreeMap;
+    let Some(path) = crate::session::get_fleet_dir().map(|d| d.join(CLAIM_FILE_NAME)) else {
+        return false;
+    };
+    let mut sent: BTreeMap<String, u64> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+    if sent.contains_key(session_id) {
+        return false;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    sent.retain(|_, at| now.saturating_sub(*at) < CLAIM_RETENTION_MS);
+    sent.insert(session_id.to_string(), now);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let Ok(raw) = serde_json::to_string_pretty(&sent) else {
+        return false;
+    };
+    // Recording the claim is what makes it a claim: if the write fails we have
+    // no memory of having sent it, so report not-sent rather than send blind.
+    crate::atomic_json::write_atomic(&path, raw.as_bytes()).is_ok()
+}
+
 /// Task reviews for this repo, newest first. Any failure (no database yet on a
 /// fresh install, a locked file) degrades to no summaries rather than to no
 /// block: the titles are 99% of the value.
@@ -704,5 +751,29 @@ mod tests {
         assert!(is_running(&SessionStatus::Delegating));
         assert!(!is_running(&SessionStatus::WaitingInput));
         assert!(!is_running(&SessionStatus::Idle));
+    }
+
+    #[test]
+    fn the_block_is_claimed_once_per_session() {
+        let _guard = crate::session::fleet_home_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", home.path()) };
+
+        assert!(claim_once("s1"), "first ask sends the block");
+        assert!(!claim_once("s1"), "every later step must be silent");
+        assert!(claim_once("s2"), "sessions are independent");
+        // The claim is durable: dsh asks from a fresh process on every step.
+        assert!(
+            home.path().join(".fleet").join(CLAIM_FILE_NAME).exists(),
+            "the ledger has to outlive the process that wrote it"
+        );
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
     }
 }
