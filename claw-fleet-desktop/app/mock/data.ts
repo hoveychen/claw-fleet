@@ -901,6 +901,25 @@ export const MOCK_HANDOFF_CHAINS: Record<string, HandoffChain> = {
     chainId: "chain-billing",
     workspacePath: "/Users/demo/workspace/billing-service",
     planId: "billing-migration",
+    goal: "把计费读路径切到 usage_billing_v2 并稳定运行 24 小时",
+    goalHistory: [
+      {
+        hop: 1,
+        sessionId: "sess-billing-1",
+        from: null,
+        to: "把计费读路径切到 usage_billing_v2",
+        reason: null,
+        at: NOW - 5 * HOUR,
+      },
+      {
+        hop: 3,
+        sessionId: "sess-billing-3",
+        from: "把计费读路径切到 usage_billing_v2",
+        to: "把计费读路径切到 usage_billing_v2 并稳定运行 24 小时",
+        reason: "老板追加了验收闸门：切换本身不算完成，要观察 24h 零 miss",
+        at: NOW - 40 * MIN,
+      },
+    ],
     links: [
       {
         fromSessionId: "sess-billing-1",
