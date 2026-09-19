@@ -91,10 +91,10 @@ pub(crate) fn route_enqueue_message(
             &req.workspace_path,
             &req.text,
         ) {
-            Ok(()) => {
-                let _ = request.respond(
-                    tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
-                );
+            Ok(delivery) => {
+                let body = serde_json::json!({ "ok": true, "delivery": delivery }).to_string();
+                let _ = request
+                    .respond(tiny_http::Response::from_string(body).with_header(json_header));
             }
             Err(e) => {
                 let body = serde_json::json!({ "error": e }).to_string();

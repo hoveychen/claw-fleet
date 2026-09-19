@@ -5604,11 +5604,14 @@ pub fn interrupt_stalled_codex_turn(stall: &StalledCodexTurn) -> Result<(), Stri
     if already_noted {
         return Ok(());
     }
+    // A Codex session has no injectable socket, so this always takes the queue
+    // path; the delivery mode is of no interest to the stall watchdog.
     crate::pending_message::enqueue(
         &stall.session_id,
         &stall.workspace_path,
         &codex_stall_resume_note(stall.silence_secs),
     )
+    .map(|_| ())
 }
 
 fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Option<u32>, bool) {

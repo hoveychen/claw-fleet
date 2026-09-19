@@ -407,14 +407,11 @@ fn vet_send_target<'a>(
     Ok(target)
 }
 
-/// Queue `text` as a follow-up turn for another session, delivered when its
-/// current turn ends.
+/// Send `text` as a follow-up turn to another session — into its running turn
+/// when reachable, otherwise queued until that turn ends.
 ///
-/// The one lever an agent has for steering a session that is *already running*:
-/// Fleet's sessions are one-shot headless `claude -p` processes with no live
-/// stdin (see [`crate::pending_message`]), and they never register as Claude
-/// Code cross-session peers, so `SendMessage` cannot address them. Shared by the
-/// `fleet__control action=send` tool and the `fleet send` CLI.
+/// The one lever an agent has for steering a session that is *already running*.
+/// Shared by the `fleet__control action=send` tool and the `fleet send` CLI.
 pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
     let sessions = load_sessions();
     let self_id = crate::codex_launch::resolve_fleet_session_id_from_env();
@@ -422,23 +419,31 @@ pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
     // `enqueue` itself refuses a session Fleet does not own — one it cannot
     // `claude --resume` without putting a second process on somebody's
     // transcript — so that gate is not repeated here.
-    crate::pending_message::enqueue(&target.id, &target.workspace_path, text)?;
+    let delivery = crate::pending_message::enqueue(&target.id, &target.workspace_path, text)?;
     // A retired hop is re-addressed to whoever inherited its work, so report the
     // landing session rather than the one that was asked for.
     let landed = crate::pending_message::live_target(&target.id);
-    let queued = crate::pending_message::get(&landed)
-        .map(|q| q.messages.len())
-        .unwrap_or(1);
     let relayed = if landed == target.id {
         String::new()
     } else {
         format!(
-            " (that hop has handed its baton on; queued for its successor {} instead)",
+            " (that hop has handed its baton on; sent to its successor {} instead)",
             short_id(&landed)
         )
     };
+    let how = match delivery {
+        crate::pending_message::Delivery::Injected => {
+            "delivered into its running turn; it picks the message up at its next tool call".into()
+        }
+        crate::pending_message::Delivery::Queued => {
+            let queued = crate::pending_message::get(&landed)
+                .map(|q| q.messages.len())
+                .unwrap_or(1);
+            format!("{queued} message(s) pending, delivered when its current turn ends")
+        }
+    };
     Ok(format!(
-        "ok: queued for {} ({}){relayed}; {queued} message(s) pending, delivered when its current turn ends",
+        "ok: sent to {} ({}){relayed}; {how}",
         short_id(&target.id),
         target.workspace_name
     ))

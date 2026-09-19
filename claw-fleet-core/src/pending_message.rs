@@ -5,8 +5,12 @@
 //! (see [`crate::session_launch`]). While that process is alive there is no live
 //! stdin to type into, and firing a *second* `claude --resume` on the same
 //! transcript is how you corrupt a session (see [`crate::parked::answer_with`]).
-//! So a follow-up typed while the turn is running cannot be delivered
-//! immediately.
+//!
+//! That is no longer the end of the story: the running process listens on a unix
+//! socket that accepts a message mid-turn, so [`enqueue`] tries
+//! [`crate::live_inject`] first and only falls back to this queue when the fast
+//! path is unavailable — a Codex session (no such socket), a turn that ended
+//! between the lookup and the write, or a platform the injector does not speak.
 //!
 //! This module is the "queue it, deliver it when the turn ends" layer. A message
 //! enqueued for a running session is written to
@@ -195,7 +199,22 @@ pub fn live_target(session_id: &str) -> String {
     live_baton_of(session_id).unwrap_or_else(|| session_id.to_string())
 }
 
-pub fn enqueue(session_id: &str, workspace_path: &str, text: &str) -> Result<(), String> {
+/// How a follow-up actually reached its session.
+///
+/// Crosses the HTTP/relay boundary (front ends render a different composer
+/// state for each), so it needs both `Serialize` and `Deserialize`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Delivery {
+    /// Written straight into the running turn over the session's unix socket;
+    /// the agent absorbs it at its next tool round. Nothing was queued.
+    Injected,
+    /// Parked in `~/.fleet/pending-messages/` to be delivered by a
+    /// `claude --resume` once the turn ends.
+    Queued,
+}
+
+pub fn enqueue(session_id: &str, workspace_path: &str, text: &str) -> Result<Delivery, String> {
     // Re-address ahead of every other check: a retired hop is not a valid
     // destination, and the Fleet-owned gate below has to run against the hop
     // that will actually be resumed.
@@ -209,7 +228,19 @@ pub fn enqueue(session_id: &str, workspace_path: &str, text: &str) -> Result<(),
     if crate::parked::parkable_workspace(session_id).is_none() {
         return Err("session is not Fleet-owned; cannot queue a follow-up".into());
     }
-    append_to_queue(session_id, workspace_path, text)
+    // Fast path: hand it to the live turn instead of making the user wait for it
+    // to end. Only ever an optimisation — the target can exit between the lookup
+    // and the write, and a Codex session has no such socket at all, so every
+    // failure falls through to the queue below rather than surfacing an error.
+    //
+    // Ordering note: nothing is queued when this succeeds, so a burst of
+    // messages arrives as N separate prompts in the receiver's queue rather than
+    // the combined single turn the queue path produces. That is the point —
+    // combining only ever existed because the messages could not be delivered.
+    if crate::live_inject::inject(session_id, text).is_ok() {
+        return Ok(Delivery::Injected);
+    }
+    append_to_queue(session_id, workspace_path, text).map(|()| Delivery::Queued)
 }
 
 /// [`enqueue`] without the Fleet-owned gate, for text that has already passed

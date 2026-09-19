@@ -2232,12 +2232,13 @@ impl LocalBackend {
         session_id: String,
         workspace_path: String,
         text: String,
-    ) -> Result<(), String> {
-        claw_fleet_core::pending_message::enqueue(&session_id, &workspace_path, &text)?;
+    ) -> Result<claw_fleet_core::pending_message::Delivery, String> {
+        let delivery =
+            claw_fleet_core::pending_message::enqueue(&session_id, &workspace_path, &text)?;
         // Re-enrich + emit so the queued chip shows immediately, without waiting
         // for the next scan tick.
         self.restamp_marks_and_emit();
-        Ok(())
+        Ok(delivery)
     }
 
     pub fn cancel_pending_message(&self, session_id: String, index: usize) -> Result<(), String> {
