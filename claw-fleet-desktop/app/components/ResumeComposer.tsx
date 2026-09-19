@@ -185,8 +185,11 @@ export function ResumeComposer({
     setError(null);
     try {
       if (enqueueing) {
-        // Turn still running: queue it. Model/effort are carried from the
-        // session's own launch flags at drain time, so no overrides here.
+        // Turn still running: the backend writes it into the live turn when it
+        // can, and falls back to the queue otherwise — the queued chips render
+        // off the session snapshot, so only the fallback shows anything here.
+        // Model/effort are carried from the session's own launch flags at drain
+        // time, so no overrides here.
         await invoke("enqueue_session_message", {
           sessionId,
           workspacePath,
@@ -221,7 +224,7 @@ export function ResumeComposer({
       {visiblePending.length > 0 && (
         <div className={styles.queued}>
           <div className={styles.queued_label}>
-            {t("history.enqueue_queued_label", "已排队，本轮结束后自动发送")}
+            {t("history.enqueue_queued_label", "没能直接送进去，已排队，本轮结束后自动发送")}
           </div>
           {visiblePending.map(({ text: m, index: i }) => (
             <div key={i} className={styles.queued_chip}>
@@ -259,7 +262,7 @@ export function ResumeComposer({
         }
         placeholder={
           enqueueing
-            ? t("history.enqueue_placeholder", "会话运行中，发送后排队，本轮结束自动接上…")
+            ? t("history.enqueue_placeholder", "会话运行中，消息直接送进本轮…")
             : t("history.resume_placeholder", "输入追问提示词后恢复会话…")
         }
         disabled={submitting}

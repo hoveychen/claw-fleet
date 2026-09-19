@@ -1565,7 +1565,7 @@ export function ResumeComposer({
     <div className={styles.resumeBox} ref={boxRef}>
       {visiblePending.length > 0 && (
         <div className={styles.queuedList}>
-          <div className={styles.queuedLabel}>{t("已排队，本轮结束后自动发送")}</div>
+          <div className={styles.queuedLabel}>{t("没能直接送进去，已排队")}</div>
           {visiblePending.map(({ text: m, index: i }) => (
             <div key={i} className={styles.queuedChip}>
               <span className={styles.queuedText}>{m}</span>
@@ -1635,7 +1635,7 @@ export function ResumeComposer({
                expands the box to two lines at rest — exactly what we're eliminating.
                The mic is right there, no need for text explanation. "Empty = continue"
                behavior unchanged, just not written in the box. */
-            placeholder={enqueueing ? t("排队一条追问…") : t("继续这个会话…")}
+            placeholder={enqueueing ? t("直接插一句…") : t("继续这个会话…")}
             rows={1}
             value={voice.showingPreview ? voice.preview : prompt}
             readOnly={voice.showingPreview}

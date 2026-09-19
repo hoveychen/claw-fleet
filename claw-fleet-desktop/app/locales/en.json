@@ -2463,7 +2463,7 @@
   "history": {
     "title": "Tasks",
     "search_placeholder": "Search title, plan, full text…",
-    "enqueue_placeholder": "Session is running — your message queues and sends when this turn ends…",
+    "enqueue_placeholder": "Session is running — your message goes straight into this turn…",
     "empty": "No sessions yet — start one from the button above",
     "no_match": "No matching sessions",
     "untitled": "(untitled)",
@@ -2515,7 +2515,7 @@
     "select_hint": "Select a session on the left to view its detail",
     "empty_hint": "No sessions yet — start one from above",
     "enqueue_cancel": "Cancel this queued message",
-    "enqueue_queued_label": "Queued — sends automatically when this turn ends",
+    "enqueue_queued_label": "Couldn't go in live — queued, sends when this turn ends",
     "group_collapse": "Collapse relay chain",
     "group_expand": "Show earlier sessions in this relay chain",
     "toggle_done": "Done — click to mark in progress again",
