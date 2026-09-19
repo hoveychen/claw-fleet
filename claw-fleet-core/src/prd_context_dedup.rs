@@ -191,9 +191,10 @@ fn codex_injected_reminder(value: &Value) -> Option<String> {
 
 const REMINDER_OPEN: &str = "<system-reminder>";
 const REMINDER_CLOSE: &str = "</system-reminder>";
-/// Sentence unique to the plan reminder, present in every rendering of it (see
-/// `prd_tasks::render_active_plans_reminder`).
-const PLAN_REMINDER_MARK: &str = "re-injected on every prompt by Fleet PRD Discipline mode";
+/// Phrase unique to the plan reminder, present in every rendering of it.
+/// Owned by the renderer so the two cannot drift — they did once, and
+/// attributed sessions lost dedup entirely for it.
+use crate::prd_tasks::PLAN_REMINDER_MARK;
 
 fn is_plan_reminder(text: &str) -> bool {
     text.trim_start().starts_with(REMINDER_OPEN) && text.contains(PLAN_REMINDER_MARK)
