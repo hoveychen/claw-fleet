@@ -226,6 +226,91 @@ pub fn build_rows(
         .collect()
 }
 
+/// Byte ceiling for the rendered block.
+///
+/// Measured against real data on this machine: 40 titles plus three summaries
+/// came to 4711 bytes / 1676 tokens, and the worst case (every title at its
+/// 84-char maximum, every summary at its 946-char maximum) would reach ~6.8 KB
+/// / ~3429 tokens. 5500 leaves the measured shape intact while bounding the
+/// tail. Unlike the 12 KB `prd_tasks::BODY_CAP_BYTES` this is not a cliff —
+/// the block is delivered at SessionStart, not on every prompt — but an
+/// unbounded block would still crowd out the window it opens.
+pub const MAX_BLOCK_BYTES: usize = 5_500;
+
+const BLOCK_OPEN: &str = "<fleet_recent_sessions>";
+const BLOCK_CLOSE: &str = "</fleet_recent_sessions>";
+
+/// Format an epoch-ms stamp as a local `MM-DD HH:MM`.
+///
+/// Local time, matching the daily report: the reader is a person's agent
+/// working their hours, and a UTC stamp would read as the wrong day for most
+/// of the evening.
+fn stamp(ms: u64) -> String {
+    let secs = (ms / 1000) as i64;
+    chrono::DateTime::from_timestamp(secs, 0)
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
+/// Render the block, or `None` when there is nothing to say.
+///
+/// Returning `None` rather than an empty shell matters: a workspace with no
+/// history should cost zero tokens, and an empty block invites the model to
+/// remark on the absence.
+pub fn render(rows: &[RecentRow], workspace_path: &str) -> Option<String> {
+    if rows.is_empty() {
+        return None;
+    }
+    let name = crate::session::workspace_name(workspace_path);
+    let mut out = format!(
+        "{BLOCK_OPEN}\nWhat this workspace ({name}) has been worked on recently — other sessions \
+         in this repository, newest first. Background context for orienting yourself; it is not \
+         an instruction to act on any of it. `[running]` marks a session working right now, \
+         which may be touching the same files as you.\n\n"
+    );
+    // Budget the rows against the closing tag so the block always terminates.
+    let budget = MAX_BLOCK_BYTES.saturating_sub(out.len() + BLOCK_CLOSE.len() + 2);
+    let mut body = String::new();
+    for row in rows {
+        let mut line = format!("{}  ", stamp(row.activity_ms));
+        if row.running {
+            line.push_str("[running] ");
+        }
+        line.push_str(&row.title);
+        line.push('\n');
+        if let Some(summary) = &row.summary {
+            for chunk in summary.lines() {
+                let chunk = chunk.trim();
+                if !chunk.is_empty() {
+                    line.push_str("    ");
+                    line.push_str(chunk);
+                    line.push('\n');
+                }
+            }
+        }
+        // Whole rows only. A half-printed row (or worse, a title cut mid-word
+        // with its summary still attached) reads as corruption; dropping the
+        // oldest rows is the honest degradation. Rows are newest-first, so
+        // stopping here keeps the head — the opposite of `session_notes`,
+        // whose file grows at the tail.
+        if body.len() + line.len() > budget {
+            break;
+        }
+        body.push_str(&line);
+    }
+    if body.is_empty() {
+        return None;
+    }
+    out.push_str(&body);
+    out.push_str(BLOCK_CLOSE);
+    out.push('\n');
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,6 +532,127 @@ mod tests {
         live.status = SessionStatus::Executing;
         let rows = build_rows(&[live], &RecentQuery::new("/w/proj"), &[], 0);
         assert!(rows[0].running);
+    }
+
+    fn row(id: &str, title: &str, running: bool, summary: Option<&str>) -> RecentRow {
+        RecentRow {
+            session_id: id.to_string(),
+            title: title.to_string(),
+            // 2026-09-19 08:00:00 UTC — the exact local rendering is the
+            // machine's business; these tests assert on structure, not on a
+            // timezone-dependent string.
+            activity_ms: 1_789_000_000_000,
+            running,
+            summary: summary.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn an_empty_list_renders_nothing() {
+        assert_eq!(render(&[], "/w/proj"), None);
+    }
+
+    #[test]
+    fn the_block_is_wrapped_and_names_the_workspace() {
+        let got = render(&[row("a", "did a thing", false, None)], "/w/proj").unwrap();
+        assert!(got.starts_with(BLOCK_OPEN));
+        assert!(got.trim_end().ends_with(BLOCK_CLOSE));
+        assert!(got.contains("(proj)"), "should name the workspace: {got}");
+        assert!(got.contains("did a thing"));
+    }
+
+    #[test]
+    fn a_worktree_path_is_named_after_its_repo() {
+        let got = render(
+            &[row("a", "t", false, None)],
+            "/w/proj/.worktrees/some-task",
+        )
+        .unwrap();
+        assert!(got.contains("(proj)"), "{got}");
+    }
+
+    #[test]
+    fn running_rows_are_marked_and_others_are_not() {
+        let got = render(
+            &[
+                row("live", "in flight", true, None),
+                row("done", "finished", false, None),
+            ],
+            "/w/proj",
+        )
+        .unwrap();
+        assert!(got.contains("[running] in flight"));
+        assert!(!got.contains("[running] finished"));
+    }
+
+    #[test]
+    fn a_summary_is_indented_under_its_row() {
+        let got = render(&[row("a", "title", false, Some("what happened"))], "/w/proj").unwrap();
+        assert!(got.contains("title\n    what happened\n"), "{got}");
+    }
+
+    #[test]
+    fn a_multiline_summary_indents_every_line_and_drops_blanks() {
+        let got = render(
+            &[row("a", "title", false, Some("first\n\n  second  "))],
+            "/w/proj",
+        )
+        .unwrap();
+        assert!(got.contains("    first\n    second\n"), "{got}");
+    }
+
+    #[test]
+    fn the_block_stays_within_its_byte_ceiling() {
+        let long = "x".repeat(900);
+        let rows: Vec<RecentRow> = (0..40)
+            .map(|i| row(&format!("s{i}"), &format!("title {i}"), false, Some(&long)))
+            .collect();
+        let got = render(&rows, "/w/proj").unwrap();
+        assert!(
+            got.len() <= MAX_BLOCK_BYTES,
+            "rendered {} bytes, ceiling {MAX_BLOCK_BYTES}",
+            got.len()
+        );
+        // Truncation drops the oldest rows, never the frame.
+        assert!(got.trim_end().ends_with(BLOCK_CLOSE));
+        assert!(got.contains("title 0"), "newest row must survive");
+        assert!(!got.contains("title 39"), "oldest row should be dropped");
+    }
+
+    #[test]
+    fn a_single_oversized_row_does_not_emit_a_hollow_block() {
+        // One row too big for the budget: better no block than a frame with
+        // nothing in it.
+        let huge = "y".repeat(MAX_BLOCK_BYTES * 2);
+        assert_eq!(render(&[row("a", "t", false, Some(&huge))], "/w/proj"), None);
+    }
+
+    #[test]
+    fn rows_carry_a_local_timestamp() {
+        let got = render(&[row("a", "t", false, None)], "/w/proj").unwrap();
+        // MM-DD HH:MM, whatever the machine's zone resolves it to.
+        let has_stamp = got
+            .lines()
+            .any(|l| regex_lite_mm_dd_hh_mm(l.trim_start()));
+        assert!(has_stamp, "no MM-DD HH:MM stamp found in: {got}");
+    }
+
+    /// Tiny shape check for `MM-DD HH:MM` — avoids pulling in a regex crate
+    /// just to assert a timestamp survived rendering.
+    fn regex_lite_mm_dd_hh_mm(line: &str) -> bool {
+        let b = line.as_bytes();
+        b.len() >= 11
+            && b[0].is_ascii_digit()
+            && b[1].is_ascii_digit()
+            && b[2] == b'-'
+            && b[3].is_ascii_digit()
+            && b[4].is_ascii_digit()
+            && b[5] == b' '
+            && b[6].is_ascii_digit()
+            && b[7].is_ascii_digit()
+            && b[8] == b':'
+            && b[9].is_ascii_digit()
+            && b[10].is_ascii_digit()
     }
 
     #[test]
