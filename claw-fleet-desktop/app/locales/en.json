@@ -1878,6 +1878,7 @@
     "fleet_tool": {
       "ask": "Decision card",
       "render_a2ui": "Interactive card",
+      "spawn": "Spawn session",
       "plan": "Plan",
       "handoff": "Handoff",
       "watch": "Watch",

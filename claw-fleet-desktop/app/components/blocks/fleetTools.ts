@@ -30,6 +30,7 @@
  * the two lists must be kept in step.
  */
 export const FLEET_CONTROL_TOOLS = [
+  "spawn",
   "plan",
   "handoff",
   "watch",
@@ -61,7 +62,7 @@ export function isFleetTool(name: string): FleetTool | null {
 /**
  * i18n key for a Fleet MCP tool's human-readable label, keyed by the tail
  * segment of its wire name (`mcp__fleet__fleet__<tail>`). Covers every one of
- * the eleven control tools plus the four non-control ones (`ask`,
+ * the twelve control tools plus the four non-control ones (`ask`,
  * `render_a2ui`, `set_session_title`, `image`, `image_edit`). Used to relabel
  * the raw `mcp__fleet__fleet__…` id wherever it would otherwise leak verbatim —
  * e.g. the ToolSearch "loading tools" summary, where a tool is just a string in
@@ -71,6 +72,7 @@ export function isFleetTool(name: string): FleetTool | null {
 export const FLEET_TOOL_LABEL_KEYS: Record<string, string> = {
   ask: "detail.fleet_tool.ask",
   render_a2ui: "detail.fleet_tool.render_a2ui",
+  spawn: "detail.fleet_tool.spawn",
   plan: "detail.fleet_tool.plan",
   handoff: "detail.fleet_tool.handoff",
   watch: "detail.fleet_tool.watch",
