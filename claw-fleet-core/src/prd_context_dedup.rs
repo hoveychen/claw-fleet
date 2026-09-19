@@ -336,4 +336,64 @@ mod tests {
         // injection, never a missing one.
         assert!(codex_needs_injection(&path, &text));
     }
+
+    /// Every branch of the real renderer must be recognisable as a plan
+    /// reminder — driven through `render_active_plans_reminder` itself, not a
+    /// fixture.
+    ///
+    /// The fixture above is why this bug lived: it interpolated the marker
+    /// constant into a hand-written string, so it agreed with whatever the
+    /// constant said and never once compared it against the text the renderer
+    /// actually produces. The cursor-focus header was reworded out from under
+    /// it, and every attributed session silently stopped deduping.
+    #[test]
+    fn every_rendering_of_the_real_reminder_is_recognised() {
+        let _guard = crate::session::fleet_home_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", home.path()) };
+
+        let ws = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            ws.path().join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"marker-probe\" v=\"2\" -->\n\n\
+**Plan:** Probe\n\n\
+- [ ] **P1** — first task\n\n\
+<!-- fleet:prd:end id=\"marker-probe\" -->\n",
+        )
+        .unwrap();
+
+        // Unattributed: the flat listing.
+        let flat = crate::prd_tasks::render_active_plans_reminder(ws.path(), None)
+            .expect("an active plan renders");
+        assert!(
+            is_plan_reminder(&flat),
+            "the unattributed rendering must be recognised: {flat}"
+        );
+
+        // Attributed: the cursor-focus branch, which is what a session doing
+        // work receives — and the branch the marker had drifted away from.
+        crate::task_progress::set_current(
+            "marker-probe-session",
+            &ws.path().to_string_lossy(),
+            "marker-probe",
+            Some("P1".into()),
+        )
+        .expect("record focus");
+        let focused =
+            crate::prd_tasks::render_active_plans_reminder(ws.path(), Some("marker-probe-session"))
+                .expect("an active plan renders");
+        assert_ne!(flat, focused, "the two branches must really differ");
+        assert!(
+            is_plan_reminder(&focused),
+            "the cursor-focus rendering must be recognised: {focused}"
+        );
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+    }
 }
