@@ -9,6 +9,13 @@
 // shows metadata only. Downloading has no such ceiling — it walks the file by
 // byte range (see `downloadArtifact`) — so the button stays live at any size,
 // and reports a percentage while it works.
+//
+// Video and audio sit on the download side of that line rather than the preview
+// side: they are buffered whole on demand and handed to the native element as a
+// blob. That trades a wait for the two things a half-streamed clip would not
+// have on this transport — any codec the device can play, and real seeking.
+// True streaming would mean a Service Worker translating the element's Range
+// requests into relay calls; deliberately not built yet.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -166,6 +173,12 @@ export function ArtifactDetail({
   // honestly indeterminate.
   const [abort, setAbort] = useState<AbortController | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  // Which button started the transfer. One at a time on purpose: two concurrent
+  // walks of the same file would compete for the link and double the memory.
+  const [purpose, setPurpose] = useState<"share" | "play" | null>(null);
+  // A buffered clip, kept apart from `blobUrl` because it is produced on demand
+  // rather than by the open-the-detail effect.
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const kind = previewKind(artifact);
 
@@ -175,8 +188,11 @@ export function ArtifactDetail({
   // the decision tab in one step.
   useHistoryLayer(onBack);
 
+  // Media is the one kind the detail view does not fetch on open: a clip can be
+  // hundreds of megabytes, and pulling that down because someone tapped a row
+  // is not a preview, it is a surprise. It waits for the play button.
   useEffect(() => {
-    if (!client || kind === "none") return;
+    if (!client || kind === "none" || kind === "media") return;
     let alive = true;
     let url: string | null = null;
     fetchArtifact(client, artifact.id)
@@ -246,43 +262,106 @@ export function ArtifactDetail({
     [shareFile],
   );
 
-  // Tapping the button while a download runs cancels it. A transfer that can
-  // take minutes needs a way out that is not "close the app".
-  const share = useCallback(async () => {
-    if (!client) return;
-    if (abort) {
-      abort.abort();
-      return;
-    }
-    const ctrl = new AbortController();
-    setAbort(ctrl);
-    setProgress(0);
-    try {
-      const { filename, mime, blob } = await downloadArtifact(client, artifact.id, {
-        signal: ctrl.signal,
-        onProgress: ({ received, total }) =>
-          setProgress(total ? Math.min(99, Math.floor((received / total) * 100)) : 0),
-      });
-      await shareFile(new File([blob], filename, { type: mime }), artifact.title);
-    } catch (e) {
-      // The user pressed cancel; say so plainly rather than as a failure.
-      const name = e instanceof DOMException ? e.name : "";
-      setErr(name === "AbortError" ? t("已取消") : e instanceof Error ? e.message : String(e));
-    } finally {
-      setAbort(null);
+  // One transfer path, two destinations: the share sheet, or a blob URL for the
+  // player. Pressing the same button again while it runs cancels it — a
+  // transfer that can take minutes needs a way out that is not "close the app".
+  const transfer = useCallback(
+    async (what: "share" | "play") => {
+      if (!client) return;
+      if (abort) {
+        abort.abort();
+        return;
+      }
+      const ctrl = new AbortController();
+      setAbort(ctrl);
+      setPurpose(what);
       setProgress(null);
-    }
-  }, [client, artifact.id, artifact.title, abort, shareFile]);
+      setErr(null);
+      try {
+        const { filename, mime, blob } = await downloadArtifact(client, artifact.id, {
+          signal: ctrl.signal,
+          onProgress: ({ received, total }) =>
+            setProgress(total ? Math.min(99, Math.floor((received / total) * 100)) : 0),
+        });
+        if (what === "play") {
+          setMediaUrl(URL.createObjectURL(blob));
+        } else {
+          await shareFile(new File([blob], filename, { type: mime }), artifact.title);
+        }
+      } catch (e) {
+        // The user pressed cancel; say so plainly rather than as a failure.
+        const name = e instanceof DOMException ? e.name : "";
+        setErr(name === "AbortError" ? t("已取消") : e instanceof Error ? e.message : String(e));
+      } finally {
+        setAbort(null);
+        setPurpose(null);
+        setProgress(null);
+      }
+    },
+    [client, artifact.id, artifact.title, abort, shareFile],
+  );
+
+  const share = useCallback(() => void transfer("share"), [transfer]);
+  const play = useCallback(() => void transfer("play"), [transfer]);
+
+  // Revoked when it is replaced or the view closes: a buffered clip is the
+  // largest thing this app ever holds, and leaving it to GC is how a phone
+  // runs out of memory after browsing three of them.
+  useEffect(() => {
+    if (!mediaUrl) return;
+    return () => URL.revokeObjectURL(mediaUrl);
+  }, [mediaUrl]);
 
   const Icon = KIND_ICON[artifact.kind] ?? FileText;
-  const source: PreviewSource = { kind, title: artifact.title, blobUrl, blob, text };
+  const source: PreviewSource = {
+    kind,
+    title: artifact.title,
+    mime: artifact.mime,
+    blobUrl: kind === "media" ? mediaUrl : blobUrl,
+    blob,
+    text,
+  };
+  const buffering = purpose === "play";
+
+  // What stands in for a player before the bytes are here. Not "loading": the
+  // wait is long enough to need a reason, a size, and a way to stop it.
+  const mediaPrompt = (
+    <div className={styles.noPreview}>
+      <Icon size={34} strokeWidth={1.1} />
+      {buffering ? (
+        <>
+          <div className={styles.noPreviewTitle}>
+            {progress == null ? t("准备中…") : t("缓存中 {0}%", progress)}
+          </div>
+          <div className={styles.bufferBar}>
+            <div className={styles.bufferFill} style={{ width: `${progress ?? 0}%` }} />
+          </div>
+          <button className={styles.action} onClick={play}>
+            {t("取消")}
+          </button>
+        </>
+      ) : (
+        <>
+          <div className={styles.noPreviewHint}>
+            {err ?? t("要先把整份缓存到手机才能播，{0}。", formatBytes(artifact.sizeBytes))}
+          </div>
+          <button className={styles.action} onClick={play} disabled={!client}>
+            {t("缓存并播放")}
+          </button>
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div className={styles.detail}>
       <AppHeader onBack={onBack} title={artifact.title} />
 
       <div className={styles.stage}>
-        {err ? (
+        {/* A media error keeps the prompt on screen rather than replacing it:
+            cancelling a buffer must leave the play button where it was, or the
+            only way to retry is to back out of the artifact entirely. */}
+        {err && kind !== "media" ? (
           <div className={styles.noPreview}>
             <TriangleAlert size={28} />
             <div className={styles.noPreviewTitle}>{t("加载失败")}</div>
@@ -295,9 +374,13 @@ export function ArtifactDetail({
           <PreviewBody
             src={source}
             fallback={
-              <div className={styles.noPreview}>
-                <div className={styles.noPreviewHint}>{t("加载中…")}</div>
-              </div>
+              kind === "media" ? (
+                mediaPrompt
+              ) : (
+                <div className={styles.noPreview}>
+                  <div className={styles.noPreviewHint}>{t("加载中…")}</div>
+                </div>
+              )
             }
           />
         ) : (
@@ -334,11 +417,13 @@ export function ArtifactDetail({
               the chunked path exists to deliver. */}
           <button
             className={styles.action}
+            // Disabled while the player is buffering: one transfer at a time,
+            // and a second walk of the same file would just fight the first.
+            disabled={!client || buffering}
             onClick={share}
-            disabled={!client}
-            title={abort ? t("点一下取消") : undefined}
+            title={purpose === "share" ? t("点一下取消") : undefined}
           >
-            {abort == null
+            {purpose !== "share"
               ? t("分享 / 保存")
               : progress == null
                 ? t("准备中…")

@@ -46,10 +46,14 @@ export function isFetchable(a: Artifact): boolean {
 /**
  * Which artifacts the phone can actually show something for.
  *
- * Kept separate from the `kind` the desktop uses: the desktop can stream a
- * video and frame a PDF, the phone is fetching whole bytes into memory. Video
- * and audio are listed but not played here — a playable clip would have to be
- * under 16 MiB, which is not the case for anything worth calling a deliverable.
+ * Kept separate from the `kind` the desktop uses: the desktop streams from a
+ * local file, the phone has to get the bytes across first.
+ *
+ * `media` is the one kind that does not have to fit in a frame, and so the one
+ * the `isFetchable` gate below deliberately skips: a clip is buffered with
+ * `downloadArtifact` on demand — the user asks for it by pressing play — and
+ * handed to `<video>` as a blob. Every other kind is fetched whole the moment
+ * the detail view opens, which is exactly why they still have to be small.
  *
  * The store's single `text` kind is split three ways here for the same reason
  * the desktop splits it: a markdown spec and an html report are ordinary
@@ -65,6 +69,7 @@ export function isFetchable(a: Artifact): boolean {
  */
 export type PreviewKind =
   | "image"
+  | "media"
   | "zip"
   | "pdf"
   | "markdown"
@@ -82,8 +87,11 @@ const OOXML_MIME: Record<string, PreviewKind> = {
 };
 
 export function previewKind(a: Artifact): PreviewKind {
-  if (!isFetchable(a)) return "none";
-  return previewKindFor(a.kind, a.mime);
+  const kind = previewKindFor(a.kind, a.mime);
+  // Size gates the fetch-it-all-on-open kinds only. Playback buffers on demand,
+  // so a 400 MB render is still offered — that is the whole point of it.
+  if (kind !== "media" && !isFetchable(a)) return "none";
+  return kind;
 }
 
 /**
@@ -95,6 +103,7 @@ export function previewKind(a: Artifact): PreviewKind {
  */
 export function previewKindFor(kind: string, mime: string): PreviewKind {
   if (kind === "image") return "image";
+  if (kind === "video" || kind === "audio") return "media";
   if (kind === "pdf") return "pdf";
   const base = mime.split(";")[0].trim().toLowerCase();
   if (kind === "text") {

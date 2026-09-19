@@ -172,10 +172,19 @@ describe("previewKind", () => {
     expect(previewKindFor("other", "application/octet-stream")).toBe("none");
   });
 
-  /** Video and audio are listed but never played here — see the module docs. */
-  it("does not offer playback for media", () => {
-    expect(previewKind(make({ kind: "video", sizeBytes: 1000 }))).toBe("none");
-    expect(previewKind(make({ kind: "audio", sizeBytes: 1000 }))).toBe("none");
+  it("offers playback for media", () => {
+    expect(previewKind(make({ kind: "video", mime: "video/mp4", sizeBytes: 1000 }))).toBe("media");
+    expect(previewKind(make({ kind: "audio", mime: "audio/mpeg", sizeBytes: 1000 }))).toBe("media");
+  });
+
+  it("offers playback past the single-frame ceiling, unlike every other kind", () => {
+    // The reason the size gate is skipped for media: a clip is buffered on
+    // demand rather than fetched when the detail view opens, so the frame limit
+    // that governs previews does not apply. A render over the ceiling is
+    // exactly the case this exists for.
+    const big = { sizeBytes: MAX_RELAY_BYTES + 1 };
+    expect(previewKind(make({ kind: "video", mime: "video/mp4", ...big }))).toBe("media");
+    expect(previewKind(make({ kind: "pdf", mime: "application/pdf", ...big }))).toBe("none");
   });
 });
 
