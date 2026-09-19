@@ -2120,6 +2120,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "plan_forest" => serve_plan_forest(params),
         "session_decisions" => serve_session_decisions(params),
         "decision_asset" => serve_decision_asset(params),
+        "session_images" => serve_session_images(params),
+        "session_image" => serve_session_image(params),
         "tail" => serve_tail(params),
         "tail_delta" => serve_tail_delta(params),
         "tool_detail" => serve_tool_detail(params),
@@ -2380,6 +2382,58 @@ fn serve_decision_asset(params: &Value) -> Result<Value, String> {
     const MAX_ASSET_BYTES: usize = 12 * 1024 * 1024;
     if bytes.len() > MAX_ASSET_BYTES {
         return Err(format!("asset too large: {} bytes", bytes.len()));
+    }
+    Ok(json!({
+        "mime": mime,
+        "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
+}
+
+/// Generated images belonging to one handle — the phone's equivalent of the
+/// desktop's `fleet-genimage://` thumbnail strip and of `fleet serve`'s
+/// `/session_images`.
+///
+/// Returns bare filenames rather than absolute paths: the phone cannot open a
+/// path on this machine, and it only ever needs the name to hand back to
+/// `session_image`.
+fn serve_session_images(params: &Value) -> Result<Value, String> {
+    let session = params
+        .get("session")
+        .and_then(Value::as_str)
+        .ok_or("missing session")?;
+    let images: Vec<Value> = crate::codex_image::list_thread_images(session)
+        .into_iter()
+        .filter_map(|img| {
+            let name = std::path::Path::new(&img.path)
+                .file_name()
+                .and_then(|n| n.to_str())?
+                .to_string();
+            Some(json!({ "name": name, "bytes": img.bytes }))
+        })
+        .collect();
+    Ok(json!({ "images": images }))
+}
+
+/// Bytes of one generated image, downscaled and base64'd for the WS frame.
+///
+/// Reuses the decision-asset squeeze rather than sending the original: a 4K
+/// `max`-quality render is tens of megabytes, which the relay will not carry
+/// and a phone would not want over mobile data. Traversal and extension gating
+/// live in `read_thread_image`, not here.
+fn serve_session_image(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+    let session = params
+        .get("session")
+        .and_then(Value::as_str)
+        .ok_or("missing session")?;
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or("missing name")?;
+    let image = crate::codex_image::read_thread_image(session, name)?;
+    let (bytes, mime) = downscale_decision_asset(image.bytes, &image.mime);
+    if bytes.len() > DECISION_ASSET_HARD_CAP_BYTES {
+        return Err(format!("image too large: {} bytes", bytes.len()));
     }
     Ok(json!({
         "mime": mime,
