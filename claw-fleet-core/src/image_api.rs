@@ -526,6 +526,85 @@ fn tail(s: &str, n: usize) -> String {
     chars[chars.len() - n..].iter().collect()
 }
 
+// ── Output store ────────────────────────────────────────────────────────────
+//
+// The Codex-driven path never had to think about where pictures live: the
+// built-in tool wrote them to `$CODEX_HOME/generated_images/<thread_id>/`, and
+// the thread id doubled as the directory name, the `fleet-genimage://` key, the
+// `/session_images` query parameter and the follow-up-edit handle. Calling the
+// API ourselves means there is no thread and no id, so we mint one.
+//
+// The handle is prefixed, and [`crate::codex_image::thread_images_dir`] routes
+// on that prefix. That is what keeps every existing reader — the custom
+// protocol, the two `fleet serve` routes, the desktop thumbnail strip — working
+// unchanged, and what keeps images from older Codex threads readable instead of
+// orphaning them.
+
+/// Marks a handle as ours rather than a Codex thread id. Codex ids are bare
+/// UUIDs, so no real thread can collide with this.
+pub const HANDLE_PREFIX: &str = "img-";
+
+/// Is this a handle minted by [`new_handle`] rather than a Codex thread id?
+pub fn is_native_handle(handle: &str) -> bool {
+    handle.starts_with(HANDLE_PREFIX) && handle_is_safe(handle)
+}
+
+/// A handle is a directory name, so it has to be one path segment and nothing
+/// clever. Checked on both the write and the read side.
+fn handle_is_safe(handle: &str) -> bool {
+    !handle.is_empty()
+        && !handle.contains('/')
+        && !handle.contains('\\')
+        && !handle.contains("..")
+        && !Path::new(handle).is_absolute()
+}
+
+/// Mint a fresh handle for one generation.
+pub fn new_handle() -> String {
+    format!("{HANDLE_PREFIX}{}", uuid::Uuid::new_v4())
+}
+
+/// Where this handle's images live: `<fleet dir>/generated_images/<handle>`.
+///
+/// Deliberately under Fleet's own directory, not `$CODEX_HOME`: these are not
+/// Codex's output any more, and a user who logs out of Codex or clears its home
+/// should not lose them.
+pub fn handle_dir(handle: &str) -> Option<PathBuf> {
+    if !handle_is_safe(handle) {
+        return None;
+    }
+    crate::session::get_fleet_dir().map(|d| d.join("generated_images").join(handle))
+}
+
+/// Write one turn's images into the handle's directory.
+///
+/// Names are `1.png`, `2.png`, … in the order the API returned them, which
+/// keeps `n > 1` variants in the caller's order — unlike the Codex path, which
+/// had to sort by file size because it could not tell them apart.
+pub fn save_images(
+    handle: &str,
+    images: &[ImageBytes],
+    output_format: Option<&str>,
+) -> Result<Vec<crate::codex_image::GeneratedImage>, String> {
+    let dir = handle_dir(handle).ok_or_else(|| format!("invalid image handle '{handle}'"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    let ext = match output_format.unwrap_or("png") {
+        "jpeg" => "jpg",
+        other => other,
+    };
+    let mut out = Vec::with_capacity(images.len());
+    for (i, image) in images.iter().enumerate() {
+        let path = dir.join(format!("{}.{ext}", i + 1));
+        std::fs::write(&path, &image.bytes)
+            .map_err(|e| format!("write {}: {e}", path.display()))?;
+        out.push(crate::codex_image::GeneratedImage {
+            path: path.to_string_lossy().to_string(),
+            bytes: image.bytes.len() as u64,
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -771,6 +850,91 @@ mod tests {
         assert!(decode_response("{\"data\":[]}").is_err());
         assert!(decode_response("{\"error\":{\"message\":\"nope\"}}").is_err());
         assert!(decode_response("not json").is_err());
+    }
+
+    #[test]
+    fn a_native_handle_is_distinguishable_from_a_codex_thread_id() {
+        let handle = new_handle();
+        assert!(is_native_handle(&handle));
+        // Codex thread ids are bare UUIDs.
+        assert!(!is_native_handle("01a0a794-1234-5678-9abc-def012345678"));
+        assert!(!is_native_handle(""));
+    }
+
+    #[test]
+    fn a_handle_that_could_escape_the_store_is_refused() {
+        for evil in ["img-../..", "img-a/b", "img-a\\b", "/img-abs"] {
+            assert!(!is_native_handle(evil), "{evil} must not be a handle");
+            assert!(handle_dir(evil).is_none(), "{evil} must not resolve");
+        }
+    }
+
+    #[test]
+    fn saved_images_are_numbered_in_the_order_the_api_returned_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = crate::paths::fleet_home_guard(tmp.path());
+        let handle = new_handle();
+        let images = vec![
+            ImageBytes {
+                bytes: b"first-and-much-longer".to_vec(),
+                generation_id: None,
+            },
+            ImageBytes {
+                bytes: b"second".to_vec(),
+                generation_id: None,
+            },
+        ];
+        let saved = save_images(&handle, &images, None).unwrap();
+        assert_eq!(saved.len(), 2);
+        // Order is API order, not size order — the Codex path had to sort by
+        // size because it could not tell variants apart; we can.
+        assert!(saved[0].path.ends_with("1.png"));
+        assert!(saved[1].path.ends_with("2.png"));
+        assert_eq!(saved[1].bytes, 6);
+        assert_eq!(
+            std::fs::read(&saved[0].path).unwrap(),
+            b"first-and-much-longer"
+        );
+    }
+
+    #[test]
+    fn jpeg_output_is_saved_with_the_conventional_extension() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = crate::paths::fleet_home_guard(tmp.path());
+        let handle = new_handle();
+        let images = vec![ImageBytes {
+            bytes: b"x".to_vec(),
+            generation_id: None,
+        }];
+        let saved = save_images(&handle, &images, Some("jpeg")).unwrap();
+        assert!(saved[0].path.ends_with("1.jpg"), "{}", saved[0].path);
+        let saved = save_images(&handle, &images, Some("webp")).unwrap();
+        assert!(saved[0].path.ends_with("1.webp"), "{}", saved[0].path);
+    }
+
+    #[test]
+    fn a_native_handle_reads_back_through_the_existing_image_lookups() {
+        // The desktop protocol and both `fleet serve` routes go through
+        // `codex_image::{list_thread_images, read_thread_image}`. Neither knows
+        // about the new store, and neither should have to.
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = crate::paths::fleet_home_guard(tmp.path());
+        let handle = new_handle();
+        save_images(
+            &handle,
+            &[ImageBytes {
+                bytes: b"\x89PNG\r\n\x1a\n".to_vec(),
+                generation_id: None,
+            }],
+            None,
+        )
+        .unwrap();
+
+        let listed = crate::codex_image::list_thread_images(&handle);
+        assert_eq!(listed.len(), 1, "native handle must list through codex_image");
+        let read = crate::codex_image::read_thread_image(&handle, "1.png").unwrap();
+        assert_eq!(read.bytes, b"\x89PNG\r\n\x1a\n");
+        assert_eq!(read.mime, "image/png");
     }
 
     #[test]

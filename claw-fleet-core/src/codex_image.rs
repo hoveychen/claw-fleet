@@ -66,12 +66,25 @@ pub struct GenerateImageResult {
     pub timeline: Vec<TurnEvent>,
 }
 
-/// `$CODEX_HOME/generated_images/<thread_id>` — where the built-in `image_gen`
-/// tool drops output for one thread.
+/// Where one handle's images live.
+///
+/// Two stores behind one lookup, routed on the handle's shape:
+///
+/// - `img-<uuid>` — minted by [`crate::image_api::new_handle`] for a native
+///   Images API call, stored under Fleet's own directory.
+/// - anything else — a Codex thread id, stored where the built-in `image_gen`
+///   tool put it: `$CODEX_HOME/generated_images/<thread_id>`.
+///
+/// Routing here rather than at each call site is what lets the desktop's
+/// `fleet-genimage://` protocol, both `fleet serve` routes and the thumbnail
+/// strip serve pictures from either era without knowing which is which.
 pub fn thread_images_dir(thread_id: &str) -> Option<PathBuf> {
     let thread_id = thread_id.trim();
     if thread_id.is_empty() {
         return None;
+    }
+    if crate::image_api::is_native_handle(thread_id) {
+        return crate::image_api::handle_dir(thread_id);
     }
     crate::codex_launch::codex_home().map(|h| h.join("generated_images").join(thread_id))
 }
