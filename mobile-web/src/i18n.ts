@@ -707,6 +707,7 @@ const DICT: Record<string, string> = {
   收起接力链: "Collapse the handoff chain",
   展开接力链上更早的会话: "Show earlier sessions in the handoff chain",
   "{0} 断开,已停止": "{0} disconnected — stopped",
+  "{0} 卡住": "{0} wedged",
   远端: "Remote",
   "{0} 断开,agent 未停": "{0} disconnected — agent still running",
   "这些文件留在了本机镜像目录 {0},没同步到远端主机:{1}": "These files stayed in the local mirror directory {0} and were not synced to the remote host: {1}",

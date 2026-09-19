@@ -24,6 +24,7 @@ import {
   FileWarning,
   ServerOff,
   Share2,
+  TimerOff,
   Square,
   WifiOff,
 } from "lucide-react";
@@ -130,7 +131,16 @@ export function statusTone(s: SessionInfo & { deviceId?: string }): string | nul
   // as ended — when a Fleet timer is in fact going to resume it.
   if (s.status === "watching") return "watching";
   if (s.status === "waitingInput") return "waiting";
-  if (s.status === "rateLimited" || s.status === "serverErrored" || s.status === "remoteDisconnected")
+  // `stuck` joins the error family rather than falling through to the quiet
+  // branch below: a wedged turn keeps its process alive and writes nothing, so
+  // hysteresis would dim it to "quiet" — the one reading that says "nothing to
+  // see here" about the one state that always needs a human.
+  if (
+    s.status === "rateLimited" ||
+    s.status === "serverErrored" ||
+    s.status === "remoteDisconnected" ||
+    s.status === "stuck"
+  )
     return "error";
   // A latched session stays dim even while its status momentarily reads live —
   // that is the whole point of the hysteresis.
@@ -826,6 +836,17 @@ export function TasksView({
             <span className={styles.handoff}>
               <Share2 size={11} />
               {s.handoff.hop}/{s.handoff.chainLen}
+            </span>
+          )}
+          {/* 卡死了要说卡在哪个工具上:光一个红点等于让人开着 transcript 才知道
+              该不该去中断。挂了多久同样是判据——WebFetch 卡 20 分钟是坏了,
+              Bash 跑 20 分钟可能只是在编译。 */}
+          {s.status === "stuck" && s.stuckTool && (
+            <span className={styles.remoteLost}>
+              <TimerOff size={11} />
+              {s.stuckTool.sinceMs
+                ? `${s.stuckTool.name} ${formatWatchElapsed(s.stuckTool.sinceMs)}`
+                : t("{0} 卡住", s.stuckTool.name)}
             </span>
           )}
           {/* Remote SSH tunnel died and Fleet stopped the session—a red dot alone would

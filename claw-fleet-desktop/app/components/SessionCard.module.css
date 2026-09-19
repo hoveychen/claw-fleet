@@ -166,6 +166,21 @@
    rate-limit red — a different failure that needs a different action (⎋). */
 .badge_stuck       { color: #ea580c; font-weight: 600; }
 
+/* Which tool the wedged turn is waiting on, sat right after the Stuck badge.
+   Shares the badge's orange-red so the two read as one statement, and stays a
+   plain chip (no background) so it does not compete with the badge itself. */
+.stuck_tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #ea580c;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The disconnect chip. Shares the remote-badge shape (.tag_remote / .gm_remote)
    so it reads as "that host badge, gone wrong" rather than a new kind of thing;
    only the colour changes. Sized between the two so one component can sit on

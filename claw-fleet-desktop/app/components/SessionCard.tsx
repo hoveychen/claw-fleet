@@ -172,6 +172,28 @@ export function ServerErrorControls({ session }: { session: SessionInfo }) {
  * What the badge cannot carry is the host, rca's own line, and whether the kill
  * landed; those are here and in the tooltip.
  */
+/** Names the tool a wedged session is waiting on, next to the Stuck badge.
+ *  "Stuck" alone leaves the user to open the transcript to learn whether it is
+ *  a hung WebFetch (interrupt it) or a genuinely long Bash (leave it be). Only
+ *  rendered on the stuck status: the underlying `stuckTool` is stamped from an
+ *  unresolved batch regardless of the age floor, and a batch that is merely
+ *  in-flight is not news. */
+export function StuckToolNotice({ session }: { session: SessionInfo }) {
+  const { t } = useTranslation();
+  const stuck = session.stuckTool;
+  if (session.status !== "stuck" || !stuck) return null;
+  const elapsed = stuck.sinceMs ? formatDuration(Date.now() - stuck.sinceMs) : null;
+  return (
+    <span
+      className={styles.stuck_tool}
+      title={t("card.tip_stuck_tool", { tool: stuck.name })}
+    >
+      <FileWarning size={11} strokeWidth={1.8} />
+      {elapsed ? `${stuck.name} · ${elapsed}` : stuck.name}
+    </span>
+  );
+}
+
 export function RemoteDisconnectNotice({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
   const [resuming, setResuming] = useState(false);
@@ -761,6 +783,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
               </span>
             )}
             {!hideHeader && <StatusBadge status={session.status} />}
+            {!hideHeader && <StuckToolNotice session={session} />}
             {!hideHeader && <RemoteDisconnectNotice session={session} />}
             {!hideHeader && <MirrorWriteNotice session={session} />}
             {!hideHeader && <OutOfCreditsNotice session={session} />}
