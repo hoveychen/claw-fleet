@@ -337,6 +337,30 @@ pub fn render_for_workspace(workspace_path: &str, exclude_session_id: Option<&st
     render(&rows, workspace_path)
 }
 
+/// [`render_for_workspace`], abandoned if it has not finished in `budget`.
+///
+/// For callers whose whole response is on a clock someone else set: the dsh
+/// plugin gives `fleet dsh-context` 5 seconds for *everything* it returns, and
+/// a scan that overran it would cost not just this block but every guidance
+/// section in the same reply. Measured at ~3.7s warm on this machine and tens
+/// of seconds against a cold scan cache, so the overrun is a question of when.
+///
+/// The scan is left running in its detached thread; a CLI process exits
+/// moments later and takes it with it.
+pub fn render_within(
+    workspace_path: &str,
+    exclude_session_id: Option<&str>,
+    budget: std::time::Duration,
+) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let workspace = workspace_path.to_string();
+    let exclude = exclude_session_id.map(str::to_string);
+    std::thread::spawn(move || {
+        let _ = tx.send(render_for_workspace(&workspace, exclude.as_deref()));
+    });
+    rx.recv_timeout(budget).ok().flatten()
+}
+
 /// Name of the ledger recording which sessions were already sent the block.
 const CLAIM_FILE_NAME: &str = "recent-sessions-sent.json";
 
@@ -382,6 +406,31 @@ pub fn claim_once(session_id: &str) -> bool {
     // Recording the claim is what makes it a claim: if the write fails we have
     // no memory of having sent it, so report not-sent rather than send blind.
     crate::atomic_json::write_atomic(&path, raw.as_bytes()).is_ok()
+}
+
+/// Undo a [`claim_once`], so the next step tries again.
+///
+/// A claim is made before the render because the render is the expensive part;
+/// when it then comes back empty — a scan that overran its budget — the claim
+/// has to be given back, or one slow moment would cost the session its only
+/// chance at the block.
+pub fn forget(session_id: &str) {
+    use std::collections::BTreeMap;
+    let Some(path) = crate::session::get_fleet_dir().map(|d| d.join(CLAIM_FILE_NAME)) else {
+        return;
+    };
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut sent) = serde_json::from_str::<BTreeMap<String, u64>>(&raw) else {
+        return;
+    };
+    if sent.remove(session_id).is_none() {
+        return;
+    }
+    if let Ok(raw) = serde_json::to_string_pretty(&sent) {
+        let _ = crate::atomic_json::write_atomic(&path, raw.as_bytes());
+    }
 }
 
 /// Task reviews for this repo, newest first. Any failure (no database yet on a
@@ -763,6 +812,11 @@ mod tests {
         assert!(claim_once("s1"), "first ask sends the block");
         assert!(!claim_once("s1"), "every later step must be silent");
         assert!(claim_once("s2"), "sessions are independent");
+        // A render that overran its budget gives the claim back.
+        forget("s1");
+        assert!(claim_once("s1"), "a forgotten session may be sent again");
+        assert!(!claim_once("s2"), "forgetting one leaves the others claimed");
+        forget("never-claimed");
         // The claim is durable: dsh asks from a fresh process on every step.
         assert!(
             home.path().join(".fleet").join(CLAIM_FILE_NAME).exists(),

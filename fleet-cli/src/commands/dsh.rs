@@ -31,6 +31,11 @@
 
 use std::path::PathBuf;
 
+/// How long the recent-sessions block may take before this command gives up on
+/// it. Two thirds of the plugin's 5-second ceiling, leaving room for the
+/// guidance sections that share the reply.
+const RECENT_SESSIONS_BUDGET: std::time::Duration = std::time::Duration::from_millis(3000);
+
 /// Emit the sections a dsh session should receive on this step.
 ///
 /// `cwd` is the session's working directory (the plugin reads it off
@@ -103,15 +108,23 @@ pub(crate) fn cmd_dsh_context(
     // `[running]` marker change between steps, so it would look fresh all day.
     // Claiming first also skips the session scan, which is the costly half of
     // rendering it.
-    if session
-        .as_deref()
-        .is_some_and(claw_fleet_core::recent_sessions::claim_once)
-    {
-        if let Some(block) = claw_fleet_core::recent_sessions::render_for_workspace(
-            &cwd.to_string_lossy(),
-            session.as_deref(),
-        ) {
-            sections.push(serde_json::json!({ "name": "fleet-recent-sessions", "text": block }));
+    //
+    // Rendering is also kept on a short leash. The plugin allows this whole
+    // command 5 seconds, and the scan behind the block takes ~3.7s warm and far
+    // longer cold — overrunning would drop every guidance section in this
+    // reply, not just this one. A render that misses the budget hands its claim
+    // back so the next step can try again.
+    if let Some(sid) = session.as_deref() {
+        if claw_fleet_core::recent_sessions::claim_once(sid) {
+            match claw_fleet_core::recent_sessions::render_within(
+                &cwd.to_string_lossy(),
+                Some(sid),
+                RECENT_SESSIONS_BUDGET,
+            ) {
+                Some(block) => sections
+                    .push(serde_json::json!({ "name": "fleet-recent-sessions", "text": block })),
+                None => claw_fleet_core::recent_sessions::forget(sid),
+            }
         }
     }
 
