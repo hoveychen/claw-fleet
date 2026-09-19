@@ -722,6 +722,58 @@ fn roster_selection(projections: &Value) -> Option<RosterSelection> {
     })
 }
 
+/// A roster item's subagent identity, or `None` when the item is a main
+/// session.
+///
+/// dsh delegates by *spawning a real session*: the child gets its own
+/// `~/.dsh/sessions/<cwd>/<childId>/session.v3.jsonl.zstd` and its own
+/// `session/list` item, and the only thing marking it as delegated work is the
+/// pair of fields read here. Fleet used to read neither, so every dsh subagent
+/// landed in the roster as a main session sitting beside its own parent —
+/// measured 2026-09-19, 427 dsh sessions on this machine and not one with
+/// `is_subagent` set.
+///
+/// `origin` is the discriminator rather than `parentSessionId` alone: a future
+/// origin that also carries a parent (a fork, a resume) must not be silently
+/// folded into "subagent" by a presence check.
+fn roster_subagent(item: &Value, projections: &Value) -> Option<SubagentIdentity> {
+    let origin = item.get("origin").and_then(Value::as_str)?;
+    if origin != "subagent" {
+        return None;
+    }
+    let descriptor = projections
+        .get("values")
+        .and_then(|v| v.get("subagent"))
+        .filter(|v| v.is_object());
+    let text = |key: &str| {
+        descriptor
+            .and_then(|d| d.get(key))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    Some(SubagentIdentity {
+        parent_session_id: item
+            .get("parentSessionId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        // dsh has no named agent roster (`agent-loop.agents` ships empty), so
+        // the delegation `mode` — `one-shot` today — is the only type-shaped
+        // fact there is. It feeds the same ⎇ chip Claude fills with an agent
+        // type and Codex with an `agent_role`.
+        agent_type: text("mode"),
+        agent_description: text("label"),
+    })
+}
+
+/// The three [`SessionInfo`] fields [`roster_subagent`] fills.
+struct SubagentIdentity {
+    parent_session_id: Option<String>,
+    agent_type: Option<String>,
+    agent_description: Option<String>,
+}
+
 /// Context-window occupancy from `projections.values.contextPressure`, as the
 /// 0..1 fraction [`SessionInfo::context_percent`] carries.
 ///
@@ -792,6 +844,7 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
     });
 
     let selection = roster_selection(&projections);
+    let subagent = roster_subagent(item, &projections);
 
     Some(SessionInfo {
         // The roster *does* name a route, in `modelSelection` — it just took
@@ -836,6 +889,10 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         created_at_ms: updated_at,
         jsonl_path: format!("{DSH_URI_PREFIX}{id}"),
         agent_source: "dsh".to_string(),
+        is_subagent: subagent.is_some(),
+        parent_session_id: subagent.as_ref().and_then(|s| s.parent_session_id.clone()),
+        agent_type: subagent.as_ref().and_then(|s| s.agent_type.clone()),
+        agent_description: subagent.as_ref().and_then(|s| s.agent_description.clone()),
         ..Default::default()
     })
 }
@@ -975,10 +1032,17 @@ fn overlay_speed(infos: &mut [SessionInfo]) {
             now_ms,
         );
         info.token_speed = token_speed;
-        // `agent_token_speed` is "this session plus its subagents". dsh's
-        // subagents run inside the parent session rather than as roster
-        // entries of their own, so there is nothing to roll up: the session's
-        // own counter already covers the whole tree.
+        // `agent_token_speed` is "this session plus its subagents", and this
+        // seeds it with the session's own speed only.
+        //
+        // This comment used to claim dsh had no subagent roster entries to roll
+        // up. That was wrong: a dsh subagent *is* a roster entry of its own
+        // (see [`roster_subagent`]), so a parent's tree speed is genuinely
+        // larger than this. The rollup itself is not this function's to do —
+        // `session::scan::aggregate_subagent_rollup` owns it, and it currently
+        // runs only inside the Claude scan, so Codex sits in the same gap.
+        // Seeding the field keeps the desktop's global sum (which adds up every
+        // session's speed) correct in the meantime.
         info.agent_token_speed = token_speed;
         info.cost_speed_usd_per_min = cost_speed;
     }
@@ -2616,6 +2680,73 @@ mod tests {
     #[test]
     fn rejects_an_item_without_a_session_id() {
         assert!(session_info_from_list_item(&json!({ "cwd": "/tmp" })).is_none());
+    }
+
+    /// Shape measured off a live `session/list` on 2026-09-19, after a
+    /// `dsh --profile headless` run delegated one read to a subagent.
+    fn subagent_list_item() -> Value {
+        json!({
+            "sessionId": "7d2a072f-443c-478e-be9b-5a9d671ed5ee",
+            "updatedAt": 1789794784703u64,
+            "running": false,
+            "blank": false,
+            "parentSessionId": "session-9ba2e49d-36d8-49d1-90bd-500d81a9a433",
+            "origin": "subagent",
+            "cwd": "/tmp",
+            "projections": { "values": {
+                "title": "Read secret.txt token",
+                "subagent": { "mode": "one-shot", "label": "Read secret.txt token", "seq": 5 }
+            }}
+        })
+    }
+
+    #[test]
+    fn a_delegated_session_maps_to_a_subagent() {
+        let info = session_info_from_list_item(&subagent_list_item()).expect("mapped");
+        assert!(info.is_subagent);
+        assert_eq!(
+            info.parent_session_id.as_deref(),
+            Some("session-9ba2e49d-36d8-49d1-90bd-500d81a9a433")
+        );
+        assert_eq!(info.agent_type.as_deref(), Some("one-shot"));
+        assert_eq!(info.agent_description.as_deref(), Some("Read secret.txt token"));
+    }
+
+    #[test]
+    fn an_ordinary_session_stays_a_main_session() {
+        let info = session_info_from_list_item(&live_list_item()).expect("mapped");
+        assert!(!info.is_subagent);
+        assert_eq!(info.parent_session_id, None);
+        assert_eq!(info.agent_type, None);
+    }
+
+    /// `origin` is the discriminator, not the mere presence of a parent: an
+    /// origin dsh may add later that also carries a `parentSessionId` (a fork,
+    /// a branch) must not be mistaken for delegated work.
+    #[test]
+    fn a_parent_link_alone_is_not_a_subagent() {
+        let mut item = subagent_list_item();
+        item["origin"] = json!("fork");
+        let info = session_info_from_list_item(&item).expect("mapped");
+        assert!(!info.is_subagent);
+        assert_eq!(info.parent_session_id, None);
+    }
+
+    /// dsh writes the descriptor one event after the session opens, so a
+    /// subagent scanned in that window has `origin` but no `subagent` block.
+    /// It is still a subagent — the type and label just are not known yet.
+    #[test]
+    fn a_subagent_without_its_descriptor_yet_still_maps() {
+        let mut item = subagent_list_item();
+        item["projections"]["values"]["subagent"] = Value::Null;
+        let info = session_info_from_list_item(&item).expect("mapped");
+        assert!(info.is_subagent);
+        assert_eq!(info.agent_type, None);
+        assert_eq!(info.agent_description, None);
+        assert_eq!(
+            info.parent_session_id.as_deref(),
+            Some("session-9ba2e49d-36d8-49d1-90bd-500d81a9a433")
+        );
     }
 
     // ── What the roster itself publishes ─────────────────────────────────────
