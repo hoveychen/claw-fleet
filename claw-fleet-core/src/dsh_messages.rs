@@ -35,14 +35,139 @@
 //!   `sandbox/mode`, `approval/policy`, `agent/inbox/spliced` — session
 //!   bookkeeping with no place in a conversation.
 
+use std::collections::{HashMap, VecDeque};
+
 use serde_json::{json, Value};
+
+/// The dsh tools that delegate to a child session. Both spawn one — `subagent`
+/// from a fresh context, `subagent_fork` from a copy of the parent's — and both
+/// are announced by the same `subagent/catalog` event.
+const DELEGATING_TOOLS: [&str; 2] = ["subagent", "subagent_fork"];
+
+/// One delegation, assembled from the `tool/call` that asked for it and the
+/// `subagent/catalog` that reported the child it got.
+struct Delegation {
+    child_id: String,
+    mode: Option<String>,
+    label: Option<String>,
+    called_at_ms: i64,
+    /// Did the parent fork its own context into the child (`subagent_fork`)
+    /// rather than start it clean (`subagent`)?
+    ///
+    /// The catalog cannot answer this: measured 2026-09-19, a fork and a plain
+    /// delegation both report `mode: "one-shot"`. The calling tool's name is
+    /// the only place the distinction survives.
+    forked: bool,
+}
+
+/// Pair every delegating `tool/call` with the `subagent/catalog` that answered
+/// it, keyed by tool-call id.
+///
+/// The pairing is positional because dsh links the two events by neither id nor
+/// seq: `tool/call` carries a `callId` the catalog does not repeat, and the
+/// catalog carries a `childId` the call has never heard of. What dsh does
+/// guarantee is order — a catalog is written as the child opens, so the queue
+/// of calls still waiting for one is drained oldest-first.
+///
+/// A background fan-out (`run_in_background: true`) can therefore mis-pair a
+/// *label* across simultaneous delegations. It cannot mis-pair the set, and the
+/// alternative — publishing no card metadata at all — was the status quo.
+fn index_delegations(events: &[Value]) -> HashMap<String, Delegation> {
+    let mut pending: VecDeque<(String, i64, bool)> = VecDeque::new();
+    let mut by_call = HashMap::new();
+    for event in events {
+        let data = event.get("data").unwrap_or(&Value::Null);
+        match event.get("type").and_then(Value::as_str) {
+            Some("tool/call") => {
+                let name = data.get("name").and_then(Value::as_str).unwrap_or("");
+                if !DELEGATING_TOOLS.contains(&name) {
+                    continue;
+                }
+                let Some(call_id) = data.get("callId").and_then(Value::as_str) else {
+                    continue;
+                };
+                let at = event.get("time").and_then(Value::as_i64).unwrap_or(0);
+                pending.push_back((call_id.to_string(), at, name == "subagent_fork"));
+            }
+            Some("subagent/catalog") => {
+                let Some(child_id) = data.get("childId").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some((call_id, called_at_ms, forked)) = pending.pop_front() else {
+                    continue;
+                };
+                let text = |key: &str| {
+                    data.get(key)
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                };
+                by_call.insert(
+                    call_id,
+                    Delegation {
+                        child_id: child_id.to_string(),
+                        mode: text("mode"),
+                        label: text("label"),
+                        called_at_ms,
+                        forked,
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+    by_call
+}
+
+/// The `toolUseResult` sidecar an Agent card reads, for one settled delegation.
+///
+/// dsh's own `tool-result` block carries only text: no status, no duration, no
+/// child id. Without this the card falls back to `asAgentResult` returning
+/// `null`, which blanks the whole chip row and the body — so the parent's
+/// transcript showed a delegation happening and nothing about how it went.
+///
+/// `totalTokens` and `totalToolUseCount` stay absent on purpose: a dsh
+/// subagent's usage lives in *its own* session's projections, which this
+/// event-stream conversion cannot see. An absent chip is honest; a zero would
+/// read as "the subagent spent nothing".
+fn delegation_result(delegation: &Delegation, block: &Value, result_at_ms: i64) -> Value {
+    let is_error = block
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut out = json!({
+        "status": if is_error { "error" } else { "completed" },
+        "agentId": delegation.child_id,
+        "content": tool_result_text(block.get("content")),
+    });
+    // Both delegating tools rename to `Agent`, so the ⎇ chip is the only place
+    // left that can say a child inherited its parent's context.
+    match (&delegation.mode, delegation.forked) {
+        (Some(mode), true) => out["agentType"] = json!(format!("{mode} fork")),
+        (Some(mode), false) => out["agentType"] = json!(mode),
+        (None, true) => out["agentType"] = json!("fork"),
+        (None, false) => {}
+    }
+    if let Some(label) = &delegation.label {
+        out["prompt"] = json!(label);
+    }
+    // dsh publishes a `subagentTiming.settledMs` projection, but only on the
+    // child's own roster item. Between the two events actually in hand, the
+    // wall-clock span is the same measurement.
+    if delegation.called_at_ms > 0 && result_at_ms >= delegation.called_at_ms {
+        out["totalDurationMs"] = json!(result_at_ms - delegation.called_at_ms);
+    }
+    out
+}
 
 /// Convert a session's durable events into Claude-shaped transcript records.
 pub fn normalize(events: &[Value]) -> Vec<Value> {
+    let delegations = index_delegations(events);
     events
         .iter()
         .filter_map(|event| {
-            let mut message = normalize_event(event)?;
+            let mut message = normalize_event(event, &delegations)?;
             // seq is durable and unique within a session, including injections,
             // tool results and notices. Millisecond timestamps are NOT unique.
             // Keep identity independent of pagination and normalized row offsets.
@@ -123,7 +248,11 @@ fn canonical_tool_name(name: &str) -> &str {
         "lsp" => "LSP",
         "web_search" => "WebSearch",
         "web_fetch" => "WebFetch",
-        "subagent" => "Agent",
+        // Both spawn a child session and both take `description` / `prompt`
+        // (measured 2026-09-19), so the argument shapes really are identical —
+        // which is this function's whole admission criterion. Which of the two
+        // was called survives on the card as the `agentType` chip.
+        "subagent" | "subagent_fork" => "Agent",
         "todo_write" => "TodoWrite",
         "ask_user_question" => "AskUserQuestion",
         "exit_plan_mode" => "ExitPlanMode",
@@ -279,7 +408,7 @@ fn notice(event: &Value, text: String) -> Value {
     })
 }
 
-fn normalize_event(event: &Value) -> Option<Value> {
+fn normalize_event(event: &Value, delegations: &HashMap<String, Delegation>) -> Option<Value> {
     let kind = event.get("type").and_then(Value::as_str)?;
     let data = event.get("data").unwrap_or(&Value::Null);
     let timestamp = timestamp_of(event);
@@ -389,11 +518,24 @@ fn normalize_event(event: &Value) -> Option<Value> {
             if results.is_empty() {
                 return None;
             }
-            Some(json!({
+            let mut record = json!({
                 "type": "user",
                 "message": { "role": "user", "content": results },
                 "timestamp": timestamp,
-            }))
+            });
+            // Claude carries a settled subagent's summary beside the record, not
+            // inside the `tool_result` block, and `ToolUseBlock` reads it from
+            // there. One `tool/result` event settles one call in every dsh log
+            // seen so far; if that ever changes, the first delegation in the
+            // batch is the one described rather than none.
+            if let Some((delegation, block)) = blocks.iter().find_map(|b| {
+                let call_id = b.get("toolCallId").and_then(Value::as_str)?;
+                Some((delegations.get(call_id)?, b))
+            }) {
+                let at = event.get("time").and_then(Value::as_i64).unwrap_or(0);
+                record["toolUseResult"] = delegation_result(delegation, block, at);
+            }
+            Some(record)
         }
 
         // The durable audit pair around a human decision. Worth a line: without
@@ -875,6 +1017,151 @@ mod tests {
         let first = out[0]["message"]["content"][0]["text"].as_str().unwrap();
         assert!(first.contains("bash") && first.contains("danger-full-access"), "{first}");
         assert_eq!(out[1]["message"]["content"][0]["text"], "Approval rejected");
+    }
+
+    // ── Delegation ───────────────────────────────────────────────────────────
+    //
+    // The three events dsh writes around one `subagent` call, captured on
+    // 2026-09-19 from a `dsh --profile headless` run that delegated one read.
+
+    fn delegating_call(call_id: &str, seq: i64, at: i64) -> Value {
+        json!({
+            "type": "tool/call",
+            "seq": seq,
+            "time": at,
+            "data": {
+                "turn": 1, "step": 1,
+                "callId": call_id,
+                "name": "subagent",
+                "arguments": "{\"description\": \"Read secret.txt token\", \"prompt\": \"read it\"}"
+            }
+        })
+    }
+
+    fn catalog(child_id: &str, seq: i64, at: i64, label: &str) -> Value {
+        json!({
+            "type": "subagent/catalog",
+            "seq": seq,
+            "time": at,
+            "data": {
+                "version": 0,
+                "childId": child_id,
+                "childCreatedAt": at,
+                "mode": "one-shot",
+                "label": label
+            }
+        })
+    }
+
+    fn settled(call_id: &str, seq: i64, at: i64, is_error: bool) -> Value {
+        json!({
+            "type": "tool/result",
+            "seq": seq,
+            "time": at,
+            "data": { "message": { "role": "user", "content": [{
+                "type": "tool-result",
+                "toolCallId": call_id,
+                "content": [{ "type": "text", "text": "SECRET_TOKEN=ZQ7" }],
+                "isError": is_error
+            }]}}
+        })
+    }
+
+    #[test]
+    fn a_settled_delegation_carries_the_agent_card_sidecar() {
+        let out = normalize(&[
+            delegating_call("call_00", 22, 1_789_794_784_693),
+            catalog("7d2a072f", 23, 1_789_794_784_751, "Read secret.txt token"),
+            settled("call_00", 24, 1_789_794_790_464, false),
+        ]);
+        // Neither the catalog nor the duplicate `tool/call` reaches the
+        // transcript (the `tool_use` block comes off `assistant/message`), so
+        // the settled result is the only record here — and it is the one that
+        // has to carry the card's metadata.
+        assert_eq!(out.len(), 1);
+        let meta = &out[0]["toolUseResult"];
+        assert_eq!(meta["status"], "completed");
+        assert_eq!(meta["agentId"], "7d2a072f");
+        assert_eq!(meta["agentType"], "one-shot");
+        assert_eq!(meta["prompt"], "Read secret.txt token");
+        assert_eq!(meta["totalDurationMs"], 5771);
+        assert_eq!(meta["content"], "SECRET_TOKEN=ZQ7");
+        // Usage lives in the child's own session, so it must not be invented.
+        assert!(meta.get("totalTokens").is_none());
+        assert!(meta.get("totalToolUseCount").is_none());
+    }
+
+    #[test]
+    fn a_failed_delegation_reports_an_error_status() {
+        let out = normalize(&[
+            delegating_call("call_00", 22, 1_000),
+            catalog("child", 23, 1_010, "doomed"),
+            settled("call_00", 24, 1_500, true),
+        ]);
+        assert_eq!(out[0]["toolUseResult"]["status"], "error");
+    }
+
+    /// An ordinary tool's result must not grow an Agent sidecar — the card
+    /// would read a status for a `bash` call that never delegated anything.
+    #[test]
+    fn an_ordinary_tool_result_has_no_agent_sidecar() {
+        let out = normalize(&[settled("call_99", 24, 1_500, false)]);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].get("toolUseResult").is_none());
+    }
+
+    /// The child opens before it finishes, so a scan mid-flight sees the call
+    /// and the catalog but no result. Nothing to describe yet, and nothing that
+    /// should break.
+    #[test]
+    fn a_delegation_still_running_produces_no_sidecar() {
+        let out = normalize(&[
+            delegating_call("call_00", 22, 1_000),
+            catalog("child", 23, 1_010, "in flight"),
+        ]);
+        assert!(out.is_empty());
+    }
+
+    /// A fork carries the same `mode: "one-shot"` as a plain delegation
+    /// (measured), so the chip has to name the tool to stay distinguishable.
+    #[test]
+    fn a_fork_is_labelled_apart_from_a_plain_delegation() {
+        let mut call = delegating_call("call_00", 22, 1_000);
+        call["data"]["name"] = json!("subagent_fork");
+        let out = normalize(&[
+            call,
+            catalog("child", 23, 1_010, "Fork reads fork.txt"),
+            settled("call_00", 24, 1_500, false),
+        ]);
+        assert_eq!(out[0]["toolUseResult"]["agentType"], "one-shot fork");
+    }
+
+    /// Both delegating tools take `description` / `prompt`, so both are safe to
+    /// rename onto Claude's Agent card.
+    #[test]
+    fn both_delegating_tools_render_as_the_agent_card() {
+        for name in ["subagent", "subagent_fork"] {
+            assert_eq!(canonical_tool_name(name), "Agent", "{name}");
+        }
+        // dsh's workflow is not Claude's, and Claude's Workflow card promises a
+        // session-level DAG tab dsh has nothing to fill.
+        assert_eq!(canonical_tool_name("workflow"), "workflow");
+    }
+
+    /// Two delegations in one turn settle against their own calls: the queue
+    /// pairs them in the order dsh opened the children.
+    #[test]
+    fn concurrent_delegations_keep_their_own_children() {
+        let out = normalize(&[
+            delegating_call("call_a", 10, 1_000),
+            delegating_call("call_b", 11, 1_001),
+            catalog("child-a", 12, 1_010, "first"),
+            catalog("child-b", 13, 1_011, "second"),
+            settled("call_b", 14, 2_000, false),
+            settled("call_a", 15, 2_100, false),
+        ]);
+        assert_eq!(out[0]["toolUseResult"]["agentId"], "child-b");
+        assert_eq!(out[1]["toolUseResult"]["agentId"], "child-a");
     }
 
     /// A whole captured turn, in order: the renderer sees prose, a tool card

@@ -693,22 +693,32 @@ export function SessionDetail({
   }, [standaloneJsonlPath, liveActive, paused]);
 
   // Open a subagent's session — a workflow fan-out agent from the DAG, or a
-  // Task subagent from its tool card. The scan registers both as
-  // `agent-<agentId>` (see session.rs). No-op if a scan hasn't surfaced it yet.
+  // Task subagent from its tool card. Claude's scan registers both as
+  // `agent-<agentId>` (the jsonl file's stem, see session.rs); dsh delegates by
+  // spawning a real session, so there the agent id IS the session id. Try the
+  // prefixed form first so a Claude id can never be shadowed by a bare match.
+  // No-op if a scan hasn't surfaced it yet.
+  const findAgentSession = useCallback(
+    (agentId: string) =>
+      sessions.find((s) => s.id === `agent-${agentId}`) ??
+      sessions.find((s) => s.id === agentId && s.isSubagent),
+    [sessions],
+  );
+
   const openAgentSession = useCallback(
     (agentId: string) => {
-      const target = sessions.find((s) => s.id === `agent-${agentId}`);
+      const target = findAgentSession(agentId);
       if (target) open(target);
     },
-    [sessions, open],
+    [findAgentSession, open],
   );
 
   const agentNav = useMemo(
     () => ({
       open: openAgentSession,
-      has: (agentId: string) => sessions.some((s) => s.id === `agent-${agentId}`),
+      has: (agentId: string) => findAgentSession(agentId) !== undefined,
     }),
-    [openAgentSession, sessions],
+    [openAgentSession, findAgentSession],
   );
 
   useEffect(() => {

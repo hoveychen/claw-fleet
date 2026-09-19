@@ -610,38 +610,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
 
     strip_ide_name_from_fleet_spawns(&mut sessions);
 
-    // Promote main sessions to Delegating if they have at least one actively-working subagent.
-    // A subagent that is WaitingInput has finished its turn and should not cause the parent
-    // to show as Delegating — otherwise the parent's own WaitingInput status gets hidden.
-    let active_parent_ids: std::collections::HashSet<String> = sessions
-        .iter()
-        .filter(|s| {
-            s.is_subagent
-                && matches!(
-                    s.status,
-                    SessionStatus::Thinking
-                        | SessionStatus::Executing
-                        | SessionStatus::Streaming
-                        | SessionStatus::Delegating
-                        | SessionStatus::Processing
-                )
-        })
-        .filter_map(|s| s.parent_session_id.clone())
-        .collect();
-
-    for session in &mut sessions {
-        if !session.is_subagent
-            && session.parent_session_id.is_none()
-            && active_parent_ids.contains(&session.id)
-            && matches!(
-                session.status,
-                SessionStatus::Active | SessionStatus::Idle | SessionStatus::Processing
-            )
-        {
-            session.status = SessionStatus::Delegating;
-        }
-    }
-
+    promote_delegating_parents(&mut sessions);
     aggregate_subagent_rollup(&mut sessions);
 
     // Prune stale entries from session cache.
@@ -752,20 +721,77 @@ pub fn scan_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionIn
     sessions
 }
 
+/// Is this subagent working right now?
+///
+/// `WaitingInput` is the pointed exclusion: a parked subagent has finished its
+/// turn, and counting it would both inflate the badge and hide a parent's own
+/// `WaitingInput` behind a `Delegating`.
+///
+/// `Active` is in the set because it is what a source reports when it knows the
+/// session is running but not which phase it is in — dsh's roster has exactly
+/// one liveness bit, so every live dsh subagent lands here. Leaving it out is
+/// what kept dsh parents at `running_subagent_count: 0` with a demonstrably
+/// live child (measured 2026-09-19).
+///
+/// Shared by the two readings that must not drift apart: the badge's count and
+/// the `Delegating` promotion. They were separate literals until one of them
+/// had to learn about `Active`.
+fn subagent_is_in_flight(status: &SessionStatus) -> bool {
+    matches!(
+        status,
+        SessionStatus::Active
+            | SessionStatus::Thinking
+            | SessionStatus::Executing
+            | SessionStatus::Streaming
+            | SessionStatus::Delegating
+            | SessionStatus::Processing
+    )
+}
+
+/// Show a main session as `Delegating` while at least one of its subagents is
+/// working.
+///
+/// Idempotent: a parent already promoted is `Delegating`, which is not one of
+/// the statuses this overwrites, so a second pass leaves it alone.
+pub(crate) fn promote_delegating_parents(sessions: &mut [SessionInfo]) {
+    let active_parent_ids: HashSet<String> = sessions
+        .iter()
+        .filter(|s| s.is_subagent && subagent_is_in_flight(&s.status))
+        .filter_map(|s| s.parent_session_id.clone())
+        .collect();
+
+    for session in sessions.iter_mut() {
+        if !session.is_subagent
+            && session.parent_session_id.is_none()
+            && active_parent_ids.contains(&session.id)
+            && matches!(
+                session.status,
+                SessionStatus::Active | SessionStatus::Idle | SessionStatus::Processing
+            )
+        {
+            session.status = SessionStatus::Delegating;
+        }
+    }
+}
+
 /// Roll every subagent's contribution up onto its parent main session, keyed by
 /// `parent_session_id`. Four aggregates land here in one pass over the list:
+/// `agent_total_cost_usd`, `agent_token_speed`, `agent_last_activity_ms` and
+/// `running_subagent_count`.
 ///
-/// - `agent_total_cost_usd` / `agent_token_speed` — *accumulators*: a main
-///   session already holds its own value from parse (cached pre-aggregation so
-///   no double-count on a cache hit) and gains the sum of every subagent's.
-/// - `agent_last_activity_ms` / `running_subagent_count` — *overwrites*: the
-///   freshest activity across the parent and any subagent, and the count of
-///   subagents working right now. Recomputed from scratch each scan, so they are
-///   immune to the cached seed being stale.
+/// **All four are recomputed from the parent's own value, never accumulated
+/// onto whatever the field already held.** The `agent_*` pair used to be `+=`,
+/// which made the function safe to call exactly once per list. That was true
+/// while only [`scan_claude_sessions`] called it; it stopped being a property
+/// worth relying on the moment the merged [`scan_all_sources`] needed a second
+/// pass to reach the sources that scan themselves. Assigning makes a second
+/// call a no-op instead of a double-count, and costs nothing: every source
+/// seeds `agent_total_cost_usd`/`agent_token_speed` from the session's own
+/// `total_cost_usd`/`token_speed`, which is exactly what this recomputes from.
 ///
 /// Every subagent counts — including the hidden workflow fan-out agents — so the
 /// per-card rollup reconciles with the global aggregate.
-fn aggregate_subagent_rollup(sessions: &mut [SessionInfo]) {
+pub(crate) fn aggregate_subagent_rollup(sessions: &mut [SessionInfo]) {
     let mut cost_by_parent: HashMap<String, f64> = HashMap::new();
     let mut speed_by_parent: HashMap<String, f64> = HashMap::new();
     let mut activity_by_parent: HashMap<String, u64> = HashMap::new();
@@ -777,16 +803,7 @@ fn aggregate_subagent_rollup(sessions: &mut [SessionInfo]) {
                 *speed_by_parent.entry(pid.clone()).or_insert(0.0) += s.token_speed;
                 let act = activity_by_parent.entry(pid.clone()).or_insert(0);
                 *act = (*act).max(s.last_activity_ms);
-                // Same in-flight set as `active_parent_ids` (WaitingInput
-                // excluded — a parked subagent has finished its turn).
-                if matches!(
-                    s.status,
-                    SessionStatus::Thinking
-                        | SessionStatus::Executing
-                        | SessionStatus::Streaming
-                        | SessionStatus::Delegating
-                        | SessionStatus::Processing
-                ) {
+                if subagent_is_in_flight(&s.status) {
                     *running_by_parent.entry(pid.clone()).or_insert(0) += 1;
                 }
             }
@@ -796,12 +813,10 @@ fn aggregate_subagent_rollup(sessions: &mut [SessionInfo]) {
         if session.is_subagent {
             continue;
         }
-        if let Some(extra) = cost_by_parent.get(&session.id) {
-            session.agent_total_cost_usd += *extra;
-        }
-        if let Some(extra) = speed_by_parent.get(&session.id) {
-            session.agent_token_speed += *extra;
-        }
+        session.agent_total_cost_usd =
+            session.total_cost_usd + cost_by_parent.get(&session.id).copied().unwrap_or(0.0);
+        session.agent_token_speed =
+            session.token_speed + speed_by_parent.get(&session.id).copied().unwrap_or(0.0);
         let sub_activity = activity_by_parent.get(&session.id).copied().unwrap_or(0);
         session.agent_last_activity_ms = session.last_activity_ms.max(sub_activity);
         session.running_subagent_count =
@@ -900,6 +915,13 @@ pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -
             sessions.extend(source.scan_sessions());
         }
     }
+    // Every source that discovers subagents of its own has to be in the list
+    // before the tree aggregates can be right, so both passes run here rather
+    // than inside any one source. The Claude scan has already run them over its
+    // own slice by now; both are idempotent precisely so this second pass costs
+    // it nothing.
+    promote_delegating_parents(&mut sessions);
+    aggregate_subagent_rollup(&mut sessions);
     enrich_all(&mut sessions);
     sort_sessions(&mut sessions);
     sessions
@@ -975,5 +997,98 @@ mod rollup_tests {
         let mut sessions = vec![sub_row];
         aggregate_subagent_rollup(&mut sessions);
         assert_eq!(sessions[0].running_subagent_count, 0);
+    }
+
+    /// The merged scan rolls up after every source has contributed, and the
+    /// Claude scan has already rolled up its own slice by then — so the second
+    /// pass has to land on the same numbers as the first. Back when the
+    /// `agent_*` pair accumulated, it doubled a parent's tree cost and speed.
+    #[test]
+    fn rolling_up_twice_lands_on_the_same_numbers() {
+        let mut main = test_session("main");
+        main.last_activity_ms = 1_000;
+        main.total_cost_usd = 0.10;
+        main.agent_total_cost_usd = 0.10;
+        main.token_speed = 5.0;
+        main.agent_token_speed = 5.0;
+        let mut sessions = vec![
+            main,
+            sub("a", "main", SessionStatus::Executing, 9_000, 0.03, 2.0),
+            sub("b", "main", SessionStatus::Thinking, 3_000, 0.03, 1.0),
+        ];
+
+        aggregate_subagent_rollup(&mut sessions);
+        let once = sessions[0].clone();
+        aggregate_subagent_rollup(&mut sessions);
+        let twice = &sessions[0];
+
+        assert!((once.agent_total_cost_usd - 0.16).abs() < 1e-9, "{once:?}");
+        assert!((once.agent_token_speed - 8.0).abs() < 1e-9, "{once:?}");
+        assert!((twice.agent_total_cost_usd - once.agent_total_cost_usd).abs() < 1e-9);
+        assert!((twice.agent_token_speed - once.agent_token_speed).abs() < 1e-9);
+        assert_eq!(twice.running_subagent_count, once.running_subagent_count);
+        assert_eq!(twice.agent_last_activity_ms, once.agent_last_activity_ms);
+    }
+
+    /// A source with only a liveness bit reports its live subagents as
+    /// `Active`. dsh's roster is exactly that, so excluding `Active` left every
+    /// dsh parent at zero with a demonstrably running child.
+    #[test]
+    fn an_active_subagent_counts_and_promotes_its_parent() {
+        let mut main = test_session("main");
+        main.status = SessionStatus::Idle;
+        let mut sessions = vec![main, sub("a", "main", SessionStatus::Active, 9_000, 0.0, 3.0)];
+
+        promote_delegating_parents(&mut sessions);
+        aggregate_subagent_rollup(&mut sessions);
+
+        assert_eq!(sessions[0].running_subagent_count, 1);
+        assert!(matches!(sessions[0].status, SessionStatus::Delegating));
+    }
+
+    /// A parked subagent stays excluded — that exclusion is the reason the set
+    /// is hand-written rather than "anything but Idle".
+    #[test]
+    fn a_parked_subagent_neither_counts_nor_promotes() {
+        let mut main = test_session("main");
+        main.status = SessionStatus::WaitingInput;
+        let mut sessions = vec![
+            main,
+            sub("a", "main", SessionStatus::WaitingInput, 9_000, 0.0, 0.0),
+        ];
+
+        promote_delegating_parents(&mut sessions);
+        aggregate_subagent_rollup(&mut sessions);
+
+        assert_eq!(sessions[0].running_subagent_count, 0);
+        assert!(matches!(sessions[0].status, SessionStatus::WaitingInput));
+    }
+
+    /// The merged scan promotes after the Claude scan already did, so a second
+    /// pass must not disturb a parent it already moved.
+    #[test]
+    fn promoting_twice_leaves_the_parent_delegating() {
+        let mut main = test_session("main");
+        main.status = SessionStatus::Idle;
+        let mut sessions = vec![main, sub("a", "main", SessionStatus::Executing, 9_000, 0.0, 1.0)];
+        promote_delegating_parents(&mut sessions);
+        promote_delegating_parents(&mut sessions);
+        assert!(matches!(sessions[0].status, SessionStatus::Delegating));
+    }
+
+    /// A source that never seeded `agent_total_cost_usd` (dsh leaves it at its
+    /// `Default`) still gets a truthful tree cost, because the rollup recomputes
+    /// from `total_cost_usd` rather than adding onto whatever was there.
+    #[test]
+    fn an_unseeded_parent_still_gets_its_own_cost_back() {
+        let mut main = test_session("main");
+        main.total_cost_usd = 0.42;
+        main.agent_total_cost_usd = 0.0;
+        main.token_speed = 7.0;
+        main.agent_token_speed = 0.0;
+        let mut sessions = vec![main];
+        aggregate_subagent_rollup(&mut sessions);
+        assert!((sessions[0].agent_total_cost_usd - 0.42).abs() < 1e-9);
+        assert!((sessions[0].agent_token_speed - 7.0).abs() < 1e-9);
     }
 }

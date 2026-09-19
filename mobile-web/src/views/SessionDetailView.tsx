@@ -471,9 +471,11 @@ const SEARCH_TOOLS = new Set([
   "session_search", "session_trace",
   "session_event_read", "session_event_search", "session_event_trace",
 ]);
+// Mirrors the desktop Rail's set: core renames dsh's `subagent` /
+// `subagent_fork` to `Agent` upstream, while `workflow` keeps its own name.
 const AGENT_TOOLS = new Set([
   "Agent", "spawn_agent", "wait_agent",
-  "subagent", "list_agents", "send_message", "interrupt_agent", "report",
+  "workflow", "list_agents", "send_message", "interrupt_agent", "report",
 ]);
 const PLAN_TOOLS = new Set([
   "TodoWrite", "TodoRead", "update_plan",

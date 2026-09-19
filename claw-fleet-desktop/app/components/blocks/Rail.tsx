@@ -58,9 +58,14 @@ const SEARCH_TOOLS = new Set([
   "session_search", "session_trace",
   "session_event_read", "session_event_search", "session_event_trace",
 ]);
+// dsh's `subagent` / `subagent_fork` are absent on purpose: core renames both
+// to `Agent` before a block reaches here, so listing them would be dead weight.
+// `workflow` keeps its own name (dsh's workflow is not Claude's, and renaming
+// it would promise a session-level DAG tab that has nothing behind it), so it
+// needs its entry here to get the agent glyph.
 const AGENT_TOOLS = new Set([
   "Agent", "spawn_agent", "wait_agent",
-  "subagent", "list_agents", "send_message", "interrupt_agent", "report",
+  "workflow", "list_agents", "send_message", "interrupt_agent", "report",
 ]);
 const PLAN_TOOLS = new Set([
   "TodoWrite", "TodoRead", "update_plan", "EnterPlanMode", "ExitPlanMode",
