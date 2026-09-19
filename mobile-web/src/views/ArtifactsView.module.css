@@ -127,6 +127,36 @@
   border-radius: 8px;
 }
 
+/* 视频与音频：整份缓存完再交给原生控件，所以这里只管排版，不做自定义播放器。
+   音频元素没有内在高度，给个满宽就够；视频则跟图片一样按 stage 等比收进去。 */
+.mediaPlayer {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  background: #000;
+}
+
+audio.mediaPlayer {
+  width: 100%;
+  background: none;
+}
+
+/* 缓存进度：播放前那段等待是真实的，用一条横杠把它说清楚。 */
+.bufferBar {
+  width: min(240px, 70%);
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-border, rgba(128, 128, 128, 0.35));
+}
+
+.bufferFill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent, currentColor);
+  transition: width 120ms linear;
+}
+
 /* PDF 和 html 预览共用同一个框：都是把一份完整文档塞进 iframe。 */
 .docFrame {
   width: 100%;

@@ -193,12 +193,15 @@ export function ZipBrowser({
         // Each kind produces only its own representation: markdown/html/text read
         // from the decoded string, image/pdf need blob URL, Office suite need Blob
         // itself. Preparing both wastes memory on mobile.
-        if (kind === "image" || kind === "pdf") {
+        // A media member needs no buffering step: unzipping already put the
+        // whole clip in memory, so it goes straight to a blob URL like an image.
+        if (kind === "image" || kind === "pdf" || kind === "media") {
           url = URL.createObjectURL(new Blob([out as BlobPart], { type: mime }));
         }
         setMemberSource({
           kind,
           title: open.name,
+          mime,
           blobUrl: url,
           blob:
             kind === "docx" || kind === "xlsx" || kind === "pptx"

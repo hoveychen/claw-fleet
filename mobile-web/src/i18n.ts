@@ -858,6 +858,9 @@ const DICT: Record<string, string> = {
   "分享 / 保存": "Share / Save",
   "准备中…": "Preparing…",
   "下载中 {0}%": "Downloading {0}%",
+  "缓存中 {0}%": "Buffering {0}%",
+  "缓存并播放": "Buffer and play",
+  "要先把整份缓存到手机才能播，{0}。": "Playing it means buffering the whole {0} onto the phone first.",
   "点一下取消": "Tap to cancel",
   // "Cancelled" is already defined above — reuse it.
   // "Load failed" already defined elsewhere — reuse it.

@@ -26,7 +26,9 @@ const OfficePreview = lazy(() => import("./OfficePreview"));
 export interface PreviewSource {
   kind: PreviewKind;
   title: string;
-  /** Used by image / pdf. */
+  /** Mime of the bytes — `media` needs it to tell a clip from a track. */
+  mime?: string;
+  /** Used by image / pdf / media. */
   blobUrl: string | null;
   /** Used by Office (three libraries all read XML from zip, need the Blob itself). */
   blob: Blob | null;
@@ -43,8 +45,18 @@ export function PreviewBody({
   src: PreviewSource;
   fallback?: React.ReactNode;
 }) {
-  const { kind, title, blobUrl, blob, text } = src;
+  const { kind, title, mime, blobUrl, blob, text } = src;
   if (kind === "image" && blobUrl) return <img src={blobUrl} alt={title} />;
+  if (kind === "media" && blobUrl) {
+    // The blob is the whole clip, already on the device, so the element gets
+    // real duration and seeking — the thing a half-buffered stream would not
+    // have. `controls` is the entire UI; we add nothing on top of it.
+    return mime?.startsWith("audio/") ? (
+      <audio className={styles.mediaPlayer} src={blobUrl} controls />
+    ) : (
+      <video className={styles.mediaPlayer} src={blobUrl} controls playsInline />
+    );
+  }
   if (kind === "pdf" && blobUrl) {
     return <iframe className={styles.docFrame} src={blobUrl} title={title} />;
   }
