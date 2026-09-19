@@ -939,6 +939,66 @@ mod tests {
         assert!(!has_pending_noninteractive_tool_batch(&earlier_stuck_later_ok));
     }
 
+    /// One API response carrying several `tool_use` blocks is flushed to the
+    /// transcript one block per line, so a parallel batch arrives as several
+    /// `assistant` records that all share the same `message.id`. Anchoring on
+    /// the last such record alone sees only its own block: when the tool issued
+    /// last is the one that returns, the batch reads as fully resolved while an
+    /// earlier block hangs forever.
+    ///
+    /// Real incident 2026-09-19 (session 7a72050c): two `Agent` blocks of one
+    /// response landed as records 37 and 38 under `msg_011CfDH8Su…`; record 38's
+    /// result came back, record 37's never did, and the session sat wedged for
+    /// 23 minutes without ever being marked Stuck.
+    fn assistant_msg_msgid(blocks: Vec<Value>, msg_id: &str) -> Value {
+        json!({
+            "type": "assistant",
+            "message": {
+                "id": msg_id,
+                "role": "assistant",
+                "content": blocks,
+                "stop_reason": "tool_use",
+                "model": "claude-sonnet-4-20250514",
+                "usage": { "output_tokens": 100 }
+            }
+        })
+    }
+
+    #[test]
+    fn stuck_batch_split_across_records_of_one_response_is_true() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg_msgid(vec![tool_use_block_id("Agent", "agent_hung")], "msg_1"),
+            assistant_msg_msgid(vec![tool_use_block_id("Agent", "agent_ok")], "msg_1"),
+            tool_result_msg("agent_ok"),
+        ];
+        assert!(has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_split_across_records_all_resolved_is_false() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg_msgid(vec![tool_use_block_id("Agent", "agent_a")], "msg_1"),
+            assistant_msg_msgid(vec![tool_use_block_id("Agent", "agent_b")], "msg_1"),
+            tool_result_msg("agent_b"),
+            tool_result_msg("agent_a"),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_distinct_message_ids_stay_independent() {
+        // Guards the widening above from swallowing the supersede rule: records
+        // from different responses are different batches even when adjacent.
+        let lines = vec![
+            assistant_msg_msgid(vec![tool_use_block_id("WebFetch", "old_hung")], "msg_1"),
+            assistant_msg_msgid(vec![tool_use_block_id("Bash", "new1")], "msg_2"),
+            tool_result_msg("new1"),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
     #[test]
     fn status_streaming_thinking_blocks() {
         let lines = vec![
