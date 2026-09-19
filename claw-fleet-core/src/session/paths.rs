@@ -804,6 +804,101 @@ pub(crate) fn workspace_name(path: &str) -> String {
         .to_string()
 }
 
+/// Collapse an in-repo worktree checkout to its repo root *path*.
+///
+/// [`workspace_name`] already folds `<repo-root>/.worktrees/<task-id>` to the
+/// repo for display; this returns the path prefix instead of the leaf name, so
+/// two checkouts of one repo compare equal. Grouping by name alone would merge
+/// unrelated repos that happen to share a basename.
+///
+/// Mirrors `shared-ts/repoPath.ts`'s `repoRootPath`, which the desktop
+/// launchpad and the mobile task page group by — a divergence here would fold
+/// sessions into different buckets on the backend than the UI shows. Paths
+/// without a `.worktrees` segment (including `~/.fleet/worktrees/`, whose
+/// segment is `worktrees` with no dot) are returned unchanged.
+pub fn repo_root_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let segments: Vec<&str> = normalized.split('/').collect();
+    let Some(idx) = segments.iter().position(|s| *s == ".worktrees") else {
+        return path.to_string();
+    };
+    // `idx == 0` means the path *starts* with `.worktrees`, so there is no repo
+    // root above it to collapse to.
+    if idx == 0 {
+        return path.to_string();
+    }
+    let before = segments[..idx].join("/");
+    if before.is_empty() {
+        path.to_string()
+    } else {
+        before
+    }
+}
+
+/// Do `a` and `b` belong to the same repository, counting a plan's worktree as
+/// part of the repo it was branched from? Folds through [`repo_root_path`]
+/// first, then defers to [`same_workspace_path`] for separator/case handling.
+pub fn same_repo_root(a: &str, b: &str) -> bool {
+    same_workspace_path(&repo_root_path(a), &repo_root_path(b))
+}
+
+#[cfg(test)]
+mod repo_root_path_tests {
+    use super::{repo_root_path, same_repo_root};
+
+    #[test]
+    fn collapses_a_worktree_to_its_repo() {
+        assert_eq!(
+            repo_root_path("/Users/x/workspace/proj/.worktrees/my-task"),
+            "/Users/x/workspace/proj"
+        );
+    }
+
+    #[test]
+    fn leaves_a_plain_checkout_alone() {
+        assert_eq!(
+            repo_root_path("/Users/x/workspace/proj"),
+            "/Users/x/workspace/proj"
+        );
+    }
+
+    #[test]
+    fn ignores_the_dotless_fleet_worktrees_dir() {
+        // `~/.fleet/worktrees/<id>` holds task workers, not plan checkouts.
+        assert_eq!(
+            repo_root_path("/Users/x/.fleet/worktrees/abc"),
+            "/Users/x/.fleet/worktrees/abc"
+        );
+    }
+
+    #[test]
+    fn a_leading_worktrees_segment_has_no_root_above_it() {
+        assert_eq!(repo_root_path(".worktrees/task"), ".worktrees/task");
+    }
+
+    #[test]
+    fn collapses_windows_separators() {
+        assert_eq!(
+            repo_root_path("C:\\code\\proj\\.worktrees\\task"),
+            "C:/code/proj"
+        );
+    }
+
+    #[test]
+    fn two_worktrees_of_one_repo_are_the_same_root() {
+        assert!(same_repo_root(
+            "/Users/x/proj/.worktrees/a",
+            "/Users/x/proj/.worktrees/b"
+        ));
+        assert!(same_repo_root("/Users/x/proj/.worktrees/a", "/Users/x/proj"));
+    }
+
+    #[test]
+    fn unrelated_repos_sharing_a_basename_stay_apart() {
+        assert!(!same_repo_root("/Users/x/a/proj", "/Users/x/b/proj"));
+    }
+}
+
 #[cfg(test)]
 mod workspace_name_win_tests {
     use super::workspace_name;
