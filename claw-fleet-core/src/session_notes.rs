@@ -442,6 +442,11 @@ pub fn search_in(
 /// notes themselves.
 pub const MAX_HINT_BYTES: usize = 4_000;
 
+/// How many note files the roster names before collapsing the rest into a
+/// count. A long handoff chain makes every predecessor's notes readable, and an
+/// unbounded roster would eat the byte budget the *contents* need.
+pub const MAX_HINT_ROSTER_ROWS: usize = 8;
+
 /// The text the `SessionStart(compact|resume|startup)` hook injects: a roster of
 /// the note files visible to `session_id` plus the most recently updated one,
 /// clipped to [`MAX_HINT_BYTES`]. `None` when there are no notes, so sessions
@@ -463,9 +468,12 @@ pub fn render_hint_in(root: &Path, session_id: &str, readable: &[String]) -> Opt
          do not narrate to the user.\n",
     );
     out.push_str(&format!("Files ({}):\n", files.len()));
-    for f in &files {
+    for f in files.iter().take(MAX_HINT_ROSTER_ROWS) {
         let owner = if f.session_id == session_id { "own" } else { "predecessor" };
         out.push_str(&format!("  {}  {} bytes  [{owner}]\n", f.path, f.bytes));
+    }
+    if let Some(hidden) = files.len().checked_sub(MAX_HINT_ROSTER_ROWS).filter(|n| *n > 0) {
+        out.push_str(&format!("  … and {hidden} more (fleet__notes list)\n"));
     }
     // Most recent write overall — a checkpoint written right before the
     // compaction is exactly what the next window needs first.
@@ -485,16 +493,25 @@ pub fn render_hint_in(root: &Path, session_id: &str, readable: &[String]) -> Opt
     Some(out)
 }
 
-/// Clip to `budget` bytes on a char boundary, marking the elision.
+/// Clip to `budget` bytes on a char boundary, keeping the **tail** and marking
+/// the elision at the top.
+///
+/// Keeping the tail rather than the head is the whole point: the guidance tells
+/// agents to `append` a line per finished task, so the newest state — the one a
+/// fresh context window needs — lives at the end of the file. Clipping the head
+/// off a 38 KB checkpoint used to hand the next window the oldest entries and
+/// drop everything since.
 fn clip_bytes(text: &str, budget: usize) -> String {
     if text.len() <= budget {
         return text.to_string();
     }
-    let mut end = budget.saturating_sub(24).min(text.len());
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
+    const MARKER: &str = "… [clipped; earlier entries are in the file]\n";
+    let keep = budget.saturating_sub(MARKER.len());
+    let mut start = text.len() - keep.min(text.len());
+    while start < text.len() && !text.is_char_boundary(start) {
+        start += 1;
     }
-    format!("{}\n… [clipped; read the file for the rest]", &text[..end])
+    format!("{MARKER}{}", &text[start..])
 }
 
 #[cfg(test)]
@@ -521,6 +538,43 @@ mod tests {
         assert!(hint.contains("old.md  9 bytes  [own]"));
         assert!(hint.contains("--- checkpoint.md (latest) ---"), "{hint}");
         assert!(hint.contains("[clipped;"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hint_keeps_the_tail_of_an_appended_checkpoint() {
+        let root = fresh_root("hint-tail");
+        let own = vec!["s1".to_string()];
+        // Shaped like a real checkpoint: appended to over a session's life, so
+        // the newest state is the last line.
+        let body = format!("FIRST_ENTRY\n{}LAST_ENTRY\n", "决策记录\n".repeat(4_000));
+        write_in(&root, "s1", "checkpoint.md", &body).unwrap();
+
+        let hint = render_hint_in(&root, "s1", &own).unwrap();
+        assert!(hint.len() <= MAX_HINT_BYTES, "hint is {} bytes", hint.len());
+        assert!(hint.contains("LAST_ENTRY"), "newest entry was clipped away: {hint}");
+        assert!(!hint.contains("FIRST_ENTRY"), "oldest entry survived instead of the newest");
+        assert!(hint.contains("… [clipped; earlier entries are in the file]"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn hint_roster_collapses_past_the_row_cap() {
+        let root = fresh_root("hint-roster");
+        // A long handoff chain: one predecessor note each, all readable.
+        let readable: Vec<String> = (0..20).map(|i| format!("s{i}")).collect();
+        for s in &readable {
+            write_in(&root, s, "checkpoint.md", &format!("note from {s}")).unwrap();
+        }
+
+        let hint = render_hint_in(&root, "s0", &readable).unwrap();
+        assert!(hint.contains("Files (20):"));
+        assert_eq!(
+            hint.matches("bytes  [").count(),
+            MAX_HINT_ROSTER_ROWS,
+            "roster should stop at the cap: {hint}"
+        );
+        assert!(hint.contains("… and 12 more (fleet__notes list)"), "{hint}");
         let _ = fs::remove_dir_all(&root);
     }
 
