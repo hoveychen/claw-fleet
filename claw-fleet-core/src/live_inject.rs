@@ -30,6 +30,22 @@
 //! can exit between the lookup and the write (its turn ends whenever it ends),
 //! so every failure mode is reported to the caller, which re-queues the message
 //! via [`crate::pending_message`] rather than dropping it.
+//!
+//! **The child token, and why it is not optional.** A receiver running under
+//! `bypassPermissions` holds an unauthenticated inbound message for approval
+//! instead of delivering it — and a headless `claude -p` has no UI to approve
+//! it and keeps the hold in memory, so the message is simply gone when the turn
+//! ends. Measured 2026-09-19 against a `--permission-mode bypassPermissions`
+//! probe: an anonymous write produced no `queue-operation` entry at all, not
+//! even an enqueue.
+//!
+//! Presenting the receiver's own `childToken` makes it treat the write as
+//! self-sent and skip that gate. The token reaches Fleet because hooks are
+//! spawned *by* the session and inherit `CLAUDE_CODE_MESSAGING_TOKEN`; the
+//! `SessionStart` hook records it via [`record_session_token`]. It does **not**
+//! change how the message is presented — that is hardcoded to peer framing (see
+//! the wiki doc `cc/mid-turn-messaging`) — it only decides whether the message
+//! arrives at all.
 
 use std::path::{Path, PathBuf};
 
@@ -45,6 +61,19 @@ struct SessionRegistration {
     pid: u32,
     session_id: String,
     messaging_socket_path: Option<String>,
+}
+
+/// A session's own messaging credentials, as seen from inside one of its hooks.
+///
+/// `socket_path` is recorded alongside the token because both are per-process:
+/// every Fleet turn is a new `claude -p` with a new pid, a new socket and a new
+/// token. Matching the stored path against the live registration is what keeps
+/// a previous turn's stale token from being presented to the current one.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct SessionToken {
+    socket_path: String,
+    token: String,
 }
 
 /// A running session we can write to right now.
@@ -71,12 +100,131 @@ struct FrameMessage<'a> {
     content: &'a str,
 }
 
+/// The optional first line, presenting the receiver's own child token.
+#[derive(Serialize)]
+struct AuthFrame<'a> {
+    #[serde(rename = "type")]
+    kind: &'a str,
+    token: &'a str,
+}
+
 /// The receiver closes the connection on any line over 1 MiB, so a message that
 /// long has to go through the queue instead.
 const MAX_FRAME_BYTES: usize = 1_048_576;
 
 fn sessions_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".claude").join("sessions"))
+}
+
+fn token_dir() -> Option<PathBuf> {
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("messaging-tokens"))
+}
+
+/// Path of a session's recorded token, or `None` for an id that could escape the
+/// store directory. Mirrors `pending_message::queue_path`'s sanitisation.
+fn token_path(session_id: &str) -> Option<PathBuf> {
+    if session_id.is_empty()
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || session_id.contains("..")
+    {
+        return None;
+    }
+    token_dir().map(|d| d.join(format!("{session_id}.json")))
+}
+
+/// Record the calling session's own messaging credentials for Fleet to present
+/// later. Call from a hook — a process the session itself spawned, and therefore
+/// the only kind that can read `CLAUDE_CODE_MESSAGING_TOKEN`.
+///
+/// A no-op when either environment variable is absent (an older CLI, or a
+/// process that is not a session's child), so callers need no platform guard.
+/// The file is written `0600`: it holds a credential that lets any reader write
+/// into this session's turn.
+pub fn record_session_token(session_id: &str) {
+    let (Ok(socket_path), Ok(token)) = (
+        std::env::var("CLAUDE_CODE_MESSAGING_SOCKET"),
+        std::env::var("CLAUDE_CODE_MESSAGING_TOKEN"),
+    ) else {
+        return;
+    };
+    if socket_path.is_empty() || token.is_empty() {
+        return;
+    }
+    let Some(path) = token_path(session_id) else {
+        return;
+    };
+    let record = SessionToken { socket_path, token };
+    let Ok(body) = serde_json::to_string(&record) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    if std::fs::write(&path, body).is_err() {
+        return;
+    }
+    restrict_to_owner(&path);
+    prune_stale_tokens();
+}
+
+/// Drop recorded tokens whose socket no longer exists. Without this the store
+/// grows one credential file per session forever — every session that ever ran
+/// a turn writes one, and nothing else would ever remove them.
+///
+/// A vanished socket means that process is gone, so the token authenticates
+/// nothing. Cheap enough to run on every record: the store holds at most one
+/// small file per session.
+fn prune_stale_tokens() {
+    let Some(dir) = token_dir() else { return };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(body) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        match serde_json::from_str::<SessionToken>(&body) {
+            Ok(rec) if Path::new(&rec.socket_path).exists() => {}
+            // Gone, or unparseable (a partial write, or an older format).
+            _ => {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path) {}
+
+/// The token to present when writing to `socket_path`, if one was recorded for
+/// this session *and* belongs to the process now listening there.
+///
+/// The path comparison is the freshness check: a token recorded by an earlier
+/// turn names that turn's socket, which no longer matches, so it is discarded
+/// rather than presented to a process it does not authenticate against.
+fn token_for(session_id: &str, socket_path: &Path) -> Option<String> {
+    let path = token_path(session_id)?;
+    let body = std::fs::read_to_string(path).ok()?;
+    let record: SessionToken = serde_json::from_str(&body).ok()?;
+    (Path::new(&record.socket_path) == socket_path).then_some(record.token)
+}
+
+/// Drop a session's recorded token. Called when its turn is known to be over,
+/// so the store does not accumulate one credential file per session forever.
+pub fn forget_session_token(session_id: &str) {
+    if let Some(path) = token_path(session_id) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Whether a directory entry is a registration file (`<pid>.json`) rather than
@@ -173,6 +321,17 @@ fn encode_frame(text: &str) -> Result<Vec<u8>, String> {
     Ok(line)
 }
 
+/// Serialise the auth line presenting `token`.
+fn encode_auth(token: &str) -> Result<Vec<u8>, String> {
+    let frame = AuthFrame {
+        kind: "auth",
+        token,
+    };
+    let mut line = serde_json::to_vec(&frame).map_err(|e| format!("serialize auth: {e}"))?;
+    line.push(b'\n');
+    Ok(line)
+}
+
 /// Deliver `text` into the running turn of `session_id`.
 ///
 /// `Ok(())` means the line reached the socket; the receiver absorbs it at its
@@ -192,6 +351,15 @@ pub fn inject(session_id: &str, text: &str) -> Result<(), String> {
 
     let mut stream = UnixStream::connect(&target.socket_path)
         .map_err(|e| format!("connect {}: {e}", target.socket_path.display()))?;
+    // Authenticate first when we hold this turn's own token: without it a
+    // receiver under bypassPermissions holds the message for an approval that
+    // will never come. Harmless when the receiver does not require auth.
+    if let Some(token) = token_for(session_id, &target.socket_path) {
+        let auth = encode_auth(&token)?;
+        stream
+            .write_all(&auth)
+            .map_err(|e| format!("write auth: {e}"))?;
+    }
     stream
         .write_all(&line)
         .map_err(|e| format!("write frame: {e}"))?;
@@ -306,6 +474,52 @@ mod tests {
         let huge = "x".repeat(MAX_FRAME_BYTES + 1);
         let err = encode_frame(&huge).expect_err("over the limit");
         assert!(err.contains("frame limit"), "got: {err}");
+    }
+
+    #[test]
+    fn auth_line_is_its_own_json_line() {
+        let line = encode_auth("deadbeef").expect("encode");
+        assert!(line.ends_with(b"\n"));
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&line[..line.len() - 1]).expect("valid json");
+        assert_eq!(parsed["type"], "auth");
+        assert_eq!(parsed["token"], "deadbeef");
+    }
+
+    #[test]
+    fn token_path_rejects_traversal() {
+        assert!(token_path("../../etc/passwd").is_none());
+        assert!(token_path("a/b").is_none());
+        assert!(token_path("").is_none());
+    }
+
+    #[test]
+    fn a_token_is_presented_only_for_the_socket_it_was_recorded_against() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let dir = home.path().join(".fleet").join("messaging-tokens");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(
+            dir.join("sess-1.json"),
+            r#"{"socketPath":"/tmp/cc-socks/100.sock","token":"tok-100"}"#,
+        )
+        .expect("write token");
+
+        let read = |sid: &str, sock: &str| -> Option<String> {
+            let body = std::fs::read_to_string(dir.join(format!("{sid}.json"))).ok()?;
+            let rec: SessionToken = serde_json::from_str(&body).ok()?;
+            (Path::new(&rec.socket_path) == Path::new(sock)).then_some(rec.token)
+        };
+
+        assert_eq!(
+            read("sess-1", "/tmp/cc-socks/100.sock").as_deref(),
+            Some("tok-100"),
+            "the socket it was recorded against gets the token"
+        );
+        assert_eq!(
+            read("sess-1", "/tmp/cc-socks/200.sock"),
+            None,
+            "a later turn's socket must not be handed the old turn's token"
+        );
     }
 
     #[cfg(unix)]
