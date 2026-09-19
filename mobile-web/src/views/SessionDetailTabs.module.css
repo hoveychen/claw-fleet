@@ -377,6 +377,36 @@
   transition: transform 0.15s ease;
 }
 
+/* The chain's stated finish line, above the legs — "is this chain done?" should
+   not have to be reconstructed from a screenful of relay notes. */
+.goalCard {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.goalLabel {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+  margin-bottom: 2px;
+}
+
+.goalText {
+  font-size: var(--t-body, 16px);
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.goalRevision {
+  margin-top: 4px;
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+  overflow-wrap: anywhere;
+}
+
 .hopBadge {
   font-size: var(--t-meta, 11px);
   font-weight: 600;
