@@ -2060,6 +2060,7 @@ fn build_session_from_sqlite(
         // Claude scan path, so Codex stamps its own here.
         proc_alive,
         pending_tool_batch: false,
+        stuck_tool: None,
         last_skill: None,
         context_percent,
         agent_source: "codex".to_string(),
@@ -5870,6 +5871,7 @@ fn parse_codex_session(
         // Claude scan path, so Codex stamps its own here.
         proc_alive,
         pending_tool_batch: false,
+        stuck_tool: None,
         last_skill: None,
         context_percent,
         agent_source: "codex".to_string(),

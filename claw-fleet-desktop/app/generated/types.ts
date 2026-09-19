@@ -49,7 +49,8 @@ thinkingLevel: string | null,
 effort: string | null, pid: number | null, 
 pidPrecise: boolean, 
 procAlive: boolean, 
-pendingToolBatch: boolean, lastSkill: string | null, 
+pendingToolBatch: boolean, 
+stuckTool?: StuckTool | null, lastSkill: string | null, 
 contextPercent: number | null, 
 agentSource: string, 
 lastOutcome: Array<string> | null, 
@@ -70,6 +71,8 @@ watches?: Array<WatchSummary>,
 remoteDisconnect?: RemoteDisconnect | null, 
 mirrorWrite?: MirrorWrite | null, 
 outOfCredits?: string | null, };
+
+export type StuckTool = { name: string, sinceMs?: number | null, };
 
 export type SessionMark = "pending" | "done";
 

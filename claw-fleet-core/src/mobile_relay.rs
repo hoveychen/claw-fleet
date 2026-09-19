@@ -955,6 +955,11 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // falls back to the raw first-prompt slug.
     "titleOverride",
     "status",
+    // Which tool a `stuck` session is wedged on. The phone is the surface most
+    // likely to catch a wedged session first (it is what 老板 checks away from
+    // the desk), and "stuck" without the tool name is not actionable — one
+    // small object is worth the bytes.
+    "stuckTool",
     "isSubagent",
     // Subagent drill-down: the phone keeps subagent rows (id `agent-<uuid>`) in
     // its session array purely as a lookup table for "open subagent" navigation, so

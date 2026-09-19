@@ -440,9 +440,10 @@ pub(crate) fn is_interactive_wait_tool(name: &str) -> bool {
         || name.contains("permission") // mcp__fleet__fleet__permission_prompt
 }
 
-/// Detects a turn wedged mid tool-batch: the most recent assistant message that
-/// issued `tool_use` blocks has at least one block whose `tool_use_id` never
-/// received a matching `tool_result` in the records that follow it, AND that
+/// Detects a turn wedged mid tool-batch: the most recent API response that
+/// issued `tool_use` blocks — every assistant record sharing its `message.id`,
+/// since one response is flushed one block per line — has at least one block
+/// whose `tool_use_id` never received a matching `tool_result`, AND that
 /// unresolved block is a *non-interactive* tool.
 ///
 /// This is the signal the plain status machine lacks. [`determine_status`] only
@@ -460,7 +461,14 @@ pub(crate) fn is_interactive_wait_tool(name: &str) -> bool {
 /// presents as an unresolved batch while it runs. [`STUCK_TOOL_BATCH_FLOOR_SECS`]
 /// (minutes, far longer than any real tool round-trip) is what keeps that from
 /// flagging in the common case.
-pub(crate) fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> bool {
+/// [`has_pending_noninteractive_tool_batch`] with the culprit attached: which
+/// tool never came back, and when its batch was issued. The UI needs both to
+/// say "stuck 23 min on WebFetch" instead of just colouring the row.
+///
+/// `since_ms` is the batch's first record's `timestamp` (epoch millis), absent
+/// when the transcript carries none — older records predate the field, and a
+/// missing clock must not suppress the mark itself.
+pub(crate) fn pending_noninteractive_tool_batch(last_lines: &[Value]) -> Option<PendingToolBatch> {
     let msg_blocks = |v: &Value| -> Option<Vec<Value>> {
         v.get("message")
             .and_then(|m| m.get("content"))
@@ -477,13 +485,40 @@ pub(crate) fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> boo
                     .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
             })
     }) else {
-        return false;
+        return None;
     };
 
-    // (tool_use_id, tool_name) issued by that assistant message.
-    let issued: Vec<(String, String)> = msg_blocks(&last_lines[asst_idx])
-        .unwrap_or_default()
+    // One API response is flushed one content block per line, so a response
+    // that issued several tool_use blocks in parallel spans several assistant
+    // records that all carry its `message.id`. Walk back over that run so the
+    // whole batch is considered: anchoring on `asst_idx` alone hid every hang
+    // whose partner block happened to be issued last and returned (session
+    // 7a72050c, 23 minutes wedged and never marked Stuck).
+    let msg_id = |v: &Value| -> Option<String> {
+        v.get("message")
+            .and_then(|m| m.get("id"))
+            .and_then(|i| i.as_str())
+            .map(|s| s.to_string())
+    };
+    let batch_id = msg_id(&last_lines[asst_idx]);
+    let mut batch_start = asst_idx;
+    if batch_id.is_some() {
+        while batch_start > 0 {
+            let prev = &last_lines[batch_start - 1];
+            let same_response = prev.get("type").and_then(|t| t.as_str()) == Some("assistant")
+                && msg_id(prev) == batch_id;
+            if !same_response {
+                break;
+            }
+            batch_start -= 1;
+        }
+    }
+
+    // (tool_use_id, tool_name) issued across the batch's records.
+    let issued: Vec<(String, String)> = last_lines[batch_start..=asst_idx]
         .iter()
+        .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+        .flat_map(|v| msg_blocks(v).unwrap_or_default())
         .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
         .filter_map(|b| {
             let id = b.get("id").and_then(|i| i.as_str())?.to_string();
@@ -492,12 +527,15 @@ pub(crate) fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> boo
         })
         .collect();
     if issued.is_empty() {
-        return false;
+        return None;
     }
 
-    // tool_use_ids resolved by any tool_result in the records AFTER the batch.
+    // tool_use_ids resolved by any tool_result in the records after the batch
+    // started. Scanning from `batch_start` rather than `asst_idx` keeps a
+    // result that interleaved with the batch's own records from reading as
+    // missing — a false Stuck is worse than a late one.
     let mut resolved: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for v in &last_lines[asst_idx + 1..] {
+    for v in &last_lines[batch_start + 1..] {
         if let Some(blocks) = msg_blocks(v) {
             for b in &blocks {
                 if b.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
@@ -509,10 +547,27 @@ pub(crate) fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> boo
         }
     }
 
-    // Stuck iff some issued tool_use is unresolved AND non-interactive.
-    issued
+    // Stuck iff some issued tool_use is unresolved AND non-interactive. Report
+    // the first such block: with several hung at once, the earliest issued is
+    // the one that has been waiting longest.
+    let (_, tool_name) = issued
         .iter()
-        .any(|(id, name)| !resolved.contains(id) && !is_interactive_wait_tool(name))
+        .find(|(id, name)| !resolved.contains(id) && !is_interactive_wait_tool(name))?;
+
+    let since_ms = last_lines[batch_start]
+        .get("timestamp")
+        .and_then(|t| t.as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.timestamp_millis() as u64);
+
+    Some(PendingToolBatch { tool_name: tool_name.clone(), since_ms })
+}
+
+/// The unresolved block behind a [`SessionStatus::Stuck`] mark.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PendingToolBatch {
+    pub tool_name: String,
+    pub since_ms: Option<u64>,
 }
 
 pub(crate) fn determine_status(

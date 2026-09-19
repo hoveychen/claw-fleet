@@ -96,6 +96,9 @@ export interface SessionInfo {
    *  Load-bearing for Codex sessions (no local aiTitle). */
   titleOverride?: string | null;
   status: SessionStatus;
+  /** On a `stuck` session, the tool whose tool_result never arrived and when
+   *  its batch was issued — "stuck" alone does not say whether to interrupt. */
+  stuckTool?: { name: string; sinceMs?: number | null } | null;
   isSubagent: boolean;
   /** Subagent drill-down: on a subagent row (id `agent-<uuid>`, isSubagent),
    *  the owning main session's id — the phone attaches the subagent under it and

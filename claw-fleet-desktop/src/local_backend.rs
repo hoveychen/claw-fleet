@@ -4453,6 +4453,7 @@ mod tests {
             pid_precise: false,
             proc_alive: false,
             pending_tool_batch: false,
+            stuck_tool: None,
             pending_messages: Vec::new(),
             last_skill: None,
             context_percent: None,
