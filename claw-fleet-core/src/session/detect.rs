@@ -461,7 +461,14 @@ pub(crate) fn is_interactive_wait_tool(name: &str) -> bool {
 /// presents as an unresolved batch while it runs. [`STUCK_TOOL_BATCH_FLOOR_SECS`]
 /// (minutes, far longer than any real tool round-trip) is what keeps that from
 /// flagging in the common case.
-pub(crate) fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> bool {
+/// [`has_pending_noninteractive_tool_batch`] with the culprit attached: which
+/// tool never came back, and when its batch was issued. The UI needs both to
+/// say "stuck 23 min on WebFetch" instead of just colouring the row.
+///
+/// `since_ms` is the batch's first record's `timestamp` (epoch millis), absent
+/// when the transcript carries none — older records predate the field, and a
+/// missing clock must not suppress the mark itself.
+pub(crate) fn pending_noninteractive_tool_batch(last_lines: &[Value]) -> Option<PendingToolBatch> {
     let msg_blocks = |v: &Value| -> Option<Vec<Value>> {
         v.get("message")
             .and_then(|m| m.get("content"))
@@ -478,7 +485,7 @@ pub(crate) fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> boo
                     .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
             })
     }) else {
-        return false;
+        return None;
     };
 
     // One API response is flushed one content block per line, so a response
@@ -520,7 +527,7 @@ pub(crate) fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> boo
         })
         .collect();
     if issued.is_empty() {
-        return false;
+        return None;
     }
 
     // tool_use_ids resolved by any tool_result in the records after the batch
@@ -540,10 +547,27 @@ pub(crate) fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> boo
         }
     }
 
-    // Stuck iff some issued tool_use is unresolved AND non-interactive.
-    issued
+    // Stuck iff some issued tool_use is unresolved AND non-interactive. Report
+    // the first such block: with several hung at once, the earliest issued is
+    // the one that has been waiting longest.
+    let (_, tool_name) = issued
         .iter()
-        .any(|(id, name)| !resolved.contains(id) && !is_interactive_wait_tool(name))
+        .find(|(id, name)| !resolved.contains(id) && !is_interactive_wait_tool(name))?;
+
+    let since_ms = last_lines[batch_start]
+        .get("timestamp")
+        .and_then(|t| t.as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.timestamp_millis() as u64);
+
+    Some(PendingToolBatch { tool_name: tool_name.clone(), since_ms })
+}
+
+/// The unresolved block behind a [`SessionStatus::Stuck`] mark.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PendingToolBatch {
+    pub tool_name: String,
+    pub since_ms: Option<u64>,
 }
 
 pub(crate) fn determine_status(

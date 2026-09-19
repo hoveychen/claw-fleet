@@ -82,6 +82,19 @@ pub struct RateLimitState {
     pub error_timestamp: chrono::DateTime<chrono::Utc>,
 }
 
+/// Populated when a turn is wedged mid tool-batch (see
+/// [`detect::pending_noninteractive_tool_batch`]). `sinceMs` is the batch's
+/// issue time in epoch millis, absent on transcripts that carry no timestamp —
+/// the UI then names the tool without an elapsed count.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct StuckTool {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since_ms: Option<u64>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -207,11 +220,16 @@ pub struct SessionInfo {
     pub proc_alive: bool,
     /// True when the most recent assistant tool_use batch has a non-interactive
     /// tool whose `tool_result` never arrived (see
-    /// [`has_pending_noninteractive_tool_batch`]). Computed at parse time and
+    /// [`detect::pending_noninteractive_tool_batch`]). Computed at parse time and
     /// carried across cache hits; `apply_pid_liveness` combines it with
     /// `proc_alive` + an age floor to promote the status to `Stuck`.
     #[serde(default)]
     pub pending_tool_batch: bool,
+    /// Which tool left `pending_tool_batch` true, and when its batch was
+    /// issued. Carried alongside the bool so the UI can say what the session is
+    /// wedged on instead of only that it is; `None` whenever the bool is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stuck_tool: Option<StuckTool>,
     pub last_skill: Option<String>,
     /// Approximate context-window utilisation (0.0 – 1.0) derived from the
     /// last finalized assistant message's usage fields.  `None` when no
@@ -793,6 +811,7 @@ mod tests {
             pid_precise: false,
             proc_alive: false,
             pending_tool_batch: false,
+            stuck_tool: None,
             last_skill: None,
             context_percent: None,
             agent_source: "claude-code".into(),
@@ -872,7 +891,7 @@ mod tests {
             tool_result_msg("t1"),
             tool_result_msg("t2"),
         ];
-        assert!(!has_pending_noninteractive_tool_batch(&lines));
+        assert!(pending_noninteractive_tool_batch(&lines).is_none());
     }
 
     #[test]
@@ -892,7 +911,7 @@ mod tests {
             tool_result_msg("wf_ok"),
             tool_result_msg("agent1"),
         ];
-        assert!(has_pending_noninteractive_tool_batch(&lines));
+        assert!(pending_noninteractive_tool_batch(&lines).is_some());
     }
 
     #[test]
@@ -902,7 +921,7 @@ mod tests {
             user_msg(),
             assistant_msg(vec![tool_use_block_id("AskUserQuestion", "ask1")], None),
         ];
-        assert!(!has_pending_noninteractive_tool_batch(&lines));
+        assert!(pending_noninteractive_tool_batch(&lines).is_none());
     }
 
     #[test]
@@ -914,7 +933,7 @@ mod tests {
                 None,
             ),
         ];
-        assert!(!has_pending_noninteractive_tool_batch(&lines));
+        assert!(pending_noninteractive_tool_batch(&lines).is_none());
     }
 
     #[test]
@@ -923,7 +942,7 @@ mod tests {
             user_msg(),
             assistant_msg(vec![text_block("just talking")], Some("end_turn")),
         ];
-        assert!(!has_pending_noninteractive_tool_batch(&lines));
+        assert!(pending_noninteractive_tool_batch(&lines).is_none());
     }
 
     #[test]
@@ -936,7 +955,7 @@ mod tests {
             assistant_msg(vec![tool_use_block_id("Bash", "new1")], None),
             tool_result_msg("new1"),
         ];
-        assert!(!has_pending_noninteractive_tool_batch(&earlier_stuck_later_ok));
+        assert!(pending_noninteractive_tool_batch(&earlier_stuck_later_ok).is_none());
     }
 
     /// One API response carrying several `tool_use` blocks is flushed to the
@@ -972,7 +991,7 @@ mod tests {
             assistant_msg_msgid(vec![tool_use_block_id("Agent", "agent_ok")], "msg_1"),
             tool_result_msg("agent_ok"),
         ];
-        assert!(has_pending_noninteractive_tool_batch(&lines));
+        assert!(pending_noninteractive_tool_batch(&lines).is_some());
     }
 
     #[test]
@@ -984,7 +1003,34 @@ mod tests {
             tool_result_msg("agent_b"),
             tool_result_msg("agent_a"),
         ];
-        assert!(!has_pending_noninteractive_tool_batch(&lines));
+        assert!(pending_noninteractive_tool_batch(&lines).is_none());
+    }
+
+    #[test]
+    fn stuck_batch_reports_the_hung_tool_and_its_issue_time() {
+        // The UI needs both halves: which tool to name, and how long it has
+        // been waiting. `since_ms` is the batch's first record, not the last —
+        // an earlier block is the one that has been hanging longest.
+        let mut first = assistant_msg_msgid(vec![tool_use_block_id("WebFetch", "wf_hung")], "msg_1");
+        first["timestamp"] = json!("2026-09-19T18:35:59.000Z");
+        let mut second = assistant_msg_msgid(vec![tool_use_block_id("Bash", "bash_ok")], "msg_1");
+        second["timestamp"] = json!("2026-09-19T18:36:00.000Z");
+
+        let batch = pending_noninteractive_tool_batch(&[user_msg(), first, second, tool_result_msg("bash_ok")])
+            .expect("hung WebFetch is detected");
+        assert_eq!(batch.tool_name, "WebFetch");
+        assert_eq!(batch.since_ms, Some(1789842959000));
+    }
+
+    #[test]
+    fn stuck_batch_without_timestamps_still_reports_the_tool() {
+        let batch = pending_noninteractive_tool_batch(&[
+            user_msg(),
+            assistant_msg(vec![tool_use_block_id("WebFetch", "wf_hung")], None),
+        ])
+        .expect("a missing clock must not suppress the mark");
+        assert_eq!(batch.tool_name, "WebFetch");
+        assert_eq!(batch.since_ms, None);
     }
 
     #[test]
@@ -996,7 +1042,7 @@ mod tests {
             assistant_msg_msgid(vec![tool_use_block_id("Bash", "new1")], "msg_2"),
             tool_result_msg("new1"),
         ];
-        assert!(!has_pending_noninteractive_tool_batch(&lines));
+        assert!(pending_noninteractive_tool_batch(&lines).is_none());
     }
 
     #[test]

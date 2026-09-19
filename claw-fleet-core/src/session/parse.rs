@@ -843,7 +843,12 @@ pub fn parse_session_info(
     };
     // Raw (age-unaware) signal for stuck detection; the age floor + proc_alive
     // gate is applied later in `apply_pid_liveness`.
-    let pending_tool_batch = has_pending_noninteractive_tool_batch(&last_n);
+    let stuck_batch = pending_noninteractive_tool_batch(&last_n);
+    let pending_tool_batch = stuck_batch.is_some();
+    let stuck_tool = stuck_batch.map(|b| crate::session::StuckTool {
+        name: b.tool_name,
+        since_ms: b.since_ms,
+    });
     let stats = acc.stats();
     let ctx_usage = acc.context_usage();
     // Cumulative input across all finalized turns (input + cache_creation +
@@ -934,6 +939,7 @@ pub fn parse_session_info(
         // itself has no view of the process table.
         proc_alive: false,
         pending_tool_batch,
+        stuck_tool,
         context_percent,
         last_skill,
         agent_source: "claude-code".to_string(),

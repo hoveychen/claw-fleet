@@ -864,6 +864,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         pid_precise: false,
         proc_alive: false,
         pending_tool_batch: false,
+        stuck_tool: None,
         last_skill: None,
         context_percent: None,
         agent_source: "claude-code".into(),
