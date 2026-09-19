@@ -55,16 +55,18 @@ pub(crate) fn resume_rate_limited_session(
     )
 }
 
-/// Queue a follow-up message for a session that is still mid-turn. The message
-/// is delivered via `claude --resume` the moment the current turn ends (see
-/// [`claw_fleet_core::pending_message`]).
+/// Send a follow-up message to a session that is still mid-turn. It is written
+/// straight into the running turn when that session's socket is reachable, and
+/// otherwise queued for delivery via `claude --resume` once the turn ends. The
+/// returned [`Delivery`](claw_fleet_core::pending_message::Delivery) tells the
+/// composer which of the two happened.
 #[tauri::command(async)]
 pub(crate) fn enqueue_session_message(
     session_id: String,
     workspace_path: String,
     text: String,
     state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<claw_fleet_core::pending_message::Delivery, String> {
     state
         .backend
         .enqueue_message(session_id, workspace_path, text)

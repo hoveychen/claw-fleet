@@ -3140,8 +3140,8 @@ fn serve_enqueue_message(params: &Value) -> Result<Value, String> {
     let req: crate::pending_message::EnqueueMessageRequest =
         serde_json::from_value(params.clone())
             .map_err(|e| format!("bad enqueue_message params: {e}"))?;
-    crate::pending_message::enqueue(&req.session_id, &req.workspace_path, &req.text)?;
-    Ok(json!({ "ok": true }))
+    let delivery = crate::pending_message::enqueue(&req.session_id, &req.workspace_path, &req.text)?;
+    Ok(json!({ "ok": true, "delivery": delivery }))
 }
 
 fn serve_cancel_pending_message(params: &Value) -> Result<Value, String> {
