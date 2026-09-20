@@ -2514,6 +2514,7 @@
     "group_mode_label": "Group by",
     "group_by_workspace": "Group by repository",
     "group_by_status": "Group by status",
+    "group_by_none": "No grouping",
     "status_g_running": "Running",
     "status_g_waitingInput": "Waiting for input",
     "status_g_watching": "Waiting on a watch",

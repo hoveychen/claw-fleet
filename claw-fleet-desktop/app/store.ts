@@ -36,9 +36,10 @@ export type { ViewMode, SessionViewMode } from "./viewModes";
 /** Launcher rail's segmented mark filter. "all" shows every bucket. */
 export type MarkFilter = "all" | "pending" | "done";
 /** What the task rail's sections stand for: the repository a session runs in,
- *  or its run status. Orthogonal to {@link MarkFilter}, which narrows *which*
- *  rows are listed rather than how they are bundled. */
-export type HistoryGroupMode = "workspace" | "status";
+ *  or its run status — or "none", which drops the headings and lists every row
+ *  in one activity-ordered stream. Orthogonal to {@link MarkFilter}, which
+ *  narrows *which* rows are listed rather than how they are bundled. */
+export type HistoryGroupMode = "workspace" | "status" | "none";
 
 export interface MainViewState {
   gallery: { query: string; showAll: boolean; idleExpanded: boolean };
@@ -493,7 +494,8 @@ function readCollapsedWorkspaces(): string[] {
 /** Persisted grouping mode; anything unrecognised falls back to the repository
  *  sections the rail has always shown. */
 function readGroupMode(): HistoryGroupMode {
-  return getItem("history-group-mode") === "status" ? "status" : "workspace";
+  const raw = getItem("history-group-mode");
+  return raw === "status" || raw === "none" ? raw : "workspace";
 }
 
 /** Persisted mark filter, tolerating an absent / corrupt value. */
