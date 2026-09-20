@@ -1413,9 +1413,9 @@ export function SessionDetail({
                   nothing here should look like one. The AI title leads (it is
                   what identifies the session); everything you only ever copy
                   (session id, transcript path, workspace path) lives behind the
-                  ⋯ menu; the plan / handoff / watch rows ride along the bottom
-                  edge, where they stay put instead of scrolling away with the
-                  conversation. */}
+                  ⋯ menu; the handoff and watch chips ride the identity row, and
+                  the plan row rides the bottom edge, where they stay put
+                  instead of scrolling away with the conversation. */}
               {/* data-tauri-drag-region on every container of this banner: it
                   now owns the window's top-right corner, and a frameless window
                   can only be dragged by an element that carries the attribute
@@ -1539,6 +1539,16 @@ export function SessionDetail({
                       </span>
                     )}
                     <ScheduleProvenanceChip session={liveSession} />
+                    {/* Relay position and live watches are chips like any other
+                        fact about this session, so they ride the identity row
+                        rather than each claiming a line under the header. They
+                        stay after the metrics chips: both are unconditional (not
+                        behind the ··· toggle) and would otherwise split the
+                        identity run. */}
+                    {liveSession.handoff && <HandoffChainRow session={liveSession} inline />}
+                    {liveSession.watches && liveSession.watches.length > 0 && (
+                      <WatchStatusRow session={liveSession} inline />
+                    )}
                     {/* Reveals the numeric chips above. Sits last so the identity run
                         reads uninterrupted and the control lands at the row's end. */}
                     <button
@@ -1601,12 +1611,6 @@ export function SessionDetail({
                     variant="header"
                     onOpen={() => setAux((st) => showFacet(st, "tasks"))}
                   />
-                )}
-                {/* Handoff relay chain — chip toggles the chain detail panel */}
-                {liveSession.handoff && <HandoffChainRow session={liveSession} />}
-                {/* Active fleet-watch(es) — what this session is waiting on */}
-                {liveSession.watches && liveSession.watches.length > 0 && (
-                  <WatchStatusRow session={liveSession} />
                 )}
               </div>
 

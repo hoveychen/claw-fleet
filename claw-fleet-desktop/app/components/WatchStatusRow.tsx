@@ -24,8 +24,17 @@ function formatElapsed(ms: number): string {
  * stopped deletes its record, so the chip disappears on its own.
  *
  * Callers must guard on `session.watches?.length` being truthy.
+ *
+ * `inline` drops the row wrapper so the chips can sit in a chip row someone else
+ * owns (the detail header's meta row), instead of claiming a line of their own.
  */
-export function WatchStatusRow({ session }: { session: SessionInfo }) {
+export function WatchStatusRow({
+  session,
+  inline = false,
+}: {
+  session: SessionInfo;
+  inline?: boolean;
+}) {
   const { t } = useTranslation();
   // Re-tick once a second so elapsed climbs live even between session polls.
   const [now, setNow] = useState(() => Date.now());
@@ -37,8 +46,8 @@ export function WatchStatusRow({ session }: { session: SessionInfo }) {
   const watches = session.watches ?? [];
   if (watches.length === 0) return null;
 
-  return (
-    <div className={styles.watch_row}>
+  const chips = (
+    <>
       {watches.map((w) => {
         const elapsed = formatElapsed(now - w.created);
         // A non-zero streak means the `until` command cannot run at all, so the
@@ -69,6 +78,8 @@ export function WatchStatusRow({ session }: { session: SessionInfo }) {
           </span>
         );
       })}
-    </div>
+    </>
   );
+
+  return inline ? chips : <div className={styles.watch_row}>{chips}</div>;
 }

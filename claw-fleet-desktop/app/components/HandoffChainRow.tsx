@@ -12,8 +12,17 @@ import { HandoffChainModal } from "./HandoffChainModal";
  * passed. The chain lazy-loads on first open.
  *
  * Callers must guard on `session.handoff` being present.
+ *
+ * `inline` drops the row wrapper so the chip can sit in a chip row someone else
+ * owns (the detail header's meta row), instead of claiming a line of its own.
  */
-export function HandoffChainRow({ session }: { session: SessionInfo }) {
+export function HandoffChainRow({
+  session,
+  inline = false,
+}: {
+  session: SessionInfo;
+  inline?: boolean;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [chain, setChain] = useState<HandoffChain | null>(null);
@@ -37,8 +46,8 @@ export function HandoffChainRow({ session }: { session: SessionInfo }) {
     }
   };
 
-  return (
-    <div className={styles.handoff_row}>
+  const body = (
+    <>
       <span
         className={styles.handoff_chip}
         role="button"
@@ -63,6 +72,8 @@ export function HandoffChainRow({ session }: { session: SessionInfo }) {
           onClose={() => setOpen(false)}
         />
       )}
-    </div>
+    </>
   );
+
+  return inline ? body : <div className={styles.handoff_row}>{body}</div>;
 }
