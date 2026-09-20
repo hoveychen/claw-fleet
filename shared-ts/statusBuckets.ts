@@ -67,3 +67,27 @@ export function statusBucketOf(
   }
   return "ended";
 }
+
+/**
+ * Which section a *collapsed relay chain* belongs to, given its members' own
+ * buckets: the most salient one, in `STATUS_BUCKETS` order (a running hop wins
+ * over a waiting one, anything live wins over ended).
+ *
+ * A chain is one unit of work, so bucketing its hops individually split it
+ * across two headings: every retired hop reads as `ended` the moment it hands
+ * off (no process, status decayed), so a chain that is very much alive showed a
+ * collapsed "ended" row for its retired hops alongside the running tip. Judge
+ * the chain by its liveliest member instead, the same way `chainBarColor` /
+ * `chainTone` already pick the collapsed row's dot.
+ *
+ * An empty member list cannot happen through the render path (a group always
+ * has ≥2 members) and falls back to `ended`.
+ */
+export function chainBucketOf(members: StatusBucket[]): StatusBucket {
+  let best = STATUS_BUCKETS.length;
+  for (const b of members) {
+    const rank = STATUS_BUCKETS.indexOf(b);
+    if (rank >= 0 && rank < best) best = rank;
+  }
+  return STATUS_BUCKETS[best] ?? "ended";
+}

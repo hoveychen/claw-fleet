@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { SessionInfo, SessionStatus } from "../types";
 import { resetQuietAliveLatch } from "../types";
 import {
-  groupSessionsByStatus,
+  groupItemsByStatus,
+  itemBucketOf,
   statusBucketOf,
   statusSectionPath,
 } from "./sessionStatusGroups";
+import { buildRenderItems } from "./sessionGroups";
 
 function session(
   id: string,
@@ -23,6 +25,25 @@ function session(
     lastActivityMs: agentLastActivityMs,
     agentLastActivityMs,
   } as SessionInfo;
+}
+
+/** A session that is hop `hop` of a `chainLen`-long relay chain. */
+function hop(
+  id: string,
+  status: SessionStatus,
+  agentLastActivityMs: number,
+  hopNo: number,
+  procAlive = false,
+): SessionInfo {
+  return {
+    ...session(id, status, agentLastActivityMs, procAlive),
+    handoff: { chainId: "relay-1", chainLen: 3, hop: hopNo },
+  } as SessionInfo;
+}
+
+/** The rail's own pipeline: fold chains, then partition by status. */
+function group(rows: SessionInfo[], opts?: { preserveOrder?: boolean }) {
+  return groupItemsByStatus(buildRenderItems(rows, true), opts);
 }
 
 describe("statusBucketOf", () => {
@@ -51,11 +72,15 @@ describe("statusBucketOf", () => {
   });
 });
 
-describe("groupSessionsByStatus", () => {
+function idsOf(items: ReturnType<typeof group>[number]["items"]): string[] {
+  return items.map((it) => (it.kind === "single" ? it.session.id : it.chainId));
+}
+
+describe("groupItemsByStatus", () => {
   beforeEach(resetQuietAliveLatch);
 
   it("orders sections by attention and rows by activity, dropping empty buckets", () => {
-    const groups = groupSessionsByStatus([
+    const groups = group([
       session("done-old", "idle", 10),
       session("parked", "waitingInput", 20),
       session("done-new", "idle", 30),
@@ -68,15 +93,59 @@ describe("groupSessionsByStatus", () => {
       "ended",
     ]);
     expect(groups[0].path).toBe(statusSectionPath("running"));
-    expect(groups[2].sessions.map((s) => s.id)).toEqual(["done-new", "done-old"]);
+    expect(idsOf(groups[2].items)).toEqual(["done-new", "done-old"]);
   });
 
   it("leaves rows in the caller's order under preserveOrder", () => {
-    const groups = groupSessionsByStatus(
-      [session("older", "idle", 10), session("newer", "idle", 99)],
-      { preserveOrder: true },
-    );
+    const groups = group([session("older", "idle", 10), session("newer", "idle", 99)], {
+      preserveOrder: true,
+    });
 
-    expect(groups[0].sessions.map((s) => s.id)).toEqual(["older", "newer"]);
+    expect(idsOf(groups[0].items)).toEqual(["older", "newer"]);
+  });
+
+  it("keeps a live relay chain whole under running", () => {
+    // Hops that have handed off have no process and a decayed status, so
+    // bucketing them individually filed the chain under "ended" alongside its
+    // own running tip.
+    const groups = group([
+      hop("tip", "thinking", 40, 3, true),
+      hop("retired-2", "idle", 30, 2),
+      hop("retired-1", "idle", 20, 1),
+      session("plain-done", "idle", 10),
+    ]);
+
+    expect(groups.map((g) => g.bucket)).toEqual(["running", "ended"]);
+    expect(idsOf(groups[0].items)).toEqual(["relay-1"]);
+    expect(idsOf(groups[1].items)).toEqual(["plain-done"]);
+  });
+
+  it("files a fully retired chain under ended", () => {
+    const groups = group([hop("last", "idle", 30, 3), hop("first", "idle", 20, 1)]);
+
+    expect(groups.map((g) => g.bucket)).toEqual(["ended"]);
+    expect(idsOf(groups[0].items)).toEqual(["relay-1"]);
+  });
+
+  it("sorts a chain by its most recent hop", () => {
+    const groups = group([
+      session("solo", "idle", 25),
+      hop("tip", "idle", 30, 3),
+      hop("first", "idle", 5, 1),
+    ]);
+
+    expect(idsOf(groups[0].items)).toEqual(["relay-1", "solo"]);
+  });
+});
+
+describe("itemBucketOf", () => {
+  beforeEach(resetQuietAliveLatch);
+
+  it("takes the most salient hop of a chain", () => {
+    const [chain] = buildRenderItems(
+      [hop("tip", "idle", 30, 3), hop("parked", "waitingInput", 20, 2)],
+      true,
+    );
+    expect(itemBucketOf(chain)).toBe("waitingInput");
   });
 });
