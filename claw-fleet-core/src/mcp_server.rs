@@ -505,16 +505,16 @@ fn image_shared_properties() -> Value {
         "model": {
             "type": "string",
             "enum": ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2"],
-            "description": "Image model. `gpt-image-2.5-flare` (default) is the fast tier; `gpt-image-2.5-sunburst` costs the same but renders slower and sharper — use it for final assets, dense text and identity-sensitive edits."
+            "description": "Image model. `gpt-image-2.5-flare` (default) is the fast tier; `gpt-image-2.5-sunburst` costs the same but renders slower and sharper — use it for final assets, dense text and identity-sensitive edits. ONLY HONOURED WITH AN OPENAI_API_KEY: on the ChatGPT plan quota the backend ignores this field entirely (measured 2026-09-20 — a nonsense model name still returned a picture)."
         },
         "quality": {
             "type": "string",
             "enum": ["low", "medium", "high", "xhigh", "max", "auto"],
-            "description": "Render effort. `low` for drafts and thumbnails; `high` and up for final assets. `xhigh` and `max` exist only on the 2.5 models."
+            "description": "Render effort. `low` for drafts and thumbnails; `high` and up for final assets. `xhigh` and `max` exist only on the 2.5 models. ONLY HONOURED WITH AN OPENAI_API_KEY: on the ChatGPT plan quota every tier comes back as `low`. The result line reports what the backend actually used, so check it rather than assuming."
         },
         "size": {
             "type": "string",
-            "description": "`auto`, or WIDTHxHEIGHT. Edges must be multiples of 16px and at most 3840px, aspect ratio at most 3:1, total pixels between 655,360 and 8,294,400. Common: 1024x1024, 1536x1024, 2048x1152, 3840x2160."
+            "description": "`auto`, or WIDTHxHEIGHT. Edges must be multiples of 16px and at most 3840px, aspect ratio at most 3:1, total pixels between 655,360 and 8,294,400. Common: 1024x1024, 1536x1024, 2048x1152, 3840x2160. ONLY HONOURED WITH AN OPENAI_API_KEY: on the ChatGPT plan quota the backend picks its own dimensions."
         },
         "background": {
             "type": "string",

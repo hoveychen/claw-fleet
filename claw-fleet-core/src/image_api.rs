@@ -418,7 +418,7 @@ pub fn execute(
     auth: &ImageAuth,
     turn_id: &str,
     timeout: Duration,
-) -> Result<Vec<ImageBytes>, String> {
+) -> Result<(Vec<ImageBytes>, ResponseMeta), String> {
     validate(req)?;
     let client = reqwest::blocking::Client::builder()
         .timeout(timeout)
@@ -482,11 +482,57 @@ fn edit_form(req: &ImageRequest) -> Result<reqwest::blocking::multipart::Form, S
     Ok(form)
 }
 
-/// Decode `{ data: [{ b64_json, generation_id }] }`.
+/// What the backend says it actually used, as opposed to what we asked for.
+///
+/// Load-bearing for honesty: the request carries the caller's `quality`/`size`,
+/// but only the response says whether the backend honoured them. Reporting the
+/// request back would make a silently-ignored tier indistinguishable from an
+/// applied one.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ResponseMeta {
+    pub quality: Option<String>,
+    pub size: Option<String>,
+    pub background: Option<String>,
+}
+
+impl ResponseMeta {
+    fn from_json(v: &serde_json::Value) -> Self {
+        let field = |key: &str| {
+            v.get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        };
+        Self {
+            quality: field("quality"),
+            size: field("size"),
+            background: field("background"),
+        }
+    }
+
+    /// Human-readable tail for the provenance line; empty when the backend
+    /// echoed nothing.
+    fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(q) = &self.quality {
+            parts.push(format!("quality {q}"));
+        }
+        if let Some(s) = &self.size {
+            parts.push(format!("size {s}"));
+        }
+        if let Some(b) = &self.background {
+            if b != "auto" {
+                parts.push(format!("background {b}"));
+            }
+        }
+        parts.join(", ")
+    }
+}
+
+/// Decode `{ data: [{ b64_json, generation_id }], quality, size, background }`.
 ///
 /// Shape is shared by both backends — it is the same `ImageResponse` struct
 /// codex-rs deserialises (`created`, `data`, `background`, `quality`, `size`).
-pub fn decode_response(body: &str) -> Result<Vec<ImageBytes>, String> {
+pub fn decode_response(body: &str) -> Result<(Vec<ImageBytes>, ResponseMeta), String> {
     use base64::Engine as _;
     let v: serde_json::Value =
         serde_json::from_str(body).map_err(|e| format!("parse response: {e}"))?;
@@ -514,7 +560,7 @@ pub fn decode_response(body: &str) -> Result<Vec<ImageBytes>, String> {
     if out.is_empty() {
         return Err("response returned no images".to_string());
     }
-    Ok(out)
+    Ok((out, ResponseMeta::from_json(&v)))
 }
 
 /// Last `n` characters, for quoting an error body without flooding a log line.
@@ -680,15 +726,52 @@ pub fn wants_codex_backend(model: Option<&str>) -> bool {
 
 /// One-line summary of what actually ran, surfaced to the agent so a surprising
 /// result (wrong tier, unexpected backend) is visible rather than inferred.
-fn provenance(auth: &ImageAuth, req: &ImageRequest) -> String {
+///
+/// The quality/size come from `meta` — the backend's own echo — not from the
+/// request. Echoing the request back would report a tier the backend quietly
+/// dropped as though it had been applied, which is exactly the confusion this
+/// line exists to prevent. Falls back to the requested values only when the
+/// backend echoed nothing at all.
+fn provenance(auth: &ImageAuth, req: &ImageRequest, meta: &ResponseMeta) -> String {
     let mut note = format!("{} via {}", req.effective_model(), auth.label());
-    if let Some(q) = &req.quality {
-        note.push_str(&format!(", quality {q}"));
+    let described = meta.describe();
+    if described.is_empty() {
+        if let Some(q) = &req.quality {
+            note.push_str(&format!(", requested quality {q}"));
+        }
+        if let Some(s) = &req.size {
+            note.push_str(&format!(", requested size {s}"));
+        }
+        return note;
     }
-    if let Some(s) = &req.size {
-        note.push_str(&format!(", size {s}"));
+    note.push_str(&format!(", {described}"));
+    let ignored = ignored_controls(req, meta);
+    if !ignored.is_empty() {
+        note.push_str(&format!(" — {} ignored by this backend", ignored.join(" and ")));
     }
     note
+}
+
+/// Controls the caller set that the backend did not honour.
+///
+/// Measured 2026-09-20 against the ChatGPT plan-quota backend: it accepts
+/// `model`, `quality` and `size` in the body and then ignores all three. A
+/// nonsense model name (`gpt-image-9-does-not-exist`) still returned a picture,
+/// and every quality tier came back echoed as `low`. Saying nothing here would
+/// let a caller believe a `max` render happened because no error was raised.
+fn ignored_controls(req: &ImageRequest, meta: &ResponseMeta) -> Vec<String> {
+    let mut ignored = Vec::new();
+    if let (Some(want), Some(got)) = (&req.quality, &meta.quality) {
+        if want != got && want != "auto" {
+            ignored.push(format!("quality={want}"));
+        }
+    }
+    if let (Some(want), Some(got)) = (&req.size, &meta.size) {
+        if want != got && want != "auto" {
+            ignored.push(format!("size={want}"));
+        }
+    }
+    ignored
 }
 
 /// Run one request end to end: authenticate, call, save, describe.
@@ -701,7 +784,7 @@ pub fn run(
 ) -> Result<crate::codex_image::GenerateImageResult, String> {
     let auth = load_auth(None)?;
     let handle = new_handle();
-    let images = execute(req, &auth, &handle, DEFAULT_TIMEOUT)?;
+    let (images, meta) = execute(req, &auth, &handle, DEFAULT_TIMEOUT)?;
     let saved = save_images(&handle, &images, req.output_format.as_deref(), owner)?;
     Ok(crate::codex_image::GenerateImageResult {
         thread_id: handle,
@@ -709,7 +792,7 @@ pub fn run(
         agent_message: String::new(),
         timeline: vec![crate::codex_image::TurnEvent {
             kind: "image".to_string(),
-            text: provenance(&auth, req),
+            text: provenance(&auth, req, &meta),
         }],
     })
 }
@@ -975,12 +1058,97 @@ mod tests {
             ]
         })
         .to_string();
-        let images = decode_response(&body).unwrap();
+        let (images, meta) = decode_response(&body).unwrap();
         assert_eq!(images.len(), 2);
         assert_eq!(images[0].bytes, b"hi");
         assert_eq!(images[0].generation_id.as_deref(), Some("gen_1"));
         assert_eq!(images[1].bytes, b"ya");
         assert_eq!(images[1].generation_id, None);
+        // The backend's echo is what provenance reports, so it must survive
+        // decoding rather than being dropped on the floor.
+        assert_eq!(meta.quality.as_deref(), Some("high"));
+        assert_eq!(meta.size.as_deref(), Some("1024x1024"));
+        assert_eq!(meta.background.as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn provenance_reports_the_backend_echo_not_the_request() {
+        // The failure this guards: asking for quality=max, the backend quietly
+        // serving something else, and the agent being told "max" anyway.
+        let mut req = ImageRequest::new("a cat");
+        req.quality = Some("max".into());
+        req.size = Some("3840x2160".into());
+        let meta = ResponseMeta {
+            quality: Some("medium".into()),
+            size: Some("1024x1024".into()),
+            background: Some("auto".into()),
+        };
+        let note = provenance(&ImageAuth::ApiKey("k".into()), &req, &meta);
+        // What ran is stated as fact; what was asked for appears only as the
+        // thing that got dropped, never as a bare claim that it happened.
+        assert!(note.contains("quality medium"), "{note}");
+        assert!(note.contains("1024x1024"), "{note}");
+        assert!(note.contains("quality=max"), "{note}");
+        assert!(note.contains("ignored by this backend"), "{note}");
+        assert!(!note.contains("quality max"), "{note}");
+        // background=auto is noise; only a non-default one is worth a word.
+        assert!(!note.contains("background auto"), "{note}");
+    }
+
+    #[test]
+    fn provenance_calls_out_a_control_the_backend_dropped() {
+        // The real plan-quota behaviour, measured 2026-09-20: asked for max at
+        // 3840x2160, served low at the backend's own dimensions, no error.
+        let mut req = ImageRequest::new("a cat");
+        req.quality = Some("max".into());
+        req.size = Some("3840x2160".into());
+        let meta = ResponseMeta {
+            quality: Some("low".into()),
+            size: Some("1347x1167".into()),
+            background: None,
+        };
+        let note = provenance(&ImageAuth::ApiKey("k".into()), &req, &meta);
+        assert!(note.contains("quality low"), "{note}");
+        assert!(note.contains("ignored by this backend"), "{note}");
+        assert!(note.contains("quality=max"), "{note}");
+        assert!(note.contains("size=3840x2160"), "{note}");
+    }
+
+    #[test]
+    fn an_honoured_control_is_not_reported_as_ignored() {
+        let mut req = ImageRequest::new("a cat");
+        req.quality = Some("high".into());
+        req.size = Some("1024x1024".into());
+        let meta = ResponseMeta {
+            quality: Some("high".into()),
+            size: Some("1024x1024".into()),
+            background: None,
+        };
+        let note = provenance(&ImageAuth::ApiKey("k".into()), &req, &meta);
+        assert!(!note.contains("ignored"), "{note}");
+        // `auto` means "backend's choice", so whatever comes back honoured it.
+        let mut req = ImageRequest::new("a cat");
+        req.quality = Some("auto".into());
+        let meta = ResponseMeta {
+            quality: Some("low".into()),
+            size: None,
+            background: None,
+        };
+        let note = provenance(&ImageAuth::ApiKey("k".into()), &req, &meta);
+        assert!(!note.contains("ignored"), "{note}");
+    }
+
+    #[test]
+    fn provenance_falls_back_to_the_request_when_nothing_was_echoed() {
+        let mut req = ImageRequest::new("a cat");
+        req.quality = Some("xhigh".into());
+        let note = provenance(
+            &ImageAuth::ApiKey("k".into()),
+            &req,
+            &ResponseMeta::default(),
+        );
+        // Marked as requested, so it can never be mistaken for a confirmation.
+        assert!(note.contains("requested quality xhigh"), "{note}");
     }
 
     #[test]
@@ -1115,7 +1283,12 @@ mod tests {
         req.model = Some(MODEL_SUNBURST.into());
         req.quality = Some("max".into());
         req.size = Some("3840x2160".into());
-        let note = provenance(&ImageAuth::ApiKey("k".into()), &req);
+        let meta = ResponseMeta {
+            quality: Some("max".into()),
+            size: Some("3840x2160".into()),
+            background: None,
+        };
+        let note = provenance(&ImageAuth::ApiKey("k".into()), &req, &meta);
         assert!(note.contains(MODEL_SUNBURST), "{note}");
         assert!(note.contains("api-key"), "{note}");
         assert!(note.contains("max"), "{note}");
