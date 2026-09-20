@@ -92,6 +92,8 @@ const ALL_KEYS = [
   // workspace paths. Must be readable on boot, otherwise every launch reopens
   // repos the reader deliberately folded away.
   "history-collapsed-workspaces",
+  // Whether the task rail sections by repository or by run status.
+  "history-group-mode",
   "onboarding-dismissed",
   "wizard-completed",
   "hooks-banner-dismissed",
