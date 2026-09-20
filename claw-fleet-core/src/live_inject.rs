@@ -405,6 +405,26 @@ pub fn inject(_session_id: &str, _text: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Manual probe, not part of any suite: injects a signed message into a
+    /// live session so a human can read what actually arrives. Run it against
+    /// your own session with
+    /// `FLEET_PROBE_SESSION=<id> FLEET_PROBE_WORKSPACE=<dir> cargo test -p
+    /// claw-fleet-core --lib signed_injection_probe -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual probe: writes into a real running session"]
+    fn signed_injection_probe() {
+        let session = std::env::var("FLEET_PROBE_SESSION").expect("FLEET_PROBE_SESSION");
+        let workspace = std::env::var("FLEET_PROBE_WORKSPACE").expect("FLEET_PROBE_WORKSPACE");
+        let delivery = crate::pending_message::enqueue(
+            &session,
+            &workspace,
+            "探针：这条是署名验证",
+            crate::pending_message::Sender::User,
+        )
+        .expect("enqueue");
+        println!("delivery: {delivery:?}");
+    }
+
     #[test]
     fn signing_a_user_message_round_trips() {
         let signed = sign_as_user("合并吧");
