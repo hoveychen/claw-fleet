@@ -31,6 +31,53 @@ impl SkillTarget {
             Self::Codex => "codex",
         }
     }
+
+    /// The [`crate::SKILL_TARGETS`] display name for this runtime, which is how
+    /// [`crate::BundledSkill::skip_targets`] names them.
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "Claude Code",
+            Self::Codex => "Codex",
+        }
+    }
+}
+
+/// Every runtime this slug is *supposed* to be projected into.
+///
+/// Normally both: a user's skill belongs everywhere they work. But a skill
+/// Fleet bundles may deliberately skip a runtime that already ships an
+/// equivalent — `image-generation` skips Codex, which has its own `imagegen`.
+///
+/// This has to be consulted in three places, not one. Projecting is the obvious
+/// place; the subtle ones are the state classifier and the reconciler, which
+/// otherwise read a deliberately-absent projection as a *damaged* one. Before
+/// this existed, `image-generation` was adopted, projected into Codex anyway,
+/// and — had the projection been removed by hand — would then have been
+/// classified `Partial` and deleted outright, canonical copy and all.
+fn expected_targets(slug: &str) -> &'static [SkillTarget] {
+    const BOTH: &[SkillTarget] = &[SkillTarget::ClaudeCode, SkillTarget::Codex];
+    const CLAUDE_ONLY: &[SkillTarget] = &[SkillTarget::ClaudeCode];
+    const CODEX_ONLY: &[SkillTarget] = &[SkillTarget::Codex];
+
+    let Some(bundled) = crate::BUNDLED_SKILLS.iter().find(|s| s.name == slug) else {
+        return BOTH;
+    };
+    match (
+        bundled.applies_to(SkillTarget::ClaudeCode.display_name()),
+        bundled.applies_to(SkillTarget::Codex.display_name()),
+    ) {
+        (true, true) => BOTH,
+        (true, false) => CLAUDE_ONLY,
+        (false, true) => CODEX_ONLY,
+        // A bundled skill that goes nowhere would be dead weight; treat it as
+        // unmanaged rather than inventing an empty-projection state.
+        (false, false) => &[],
+    }
+}
+
+/// Is this runtime expected to hold a projection of `slug`?
+fn is_expected(slug: &str, target: SkillTarget) -> bool {
+    expected_targets(slug).contains(&target)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -422,9 +469,14 @@ pub fn inventory() -> Result<Vec<SkillSyncEntry>, String> {
         let codex_managed = canonical_path
             .zip(codex_path)
             .is_some_and(|(canonical, path)| points_to(path, canonical));
+        // A runtime this skill deliberately skips counts as satisfied: absence
+        // there is the goal, not damage to repair.
+        let claude_ok =
+            claude_managed || !is_expected(&slug, SkillTarget::ClaudeCode);
+        let codex_ok = codex_managed || !is_expected(&slug, SkillTarget::Codex);
         let state = if canonical_path.is_none() {
             SkillSyncState::Unmanaged
-        } else if claude_managed && codex_managed {
+        } else if claude_ok && codex_ok {
             SkillSyncState::Shared
         } else if (claude_path.is_some() && !claude_managed)
             || (codex_path.is_some() && !codex_managed)
@@ -459,7 +511,7 @@ pub fn sync(apply: bool) -> Result<SkillSyncReport, String> {
     let canonical = scan_skill_dirs(&roots.canonical, false);
     let mut report = SkillSyncReport::default();
     for slug in canonical.keys() {
-        for target in [SkillTarget::ClaudeCode, SkillTarget::Codex] {
+        for target in expected_targets(slug).iter().copied() {
             match project_one(&roots, slug, target, apply) {
                 Ok(Some(action)) => report.actions.push(action),
                 Ok(None) => {}
@@ -980,6 +1032,89 @@ mod tests {
         assert!(report.actions.is_empty());
         assert!(!temp.path().join(".fleet/skills/solo").exists());
         assert!(!temp.path().join(".codex/skills/solo").exists());
+    }
+
+    #[test]
+    fn a_bundled_skill_that_skips_a_runtime_is_never_projected_there() {
+        // Measured on the real machine 2026-09-20: dropping the new skill into
+        // ~/.claude/skills was enough for the watcher to adopt it and project a
+        // symlink into ~/.codex/skills, straight past the install-time skip.
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        mark_codex_present(temp.path());
+        write_skill(
+            &temp.path().join(".claude/skills"),
+            "image-generation",
+            crate::IMAGE_SKILL_MD,
+        );
+        let report = auto_reconcile().unwrap();
+        assert!(report.conflicts.is_empty(), "{:?}", report.conflicts);
+        assert!(
+            temp.path()
+                .join(".claude/skills/image-generation/SKILL.md")
+                .is_file(),
+            "Claude must keep it"
+        );
+        assert!(
+            !temp.path().join(".codex/skills/image-generation").exists(),
+            "Codex ships its own imagegen; this must never land there"
+        );
+    }
+
+    #[test]
+    fn a_deliberately_skipped_runtime_does_not_make_a_skill_look_damaged() {
+        // The dangerous half: `Partial` means "lost a projection", and
+        // auto_reconcile repairs that by deleting the skill and its canonical
+        // copy. A skill that is *supposed* to be missing from Codex must
+        // classify as Shared, or it would delete itself on the next tick.
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        mark_codex_present(temp.path());
+        write_skill(
+            &temp.path().join(".claude/skills"),
+            "image-generation",
+            crate::IMAGE_SKILL_MD,
+        );
+        auto_reconcile().unwrap();
+
+        let item = inventory()
+            .unwrap()
+            .into_iter()
+            .find(|i| i.slug == "image-generation")
+            .expect("skill should still be inventoried");
+        assert_eq!(item.state, SkillSyncState::Shared, "{item:?}");
+
+        // And a second pass must not undo the first.
+        auto_reconcile().unwrap();
+        assert!(
+            temp.path()
+                .join(".claude/skills/image-generation/SKILL.md")
+                .is_file(),
+            "a second reconcile deleted the skill"
+        );
+        assert!(
+            temp.path()
+                .join(".fleet/skills/image-generation/SKILL.md")
+                .is_file(),
+            "a second reconcile deleted the canonical copy"
+        );
+    }
+
+    #[test]
+    fn expected_targets_defaults_to_both_for_a_user_skill() {
+        assert_eq!(
+            expected_targets("some-user-skill"),
+            &[SkillTarget::ClaudeCode, SkillTarget::Codex]
+        );
+        assert_eq!(
+            expected_targets("image-generation"),
+            &[SkillTarget::ClaudeCode]
+        );
+        // The fleet skill is bundled but skips nothing.
+        assert_eq!(
+            expected_targets("fleet"),
+            &[SkillTarget::ClaudeCode, SkillTarget::Codex]
+        );
     }
 
     #[test]
