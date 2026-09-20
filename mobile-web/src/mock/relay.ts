@@ -289,10 +289,16 @@ export class MockRelayClient extends RelayClient {
       case "stop_workspace":
       case "interrupt":
       case "resume_session":
-      case "enqueue_message":
       case "cancel_pending_message":
       case "spawn_session":
         return { ok: true };
+
+      // Same, but the reply also reports how the follow-up landed — the mock
+      // says "straight into the running turn", which is the live path and the
+      // one that draws a bubble. Answering a bare `{ok:true}` here would leave
+      // the mid-turn echo invisible in demo and screenshot mode.
+      case "enqueue_message":
+        return { ok: true, delivery: "injected" };
 
       // ── Terminal ────────────────────────────────────────────────────────────
       // A mock pty: the first proc_output yields one screen of prompt, then no new bytes.

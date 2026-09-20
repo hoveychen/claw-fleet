@@ -214,7 +214,35 @@ pub enum Delivery {
     Queued,
 }
 
-pub fn enqueue(session_id: &str, workspace_path: &str, text: &str) -> Result<Delivery, String> {
+/// Who typed the follow-up.
+///
+/// It decides nothing about delivery and everything about how the receiver is
+/// told to read the message. The socket stamps *every* injected message as a
+/// peer — that is hardcoded in the CLI and cannot be overridden (see
+/// `live_inject`'s module docs) — so a message the user typed in a Fleet
+/// surface arrives framed as "another Claude session sent this, not your
+/// user". Measured on 2026-09-20: a session took a question its user typed in
+/// the desktop composer, reasoned about "the peer's question", and answered it
+/// by guessing a recipient and `SendMessage`-ing the answer to an unrelated
+/// session. The user never saw a reply.
+///
+/// Fleet cannot change the framing, but it writes the body, so a `User`
+/// message carries a line saying who it is really from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sender {
+    /// A person typing in a Fleet surface — desktop composer, browser, phone.
+    User,
+    /// Another agent steering this session (`fleet send`, `fleet__control`).
+    /// The peer framing the CLI applies is already correct; say nothing.
+    Agent,
+}
+
+pub fn enqueue(
+    session_id: &str,
+    workspace_path: &str,
+    text: &str,
+    sender: Sender,
+) -> Result<Delivery, String> {
     // Re-address ahead of every other check: a retired hop is not a valid
     // destination, and the Fleet-owned gate below has to run against the hop
     // that will actually be resumed.
@@ -237,7 +265,19 @@ pub fn enqueue(session_id: &str, workspace_path: &str, text: &str) -> Result<Del
     // messages arrives as N separate prompts in the receiver's queue rather than
     // the combined single turn the queue path produces. That is the point —
     // combining only ever existed because the messages could not be delivered.
-    if crate::live_inject::inject(session_id, text).is_ok() {
+    //
+    // Only the injected copy is signed. The queue path is drained through
+    // `claude --resume`, where the text *is* the user's prompt and no framing
+    // has to be undone.
+    let signed;
+    let injected_text = match sender {
+        Sender::User => {
+            signed = crate::live_inject::sign_as_user(text);
+            signed.as_str()
+        }
+        Sender::Agent => text,
+    };
+    if crate::live_inject::inject(session_id, injected_text).is_ok() {
         return Ok(Delivery::Injected);
     }
     append_to_queue(session_id, workspace_path, text).map(|()| Delivery::Queued)

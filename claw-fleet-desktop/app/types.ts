@@ -349,6 +349,11 @@ export interface TailDelta {
   offset: number;
 }
 
+/** How a follow-up sent to a running session actually reached it — mirrors
+ *  `pending_message::Delivery` (serde `camelCase`). `injected` went straight
+ *  into the live turn; `queued` waits for it to end. */
+export type Delivery = "injected" | "queued";
+
 export interface RawMessage {
   type: "user" | "assistant" | "progress" | "queue-operation" | "last-prompt" | "file-history-snapshot";
   uuid?: string;
@@ -359,6 +364,11 @@ export interface RawMessage {
    *  system reminders) with this. A skill-body injection also carries
    *  `sourceToolUseID`; see `skillInjection.ts`. */
   isMeta?: boolean;
+  /** Set by core on a user record it rewrote from the CLI's `queued_command`
+   *  attachment row — a message that was written into the turn while it ran
+   *  (see `queued_command.rs`). It is the user speaking, so it renders as a
+   *  normal bubble; the flag is only here for clients that want to say so. */
+  fleetMidTurn?: boolean;
   /** Synthesised by the backend from a codex turn-boundary error (a turn that
    *  failed before producing any reply — expired credentials, a stream error).
    *  Renders as a failure banner, not as an assistant bubble. */

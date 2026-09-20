@@ -419,7 +419,14 @@ pub fn send_message(needle: &str, text: &str) -> Result<String, String> {
     // `enqueue` itself refuses a session Fleet does not own — one it cannot
     // `claude --resume` without putting a second process on somebody's
     // transcript — so that gate is not repeated here.
-    let delivery = crate::pending_message::enqueue(&target.id, &target.workspace_path, text)?;
+    // An agent steering another session: the CLI's peer framing is already the
+    // truth here, so nothing is signed onto the body.
+    let delivery = crate::pending_message::enqueue(
+        &target.id,
+        &target.workspace_path,
+        text,
+        crate::pending_message::Sender::Agent,
+    )?;
     // A retired hop is re-addressed to whoever inherited its work, so report the
     // landing session rather than the one that was asked for.
     let landed = crate::pending_message::live_target(&target.id);

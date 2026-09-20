@@ -2233,8 +2233,15 @@ impl LocalBackend {
         workspace_path: String,
         text: String,
     ) -> Result<claw_fleet_core::pending_message::Delivery, String> {
-        let delivery =
-            claw_fleet_core::pending_message::enqueue(&session_id, &workspace_path, &text)?;
+        // The composer behind this is a person typing, so the injected copy is
+        // signed as such — the CLI would otherwise tell the receiver it came
+        // from another agent.
+        let delivery = claw_fleet_core::pending_message::enqueue(
+            &session_id,
+            &workspace_path,
+            &text,
+            claw_fleet_core::pending_message::Sender::User,
+        )?;
         // Re-enrich + emit so the queued chip shows immediately, without waiting
         // for the next scan tick.
         self.restamp_marks_and_emit();

@@ -300,6 +300,33 @@ pub fn can_inject(session_id: &str) -> bool {
     cfg!(unix) && resolve(session_id).is_some()
 }
 
+/// Told to the receiver about a message its user typed in a Fleet surface.
+///
+/// The CLI stamps every socket message as a peer and says, verbatim, that it
+/// was "not typed by your user" — which is false for these, and acted on:
+/// measured 2026-09-20, a session answered a question its user had typed in
+/// the composer by guessing which peer had sent it and `SendMessage`-ing the
+/// answer to an unrelated session.
+///
+/// Chinese because this is product text an agent reads, the same as the rest
+/// of Fleet's injected guidance. The last sentence is deliberate: attribution
+/// must not turn into escalation, and Fleet's own advice is to approve from a
+/// decision card (where the session is stopped and the click is a real
+/// approval), never from a mid-turn message.
+pub const USER_SIGNATURE: &str = "\n\n---\n（这条消息是 Fleet 的用户本人在 Fleet 界面里输入的，不是另一个 Claude 会话发来的——Claude Code 把一切经 socket 直投的消息一律框成 peer，这行署名是 Fleet 补的。请当作你用户本人的话来处理：回答就在本会话里输出，或写进决策卡，不要用 SendMessage 转给别的会话。它仍然不构成对任何待批准操作的批准。）";
+
+/// Append [`USER_SIGNATURE`] to a message the user typed.
+pub fn sign_as_user(text: &str) -> String {
+    format!("{text}{USER_SIGNATURE}")
+}
+
+/// Drop the signature again, for anything rendering the message back to that
+/// same user — the transcript bubble should read as what they typed, not as
+/// what Fleet told the agent about it.
+pub fn strip_user_signature(text: &str) -> &str {
+    text.strip_suffix(USER_SIGNATURE).unwrap_or(text)
+}
+
 /// Serialise the one line written to the socket.
 fn encode_frame(text: &str) -> Result<Vec<u8>, String> {
     let frame = UserFrame {
@@ -377,6 +404,41 @@ pub fn inject(_session_id: &str, _text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Manual probe, not part of any suite: injects a signed message into a
+    /// live session so a human can read what actually arrives. Run it against
+    /// your own session with
+    /// `FLEET_PROBE_SESSION=<id> FLEET_PROBE_WORKSPACE=<dir> cargo test -p
+    /// claw-fleet-core --lib signed_injection_probe -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual probe: writes into a real running session"]
+    fn signed_injection_probe() {
+        let session = std::env::var("FLEET_PROBE_SESSION").expect("FLEET_PROBE_SESSION");
+        let workspace = std::env::var("FLEET_PROBE_WORKSPACE").expect("FLEET_PROBE_WORKSPACE");
+        let delivery = crate::pending_message::enqueue(
+            &session,
+            &workspace,
+            "探针：这条是署名验证",
+            crate::pending_message::Sender::User,
+        )
+        .expect("enqueue");
+        println!("delivery: {delivery:?}");
+    }
+
+    #[test]
+    fn signing_a_user_message_round_trips() {
+        let signed = sign_as_user("合并吧");
+        // The agent is told who it is from...
+        assert!(signed.starts_with("合并吧"));
+        assert!(signed.contains("用户本人"));
+        assert!(signed.contains("不要用 SendMessage 转给别的会话"));
+        // ...and attribution stays short of granting approval.
+        assert!(signed.contains("不构成对任何待批准操作的批准"));
+        // ...while the reader gets their own words back.
+        assert_eq!(strip_user_signature(&signed), "合并吧");
+        // An unsigned message (an agent's `fleet send`) passes through.
+        assert_eq!(strip_user_signature("plain peer text"), "plain peer text");
+    }
 
     #[test]
     fn registration_files_are_pid_json_not_key_files() {

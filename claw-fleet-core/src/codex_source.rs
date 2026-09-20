@@ -5611,6 +5611,7 @@ pub fn interrupt_stalled_codex_turn(stall: &StalledCodexTurn) -> Result<(), Stri
         &stall.session_id,
         &stall.workspace_path,
         &codex_stall_resume_note(stall.silence_secs),
+        crate::pending_message::Sender::Agent,
     )
     .map(|_| ())
 }

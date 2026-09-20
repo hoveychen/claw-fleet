@@ -13,10 +13,10 @@ import {
 } from "../store";
 import { CalendarClock, LoaderCircle, PanelRight } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, isLiveMember, SCHEDULE_ENTRYPOINT } from "../types";
-import type { DecisionHistoryRecord, LiveThinking, NoteFile, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
+import type { DecisionHistoryRecord, Delivery, LiveThinking, NoteFile, RawMessage, SessionInfo, TailDelta, TaskPlanDetail } from "../types";
 import { isRenderableRow } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
-import { landedUserTexts, stillPending } from "../optimisticEcho";
+import { landedUserTexts, shouldEchoSend, stillPending } from "../optimisticEcho";
 import { appendTailDelta } from "../tailDelta";
 import { arrivedSince, nextLiveTail, recordId } from "../liveTailWindow";
 import { withStallWatch } from "../loadDeadline";
@@ -423,18 +423,29 @@ export function SessionDetail({
   }, [resumeGrace]);
 
   // Called by ResumeComposer the moment a follow-up is accepted by the backend.
-  // Only a *resume* is being delivered now, so only it earns a transcript bubble
-  // + poller grace; an *enqueue* is merely queued (turn still running, already
-  // live), and its honest affordance is the "Queued" pending chip.
-  const handleResumed = useCallback((finalPrompt: string, mode: "resume" | "enqueue") => {
-    if (mode !== "resume") return;
+  // A bubble is owed whenever the message is on its way *now*: a resume, or an
+  // enqueue that went straight into the live turn. Only a genuinely queued
+  // message is honestly represented by the "Queued" chip instead — it has not
+  // been delivered yet.
+  //
+  // An injected message does get a real transcript row, but not until the agent
+  // absorbs it at its next tool boundary, which can be minutes into a long tool
+  // call. Without the echo the send looked like it did nothing at all.
+  const handleResumed = useCallback((
+    finalPrompt: string,
+    mode: "resume" | "enqueue",
+    delivery?: Delivery,
+  ) => {
+    if (!shouldEchoSend(mode, delivery)) return;
     const text = finalPrompt.trim();
     if (text) {
       optimisticSeq.current += 1;
       const id = `optimistic-${Date.now()}-${optimisticSeq.current}`;
       setOptimisticSends((prev) => [...prev, { id, text }]);
     }
-    setResumeGrace(true);
+    // Grace is for a cold-starting `claude --resume` only; an injected message
+    // went to a session that is already live and being polled.
+    if (mode === "resume") setResumeGrace(true);
   }, []);
 
   const sessions = useSessionsStore((s) => s.sessions);

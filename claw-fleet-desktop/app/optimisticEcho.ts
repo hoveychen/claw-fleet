@@ -29,6 +29,23 @@ export function landedUserTexts(messages: RawMessage[]): Set<string> {
   return set;
 }
 
+/**
+ * Whether a send earns an immediate bubble.
+ *
+ * A resume does: the agent is cold-starting and will not write the record for
+ * seconds. An enqueue does too — but only when it was *injected* into the live
+ * turn, because the receiving CLI does not write its record until it absorbs
+ * the message at its next tool boundary, which on a long tool call is minutes
+ * away. A genuinely queued message has not been delivered at all, and its
+ * honest affordance is the "queued" chip, not a bubble.
+ */
+export function shouldEchoSend(
+  mode: "resume" | "enqueue",
+  delivery?: "injected" | "queued",
+): boolean {
+  return mode === "resume" || delivery === "injected";
+}
+
 /** Whether one echoed text is still waiting for its real transcript row. */
 export function stillPending(text: string, landed: Set<string>): boolean {
   return !landed.has(text.trim());
