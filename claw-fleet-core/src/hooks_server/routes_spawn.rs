@@ -86,10 +86,12 @@ pub(crate) fn route_enqueue_message(
     let mut buf = String::new();
     let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
     match serde_json::from_str::<crate::pending_message::EnqueueMessageRequest>(&buf) {
+        // Behind this route is the browser build's composer — a person typing.
         Ok(req) => match crate::pending_message::enqueue(
             &req.session_id,
             &req.workspace_path,
             &req.text,
+            crate::pending_message::Sender::User,
         ) {
             Ok(delivery) => {
                 let body = serde_json::json!({ "ok": true, "delivery": delivery }).to_string();

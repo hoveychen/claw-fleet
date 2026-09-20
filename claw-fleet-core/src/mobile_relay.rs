@@ -3149,7 +3149,13 @@ fn serve_enqueue_message(params: &Value) -> Result<Value, String> {
     let req: crate::pending_message::EnqueueMessageRequest =
         serde_json::from_value(params.clone())
             .map_err(|e| format!("bad enqueue_message params: {e}"))?;
-    let delivery = crate::pending_message::enqueue(&req.session_id, &req.workspace_path, &req.text)?;
+    // The phone's composer is a person typing, same as the desktop's.
+    let delivery = crate::pending_message::enqueue(
+        &req.session_id,
+        &req.workspace_path,
+        &req.text,
+        crate::pending_message::Sender::User,
+    )?;
     Ok(json!({ "ok": true, "delivery": delivery }))
 }
 

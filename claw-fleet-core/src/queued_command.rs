@@ -47,7 +47,11 @@ pub fn unfold(message: &mut Value) {
     let Some(prompt) = attachment.get("prompt").and_then(Value::as_str) else {
         return;
     };
-    let prompt = prompt.to_string();
+    // Fleet signs the messages it injects on the user's behalf, to undo the
+    // CLI's "not typed by your user" framing (see `live_inject::USER_SIGNATURE`).
+    // That line is addressed to the agent, not to the reader — the bubble shows
+    // what the user actually typed.
+    let prompt = crate::live_inject::strip_user_signature(prompt.trim_end()).to_string();
     if prompt.trim().is_empty() {
         return;
     }
@@ -119,6 +123,16 @@ mod tests {
         let before = msg.clone();
         unfold(&mut msg);
         assert_eq!(msg, before);
+    }
+
+    /// The signature is guidance for the agent; showing it back to the person
+    /// who typed the message would be noise they never wrote.
+    #[test]
+    fn the_senders_signature_is_stripped_from_the_bubble() {
+        let signed = crate::live_inject::sign_as_user("合并吧");
+        let mut msg = row(json!({"kind": "peer", "from": "unknown"}), &signed);
+        unfold(&mut msg);
+        assert_eq!(msg["message"]["content"][0]["text"], "合并吧");
     }
 
     #[test]
