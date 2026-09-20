@@ -354,7 +354,8 @@ export type ElicitationQuestion = { question: string, header: string, options: A
 
 export type ElicitationRequest = { id: string, sessionId: string, workspaceName: string, 
 aiTitle?: string | null, questions: Array<ElicitationQuestion>, timestamp: string, 
-parked?: boolean, };
+parked?: boolean, 
+turnCompletion?: boolean, };
 
 export type FleetAskRequest = { id: string, 
 sessionId: string, workspaceName: string, aiTitle?: string | null, timestamp: string, 
@@ -406,7 +407,7 @@ toolName: string,
 toolInput: unknown, 
 toolUseId?: string | null, };
 
-export type ElicitationOutcome = "answered" | "declined" | "heartbeat-lost" | "timeout";
+export type ElicitationOutcome = "answered" | "declined" | "task-completed" | "task-abandoned" | "heartbeat-lost" | "timeout";
 
 export type PlanApprovalOutcome = "approved" | "approved-with-edits" | "rejected" | "heartbeat-lost" | "timeout";
 

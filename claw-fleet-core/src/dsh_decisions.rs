@@ -435,6 +435,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
                 questions: cards,
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 parked: false,
+                turn_completion: false,
             };
             match crate::elicitation::write_request(&request) {
                 Ok(()) => {
@@ -525,11 +526,7 @@ fn collect_answers(
 /// turn-completion-card check and the daily report see dsh cards like every
 /// other source's.
 fn record_question_history(request: &ElicitationRequest, resp: &ElicitationResponse) {
-    let outcome = if resp.declined {
-        ElicitationOutcome::Declined
-    } else {
-        ElicitationOutcome::Answered
-    };
+    let outcome = ElicitationOutcome::for_resolution(resp.declined, resp.task_outcome);
     let record = build_elicitation_record(
         request,
         outcome,
@@ -564,8 +561,15 @@ fn send_question(
     resp: &ElicitationResponse,
 ) -> Result<(), String> {
     if resp.declined {
+        // A card ended with its terminal button refuses with the terminal
+        // notice instead, so the agent stops rather than rephrasing the
+        // question — same wording every other harness gets.
+        let message = match resp.task_outcome {
+            Some(o) => o.terminal_notice(),
+            None => DECLINED_MESSAGE,
+        };
         return client
-            .refuse_event(client_id, event_id, DECLINED_MESSAGE)
+            .refuse_event(client_id, event_id, message)
             .map_err(Into::into);
     }
     // Positional: the server checks answer[i].id against questions[i].id, so the

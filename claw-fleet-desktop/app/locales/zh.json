@@ -2300,6 +2300,8 @@
     "title": "Agent 提问",
     "submit": "提交",
     "decline": "拒绝",
+    "finish_task": "结束任务",
+    "finish_task_tooltip": "老板在这里收工。结束后本会话标记为「已完成」，并告诉 agent 停手。",
     "next": "下一题",
     "back": "上一题",
     "other": "其他",

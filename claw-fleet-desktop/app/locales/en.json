@@ -2303,6 +2303,8 @@
     "title": "Agent Question",
     "submit": "Submit",
     "decline": "Decline",
+    "finish_task": "Finish task",
+    "finish_task_tooltip": "Ending here marks this session complete and tells the agent to stop.",
     "next": "Next",
     "back": "Back",
     "other": "Other",

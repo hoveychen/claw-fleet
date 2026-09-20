@@ -120,8 +120,7 @@ pub(crate) fn route_elicitation_respond(
                         // A parked card has no producer left polling for a response
                         // file, so `deliver` resumes the session with the answer
                         // instead (or drops the card when the user dismissed it).
-                        let outcome =
-                            crate::parked::deliver(&resp.id, &resp, resp.declined, elicitation::write_response);
+                        let outcome = elicitation::deliver_response(&resp);
                         match outcome {
                             Ok(()) => {
                                 // Don't cleanup here — the `fleet elicitation` CLI

@@ -3340,23 +3340,20 @@ impl LocalBackend {
         id: &str,
         declined: bool,
         answers: std::collections::HashMap<String, String>,
+        task_outcome: Option<claw_fleet_core::task_outcome::TaskOutcome>,
     ) -> Result<(), String> {
         let resp = crate::elicitation::ElicitationResponse {
             id: id.to_string(),
             declined,
             answers,
+            task_outcome,
         };
         // A parked card has no producer left polling for a response file: the
-        // hook that asked timed out and its turn was interrupted. Resolving it
-        // resumes the session with the answer instead (or, if the user declined,
-        // just drops the question).
-        let result = claw_fleet_core::parked::deliver(
-            id,
-            &resp,
-            declined,
-            crate::elicitation::write_response,
-        );
-        result
+        // hook that asked timed out and its turn was interrupted. `deliver_response`
+        // stamps the task's terminal state (when the card was ended with its
+        // terminal button) and then resumes the session with the answer instead
+        // (or, if the user declined, just drops the question).
+        crate::elicitation::deliver_response(&resp)
     }
 
     pub fn respond_to_fleet_ask(

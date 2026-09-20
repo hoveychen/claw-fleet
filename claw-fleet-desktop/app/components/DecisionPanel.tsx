@@ -701,6 +701,19 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
     () => declineElicitation(decision.id),
     [declineElicitation, decision.id],
   );
+  // Terminal button, on the turn-completion card only: that card is raised
+  // because the session finished its turn and is waiting for input, so ending
+  // the task is a verdict the boss can actually make. A mid-turn
+  // AskUserQuestion card has an agent blocked on an answer and keeps its
+  // original Submit / Decline pair.
+  //
+  // These cards carry no `taskComplete` claim the way fleet__ask does, so the
+  // button always closes the task as complete.
+  const canTerminate = request.turnCompletion === true;
+  const handleTerminate = useCallback(
+    () => declineElicitation(decision.id, "completed"),
+    [declineElicitation, decision.id],
+  );
 
   return (
     <div className={`${styles.card} ${styles.card_flex}`}>
@@ -840,6 +853,18 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
 
         {parked && <ParkedBanner />}
         <div className={styles.actions}>
+        {canTerminate && (
+          <button
+            className={`${styles.btn} ${styles.btn_finish}`}
+            onClick={handleTerminate}
+            title={t(
+              "elicitation.finish_task_tooltip",
+              "Ending here marks this session complete.",
+            )}
+          >
+            {t("elicitation.finish_task", "Finish task")}
+          </button>
+        )}
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}
           onClick={handleDecline}

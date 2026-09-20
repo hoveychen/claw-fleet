@@ -203,6 +203,7 @@ pub fn build_turn_card(session: &SessionInfo, last_text: &str) -> ElicitationReq
         }],
         timestamp: chrono::Utc::now().to_rfc3339(),
         parked: false,
+        turn_completion: true,
     }
 }
 
