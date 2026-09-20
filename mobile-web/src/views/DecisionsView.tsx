@@ -29,6 +29,7 @@ import type {
   CommandLeaf,
   ContentBlock,
   ElicitationQuestion,
+  ElicitationRequest,
   FleetAskFormField,
   FleetAskQuestion,
   FleetAskRequest,
@@ -1184,8 +1185,9 @@ function QuestionsCard({
 
   // v3 决策卡:fleet__ask 的那颗结束按钮是一等的、永远在的,不占 options 名额。
   // agent 的 `taskComplete` 只决定它是「结束任务」(会话记成功) 还是「放弃任务」
-  // (会话记未完成)。elicitation(AskUserQuestion)没有这个轴 —— 它另有一颗独立的
-  // 「结束任务」按钮,与「拒绝回答」并排,永远记成 completed。
+  // (会话记未完成)。elicitation 没有这个轴 —— 只有「等待输入」时弹出的任务完成卡
+  // (turnCompletion) 另有一颗独立的「结束任务」按钮,与「拒绝回答」并排,永远记成
+  // completed;agent 中途提问的那种卡保持原样。
   const taskComplete = isFleetAsk && (request as FleetAskRequest).taskComplete === true;
   const doSubmit = (declined: boolean, terminal = false) => {
     if (declined) {
@@ -1409,7 +1411,7 @@ function QuestionsCard({
       ))}
       {error && <div className={styles.error}>{error}</div>}
       <div className={styles.actions}>
-        {!isFleetAsk && (
+        {!isFleetAsk && (request as ElicitationRequest).turnCompletion === true && (
           <button
             className={`${styles.ghostButton} ${styles.finishButton}`}
             onClick={() => doSubmit(true, true)}

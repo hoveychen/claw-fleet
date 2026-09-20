@@ -1229,6 +1229,7 @@ mod tests {
     fn sample_request(session_id: &str, id: &str) -> ElicitationRequest {
         ElicitationRequest {
             parked: false,
+            turn_completion: false,
             id: id.into(),
             session_id: session_id.into(),
             workspace_name: "claude-fleet".into(),
@@ -1742,6 +1743,7 @@ mod tests {
     fn recommended_request(session_id: &str, id: &str) -> ElicitationRequest {
         ElicitationRequest {
             parked: false,
+            turn_completion: false,
             id: id.into(),
             session_id: session_id.into(),
             workspace_name: "claude-fleet".into(),

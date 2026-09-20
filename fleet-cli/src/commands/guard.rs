@@ -317,6 +317,7 @@ pub(crate) fn cmd_elicitation() {
         questions,
         timestamp: chrono::Utc::now().to_rfc3339(),
         parked: false,
+        turn_completion: false,
     };
 
     if let Err(e) = elicitation::write_request(&req) {

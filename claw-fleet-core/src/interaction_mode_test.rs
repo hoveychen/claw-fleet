@@ -69,6 +69,7 @@ pub fn build_test_request() -> ElicitationRequest {
         }],
         timestamp: chrono::Utc::now().to_rfc3339(),
         parked: false,
+        turn_completion: false,
     }
 }
 

@@ -435,6 +435,7 @@ fn handle_frame(client: &DshClient, pending: &mut HashMap<String, Pending>, fram
                 questions: cards,
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 parked: false,
+                turn_completion: false,
             };
             match crate::elicitation::write_request(&request) {
                 Ok(()) => {

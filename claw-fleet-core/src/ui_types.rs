@@ -401,6 +401,7 @@ mod tests {
         let mut pending = PendingDecisions::default();
         pending.elicitation.push(ElicitationRequest {
             parked: false,
+            turn_completion: false,
             id: "e1".into(),
             session_id: "s1".into(),
             workspace_name: String::new(),
@@ -425,6 +426,7 @@ mod tests {
         let mut pending = PendingDecisions::default();
         pending.elicitation.push(ElicitationRequest {
             parked: false,
+            turn_completion: false,
             id: "e1".into(),
             session_id: "s1".into(),
             workspace_name: String::new(),
@@ -448,6 +450,7 @@ mod tests {
         // Already-populated workspace must be preserved.
         pending.elicitation.push(ElicitationRequest {
             parked: false,
+            turn_completion: false,
             id: "e1".into(),
             session_id: "s1".into(),
             workspace_name: "preset-ws".into(),
@@ -458,6 +461,7 @@ mod tests {
         // Unknown session → left as-is (empty), no panic.
         pending.elicitation.push(ElicitationRequest {
             parked: false,
+            turn_completion: false,
             id: "e2".into(),
             session_id: "missing".into(),
             workspace_name: String::new(),

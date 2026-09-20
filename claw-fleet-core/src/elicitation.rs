@@ -57,6 +57,15 @@ pub struct ElicitationRequest {
     /// Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub parked: bool,
+    /// Raised by [`crate::turn_completion_card`] because the session finished a
+    /// turn and is waiting for input — not by an agent asking a question.
+    ///
+    /// Only these cards carry the terminal button: the session is idle, so
+    /// "the boss is done with this task" is a verdict they can actually make.
+    /// A mid-turn `AskUserQuestion` card has an agent blocked on an answer and
+    /// keeps the pre-existing Submit / Decline pair.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub turn_completion: bool,
 }
 
 /// Written by Fleet desktop app → read by `fleet elicitation`.
@@ -312,6 +321,8 @@ mod tests {
             questions: Vec::new(),
             timestamp: "2026-07-16T00:00:00Z".to_string(),
             parked: false,
+            // The terminal button only ever appears on these cards.
+            turn_completion: true,
         })
         .unwrap();
     }
