@@ -1570,8 +1570,13 @@ interface DecisionState {
   ) => Promise<void>;
   /** Submit elicitation answers. */
   submitElicitation: (id: string) => Promise<void>;
-  /** Decline an elicitation. */
-  declineElicitation: (id: string) => Promise<void>;
+  /**
+   * Decline an elicitation. `taskOutcome` is set when the card was resolved
+   * with its terminal button rather than the Decline button — Fleet stamps it
+   * onto the session (and the whole handoff chain) and the agent is told the
+   * task is over instead of "the user declined to answer".
+   */
+  declineElicitation: (id: string, taskOutcome?: TaskOutcome | null) => Promise<void>;
   /** Submit fleet__ask answers (options + form fields) back to the MCP server. */
   submitFleetAsk: (id: string) => Promise<void>;
   /**
@@ -2036,11 +2041,16 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     );
   },
 
-  declineElicitation: async (id) => {
+  declineElicitation: async (id, taskOutcome) => {
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
     fireDecisionResponse("respond_to_elicitation (decline)", () =>
-      invoke("respond_to_elicitation", { id, declined: true, answers: {} }),
+      invoke("respond_to_elicitation", {
+        id,
+        declined: true,
+        answers: {},
+        taskOutcome: taskOutcome ?? null,
+      }),
     );
   },
 

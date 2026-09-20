@@ -701,6 +701,13 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
     () => declineElicitation(decision.id),
     [declineElicitation, decision.id],
   );
+  // Terminal button. AskUserQuestion carries no `taskComplete` claim the way
+  // fleet__ask does, so this card's button always closes the task as complete:
+  // a card the user walks up to and ends is one they consider finished.
+  const handleTerminate = useCallback(
+    () => declineElicitation(decision.id, "completed"),
+    [declineElicitation, decision.id],
+  );
 
   return (
     <div className={`${styles.card} ${styles.card_flex}`}>
@@ -840,6 +847,16 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
 
         {parked && <ParkedBanner />}
         <div className={styles.actions}>
+        <button
+          className={`${styles.btn} ${styles.btn_finish}`}
+          onClick={handleTerminate}
+          title={t(
+            "elicitation.finish_task_tooltip",
+            "Ending here marks this session complete.",
+          )}
+        >
+          {t("elicitation.finish_task", "Finish task")}
+        </button>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}
           onClick={handleDecline}
