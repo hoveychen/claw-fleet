@@ -16,7 +16,7 @@ import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
 import { isWebBuild } from "../hostEnv";
 import { DirPickerDialog } from "./DirPickerDialog";
-import type { SessionInfo } from "../types";
+import type { Delivery, SessionInfo } from "../types";
 import styles from "./ResumeComposer.module.css";
 
 function basename(p: string): string {
@@ -49,10 +49,16 @@ export function ResumeComposer({
    *  while the turn is running. */
   session?: SessionInfo;
   /** Fired the moment the backend accepts the follow-up, with the final prompt
-   *  text (including any appended attachment context) and which mode delivered
-   *  it. The parent echoes a resume as an optimistic user bubble while
-   *  `claude --resume` cold-starts; an enqueue keeps its "queued" chip instead. */
-  onResumed: (finalPrompt: string, mode: "resume" | "enqueue") => void;
+   *  text (including any appended attachment context), which mode delivered it
+   *  and — for an enqueue — which of the two ways it actually landed. The
+   *  parent echoes an optimistic user bubble for a resume and for an enqueue
+   *  that went straight into the live turn; only a genuinely queued message
+   *  gets the "queued" chip instead. */
+  onResumed: (
+    finalPrompt: string,
+    mode: "resume" | "enqueue",
+    delivery?: Delivery,
+  ) => void;
   /** `"resume"`: the turn ended, submit spawns `claude --resume` now.
    *  `"enqueue"`: the turn is still running, submit queues the message to be
    *  delivered when the turn ends (see `pending_message`). */
@@ -183,14 +189,18 @@ export function ResumeComposer({
     }
     setSubmitting(true);
     setError(null);
+    let delivery: Delivery | undefined;
     try {
       if (enqueueing) {
         // Turn still running: the backend writes it into the live turn when it
-        // can, and falls back to the queue otherwise — the queued chips render
-        // off the session snapshot, so only the fallback shows anything here.
+        // can, and falls back to the queue otherwise. Which of the two happened
+        // decides the affordance — a queued message gets its chip off the
+        // session snapshot, an injected one gets an optimistic bubble from the
+        // parent (its real transcript row only lands when the agent absorbs it,
+        // which can be minutes into a long tool call).
         // Model/effort are carried from the session's own launch flags at drain
         // time, so no overrides here.
-        await invoke("enqueue_session_message", {
+        delivery = await invoke<Delivery>("enqueue_session_message", {
           sessionId,
           workspacePath,
           text: finalPrompt,
@@ -207,7 +217,7 @@ export function ResumeComposer({
         });
       }
       clear();
-      onResumed(finalPrompt, mode);
+      onResumed(finalPrompt, mode, delivery);
     } catch (e) {
       setError(String((e as { message?: string })?.message ?? e));
     } finally {

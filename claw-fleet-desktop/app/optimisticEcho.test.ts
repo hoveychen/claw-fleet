@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { landedUserTexts, stillPending } from "./optimisticEcho";
+import { landedUserTexts, shouldEchoSend, stillPending } from "./optimisticEcho";
 import type { RawMessage } from "./types";
 
 function user(text: string, isMeta?: boolean): RawMessage {
@@ -10,6 +10,17 @@ function user(text: string, isMeta?: boolean): RawMessage {
     ...(isMeta ? { isMeta: true } : {}),
   } as RawMessage;
 }
+
+describe("shouldEchoSend", () => {
+  it("echoes a resume and an injected enqueue, but not a queued one", () => {
+    expect(shouldEchoSend("resume")).toBe(true);
+    expect(shouldEchoSend("enqueue", "injected")).toBe(true);
+    // Not delivered yet — the pending chip is the honest affordance.
+    expect(shouldEchoSend("enqueue", "queued")).toBe(false);
+    // A backend too old to report which path it took: keep the old behaviour.
+    expect(shouldEchoSend("enqueue")).toBe(false);
+  });
+});
 
 describe("landedUserTexts", () => {
   it("counts a real user bubble as landed", () => {
@@ -30,6 +41,15 @@ describe("landedUserTexts", () => {
   it("does not count a folded meta row as the user's prompt", () => {
     const landed = landedUserTexts([user("修一下花费明细", true)]);
     expect(stillPending("修一下花费明细", landed)).toBe(true);
+  });
+
+  it("counts a mid-turn injected message once its rewritten row lands", () => {
+    // Core rewrites the CLI's `queued_command` attachment row into this plain
+    // user record (see `queued_command.rs`), which is what retires the echo.
+    const landed = landedUserTexts([
+      { ...user("改成蓝色"), fleetMidTurn: true } as RawMessage,
+    ]);
+    expect(stillPending("改成蓝色", landed)).toBe(false);
   });
 
   it("ignores assistant rows", () => {
