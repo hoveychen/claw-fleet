@@ -240,6 +240,129 @@ fn list_pending_in_dir(dir: &std::path::Path) -> std::io::Result<Vec<String>> {
 mod tests {
     use super::*;
 
+    /// Scoped `FLEET_HOME` + `CODEX_HOME`, so a test's cards, task outcomes and
+    /// session marks land in a private directory. Mirrors `mcp_ipc`'s helper.
+    struct TmpHome {
+        dir: std::path::PathBuf,
+        previous_fleet: Option<std::ffi::OsString>,
+        previous_codex: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TmpHome {
+        fn new(tag: &str) -> Self {
+            let lock = crate::session::fleet_home_lock();
+            let dir = fresh_tmp_dir(tag);
+            std::fs::create_dir_all(&dir).unwrap();
+            let previous_fleet = std::env::var_os("FLEET_HOME");
+            let previous_codex = std::env::var_os("CODEX_HOME");
+            unsafe {
+                std::env::set_var("FLEET_HOME", &dir);
+                std::env::set_var("CODEX_HOME", dir.join(".codex"));
+            }
+            Self { dir, previous_fleet, previous_codex, _lock: lock }
+        }
+
+        fn plant_codex_session(&self, id: &str, workspace: &std::path::Path) {
+            let sessions = self.dir.join(".codex/sessions/2026/07/16");
+            std::fs::create_dir_all(&sessions).unwrap();
+            let record = serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": id,
+                    "session_id": id,
+                    "originator": "fleet",
+                    "cwd": workspace,
+                    "source": "exec"
+                }
+            });
+            std::fs::write(
+                sessions.join(format!("rollout-2026-07-16T00-00-00-{id}.jsonl")),
+                format!("{record}\n"),
+            )
+            .unwrap();
+        }
+    }
+
+    impl Drop for TmpHome {
+        fn drop(&mut self) {
+            unsafe {
+                match self.previous_fleet.take() {
+                    Some(value) => std::env::set_var("FLEET_HOME", value),
+                    None => std::env::remove_var("FLEET_HOME"),
+                }
+                match self.previous_codex.take() {
+                    Some(value) => std::env::set_var("CODEX_HOME", value),
+                    None => std::env::remove_var("CODEX_HOME"),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn planted_request(home: &TmpHome, card_id: &str, session_id: &str) {
+        let workspace = home.dir.join("ws");
+        std::fs::create_dir_all(&workspace).unwrap();
+        home.plant_codex_session(session_id, &workspace);
+        write_request(&ElicitationRequest {
+            id: card_id.to_string(),
+            session_id: session_id.to_string(),
+            workspace_name: String::new(),
+            ai_title: None,
+            questions: Vec::new(),
+            timestamp: "2026-07-16T00:00:00Z".to_string(),
+            parked: false,
+        })
+        .unwrap();
+    }
+
+    /// The card's terminal button closes the task, so the session (and the
+    /// whole handoff chain behind it) has to carry the terminal state — the
+    /// same contract `fleet__ask` cards already have.
+    #[test]
+    fn terminal_button_stamps_outcome_and_mark() {
+        let home = TmpHome::new("terminal-one");
+        planted_request(&home, "card-elicit-1", "sess-elicit-1");
+
+        deliver_response(&ElicitationResponse {
+            id: "card-elicit-1".into(),
+            declined: true,
+            answers: HashMap::new(),
+            task_outcome: Some(crate::task_outcome::TaskOutcome::Completed),
+        })
+        .unwrap();
+
+        let rec = crate::task_outcome::read("sess-elicit-1").expect("outcome stamped");
+        assert_eq!(rec.outcome, crate::task_outcome::TaskOutcome::Completed);
+        assert_eq!(rec.card_id, "card-elicit-1");
+        // AskUserQuestion has no `taskComplete` claim to carry over: the user
+        // ended the task, the agent never said it was done.
+        assert!(!rec.agent_claimed_complete);
+        assert_eq!(
+            crate::session_mark::read("sess-elicit-1"),
+            Some(crate::session_mark::SessionMark::Done),
+            "reaching a terminal state also clears the needs-review chore"
+        );
+    }
+
+    /// Declining to answer one question is not a verdict on the task.
+    #[test]
+    fn plain_decline_stamps_nothing() {
+        let home = TmpHome::new("terminal-none");
+        planted_request(&home, "card-elicit-2", "sess-elicit-2");
+
+        deliver_response(&ElicitationResponse {
+            id: "card-elicit-2".into(),
+            declined: true,
+            answers: HashMap::new(),
+            task_outcome: None,
+        })
+        .unwrap();
+
+        assert!(crate::task_outcome::read("sess-elicit-2").is_none());
+        assert_eq!(crate::session_mark::read("sess-elicit-2"), None);
+    }
+
     fn fresh_tmp_dir(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "fleet-elicit-{}-{}-{}",
