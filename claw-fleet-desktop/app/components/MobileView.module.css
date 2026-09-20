@@ -216,6 +216,15 @@
   color: var(--color-text-dim);
 }
 
+/* The host in force, on its own line under the hint — the option labels no
+   longer carry it. */
+.relayHost {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
 .urlInput {
   flex: 1;
   background: var(--color-bg-field);

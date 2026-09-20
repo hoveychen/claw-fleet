@@ -315,13 +315,10 @@ export function MobileView() {
                 }}
               >
                 <option value="global">
-                  {t("mobile_relay_preset_global", "Global（海外）· fleet-relay.muveeai.com")}
+                  {t("mobile_relay_preset_global", "Global（海外默认）")}
                 </option>
                 <option value="cn">
-                  {t(
-                    "mobile_relay_preset_cn",
-                    "China-optimized（国内）· fleet-relay.eternizedlab.com",
-                  )}
+                  {t("mobile_relay_preset_cn", "China-optimized（国内默认）")}
                 </option>
                 <option value="custom">{t("mobile_relay_preset_custom", "自定义地址…")}</option>
               </select>
@@ -349,18 +346,15 @@ export function MobileView() {
               </div>
             )}
 
+            {/* The hostnames the options used to spell out live here instead —
+                the option labels stay short, and the host in force is still on
+                screen (for "custom" the text box above already shows it). */}
             <p className={styles.relayHint}>
               {relayChoice === "cn"
-                ? t(
-                    "mobile_relay_hint_cn",
-                    "国内默认：经大陆反向代理接入，境内网络更稳。",
-                  )
+                ? t("mobile_relay_hint_cn", "经大陆反向代理接入，境内网络更稳。")
                 : relayChoice === "custom"
                   ? t("mobile_relay_hint_custom", "自建或自托管的 relay 地址。")
-                  : t(
-                      "mobile_relay_hint_global",
-                      "海外默认：直连 relay 主机，不经额外中转。",
-                    )}
+                  : t("mobile_relay_hint_global", "直连 relay 主机，不经额外中转。")}
               {relayChoice !== "custom" && (
                 <>
                   {" "}
@@ -368,6 +362,7 @@ export function MobileView() {
                     "mobile_relay_hint_shared",
                     "两个预设指向同一个 relay，只是网络路径不同；已配对的手机需重新扫码才会走新地址。",
                   )}
+                  <code className={styles.relayHost}>{config.relayUrl}</code>
                 </>
               )}
             </p>
