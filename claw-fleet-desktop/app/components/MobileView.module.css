@@ -197,10 +197,23 @@
   flex-shrink: 0;
 }
 
-.urlValue {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Relay host dropdown — the two presets plus "custom". Wide enough that the
+   longest option (the label plus its hostname) is not clipped. */
+.relaySelect {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  color: var(--color-text);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.relayHint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-text-dim);
 }
 
 .urlInput {

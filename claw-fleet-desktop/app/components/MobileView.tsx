@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "./PageShell";
 import { useUIStore } from "../store";
+import { RELAY_PRESETS, relayChoiceOf, type RelayChoice } from "../relayPresets";
 import styles from "./MobileView.module.css";
 
 interface MobileRelayConfig {
@@ -187,6 +188,12 @@ export function MobileView() {
     );
   }
 
+  // Which dropdown entry is showing. `editingUrl` is the sticky "the user asked
+  // for the custom box" bit — without it, typing a preset's own URL into the box
+  // would collapse the box mid-edit.
+  const storedChoice = relayChoiceOf(config.relayUrl);
+  const relayChoice: RelayChoice = editingUrl ? "custom" : storedChoice;
+
   return (
     <PageShell view="mobile" title={t("mobile_title", "移动端")}>
       <div className={styles.container}>
@@ -289,34 +296,81 @@ export function MobileView() {
 
             <div className={styles.fieldRow}>
               <span className={styles.fieldLabel}>{t("mobile_relay_url", "Relay 地址")}</span>
-              {editingUrl ? (
+              <select
+                className={styles.relaySelect}
+                value={relayChoice}
+                disabled={busy}
+                onChange={(e) => {
+                  const choice = e.target.value as RelayChoice;
+                  if (choice === "custom") {
+                    // Seed the box with the host in force, so switching to
+                    // custom is an edit of the current address, not a blank.
+                    setUrlDraft(config.relayUrl);
+                    setEditingUrl(true);
+                    return;
+                  }
+                  setEditingUrl(false);
+                  const preset = RELAY_PRESETS.find((p) => p.key === choice);
+                  if (preset) void applyConfig({ relayUrl: preset.url });
+                }}
+              >
+                <option value="global">
+                  {t("mobile_relay_preset_global", "Global（海外）· fleet-relay.muveeai.com")}
+                </option>
+                <option value="cn">
+                  {t(
+                    "mobile_relay_preset_cn",
+                    "China-optimized（国内）· fleet-relay.eternizedlab.com",
+                  )}
+                </option>
+                <option value="custom">{t("mobile_relay_preset_custom", "自定义地址…")}</option>
+              </select>
+            </div>
+
+            {relayChoice === "custom" && (
+              <div className={styles.fieldRow}>
+                <input
+                  className={styles.urlInput}
+                  value={urlDraft}
+                  onChange={(e) => setUrlDraft(e.target.value)}
+                  placeholder="https://…"
+                  spellCheck={false}
+                />
+                <button
+                  className={styles.smallButton}
+                  disabled={busy || !urlDraft.trim()}
+                  onClick={() => {
+                    setEditingUrl(false);
+                    void applyConfig({ relayUrl: urlDraft.trim() });
+                  }}
+                >
+                  {t("save", "保存")}
+                </button>
+              </div>
+            )}
+
+            <p className={styles.relayHint}>
+              {relayChoice === "cn"
+                ? t(
+                    "mobile_relay_hint_cn",
+                    "国内默认：经大陆反向代理接入，境内网络更稳。",
+                  )
+                : relayChoice === "custom"
+                  ? t("mobile_relay_hint_custom", "自建或自托管的 relay 地址。")
+                  : t(
+                      "mobile_relay_hint_global",
+                      "海外默认：直连 relay 主机，不经额外中转。",
+                    )}
+              {relayChoice !== "custom" && (
                 <>
-                  <input
-                    className={styles.urlInput}
-                    value={urlDraft}
-                    onChange={(e) => setUrlDraft(e.target.value)}
-                    spellCheck={false}
-                  />
-                  <button
-                    className={styles.smallButton}
-                    disabled={busy}
-                    onClick={() => {
-                      setEditingUrl(false);
-                      void applyConfig({ relayUrl: urlDraft.trim() });
-                    }}
-                  >
-                    {t("save", "保存")}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <code className={styles.urlValue}>{config.relayUrl}</code>
-                  <button className={styles.smallButton} onClick={() => setEditingUrl(true)}>
-                    {t("edit", "编辑")}
-                  </button>
+                  {" "}
+                  {t(
+                    "mobile_relay_hint_shared",
+                    "两个预设指向同一个 relay，只是网络路径不同；已配对的手机需重新扫码才会走新地址。",
+                  )}
                 </>
               )}
-            </div>
+            </p>
 
             <div className={styles.dangerZone}>
               <button className={styles.dangerButton} disabled={busy} onClick={() => void rotate()}>

@@ -8,6 +8,7 @@
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { localDateKey } from "../localDate";
+import { RELAY_URL_GLOBAL } from "../relayPresets";
 import type { RawMessage, SessionInfo } from "../types";
 import type { LiveThinking } from "../generated/types";
 import type { PromoScene } from "./promo-scene";
@@ -138,6 +139,10 @@ function guardAnalysisFor(command: string): string {
 }
 
 let spawnCounter = 0;
+
+// Relay host the Mobile panel shows, mutated by set_mobile_relay_config so the
+// host dropdown is actually switchable under ?mock.
+let mockRelayUrl = RELAY_URL_GLOBAL;
 
 // The ssh host book and the rca workspace registry, in-memory so the whole
 // flow (add a host, browse it, register a workspace, badge the session) is
@@ -1113,21 +1118,25 @@ async function handleIPC(
       return (chainId && (RELAY_CHAINS[chainId] || MOCK_HANDOFF_CHAINS[chainId])) || null;
     }
 
-    // ── Mobile relay (Mobile 板块; static demo values) ──
+    // ── Mobile relay (Mobile 板块; demo values) ──
+    // The relay URL echoes what was set and starts at the real global host, so
+    // the host dropdown demos its actual states instead of always reading as
+    // "custom".
     case "get_mobile_relay_config":
-    case "set_mobile_relay_config":
+      return { enabled: true, relayUrl: mockRelayUrl, secret: "demo-pairing-secret" };
+    case "set_mobile_relay_config": {
+      const cfg = args.cfg as { relayUrl?: string } | undefined;
+      if (cfg?.relayUrl) mockRelayUrl = cfg.relayUrl;
+      return { enabled: true, relayUrl: mockRelayUrl, secret: "demo-pairing-secret" };
+    }
     case "rotate_mobile_relay_secret":
-      return {
-        enabled: true,
-        relayUrl: "https://fleet-relay.example.com",
-        secret: "demo-pairing-secret",
-      };
+      return { enabled: true, relayUrl: mockRelayUrl, secret: "demo-pairing-secret" };
     case "mobile_relay_status":
       return {
         enabled: true,
         connected: true,
         clients: 2,
-        relayUrl: "https://fleet-relay.example.com",
+        relayUrl: mockRelayUrl,
         secretSet: true,
         devices: [
           { clientId: "dev-iphone", label: "iPhone 15 Pro", platform: "ios", pushSubscribed: true, connectedAtMs: Date.now() - 3_600_000, lastSeenMs: Date.now() - 4_000, appCommit: "abc1234" },
