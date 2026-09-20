@@ -89,15 +89,21 @@ fn handle_line(line: &str) -> Option<String> {
 
 fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
     match method {
-        "initialize" => Ok(json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": { "tools": {} },
-            "serverInfo": {
-                "name": SERVER_NAME,
-                "version": env!("CARGO_PKG_VERSION"),
-            },
-        })),
-        "tools/list" => Ok(tools_list_result(session_is_fleet_owned())),
+        "initialize" => {
+            remember_client(params);
+            Ok(json!({
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": { "tools": {} },
+                "serverInfo": {
+                    "name": SERVER_NAME,
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+            }))
+        }
+        "tools/list" => Ok(tools_list_result(
+            session_is_fleet_owned(),
+            client_has_native_image_gen(),
+        )),
         "tools/call" => handle_tool_call(params),
         other => Err(JsonRpcError {
             code: -32601,
@@ -106,8 +112,15 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
     }
 }
 
-/// The tools every session sees, Fleet-owned or not: the four UI tools plus the
-/// two image tools. Exported as a registry for the same reason
+/// The tools a session sees regardless of whether Fleet launched it: the four
+/// UI tools plus the two image tools.
+///
+/// "Always on" is about the Fleet-owned gate, not about every client — the two
+/// image tools are withheld from a harness that ships its own image generation
+/// (see [`client_has_native_image_gen`]). The four UI tools have no such
+/// equivalent anywhere and really are unconditional.
+///
+/// Exported as a registry for the same reason
 /// [`crate::mcp_control::CONTROL_TOOL_NAMES`] is — tests that want "how many
 /// tools should a session see" must read it from here rather than hardcode a
 /// count. Both halves have now drifted once: `fleet__inspect` / `fleet__control`
@@ -136,19 +149,65 @@ pub const ALWAYS_ON_TOOL_NAMES: [&str; 6] = [
 /// `fleet …` is routed to a remote executor with no `fleet`; an MCP call reaches
 /// this local server that owns the local state). Split from `dispatch` so the
 /// gating is testable without mutating process env.
-fn tools_list_result(fleet_owned: bool) -> Value {
+fn tools_list_result(fleet_owned: bool, client_draws_its_own: bool) -> Value {
     let mut tools = vec![
         fleet_ask_tool_def(),
         a2ui_render_tool_def(),
         set_session_title_tool_def(),
         permission_prompt_tool_def(),
-        image_tool_def(),
-        image_edit_tool_def(),
     ];
+    if !client_draws_its_own {
+        tools.push(image_tool_def());
+        tools.push(image_edit_tool_def());
+    }
     if fleet_owned {
         tools.extend(crate::mcp_control::control_tool_defs());
     }
     json!({ "tools": tools })
+}
+
+/// MCP `clientInfo.name` of the harness on the other end of this stdio pipe,
+/// captured during `initialize`.
+///
+/// Process-global because one MCP server process serves exactly one client: the
+/// harness spawns it as a stdio child and owns it for the session's lifetime.
+static CLIENT_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Record who connected. Called once, from `initialize`.
+fn remember_client(params: &Value) {
+    if let Some(name) = params
+        .get("clientInfo")
+        .and_then(|c| c.get("name"))
+        .and_then(Value::as_str)
+    {
+        let _ = CLIENT_NAME.set(name.to_string());
+    }
+}
+
+/// Does the connected harness already ship its own image generation?
+///
+/// Codex does: its bundled `imagegen` skill drives a built-in `image_gen` tool
+/// that needs no Fleet plumbing at all. Offering `fleet__image` beside it gives
+/// a Codex session two tools for one job and invites it to pick the one with
+/// the extra hop, so we simply do not advertise ours there. Every other harness
+/// — Claude Code, dsh, anything else — has no native equivalent and gets them.
+///
+/// Measured 2026-09-20 against codex-cli 0.153.4: it introduces itself as
+/// `{"name": "codex-mcp-client", "title": "Codex", "version": "0.153.4"}`. The
+/// prefix match rather than an exact one is deliberate, and so is the direction
+/// it fails in: an unrecognised or renamed client is treated as *not* having
+/// native image generation, so the worst case is the status quo (a Codex
+/// session sees two tools) rather than a Claude session silently losing the
+/// ability to draw.
+fn client_has_native_image_gen() -> bool {
+    CLIENT_NAME
+        .get()
+        .is_some_and(|name| client_name_has_native_image_gen(name))
+}
+
+/// Pure predicate over a `clientInfo.name`, split out for unit testing.
+fn client_name_has_native_image_gen(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("codex")
 }
 
 fn fleet_ask_tool_def() -> Value {
@@ -1465,7 +1524,7 @@ mod tests {
         // gating it would leave a hand-launched session unable to make an image
         // at all. It must show up on both sides of the gate.
         for fleet_owned in [false, true] {
-            let result = tools_list_result(fleet_owned);
+            let result = tools_list_result(fleet_owned, false);
             let names: Vec<&str> = result["tools"]
                 .as_array()
                 .unwrap()
@@ -1475,6 +1534,72 @@ mod tests {
             assert!(
                 names.contains(&"fleet__image"),
                 "fleet_owned={fleet_owned} must still see fleet__image"
+            );
+        }
+    }
+
+    #[test]
+    fn a_harness_with_its_own_image_gen_is_not_offered_ours() {
+        // Codex ships the bundled `imagegen` skill over a built-in image_gen
+        // tool. Advertising fleet__image beside it means two tools for one job.
+        for fleet_owned in [false, true] {
+            let result = tools_list_result(fleet_owned, true);
+            let names: Vec<&str> = result["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap())
+                .collect();
+            assert!(
+                !names.contains(&"fleet__image"),
+                "fleet_owned={fleet_owned} must not be offered fleet__image"
+            );
+            assert!(
+                !names.contains(&"fleet__image_edit"),
+                "fleet_owned={fleet_owned} must not be offered fleet__image_edit"
+            );
+            // The UI tools have no native equivalent anywhere and must stay.
+            assert!(names.contains(&"fleet__ask"), "fleet__ask must survive");
+            assert!(
+                names.contains(&"fleet__set_session_title"),
+                "fleet__set_session_title must survive"
+            );
+        }
+    }
+
+    #[test]
+    fn the_real_codex_handshake_is_recognised() {
+        // Captured 2026-09-20 from codex-cli 0.153.4 by pointing a probe MCP
+        // server at an isolated CODEX_HOME. Verbatim, so a rename upstream
+        // shows up here rather than as a silently duplicated tool.
+        let params = json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": { "elicitation": { "form": {}, "url": {} } },
+            "clientInfo": {
+                "name": "codex-mcp-client",
+                "title": "Codex",
+                "version": "0.153.4"
+            }
+        });
+        let name = params["clientInfo"]["name"].as_str().unwrap();
+        assert!(client_name_has_native_image_gen(name));
+    }
+
+    #[test]
+    fn other_harnesses_keep_the_image_tools() {
+        // Anything that is not Codex has no native equivalent. The failure
+        // direction matters: an unknown client must keep the tools, never lose
+        // them.
+        for name in ["claude-code", "claude", "dsh", "some-new-harness", ""] {
+            assert!(
+                !client_name_has_native_image_gen(name),
+                "{name} must keep fleet__image"
+            );
+        }
+        for name in ["codex-mcp-client", "Codex-MCP-Client", "codex"] {
+            assert!(
+                client_name_has_native_image_gen(name),
+                "{name} must be recognised as Codex"
             );
         }
     }
@@ -1541,7 +1666,7 @@ mod tests {
     #[test]
     fn edit_tool_is_advertised_alongside_the_generator() {
         for fleet_owned in [false, true] {
-            let result = tools_list_result(fleet_owned);
+            let result = tools_list_result(fleet_owned, false);
             let names: Vec<&str> = result["tools"]
                 .as_array()
                 .unwrap()
@@ -1670,7 +1795,7 @@ mod tests {
         // regardless of ambient env (the JSON-RPC path gates on
         // `session_is_fleet_owned`, but the pure builder lets us assert
         // deterministically).
-        let result = tools_list_result(false);
+        let result = tools_list_result(false, false);
         let tools = result["tools"].as_array().expect("tools array");
         assert_eq!(
             tools.len(),
@@ -1721,7 +1846,7 @@ mod tests {
     /// `ALWAYS_ON_TOOL_NAMES` — which is what every count assertion reads.
     #[test]
     fn always_on_tool_names_match_the_advertised_list() {
-        let result = tools_list_result(false);
+        let result = tools_list_result(false, false);
         let names: Vec<&str> = result["tools"]
             .as_array()
             .expect("tools array")
@@ -1735,7 +1860,7 @@ mod tests {
     fn fleet_owned_session_also_sees_the_control_tools() {
         // Conditional registration: a Fleet-owned session gets the always-on
         // tools PLUS every control tool; a non-Fleet session (tested above) does not.
-        let result = tools_list_result(true);
+        let result = tools_list_result(true, false);
         let tools = result["tools"].as_array().expect("tools array");
         assert_eq!(
             tools.len(),
