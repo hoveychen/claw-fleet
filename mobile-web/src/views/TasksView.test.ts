@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFrozenOrder,
+  bucketOfTone,
   buildRenderItems,
   workspaceFilterValue,
+  groupStatusSections,
   groupTaskSections,
   statusTone,
 } from "./TasksView";
@@ -305,5 +307,47 @@ describe("applyFrozenOrder", () => {
     const rows = [row("dev-a", "s"), row("dev-b", "s")];
     const out = applyFrozenOrder(rows, frozen);
     expect(keys(out)).toEqual(["dev-b::s", "dev-a::s"]);
+  });
+});
+
+describe("groupStatusSections", () => {
+  function row(id: string, status: string, procAlive = false) {
+    return {
+      id,
+      status,
+      procAlive,
+      lastActivityMs: Date.now(),
+      workspacePath: "/work/repo",
+      workspaceName: "repo",
+      deviceId: "d1",
+    } as unknown as WithDevice<SessionInfo>;
+  }
+
+  it("derives a card's section from the very tone its dot wears", () => {
+    expect(bucketOfTone("working")).toBe("running");
+    expect(bucketOfTone("quiet")).toBe("running");
+    expect(bucketOfTone("waiting")).toBe("waitingInput");
+    expect(bucketOfTone("watching")).toBe("watching");
+    expect(bucketOfTone("error")).toBe("error");
+    expect(bucketOfTone(null)).toBe("ended");
+  });
+
+  it("orders sections by attention, drops empty buckets and keeps row order", () => {
+    const secs = groupStatusSections([
+      row("done-first", "idle"),
+      row("parked", "waitingInput"),
+      row("done-second", "idle"),
+      row("busy", "executing"),
+      row("limited", "rateLimited"),
+    ]);
+
+    expect(secs.map((s) => s.bucket)).toEqual([
+      "running",
+      "waitingInput",
+      "error",
+      "ended",
+    ]);
+    // The freeze must survive grouping, same contract as groupTaskSections.
+    expect(secs[3].sessions.map((s) => s.id)).toEqual(["done-first", "done-second"]);
   });
 });

@@ -57,6 +57,24 @@
   }
 }
 
+/* Mark filter + grouping switcher share one line: the mark segments take the
+   width (they carry counts), the icon-only grouping switcher just its content. */
+.segmentRow {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.segmentRow > .segment:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.segmentRow > .segment:last-child .segmentButton {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+}
+
 .segment {
   display: flex;
   background: var(--color-bg-secondary);

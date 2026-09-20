@@ -2517,6 +2517,7 @@
     "group_by_none": "No grouping",
     "status_g_running": "Running",
     "status_g_waitingInput": "Waiting for input",
+    "status_g_error": "Errored / rate-limited",
     "status_g_watching": "Waiting on a watch",
     "status_g_ended": "Ended",
     "group_hint": "Handoff relay chain — click to expand its sessions",

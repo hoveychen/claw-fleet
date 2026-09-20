@@ -1,26 +1,12 @@
 import type { SessionInfo } from "../types";
-import { LIVE_STATUSES, isQuietAliveSticky } from "../types";
+import { isQuietAliveSticky } from "../types";
+import {
+  STATUS_BUCKETS,
+  statusBucketOf as bucketOf,
+  type StatusBucket,
+} from "../../../shared-ts/statusBuckets";
 
-/**
- * The buckets the task rail groups by when the reader picks "by status".
- *
- * They are deliberately the four states the row's own run dot already
- * distinguishes (see `rowBarColor`): green = running, amber = parked for input,
- * violet = parked on a `fleet watch`, no dot = ended. Grouping by anything else
- * would put a row under a heading that contradicts the colour next to it.
- *
- * Note this is the *run* status, not the manual review mark — that dimension is
- * already served by the pending/done filter segments above the list.
- */
-export type StatusBucket = "running" | "waitingInput" | "watching" | "ended";
-
-/** Section order: the states that want attention first, ended work last. */
-export const STATUS_BUCKETS: StatusBucket[] = [
-  "running",
-  "waitingInput",
-  "watching",
-  "ended",
-];
+export { STATUS_BUCKETS, type StatusBucket };
 
 export interface StatusSessionGroup {
   bucket: StatusBucket;
@@ -41,16 +27,16 @@ function activityMs(session: SessionInfo): number {
 }
 
 /**
- * Which bucket a session falls in. `isQuietAliveSticky` is consulted so a
- * session parked on one long tool call — process alive, transcript gone quiet,
- * status decayed to idle — lands under "running" rather than "ended", matching
- * the faded-green dot the row wears.
+ * Which bucket a session falls in. The latch is consulted so a session parked
+ * on one long tool call — process alive, transcript gone quiet, status decayed
+ * to idle — lands under "running" rather than "ended", matching the faded-green
+ * dot the row wears.
  */
 export function statusBucketOf(s: SessionInfo): StatusBucket {
-  if (s.status === "watching") return "watching";
-  if (s.status === "waitingInput") return "waitingInput";
-  if (LIVE_STATUSES.has(s.status) || isQuietAliveSticky(s)) return "running";
-  return "ended";
+  return bucketOf(s.status, {
+    procAlive: s.procAlive,
+    quiet: isQuietAliveSticky(s),
+  });
 }
 
 /**

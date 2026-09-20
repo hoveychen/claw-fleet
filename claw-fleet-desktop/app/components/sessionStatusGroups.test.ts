@@ -28,11 +28,19 @@ function session(
 describe("statusBucketOf", () => {
   beforeEach(resetQuietAliveLatch);
 
-  it("separates the three attention states from ended work", () => {
+  it("separates the attention states from ended work", () => {
     expect(statusBucketOf(session("a", "executing", 1))).toBe("running");
     expect(statusBucketOf(session("b", "waitingInput", 1))).toBe("waitingInput");
     expect(statusBucketOf(session("c", "watching", 1))).toBe("watching");
     expect(statusBucketOf(session("d", "idle", 1))).toBe("ended");
+  });
+
+  it("keeps a wedged or cut-off session out of the ended bucket", () => {
+    // These write nothing while their process lives, so a plain liveness test
+    // would file them under ended — the one state that always needs a human.
+    expect(statusBucketOf(session("limited", "rateLimited", 1))).toBe("error");
+    expect(statusBucketOf(session("wedged", "stuck", 1, true))).toBe("error");
+    expect(statusBucketOf(session("cut", "remoteDisconnected", 1))).toBe("error");
   });
 
   it("keeps a quiet-but-alive session under running", () => {
