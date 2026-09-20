@@ -370,11 +370,7 @@ pub(crate) fn cmd_elicitation() {
     };
     match resp {
         Some(resp) => {
-            let outcome = if resp.declined {
-                ElicitationOutcome::Declined
-            } else {
-                ElicitationOutcome::Answered
-            };
+            let outcome = ElicitationOutcome::for_resolution(resp.declined, resp.task_outcome);
             let rec = build_elicitation_record(
                 &req,
                 outcome,
@@ -386,12 +382,19 @@ pub(crate) fn cmd_elicitation() {
             }
             elicitation::cleanup(&request_id);
             if resp.declined {
-                // User declined — deny so Claude Code knows.
+                // User declined — deny so Claude Code knows. The deny reason is
+                // what the model reads as the tool result, so a card ended with
+                // its terminal button says so there: "declined to answer" would
+                // send the agent looking for another way to ask.
+                let reason = match resp.task_outcome {
+                    Some(o) => o.terminal_notice().to_string(),
+                    None => "Fleet: user declined to answer".to_string(),
+                };
                 let out = serde_json::json!({
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
-                        "permissionDecisionReason": "Fleet: user declined to answer"
+                        "permissionDecisionReason": reason
                     }
                 });
                 println!("{}", out);

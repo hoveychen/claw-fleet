@@ -1144,15 +1144,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
 /// second leaves the work open.
 fn terminal_notice(outcome: Option<crate::task_outcome::TaskOutcome>) -> String {
     match outcome {
-        Some(crate::task_outcome::TaskOutcome::Completed) => "TASK FINISHED — the user pressed 「结束任务」 and closed this task as complete. \
-             Stop here. Do not start further work, do not raise another card, and do not \
-             summarise again: end your turn with at most one short line of acknowledgement."
-            .into(),
-        Some(crate::task_outcome::TaskOutcome::Abandoned) => "TASK ABANDONED — the user pressed 「放弃任务」 and closed this task as \
-             unfinished. Stop working on it. Do not try to salvage it, do not raise another \
-             card, and do not push back: end your turn with at most one short line of \
-             acknowledgement. The remaining work is recorded as not done."
-            .into(),
+        Some(o) => o.terminal_notice().into(),
         None => "User dismissed the fleet__ask Decision Card without answering.".into(),
     }
 }

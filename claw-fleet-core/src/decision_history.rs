@@ -31,10 +31,34 @@ pub enum ElicitationOutcome {
     Answered,
     /// User explicitly closed the card.
     Declined,
+    /// User pressed the card's terminal button — the task was closed as
+    /// complete. Split out from `Declined` for the same reason as
+    /// [`FleetAskOutcome::TaskCompleted`]: a verdict on the task is not the
+    /// same event as a refusal to answer one question.
+    TaskCompleted,
+    /// User pressed the card's terminal button with an "unfinished" verdict.
+    TaskAbandoned,
     /// Desktop consumer disappeared mid-flight; CLI fell back to native UI.
     HeartbeatLost,
     /// 600s elapsed without any response.
     Timeout,
+}
+
+impl ElicitationOutcome {
+    /// The outcome a resolved card carries. `task_outcome` is `Some` only when
+    /// the user used the card's terminal button. Mirrors
+    /// [`FleetAskOutcome::for_resolution`].
+    pub fn for_resolution(
+        declined: bool,
+        task_outcome: Option<crate::task_outcome::TaskOutcome>,
+    ) -> Self {
+        match (declined, task_outcome) {
+            (_, Some(crate::task_outcome::TaskOutcome::Completed)) => Self::TaskCompleted,
+            (_, Some(crate::task_outcome::TaskOutcome::Abandoned)) => Self::TaskAbandoned,
+            (true, None) => Self::Declined,
+            (false, None) => Self::Answered,
+        }
+    }
 }
 
 /// Terminal outcome of a plan-approval card.
@@ -533,6 +557,10 @@ fn accumulate_record(stats: &mut DecisionCardStats, rec: &DecisionHistoryRecord,
                 accumulate_first_q_elicitation(s, r);
             }
             ElicitationOutcome::Declined => s.declined += 1,
+            // Terminal presses stay out of `declined` for the same reason as
+            // their fleet-ask twins below.
+            ElicitationOutcome::TaskCompleted => s.task_completed += 1,
+            ElicitationOutcome::TaskAbandoned => s.task_abandoned += 1,
             ElicitationOutcome::HeartbeatLost => s.heartbeat_lost += 1,
             ElicitationOutcome::Timeout => s.timeout += 1,
         },
