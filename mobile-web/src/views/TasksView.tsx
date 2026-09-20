@@ -293,11 +293,13 @@ export function bucketOfTone(tone: string | null): StatusBucket {
   return "running";
 }
 
-/** The dot tone a status heading wears. "running" takes the steady green rather
- *  than the pulsing accent: a heading that throbs competes with the live cards
- *  under it. */
+/** The dot tone a status heading wears — the tone most of its cards wear, so
+ *  the heading reads as a label for the colour under it. The running bucket
+ *  spans three tones (working / active / quiet); it takes `working`, the one a
+ *  busy session shows, with the pulse suppressed in CSS so a heading does not
+ *  throb alongside the live cards. */
 const BUCKET_HEADER_TONE: Record<StatusBucket, string> = {
-  running: "active",
+  running: "working",
   waitingInput: "waiting",
   error: "error",
   watching: "watching",

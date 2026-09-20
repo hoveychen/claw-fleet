@@ -195,6 +195,12 @@
   text-align: left;
 }
 
+/* A status heading borrows the row dot for its colour, but not its pulse — a
+   throbbing heading competes with the live cards it labels. */
+.workspaceHeader .statusDot {
+  animation: none;
+}
+
 .workspaceFolder {
   color: var(--color-accent);
   flex-shrink: 0;
