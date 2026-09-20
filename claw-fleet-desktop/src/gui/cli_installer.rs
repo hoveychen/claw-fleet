@@ -166,6 +166,11 @@ pub(crate) async fn pick_file(title: String) -> Option<String> {
 }
 
 /// Open a native save dialog and write SKILL.md to the chosen path.
+///
+/// Exports the `fleet` skill specifically, not every bundled one: this is the
+/// "hand me the file so I can put it somewhere myself" affordance, and a save
+/// dialog picks one destination. Use `install_fleet_skill` to place all bundled
+/// skills into their runtimes.
 #[tauri::command]
 pub(crate) async fn save_skill_file() -> Result<String, String> {
     let handle = rfd::AsyncFileDialog::new()
@@ -201,16 +206,21 @@ pub(crate) fn install_fleet_skill() -> Result<SkillInstallResult, String> {
         if !detect.exists() {
             continue;
         }
-        let skill_dir = skills.join("fleet");
-        let skill_path = skill_dir.join("SKILL.md");
-        match std::fs::create_dir_all(&skill_dir)
-            .and_then(|_| std::fs::write(&skill_path, FLEET_SKILL_MD))
-        {
-            Ok(_) => installed.push(DetectedTool {
-                name: name.to_string(),
-                skill_path: skill_path.to_string_lossy().to_string(),
-            }),
-            Err(e) => errors.push(format!("{}: {}", name, e)),
+        for skill in claw_fleet_core::BUNDLED_SKILLS {
+            if !skill.applies_to(name) {
+                continue;
+            }
+            let skill_dir = skills.join(skill.name);
+            let skill_path = skill_dir.join("SKILL.md");
+            match std::fs::create_dir_all(&skill_dir)
+                .and_then(|_| std::fs::write(&skill_path, skill.body))
+            {
+                Ok(_) => installed.push(DetectedTool {
+                    name: name.to_string(),
+                    skill_path: skill_path.to_string_lossy().to_string(),
+                }),
+                Err(e) => errors.push(format!("{} ({}): {}", name, skill.name, e)),
+            }
         }
     }
 
