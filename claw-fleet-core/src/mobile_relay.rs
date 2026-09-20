@@ -1135,7 +1135,7 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
 /// Top-level record fields the mobile `RawMessage` declares. `uuid` is
 /// load-bearing beyond rendering — `appendUnique` dedups tailed lines by it.
 /// `isMeta`/`sourceToolUseID` drive the client's MetaFoldCard grouping.
-const TAIL_MSG_FIELDS: [&str; 8] = [
+const TAIL_MSG_FIELDS: [&str; 9] = [
     "type",
     "uuid",
     "timestamp",
@@ -1144,6 +1144,10 @@ const TAIL_MSG_FIELDS: [&str; 8] = [
     "isMeta",
     "sourceToolUseID",
     "fleetEvent",
+    // Marks a user row core rewrote from a mid-turn injection (see
+    // `queued_command.rs`). The row renders as a normal bubble either way;
+    // without the flag the phone cannot tell the reader it arrived mid-turn.
+    "fleetMidTurn",
 ];
 /// Content-block fields the mobile `ContentBlock` declares and renders.
 /// `is_error` feeds the tool chip's error badge; result bodies stay stripped.

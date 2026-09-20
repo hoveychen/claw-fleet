@@ -1538,8 +1538,21 @@ export function ResumeComposer({
         };
     try {
       // 5th arg = onAck: fired once when desktop's early ack arrives.
-      await client.request(method, params, undefined, succeed);
+      const reply = await client.request<{ delivery?: string }>(
+        method,
+        params,
+        undefined,
+        succeed,
+      );
       succeed(); // Reply also succeeds, idempotent with onAck
+      // Only the reply says how an enqueue actually landed. Injected = already
+      // inside the running turn, so it earns its bubble now: the CLI does not
+      // write the real transcript row until the agent absorbs the message at
+      // its next tool boundary, which on a long tool call is minutes away.
+      // Queued = not delivered at all, and the chip stays the honest state.
+      if (enqueueing && text && reply?.delivery === "injected") {
+        onOptimisticSend?.(text);
+      }
     } catch (e) {
       // Regardless of failure, submit is no longer in flight: resume parent's polling.
       onSubmitInFlight?.(false);
