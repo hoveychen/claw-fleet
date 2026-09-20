@@ -141,20 +141,57 @@ function base64ToBytes(b64: string): Uint8Array {
  * The desktop reads them off `AppState` — which the frontend itself populated
  * via `set_locale` / `set_user_title` — so there is no argument on the IPC call
  * to take them from. The browser build keeps the same two values in its own
- * settings store, and `webTransport` installs a reader for them here. Left at
- * the fallback, an "apply" would write guidance addressed to nobody, so the
- * source is injected rather than guessed.
+ * settings store, and `webTransport` installs a reader for them here.
+ *
+ * Absent until somebody installs one, and an installed one may still answer
+ * with an empty `locale` (that client has no language choice on record yet).
+ * Both mean "there is nobody to address this guidance to" — see
+ * `GUIDANCE_COMMANDS`.
  */
-let hostPrefsSource: () => { userTitle: string; locale: string } = () => ({
-  userTitle: "",
-  locale: "en",
-});
+let hostPrefsSource: (() => { userTitle: string; locale: string }) | null = null;
 
 export function setHostPrefsSource(fn: () => { userTitle: string; locale: string }) {
   hostPrefsSource = fn;
 }
 
-const hostPrefs = () => hostPrefsSource();
+/** Test seam: forget an installed source, so a suite can exercise both states. */
+export function clearHostPrefsSource() {
+  hostPrefsSource = null;
+}
+
+const hostPrefs = () => hostPrefsSource?.() ?? { userTitle: "", locale: "" };
+
+/** Whether a guidance apply has a language to write it in. */
+export function hasHostLocale(): boolean {
+  return hostPrefs().locale !== "";
+}
+
+/**
+ * The commands whose probe route rewrites the user's `~/.claude` guidance from
+ * `hostPrefs()`. Skipped entirely while `hasHostLocale()` is false.
+ *
+ * Why this guard exists, from the day it bit: `?mock&live` (the `live-ui.sh`
+ * harness) installs `tauri-mock`, not `webTransport` — so nothing ever called
+ * `setHostPrefsSource`, and the old fallback quietly answered `locale: "en"`.
+ * `controlPlaneSelfHeal` posts these five on *every* App mount, and the
+ * harness's probe runs against the real `$HOME` (it has to: the whole point is
+ * real session data, which is read out of `~/.claude/projects`). One headless
+ * screenshot run therefore retranslated a Chinese user's entire control plane
+ * into English — and since `fleet-interaction-mode.md` is where "speak
+ * English throughout" lives, every session started afterwards answered in the
+ * wrong language, until the desktop app's own `set_locale` wrote it back.
+ *
+ * A guess is worse than a skip here: the file on disk is already correct, and
+ * only the real frontend knows which language the user chose.
+ */
+export const GUIDANCE_COMMANDS = new Set([
+  "apply_interaction_mode",
+  "apply_prd_mode",
+  "apply_wiki_guidance",
+  "apply_model_guidance",
+  "apply_session_title_guidance",
+  "reconcile_codex_guidance",
+]);
 
 /**
  * Tauri command → probe route. Mirrors `claw-fleet-desktop/src/remote.rs`,
@@ -1836,6 +1873,15 @@ export async function liveInvoke(
 
   const composite = LIVE_COMPOSITES[cmd];
   if (composite) return { handled: true, value: await composite(args) };
+
+  // A guidance apply with nobody to address it to is a no-op, not a write.
+  if (GUIDANCE_COMMANDS.has(cmd) && !hasHostLocale()) {
+    if (!fellBack.has(cmd)) {
+      fellBack.add(cmd);
+      logLine(`SKIP ${cmd} (no host locale — would rewrite the host's guidance in a guessed language)`);
+    }
+    return { handled: true, value: null };
+  }
 
   const mapper = LIVE_ROUTES[cmd];
   if (!mapper) {

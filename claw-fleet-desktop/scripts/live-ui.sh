@@ -34,6 +34,15 @@ for f in port token; do
   [ -f "$HOME/.fleet/$f" ] && cp "$HOME/.fleet/$f" "$LOGDIR/$f.bak"
 done
 
+# The probe deliberately runs against the real $HOME / ~/.claude — real session
+# data is the whole point of this harness, and the scanners read it out of
+# ~/.claude/projects, so isolating CLAUDE_CONFIG_DIR would hand the UI an empty
+# board. The cost is that every *write* route this page reaches is a write to
+# the developer's own machine. The one that bit: `controlPlaneSelfHeal` posts
+# the five guidance appliers on every App mount, and with no host-prefs source
+# installed in `?mock&live` they went out in a guessed locale and translated a
+# Chinese user's whole ~/.claude control plane. Guarded now in
+# `app/mock/liveProxy.ts` (`GUIDANCE_COMMANDS`); keep new write routes in mind.
 echo "→ probe:  $FLEET_BIN serve --port $PROBE_PORT  (log: $LOGDIR/probe.log)"
 "$FLEET_BIN" serve --port "$PROBE_PORT" --token "$TOKEN" >"$LOGDIR/probe.log" 2>&1 &
 PROBE_PID=$!
