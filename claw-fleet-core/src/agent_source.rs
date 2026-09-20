@@ -132,7 +132,13 @@ pub trait AgentSource: Send + Sync {
         file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
         // Advance only past complete (newline-terminated) lines; a half-written
         // trailing record stays unconsumed so the next poll re-reads its bytes.
-        let (lines, consumed) = crate::jsonl_tail::parse_incremental_tail(&buf);
+        let (mut lines, consumed) = crate::jsonl_tail::parse_incremental_tail(&buf);
+        // The live-edge path matters most for a mid-turn injection: the message
+        // is written while the user is watching the turn run. A no-op for every
+        // row that is not a peer `queued_command` (so for every source but
+        // Claude), which is why it rides the shared default rather than a
+        // per-source override.
+        lines.iter_mut().for_each(crate::queued_command::unfold);
         Ok((lines, offset + consumed as u64))
     }
 

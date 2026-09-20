@@ -107,6 +107,7 @@ pub mod permission_prompt_ipc;
 pub mod permissions_injector;
 pub mod proc_runner;
 pub mod process_util;
+pub mod queued_command;
 pub mod routes;
 /// Path helpers, formerly re-exported from the (removed) `claw-fleet-task`
 /// crate. `real_home_dir` / `get_fleet_dir` live in [`session`];
