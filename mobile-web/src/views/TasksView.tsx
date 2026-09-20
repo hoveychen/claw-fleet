@@ -8,12 +8,14 @@ import {
   type ReactNode,
 } from "react";
 import {
+  Activity,
   CheckCheck,
   CheckCircle2,
   ChevronRight,
   Circle,
   Clock,
   Folder,
+  List,
   MonitorSmartphone,
   Inbox,
   Loader2,
@@ -43,6 +45,7 @@ import { canControl, runStop, stopMode } from "./sessionStop";
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import { countChainUnits } from "../../../shared-ts/chainUnits";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
+import { STATUS_BUCKETS, type StatusBucket } from "../../../shared-ts/statusBuckets";
 import styles from "./TasksView.module.css";
 
 /** Document-level scrollbar is shared by all tabs; the task view unmounts/remounts with
@@ -275,6 +278,73 @@ export function groupTaskSections(
   return [...chat, ...sections.filter((sec) => !isChat(sec))];
 }
 
+/** What the task list's sections stand for — the same three the desktop task
+ *  rail offers. "none" drops the headings and lists every card in one stream. */
+export type TaskGroupMode = "workspace" | "status" | "none";
+
+/** Which run-status section a card belongs to, derived from the very tone its
+ *  dot wears (see `statusTone`) so a heading can never contradict the colour
+ *  under it. A null tone is an ended session. */
+export function bucketOfTone(tone: string | null): StatusBucket {
+  if (tone === "waiting") return "waitingInput";
+  if (tone === "watching") return "watching";
+  if (tone === "error") return "error";
+  if (tone === null) return "ended";
+  return "running";
+}
+
+/** The dot tone a status heading wears — the tone most of its cards wear, so
+ *  the heading reads as a label for the colour under it. The running bucket
+ *  spans three tones (working / active / quiet); it takes `working`, the one a
+ *  busy session shows, with the pulse suppressed in CSS so a heading does not
+ *  throb alongside the live cards. */
+const BUCKET_HEADER_TONE: Record<StatusBucket, string> = {
+  running: "working",
+  waitingInput: "waiting",
+  error: "error",
+  watching: "watching",
+  ended: "idle",
+};
+
+/** Heading text for a run-status section. */
+function bucketLabel(bucket: StatusBucket): string {
+  if (bucket === "running") return t("运行中");
+  if (bucket === "waitingInput") return t("等待输入");
+  if (bucket === "error") return t("出错/限流");
+  if (bucket === "watching") return t("等待触发");
+  return t("已结束");
+}
+
+/** One run-status partition, shaped like `TaskSection` so the list renders both
+ *  groupings through the same code. */
+export interface StatusTaskSection {
+  bucket: StatusBucket;
+  key: string;
+  sessions: Array<WithDevice<SessionInfo>>;
+}
+
+/**
+ * Slice a pre-sorted session list into run-status partitions, in the fixed
+ * `STATUS_BUCKETS` order. Input order is preserved inside a partition (the
+ * frozen-order machinery must stay intact), and empty buckets are dropped.
+ */
+export function groupStatusSections(
+  rows: Array<WithDevice<SessionInfo>>,
+): StatusTaskSection[] {
+  const byBucket = new Map<StatusBucket, Array<WithDevice<SessionInfo>>>();
+  for (const s of rows) {
+    const bucket = bucketOfTone(statusTone(s));
+    const arr = byBucket.get(bucket);
+    if (arr) arr.push(s);
+    else byBucket.set(bucket, [s]);
+  }
+  return STATUS_BUCKETS.filter((b) => byBucket.get(b)?.length).map((bucket) => ({
+    bucket,
+    key: `status:${bucket}`,
+    sessions: byBucket.get(bucket)!,
+  }));
+}
+
 /** Value of a directory filter option. Single-device: the path itself (for backward
  *  compatibility, old draft values still work). */
 export function workspaceFilterValue(
@@ -430,6 +500,9 @@ export function TasksView({
   // lives in the More tab. Tabs unmount on switch, so this re-reads the saved
   // value whenever the task page remounts — no cross-tab live sync needed.
   const [groupHandoff] = useDraft<boolean>("tasks:groupHandoff", true);
+  // What the list's sections stand for. Persisted like the filters above, for
+  // the same reason: every tab switch unmounts this view.
+  const [groupMode, setGroupMode] = useDraft<TaskGroupMode>("tasks:groupMode", "workspace");
   const [busyOp, setBusyOp] = useState<string | null>(null);
   // Optimistic mark overrides, dropped once the server snapshot catches up.
   const [markOverride, setMarkOverride] = useState<Record<string, SessionMark | null>>({});
@@ -604,13 +677,38 @@ export function TasksView({
   // Folder partitions form the top level of the list; relay-chain grouping nests inside
   // partitions (isomorphic to desktop launchpad), so buildRenderItems runs per-partition,
   // never chains sessions from two directories.
-  const sections = useMemo(
-    () =>
-      groupTaskSections(visible, { chatPathOf, multiDevice, deviceLabelOf }).map((sec) => ({
-        ...sec,
+  // Both groupings produce the same shape so the list below renders one way;
+  // only the heading's glyph, label and tooltip differ. "none" yields no
+  // sections at all — the list renders `flatItems` instead.
+  const sections = useMemo(() => {
+    if (groupMode === "none") return [];
+    if (groupMode === "status") {
+      return groupStatusSections(visible).map((sec) => ({
+        key: sec.key,
+        name: bucketLabel(sec.bucket),
+        // No path to show, and the label already says everything the heading
+        // knows — so no tooltip rather than a misleading one.
+        tooltip: "",
+        tone: BUCKET_HEADER_TONE[sec.bucket],
         items: buildRenderItems(sec.sessions, groupHandoff),
-      })),
-    [visible, chatPathOf, multiDevice, deviceLabelOf, groupHandoff],
+      }));
+    }
+    return groupTaskSections(visible, { chatPathOf, multiDevice, deviceLabelOf }).map(
+      (sec) => ({
+        key: sec.key,
+        name: sec.name,
+        tooltip: sec.path,
+        tone: null as string | null,
+        items: buildRenderItems(sec.sessions, groupHandoff),
+      }),
+    );
+  }, [visible, chatPathOf, multiDevice, deviceLabelOf, groupHandoff, groupMode]);
+
+  // "none" mode's single stream: the same cards, relay chains still folded, in
+  // the activity order `visible` already carries.
+  const flatItems = useMemo(
+    () => buildRenderItems(visible, groupHandoff),
+    [visible, groupHandoff],
   );
 
   // Collapsed partition keys. Default all expanded—phone users should see sessions
@@ -960,6 +1058,41 @@ export function TasksView({
     );
   };
 
+  /** One list entry: a standalone card, or a folded relay chain that expands to
+   *  its earlier hops. Shared by the grouped sections and the ungrouped stream
+   *  so a card renders identically either way. */
+  const renderItem = (item: (typeof flatItems)[number]) => {
+    if (item.kind === "single") return renderCard(item.session);
+    const { chainId, tip, members, key } = item;
+    const full = chainMembersAll.get(chainId) ?? members;
+    const expanded = expandedChains.has(chainId);
+    const limit = chainLoadMore[chainId] ?? GROUP_VISIBLE;
+    // The header card *is* the tip (latest hop); the expanded list shows only
+    // the chain's *other* hops, never the tip again.
+    const rest = members.filter((m) => m.id !== tip.id);
+    const shown = expanded ? rest.slice(0, limit) : [];
+    const hidden = rest.length - shown.length;
+    return (
+      <div key={key} className={styles.group}>
+        {renderCard(tip, {
+          expanded,
+          onToggleExpand: () => toggleChain(chainId),
+          markMembers: full,
+        })}
+        {expanded && (
+          <div className={styles.groupChildren}>
+            {shown.map((m) => renderCard(m))}
+            {hidden > 0 && (
+              <button className={styles.groupMore} onClick={() => loadMoreChain(chainId)}>
+                {t("显示更早的 {0} 棒", hidden)}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className={styles.wrapper}>
       <div className={styles.filterBar}>
@@ -976,6 +1109,7 @@ export function TasksView({
           />
           {searching && <span className={styles.searchSpinner} />}
         </div>
+        <div className={styles.segmentRow}>
         <div className={styles.segment}>
           {(["all", "pending", "done"] as MarkFilter[]).map((key) => (
             <button
@@ -992,6 +1126,34 @@ export function TasksView({
               <span className={styles.segmentCount}>{counts[key]}</span>
             </button>
           ))}
+        </div>
+        {/* What the sections below stand for — the same three the desktop task
+            rail offers, sized down to icons because a phone has no room for
+            three labels beside the mark filter. */}
+        <div className={styles.segment} aria-label={t("分组方式")} role="group">
+          {(["workspace", "status", "none"] as TaskGroupMode[]).map((mode) => {
+            const label =
+              mode === "workspace"
+                ? t("按仓库分组")
+                : mode === "status"
+                  ? t("按状态分组")
+                  : t("不分组");
+            return (
+              <button
+                key={mode}
+                className={styles.segmentButton}
+                data-active={groupMode === mode}
+                onClick={() => setGroupMode(mode)}
+                aria-label={label}
+                title={label}
+              >
+                {mode === "workspace" && <Folder size={15} />}
+                {mode === "status" && <Activity size={15} />}
+                {mode === "none" && <List size={15} />}
+              </button>
+            );
+          })}
+        </div>
         </div>
       </div>
 
@@ -1014,10 +1176,14 @@ export function TasksView({
               <button
                 className={styles.workspaceHeader}
                 aria-expanded={!collapsed}
-                title={section.path}
+                title={section.tooltip}
                 onClick={() => toggleSection(section.key)}
               >
-                <Folder size={13} className={styles.workspaceFolder} />
+                {section.tone ? (
+                  <span className={styles.statusDot} data-tone={section.tone} />
+                ) : (
+                  <Folder size={13} className={styles.workspaceFolder} />
+                )}
                 <span className={styles.workspaceName}>{section.name}</span>
                 {/* Item count when collapsed: a collapsed handoff chain counts as one,
                     same meaning as the desktop secondary sidebar. */}
@@ -1028,44 +1194,12 @@ export function TasksView({
                   data-open={!collapsed}
                 />
               </button>
-              {!collapsed &&
-                section.items.map((item) => {
-                  if (item.kind === "single") return renderCard(item.session);
-                  const { chainId, tip, members, key } = item;
-                  const full = chainMembersAll.get(chainId) ?? members;
-                  const expanded = expandedChains.has(chainId);
-                  const limit = chainLoadMore[chainId] ?? GROUP_VISIBLE;
-                  // The header card *is* the tip (latest hop); the expanded list
-                  // shows only the chain's *other* hops, never the tip again.
-                  const rest = members.filter((m) => m.id !== tip.id);
-                  const shown = expanded ? rest.slice(0, limit) : [];
-                  const hidden = rest.length - shown.length;
-                  return (
-                    <div key={key} className={styles.group}>
-                      {renderCard(tip, {
-                        expanded,
-                        onToggleExpand: () => toggleChain(chainId),
-                        markMembers: full,
-                      })}
-                      {expanded && (
-                        <div className={styles.groupChildren}>
-                          {shown.map((m) => renderCard(m))}
-                          {hidden > 0 && (
-                            <button
-                              className={styles.groupMore}
-                              onClick={() => loadMoreChain(chainId)}
-                            >
-                              {t("显示更早的 {0} 棒", hidden)}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+              {!collapsed && section.items.map(renderItem)}
             </section>
           );
         })}
+        {/* Ungrouped: the same cards in one stream, no headings. */}
+        {groupMode === "none" && flatItems.map(renderItem)}
       </div>
 
     </div>

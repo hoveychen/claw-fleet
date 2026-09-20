@@ -74,6 +74,22 @@
   overflow: hidden;
 }
 
+/* Grouping switcher. Same chrome as .mark_filter so the two read as one
+   toolbar, but icon-only and sized to its content — the mark segments carry the
+   counts and earn the width. */
+.group_mode {
+  display: flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.group_mode .mark_seg {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+}
+
 .mark_seg {
   display: inline-flex;
   align-items: center;

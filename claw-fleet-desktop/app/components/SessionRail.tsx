@@ -50,6 +50,13 @@ type WorkspaceRailSectionProps = {
    *  filter change made its workspace briefly empty and unmount. */
   collapsed: boolean;
   onToggle: (path: string) => void;
+  /** Replaces the folder glyph. The section is also used for the rail's
+   *  group-by-status mode, where a folder would claim these rows share a
+   *  directory when what they share is a run state. */
+  icon?: ReactNode;
+  /** Native tooltip on the heading. Defaults to `path`, which is the right
+   *  thing for a repository section and meaningless for a synthetic one. */
+  tooltip?: string;
   children: ReactNode;
 };
 
@@ -62,6 +69,8 @@ export function WorkspaceRailSection({
   count,
   collapsed,
   onToggle,
+  icon,
+  tooltip,
   children,
 }: WorkspaceRailSectionProps) {
   const { t } = useTranslation();
@@ -72,11 +81,11 @@ export function WorkspaceRailSection({
         type="button"
         className={styles.workspace_header}
         aria-expanded={!collapsed}
-        title={path}
+        title={tooltip ?? path}
         onClick={() => onToggle(path)}
       >
         <span className={styles.workspace_folder} aria-hidden="true">
-          {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
+          {icon ?? (collapsed ? <Folder size={14} /> : <FolderOpen size={14} />)}
         </span>
         <span className={styles.workspace_name}>{name}</span>
         <span

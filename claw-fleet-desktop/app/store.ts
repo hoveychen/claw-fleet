@@ -35,6 +35,11 @@ export { ALL_VIEW_MODES } from "./viewModes";
 export type { ViewMode, SessionViewMode } from "./viewModes";
 /** Launcher rail's segmented mark filter. "all" shows every bucket. */
 export type MarkFilter = "all" | "pending" | "done";
+/** What the task rail's sections stand for: the repository a session runs in,
+ *  or its run status — or "none", which drops the headings and lists every row
+ *  in one activity-ordered stream. Orthogonal to {@link MarkFilter}, which
+ *  narrows *which* rows are listed rather than how they are bundled. */
+export type HistoryGroupMode = "workspace" | "status" | "none";
 
 export interface MainViewState {
   gallery: { query: string; showAll: boolean; idleExpanded: boolean };
@@ -267,6 +272,11 @@ interface UIState {
    *  Written to disk so a deliberately folded repo stays folded across a
    *  restart, same as the filters above. */
   historyCollapsedWorkspaces: string[];
+  /** What the task rail's sections group by. Stored (and persisted) for the same
+   *  unmount reason as the filters above; the fold state of both groupings lives
+   *  in `historyCollapsedWorkspaces`, whose status keys are namespaced so the two
+   *  modes cannot fold each other's sections. */
+  historyGroupMode: HistoryGroupMode;
   mainViewState: MainViewState;
   updateMainViewState: <K extends keyof MainViewState>(
     view: K,
@@ -281,6 +291,7 @@ interface UIState {
   setHistoryQuery: (q: string) => void;
   setHistoryGroupHandoff: (on: boolean) => void;
   toggleHistoryWorkspaceCollapsed: (workspacePath: string) => void;
+  setHistoryGroupMode: (m: HistoryGroupMode) => void;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
   setTheme: (t: Theme) => void;
@@ -480,6 +491,13 @@ function readCollapsedWorkspaces(): string[] {
   }
 }
 
+/** Persisted grouping mode; anything unrecognised falls back to the repository
+ *  sections the rail has always shown. */
+function readGroupMode(): HistoryGroupMode {
+  const raw = getItem("history-group-mode");
+  return raw === "status" || raw === "none" ? raw : "workspace";
+}
+
 /** Persisted mark filter, tolerating an absent / corrupt value. */
 function readMarkFilter(): MarkFilter {
   const raw = getItem("history-mark-filter");
@@ -622,6 +640,7 @@ export const useUIStore = create<UIState>((set) => ({
   // "false" opts out. Mirrors the `autoUpdateCheck` default-on idiom.
   historyGroupHandoff: getItem("history-group-handoff") !== "false",
   historyCollapsedWorkspaces: readCollapsedWorkspaces(),
+  historyGroupMode: readGroupMode(),
   mainViewState: DEFAULT_MAIN_VIEW_STATE,
   updateMainViewState: (view, patch) =>
     set((state) => ({
@@ -657,6 +676,10 @@ export const useUIStore = create<UIState>((set) => ({
       setItem("history-collapsed-workspaces", JSON.stringify(next));
       return { historyCollapsedWorkspaces: next };
     }),
+  setHistoryGroupMode: (m) => {
+    setItem("history-group-mode", m);
+    set({ historyGroupMode: m });
+  },
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   setTheme: (t) => {
     setItem("theme", t);
