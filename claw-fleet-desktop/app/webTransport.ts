@@ -364,9 +364,23 @@ export async function installWebTransport(): Promise<void> {
   // AppState; here they live in this store, under the same keys `storage.ts`
   // registers ("user-title", "lang"). Read on each call rather than cached, so
   // an apply right after a language switch carries the new value.
+  //
+  // The locale reports `""` rather than a literal "en" when this browser has
+  // no language on record, and liveProxy then skips the apply. These routes
+  // rewrite the host's real `~/.claude/fleet-*.md`, and a first visit from a
+  // new device knows nothing about the host's language — guessing "en" there
+  // would translate a Chinese host's whole control plane, which is exactly how
+  // this bit us through the `live-ui.sh` harness. The host's own default is
+  // still honoured: `lang-host-default` is `FLEET_LOCALE` as reported by
+  // `host_features`, i.e. the same value that rendered the guidance files in
+  // the first place. Only `navigator.language` — a fact about the visitor, not
+  // about the host — is refused as a basis for writing.
   setHostPrefsSource(() => ({
     userTitle: window.localStorage.getItem(`${STORE_PREFIX}user-title`) ?? "",
-    locale: window.localStorage.getItem(`${STORE_PREFIX}lang`) ?? "en",
+    locale:
+      window.localStorage.getItem(`${STORE_PREFIX}lang`) ??
+      window.localStorage.getItem(`${STORE_PREFIX}lang-host-default`) ??
+      "",
   }));
 
   // `shouldMockEvents` routes `emit`/`listen` through the same handler, which

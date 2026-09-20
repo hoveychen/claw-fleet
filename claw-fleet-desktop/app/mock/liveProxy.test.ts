@@ -678,3 +678,78 @@ describe("get_app_version composite", () => {
     expect(value).toEqual({ handled: true, value: "" });
   });
 });
+
+/**
+ * The guidance appliers write the *host's* real `~/.claude/fleet-*.md`, so the
+ * language they are written in has to come from the user, never from a default.
+ *
+ * What this pins down happened for real: `?mock&live` installs `tauri-mock`,
+ * which — unlike `webTransport` — never calls `setHostPrefsSource`, and the old
+ * fallback answered `locale: "en"`. `controlPlaneSelfHeal` posts these on every
+ * App mount, so one headless `live-ui.sh` screenshot run rewrote a Chinese
+ * user's whole control plane in English, and every session started afterwards
+ * answered in the wrong language.
+ */
+describe("guidance applies without a host locale", () => {
+  async function invokeWithFetchSpy(cmd: string) {
+    const { liveInvoke } = await import("./liveProxy");
+    const realFetch = globalThis.fetch;
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen.push(new URL(String(input), "http://localhost").pathname);
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      return { value: await liveInvoke(cmd, {}), seen };
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  it("skips the probe entirely when no host-prefs source is installed", async () => {
+    const { clearHostPrefsSource, GUIDANCE_COMMANDS } = await import("./liveProxy");
+    clearHostPrefsSource();
+    for (const cmd of GUIDANCE_COMMANDS) {
+      const { value, seen } = await invokeWithFetchSpy(cmd);
+      // Handled, so the caller does not fall through to the fixtures either —
+      // the apply is simply a no-op.
+      expect(value, cmd).toEqual({ handled: true, value: null });
+      expect(seen, cmd).toEqual([]);
+    }
+  });
+
+  it("skips when the installed source has no language on record", async () => {
+    const { setHostPrefsSource } = await import("./liveProxy");
+    setHostPrefsSource(() => ({ userTitle: "", locale: "" }));
+    const { seen } = await invokeWithFetchSpy("apply_interaction_mode");
+    expect(seen).toEqual([]);
+  });
+
+  it("forwards the apply once a language is known", async () => {
+    const { setHostPrefsSource, clearHostPrefsSource } = await import("./liveProxy");
+    setHostPrefsSource(() => ({ userTitle: "", locale: "zh" }));
+    try {
+      const { seen } = await invokeWithFetchSpy("apply_interaction_mode");
+      expect(seen).toEqual([expect.stringContaining("/apply_interaction_mode")]);
+    } finally {
+      clearHostPrefsSource();
+    }
+  });
+
+  it("guards every guidance route the proxy can reach", async () => {
+    const { GUIDANCE_COMMANDS, LIVE_ROUTES } = await import("./liveProxy");
+    // A guarded command that is not a route would be a typo silently guarding
+    // nothing; a guidance route left out of the set is the original bug back.
+    for (const cmd of GUIDANCE_COMMANDS) {
+      expect(Object.keys(LIVE_ROUTES), cmd).toContain(cmd);
+    }
+    // "Writes guidance" is exactly "carries a locale in its body" — the
+    // `remove_*` twins take none, and removal means the same thing in every
+    // language, so they are deliberately not guarded.
+    const guidanceRoutes = Object.keys(LIVE_ROUTES).filter((c) => {
+      const body = LIVE_ROUTES[c]({}).body as Record<string, unknown> | undefined;
+      return !!body && "locale" in body;
+    });
+    expect([...GUIDANCE_COMMANDS].sort()).toEqual(guidanceRoutes.sort());
+  });
+});
