@@ -310,6 +310,13 @@
   "mobile_device_stale_hint": "This phone's bundle is behind the desktop ({{desktop}}). Rebuild and redeploy the relay for your changes to take effect.",
   "mobile_qr_hint": "Scan with your phone camera. The QR code contains the pairing secret — do not share screenshots. On iPhone, add to Home Screen from Safari to receive push notifications.",
   "mobile_relay_url": "Relay URL",
+  "mobile_relay_preset_global": "Global (default outside mainland China)",
+  "mobile_relay_preset_cn": "China-optimized (default in mainland China)",
+  "mobile_relay_preset_custom": "Custom URL…",
+  "mobile_relay_hint_global": "Connects straight to the relay host, no extra hop.",
+  "mobile_relay_hint_cn": "Goes through a mainland reverse proxy for a steadier connection there.",
+  "mobile_relay_hint_custom": "Your own self-hosted relay.",
+  "mobile_relay_hint_shared": "Both presets front the same relay — only the network path differs; already-paired phones need to rescan the QR code to use the new one.",
   "mobile_rotate": "Regenerate pairing secret",
   "mobile_rotate_hint": "The old QR code and paired phones stop working immediately.",
   "new_session": {

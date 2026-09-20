@@ -310,6 +310,13 @@
   "mobile_device_stale_hint": "手机端 bundle 落后于桌面端（桌面 {{desktop}}）。重新构建并部署 relay 让改动生效。",
   "mobile_qr_hint": "用手机相机扫码打开。二维码包含配对密钥，请勿截图外传。iPhone 需在 Safari 中「添加到主屏幕」后才能收到推送通知。",
   "mobile_relay_url": "Relay 地址",
+  "mobile_relay_preset_global": "Global（海外默认）",
+  "mobile_relay_preset_cn": "China-optimized（国内默认）",
+  "mobile_relay_preset_custom": "自定义地址…",
+  "mobile_relay_hint_global": "直连 relay 主机，不经额外中转。",
+  "mobile_relay_hint_cn": "经大陆反向代理接入，境内网络更稳。",
+  "mobile_relay_hint_custom": "自建或自托管的 relay 地址。",
+  "mobile_relay_hint_shared": "两个预设指向同一个 relay，只是网络路径不同；已配对的手机需重新扫码才会走新地址。",
   "mobile_rotate": "重新生成配对密钥",
   "mobile_rotate_hint": "旧二维码与已配对的手机将立即失效。",
   "new_session": {

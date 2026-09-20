@@ -169,4 +169,21 @@ mod tests {
         // Undetectable region keeps the historical default.
         assert_eq!(relay_url_for_country(None), RELAY_URL_GLOBAL);
     }
+
+    /// The desktop's relay-host dropdown offers these same two hosts, and the
+    /// frontend cannot read a Rust const — so it hardcodes them. Renaming a
+    /// host here without touching that file would leave the dropdown pointing
+    /// at a dead hostname while every Rust-side default moved on.
+    #[test]
+    fn desktop_dropdown_presets_match_these_hosts() {
+        const PRESETS_TS: &str = include_str!("../../claw-fleet-desktop/app/relayPresets.ts");
+        assert!(
+            PRESETS_TS.contains(RELAY_URL_GLOBAL),
+            "claw-fleet-desktop/app/relayPresets.ts no longer carries {RELAY_URL_GLOBAL}"
+        );
+        assert!(
+            PRESETS_TS.contains(RELAY_URL_CN),
+            "claw-fleet-desktop/app/relayPresets.ts no longer carries {RELAY_URL_CN}"
+        );
+    }
 }
