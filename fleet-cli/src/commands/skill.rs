@@ -2,7 +2,7 @@
 
 use crate::fmt::*;
 use claw_fleet_core::skill_sync::{self, SkillSyncEntry, SkillSyncReport, SkillTarget};
-use claw_fleet_core::{FLEET_SKILL_MD, SKILL_TARGETS};
+use claw_fleet_core::{BUNDLED_SKILLS, SKILL_TARGETS};
 use std::path::Path;
 
 pub(crate) fn cmd_skill_install() {
@@ -23,17 +23,22 @@ pub(crate) fn cmd_skill_install() {
         if !detect.exists() {
             continue;
         }
-        let skill_dir = skills.join("fleet");
-        let skill_path = skill_dir.join("SKILL.md");
-        match std::fs::create_dir_all(&skill_dir)
-            .and_then(|_| std::fs::write(&skill_path, FLEET_SKILL_MD))
-        {
-            Ok(_) => {
-                println!("  {b}✓{r}  {name}  {d}{}{r}", skill_path.display(), d = c_dim(), r = c_reset());
-                any = true;
+        for skill in BUNDLED_SKILLS {
+            if !skill.applies_to(name) {
+                continue;
             }
-            Err(e) => {
-                eprintln!("  ✗  {name}: {e}");
+            let skill_dir = skills.join(skill.name);
+            let skill_path = skill_dir.join("SKILL.md");
+            match std::fs::create_dir_all(&skill_dir)
+                .and_then(|_| std::fs::write(&skill_path, skill.body))
+            {
+                Ok(_) => {
+                    println!("  {b}✓{r}  {name}  {d}{}{r}", skill_path.display(), d = c_dim(), r = c_reset());
+                    any = true;
+                }
+                Err(e) => {
+                    eprintln!("  ✗  {name} ({}): {e}", skill.name);
+                }
             }
         }
     }

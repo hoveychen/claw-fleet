@@ -395,6 +395,7 @@ pub fn check_cli_installed() -> (bool, Option<String>) {
 // ── Shared constants ─────────────────────────────────────────────────────────
 
 pub const FLEET_SKILL_MD: &str = include_str!("../../skills/fleet/SKILL.md");
+pub const IMAGE_SKILL_MD: &str = include_str!("../../skills/image-generation/SKILL.md");
 
 /// `(display name, installation detection dir, native skills dir)`.
 pub const SKILL_TARGETS: &[(&str, &str, &str)] = &[
@@ -402,6 +403,48 @@ pub const SKILL_TARGETS: &[(&str, &str, &str)] = &[
     ("Codex", ".codex", ".codex/skills"),
     ("GitHub Copilot", ".copilot", ".copilot/skills"),
     ("Gemini CLI", ".gemini", ".gemini/skills"),
+];
+
+/// One skill Fleet ships inside its own binary.
+///
+/// The body is `include_str!`d from `skills/<name>/SKILL.md` so the repo copy is
+/// the single source of truth — editing the markdown is the whole change, and
+/// nothing can drift between a Rust string and the file people read.
+pub struct BundledSkill {
+    /// Directory name under a runtime's `skills/`, and the skill's `name:` in
+    /// the frontmatter. These must match or the runtime will not find it.
+    pub name: &'static str,
+    pub body: &'static str,
+    /// [`SKILL_TARGETS`] display names this skill must NOT be installed into.
+    pub skip_targets: &'static [&'static str],
+}
+
+impl BundledSkill {
+    /// Should this skill be installed into the named target?
+    pub fn applies_to(&self, target_display_name: &str) -> bool {
+        !self.skip_targets.contains(&target_display_name)
+    }
+}
+
+/// Every skill Fleet installs. Iterate this rather than naming skills one by
+/// one — each install site got exactly one arm wrong the last time a registry
+/// like this was hand-maintained.
+pub const BUNDLED_SKILLS: &[BundledSkill] = &[
+    BundledSkill {
+        name: "fleet",
+        body: FLEET_SKILL_MD,
+        skip_targets: &[],
+    },
+    BundledSkill {
+        name: "image-generation",
+        body: IMAGE_SKILL_MD,
+        // Codex ships its own `imagegen` skill over a built-in `image_gen`
+        // tool, and `mcp_server` withholds `fleet__image` from a Codex client
+        // for that reason. Installing this there would hand Codex a document
+        // teaching it to use a tool it cannot see, competing with the skill it
+        // already has.
+        skip_targets: &["Codex"],
+    },
 ];
 
 /// Resolve a [`SKILL_TARGETS`] entry to absolute `(detect_dir, skills_dir)`.
@@ -432,6 +475,98 @@ pub fn resolve_skill_target(
         }
     }
     (home.join(detect_dir), home.join(skills_dir))
+}
+
+#[cfg(test)]
+mod bundled_skill_tests {
+    use super::{BUNDLED_SKILLS, SKILL_TARGETS};
+
+    fn skill(name: &str) -> &'static super::BundledSkill {
+        BUNDLED_SKILLS
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("{name} must be bundled"))
+    }
+
+    #[test]
+    fn the_image_skill_is_never_installed_into_codex() {
+        // Codex ships its own `imagegen` skill, and mcp_server withholds
+        // fleet__image from a Codex client. Installing this there would teach
+        // Codex to reach for a tool it cannot see.
+        let image = skill("image-generation");
+        assert!(!image.applies_to("Codex"));
+        for (name, _, _) in SKILL_TARGETS {
+            if *name != "Codex" {
+                assert!(image.applies_to(name), "{name} should get the image skill");
+            }
+        }
+    }
+
+    #[test]
+    fn the_fleet_skill_still_goes_everywhere() {
+        let fleet = skill("fleet");
+        for (name, _, _) in SKILL_TARGETS {
+            assert!(fleet.applies_to(name), "{name} must keep the fleet skill");
+        }
+    }
+
+    #[test]
+    fn every_skip_target_names_a_real_target() {
+        // A typo here fails open — the skill silently installs everywhere —
+        // so the roster has to be checked against the target table.
+        for skill in BUNDLED_SKILLS {
+            for skipped in skill.skip_targets {
+                assert!(
+                    SKILL_TARGETS.iter().any(|(name, _, _)| name == skipped),
+                    "{} skips unknown target {skipped}",
+                    skill.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_bundled_body_is_a_skill_whose_frontmatter_name_matches_its_dir() {
+        // The runtime resolves a skill by its directory name; a frontmatter
+        // `name:` that disagrees makes it unfindable.
+        for skill in BUNDLED_SKILLS {
+            assert!(
+                skill.body.starts_with("---\n"),
+                "{} must open with frontmatter",
+                skill.name
+            );
+            let declared = skill
+                .body
+                .lines()
+                .find_map(|l| l.strip_prefix("name: "))
+                .unwrap_or_else(|| panic!("{} has no name: in frontmatter", skill.name));
+            assert_eq!(declared.trim(), skill.name);
+            assert!(
+                skill.body.contains("description:"),
+                "{} needs a description: — it is what decides whether the body loads",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_image_skill_states_the_plan_backend_limitation() {
+        // The single most surprising fact about this capability, measured
+        // 2026-09-20: the plan-quota backend accepts model/quality/size and
+        // ignores all three. An agent that does not know this will report a
+        // `max` render that never happened.
+        let body = skill("image-generation").body;
+        assert!(body.contains("OPENAI_API_KEY"), "must name the gate");
+        assert!(
+            body.contains("ignore") || body.contains("ignored") || body.contains("ignores"),
+            "must say the controls get ignored"
+        );
+        assert!(body.contains("fleet__image"), "must name the tool it drives");
+        assert!(
+            body.contains("fleet__image_edit"),
+            "must name the edit tool too"
+        );
+    }
 }
 
 #[cfg(test)]
