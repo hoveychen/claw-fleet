@@ -323,6 +323,23 @@ describe("groupStatusSections", () => {
     } as unknown as WithDevice<SessionInfo>;
   }
 
+  /** A card that is hop `hopNo` of a 3-hop relay chain. */
+  function hop(id: string, status: string, hopNo: number, procAlive = false) {
+    return {
+      ...row(id, status, procAlive),
+      handoff: { chainId: "relay-1", chainLen: 3, hop: hopNo },
+    } as unknown as WithDevice<SessionInfo>;
+  }
+
+  /** The page's own pipeline: fold chains, then partition by status. */
+  function group(rows: Array<WithDevice<SessionInfo>>) {
+    return groupStatusSections(buildRenderItems(rows, true));
+  }
+
+  function idsOf(items: ReturnType<typeof group>[number]["items"]): string[] {
+    return items.map((it) => (it.kind === "single" ? it.session.id : it.chainId));
+  }
+
   it("derives a card's section from the very tone its dot wears", () => {
     expect(bucketOfTone("working")).toBe("running");
     expect(bucketOfTone("quiet")).toBe("running");
@@ -333,7 +350,7 @@ describe("groupStatusSections", () => {
   });
 
   it("orders sections by attention, drops empty buckets and keeps row order", () => {
-    const secs = groupStatusSections([
+    const secs = group([
       row("done-first", "idle"),
       row("parked", "waitingInput"),
       row("done-second", "idle"),
@@ -348,6 +365,28 @@ describe("groupStatusSections", () => {
       "ended",
     ]);
     // The freeze must survive grouping, same contract as groupTaskSections.
-    expect(secs[3].sessions.map((s) => s.id)).toEqual(["done-first", "done-second"]);
+    expect(idsOf(secs[3].items)).toEqual(["done-first", "done-second"]);
+  });
+
+  it("keeps a live relay chain whole under running", () => {
+    // Every hop that has handed off is process-less and toneless, so bucketing
+    // hop by hop filed the chain under "ended" beside its own running tip.
+    const secs = group([
+      hop("tip", "executing", 3, true),
+      hop("retired-2", "idle", 2),
+      hop("retired-1", "idle", 1),
+      row("plain-done", "idle"),
+    ]);
+
+    expect(secs.map((s) => s.bucket)).toEqual(["running", "ended"]);
+    expect(idsOf(secs[0].items)).toEqual(["relay-1"]);
+    expect(idsOf(secs[1].items)).toEqual(["plain-done"]);
+  });
+
+  it("files a fully retired chain under ended", () => {
+    const secs = group([hop("last", "idle", 3), hop("first", "idle", 1)]);
+
+    expect(secs.map((s) => s.bucket)).toEqual(["ended"]);
+    expect(idsOf(secs[0].items)).toEqual(["relay-1"]);
   });
 });

@@ -45,7 +45,11 @@ import { canControl, runStop, stopMode } from "./sessionStop";
 import { repoRootPath } from "../../../shared-ts/repoPath";
 import { countChainUnits } from "../../../shared-ts/chainUnits";
 import { createQuietLatch, stickyQuiet } from "../../../shared-ts/quietLatch";
-import { STATUS_BUCKETS, type StatusBucket } from "../../../shared-ts/statusBuckets";
+import {
+  STATUS_BUCKETS,
+  chainBucketOf,
+  type StatusBucket,
+} from "../../../shared-ts/statusBuckets";
 import styles from "./TasksView.module.css";
 
 /** Document-level scrollbar is shared by all tabs; the task view unmounts/remounts with
@@ -315,33 +319,42 @@ function bucketLabel(bucket: StatusBucket): string {
   return t("已结束");
 }
 
-/** One run-status partition, shaped like `TaskSection` so the list renders both
- *  groupings through the same code. */
+/** One run-status partition of already-folded cards, shaped like `TaskSection`
+ *  so the list renders both groupings through the same code. */
 export interface StatusTaskSection {
   bucket: StatusBucket;
   key: string;
-  sessions: Array<WithDevice<SessionInfo>>;
+  items: Array<RenderItem<WithDevice<SessionInfo>>>;
+}
+
+/** Which partition a rendered card belongs to. A collapsed relay chain is one
+ *  unit of work, judged by its liveliest hop — bucketing hop by hop would file
+ *  every hop that has already handed off under "ended", splitting a live chain
+ *  across two headings. */
+export function itemBucket(item: RenderItem<WithDevice<SessionInfo>>): StatusBucket {
+  if (item.kind === "single") return bucketOfTone(statusTone(item.session));
+  return chainBucketOf(item.members.map((m) => bucketOfTone(statusTone(m))));
 }
 
 /**
- * Slice a pre-sorted session list into run-status partitions, in the fixed
- * `STATUS_BUCKETS` order. Input order is preserved inside a partition (the
- * frozen-order machinery must stay intact), and empty buckets are dropped.
+ * Slice a pre-sorted, already-folded card list into run-status partitions, in
+ * the fixed `STATUS_BUCKETS` order. Input order is preserved inside a partition
+ * (the frozen-order machinery must stay intact), and empty buckets are dropped.
  */
 export function groupStatusSections(
-  rows: Array<WithDevice<SessionInfo>>,
+  items: Array<RenderItem<WithDevice<SessionInfo>>>,
 ): StatusTaskSection[] {
-  const byBucket = new Map<StatusBucket, Array<WithDevice<SessionInfo>>>();
-  for (const s of rows) {
-    const bucket = bucketOfTone(statusTone(s));
+  const byBucket = new Map<StatusBucket, Array<RenderItem<WithDevice<SessionInfo>>>>();
+  for (const item of items) {
+    const bucket = itemBucket(item);
     const arr = byBucket.get(bucket);
-    if (arr) arr.push(s);
-    else byBucket.set(bucket, [s]);
+    if (arr) arr.push(item);
+    else byBucket.set(bucket, [item]);
   }
   return STATUS_BUCKETS.filter((b) => byBucket.get(b)?.length).map((bucket) => ({
     bucket,
     key: `status:${bucket}`,
-    sessions: byBucket.get(bucket)!,
+    items: byBucket.get(bucket)!,
   }));
 }
 
@@ -683,14 +696,17 @@ export function TasksView({
   const sections = useMemo(() => {
     if (groupMode === "none") return [];
     if (groupMode === "status") {
-      return groupStatusSections(visible).map((sec) => ({
+      // Folded first, then partitioned: a relay chain stays one card under its
+      // liveliest hop instead of being split between "running" (its tip) and
+      // "ended" (every hop that has already handed off).
+      return groupStatusSections(buildRenderItems(visible, groupHandoff)).map((sec) => ({
         key: sec.key,
         name: bucketLabel(sec.bucket),
         // No path to show, and the label already says everything the heading
         // knows — so no tooltip rather than a misleading one.
         tooltip: "",
         tone: BUCKET_HEADER_TONE[sec.bucket],
-        items: buildRenderItems(sec.sessions, groupHandoff),
+        items: sec.items,
       }));
     }
     return groupTaskSections(visible, { chatPathOf, multiDevice, deviceLabelOf }).map(
