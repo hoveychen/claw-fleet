@@ -155,10 +155,11 @@ pub(crate) fn respond_to_elicitation(
     id: String,
     declined: bool,
     answers: std::collections::HashMap<String, String>,
+    task_outcome: Option<claw_fleet_core::task_outcome::TaskOutcome>,
 ) -> Result<(), String> {
     state
         .backend
-        .respond_to_elicitation(&id, declined, answers)
+        .respond_to_elicitation(&id, declined, answers, task_outcome)
 }
 
 #[tauri::command(async)]

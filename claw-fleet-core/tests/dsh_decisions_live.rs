@@ -261,6 +261,7 @@ fn live_a_question_becomes_a_card_and_its_answer_reaches_the_agent() {
         id: card.id.clone(),
         declined: false,
         answers,
+        task_outcome: None,
     })
     .expect("write answer");
 

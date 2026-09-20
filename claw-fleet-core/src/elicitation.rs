@@ -69,6 +69,14 @@ pub struct ElicitationResponse {
     #[serde(default)]
     pub declined: bool,
     pub answers: HashMap<String, String>,
+    /// Set when the user resolved the card with its terminal button instead of
+    /// answering. Carries `declined: true` as well, because there is no answer
+    /// to hand back — the distinction is that this is a verdict on the *task*,
+    /// not a refusal to answer this one question. See
+    /// [`crate::mcp_ipc::FleetAskResponse::task_outcome`], the `fleet__ask`
+    /// twin of this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_outcome: Option<crate::task_outcome::TaskOutcome>,
 }
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -115,6 +123,45 @@ pub fn write_response(resp: &ElicitationResponse) -> Result<(), String> {
     let path = response_path(&resp.id).ok_or("cannot determine home dir")?;
     let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write elicitation response: {e}"))
+}
+
+/// The single seam every elicitation response path goes through — the desktop
+/// backend, the `fleet serve` route and the mobile relay. Stamps the session's
+/// terminal state (when the card was resolved with its terminal button) and
+/// then hands the response to [`crate::parked::deliver`], which either wakes a
+/// parked session or writes the response file for the blocked producer.
+///
+/// Stamping here rather than inside [`write_response`] is load-bearing, for the
+/// same reason as [`crate::mcp_ipc::deliver_response`]: a **parked** card that
+/// the user ends is `discard`ed, so `write_response` is never reached.
+pub fn deliver_response(resp: &ElicitationResponse) -> Result<(), String> {
+    stamp_task_outcome(resp);
+    crate::parked::deliver(&resp.id, resp, resp.declined, write_response)
+}
+
+/// Record the task's terminal state when the card was ended with its terminal
+/// button. No-op for an ordinary answer or a plain decline.
+///
+/// `AskUserQuestion` has no `taskComplete` equivalent — the agent never claimed
+/// the work was done — so the claim flag is always `false` here even though the
+/// button itself closes the task as completed.
+fn stamp_task_outcome(resp: &ElicitationResponse) {
+    let Some(outcome) = resp.task_outcome else {
+        return;
+    };
+    let Some(session_id) = terminal_session(&resp.id) else {
+        return;
+    };
+    crate::task_review::terminate_task(&session_id, outcome, &resp.id, false);
+}
+
+/// Session that raised the card being resolved. A live card still has its
+/// request file; a parked card's request lives inside the parked store instead.
+fn terminal_session(id: &str) -> Option<String> {
+    if let Some(req) = read_request(id) {
+        return Some(req.session_id);
+    }
+    Some(crate::parked::get(id)?.session_id)
 }
 
 /// Clean up request + response files.

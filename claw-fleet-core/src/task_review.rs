@@ -286,6 +286,94 @@ pub fn on_task_terminated(session_id: &str, workspace_path: &str, outcome: TaskO
     });
 }
 
+/// Stamp the terminal state across every session of `session_id`'s task — the
+/// whole handoff chain, or just this one session when it never relayed. Returns
+/// the answering session's workspace.
+///
+/// **The whole handoff chain is stamped, not just the answering hop.** A relay
+/// chain is one task carried by N sessions (`fleet handoff`), so ending it on
+/// the last hop has to close the earlier ones too — otherwise every predecessor
+/// keeps a row in the desktop's pending bucket forever (`markBucket` in
+/// `HistoryView.tsx` calls anything without `userMark == done` pending), and a
+/// long chain leaves N-1 of them behind. Only the hop that actually raised the
+/// card carries the agent's `taskComplete` claim; predecessors record `false`,
+/// because they never made that claim and the retrospective reads that field as
+/// "the agent said it was done" evidence.
+///
+/// Kept separate from [`on_task_terminated`] so it is testable without the
+/// detached retrospective thread that normally follows it.
+pub fn stamp_terminal_chain(
+    session_id: &str,
+    outcome: TaskOutcome,
+    card_id: &str,
+    agent_claimed_complete: bool,
+) -> String {
+    let workspace = stamp_one_terminal(session_id, outcome, card_id, agent_claimed_complete);
+    // `task_sessions` is the existing definition of "the sessions that make up
+    // this task" (the retrospective already reads the chain this way); reuse it
+    // so the two cannot drift.
+    for hop in task_sessions(session_id) {
+        if hop == session_id || hop.trim().is_empty() {
+            continue;
+        }
+        stamp_one_terminal(&hop, outcome, card_id, false);
+    }
+    workspace
+}
+
+/// Stamp one session's terminal state + review mark, returning the workspace it
+/// resolved to (the caller needs it for the retrospective).
+///
+/// Also sets the manual review mark to `Done`: reaching a terminal state means
+/// the human is finished with this session either way, so leaving it in the
+/// "needs review" bucket would just be a stale chore.
+fn stamp_one_terminal(
+    session_id: &str,
+    outcome: TaskOutcome,
+    card_id: &str,
+    agent_claimed_complete: bool,
+) -> String {
+    let workspace = crate::session::resolve_session_cwd(session_id)
+        .or_else(|| crate::codex_source::codex_fleet_owned_cwd(session_id))
+        .unwrap_or_default();
+    if let Err(e) = crate::task_outcome::set_outcome(
+        session_id,
+        &workspace,
+        Some(outcome),
+        card_id,
+        agent_claimed_complete,
+    ) {
+        crate::log_debug(&format!("task outcome stamp for {session_id}: {e}"));
+    }
+    if let Err(e) = crate::session_mark::set_mark(
+        session_id,
+        &workspace,
+        Some(crate::session_mark::SessionMark::Done),
+    ) {
+        crate::log_debug(&format!("session mark on terminal {session_id}: {e}"));
+    }
+    workspace
+}
+
+/// Stamp a card's terminal state across the task's chain and kick off the
+/// retrospective — the one entry point every decision surface with a terminal
+/// button goes through (`fleet__ask` cards via `mcp_ipc`, `AskUserQuestion`
+/// cards via `elicitation`).
+pub fn terminate_task(
+    session_id: &str,
+    outcome: TaskOutcome,
+    card_id: &str,
+    agent_claimed_complete: bool,
+) {
+    if session_id.trim().is_empty() {
+        return;
+    }
+    let workspace = stamp_terminal_chain(session_id, outcome, card_id, agent_claimed_complete);
+    // Per-task retrospective. Returns immediately; the LLM pass runs detached,
+    // because this path is unblocking an agent that is waiting on the card.
+    on_task_terminated(session_id, &workspace, outcome);
+}
+
 /// The sessions that make up this task, in hop order. A handoff chain is one
 /// task; a session that never handed off is a one-hop task.
 pub fn task_sessions(session_id: &str) -> Vec<String> {

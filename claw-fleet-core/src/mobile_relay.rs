@@ -2017,8 +2017,18 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
                 .map_err(|e| format!("bad answers: {e}"))?
                 .unwrap_or_default();
             let declined = payload.get("declined").and_then(Value::as_bool).unwrap_or(false);
-            let resp = crate::elicitation::ElicitationResponse { id: id.clone(), declined, answers };
-            crate::parked::deliver(&id, &resp, declined, crate::elicitation::write_response)
+            // Terminal button: the phone sends `taskOutcome` alongside
+            // `declined: true`, exactly like the fleet-ask arm below.
+            let task_outcome = payload
+                .get("taskOutcome")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            let resp = crate::elicitation::ElicitationResponse {
+                id: id.clone(),
+                declined,
+                answers,
+                task_outcome,
+            };
+            crate::elicitation::deliver_response(&resp)
         }
         "fleet-ask" => {
             let answers: std::collections::BTreeMap<String, String> = payload

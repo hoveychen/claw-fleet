@@ -423,6 +423,9 @@ pub fn form_answer_to_elicitation(
         id: id.to_string(),
         declined: action.is_refusal(),
         answers: stringify_map(&action.content()).into_iter().collect(),
+        // An ACP client refusing a question is a plain dismissal, not a verdict
+        // on the task — same reasoning as `form_answer_to_fleet_ask` above.
+        task_outcome: None,
     }
 }
 
