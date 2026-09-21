@@ -490,6 +490,7 @@ fn account(rec: &ExplainRecord, usage: Option<&TurnUsage>) {
 /// the real launches use, rather than a second hand-maintained list.
 pub fn claude_fork_args(
     session_id: &str,
+    fork_session_id: &str,
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
@@ -501,6 +502,13 @@ pub fn claude_fork_args(
         "--resume".to_string(),
         session_id.to_string(),
         "--fork-session".to_string(),
+        // Name the fork's identity up front instead of letting the CLI mint
+        // one: `fleet mcp` decides which tools to advertise by looking the
+        // child's `CLAUDE_CODE_SESSION_ID` up in `launch_spec`, so the id has
+        // to be recorded there *before* the process starts. See
+        // `claude_fork_ask` for the cache consequence.
+        "--session-id".to_string(),
+        fork_session_id.to_string(),
         "--no-session-persistence".to_string(),
         "--max-turns".to_string(),
         "1".to_string(),
@@ -617,6 +625,16 @@ impl ClaudeStreamFold {
     }
 }
 
+/// Drops the transient `launch_spec` note of a fork identity when the fork is
+/// over, whichever way it ended.
+struct ForgetLaunchSpec(String);
+
+impl Drop for ForgetLaunchSpec {
+    fn drop(&mut self) {
+        crate::launch_spec::forget(&self.0);
+    }
+}
+
 fn claude_stderr_log() -> Option<PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join("session_explain_stderr.log"))
 }
@@ -640,8 +658,24 @@ pub(crate) fn claude_fork_ask(
 
     let model = crate::session::resolve_session_model_spec(&spec.session_id);
     let effort = crate::launch_spec::effort_of(&spec.session_id);
+
+    // The fork must look Fleet-owned to `fleet mcp`, or the prompt cache is
+    // lost from the first message on. `fleet mcp` advertises its 12 control
+    // tools only to sessions with a `launch_spec` note; the source session has
+    // one, a CLI-minted fork id does not, so the fork's MCP tool set — and with
+    // it the deferred-tools listing Claude Code writes into the conversation
+    // — differed from the source's. Measured 2026-09-20 on a 58K-token
+    // session: a fork without the note read 15.5K (tools + system only) at
+    // $0.89; the next fork *with* the note read 58.5K at $0.04. The note is a
+    // lie about persistence (the fork writes no transcript), so it is dropped
+    // again the moment the process ends — on every exit path, via the guard.
+    let fork_session_id = uuid::Uuid::new_v4().to_string();
+    crate::launch_spec::record(&fork_session_id, model.as_deref(), effort.as_deref());
+    let _forget = ForgetLaunchSpec(fork_session_id.clone());
+
     let args = claude_fork_args(
         &spec.session_id,
+        &fork_session_id,
         &spec.prompt,
         model.as_deref(),
         effort.as_deref(),
@@ -840,6 +874,7 @@ mod tests {
     fn fork_args_mirror_the_cache_governing_flags() {
         let args = claude_fork_args(
             "sid",
+            "fork-id",
             "ask",
             Some("claude-fable-5-1"),
             Some("high"),
@@ -848,7 +883,9 @@ mod tests {
             vec![],
         );
         let joined = args.join(" ");
-        assert!(joined.starts_with("--resume sid --fork-session --no-session-persistence --max-turns 1 -p ask"));
+        assert!(joined.starts_with(
+            "--resume sid --fork-session --session-id fork-id --no-session-persistence --max-turns 1 -p ask"
+        ));
         assert!(joined.contains("--output-format stream-json --verbose --include-partial-messages"));
         // The thinking config is part of what the cache keys on.
         assert!(joined.contains("--thinking-display summarized"));
@@ -861,7 +898,7 @@ mod tests {
 
     #[test]
     fn fork_args_without_overrides_stay_minimal() {
-        let args = claude_fork_args("sid", "ask", None, None, vec![], vec![], vec![]);
+        let args = claude_fork_args("sid", "fork-id", "ask", None, None, vec![], vec![], vec![]);
         assert!(!args.iter().any(|a| a == "--model" || a == "--effort"));
     }
 

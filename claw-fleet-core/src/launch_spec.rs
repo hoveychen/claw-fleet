@@ -190,6 +190,19 @@ pub fn was_fleet_spawned(session_id: &str) -> bool {
     spec_path(session_id).map(|p| p.exists()).unwrap_or(false)
 }
 
+/// Drop the note for `session_id`, so [`was_fleet_spawned`] stops answering
+/// true for it. For identities Fleet mints only for the duration of one
+/// process — a `session_explain` fork that never persists a transcript — the
+/// note is what makes `fleet mcp` advertise the full Fleet tool set to the
+/// child (a prefix-cache requirement, see `session_explain::claude_fork_ask`),
+/// and it must not outlive the child or the Tasks list would count a session
+/// that has no transcript. No-op when there is nothing to remove.
+pub fn forget(session_id: &str) {
+    if let Some(path) = spec_path(session_id) {
+        let _ = fs::remove_file(path);
+    }
+}
+
 /// Epoch-ms after which an entrypoint-Fleet-owned session that carries no spawn
 /// marker is a leaked `claude -p` child rather than a real Fleet session.
 /// Established on this machine at the first [`record`] once the marker feature
