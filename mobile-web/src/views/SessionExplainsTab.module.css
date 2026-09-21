@@ -104,6 +104,32 @@
   color: var(--color-accent);
 }
 
+/* One turn of a chain. The card is a flex column with its own gap, so a turn
+   has to re-establish one for the blocks it now wraps. */
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.turn + .turn {
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.turnQuestion {
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* How many turns the collapsed head is summarising. */
+.turns {
+  flex-shrink: 0;
+  font-size: var(--t-meta, 11px);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+
 .answer {
   font-size: var(--t-body, 16px);
   line-height: 1.6;

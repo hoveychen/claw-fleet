@@ -84,6 +84,54 @@
   margin-bottom: 0;
 }
 
+/* Turns of one chain, divided so a follow-up reads as the next turn of the
+   same conversation rather than as a second unrelated answer. */
+.turn + .turn {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-border);
+}
+
+/* Keep asking about the same passage, at the foot of the chain. */
+.follow {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.followInput {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-family: inherit;
+  /* 16px keeps iOS from zooming the page onto the field (as in SelectionAskBar). */
+  font-size: 16px;
+  padding: 7px 10px;
+  border-radius: 9px;
+}
+.followInput:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.followSend {
+  flex-shrink: 0;
+  min-height: 34px;
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  padding: 0 12px;
+  border-radius: 9px;
+}
+.followSend:disabled {
+  opacity: 0.5;
+}
+
 .waiting,
 .error {
   margin-top: 6px;

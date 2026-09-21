@@ -1,5 +1,11 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { RelayClient, RelayRequestError, type RttSample, isDesktopRejection } from "./relay";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  RelayClient,
+  RelayRequestError,
+  type RttSample,
+  type TransportHandlers,
+  isDesktopRejection,
+} from "./relay";
 // URL membership calculation moved to relayBase.ts (a leaf module without relay client).
 import { relayDisplayHost, resolveRelayBase } from "./relayBase";
 import { deriveKeys, isSealed, open, type RelayKeys, seal, sealBytes } from "./relayCrypto";
@@ -859,5 +865,98 @@ describe("resolveRelayBase", () => {
         BAKED,
       );
     }
+  });
+});
+
+// ── Dead-link probe ─────────────────────────────────────────────────────────
+//
+// A half-open socket keeps `readyState === OPEN` and never fires `onclose`, so
+// before the probe existed nothing in this client could notice the link was
+// gone: requests sat out their full timeouts and the header signal kept showing
+// the last *successful* round trip. These tests pin the two halves of the
+// contract — probe a relay that answers, stay quiet against one that doesn't.
+describe("RelayClient detects a half-open socket", () => {
+  const clients: RelayClient[] = [];
+
+  beforeEach(() => {
+    FakeWs.instances = [];
+    (globalThis as unknown as { window: unknown }).window = windowShim();
+    (globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWs;
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const c of clients.splice(0)) c.close();
+  });
+
+  /** Authed connection under fake timers. `connected()` above can't be reused:
+   *  it polls with real `setTimeout`, which never fires once the clock is fake. */
+  async function authedUnderFakeTimers(
+    handlers: TransportHandlers,
+    authedFrame: Record<string, unknown>,
+  ): Promise<{ client: RelayClient; ws: FakeWs; closed: () => number }> {
+    const client = new RelayClient(SECRET, handlers);
+    clients.push(client);
+    client.connect();
+    // Key derivation is a WebCrypto promise, not a timer, and it does not
+    // always settle within one flush — advance repeatedly until the socket it
+    // gates actually exists rather than guessing at a number of ticks.
+    const base = FakeWs.instances.length;
+    for (let i = 0; i < 200 && FakeWs.instances.length === base; i++) {
+      await vi.advanceTimersByTimeAsync(1);
+    }
+    const ws = FakeWs.instances[FakeWs.instances.length - 1];
+    if (!ws) throw new Error("ws was never created under fake timers");
+    let closes = 0;
+    // A real `close()` fires `onclose` — the browser resolves it locally, it
+    // needs nothing from the peer. That callback is what stops the hello timer
+    // and schedules the reconnect, so a fake that only counts would leave the
+    // probe running and condemn the same socket on every later tick.
+    ws.close = () => {
+      closes++;
+      ws.onclose?.();
+    };
+    ws.onopen?.();
+    ws.deliver({ type: "authed", agent_online: true, clients: 1, ...authedFrame });
+    return { client, ws, closed: () => closes };
+  }
+
+  const pings = (ws: FakeWs) => ws.sent.map((s) => JSON.parse(s)).filter((f) => f.type === "ping");
+
+  it("probes a relay that advertises pong, and condemns the socket when none comes back", async () => {
+    let deadLinks = 0;
+    const { ws, closed } = await authedUnderFakeTimers(
+      { onDeadLink: () => deadLinks++ },
+      { pong: true },
+    );
+
+    // One hello interval: a probe goes out, and nothing is condemned yet.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(pings(ws).length).toBe(1);
+    expect(deadLinks).toBe(0);
+
+    // Answer it: the link is alive, so the deadline keeps being pushed out.
+    ws.deliver({ type: "pong", id: pings(ws)[0].id });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(deadLinks).toBe(0);
+    expect(closed()).toBe(0);
+
+    // Now go silent. Past 45s with no inbound frame the socket is condemned
+    // and handed to the normal reconnect path.
+    await vi.advanceTimersByTimeAsync(50_000);
+    expect(deadLinks).toBe(1);
+    expect(closed()).toBeGreaterThan(0);
+  });
+
+  it("stays silent against a relay that does not advertise pong", async () => {
+    // An older relay drops an unparsed `ping` frame without answering. Probing
+    // it would make every healthy link look dead and reconnect in a loop.
+    let deadLinks = 0;
+    const { ws, closed } = await authedUnderFakeTimers({ onDeadLink: () => deadLinks++ }, {});
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(pings(ws).length).toBe(0);
+    expect(deadLinks).toBe(0);
+    expect(closed()).toBe(0);
   });
 });

@@ -75,7 +75,12 @@ import {
 import { useSessionAux } from "../useSessionAux";
 import { rememberDoc, useDocHistory } from "../hooks/useDocHistory";
 import { useSessionExplains } from "../hooks/useSessionExplains";
-import { locateExplainRow, selectQuoteIn, type AssistantSelection } from "../selectionExplain";
+import {
+  locateExplainRow,
+  selectQuoteIn,
+  threadRootId,
+  type AssistantSelection,
+} from "../selectionExplain";
 import type { ExplainPreset, ExplainRecord } from "../explainApi";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SessionAuxPanel } from "./SessionAuxPanel";
@@ -1022,10 +1027,13 @@ export function SessionDetail({
   const pickExplain = useCallback((id: string) => {
     setAux((st) => toggleExplain(st, id));
   }, []);
+  /** ✕ on a side-question card hides the whole chain it renders, not one turn
+   *  of it — a card that dropped a turn and kept the rest would be a card the
+   *  reader cannot get rid of. */
   const dropExplain = useCallback(
-    (id: string) => {
-      dismissExplain(id);
-      setAux((st) => (st.expanded === explainCardId(id) ? { ...st, expanded: null } : st));
+    (ids: string[]) => {
+      for (const id of ids) dismissExplain(id);
+      setAux((st) => (ids.some((id) => st.expanded === explainCardId(id)) ? { ...st, expanded: null } : st));
     },
     [dismissExplain],
   );
@@ -1034,11 +1042,17 @@ export function SessionDetail({
    *  hand things back to the rail, not to become a second reader. */
   const reopenExplain = useCallback(
     (id: string) => {
-      restoreExplain(id);
-      setAux((st) => ({ ...st, expanded: explainCardId(id) }));
+      // A library row is one record, but the rail's card is its whole chain:
+      // restore every turn of it, and expand the card by its root id.
+      const picked = allExplains.find((r) => r.id === id);
+      const root = picked ? threadRootId(picked) : id;
+      const chain = allExplains.filter((r) => threadRootId(r) === root);
+      for (const r of chain) restoreExplain(r.id);
+      if (chain.length === 0) restoreExplain(id);
+      setAux((st) => ({ ...st, expanded: explainCardId(root) }));
       setRailOverride((v) => (v === false ? null : v));
     },
-    [restoreExplain],
+    [allExplains, restoreExplain],
   );
   /** A library row for a doc: the same call the transcript link makes, so a
    *  doc recovered from the list is indistinguishable from one just opened. */
@@ -1110,7 +1124,9 @@ export function SessionDetail({
           anchor: prev.anchor ?? undefined,
           thread: [...(prev.thread ?? []), prev.id],
         });
-        setAux((st) => ({ ...st, expanded: explainCardId(rec.id) }));
+        // The chain's card is keyed by its *root*, so expanding the new
+        // record's own id would leave the reader staring at a collapsed card.
+        setAux((st) => ({ ...st, expanded: explainCardId(threadRootId(rec)) }));
       } finally {
         setExplainBusy(false);
       }

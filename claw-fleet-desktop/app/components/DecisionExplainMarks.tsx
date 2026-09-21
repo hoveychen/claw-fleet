@@ -36,6 +36,13 @@ export type DecisionExplain = {
   enabled: boolean;
   busy: boolean;
   ask: (sel: AssistantSelection, preset: ExplainPreset, question?: string) => void;
+  /**
+   * Continue a settled answer: same passage, the prior Q/A folded into a fresh
+   * fork of the *session* (the fork itself is never resumable — see
+   * `session_explain::build_prompt`). Threading it off `prev` is what keeps the
+   * follow-up aware of the answer it is following up on.
+   */
+  followUp: (prev: ExplainRecord, question: string) => void;
   answers: ExplainRecord[];
   dismiss: (id: string) => void;
 };
@@ -97,19 +104,10 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): D
     };
   }, [sessionId]);
 
-  const ask = useCallback(
-    async (sel: AssistantSelection, preset: ExplainPreset, question?: string) => {
-      if (!sessionId || !sessionPath) return;
-      const req: ExplainRequest = {
-        sessionId,
-        sessionPath,
-        workspacePath: workspacePath || undefined,
-        quote: sel.quote,
-        preset,
-        question: preset === "custom" ? question : undefined,
-        anchor: undefined,
-        thread: [],
-      };
+  /** Post a request, show the record (or a local error stand-in), and follow it
+   *  until it settles. Shared by the first question and every follow-up. */
+  const submit = useCallback(
+    async (req: ExplainRequest) => {
       setBusy(true);
       let rec: ExplainRecord;
       try {
@@ -118,15 +116,15 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): D
         const now = Date.now();
         rec = {
           id: `local-${now}`,
-          sessionId,
+          sessionId: req.sessionId,
           source: "",
           createdMs: now,
           updatedMs: now,
-          preset,
-          quote: sel.quote,
-          question: question ?? "",
-          anchor: undefined,
-          thread: [],
+          preset: req.preset,
+          quote: req.quote,
+          question: req.question ?? "",
+          anchor: req.anchor,
+          thread: req.thread ?? [],
           status: "error",
           text: "",
           error: e instanceof Error ? e.message : String(e),
@@ -140,19 +138,53 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): D
       } finally {
         setBusy(false);
       }
-      window.getSelection()?.removeAllRanges();
       upsert(rec);
       if (rec.status === "running" && !pollers.current.has(rec.id)) {
         const ctl = new AbortController();
         pollers.current.set(rec.id, ctl);
-        pollExplanation(() => getExplanation(sessionId, rec.id), upsert, { signal: ctl.signal })
+        pollExplanation(() => getExplanation(req.sessionId, rec.id), upsert, { signal: ctl.signal })
           .catch((e) => console.error("explain poll failed:", e))
           .finally(() => {
             if (pollers.current.get(rec.id) === ctl) pollers.current.delete(rec.id);
           });
       }
     },
-    [sessionId, sessionPath, workspacePath, upsert],
+    [upsert],
+  );
+
+  const ask = useCallback(
+    async (sel: AssistantSelection, preset: ExplainPreset, question?: string) => {
+      if (!sessionId || !sessionPath) return;
+      await submit({
+        sessionId,
+        sessionPath,
+        workspacePath: workspacePath || undefined,
+        quote: sel.quote,
+        preset,
+        question: preset === "custom" ? question : undefined,
+        anchor: undefined,
+        thread: [],
+      });
+      window.getSelection()?.removeAllRanges();
+    },
+    [sessionId, sessionPath, workspacePath, submit],
+  );
+
+  const followUp = useCallback(
+    async (prev: ExplainRecord, question: string) => {
+      if (!sessionId || !sessionPath) return;
+      await submit({
+        sessionId,
+        sessionPath,
+        workspacePath: workspacePath || undefined,
+        quote: prev.quote,
+        preset: "custom",
+        question,
+        anchor: prev.anchor,
+        thread: [...(prev.thread ?? []), prev.id],
+      });
+    },
+    [sessionId, sessionPath, workspacePath, submit],
   );
 
   const dismiss = useCallback((id: string) => {
@@ -161,7 +193,7 @@ export function useDecisionExplainMarks(sessionId: string | null | undefined): D
     setAnswers((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
-  return { enabled: Boolean(sessionId && sessionPath), busy, ask, answers, dismiss };
+  return { enabled: Boolean(sessionId && sessionPath), busy, ask, followUp, answers, dismiss };
 }
 
 /** The answers asked from inside a card's question, under it: the quoted

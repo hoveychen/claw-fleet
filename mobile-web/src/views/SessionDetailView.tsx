@@ -47,7 +47,7 @@ import { CopyButton } from "./CopyButton";
 import { useLightbox } from "./Lightbox";
 import { AttachmentThumbs } from "./AttachmentThumb";
 import { splitContextFiles } from "../userAttachments";
-import type { FleetTransport } from "../transport";
+import { isDesktopRejection, type FleetTransport } from "../transport";
 import type {
   ContentBlock,
   LiveThinking,
@@ -109,6 +109,22 @@ import { ApiErrorCard } from "./ApiErrorCard";
 import { classifySyntheticError } from "../../../shared-ts/syntheticError";
 
 const TAIL_POLL_MS = 2500;
+/** Consecutive failed polls before a view that already has messages says so.
+ *  One dropped frame on a mobile link is noise and an error banner for it
+ *  would cry wolf; two in a row means this view has stopped following the
+ *  session, which the reader needs to know — a silently frozen transcript is
+ *  indistinguishable from a session that simply went quiet. */
+const TAIL_FAILURES_BEFORE_ERROR = 2;
+
+/** Whether a failed tail poll should be shown to the reader.
+ *
+ *  Exported for its own test: the rule is easy to get subtly wrong in either
+ *  direction, and both directions are bugs users actually hit — banner on
+ *  every blip, or a transcript that silently stops following the session. */
+export function shouldShowTailError(hasMessages: boolean, consecutiveFailures: number): boolean {
+  if (!hasMessages) return true; // nothing on screen; there is no gentler signal
+  return consecutiveFailures >= TAIL_FAILURES_BEFORE_ERROR;
+}
 const TAIL_INITIAL = 120;
 const TAIL_STEP = 200;
 const LIVE_THINKING_POLL_MS = 1200;
@@ -1325,6 +1341,8 @@ export function SessionDetailView({
   // back to the v2 full-tail poll.
   const offsetRef = useRef<number | null>(null);
   const legacyRef = useRef(false);
+  /** Consecutive failed tail polls, reset by the first one that succeeds. */
+  const tailFailuresRef = useRef(0);
   useEffect(() => {
     if (!client || pane !== null) return;
     let cancelled = false;
@@ -1345,7 +1363,15 @@ export function SessionDetailView({
       try {
         const loc = await client.request<TailDelta>("tail_delta", { path: session.jsonlPath });
         offsetRef.current = loc.newOffset;
-      } catch {
+      } catch (e) {
+        // Only a verdict from the desktop means it lacks the method. A timeout
+        // or a dropped frame says nothing about what the desktop supports, and
+        // treating it as "old desktop" was doing real damage: one bad round
+        // trip pinned this view to full-tail polling — the most expensive mode
+        // — for as long as it stayed open, and then spent a *second* full
+        // timeout on the `fullTail` below before surfacing anything, so a dead
+        // link took 30s to produce its first error.
+        if (!isDesktopRejection(e)) throw e;
         legacyRef.current = true; // old desktop — keep full polling
       }
       await fullTail();
@@ -1385,8 +1411,19 @@ export function SessionDetailView({
             }
           }
         }
+        if (!cancelled) {
+          tailFailuresRef.current = 0;
+          setLoadError(null);
+        }
       } catch (e) {
-        if (!cancelled && messages === null) {
+        // Surface a failure once the view has nothing to show, or once they
+        // stop being a blip. Previously only the first condition applied, so
+        // after one successful load every later failure was silent: the page
+        // kept displaying stale messages with no hint that it had stopped
+        // following the session at all — "looks fine, just never updates".
+        tailFailuresRef.current += 1;
+        const show = shouldShowTailError(messagesRef.current !== null, tailFailuresRef.current);
+        if (!cancelled && show) {
           setLoadError(e instanceof Error ? e.message : t("加载失败"));
         }
       }

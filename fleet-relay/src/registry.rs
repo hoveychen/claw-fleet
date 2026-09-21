@@ -27,6 +27,11 @@ use crate::frames::{OutFrame, Role};
 pub enum OutMsg {
     Text(String),
     Binary(Vec<u8>),
+    /// A protocol-level WebSocket ping the read loop schedules for its own
+    /// connection. It travels through the write pump rather than straight to
+    /// the sink because `split()` hands the sink to that task exclusively.
+    /// Never routed between connections — only a connection's `own_tx`.
+    Ping,
 }
 
 pub type Tx = UnboundedSender<OutMsg>;
@@ -323,6 +328,9 @@ mod tests {
             match msg {
                 OutMsg::Text(s) => out.push(serde_json::from_str(&s).unwrap()),
                 OutMsg::Binary(_) => panic!("expected text frame, got binary"),
+                // The registry never routes a ping; it is a connection's own
+                // keepalive, queued straight onto its write pump.
+                OutMsg::Ping => panic!("expected text frame, got ping"),
             }
         }
         out
@@ -437,6 +445,7 @@ mod tests {
             match msg {
                 OutMsg::Binary(b) => out.push(b),
                 OutMsg::Text(_) => panic!("expected binary frame, got text"),
+                OutMsg::Ping => panic!("expected binary frame, got ping"),
             }
         }
         out

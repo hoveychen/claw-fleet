@@ -1334,6 +1334,25 @@
   color: var(--color-text);
 }
 
+/* One turn of a chain. The pane is a flex column with its own gap, so a turn
+   re-establishes one for the blocks it now wraps; the dashed rule is what
+   makes a follow-up read as the next turn rather than a second answer. */
+.explain_turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.explain_turn + .explain_turn {
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.explain_turn_question {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
 .explain_answer {
   font-size: 12px;
   line-height: 1.55;

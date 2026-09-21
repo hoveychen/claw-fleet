@@ -297,7 +297,11 @@ export class HttpTransport implements FleetTransport {
     onAck?.();
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs ?? REQUEST_TIMEOUT_MS);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs ?? REQUEST_TIMEOUT_MS);
     let res: Response;
     try {
       res = await fetchImpl(`${this.base}/mobile_rpc`, {
@@ -310,6 +314,12 @@ export class HttpTransport implements FleetTransport {
       // Network down, timeout abort, gateway rejection — we got no decision. The host
       // may have already done the work, so remote is false and the caller has the right
       // to double-check independently.
+      //
+      // Only a timeout feeds the header signal, not every fetch failure: a
+      // refused connection is already reported by the stream going down, while
+      // a request that went out and never came back is the case nothing else
+      // observes. Same reasoning as the relay transport's own timeout path.
+      if (timedOut) this.handlers.onRequestTimeout?.();
       throw new TransportError(errText(e), false);
     } finally {
       clearTimeout(timer);
