@@ -85,7 +85,10 @@
   line-height: 1;
   vertical-align: super;
   color: var(--color-accent);
-  opacity: 0;
+  /* Always present at low opacity: an invisible glyph still took its width, so
+     the transcript showed a blank gap after every mark until hovered. Keeping
+     it faintly visible also tells the reader the phrase is clickable. */
+  opacity: 0.45;
   transition: opacity 0.12s ease;
 }
 
