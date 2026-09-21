@@ -1533,7 +1533,7 @@
   flex: 0 0 auto;
   padding: 0 5px;
   font-size: 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-bg-sunken);
   color: var(--color-text-dim);
 }

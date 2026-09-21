@@ -59,6 +59,7 @@ import {
   closeOtherDocs,
   collapseDoc,
   auxDocLabel,
+  escapeTarget,
   isAuxFacet,
   openDoc,
   pruneTab,
@@ -1520,6 +1521,37 @@ export function SessionDetail({
      it gives up the side-by-side and slides in over the rail instead, which is
      also what you expect a drawer entering from the right to do. */
   const railCovered = railOpen && auxOpen && bodyRowW > 0 && bodyRowW < railFitW;
+
+  /*
+   * Escape closes the drawer, then collapses the expanded rail card.
+   *
+   * These were the two surfaces on this page that swallowed the key — every
+   * modal here answers it (the reader, the lightbox, the handoff chain) and
+   * the drawer, which has a scrim and therefore reads as a modal, did not.
+   *
+   * Bubble phase, and deliberately last in line. The modals listen in capture
+   * and stop the event, so a key spent closing one never reaches here;
+   * ContextMenu does the same. The selection toolbar is the exception — it
+   * answers Escape on *keyup*, which cannot be ordered against a keydown — so
+   * a live selection is checked for directly: if the toolbar is up, the press
+   * is its.
+   */
+  useEffect(() => {
+    if (!activeFacet && aux.expanded == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const sel = window.getSelection();
+      const hasSelection = !!sel && !sel.isCollapsed;
+      setAux((st) => {
+        const target = escapeTarget(st, hasSelection);
+        if (target === "drawer") return closeAux(st);
+        if (target === "card") return collapseDoc(st);
+        return st;
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeFacet, aux.expanded]);
 
   return (
     // Both link capabilities cover the whole component, so the reader modal and

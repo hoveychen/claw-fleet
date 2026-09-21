@@ -421,6 +421,23 @@ export function orderRailItems<
   return shown.map((x) => x.entry);
 }
 
+/**
+ * What an Escape press should close, if anything.
+ *
+ * Ordered by how modal the surface is: the drawer has a scrim over the
+ * conversation, the expanded card only covers a band of it. A live text
+ * selection outranks both — the selection toolbar is up and the key is its.
+ */
+export function escapeTarget(
+  state: AuxState,
+  hasSelection: boolean,
+): "drawer" | "card" | null {
+  if (hasSelection) return null;
+  if (state.active != null) return "drawer";
+  if (state.expanded != null) return "card";
+  return null;
+}
+
 /** Clear the stack. Nothing is left expanded, because nothing is left. */
 export function closeAllDocs(state: AuxState): AuxState {
   if (state.docs.length === 0) return state;

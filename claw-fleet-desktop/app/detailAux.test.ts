@@ -7,6 +7,7 @@ import {
   closeDoc,
   collapseDoc,
   docId,
+  escapeTarget,
   initialAux,
   makeAuxDoc,
   MAX_AUX_DOCS,
@@ -281,5 +282,26 @@ describe("orderRailItems", () => {
   it("returns everything untouched when under the cap", () => {
     expect(orderRailItems([d("a", 1)], [], null)).toHaveLength(1);
     expect(orderRailItems([], [], null)).toEqual([]);
+  });
+});
+
+describe("escapeTarget", () => {
+  it("closes the drawer first — it is the more modal of the two", () => {
+    const st = showFacet(openDoc(initialAux, "file", "/a.rs"), "tokens");
+    expect(escapeTarget(st, false)).toBe("drawer");
+  });
+
+  it("collapses the expanded card when no drawer is open", () => {
+    expect(escapeTarget(openDoc(initialAux, "file", "/a.rs"), false)).toBe("card");
+  });
+
+  it("does nothing with neither open", () => {
+    expect(escapeTarget(initialAux, false)).toBeNull();
+  });
+
+  it("yields to a live selection — that Escape belongs to the ask bar", () => {
+    const st = showFacet(openDoc(initialAux, "file", "/a.rs"), "tokens");
+    expect(escapeTarget(st, true)).toBeNull();
+    expect(escapeTarget(openDoc(initialAux, "file", "/a.rs"), true)).toBeNull();
   });
 });
