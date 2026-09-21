@@ -265,16 +265,10 @@
 
 .message.assistant {
   justify-content: flex-start;
-  /* Lane for the hover controls — see `.message.assistant .row_actions`. */
-  padding-right: 54px;
 }
 
 .message.user {
   justify-content: flex-end;
-  /* No controls live on this side — the user strip sits left of the bubble.
-     The padding is here so both roles end on the same vertical line; without
-     it every user bubble would jut 54px past the assistant text above it. */
-  padding-right: 54px;
 }
 
 /* Turn rhythm.
@@ -318,17 +312,15 @@
   50% { opacity: 0.4; }
 }
 
-/* Hover affordance. It gets a lane of its own on either side of the content —
-   never a box floating on top of it. The pair used to be `position: absolute;
-   top/right: 0` over an unreserved row, which on an assistant record parks two
-   opaque 22px boxes on the first line of prose, and the first line is the one
-   line that is always full width: it hid real words on every long message.
+/* Hover affordance. Never overlaps text and never takes a pixel of column
+   width: on an assistant record it rides the footer line that already carries
+   the token counts, whose right half is empty at any pane width.
 
-   The lane costs ~54px of column on assistant rows, paid whether or not the
-   row is hovered. That is the price of never covering text, and it is the same
-   trade the user bubble already made below. Fading opacity rather than
-   toggling display keeps the lane's width constant, so revealing the pair
-   still costs no reflow. */
+   It used to be `position: absolute; top/right: 0` on the row, which parks two
+   opaque 22px boxes on the first line of prose — the one line that is always
+   full width, so it hid real words on every long message. Reserving a right
+   lane instead would fix the overlap by taking ~54px off the reading column,
+   and the column is the scarcer resource of the two. */
 .row_actions {
   display: flex;
   align-items: center;
@@ -362,15 +354,13 @@
   border-color: var(--color-accent);
 }
 
-/* Assistant prose runs the full column, so the strip gets a lane of its own,
-   carved out of the row by `.message.assistant`'s padding-right above. That
-   padding is on every assistant row, including the tool-only ones that render
-   no strip at all — otherwise prose records and tool records would end 54px
-   apart and the column's right edge would go ragged as you scroll. */
-.message.assistant .row_actions {
-  position: absolute;
-  top: 8px;
-  right: 0;
+/* Assistant footer: token counts on the left, controls pushed to the right end
+   of the same line. `margin-left: auto` rather than a fixed width, so the pair
+   stays on the row's right edge however long the counts run. The footer is
+   rendered for any record with prose even when there are no counts to show —
+   see MessageList's call site — so the controls never lose their home. */
+.usage .row_actions {
+  margin-left: auto;
 }
 
 /* The user bubble already hugs the right edge; put its control on the free
@@ -465,10 +455,15 @@
    `↑in ↓out · model · time` run keeps its separator spacing; the status dot
    just rides along as an inline-block. */
 .usage {
+  display: flex;
+  align-items: center;
   font-size: var(--t-meta, 10px);
   color: var(--color-text-dim);
   margin-top: 4px;
   padding-left: 2px;
+  /* The 22px controls are taller than the 11px counts; hold the line at their
+     height so hovering a record never nudges the one below it. */
+  min-height: 22px;
 }
 
 /* The user turn's timestamp, now a footer inside the bubble (see MessageList's

@@ -222,6 +222,24 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
   // Turn status. Previously a timeline dot in the gutter; now a marker on the
   // usage row, because roles are told apart by layout (full-width assistant vs.
   // right-aligned user bubble) rather than by a gutter rail.
+  // Tool-only assistant turns have no prose worth copying or reading. The user
+  // row puts this ahead of its bubble; the assistant row hangs it off the right
+  // end of the usage footer, where it covers no text and costs no column width.
+  const actions = copyText ? (
+    <div className={styles.row_actions}>
+      <button
+        type="button"
+        className={styles.read_btn}
+        onClick={() => setReading(true)}
+        title={t("detail.read")}
+        aria-label={t("detail.read")}
+      >
+        ⤢
+      </button>
+      <CopyButton text={copyText} />
+    </div>
+  ) : null;
+
   const stopReason = msg.message.stop_reason;
   const dotClass =
     stopReason === "end_turn"
@@ -244,21 +262,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
       data-role={isAssistant ? "assistant" : "user"}
       data-msg-uuid={msg.uuid}
     >
-      {/* Tool-only assistant turns have no prose worth copying or reading. */}
-      {copyText && (
-        <div className={styles.row_actions}>
-          <button
-            type="button"
-            className={styles.read_btn}
-            onClick={() => setReading(true)}
-            title={t("detail.read")}
-            aria-label={t("detail.read")}
-          >
-            ⤢
-          </button>
-          <CopyButton text={copyText} />
-        </div>
-      )}
+      {isUser && actions}
       {reading && (
         <ReaderModal
           text={copyText}
@@ -311,19 +315,28 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
             )}
           </div>
         )}
-        {isAssistant && turnUsage && (
+        {/* The footer also carries the read/copy pair, so a record with prose
+            but no usage counts (a streaming turn, a resumed transcript that
+            lost them) still renders one — otherwise the controls would have
+            nowhere to live on exactly the messages worth copying. */}
+        {isAssistant && (turnUsage || actions) && (
           <div className={styles.usage}>
-            {dotClass && <span className={`${styles.dot} ${dotClass}`} />}
-            ↑{turnUsage.inputTokens} ↓{turnUsage.outputTokens}
-            {msg.message.model && (
-              <span className={styles.model}> · {shortModelName(msg.message.model)}</span>
+            {turnUsage && (
+              <>
+                {dotClass && <span className={`${styles.dot} ${dotClass}`} />}
+                ↑{turnUsage.inputTokens} ↓{turnUsage.outputTokens}
+                {msg.message.model && (
+                  <span className={styles.model}> · {shortModelName(msg.message.model)}</span>
+                )}
+                {time && (
+                  <span className={styles.msg_time} title={time.full}>
+                    {" · "}
+                    {time.short}
+                  </span>
+                )}
+              </>
             )}
-            {time && (
-              <span className={styles.msg_time} title={time.full}>
-                {" · "}
-                {time.short}
-              </span>
-            )}
+            {actions}
           </div>
         )}
       </div>
