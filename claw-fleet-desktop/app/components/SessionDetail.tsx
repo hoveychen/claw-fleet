@@ -58,6 +58,7 @@ import {
   closeDoc,
   closeOtherDocs,
   collapseDoc,
+  auxDocLabel,
   isAuxFacet,
   openDoc,
   pruneTab,
@@ -71,6 +72,7 @@ import {
   type AuxFacetItem,
 } from "../detailAux";
 import { useSessionAux } from "../useSessionAux";
+import { rememberDoc } from "../hooks/useDocHistory";
 import { useSessionExplains } from "../hooks/useSessionExplains";
 import { locateExplainRow, selectQuoteIn, type AssistantSelection } from "../selectionExplain";
 import type { ExplainPreset, ExplainRecord } from "../explainApi";
@@ -814,9 +816,15 @@ export function SessionDetail({
    *  the thing the transcript named opens beside the sentence that named it,
    *  instead of taking over the window (the Repo / Wiki pages) or landing in
    *  the window's tab strip, where reading it costs sight of the conversation. */
-  const openAuxDoc = useCallback((kind: AuxDocKind, ref: string, label?: string) => {
-    setAux((st) => openDoc(st, kind, ref, label));
-  }, []);
+  const openAuxDoc = useCallback(
+    (kind: AuxDocKind, ref: string, label?: string) => {
+      setAux((st) => openDoc(st, kind, ref, label));
+      // The rail keeps 8 and clears on a session switch; the reading list
+      // keeps every ref so the facet panel can offer this one back later.
+      if (sessionId) rememberDoc(sessionId, kind, ref, label || auxDocLabel(kind, ref));
+    },
+    [sessionId],
+  );
 
   /** What a transcript's ingest card (Artifacts / Wiki) does when clicked: open
    *  the thing in the rail, or—when it is already open there—hand it to its
