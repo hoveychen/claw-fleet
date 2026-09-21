@@ -8,7 +8,9 @@
 //! - `GET /session_explain?session_id=…&id=…` returns that record as it stands
 //!   (clients poll this until `status` leaves `running`);
 //! - `GET /session_explains?session_id=…` lists every record of the session,
-//!   oldest first.
+//!   oldest first;
+//! - `POST /session_explain_dismiss` with `{sessionId, id, dismissed}` hides a
+//!   record from the rail (or hands it back) for every client that reads it.
 use super::*;
 
 /// `POST /session_explain` (ask) or `GET /session_explain?session_id=…&id=…`
@@ -55,6 +57,34 @@ pub(crate) fn route_session_explains(
         json_header,
         Ok::<_, String>(crate::session_explain::list(&session_id)),
     );
+}
+
+/// `POST /session_explain_dismiss` — `{sessionId, id, dismissed}`.
+///
+/// A write of its own rather than a field on the record: the worker streaming
+/// an answer rewrites the record from a copy it took before the ✕, so the flag
+/// lives in a sidecar the worker never touches.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DismissBody {
+    session_id: String,
+    id: String,
+    dismissed: bool,
+}
+
+pub(crate) fn route_session_explain_dismiss(
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let result = serde_json::from_slice::<DismissBody>(&body_bytes)
+        .map_err(|e| format!("bad request body: {e}"))
+        .and_then(|b| {
+            crate::session_explain::set_dismissed(&b.session_id, &b.id, b.dismissed)
+                .map(|()| serde_json::json!({ "ok": true }))
+        });
+    respond_explain_json(request, json_header, result);
 }
 
 fn decoded(query: &std::collections::HashMap<String, String>, key: &str) -> String {

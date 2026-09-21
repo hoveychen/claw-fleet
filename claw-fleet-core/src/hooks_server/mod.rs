@@ -1365,6 +1365,10 @@ fn handle_request(
 
             crate::routes::SESSION_EXPLAINS => route_session_explains(request, &query, json_header),
 
+            crate::routes::SESSION_EXPLAIN_DISMISS => {
+                route_session_explain_dismiss(request, json_header)
+            }
+
             crate::routes::MESSAGES => route_messages(ctx, request, &query, json_header, path),
 
             crate::routes::TOOL_RESULT => {

@@ -2311,6 +2311,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "session_notes_search" => serve_session_notes_search(params),
         "session_explain" => serve_session_explain(params),
         "session_explain_list" => serve_session_explain_list(params),
+        "session_explain_dismiss" => serve_session_explain_dismiss(params),
         "guard_analyze" => serve_guard_analyze(params),
         "session_search" => serve_session_search(params),
         "wiki_list" => serve_wiki_list(params),
@@ -2585,6 +2586,26 @@ fn serve_session_explain_list(params: &Value) -> Result<Value, String> {
         .and_then(Value::as_str)
         .ok_or("missing sessionId")?;
     serde_json::to_value(crate::session_explain::list(session_id)).map_err(|e| e.to_string())
+}
+
+/// `session_explain_dismiss {sessionId, id, dismissed}` — hide one side question
+/// from the rail, or hand it back. Writes a sidecar, not the record, so it
+/// cannot be clobbered by a worker still streaming the answer.
+fn serve_session_explain_dismiss(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("missing id")?;
+    let dismissed = params
+        .get("dismissed")
+        .and_then(Value::as_bool)
+        .ok_or("missing dismissed")?;
+    crate::session_explain::set_dismissed(session_id, id, dismissed)?;
+    Ok(json!({ "ok": true }))
 }
 
 fn serve_decision_asset(params: &Value) -> Result<Value, String> {
