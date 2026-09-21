@@ -834,7 +834,24 @@ fn provided_sessions() -> Option<Vec<crate::session::SessionInfo>> {
 /// (the caller just reset [`SESSIONS_LAST_HASH`], so a phone that connected
 /// mid-idle still gets state even though nothing changed for existing clients).
 /// No-op when no provider is registered — see [`SESSIONS_PROVIDER`].
+///
+/// Handed to a blocking worker, never run on the ws runtime. The desktop's
+/// provider takes the `sessions` mutex that a rescan holds, and the body then
+/// clones the whole roster, serialises it and gzips it. Inline inside the
+/// `select!` arm that calls this, all of that froze the read loop, the ping and
+/// every outbound frame for as long as the rescan ran — and 90s of that is a
+/// heartbeat timeout, which reconnects, which lands right back here.
 fn push_snapshot_on_connect() {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn_blocking(push_snapshot_now);
+        }
+        // No runtime to hand it to (unit tests drive this directly).
+        Err(_) => push_snapshot_now(),
+    }
+}
+
+fn push_snapshot_now() {
     let Some(sessions) = provided_sessions() else {
         return;
     };
@@ -2358,14 +2375,21 @@ fn known_workspaces() -> Vec<String> {
 }
 
 /// The envelope itself, ahead of [`known_workspaces`]'s memo.
+///
+/// Sessions are only half the set. A repo cloned from the repository page, or a
+/// directory the user added by hand, has no sessions by construction — so
+/// without [`crate::file_explorer::browsable_workspaces`] unioning in the
+/// server-side record of those, the phone answered "workspace is not a known
+/// session workspace" for a directory the desktop browses fine. The desktop's
+/// own `LocalBackend::known_workspaces` has always gone through it; this side
+/// was the odd one out.
 fn build_known_workspaces() -> Vec<String> {
-    let mut paths: Vec<String> = current_sessions()
+    let paths: Vec<String> = current_sessions()
         .into_iter()
         .map(|s| s.workspace_path)
         .collect();
-    paths.sort();
-    paths.dedup();
-    paths
+    // Sorts and dedups for us.
+    crate::file_explorer::browsable_workspaces(&paths)
 }
 
 /// The phone's whole data surface, as one method-name → handler table.
@@ -7679,6 +7703,36 @@ mod tests {
         *RESULT_CACHE.lock().unwrap() = None;
     }
 
+    /// The on-connect push ran inline in the ws `select!` arm, so a slow
+    /// provider — the desktop's waits on the `sessions` mutex a rescan holds —
+    /// froze the read loop, the ping and every outbound frame along with it.
+    /// Long enough and the connection times its own heartbeat out, reconnects,
+    /// and lands right back here. It must hand the work off and return at once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn on_connect_push_does_not_block_the_ws_runtime() {
+        let _guard = fleet_home_lock();
+        set_sessions_provider(|| {
+            std::thread::sleep(Duration::from_millis(150));
+            Some(vec![crate::session::SessionInfo {
+                id: "slow-provider".to_string(),
+                ..Default::default()
+            }])
+        });
+
+        let started = std::time::Instant::now();
+        push_snapshot_on_connect();
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "the caller must not wait on the provider; it took {elapsed:?}"
+        );
+
+        // Takes the provider lock, so this also waits out the in-flight push
+        // rather than leaving it running into a sibling test.
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
+    }
+
     /// The access envelope six phone methods gate on is a projection of the
     /// session list too. Re-walking every transcript per call is what made the
     /// repository page outlast the phone's 15s request timeout on a real host.
@@ -7698,11 +7752,16 @@ mod tests {
         // collapse is covered by `cached_by_key_collapses_callers_and_expires`.
         let paths = build_known_workspaces();
 
+        // The provided list is the only session-derived input; the rest of the
+        // envelope is this host's hand-added browse paths, same as the desktop.
+        let expected = crate::file_explorer::browsable_workspaces(&[
+            "/tmp/fleet-known-workspaces-sentinel".to_string()
+        ]);
         assert_eq!(
-            paths,
-            vec!["/tmp/fleet-known-workspaces-sentinel".to_string()],
-            "a rescan would report this host's real workspaces, not the sentinel"
+            paths, expected,
+            "a rescan would report this host's real session workspaces, not the sentinel"
         );
+        assert!(paths.contains(&"/tmp/fleet-known-workspaces-sentinel".to_string()));
 
         *SESSIONS_PROVIDER.lock().unwrap() = None;
     }
