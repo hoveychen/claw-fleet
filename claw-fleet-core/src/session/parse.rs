@@ -686,7 +686,20 @@ pub(crate) fn has_thinking_blocks(last_lines: &[Value]) -> bool {
     false
 }
 
+/// Last assistant text, capped at 200 chars — the task-list subtitle preview.
 pub(crate) fn extract_last_text(last_lines: &[Value]) -> Option<String> {
+    extract_last_text_capped(last_lines, Some(200))
+}
+
+/// Same selection logic as [`extract_last_text`] but returns the whole text.
+///
+/// Used by the turn-completion card, whose body is a scrollable report and
+/// must not be clipped mid-sentence the way the list preview is.
+pub fn extract_last_text_full(last_lines: &[Value]) -> Option<String> {
+    extract_last_text_capped(last_lines, None)
+}
+
+fn extract_last_text_capped(last_lines: &[Value], max_chars: Option<usize>) -> Option<String> {
     for msg in last_lines.iter().rev() {
         if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
             continue;
@@ -714,8 +727,10 @@ pub(crate) fn extract_last_text(last_lines: &[Value]) -> Option<String> {
         for block in content.iter().rev() {
             if block.get("type").and_then(|t| t.as_str()) == Some("text") {
                 if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                    let preview: String = text.chars().take(200).collect();
-                    return Some(preview);
+                    return Some(match max_chars {
+                        Some(n) => text.chars().take(n).collect(),
+                        None => text.to_string(),
+                    });
                 }
             }
         }

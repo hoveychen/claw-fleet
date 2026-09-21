@@ -207,8 +207,30 @@ pub fn build_turn_card(session: &SessionInfo, last_text: &str) -> ElicitationReq
     }
 }
 
+/// Re-read the tail of `session`'s transcript for the turn's final assistant
+/// text, uncapped.
+///
+/// Callers hand us `SessionInfo::last_message_preview`, which is clipped to 200
+/// chars for the task-list subtitle — as a card body that reads as a sentence
+/// cut in half. The card is scrollable, so it wants the whole message. One tail
+/// read per raised card, and only after every guard above has passed; the
+/// alternative (a second, uncapped field on `SessionInfo`) would carry full
+/// turn text for every scanned session through memory and IPC.
+///
+/// Returns `None` for transcripts this extractor does not understand (codex
+/// rollouts, dsh logs), leaving the caller on the preview.
+fn full_last_text(session: &SessionInfo) -> Option<String> {
+    let lines =
+        crate::jsonl_tail::read_tail_lines_as_json(std::path::Path::new(&session.jsonl_path), 100)
+            .ok()?;
+    crate::session::extract_last_text_full(&lines)
+}
+
 /// Decide whether `session`'s finished turn needs a completion card, and write
 /// it. Returns the card id when raised.
+///
+/// `last_text` is only a fallback body: when the transcript can be re-read, the
+/// card gets the untruncated final message instead.
 pub fn maybe_raise(
     session: &SessionInfo,
     last_text: &str,
@@ -247,7 +269,8 @@ pub fn maybe_raise(
     if crate::handoff::has_relayed(&session.id) {
         return Ok(None);
     }
-    let card = build_turn_card(session, last_text);
+    let body = full_last_text(session).unwrap_or_else(|| last_text.to_string());
+    let card = build_turn_card(session, &body);
     let id = card.id.clone();
     elicitation::write_request(&card)?;
     Ok(Some(id))
@@ -490,6 +513,73 @@ mod tests {
         assert!(!ack.contains("这一条是例外"));
         assert_eq!(reminder_prompt_with_answer(None), ack);
         assert!(reminder_prompt_with_answer(Some("换个方案")).contains("换个方案"));
+    }
+
+    /// The regression this guards: the card body used to be whatever the caller
+    /// passed, and both callers pass `last_message_preview` — clipped to 200
+    /// chars by `extract_last_text` for the task-list subtitle, so every report
+    /// longer than that arrived on the phone cut off mid-sentence.
+    #[test]
+    fn card_body_carries_the_whole_final_message_not_the_200_char_preview() {
+        let _env_guard = crate::session::fleet_home_lock();
+        let home = std::env::temp_dir().join(format!("fleet-turncard-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &home);
+
+        let long: String = "报".repeat(650);
+        let jsonl = home.join("transcript.jsonl");
+        std::fs::write(
+            &jsonl,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "type": "assistant",
+                    "message": { "model": "claude-opus-5", "content": [
+                        { "type": "text", "text": long }
+                    ]}
+                })
+            ),
+        )
+        .unwrap();
+
+        let mut s = session("/p");
+        s.jsonl_path = jsonl.to_string_lossy().to_string();
+        let preview: String = long.chars().take(200).collect();
+        s.last_message_preview = Some(preview.clone());
+
+        let id = maybe_raise(&s, &preview, 0)
+            .expect("raise must not error")
+            .expect("a plain card-less task turn raises a card");
+        let body = crate::elicitation::read_request(&id)
+            .expect("the card was written")
+            .questions[0]
+            .question
+            .clone();
+        assert!(
+            body.contains(&long),
+            "card body must hold all {} chars, got {}",
+            long.chars().count(),
+            body.chars().count()
+        );
+        crate::elicitation::cleanup(&id);
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// An unreadable or foreign transcript (codex rollout, dsh log) leaves the
+    /// card on the preview the caller passed rather than dropping the body.
+    #[test]
+    fn card_body_falls_back_to_the_preview_when_the_transcript_is_unreadable() {
+        let mut s = session("/p");
+        s.jsonl_path = "/definitely/not/a/file.jsonl".into();
+        assert!(full_last_text(&s).is_none());
+        let card = build_turn_card(&s, "done");
+        assert!(card.questions[0].question.contains("done"));
     }
 
     #[test]
