@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cacheHitRatio,
   costLabel,
+  groupExplainThreads,
   pollExplanation,
   type AssistantSelection,
 } from "../../../shared-ts/sessionExplain";
@@ -145,26 +146,37 @@ export function useDecisionExplainMarks(
   return { enabled: Boolean(client && sessionId && sessionPath), busy, ask, followUp, answers, dismiss };
 }
 
-/** The answers asked from inside a card's question, under it. */
+/**
+ * The answers asked from inside a card's question, under it — one card per
+ * chain, turns oldest-first, with a follow-up box at the foot of each.
+ *
+ * Grouping is not cosmetic: a follow-up is its own record (the fork is never
+ * resumed, the prior Q/A is folded into a new one), so a flat list read a
+ * two-turn conversation as two unrelated answers.
+ */
 export function DecisionExplainAnswers({
   answers,
+  busy,
   onDismiss,
+  onFollowUp,
 }: {
   answers: ExplainRecord[];
+  busy: boolean;
   onDismiss: (id: string) => void;
+  onFollowUp: (prev: ExplainRecord, question: string) => void;
 }) {
   if (answers.length === 0) return null;
   return (
     <div className={styles.list} data-testid="decision-explain-answers">
-      {answers.map((rec) => {
-        const running = rec.status === "running";
-        const failed = rec.status === "error";
-        const hit = cacheHitRatio(rec);
-        const cost = costLabel(rec.costUsd);
+      {groupExplainThreads(answers).map((thread) => {
+        const last = thread.records[thread.records.length - 1];
+        const running = last.status === "running";
+        const hit = cacheHitRatio(last);
+        const cost = costLabel(last.costUsd);
         return (
-          <div key={rec.id} className={styles.card}>
+          <div key={thread.id} className={styles.card}>
             <div className={styles.head}>
-              <span className={styles.quote}>{rec.quote}</span>
+              <span className={styles.quote}>{thread.records[0].quote}</span>
               {running && (
                 <span className={styles.state} data-tone="live">
                   <LoaderCircle size={11} aria-hidden="true" className={styles.spin} />
@@ -173,22 +185,76 @@ export function DecisionExplainAnswers({
               )}
               {!running && cost && <span className={styles.state}>{cost}</span>}
               {!running && hit != null && <span className={styles.state}>{t("缓存 {0}%", Math.round(hit * 100))}</span>}
-              <button type="button" className={styles.close} onClick={() => onDismiss(rec.id)} aria-label={t("关闭")}>
+              <button
+                type="button"
+                className={styles.close}
+                onClick={() => {
+                  for (const rec of thread.records) onDismiss(rec.id);
+                }}
+                aria-label={t("关闭")}
+              >
                 ✕
               </button>
             </div>
-            {rec.question && <div className={styles.question}>{rec.question}</div>}
-            {rec.text ? (
-              <div className={styles.answer} data-partial={running || undefined}>
-                <Md text={rec.text} />
-              </div>
-            ) : running ? (
-              <div className={styles.waiting}>{t("正在 fork 会话作答…")}</div>
-            ) : null}
-            {failed && <div className={styles.error}>{rec.error || t("失败")}</div>}
+            {thread.records.map((rec) => (
+              <ExplainTurn key={rec.id} rec={rec} />
+            ))}
+            {last.status === "done" && (
+              <ExplainFollowUp busy={busy} onSubmit={(question) => onFollowUp(last, question)} />
+            )}
           </div>
         );
       })}
     </div>
+  );
+}
+
+/** One turn of a chain: the question asked, then the answer as it arrives. */
+function ExplainTurn({ rec }: { rec: ExplainRecord }) {
+  const running = rec.status === "running";
+  return (
+    <div className={styles.turn}>
+      {rec.question && <div className={styles.question}>{rec.question}</div>}
+      {rec.text ? (
+        <div className={styles.answer} data-partial={running || undefined}>
+          <Md text={rec.text} />
+        </div>
+      ) : running ? (
+        <div className={styles.waiting}>{t("正在 fork 会话作答…")}</div>
+      ) : null}
+      {rec.status === "error" && <div className={styles.error}>{rec.error || t("失败")}</div>}
+    </div>
+  );
+}
+
+/**
+ * Keep asking about the same passage. Only rendered once the chain's last turn
+ * is `done`: a follow-up folds the prior answers into its prompt, so asking
+ * before one has settled would thread off a half-written answer.
+ */
+function ExplainFollowUp({ busy, onSubmit }: { busy: boolean; onSubmit: (question: string) => void }) {
+  const [draft, setDraft] = useState("");
+  return (
+    <form
+      className={styles.follow}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const q = draft.trim();
+        if (!q || busy) return;
+        onSubmit(q);
+        setDraft("");
+      }}
+    >
+      <input
+        className={styles.followInput}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={t("继续追问这段话…")}
+        aria-label={t("继续追问")}
+      />
+      <button type="submit" className={styles.followSend} disabled={busy || !draft.trim()}>
+        {t("发送")}
+      </button>
+    </form>
   );
 }

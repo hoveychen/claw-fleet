@@ -1299,7 +1299,12 @@ function QuestionsCard({
             busy={explainMarks.busy}
             onAsk={explainMarks.ask}
           />
-          <DecisionExplainAnswers answers={explainMarks.answers} onDismiss={explainMarks.dismiss} />
+          <DecisionExplainAnswers
+            answers={explainMarks.answers}
+            busy={explainMarks.busy}
+            onDismiss={explainMarks.dismiss}
+            onFollowUp={explainMarks.followUp}
+          />
           {isFleetAsk && (q as FleetAskQuestion).html && (
             <HtmlPreview
               html={(q as FleetAskQuestion).html!}
