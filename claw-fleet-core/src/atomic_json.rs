@@ -140,7 +140,10 @@ mod tests {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
             .collect();
-        assert!(leftovers.is_empty(), "temp files must be renamed away, found: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "temp files must be renamed away, found: {leftovers:?}"
+        );
     }
 
     #[test]
@@ -170,7 +173,11 @@ mod tests {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().contains(".corrupt"))
             .collect();
-        assert_eq!(backups.len(), 1, "corrupt bytes must be preserved, not dropped");
+        assert_eq!(
+            backups.len(),
+            1,
+            "corrupt bytes must be preserved, not dropped"
+        );
         assert_eq!(std::fs::read_to_string(backups[0].path()).unwrap(), garbage);
     }
 
@@ -197,11 +204,16 @@ mod tests {
         // A shared in-process check that lock is held exclusively.
         let inside = std::sync::Arc::new(AtomicUsize::new(0));
 
-        let worker = |path: std::sync::Arc<std::path::PathBuf>, inside: std::sync::Arc<AtomicUsize>| {
+        let worker = |path: std::sync::Arc<std::path::PathBuf>,
+                      inside: std::sync::Arc<AtomicUsize>| {
             for _ in 0..200 {
                 with_file_lock(&path, || {
                     // Only one thread may be inside the critical section.
-                    assert_eq!(inside.fetch_add(1, Ordering::SeqCst), 0, "lock not exclusive");
+                    assert_eq!(
+                        inside.fetch_add(1, Ordering::SeqCst),
+                        0,
+                        "lock not exclusive"
+                    );
                     let n: i64 = match load_preserving::<i64>(&path) {
                         JsonLoad::Loaded(v) => v,
                         _ => 0,

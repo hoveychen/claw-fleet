@@ -677,7 +677,10 @@ impl DshServer {
             // Same fix, same helper, as the Claude and Codex spawn paths
             // (`session_launch.rs` / `codex_launch.rs`); this was the one spawn
             // site that had not been wired to it.
-            .env("PATH", crate::session_launch::augmented_path_with_front(&[]))
+            .env(
+                "PATH",
+                crate::session_launch::augmented_path_with_front(&[]),
+            )
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -972,7 +975,10 @@ mod tests {
             meets_min_version(Some("garbage")),
             "an unparseable version must not block"
         );
-        assert!(meets_min_version(Some("")), "an empty version must not block");
+        assert!(
+            meets_min_version(Some("")),
+            "an empty version must not block"
+        );
     }
 
     /// dsh installs through `npm i -g`, so it lands in whatever bin dir the
@@ -1288,8 +1294,7 @@ mod tests {
     #[test]
     fn a_busy_remembered_port_falls_back_to_os_assignment() {
         with_temp_fleet_home(|base| {
-            let blocker =
-                std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let blocker = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
             let busy = blocker.local_addr().unwrap().port();
             edit_registry(|registry| registry.preferred_port = Some(busy));
             assert_eq!(preferred_port(), 0, "a busy port must not be preferred");
@@ -1319,7 +1324,9 @@ mod tests {
     #[test]
     fn tolerates_trailing_text_after_the_token() {
         assert_eq!(
-            parse_launch_line("dsh web: http://127.0.0.1:3080/?token=abc123 (press ctrl-c to stop)"),
+            parse_launch_line(
+                "dsh web: http://127.0.0.1:3080/?token=abc123 (press ctrl-c to stop)"
+            ),
             Some((3080, "abc123".to_string()))
         );
     }
@@ -1570,7 +1577,10 @@ mod tests {
             // `wait` returns only because the process was signalled; a stale
             // record that killed nothing would leave this blocked for 30s.
             let status = child.wait().expect("wait on the stand-in");
-            assert!(!status.success(), "expected a signalled exit, got {status:?}");
+            assert!(
+                !status.success(),
+                "expected a signalled exit, got {status:?}"
+            );
         });
     }
 

@@ -1,0 +1,96 @@
+/* The floating bar under (or over) a selection of agent prose. Fixed to the
+   viewport — the selection's box is read in viewport coordinates and the page
+   itself is a fixed layer — and above the composer, below the pane overlays. */
+.bar {
+  position: fixed;
+  z-index: 43;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  max-width: calc(100vw - 16px);
+  background: var(--color-bg-glass);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 12px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.22);
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--t-ui, 14px);
+  line-height: 1;
+  color: var(--color-text);
+  padding: 0 10px;
+  border-radius: 9px;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active:not(:disabled) {
+  background: var(--color-bg-card-hover);
+}
+.btn:disabled {
+  color: var(--color-text-dim);
+}
+
+.custom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.input {
+  flex: 1;
+  min-width: 160px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-family: inherit;
+  /* 16px keeps iOS from zooming the page onto the field. */
+  font-size: 16px;
+  padding: 7px 10px;
+  border-radius: 9px;
+}
+.input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.send {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  padding: 0 12px;
+  border-radius: 9px;
+}
+.send:disabled {
+  opacity: 0.5;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

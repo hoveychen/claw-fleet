@@ -126,7 +126,9 @@ pub fn remove_legacy_serve_launchagent() -> std::io::Result<()> {
 fn unload_legacy_serve_launchagent() {
     let uid = unsafe { libc::getuid() };
     let target = format!("gui/{uid}/{LEGACY_SERVE_LAUNCHAGENT_LABEL}");
-    let _ = std::process::Command::new("launchctl").args(["bootout", &target]).output();
+    let _ = std::process::Command::new("launchctl")
+        .args(["bootout", &target])
+        .output();
 }
 
 fn remove_legacy_serve_launchagent_at(launch_agents_dir: &std::path::Path) -> std::io::Result<()> {
@@ -168,7 +170,10 @@ mod tests {
         assert!(plist.exists());
 
         remove_legacy_serve_launchagent_at(&launch_agents).unwrap();
-        assert!(!plist.exists(), "legacy serve LaunchAgent plist must be removed");
+        assert!(
+            !plist.exists(),
+            "legacy serve LaunchAgent plist must be removed"
+        );
 
         // Idempotent: a second call on an absent plist is a clean no-op.
         remove_legacy_serve_launchagent_at(&launch_agents).unwrap();
@@ -189,7 +194,10 @@ mod tests {
         remove_retired_state_dirs_in(&fleet).unwrap();
 
         assert!(!retired.exists(), "retired dir must be removed");
-        assert!(live.join("abc.json").exists(), "only retired names may be swept");
+        assert!(
+            live.join("abc.json").exists(),
+            "only retired names may be swept"
+        );
 
         // Idempotent: a second call on an absent dir is a clean no-op.
         remove_retired_state_dirs_in(&fleet).unwrap();

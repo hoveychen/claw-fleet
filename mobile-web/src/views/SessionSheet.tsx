@@ -94,11 +94,16 @@ export function SessionSheet({
   family,
   pendingDecisions,
   client,
+  explainCount,
   onClose,
   onOpenPane,
   onOpenSession,
 }: {
   session: SessionInfo;
+  /** Side questions asked about this session so far. Not in the snapshot —
+   *  the detail page reads the list over the relay and passes the count once
+   *  it has it; `undefined` until then, which the row renders as silence. */
+  explainCount?: number;
   /** Main process + all subagents (caller assembles, sorts, caps per desktop rules).
    *  Empty means this is a standalone session with no subagents; that section
    *  doesn't appear. */
@@ -196,6 +201,14 @@ export function SessionSheet({
   progressRows.push({ pane: "workflow", label: t("Workflow") });
   // Note count also not in snapshot, same reasoning — no readout.
   progressRows.push({ pane: "notes", label: t("笔记") });
+  // Side questions: the count arrives with the detail page's own fetch, so it
+  // is known here more often than not; before it lands, say nothing.
+  progressRows.push({
+    pane: "explains",
+    label: t("追问"),
+    value:
+      explainCount === undefined ? undefined : explainCount === 0 ? "empty" : t("{0} 条", explainCount),
+  });
   progressRows.push({
     pane: "handoff",
     label: t("接力链"),

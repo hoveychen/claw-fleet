@@ -173,7 +173,9 @@ pub fn gate_probe_bounded(cmd: &str, limit: std::time::Duration) -> GateOutcome 
     {
         Ok(c) => c,
         Err(e) => {
-            crate::log_debug(&format!("gate preflight: cannot run until-command ({e}): {cmd}"));
+            crate::log_debug(&format!(
+                "gate preflight: cannot run until-command ({e}): {cmd}"
+            ));
             return GateOutcome {
                 met: false,
                 exit_code: None,
@@ -336,7 +338,10 @@ mod tests {
         assert!(!out.met);
         assert_eq!(out.exit_code, Some(127));
         assert!(out.is_structural_failure());
-        assert!(!out.stderr.is_empty(), "the shell explains itself on stderr");
+        assert!(
+            !out.stderr.is_empty(),
+            "the shell explains itself on stderr"
+        );
     }
 
     #[test]
@@ -371,7 +376,10 @@ mod tests {
     fn gate_probe_truncates_long_stderr_on_char_boundary() {
         // Multi-byte chars: a naive byte slice would panic here.
         let out = gate_probe("python3 -c \"import sys;sys.stderr.write('中'*5000)\"; exit 1");
-        assert!(out.stderr.chars().count() <= GATE_STDERR_CAP + 1, "capped + ellipsis");
+        assert!(
+            out.stderr.chars().count() <= GATE_STDERR_CAP + 1,
+            "capped + ellipsis"
+        );
         assert!(out.stderr.ends_with('…'));
     }
 

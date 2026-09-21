@@ -44,7 +44,9 @@ fn is_protected_under_home(path: &Path, home: &Path) -> bool {
 /// Check if a path is inside a macOS TCC-protected directory.
 #[cfg(target_os = "macos")]
 fn check_tcc_path(path: &Path) -> bool {
-    let Some(home) = crate::session::real_home_dir() else { return false };
+    let Some(home) = crate::session::real_home_dir() else {
+        return false;
+    };
     is_protected_under_home(path, &home)
 }
 
@@ -118,7 +120,8 @@ fn is_permission_error(err: &std::io::Error) -> bool {
 /// noise. Appends a timestamped record + a full backtrace to
 /// `~/.fleet/tcc-denials.log`. Best-effort: never panics, never propagates.
 pub(crate) fn note_fs_denial(path: &Path, err: &std::io::Error) {
-    let Some(log) = crate::session::real_home_dir().map(|h| h.join(".fleet").join("tcc-denials.log"))
+    let Some(log) =
+        crate::session::real_home_dir().map(|h| h.join(".fleet").join("tcc-denials.log"))
     else {
         return;
     };
@@ -154,7 +157,11 @@ fn note_fs_denial_to(
     if let Some(parent) = log_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    {
         let _ = f.write_all(record.as_bytes());
     }
     // Also surface it on stderr so it shows up in the app's captured logs.
@@ -197,10 +204,18 @@ mod tests {
         let ft = |p: &std::path::Path| std::fs::symlink_metadata(p).map(|m| m.file_type());
 
         // real dir: followable
-        assert!(readdir_is_followable_dir(ft(&protected), &protected, &is_protected));
+        assert!(readdir_is_followable_dir(
+            ft(&protected),
+            &protected,
+            &is_protected
+        ));
         // symlink → protected: NOT followed (would stat into a TCC dir)
         let plink = root.join("plink");
-        assert!(!readdir_is_followable_dir(ft(&plink), &plink, &is_protected));
+        assert!(!readdir_is_followable_dir(
+            ft(&plink),
+            &plink,
+            &is_protected
+        ));
         // symlink → ordinary dir: still followed
         let nlink = root.join("nlink");
         assert!(readdir_is_followable_dir(ft(&nlink), &nlink, &is_protected));
@@ -221,7 +236,10 @@ mod tests {
             &home.join("Library/Containers/com.foo.bar/Data"),
             home
         ));
-        assert!(is_protected_under_home(&home.join("Library/Containers"), home));
+        assert!(is_protected_under_home(
+            &home.join("Library/Containers"),
+            home
+        ));
         assert!(is_protected_under_home(
             &home.join("Library/Group Containers/group.foo.bar"),
             home
@@ -270,7 +288,9 @@ mod tests {
     fn permission_error_matches_kind_and_raw_errnos() {
         assert!(is_permission_error(&err(1))); // EPERM
         assert!(is_permission_error(&err(13))); // EACCES
-        assert!(is_permission_error(&std::io::Error::from(std::io::ErrorKind::PermissionDenied)));
+        assert!(is_permission_error(&std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied
+        )));
         assert!(!is_permission_error(&err(2))); // ENOENT
     }
 }

@@ -62,17 +62,19 @@ fn a_codex_shaped_argv_survives_the_rca_wrapper() {
         .arg(&src)
         .output()
         .expect("rustc");
-    assert!(rustc.status.success(), "{}", String::from_utf8_lossy(&rustc.stderr));
+    assert!(
+        rustc.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
 
-    claw_fleet_core::remote_workspace::upsert(
-        claw_fleet_core::remote_workspace::RemoteWorkspace {
-            path: ws.clone(),
-            ssh_target: Some(ssh_target.clone()),
-            remote_rca_path: Some(remote_rca),
-            label: Some(ssh_target.clone()),
-            ..Default::default()
-        },
-    )
+    claw_fleet_core::remote_workspace::upsert(claw_fleet_core::remote_workspace::RemoteWorkspace {
+        path: ws.clone(),
+        ssh_target: Some(ssh_target.clone()),
+        remote_rca_path: Some(remote_rca),
+        label: Some(ssh_target.clone()),
+        ..Default::default()
+    })
     .expect("register the remote workspace");
 
     // Exactly the shape `codex_launch::build_codex_spawn_args` produces: flags,
@@ -92,13 +94,10 @@ fn a_codex_shaped_argv_survives_the_rca_wrapper() {
     .map(|s| s.to_string())
     .collect();
 
-    let wrapped = claw_fleet_core::remote_workspace::wrap_launch(
-        &ws,
-        bin.to_str().unwrap(),
-        &codex_argv,
-    )
-    .expect("wrap")
-    .expect("registered workspace must wrap");
+    let wrapped =
+        claw_fleet_core::remote_workspace::wrap_launch(&ws, bin.to_str().unwrap(), &codex_argv)
+            .expect("wrap")
+            .expect("registered workspace must wrap");
 
     let out = std::process::Command::new(&wrapped.program)
         .args(&wrapped.args)

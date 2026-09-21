@@ -275,10 +275,26 @@ mod tests {
     #[test]
     fn summarize_counts_statuses_and_picks_first_active() {
         let todos = vec![
-            TodoItem { content: "a".into(), active_form: "doing a".into(), status: "completed".into() },
-            TodoItem { content: "b".into(), active_form: "doing b".into(), status: "in_progress".into() },
-            TodoItem { content: "c".into(), active_form: "doing c".into(), status: "in_progress".into() },
-            TodoItem { content: "d".into(), active_form: "doing d".into(), status: "pending".into() },
+            TodoItem {
+                content: "a".into(),
+                active_form: "doing a".into(),
+                status: "completed".into(),
+            },
+            TodoItem {
+                content: "b".into(),
+                active_form: "doing b".into(),
+                status: "in_progress".into(),
+            },
+            TodoItem {
+                content: "c".into(),
+                active_form: "doing c".into(),
+                status: "in_progress".into(),
+            },
+            TodoItem {
+                content: "d".into(),
+                active_form: "doing d".into(),
+                status: "pending".into(),
+            },
         ];
         let s = summarize(&todos);
         assert_eq!(s.completed, 1);

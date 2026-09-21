@@ -295,7 +295,8 @@ fn apply_wiki_guidance_inner(locale: &str) -> Result<(), String> {
         let existing = fs::read_to_string(&claude_md).unwrap_or_default();
         let new_content =
             crate::claude_md_block::compose(&existing, &block, BEGIN_MARKER, END_MARKER);
-        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))
+        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
+            .map_err(|e| format!("write CLAUDE.md: {e}"))
     })
 }
 
@@ -315,7 +316,8 @@ fn remove_wiki_guidance_inner() -> Result<(), String> {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
                 let stripped = strip_sentinel_block(&existing);
                 if stripped != existing {
-                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes())
+                        .map_err(|e| format!("write CLAUDE.md: {e}"))?;
                 }
             }
             Ok::<(), String>(())
@@ -399,7 +401,8 @@ mod tests {
 
     #[test]
     fn strip_leaves_other_modes_blocks_alone() {
-        let content = "<!-- fleet:interaction-mode:begin -->\n@x.md\n<!-- fleet:interaction-mode:end -->\n";
+        let content =
+            "<!-- fleet:interaction-mode:begin -->\n@x.md\n<!-- fleet:interaction-mode:end -->\n";
         assert_eq!(strip_sentinel_block(content), content);
     }
 
@@ -407,9 +410,18 @@ mod tests {
     fn render_both_locales_mention_publish() {
         for locale in ["en", "zh"] {
             let g = render_guidance(locale);
-            assert!(g.contains("fleet wiki publish"), "{locale} guidance must mention the command");
-            assert!(g.contains("slug"), "{locale} guidance must explain slug reuse");
-            assert!(g.contains("[[slug]]"), "{locale} guidance must document cross-links");
+            assert!(
+                g.contains("fleet wiki publish"),
+                "{locale} guidance must mention the command"
+            );
+            assert!(
+                g.contains("slug"),
+                "{locale} guidance must explain slug reuse"
+            );
+            assert!(
+                g.contains("[[slug]]"),
+                "{locale} guidance must document cross-links"
+            );
         }
     }
 
@@ -452,7 +464,12 @@ mod tests {
     fn render_both_locales_route_by_audience_not_by_file_format() {
         for (locale, axis, no_filter, both_sides) in [
             ("zh", "按去向,不按格式", "不挑格式", "markdown"),
-            ("en", "audience, not by format", "no format filter", "markdown"),
+            (
+                "en",
+                "audience, not by format",
+                "no format filter",
+                "markdown",
+            ),
         ] {
             let g = render_guidance(locale);
             assert!(
@@ -476,9 +493,18 @@ mod tests {
         // the decision card at random, and durable output ends up scattered.
         for locale in ["en", "zh"] {
             let g = render_guidance(locale);
-            assert!(g.contains("Artifact"), "{locale} guidance must name the Artifact tool");
-            assert!(g.contains("fleet__ask"), "{locale} guidance must point one-off renders at the decision card");
-            assert!(g.contains("fleet wiki cat"), "{locale} guidance must justify the wiki by read-back");
+            assert!(
+                g.contains("Artifact"),
+                "{locale} guidance must name the Artifact tool"
+            );
+            assert!(
+                g.contains("fleet__ask"),
+                "{locale} guidance must point one-off renders at the decision card"
+            );
+            assert!(
+                g.contains("fleet wiki cat"),
+                "{locale} guidance must justify the wiki by read-back"
+            );
         }
     }
 }

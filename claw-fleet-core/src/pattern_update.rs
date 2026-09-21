@@ -93,10 +93,7 @@ fn atomic_write(target: &PathBuf, content: &str) -> Result<(), String> {
     let dir = target.parent().ok_or("no parent dir")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
 
-    let tmp = dir.join(format!(
-        ".fleet-audit-patterns-{}.tmp",
-        std::process::id()
-    ));
+    let tmp = dir.join(format!(".fleet-audit-patterns-{}.tmp", std::process::id()));
     std::fs::write(&tmp, content).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         format!("write tmp: {e}")

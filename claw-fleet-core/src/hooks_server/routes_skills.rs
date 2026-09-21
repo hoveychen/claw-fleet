@@ -15,22 +15,19 @@ pub(crate) fn route_skills(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut workspaces: Vec<String> = ctx
-                    .sources
-                    .iter()
-                    .flat_map(|source| source.scan_sessions())
-                    .map(|session| session.workspace_path)
-                    .filter(|path| !path.is_empty())
-                    .collect();
-                workspaces.sort();
-                workspaces.dedup();
-                let items = skills::scan_all_skills_for_workspaces(&workspaces);
-                let body = serde_json::to_string(&items).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let mut workspaces: Vec<String> = ctx
+        .sources
+        .iter()
+        .flat_map(|source| source.scan_sessions())
+        .map(|session| session.workspace_path)
+        .filter(|path| !path.is_empty())
+        .collect();
+    workspaces.sort();
+    workspaces.dedup();
+    let items = skills::scan_all_skills_for_workspaces(&workspaces);
+    let body = serde_json::to_string(&items).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_skill_sync(
     _ctx: &ServeCtx,
@@ -47,7 +44,9 @@ pub(crate) fn route_skill_sync(
     #[serde(tag = "operation", rename_all = "kebab-case")]
     enum Operation {
         Sync,
-        Adopt { path: String },
+        Adopt {
+            path: String,
+        },
         Unlink {
             slug: String,
             target: crate::skill_sync::SkillTarget,
@@ -117,7 +116,8 @@ fn respond_skill_sync<T: serde::Serialize>(
     match result {
         Ok(value) => {
             let body = serde_json::to_string(&value).unwrap_or_else(|_| "null".to_string());
-            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(error) => {
             let body = serde_json::json!({"error": error}).to_string();
@@ -137,13 +137,10 @@ pub(crate) fn route_plugins(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let items = plugins::scan_with_catalog();
-                let body = serde_json::to_string(&items).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let items = plugins::scan_with_catalog();
+    let body = serde_json::to_string(&items).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_plugins_set_enabled(
     ctx: &ServeCtx,
@@ -152,48 +149,40 @@ pub(crate) fn route_plugins_set_enabled(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                #[derive(serde::Deserialize)]
-                struct Body {
-                    plugin_id: String,
-                    enabled: bool,
-                }
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
-                let parsed: Result<Body, _> = serde_json::from_str(&buf);
-                match parsed {
-                    Ok(body) => {
-                        match crate::claude_cli::set_plugin_enabled(
-                            &body.plugin_id,
-                            body.enabled,
-                        ) {
-                            Ok(()) => {
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                        .with_header(json_header),
-                                );
-                            }
-                            Err(e) => {
-                                let body =
-                                    serde_json::json!({"error": e.to_string()}).to_string();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
-                                        .with_header(json_header),
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e.to_string()}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
+    #[derive(serde::Deserialize)]
+    struct Body {
+        plugin_id: String,
+        enabled: bool,
+    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let parsed: Result<Body, _> = serde_json::from_str(&buf);
+    match parsed {
+        Ok(body) => match crate::claude_cli::set_plugin_enabled(&body.plugin_id, body.enabled) {
+            Ok(()) => {
+                let _ = request.respond(
+                    tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+                );
             }
+            Err(e) => {
+                let body = serde_json::json!({"error": e.to_string()}).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_plugins_marketplaces(
     ctx: &ServeCtx,
@@ -202,14 +191,10 @@ pub(crate) fn route_plugins_marketplaces(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let items =
-                    crate::claude_cli::list_marketplaces().unwrap_or_default();
-                let body = serde_json::to_string(&items).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let items = crate::claude_cli::list_marketplaces().unwrap_or_default();
+    let body = serde_json::to_string(&items).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_plugins_marketplaces_add(
     ctx: &ServeCtx,
@@ -218,41 +203,38 @@ pub(crate) fn route_plugins_marketplaces_add(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                #[derive(serde::Deserialize)]
-                struct Body {
-                    source: String,
-                }
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
-                match serde_json::from_str::<Body>(&buf) {
-                    Ok(body) => match crate::claude_cli::add_marketplace(&body.source)
-                    {
-                        Ok(()) => {
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                    .with_header(json_header),
-                            );
-                        }
-                        Err(e) => {
-                            let body = serde_json::json!({"error": e.to_string()}).to_string();
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body)
-                                    .with_status_code(500)
-                                    .with_header(json_header),
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e.to_string()}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
+    #[derive(serde::Deserialize)]
+    struct Body {
+        source: String,
+    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    match serde_json::from_str::<Body>(&buf) {
+        Ok(body) => match crate::claude_cli::add_marketplace(&body.source) {
+            Ok(()) => {
+                let _ = request.respond(
+                    tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+                );
             }
+            Err(e) => {
+                let body = serde_json::json!({"error": e.to_string()}).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_plugins_marketplaces_remove(
     ctx: &ServeCtx,
@@ -261,41 +243,38 @@ pub(crate) fn route_plugins_marketplaces_remove(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                #[derive(serde::Deserialize)]
-                struct Body {
-                    name: String,
-                }
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
-                match serde_json::from_str::<Body>(&buf) {
-                    Ok(body) => match crate::claude_cli::remove_marketplace(&body.name)
-                    {
-                        Ok(()) => {
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                    .with_header(json_header),
-                            );
-                        }
-                        Err(e) => {
-                            let body = serde_json::json!({"error": e.to_string()}).to_string();
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body)
-                                    .with_status_code(500)
-                                    .with_header(json_header),
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e.to_string()}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
+    #[derive(serde::Deserialize)]
+    struct Body {
+        name: String,
+    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    match serde_json::from_str::<Body>(&buf) {
+        Ok(body) => match crate::claude_cli::remove_marketplace(&body.name) {
+            Ok(()) => {
+                let _ = request.respond(
+                    tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+                );
             }
+            Err(e) => {
+                let body = serde_json::json!({"error": e.to_string()}).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_plugins_install(
     ctx: &ServeCtx,
@@ -304,50 +283,47 @@ pub(crate) fn route_plugins_install(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                #[derive(serde::Deserialize)]
-                struct Body {
-                    plugin_id: String,
+    #[derive(serde::Deserialize)]
+    struct Body {
+        plugin_id: String,
+    }
+    let is_install = request.url().starts_with(crate::routes::PLUGINS_INSTALL);
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let parsed: Result<Body, _> = serde_json::from_str(&buf);
+    match parsed {
+        Ok(body) => {
+            let result = if is_install {
+                crate::claude_cli::install_plugin(&body.plugin_id)
+            } else {
+                crate::claude_cli::uninstall_plugin(&body.plugin_id)
+            };
+            match result {
+                Ok(()) => {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+                    );
                 }
-                let is_install = request.url().starts_with(crate::routes::PLUGINS_INSTALL);
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
-                let parsed: Result<Body, _> = serde_json::from_str(&buf);
-                match parsed {
-                    Ok(body) => {
-                        let result = if is_install {
-                            crate::claude_cli::install_plugin(&body.plugin_id)
-                        } else {
-                            crate::claude_cli::uninstall_plugin(&body.plugin_id)
-                        };
-                        match result {
-                            Ok(()) => {
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                        .with_header(json_header),
-                                );
-                            }
-                            Err(e) => {
-                                let body =
-                                    serde_json::json!({"error": e.to_string()}).to_string();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
-                                        .with_header(json_header),
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e.to_string()}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
+                Err(e) => {
+                    let body = serde_json::json!({"error": e.to_string()}).to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
                 }
             }
+        }
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_skill_history(
     ctx: &ServeCtx,
@@ -358,29 +334,29 @@ pub(crate) fn route_skill_history(
 ) {
     let sources = ctx.sources;
 
-                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                if let Some(source) = find_source_for_path(sources, &file_path) {
-                    use crate::skill_history;
-                    let main_msgs = source.get_messages(&file_path).unwrap_or_default();
-                    let mut out = skill_history::extract_from_messages(&main_msgs, false);
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    if let Some(source) = find_source_for_path(sources, &file_path) {
+        use crate::skill_history;
+        let main_msgs = source.get_messages(&file_path).unwrap_or_default();
+        let mut out = skill_history::extract_from_messages(&main_msgs, false);
 
-                    let main_path = std::path::Path::new(&file_path);
-                    for sub in skill_history::subagent_jsonl_paths(main_path) {
-                        let sub_str = sub.to_string_lossy().to_string();
-                        let Ok(msgs) = source.get_messages(&sub_str) else { continue };
-                        out.extend(skill_history::extract_from_messages(&msgs, true));
-                    }
-                    skill_history::sort_by_timestamp(&mut out);
+        let main_path = std::path::Path::new(&file_path);
+        for sub in skill_history::subagent_jsonl_paths(main_path) {
+            let sub_str = sub.to_string_lossy().to_string();
+            let Ok(msgs) = source.get_messages(&sub_str) else {
+                continue;
+            };
+            out.extend(skill_history::extract_from_messages(&msgs, true));
+        }
+        skill_history::sort_by_timestamp(&mut out);
 
-                    let body = serde_json::to_string(&out).unwrap_or_default();
-                    let _ = request.respond(
-                        tiny_http::Response::from_string(body).with_header(json_header),
-                    );
-                } else {
-                    let _ = request.respond(tiny_http::Response::empty(404));
-                }
-            }
+        let body = serde_json::to_string(&out).unwrap_or_default();
+        let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+    } else {
+        let _ = request.respond(tiny_http::Response::empty(404));
+    }
+}
 
 pub(crate) fn route_skill_content(
     ctx: &ServeCtx,
@@ -389,21 +365,19 @@ pub(crate) fn route_skill_content(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                match skills::read_skill_file(&file_path) {
-                    Ok(content) => {
-                        let body = serde_json::to_string(&content).unwrap_or_default();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(_) => {
-                        let _ = request.respond(tiny_http::Response::empty(404));
-                    }
-                }
-            }
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    match skills::read_skill_file(&file_path) {
+        Ok(content) => {
+            let body = serde_json::to_string(&content).unwrap_or_default();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(_) => {
+            let _ = request.respond(tiny_http::Response::empty(404));
+        }
+    }
+}
 
 pub(crate) fn route_skill_files(
     ctx: &ServeCtx,
@@ -412,21 +386,19 @@ pub(crate) fn route_skill_files(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let skill_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                match skills::list_skill_files(&skill_path) {
-                    Ok(entries) => {
-                        let body = serde_json::to_string(&entries).unwrap_or_default();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(_) => {
-                        let _ = request.respond(tiny_http::Response::empty(404));
-                    }
-                }
-            }
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let skill_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    match skills::list_skill_files(&skill_path) {
+        Ok(entries) => {
+            let body = serde_json::to_string(&entries).unwrap_or_default();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(_) => {
+            let _ = request.respond(tiny_http::Response::empty(404));
+        }
+    }
+}
 
 pub(crate) fn route_skill_delete(
     ctx: &ServeCtx,
@@ -435,38 +407,36 @@ pub(crate) fn route_skill_delete(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                #[derive(serde::Deserialize)]
-                struct Body {
-                    skill_path: String,
-                }
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
-                let parsed: Result<Body, _> = serde_json::from_str(&buf);
-                match parsed {
-                    Ok(body) => match skills::delete_skill(&body.skill_path) {
-                        Ok(()) => {
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                    .with_header(json_header),
-                            );
-                        }
-                        Err(e) => {
-                            let body = serde_json::json!({"error": e}).to_string();
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body)
-                                    .with_status_code(500)
-                                    .with_header(json_header),
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        let body = serde_json::json!({"error": e.to_string()}).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
+    #[derive(serde::Deserialize)]
+    struct Body {
+        skill_path: String,
+    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let parsed: Result<Body, _> = serde_json::from_str(&buf);
+    match parsed {
+        Ok(body) => match skills::delete_skill(&body.skill_path) {
+            Ok(()) => {
+                let _ = request.respond(
+                    tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+                );
             }
+            Err(e) => {
+                let body = serde_json::json!({"error": e}).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}

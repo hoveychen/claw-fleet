@@ -422,7 +422,10 @@ mod tests {
             // Prose-first governs *tone*; it must not be read as "never draw".
             // The renderer grew mermaid/math/HTML support precisely so a chat
             // can answer a structural question with a structure.
-            assert!(body.contains("mermaid"), "must invite diagrams, not just prose");
+            assert!(
+                body.contains("mermaid"),
+                "must invite diagrams, not just prose"
+            );
             assert!(
                 body.contains("别把行为归因于这份文件"),
                 "must not blame behaviour on a file the user cannot see",
@@ -502,7 +505,9 @@ mod tests {
                 "resolved chat path {resolved} must still be the chat workspace",
             );
             // The link path stays valid too — drafts and older clients hold it.
-            assert!(is_chat_workspace(&home.join(".fleet/chat").to_string_lossy()));
+            assert!(is_chat_workspace(
+                &home.join(".fleet/chat").to_string_lossy()
+            ));
             // The launcher pins whatever this hands back and dedups the recents
             // against it by string equality, so it must be the resolved form.
             assert_eq!(returned, resolved);
@@ -572,7 +577,10 @@ mod tests {
             let settings = claude.join("settings.json");
             std::fs::write(&settings, "{}").unwrap();
             let args = chat_session_args();
-            let i = args.iter().position(|a| a == "--settings").expect("--settings");
+            let i = args
+                .iter()
+                .position(|a| a == "--settings")
+                .expect("--settings");
             assert_eq!(args[i + 1], settings.to_string_lossy());
         });
     }

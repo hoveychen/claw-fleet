@@ -49,8 +49,7 @@ mod tests {
             "BOM leaked into returned string: first chars = {:?}",
             s.chars().take(4).collect::<String>()
         );
-        let parsed: serde_json::Value =
-            serde_json::from_str(s.trim_end()).expect("json parses");
+        let parsed: serde_json::Value = serde_json::from_str(s.trim_end()).expect("json parses");
         assert_eq!(parsed["role"], "user");
     }
 

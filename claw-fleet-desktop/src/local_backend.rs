@@ -2961,6 +2961,31 @@ impl LocalBackend {
         )
     }
 
+    /// Accept a side question about a session; the answer streams into the
+    /// returned record's file, which the UI polls via `get_explanation`.
+    pub fn explain_selection(
+        &self,
+        request: claw_fleet_core::session_explain::ExplainRequest,
+    ) -> Result<claw_fleet_core::session_explain::ExplainRecord, String> {
+        claw_fleet_core::session_explain::ask(request)
+    }
+
+    pub fn get_explanation(
+        &self,
+        session_id: &str,
+        id: &str,
+    ) -> Result<claw_fleet_core::session_explain::ExplainRecord, String> {
+        claw_fleet_core::session_explain::get(session_id, id)
+            .ok_or_else(|| "no such explanation".to_string())
+    }
+
+    pub fn list_explanations(
+        &self,
+        session_id: &str,
+    ) -> Vec<claw_fleet_core::session_explain::ExplainRecord> {
+        claw_fleet_core::session_explain::list(session_id)
+    }
+
     pub fn git_status(
         &self,
         workspace: &str,

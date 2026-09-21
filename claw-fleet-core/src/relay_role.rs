@@ -154,7 +154,11 @@ mod tests {
     use super::*;
 
     fn holder(pid: u32, kind: AgentKind) -> Holder {
-        Holder { pid, start_time_secs: 42, kind }
+        Holder {
+            pid,
+            start_time_secs: 42,
+            kind,
+        }
     }
 
     #[test]
@@ -204,7 +208,11 @@ mod tests {
     #[test]
     fn holder_alive_rejects_unknown_start_time() {
         // start_time 0 = legacy/unknown: must never count as a live holder.
-        let h = Holder { pid: std::process::id(), start_time_secs: 0, kind: AgentKind::Desktop };
+        let h = Holder {
+            pid: std::process::id(),
+            start_time_secs: 0,
+            kind: AgentKind::Desktop,
+        };
         assert!(!holder_alive(&h));
     }
 
@@ -272,7 +280,12 @@ mod tests {
             // own pid, so the cross-process case is asserted on `may_join`.
             let h = read_holder().unwrap();
             assert!(holder_alive(&h));
-            assert!(!may_join(Some(&h), true, std::process::id() + 1, AgentKind::Headless));
+            assert!(!may_join(
+                Some(&h),
+                true,
+                std::process::id() + 1,
+                AgentKind::Headless
+            ));
         });
     }
 
@@ -280,7 +293,11 @@ mod tests {
     fn claim_takes_over_from_a_dead_holder() {
         with_temp_home(|| {
             // pid 0 never resolves → holder_alive false → role is free.
-            write_holder(&Holder { pid: 0, start_time_secs: 12345, kind: AgentKind::Desktop });
+            write_holder(&Holder {
+                pid: 0,
+                start_time_secs: 12345,
+                kind: AgentKind::Desktop,
+            });
             assert!(claim(AgentKind::Headless));
             assert_eq!(read_holder().unwrap().pid, std::process::id());
         });

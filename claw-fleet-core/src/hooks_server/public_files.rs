@@ -74,7 +74,13 @@ fn sanitize_upload_filename(raw: &str) -> String {
         .unwrap_or_default();
     let cleaned: String = base
         .chars()
-        .map(|c| if c == '/' || c == '\\' || c == '\0' { '_' } else { c })
+        .map(|c| {
+            if c == '/' || c == '\\' || c == '\0' {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let cleaned = cleaned.trim();
     if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
@@ -267,12 +273,15 @@ fn read_workspace_file(file_id: &str) -> Result<(Vec<u8>, String), (u16, String)
 fn file_content(request: tiny_http::Request, file_id: &str, json_header: tiny_http::Header) {
     match read_workspace_file(file_id) {
         Ok((bytes, mime)) => {
-            let mime_header: tiny_http::Header =
-                format!("Content-Type: {mime}").parse().unwrap();
+            let mime_header: tiny_http::Header = format!("Content-Type: {mime}").parse().unwrap();
             let _ = request.respond(tiny_http::Response::from_data(bytes).with_header(mime_header));
         }
         Err((status, msg)) => {
-            let code = if status == 403 { "forbidden" } else { "not_found" };
+            let code = if status == 403 {
+                "forbidden"
+            } else {
+                "not_found"
+            };
             respond_error(request, status, code, msg, json_header);
         }
     }
@@ -360,11 +369,23 @@ fn upload_file(mut request: tiny_http::Request, json_header: tiny_http::Header) 
     let root = std::path::PathBuf::from(public_workspace());
     let dest_dir = root.join(UPLOADS_DIR).join(&dir_name);
     if let Err(e) = std::fs::create_dir_all(&dest_dir) {
-        return respond_error(request, 500, "internal", format!("create upload dir: {e}"), json_header);
+        return respond_error(
+            request,
+            500,
+            "internal",
+            format!("create upload dir: {e}"),
+            json_header,
+        );
     }
     let dest = dest_dir.join(&filename);
     if let Err(e) = std::fs::write(&dest, &file_part.data) {
-        return respond_error(request, 500, "internal", format!("write upload: {e}"), json_header);
+        return respond_error(
+            request,
+            500,
+            "internal",
+            format!("write upload: {e}"),
+            json_header,
+        );
     }
 
     let obj = FileObject {
@@ -375,14 +396,21 @@ fn upload_file(mut request: tiny_http::Request, json_header: tiny_http::Header) 
         filename,
         purpose,
     };
-    respond_value(request, 200, &serde_json::to_value(&obj).unwrap_or_default(), json_header);
+    respond_value(
+        request,
+        200,
+        &serde_json::to_value(&obj).unwrap_or_default(),
+        json_header,
+    );
 }
 
 /// Resolve attachment file ids to absolute paths, applying the same confinement
 /// as every other file route. A missing id is a 404 and an out-of-bounds one a
 /// 403 — the caller's mistake either way, so it must not reach a spawn.
 
-fn stat_workspace_file(file_id: &str) -> Result<(String, std::path::PathBuf, std::fs::Metadata), (u16, String)> {
+fn stat_workspace_file(
+    file_id: &str,
+) -> Result<(String, std::path::PathBuf, std::fs::Metadata), (u16, String)> {
     let rel = decode_file_id(file_id).ok_or((404, "malformed file id".to_string()))?;
     if is_internal_rel(&rel) {
         return Err((403, "path is not exposed".to_string()));
@@ -422,12 +450,25 @@ fn file_meta(request: tiny_http::Request, file_id: &str, json_header: tiny_http:
                     .map(|d| d.as_secs() as i64)
                     .unwrap_or(0),
                 filename: rel.clone(),
-                purpose: if is_upload_rel(&rel) { "user_data".to_string() } else { "output".to_string() },
+                purpose: if is_upload_rel(&rel) {
+                    "user_data".to_string()
+                } else {
+                    "output".to_string()
+                },
             };
-            respond_value(request, 200, &serde_json::to_value(&obj).unwrap_or_default(), json_header);
+            respond_value(
+                request,
+                200,
+                &serde_json::to_value(&obj).unwrap_or_default(),
+                json_header,
+            );
         }
         Err((status, msg)) => {
-            let code = if status == 403 { "forbidden" } else { "not_found" };
+            let code = if status == 403 {
+                "forbidden"
+            } else {
+                "not_found"
+            };
             respond_error(request, status, code, msg, json_header);
         }
     }
@@ -453,7 +494,13 @@ fn delete_file(request: tiny_http::Request, file_id: &str, json_header: tiny_htt
                 );
             }
             if let Err(e) = std::fs::remove_file(&path) {
-                return respond_error(request, 500, "internal", format!("delete: {e}"), json_header);
+                return respond_error(
+                    request,
+                    500,
+                    "internal",
+                    format!("delete: {e}"),
+                    json_header,
+                );
             }
             // Each upload owns its directory; drop it once empty so the uploads
             // tree doesn't fill with husks.
@@ -464,12 +511,15 @@ fn delete_file(request: tiny_http::Request, file_id: &str, json_header: tiny_htt
             respond_value(request, 200, &body, json_header);
         }
         Err((status, msg)) => {
-            let code = if status == 403 { "forbidden" } else { "not_found" };
+            let code = if status == 403 {
+                "forbidden"
+            } else {
+                "not_found"
+            };
             respond_error(request, status, code, msg, json_header);
         }
     }
 }
-
 
 // ─────────────────────────── Routing ────────────────────────────────
 
@@ -491,7 +541,9 @@ pub enum V1Route {
 
 /// Route a `/v1/...` request. Pure; unit-tested.
 pub fn parse_v1_route(method: &str, path: &str) -> V1Route {
-    let Some(rest) = path.strip_prefix("/v1/") else { return V1Route::NotFound };
+    let Some(rest) = path.strip_prefix("/v1/") else {
+        return V1Route::NotFound;
+    };
     let segs: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
     match segs.as_slice() {
         ["files"] if method == "GET" => V1Route::ListFiles,
@@ -569,8 +621,14 @@ mod tests {
     fn only_the_file_routes_remain() {
         assert_eq!(parse_v1_route("GET", "/v1/files"), V1Route::ListFiles);
         assert_eq!(parse_v1_route("POST", "/v1/files"), V1Route::UploadFile);
-        assert_eq!(parse_v1_route("GET", "/v1/files/abc"), V1Route::FileMeta("abc".into()));
-        assert_eq!(parse_v1_route("DELETE", "/v1/files/abc"), V1Route::DeleteFile("abc".into()));
+        assert_eq!(
+            parse_v1_route("GET", "/v1/files/abc"),
+            V1Route::FileMeta("abc".into())
+        );
+        assert_eq!(
+            parse_v1_route("DELETE", "/v1/files/abc"),
+            V1Route::DeleteFile("abc".into())
+        );
         assert_eq!(
             parse_v1_route("GET", "/v1/files/abc/content"),
             V1Route::FileContent("abc".into())
@@ -583,7 +641,11 @@ mod tests {
             ("POST", "/v1/responses/resp_1/cancel"),
             ("GET", "/v1/responses/resp_1/files"),
         ] {
-            assert_eq!(parse_v1_route(m, p), V1Route::NotFound, "{m} {p} must be gone");
+            assert_eq!(
+                parse_v1_route(m, p),
+                V1Route::NotFound,
+                "{m} {p} must be gone"
+            );
         }
         assert_eq!(parse_v1_route("GET", "/health"), V1Route::NotFound);
     }

@@ -325,7 +325,10 @@ pub fn render(rows: &[RecentRow], workspace_path: &str) -> Option<String> {
 /// Reviews are fetched by `workspace_name` (the only index the table has) and
 /// then re-filtered by repo root, because two unrelated checkouts can share a
 /// directory name and a stranger's summary is worse than no summary.
-pub fn render_for_workspace(workspace_path: &str, exclude_session_id: Option<&str>) -> Option<String> {
+pub fn render_for_workspace(
+    workspace_path: &str,
+    exclude_session_id: Option<&str>,
+) -> Option<String> {
     let sources = crate::agent_source::build_sources();
     let sessions = crate::session::scan_all_sources(&sources);
     let mut query = RecentQuery::new(workspace_path);
@@ -598,7 +601,11 @@ mod tests {
         s.last_message_preview = Some(format!("line one\nline two {}", "z".repeat(200)));
         let got = title_for(&s).unwrap();
         assert!(!got.contains('\n'), "should be one line: {got}");
-        assert_eq!(got.chars().count(), MAX_TITLE_CHARS + 1, "80 chars + ellipsis");
+        assert_eq!(
+            got.chars().count(),
+            MAX_TITLE_CHARS + 1,
+            "80 chars + ellipsis"
+        );
         assert!(got.ends_with('…'));
     }
 
@@ -725,7 +732,11 @@ mod tests {
 
     #[test]
     fn a_summary_is_indented_under_its_row() {
-        let got = render(&[row("a", "title", false, Some("what happened"))], "/w/proj").unwrap();
+        let got = render(
+            &[row("a", "title", false, Some("what happened"))],
+            "/w/proj",
+        )
+        .unwrap();
         assert!(got.contains("title\n    what happened\n"), "{got}");
     }
 
@@ -762,16 +773,17 @@ mod tests {
         // One row too big for the budget: better no block than a frame with
         // nothing in it.
         let huge = "y".repeat(MAX_BLOCK_BYTES * 2);
-        assert_eq!(render(&[row("a", "t", false, Some(&huge))], "/w/proj"), None);
+        assert_eq!(
+            render(&[row("a", "t", false, Some(&huge))], "/w/proj"),
+            None
+        );
     }
 
     #[test]
     fn rows_carry_a_local_timestamp() {
         let got = render(&[row("a", "t", false, None)], "/w/proj").unwrap();
         // MM-DD HH:MM, whatever the machine's zone resolves it to.
-        let has_stamp = got
-            .lines()
-            .any(|l| regex_lite_mm_dd_hh_mm(l.trim_start()));
+        let has_stamp = got.lines().any(|l| regex_lite_mm_dd_hh_mm(l.trim_start()));
         assert!(has_stamp, "no MM-DD HH:MM stamp found in: {got}");
     }
 
@@ -815,7 +827,10 @@ mod tests {
         // A render that overran its budget gives the claim back.
         forget("s1");
         assert!(claim_once("s1"), "a forgotten session may be sent again");
-        assert!(!claim_once("s2"), "forgetting one leaves the others claimed");
+        assert!(
+            !claim_once("s2"),
+            "forgetting one leaves the others claimed"
+        );
         forget("never-claimed");
         // The claim is durable: dsh asks from a fresh process on every step.
         assert!(

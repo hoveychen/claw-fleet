@@ -112,6 +112,24 @@ export function agentCardId(sessionId: string): string {
   return `agent:${sessionId}`;
 }
 
+/** Rail id for a side-question ("追问") card. Same prefix scheme as docs and
+ *  agents, so `expanded` can hold any of the three. */
+export function explainCardId(explainId: string): string {
+  return `explain:${explainId}`;
+}
+
+/**
+ * Click a side-question card: expand it into the full Q/A, or — clicking the
+ * one already expanded — collapse it back to its one-line chip. The cards
+ * themselves are not held here: the records live on disk and the session's
+ * `useSessionExplains` hook is their source, so this only moves `expanded`.
+ */
+export function toggleExplain(state: AuxState, explainId: string): AuxState {
+  const id = explainCardId(explainId);
+  if (state.expanded === id) return { ...state, expanded: null };
+  return { ...state, expanded: id };
+}
+
 /** Cap on remembered doc cards. A long session can name dozens of files; the
  *  rail is a "what I have been reading" stack, not a history. Oldest drops
  *  first, never the one just opened. */

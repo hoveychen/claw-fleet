@@ -140,8 +140,9 @@ pub fn parse_pressure(tail: &str) -> Option<ContextPressure> {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0)
         };
-        let used =
-            field("input_tokens") + field("cache_creation_input_tokens") + field("cache_read_input_tokens");
+        let used = field("input_tokens")
+            + field("cache_creation_input_tokens")
+            + field("cache_read_input_tokens");
         if used == 0 {
             continue;
         }
@@ -400,7 +401,10 @@ mod tests {
             };
             let text = reminder_text(&p, tier);
             assert!(text.contains("fleet handoff"), "[{tier}] {text}");
-            assert!(!text.contains('%'), "[{tier}] must not show a percentage: {text}");
+            assert!(
+                !text.contains('%'),
+                "[{tier}] must not show a percentage: {text}"
+            );
             assert!(
                 !text.contains("1000K"),
                 "[{tier}] must not show the window size: {text}"

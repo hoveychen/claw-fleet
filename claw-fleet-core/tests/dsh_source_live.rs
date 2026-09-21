@@ -173,8 +173,8 @@ fn live_token_breakdown_reads_projections_off_a_real_server() {
         "every dsh session on this machine is blank — run a turn first"
     );
 
-    let b = claw_fleet_core::dsh_source::dsh_token_breakdown(&busiest.jsonl_path)
-        .expect("breakdown");
+    let b =
+        claw_fleet_core::dsh_source::dsh_token_breakdown(&busiest.jsonl_path).expect("breakdown");
     println!(
         "{} | billed {} (uncached {} / read {} / write {} / out {}) | ctx {:?}/{:?}",
         busiest.id,
@@ -286,7 +286,12 @@ fn live_reading_a_session_teaches_the_scan_its_model() {
         .iter()
         .rev()
         .find(|r| r["type"] == "assistant" && r["message"]["model"].is_string())
-        .map(|r| r["message"]["model"].as_str().unwrap_or_default().to_string())
+        .map(|r| {
+            r["message"]["model"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
         .expect("an assistant record must name the route that produced it");
     assert_eq!(
         last_reply_model, model,
@@ -315,7 +320,11 @@ fn live_a_read_header_teaches_the_scan_its_effort() {
     let mut found = 0usize;
     for s in source.scan_sessions().iter().take(12) {
         // A full read walks back to the head, where the `initial` header sits.
-        if source.get_messages(&s.jsonl_path).map(|m| m.is_empty()).unwrap_or(true) {
+        if source
+            .get_messages(&s.jsonl_path)
+            .map(|m| m.is_empty())
+            .unwrap_or(true)
+        {
             continue;
         }
         let after = source
@@ -324,17 +333,17 @@ fn live_a_read_header_teaches_the_scan_its_effort() {
             .find(|x| x.id == s.id)
             .expect("still on the roster");
         if let Some(effort) = after.effort.as_deref() {
-            println!(
-                "{} → model={:?} effort={effort}",
-                after.id, after.model
-            );
+            println!("{} → model={:?} effort={effort}", after.id, after.model);
             assert!(!effort.is_empty(), "an empty level must read as absent");
             found += 1;
             if found >= 2 {
                 break;
             }
         } else {
-            println!("{} → no effort in the pages read (model={:?})", after.id, after.model);
+            println!(
+                "{} → no effort in the pages read (model={:?})",
+                after.id, after.model
+            );
         }
     }
     assert!(

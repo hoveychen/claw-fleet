@@ -448,7 +448,8 @@ fn ensure_import_installed() -> Result<(), String> {
         let existing = fs::read_to_string(&claude_md).unwrap_or_default();
         let new_content = inject_import(&existing, &path.display().to_string());
         if new_content != existing {
-            crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+            crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
+                .map_err(|e| format!("write CLAUDE.md: {e}"))?;
         }
         Ok::<(), String>(())
     })?;
@@ -463,7 +464,8 @@ fn remove_import() -> Result<(), String> {
         if let Ok(existing) = fs::read_to_string(&claude_md) {
             let stripped = strip_import(&existing);
             if stripped != existing {
-                crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes())
+                    .map_err(|e| format!("write CLAUDE.md: {e}"))?;
             }
         }
         Ok::<(), String>(())
@@ -487,7 +489,8 @@ pub fn migrate_legacy_lessons() -> Result<usize, String> {
         if lessons.is_empty() {
             return Ok(Vec::new());
         }
-        crate::atomic_json::write_atomic(&claude_md, remaining.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+        crate::atomic_json::write_atomic(&claude_md, remaining.as_bytes())
+            .map_err(|e| format!("write CLAUDE.md: {e}"))?;
         Ok::<Vec<Lesson>, String>(lessons)
     })?;
     if lessons.is_empty() {
@@ -525,7 +528,12 @@ mod tests {
 
     #[test]
     fn render_then_parse_round_trips() {
-        let l = mk("Always verify.", "Got bitten once.", "claude-fleet", "abc-123");
+        let l = mk(
+            "Always verify.",
+            "Got bitten once.",
+            "claude-fleet",
+            "abc-123",
+        );
         let id = lesson_id(&l);
         let file = format!("{FILE_HEADER}\n\n{}", render_block(&id, &l));
         let parsed = parse_blocks(&file);
@@ -674,7 +682,9 @@ Before writing any new function, first search the codebase.\n\
         assert!(remaining.contains("重复造轮子是常见毛病"));
         assert!(remaining.contains("动手前跑一次 grep"));
         // …and must NOT have been swallowed into the lesson.
-        assert!(!lessons[0].reason.contains("Before writing any new function"));
+        assert!(!lessons[0]
+            .reason
+            .contains("Before writing any new function"));
     }
 
     #[test]

@@ -101,7 +101,10 @@ enum Transport {
     /// libp2p pairing code (`rca1.…`).
     Pairing(String),
     /// stdio-over-ssh: ssh target + rca binary path on the remote host.
-    Stdio { ssh_target: String, remote_rca: String },
+    Stdio {
+        ssh_target: String,
+        remote_rca: String,
+    },
 }
 
 /// The registry file: `~/.fleet/remote-workspaces.json`.
@@ -143,8 +146,11 @@ const LOCAL_BIN_MARKS: &[&str] = &["Claw Fleet.app/Contents/MacOS/fleet", ".flee
 /// prd-context hooks (they name the app bundle path) and the hooks.jsonl
 /// observability append. Marks are deliberately long and harness-specific so
 /// real user commands never contain them.
-const LOCAL_ARGV_MARKS: &[&str] =
-    &["Claw Fleet.app/Contents/MacOS/fleet", ".fleet/bin/fleet", ".fleet/hooks.jsonl"];
+const LOCAL_ARGV_MARKS: &[&str] = &[
+    "Claw Fleet.app/Contents/MacOS/fleet",
+    ".fleet/bin/fleet",
+    ".fleet/hooks.jsonl",
+];
 
 /// The pairing-code prefix (`internal/paircode/paircode.go` `Prefix`).
 const PAIRING_CODE_PREFIX: &str = "rca1.";
@@ -167,8 +173,7 @@ pub fn load() -> RemoteWorkspacesConfig {
 fn save(cfg: &RemoteWorkspacesConfig) -> Result<(), String> {
     let path = config_path().ok_or("cannot resolve ~/.fleet")?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("create {}: {e}", parent.display()))?;
+        fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
     }
     let json = serde_json::to_string_pretty(cfg)
         .map_err(|e| format!("serialize remote-workspaces: {e}"))?;
@@ -189,8 +194,9 @@ fn validate_pairing_code(code: &str) -> Result<(), String> {
 /// runs for `--via` (`cmd/rca/run.go`), could break argv splitting or inject a
 /// command. Registration values come from saved SSH connections (trusted), but
 /// reject these defensively. NOTE: a space is NOT here — see the two validators.
-const SHELL_METACHARS: &[char] =
-    &['\'', '"', ';', '&', '|', '$', '`', '\n', '\r', '<', '>', '(', ')', '\\', '*', '\t'];
+const SHELL_METACHARS: &[char] = &[
+    '\'', '"', ';', '&', '|', '$', '`', '\n', '\r', '<', '>', '(', ')', '\\', '*', '\t',
+];
 
 /// A single unsplittable token (the remote rca path): reject spaces AND
 /// metacharacters — a filesystem path passed as one argv word never needs them.
@@ -220,7 +226,9 @@ fn validate_ssh_target(tok: &str) -> Result<(), String> {
         return Err("ssh target must not be empty".to_string());
     }
     if let Some(c) = tok.chars().find(|c| SHELL_METACHARS.contains(c)) {
-        return Err(format!("ssh target contains an unsupported character {c:?}"));
+        return Err(format!(
+            "ssh target contains an unsupported character {c:?}"
+        ));
     }
     Ok(())
 }
@@ -248,7 +256,12 @@ impl RemoteWorkspace {
     }
 
     fn resolve_ssh_target(&self) -> Result<(Option<String>, Option<String>), String> {
-        if let Some(id) = self.host_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(id) = self
+            .host_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             let host = crate::remote_host::find_host(id).ok_or_else(|| {
                 format!(
                     "{}: the host this workspace runs on ({id}) has been removed — pick it again \
@@ -260,13 +273,21 @@ impl RemoteWorkspace {
             return Ok((Some(target), host.rca_path));
         }
         Ok((
-            self.ssh_target.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+            self.ssh_target
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
             None,
         ))
     }
 
     fn transport(&self) -> Result<Transport, String> {
-        let code = self.pairing_code.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let code = self
+            .pairing_code
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         // A `host_id` resolves to an ssh target through the host book, so both
         // forms collapse to the same thing before the exactly-one check — an
         // entry carrying a host id and a pairing code is still a conflict.
@@ -288,7 +309,10 @@ impl RemoteWorkspace {
                     .or(book_rca)
                     .unwrap_or_else(|| "rca".to_string());
                 validate_shell_token(&remote_rca, "remote rca path")?;
-                Ok(Transport::Stdio { ssh_target: target.to_string(), remote_rca })
+                Ok(Transport::Stdio {
+                    ssh_target: target.to_string(),
+                    remote_rca,
+                })
             }
             (Some(_), Some(_)) => Err(
                 "a remote workspace has both a pairing code and an ssh target — set exactly one \
@@ -319,15 +343,30 @@ pub fn upsert(entry: RemoteWorkspace) -> Result<RemoteWorkspacesConfig, String> 
     })?;
     let entry = RemoteWorkspace {
         path: path.clone(),
-        pairing_code: entry.pairing_code.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()),
-        ssh_target: entry.ssh_target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
-        host_id: entry.host_id.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()),
+        pairing_code: entry
+            .pairing_code
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty()),
+        ssh_target: entry
+            .ssh_target
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty()),
+        host_id: entry
+            .host_id
+            .map(|h| h.trim().to_string())
+            .filter(|h| !h.is_empty()),
         remote_rca_path: entry
             .remote_rca_path
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty()),
-        label: entry.label.map(|l| l.trim().to_string()).filter(|l| !l.is_empty()),
-        rca_path: entry.rca_path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
+        label: entry
+            .label
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty()),
+        rca_path: entry
+            .rca_path
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty()),
     };
     let mut cfg = load();
     match cfg.workspaces.iter_mut().find(|w| w.path == path) {
@@ -362,10 +401,14 @@ pub fn find_for_path(path: &str) -> Option<RemoteWorkspace> {
 /// Resolve the rca binary for `entry`: per-workspace override → global
 /// override → `~/.fleet/bin/rca` → `$PATH`. A configured-but-missing override
 /// is an error, not a silent fallthrough.
-fn resolve_rca_binary(entry: &RemoteWorkspace, cfg: &RemoteWorkspacesConfig) -> Result<String, String> {
-    for (source, configured) in
-        [("workspace rcaPath", &entry.rca_path), ("global rcaPath", &cfg.rca_path)]
-    {
+fn resolve_rca_binary(
+    entry: &RemoteWorkspace,
+    cfg: &RemoteWorkspacesConfig,
+) -> Result<String, String> {
+    for (source, configured) in [
+        ("workspace rcaPath", &entry.rca_path),
+        ("global rcaPath", &cfg.rca_path),
+    ] {
         if let Some(p) = configured {
             if Path::new(p).is_file() {
                 return Ok(p.clone());
@@ -449,7 +492,9 @@ pub fn local_release_slug() -> Option<&'static str> {
 /// The rca release tarball URL for a slug. `releases/latest` follows a 302 to
 /// whatever the newest published tag is, so Fleet never pins a version.
 pub fn rca_release_url(slug: &str) -> String {
-    format!("https://github.com/hoveychen/remote-adapter/releases/latest/download/rca_{slug}.tar.gz")
+    format!(
+        "https://github.com/hoveychen/remote-adapter/releases/latest/download/rca_{slug}.tar.gz"
+    )
 }
 
 /// Download rca for this machine into `~/.fleet/bin/rca` and verify it supports
@@ -622,7 +667,10 @@ pub fn wrap_launch(
         .map_err(|e| format!("create local mirror directory {workspace_path}: {e}"))?;
     let transport_flags: Vec<String> = match transport {
         Transport::Pairing(code) => vec!["--code".to_string(), code],
-        Transport::Stdio { ssh_target, remote_rca } => {
+        Transport::Stdio {
+            ssh_target,
+            remote_rca,
+        } => {
             // `--via '<shell cmd>'` — rca runs it under `sh -c` and speaks a
             // single yamux stream over its stdin/stdout. ServerAliveInterval
             // keeps the ssh tunnel from silently half-dying on an idle
@@ -645,7 +693,10 @@ pub fn wrap_launch(
         args: wrapped,
         envs: vec![
             ("RCC_LOCAL_BINS".to_string(), LOCAL_BIN_MARKS.join(":")),
-            ("RCC_LOCAL_ARGV_MARKS".to_string(), LOCAL_ARGV_MARKS.join(":")),
+            (
+                "RCC_LOCAL_ARGV_MARKS".to_string(),
+                LOCAL_ARGV_MARKS.join(":"),
+            ),
         ],
     }))
 }
@@ -678,7 +729,11 @@ mod tests {
             let prev = std::env::var_os("FLEET_HOME");
             // SAFETY: serialized on the process-wide FLEET_HOME lock.
             unsafe { std::env::set_var("FLEET_HOME", &dir) };
-            Self { dir, prev, _lock: lock }
+            Self {
+                dir,
+                prev,
+                _lock: lock,
+            }
         }
 
         fn path(&self, rel: &str) -> String {
@@ -730,7 +785,12 @@ mod tests {
         let cfg = load();
         assert_eq!(cfg.workspaces.len(), 2);
         assert_eq!(
-            cfg.workspaces.iter().find(|w| w.path == a).unwrap().pairing_code.as_deref(),
+            cfg.workspaces
+                .iter()
+                .find(|w| w.path == a)
+                .unwrap()
+                .pairing_code
+                .as_deref(),
             Some("rca1.CCC")
         );
 
@@ -771,7 +831,10 @@ mod tests {
         assert!(find_for_path(&ws).is_some());
         assert!(find_for_path(&format!("{ws}/")).is_some());
         assert!(find_for_path(&format!("{ws}/sub/dir")).is_some());
-        assert!(find_for_path(&format!("{ws}ect")).is_none(), "sibling 'project' must not match");
+        assert!(
+            find_for_path(&format!("{ws}ect")).is_none(),
+            "sibling 'project' must not match"
+        );
         assert!(find_for_path(&home.path("other")).is_none());
     }
 
@@ -793,17 +856,29 @@ mod tests {
         upsert(e).unwrap();
 
         let args: Vec<String> = ["-p", "hi", "--session-id", "s1"].map(String::from).into();
-        let got = wrap_launch(&ws, "/usr/local/bin/claude", &args).unwrap().unwrap();
+        let got = wrap_launch(&ws, "/usr/local/bin/claude", &args)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(got.program, fake_rca);
         assert_eq!(
             got.args,
-            ["/usr/local/bin/claude", "-p", "hi", "--session-id", "s1", "--code", "rca1.AAA"]
-                .map(String::from)
-                .to_vec()
+            [
+                "/usr/local/bin/claude",
+                "-p",
+                "hi",
+                "--session-id",
+                "s1",
+                "--code",
+                "rca1.AAA"
+            ]
+            .map(String::from)
+            .to_vec()
         );
         assert!(
-            got.envs.iter().any(|(k, v)| k == "RCC_LOCAL_BINS" && v.contains("MacOS/fleet")),
+            got.envs
+                .iter()
+                .any(|(k, v)| k == "RCC_LOCAL_BINS" && v.contains("MacOS/fleet")),
             "must pin the fleet binary local for the MCP decision-card bridge"
         );
         assert!(
@@ -844,12 +919,18 @@ mod tests {
         upsert(e).unwrap();
 
         // Round-trips: ssh target + remote rca path survive, no pairing code.
-        let saved = load().workspaces.into_iter().find(|w| w.path == ws).unwrap();
+        let saved = load()
+            .workspaces
+            .into_iter()
+            .find(|w| w.path == ws)
+            .unwrap();
         assert_eq!(saved.ssh_target.as_deref(), Some("gpu-box"));
         assert_eq!(saved.remote_rca_path.as_deref(), Some("/opt/rca"));
         assert_eq!(saved.pairing_code, None);
 
-        let got = wrap_launch(&ws, "/usr/local/bin/claude", &["-p".into()]).unwrap().unwrap();
+        let got = wrap_launch(&ws, "/usr/local/bin/claude", &["-p".into()])
+            .unwrap()
+            .unwrap();
         assert_eq!(got.program, fake_rca);
         assert_eq!(got.args[0], "/usr/local/bin/claude");
         assert_eq!(got.args[1], "-p");
@@ -858,7 +939,10 @@ mod tests {
             got.args[3],
             "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 gpu-box /opt/rca serve --stdio"
         );
-        assert!(!got.args.contains(&"--code".to_string()), "stdio must not append --code");
+        assert!(
+            !got.args.contains(&"--code".to_string()),
+            "stdio must not append --code"
+        );
         // The fleet-local pins still apply regardless of transport.
         assert!(got.envs.iter().any(|(k, _)| k == "RCC_LOCAL_BINS"));
     }
@@ -896,10 +980,20 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let got = wrap_launch(&ws, "/usr/local/bin/codex", &args).unwrap().unwrap();
+        let got = wrap_launch(&ws, "/usr/local/bin/codex", &args)
+            .unwrap()
+            .unwrap();
 
-        let via = got.args.iter().position(|a| a == "--via").expect("must carry --via");
-        let sep = got.args.iter().position(|a| a == "--").expect("must keep a separator");
+        let via = got
+            .args
+            .iter()
+            .position(|a| a == "--via")
+            .expect("must carry --via");
+        let sep = got
+            .args
+            .iter()
+            .position(|a| a == "--")
+            .expect("must keep a separator");
         assert!(
             via < sep,
             "rca stops parsing at the bare `--`, so its flags must come first: {:?}",
@@ -941,12 +1035,19 @@ mod tests {
         })
         .unwrap();
 
-        let args: Vec<String> =
-            ["exec", "--", "hi"].iter().map(|s| s.to_string()).collect();
+        let args: Vec<String> = ["exec", "--", "hi"].iter().map(|s| s.to_string()).collect();
         let got = wrap_launch(&ws, "/bin/codex", &args).unwrap().unwrap();
         assert_eq!(
             got.args,
-            vec!["/bin/codex", "exec", "--code", "rca1.CODE", "--", "--", "hi"],
+            vec![
+                "/bin/codex",
+                "exec",
+                "--code",
+                "rca1.CODE",
+                "--",
+                "--",
+                "hi"
+            ],
         );
     }
 
@@ -966,7 +1067,9 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let got = wrap_launch(&ws, "/usr/local/bin/claude", &args).unwrap().unwrap();
+        let got = wrap_launch(&ws, "/usr/local/bin/claude", &args)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             got.args,
             vec![
@@ -979,7 +1082,10 @@ mod tests {
                 "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 gpu-box rca serve --stdio",
             ],
         );
-        assert!(!got.args.contains(&"--".to_string()), "must not invent a separator");
+        assert!(
+            !got.args.contains(&"--".to_string()),
+            "must not invent a separator"
+        );
     }
 
     /// A stdio entry with no explicit remote rca path defaults to `rca`.
@@ -1004,7 +1110,10 @@ mod tests {
     fn upsert_requires_exactly_one_transport() {
         let home = TmpHome::new("onetransport");
         // Neither.
-        let bare = RemoteWorkspace { path: home.path("a"), ..Default::default() };
+        let bare = RemoteWorkspace {
+            path: home.path("a"),
+            ..Default::default()
+        };
         assert!(upsert(bare).is_err(), "no transport must be refused");
         // Both.
         let mut both = stdio_entry(&home.path("b"), "host");
@@ -1018,7 +1127,14 @@ mod tests {
     #[test]
     fn upsert_rejects_shell_metachars() {
         let home = TmpHome::new("shellmeta");
-        for bad in ["host; rm -rf /", "host$(whoami)", "host`id`", "h|p", "a\"b", "x&y"] {
+        for bad in [
+            "host; rm -rf /",
+            "host$(whoami)",
+            "host`id`",
+            "h|p",
+            "a\"b",
+            "x&y",
+        ] {
             assert!(
                 upsert(stdio_entry(&home.path("proj"), bad)).is_err(),
                 "ssh target {bad:?} must be refused"
@@ -1026,11 +1142,17 @@ mod tests {
         }
         let mut e = stdio_entry(&home.path("proj"), "safe-host");
         e.remote_rca_path = Some("/opt/rca; evil".into());
-        assert!(upsert(e).is_err(), "remote rca path with metachars must be refused");
+        assert!(
+            upsert(e).is_err(),
+            "remote rca path with metachars must be refused"
+        );
         // A remote rca path with a space is also refused (single argv word).
         let mut sp = stdio_entry(&home.path("proj"), "safe-host");
         sp.remote_rca_path = Some("/opt/my rca".into());
-        assert!(upsert(sp).is_err(), "remote rca path with a space must be refused");
+        assert!(
+            upsert(sp).is_err(),
+            "remote rca path with a space must be refused"
+        );
     }
 
     /// D1: an ssh target carrying full connection options (custom port /
@@ -1042,12 +1164,19 @@ mod tests {
         let ws = home.path("proj");
         let fake_rca = home.path("rca-bin");
         fs::write(&fake_rca, "").unwrap();
-        let mut e = stdio_entry(&ws, "-p 2222 -i /home/me/.ssh/id_ed25519 -J bastion me@gpu-box");
+        let mut e = stdio_entry(
+            &ws,
+            "-p 2222 -i /home/me/.ssh/id_ed25519 -J bastion me@gpu-box",
+        );
         e.remote_rca_path = Some("/opt/rca".into());
         e.rca_path = Some(fake_rca);
         upsert(e).unwrap();
 
-        let saved = load().workspaces.into_iter().find(|w| w.path == ws).unwrap();
+        let saved = load()
+            .workspaces
+            .into_iter()
+            .find(|w| w.path == ws)
+            .unwrap();
         assert_eq!(
             saved.ssh_target.as_deref(),
             Some("-p 2222 -i /home/me/.ssh/id_ed25519 -J bastion me@gpu-box")
@@ -1091,7 +1220,11 @@ mod tests {
         .unwrap();
 
         let before = wrap_launch(&ws, "claude", &[]).unwrap().unwrap();
-        assert!(before.args.last().unwrap().contains("dev@box"), "{:?}", before.args);
+        assert!(
+            before.args.last().unwrap().contains("dev@box"),
+            "{:?}",
+            before.args
+        );
 
         // The user edits the host: new port, new user.
         let mut moved = book_host("h1", "ops", "box");
@@ -1151,7 +1284,10 @@ mod tests {
 
         let got = wrap_launch(&ws, "claude", &[]).unwrap().unwrap();
         assert!(
-            got.args.last().unwrap().contains("/root/.fleet/bin/rca serve --stdio"),
+            got.args
+                .last()
+                .unwrap()
+                .contains("/root/.fleet/bin/rca serve --stdio"),
             "{:?}",
             got.args
         );
@@ -1168,7 +1304,14 @@ mod tests {
         e.rca_path = Some(fake_rca);
         upsert(e).unwrap();
         let got = wrap_launch(&ws, "claude", &[]).unwrap().unwrap();
-        assert!(got.args.last().unwrap().contains("own-api-ko rca serve --stdio"), "{:?}", got.args);
+        assert!(
+            got.args
+                .last()
+                .unwrap()
+                .contains("own-api-ko rca serve --stdio"),
+            "{:?}",
+            got.args
+        );
     }
 
     // ── local installer ──────────────────────────────────────────────────
@@ -1253,7 +1396,11 @@ mod tests {
     #[test]
     fn stdio_probe_rejects_a_release_predating_the_transport() {
         let home = TmpHome::new("probe-stale");
-        let rca = stub_rca(&home.dir, "rca-old", "Serve flags: --listen, --sock, --relays");
+        let rca = stub_rca(
+            &home.dir,
+            "rca-old",
+            "Serve flags: --listen, --sock, --relays",
+        );
         let err = verify_local_rca_stdio(&rca).unwrap_err();
         assert!(err.contains("serve --stdio"), "{err}");
     }

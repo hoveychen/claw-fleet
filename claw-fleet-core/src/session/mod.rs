@@ -40,33 +40,33 @@ pub enum SessionStatus {
     WaitingInput, // last stop_reason = end_turn
     Active,       // file written < 30s ago
     #[default]
-    Idle,         // no recent activity
+    Idle, // no recent activity
     RateLimited,  // last assistant message was isApiErrorMessage + error=rate_limit;
-                  // details (resets_at, limit_type) live on SessionInfo.rate_limit
+    // details (resets_at, limit_type) live on SessionInfo.rate_limit
     ServerErrored, // last assistant message was isApiErrorMessage + error=server_error
-                   // (the transient "Server error mid-response / Response stalled
-                   // mid-stream" family). Unlike RateLimited it resumes immediately
-                   // — the auto-resume scheduler retries Fleet-headless sessions.
+    // (the transient "Server error mid-response / Response stalled
+    // mid-stream" family). Unlike RateLimited it resumes immediately
+    // — the auto-resume scheduler retries Fleet-headless sessions.
     RemoteDisconnected, // The session ran on a registered remote workspace whose
-                   // transport (rca over ssh) died mid-run. Fleet stopped the
-                   // agent on purpose — left running it would have kept working
-                   // against the now-empty local mirror. Terminal: unlike
-                   // RateLimited/ServerErrored nothing retries it, because
-                   // `rca serve` is per-run and reconnecting would not restore
-                   // the remote-side run. Stamped from the side-channel record
-                   // in `remote_disconnect`, not from the transcript.
-    Stuck,        // Fleet-spawned, process alive, but wedged mid tool-use batch:
-                  // a non-interactive tool_use has been missing its tool_result
-                  // for minutes (STUCK_TOOL_BATCH_FLOOR_SECS). The turn is
-                  // deadlocked — SIGINT (interrupt_pid) unblocks it, resumable.
-    Watching,     // The turn ended after registering a `fleet watch`: no process,
-                  // no transcript writes, but a Fleet timer is polling the
-                  // condition and will `claude --resume` this very session when
-                  // it fires. Transcript-derived status would decay to Idle and
-                  // read as "ended" — so `watch::enrich_sessions` overrides it,
-                  // the same side-channel-wins shape as RemoteDisconnected.
-                  // Details (note, poll count, deadline) live on
-                  // SessionInfo.watches.
+    // transport (rca over ssh) died mid-run. Fleet stopped the
+    // agent on purpose — left running it would have kept working
+    // against the now-empty local mirror. Terminal: unlike
+    // RateLimited/ServerErrored nothing retries it, because
+    // `rca serve` is per-run and reconnecting would not restore
+    // the remote-side run. Stamped from the side-channel record
+    // in `remote_disconnect`, not from the transcript.
+    Stuck, // Fleet-spawned, process alive, but wedged mid tool-use batch:
+    // a non-interactive tool_use has been missing its tool_result
+    // for minutes (STUCK_TOOL_BATCH_FLOOR_SECS). The turn is
+    // deadlocked — SIGINT (interrupt_pid) unblocks it, resumable.
+    Watching, // The turn ended after registering a `fleet watch`: no process,
+              // no transcript writes, but a Fleet timer is polling the
+              // condition and will `claude --resume` this very session when
+              // it fires. Transcript-derived status would decay to Idle and
+              // read as "ended" — so `watch::enrich_sessions` overrides it,
+              // the same side-channel-wins shape as RemoteDisconnected.
+              // Details (note, poll count, deadline) live on
+              // SessionInfo.watches.
 }
 
 /// Populated when `SessionStatus::RateLimited`. Carries the information needed
@@ -357,20 +357,19 @@ pub struct SessionInfo {
     pub out_of_credits: Option<String>,
 }
 
-
-mod paths;
 pub(crate) mod detect;
-pub mod stats;
-mod parse;
-mod scan;
 mod kill;
+mod parse;
+mod paths;
+mod scan;
+pub mod stats;
 
-pub use self::paths::*;
 pub use self::detect::*;
-pub use self::stats::*;
-pub use self::parse::*;
-pub use self::scan::*;
 pub use self::kill::*;
+pub use self::parse::*;
+pub use self::paths::*;
+pub use self::scan::*;
+pub use self::stats::*;
 
 #[cfg(test)]
 mod test_lock {
@@ -412,7 +411,12 @@ mod tests {
         })
     }
 
-    fn assistant_msg_with_id(blocks: Vec<Value>, stop_reason: Option<&str>, id: &str, ts: &str) -> String {
+    fn assistant_msg_with_id(
+        blocks: Vec<Value>,
+        stop_reason: Option<&str>,
+        id: &str,
+        ts: &str,
+    ) -> String {
         json!({
             "type": "assistant",
             "timestamp": ts,
@@ -424,7 +428,8 @@ mod tests {
                 "model": "claude-sonnet-4-20250514",
                 "usage": { "output_tokens": 50 }
             }
-        }).to_string()
+        })
+        .to_string()
     }
 
     fn user_msg() -> Value {
@@ -489,9 +494,11 @@ mod tests {
         // identity from the first record.
         let l1 = json!({"type": "ai-title", "aiTitle": "t"}).to_string();
         let l2 = json!({"type": "user", "entrypoint": "claw-fleet-newsession",
-                        "message": {"role": "user", "content": "hi"}}).to_string();
+                        "message": {"role": "user", "content": "hi"}})
+        .to_string();
         let l3 = json!({"type": "user", "entrypoint": "cli",
-                        "message": {"role": "user", "content": "continue"}}).to_string();
+                        "message": {"role": "user", "content": "continue"}})
+        .to_string();
         let lines: Vec<&str> = vec![&l1, &l2, &l3];
         assert_eq!(
             extract_entrypoint(&lines).as_deref(),
@@ -630,7 +637,11 @@ mod tests {
     fn server_error_ignored_when_permanent_error() {
         // Permanent errors (auth, invalid_request) must NEVER be treated as
         // retryable — retrying them burns spawns forever.
-        for err in ["authentication_failed", "invalid_request", "model_not_found"] {
+        for err in [
+            "authentication_failed",
+            "invalid_request",
+            "model_not_found",
+        ] {
             let lines = vec![
                 user_msg(),
                 api_error_msg(err, "API Error", "2026-07-15T10:00:00.000Z"),
@@ -669,7 +680,9 @@ mod tests {
         let lines = vec![
             user_msg(),
             assistant_msg(
-                vec![text_block("API Error: Server error mid-response (quoted in prose)")],
+                vec![text_block(
+                    "API Error: Server error mid-response (quoted in prose)",
+                )],
                 Some("end_turn"),
             ),
         ];
@@ -702,7 +715,10 @@ mod tests {
         // the whole reason it needs its own arm. Upstream truncated the
         // tool_use JSON mid-stream; the call never ran, so a resume re-runs the
         // turn from the last tool_result exactly like a server_error.
-        let lines = vec![user_msg(), unparseable_tool_call_msg("2026-09-17T19:00:13.510Z")];
+        let lines = vec![
+            user_msg(),
+            unparseable_tool_call_msg("2026-09-17T19:00:13.510Z"),
+        ];
         assert!(
             detect_server_error(&lines),
             "an unparseable tool call must be treated as transient"
@@ -731,7 +747,9 @@ mod tests {
         let prose = vec![
             user_msg(),
             assistant_msg(
-                vec![text_block("The model's tool call could not be parsed (quoted in prose)")],
+                vec![text_block(
+                    "The model's tool call could not be parsed (quoted in prose)",
+                )],
                 Some("end_turn"),
             ),
         ];
@@ -819,7 +837,11 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None,
+            task_plan: None,
+            handoff: None,
+            user_mark: None,
+            task_outcome: None,
+            title_override: None,
             compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
@@ -885,7 +907,10 @@ mod tests {
         let lines = vec![
             user_msg(),
             assistant_msg(
-                vec![tool_use_block_id("WebFetch", "t1"), tool_use_block_id("WebFetch", "t2")],
+                vec![
+                    tool_use_block_id("WebFetch", "t1"),
+                    tool_use_block_id("WebFetch", "t2"),
+                ],
                 None,
             ),
             tool_result_msg("t1"),
@@ -929,7 +954,10 @@ mod tests {
         let lines = vec![
             user_msg(),
             assistant_msg(
-                vec![tool_use_block_id("mcp__fleet__fleet__permission_prompt", "perm1")],
+                vec![tool_use_block_id(
+                    "mcp__fleet__fleet__permission_prompt",
+                    "perm1",
+                )],
                 None,
             ),
         ];
@@ -1011,13 +1039,19 @@ mod tests {
         // The UI needs both halves: which tool to name, and how long it has
         // been waiting. `since_ms` is the batch's first record, not the last —
         // an earlier block is the one that has been hanging longest.
-        let mut first = assistant_msg_msgid(vec![tool_use_block_id("WebFetch", "wf_hung")], "msg_1");
+        let mut first =
+            assistant_msg_msgid(vec![tool_use_block_id("WebFetch", "wf_hung")], "msg_1");
         first["timestamp"] = json!("2026-09-19T18:35:59.000Z");
         let mut second = assistant_msg_msgid(vec![tool_use_block_id("Bash", "bash_ok")], "msg_1");
         second["timestamp"] = json!("2026-09-19T18:36:00.000Z");
 
-        let batch = pending_noninteractive_tool_batch(&[user_msg(), first, second, tool_result_msg("bash_ok")])
-            .expect("hung WebFetch is detected");
+        let batch = pending_noninteractive_tool_batch(&[
+            user_msg(),
+            first,
+            second,
+            tool_result_msg("bash_ok"),
+        ])
+        .expect("hung WebFetch is detected");
         assert_eq!(batch.tool_name, "WebFetch");
         assert_eq!(batch.since_ms, Some(1789842959000));
     }
@@ -1058,7 +1092,10 @@ mod tests {
     fn status_streaming_tool_use_blocks() {
         let lines = vec![
             user_msg(),
-            assistant_msg(vec![text_block("let me check"), tool_use_block("Read")], None),
+            assistant_msg(
+                vec![text_block("let me check"), tool_use_block("Read")],
+                None,
+            ),
         ];
         assert_eq!(ds(&lines, 1.0, None), SessionStatus::Executing);
     }
@@ -1083,25 +1120,25 @@ mod tests {
 
     #[test]
     fn status_end_turn_too_old_becomes_idle() {
-        let lines = vec![
-            assistant_msg(vec![text_block("Done!")], Some("end_turn")),
-        ];
+        let lines = vec![assistant_msg(vec![text_block("Done!")], Some("end_turn"))];
         assert_eq!(ds(&lines, 500.0, None), SessionStatus::Idle);
     }
 
     #[test]
     fn status_tool_use_stop_reason_executing() {
-        let lines = vec![
-            assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
-        ];
+        let lines = vec![assistant_msg(
+            vec![tool_use_block("Bash")],
+            Some("tool_use"),
+        )];
         assert_eq!(ds(&lines, 15.0, None), SessionStatus::Executing);
     }
 
     #[test]
     fn status_tool_use_too_old_becomes_idle() {
-        let lines = vec![
-            assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
-        ];
+        let lines = vec![assistant_msg(
+            vec![tool_use_block("Bash")],
+            Some("tool_use"),
+        )];
         assert_eq!(ds(&lines, 120.0, None), SessionStatus::Idle);
     }
 
@@ -1149,10 +1186,7 @@ mod tests {
     fn status_interrupt_overrides_hook_model_processing() {
         // hook_state is stale; the JSONL has a fresh interrupt marker that
         // must take precedence over Phase-0 hook overrides.
-        let lines = vec![
-            user_msg(),
-            interrupt_user_msg(false),
-        ];
+        let lines = vec![user_msg(), interrupt_user_msg(false)];
         let s = ds(&lines, 20.0, Some(&HookState::ModelProcessing));
         assert_ne!(s, SessionStatus::Thinking, "got {:?}", s);
     }
@@ -1183,9 +1217,10 @@ mod tests {
 
     #[test]
     fn status_hook_tool_executing_overrides() {
-        let lines = vec![
-            assistant_msg(vec![text_block("old text")], Some("end_turn")),
-        ];
+        let lines = vec![assistant_msg(
+            vec![text_block("old text")],
+            Some("end_turn"),
+        )];
         assert_eq!(
             ds(&lines, 20.0, Some(&HookState::ToolExecuting)),
             SessionStatus::Executing,
@@ -1194,9 +1229,7 @@ mod tests {
 
     #[test]
     fn status_hook_model_processing_overrides() {
-        let lines = vec![
-            assistant_msg(vec![text_block("old")], Some("end_turn")),
-        ];
+        let lines = vec![assistant_msg(vec![text_block("old")], Some("end_turn"))];
         assert_eq!(
             ds(&lines, 20.0, Some(&HookState::ModelProcessing)),
             SessionStatus::Thinking,
@@ -1255,10 +1288,7 @@ mod tests {
 
     #[test]
     fn status_hook_ignored_when_streaming() {
-        let lines = vec![
-            user_msg(),
-            assistant_msg(vec![thinking_block()], None),
-        ];
+        let lines = vec![user_msg(), assistant_msg(vec![thinking_block()], None)];
         assert_eq!(
             ds(&lines, 2.0, Some(&HookState::Stopped)),
             SessionStatus::Thinking,
@@ -1400,7 +1430,10 @@ mod tests {
         acc.prune_timed(now); // must not evict samples the window still needs
         let after = acc.finish_at(now);
 
-        assert!(before.token_speed > 0.0, "sanity: window should be non-empty");
+        assert!(
+            before.token_speed > 0.0,
+            "sanity: window should be non-empty"
+        );
         assert_eq!(after.token_speed, before.token_speed);
         assert_eq!(after.cost_speed_usd_per_min, before.cost_speed_usd_per_min);
     }
@@ -1434,15 +1467,18 @@ mod tests {
     fn session_acc_context_matches_whole_file_extractor() {
         let owned = vec![
             asst_usage_line(1000, 0, 0, false),
-            asst_usage_line(5000, 0, 0, false),  // the session max
-            asst_usage_line(200, 0, 0, true),    // sidechain — must be ignored
-            asst_usage_line(3000, 0, 0, false),  // the latest live turn
+            asst_usage_line(5000, 0, 0, false), // the session max
+            asst_usage_line(200, 0, 0, true),   // sidechain — must be ignored
+            asst_usage_line(3000, 0, 0, false), // the latest live turn
         ];
         let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
 
         let expected = extract_last_context_usage(&lines);
         assert_eq!(fold_in_batches(&lines).context_usage(), expected);
-        assert_eq!(expected.map(|(used, _, max)| (used, max)), Some((3000, 5000)));
+        assert_eq!(
+            expected.map(|(used, _, max)| (used, max)),
+            Some((3000, 5000))
+        );
     }
 
     /// A compact summary invalidates everything before it — including the
@@ -1479,7 +1515,11 @@ mod tests {
         let owned = vec![user_line(None), user_line(Some("vscode"))];
         let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
 
-        assert_eq!(extract_entrypoint(&lines), None, "sanity: original settles to None");
+        assert_eq!(
+            extract_entrypoint(&lines),
+            None,
+            "sanity: original settles to None"
+        );
         assert_eq!(fold_in_batches(&lines).entrypoint(), None);
     }
 
@@ -1521,7 +1561,10 @@ mod tests {
         let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
 
         let expected = crate::session_todos::latest_todo_summary_from_lines(&lines);
-        assert!(expected.is_some(), "sanity: the fixture must carry a todo block");
+        assert!(
+            expected.is_some(),
+            "sanity: the fixture must carry a todo block"
+        );
         assert_eq!(fold_in_batches(&lines).todos(), expected);
     }
 
@@ -1688,8 +1731,14 @@ mod tests {
     #[test]
     fn parse_session_info_incremental_equals_a_cold_parse() {
         let p = tmp_jsonl("parse_eq");
-        append(&p, &format!("{}\n", json!({"type": "user", "entrypoint": "cli"})));
-        append(&p, &format!("{}\n", json!({"type": "ai-title", "aiTitle": "T"})));
+        append(
+            &p,
+            &format!("{}\n", json!({"type": "user", "entrypoint": "cli"})),
+        );
+        append(
+            &p,
+            &format!("{}\n", json!({"type": "ai-title", "aiTitle": "T"})),
+        );
         append(&p, &format!("{}\n", turn("m1", 40)));
 
         // Scanned once while the session was mid-flight...
@@ -1742,7 +1791,10 @@ mod tests {
 
         let id = format!("effort-spec-{}", uuid::Uuid::new_v4());
         let p = tmp_jsonl(&id);
-        append(&p, &format!("{}\n", json!({"type": "user", "entrypoint": "cli"})));
+        append(
+            &p,
+            &format!("{}\n", json!({"type": "user", "entrypoint": "cli"})),
+        );
         append(&p, &format!("{}\n", turn("m1", 10)));
 
         // A session Fleet spawned with no `--effort` override must stay silent
@@ -1822,7 +1874,8 @@ mod tests {
                 "stop_reason": null,
                 "usage": {"output_tokens": 100}
             }
-        }).to_string();
+        })
+        .to_string();
         let lines: Vec<&str> = vec![&line];
         let stats = compute_session_stats(&lines);
         assert_eq!(stats.total_output_tokens, 0);
@@ -1837,7 +1890,8 @@ mod tests {
                 "stop_reason": "end_turn",
                 "usage": {"output_tokens": 200}
             }
-        }).to_string();
+        })
+        .to_string();
         let lines: Vec<&str> = vec![&line];
         let stats = compute_session_stats(&lines);
         assert_eq!(stats.total_output_tokens, 200);
@@ -1852,7 +1906,8 @@ mod tests {
                 "stop_reason": "end_turn",
                 "usage": {"output_tokens": 100}
             }
-        }).to_string();
+        })
+        .to_string();
         let lines: Vec<&str> = vec![&line, &line];
         let stats = compute_session_stats(&lines);
         assert_eq!(stats.total_output_tokens, 100);
@@ -1864,16 +1919,20 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let ts1 = chrono::DateTime::from_timestamp(now as i64 - 60, 0).unwrap().to_rfc3339();
-        let ts2 = chrono::DateTime::from_timestamp(now as i64 - 30, 0).unwrap().to_rfc3339();
+        let ts1 = chrono::DateTime::from_timestamp(now as i64 - 60, 0)
+            .unwrap()
+            .to_rfc3339();
+        let ts2 = chrono::DateTime::from_timestamp(now as i64 - 30, 0)
+            .unwrap()
+            .to_rfc3339();
 
         let l1 = assistant_msg_with_id(vec![], Some("end_turn"), "m1", &ts1);
         let l2 = assistant_msg_with_id(vec![], Some("end_turn"), "m2", &ts2);
         let lines: Vec<&str> = vec![&l1, &l2];
         let stats = compute_session_stats(&lines);
         assert_eq!(stats.total_output_tokens, 100); // 50 + 50
-        // 100 tokens over (now - first_ts) ≈ 60s → ~1.67 tok/s. Allow a small
-        // window for clock jitter between test setup and stats computation.
+                                                    // 100 tokens over (now - first_ts) ≈ 60s → ~1.67 tok/s. Allow a small
+                                                    // window for clock jitter between test setup and stats computation.
         assert!(
             stats.token_speed > 1.4 && stats.token_speed < 2.0,
             "speed={}",
@@ -1895,10 +1954,15 @@ mod tests {
                     "output_tokens": 1_000_000
                 }
             }
-        }).to_string();
+        })
+        .to_string();
         let lines: Vec<&str> = vec![&line];
         let stats = compute_session_stats(&lines);
-        assert!((stats.total_cost_usd - 18.0).abs() < 1e-6, "cost={}", stats.total_cost_usd);
+        assert!(
+            (stats.total_cost_usd - 18.0).abs() < 1e-6,
+            "cost={}",
+            stats.total_cost_usd
+        );
     }
 
     #[test]
@@ -1911,23 +1975,34 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let ts1 = chrono::DateTime::from_timestamp(now as i64 - 60, 0).unwrap().to_rfc3339();
-        let ts2 = chrono::DateTime::from_timestamp(now as i64 - 30, 0).unwrap().to_rfc3339();
-        let mk = |id: &str, ts: &str| json!({
-            "type": "assistant",
-            "timestamp": ts,
-            "message": {
-                "id": id,
-                "model": "claude-sonnet-4-6",
-                "stop_reason": "end_turn",
-                "usage": {"input_tokens": 0, "output_tokens": 100_000}
-            }
-        }).to_string();
+        let ts1 = chrono::DateTime::from_timestamp(now as i64 - 60, 0)
+            .unwrap()
+            .to_rfc3339();
+        let ts2 = chrono::DateTime::from_timestamp(now as i64 - 30, 0)
+            .unwrap()
+            .to_rfc3339();
+        let mk = |id: &str, ts: &str| {
+            json!({
+                "type": "assistant",
+                "timestamp": ts,
+                "message": {
+                    "id": id,
+                    "model": "claude-sonnet-4-6",
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 0, "output_tokens": 100_000}
+                }
+            })
+            .to_string()
+        };
         let l1 = mk("a1", &ts1);
         let l2 = mk("a2", &ts2);
         let lines: Vec<&str> = vec![&l1, &l2];
         let stats = compute_session_stats(&lines);
-        assert!((stats.total_cost_usd - 3.0).abs() < 1e-6, "cost={}", stats.total_cost_usd);
+        assert!(
+            (stats.total_cost_usd - 3.0).abs() < 1e-6,
+            "cost={}",
+            stats.total_cost_usd
+        );
         // Tolerance covers sub-second clock drift between test setup and
         // the `SystemTime::now()` read inside `compute_session_stats`.
         assert!(
@@ -1953,7 +2028,8 @@ mod tests {
                 "stop_reason": "end_turn",
                 "usage": {"output_tokens": 100}
             }
-        }).to_string();
+        })
+        .to_string();
         let compact1 = json!({
             "type": "system",
             "subtype": "compact_boundary",
@@ -1963,7 +2039,8 @@ mod tests {
                 "postTokens": 5_000,
                 "durationMs": 30_000
             }
-        }).to_string();
+        })
+        .to_string();
         let mid_assistant = json!({
             "type": "assistant",
             "message": {
@@ -1972,7 +2049,8 @@ mod tests {
                 "stop_reason": "end_turn",
                 "usage": {"output_tokens": 100}
             }
-        }).to_string();
+        })
+        .to_string();
         let compact2 = json!({
             "type": "system",
             "subtype": "compact_boundary",
@@ -1981,7 +2059,8 @@ mod tests {
                 "preTokens": 200_000,
                 "postTokens": 8_000
             }
-        }).to_string();
+        })
+        .to_string();
         let lines: Vec<&str> = vec![&pre_assistant, &compact1, &mid_assistant, &compact2];
         let stats = compute_session_stats(&lines);
         assert_eq!(stats.compact_count, 2);
@@ -2001,7 +2080,8 @@ mod tests {
         let bare_compact = json!({
             "type": "system",
             "subtype": "compact_boundary"
-        }).to_string();
+        })
+        .to_string();
         let lines: Vec<&str> = vec![&bare_compact];
         let stats = compute_session_stats(&lines);
         assert_eq!(stats.compact_count, 1);
@@ -2020,8 +2100,12 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let ts1 = chrono::DateTime::from_timestamp(now as i64 - 270, 0).unwrap().to_rfc3339();
-        let ts2 = chrono::DateTime::from_timestamp(now as i64 - 240, 0).unwrap().to_rfc3339();
+        let ts1 = chrono::DateTime::from_timestamp(now as i64 - 270, 0)
+            .unwrap()
+            .to_rfc3339();
+        let ts2 = chrono::DateTime::from_timestamp(now as i64 - 240, 0)
+            .unwrap()
+            .to_rfc3339();
 
         let l1 = assistant_msg_with_id(vec![], Some("end_turn"), "m1", &ts1);
         let l2 = assistant_msg_with_id(vec![], Some("end_turn"), "m2", &ts2);
@@ -2040,10 +2124,11 @@ mod tests {
 
     #[test]
     fn extract_model_from_assistant() {
-        let lines = vec![
-            assistant_msg(vec![text_block("hi")], Some("end_turn")),
-        ];
-        assert_eq!(extract_model(&lines), Some("claude-sonnet-4-20250514".into()));
+        let lines = vec![assistant_msg(vec![text_block("hi")], Some("end_turn"))];
+        assert_eq!(
+            extract_model(&lines),
+            Some("claude-sonnet-4-20250514".into())
+        );
     }
 
     // ── reconcile_model_spec tests ─────────────────────────────────────────
@@ -2091,8 +2176,14 @@ mod tests {
             reconcile_model_spec("claude-sonnet-5", Some("opus")),
             "claude-sonnet-5"
         );
-        assert_eq!(reconcile_model_spec("claude-sonnet-5", None), "claude-sonnet-5");
-        assert_eq!(reconcile_model_spec("claude-sonnet-5", Some("   ")), "claude-sonnet-5");
+        assert_eq!(
+            reconcile_model_spec("claude-sonnet-5", None),
+            "claude-sonnet-5"
+        );
+        assert_eq!(
+            reconcile_model_spec("claude-sonnet-5", Some("   ")),
+            "claude-sonnet-5"
+        );
     }
 
     /// A full-name default with a suffix matches its own resolved id.
@@ -2171,7 +2262,10 @@ mod tests {
     #[test]
     fn split_model_suffix_cases() {
         assert_eq!(split_model_suffix("opus[1m]"), ("opus", Some("[1m]")));
-        assert_eq!(split_model_suffix("claude-fable-5"), ("claude-fable-5", None));
+        assert_eq!(
+            split_model_suffix("claude-fable-5"),
+            ("claude-fable-5", None)
+        );
         // malformed: an unterminated bracket is not a suffix
         assert_eq!(split_model_suffix("opus[1m"), ("opus[1m", None));
     }
@@ -2204,17 +2298,19 @@ mod tests {
 
     #[test]
     fn thinking_blocks_present() {
-        let lines = vec![
-            assistant_msg(vec![thinking_block(), text_block("result")], Some("end_turn")),
-        ];
+        let lines = vec![assistant_msg(
+            vec![thinking_block(), text_block("result")],
+            Some("end_turn"),
+        )];
         assert!(has_thinking_blocks(&lines));
     }
 
     #[test]
     fn thinking_blocks_absent() {
-        let lines = vec![
-            assistant_msg(vec![text_block("no thinking")], Some("end_turn")),
-        ];
+        let lines = vec![assistant_msg(
+            vec![text_block("no thinking")],
+            Some("end_turn"),
+        )];
         assert!(!has_thinking_blocks(&lines));
     }
 
@@ -2232,18 +2328,20 @@ mod tests {
     #[test]
     fn extract_text_truncates_to_200_chars() {
         let long_text = "a".repeat(300);
-        let lines = vec![
-            assistant_msg(vec![text_block(&long_text)], Some("end_turn")),
-        ];
+        let lines = vec![assistant_msg(
+            vec![text_block(&long_text)],
+            Some("end_turn"),
+        )];
         let result = extract_last_text(&lines).unwrap();
         assert_eq!(result.len(), 200);
     }
 
     #[test]
     fn extract_text_returns_none_for_no_text() {
-        let lines = vec![
-            assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
-        ];
+        let lines = vec![assistant_msg(
+            vec![tool_use_block("Bash")],
+            Some("tool_use"),
+        )];
         assert_eq!(extract_last_text(&lines), None);
     }
 
@@ -2251,17 +2349,16 @@ mod tests {
 
     #[test]
     fn extract_skill_found() {
-        let lines = vec![
-            assistant_msg(vec![skill_block("commit")], Some("tool_use")),
-        ];
+        let lines = vec![assistant_msg(vec![skill_block("commit")], Some("tool_use"))];
         assert_eq!(extract_last_skill(&lines), Some("commit".into()));
     }
 
     #[test]
     fn extract_skill_not_found() {
-        let lines = vec![
-            assistant_msg(vec![tool_use_block("Read")], Some("tool_use")),
-        ];
+        let lines = vec![assistant_msg(
+            vec![tool_use_block("Read")],
+            Some("tool_use"),
+        )];
         assert_eq!(extract_last_skill(&lines), None);
     }
 
@@ -2269,7 +2366,8 @@ mod tests {
 
     #[test]
     fn resume_id_long_flag() {
-        let cmd: Vec<std::ffi::OsString> = vec!["claude".into(), "--resume".into(), "abc123".into()];
+        let cmd: Vec<std::ffi::OsString> =
+            vec!["claude".into(), "--resume".into(), "abc123".into()];
         assert_eq!(extract_resume_id(&cmd), Some("abc123".into()));
     }
 
@@ -2306,8 +2404,7 @@ mod tests {
 
     #[test]
     fn resume_id_session_id_equals_syntax() {
-        let cmd: Vec<std::ffi::OsString> =
-            vec!["claude".into(), "--session-id=sess-new".into()];
+        let cmd: Vec<std::ffi::OsString> = vec!["claude".into(), "--session-id=sess-new".into()];
         assert_eq!(extract_resume_id(&cmd), Some("sess-new".into()));
     }
 
@@ -2559,9 +2656,15 @@ mod tests {
     fn headless_argv_matches_fleets_own_spawn_shape() {
         // Verbatim from `ps` for a session Fleet spawned (prompt elided).
         assert!(is_headless_argv(&argv(&[
-            "claude", "-p", "帮我查一下这个 handoff",
-            "--session-id", "f74954c1-5deb-4098-889a-721e1d83ff1e",
-            "--output-format", "stream-json", "--permission-mode", "acceptEdits",
+            "claude",
+            "-p",
+            "帮我查一下这个 handoff",
+            "--session-id",
+            "f74954c1-5deb-4098-889a-721e1d83ff1e",
+            "--output-format",
+            "stream-json",
+            "--permission-mode",
+            "acceptEdits",
         ])));
     }
 
@@ -2570,10 +2673,19 @@ mod tests {
         // Verbatim from `ps` for the VS Code extension's CLI: no `-p`, and it
         // keeps background shells alive across turns — must never be blocked.
         assert!(!is_headless_argv(&argv(&[
-            "claude", "--output-format", "stream-json", "--verbose",
-            "--input-format", "stream-json", "--permission-prompt-tool", "stdio",
-            "--resume", "822b7957-4d5d-4d77-b84d-56f76a3acff3",
-            "--permission-mode", "acceptEdits", "--include-partial-messages",
+            "claude",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--input-format",
+            "stream-json",
+            "--permission-prompt-tool",
+            "stdio",
+            "--resume",
+            "822b7957-4d5d-4d77-b84d-56f76a3acff3",
+            "--permission-mode",
+            "acceptEdits",
+            "--include-partial-messages",
         ])));
     }
 
@@ -2582,7 +2694,10 @@ mod tests {
         // The prompt is one argv element, so its text can't be mistaken for the
         // flag — guard against a future switch to substring matching.
         assert!(!is_headless_argv(&argv(&[
-            "claude", "--resume", "s1", "run it with -p and --print",
+            "claude",
+            "--resume",
+            "s1",
+            "run it with -p and --print",
         ])));
     }
 
@@ -2594,8 +2709,20 @@ mod tests {
     #[test]
     fn is_headless_session_needs_an_exact_session_match() {
         let procs = vec![
-            CliProcess { pid: 1, ppid: None, cwd: "/w".into(), resume_session_id: Some("headless-one".into()), headless: true },
-            CliProcess { pid: 2, ppid: None, cwd: "/w".into(), resume_session_id: Some("ide-one".into()), headless: false },
+            CliProcess {
+                pid: 1,
+                ppid: None,
+                cwd: "/w".into(),
+                resume_session_id: Some("headless-one".into()),
+                headless: true,
+            },
+            CliProcess {
+                pid: 2,
+                ppid: None,
+                cwd: "/w".into(),
+                resume_session_id: Some("ide-one".into()),
+                headless: false,
+            },
         ];
         assert!(is_headless_session_in(&procs, "headless-one"));
         assert!(!is_headless_session_in(&procs, "ide-one"));
@@ -2608,25 +2735,53 @@ mod tests {
     #[test]
     fn resolve_pid_exact_resume_match() {
         let procs = vec![
-            CliProcess { pid: 100, ppid: None, cwd: "/tmp".into(), resume_session_id: Some("sess1".into()), headless: false },
-            CliProcess { pid: 200, ppid: None, cwd: "/tmp".into(), resume_session_id: None, headless: false },
+            CliProcess {
+                pid: 100,
+                ppid: None,
+                cwd: "/tmp".into(),
+                resume_session_id: Some("sess1".into()),
+                headless: false,
+            },
+            CliProcess {
+                pid: 200,
+                ppid: None,
+                cwd: "/tmp".into(),
+                resume_session_id: None,
+                headless: false,
+            },
         ];
         assert_eq!(resolve_pid(&procs, "sess1"), (Some(100), true));
     }
 
     #[test]
     fn resolve_pid_single_process() {
-        let procs = vec![
-            CliProcess { pid: 42, ppid: None, cwd: "/tmp".into(), resume_session_id: None, headless: false },
-        ];
+        let procs = vec![CliProcess {
+            pid: 42,
+            ppid: None,
+            cwd: "/tmp".into(),
+            resume_session_id: None,
+            headless: false,
+        }];
         assert_eq!(resolve_pid(&procs, "other"), (Some(42), true));
     }
 
     #[test]
     fn resolve_pid_parent_child_filtering() {
         let procs = vec![
-            CliProcess { pid: 100, ppid: Some(1), cwd: "/tmp".into(), resume_session_id: None, headless: false },
-            CliProcess { pid: 200, ppid: Some(100), cwd: "/tmp".into(), resume_session_id: None, headless: false },
+            CliProcess {
+                pid: 100,
+                ppid: Some(1),
+                cwd: "/tmp".into(),
+                resume_session_id: None,
+                headless: false,
+            },
+            CliProcess {
+                pid: 200,
+                ppid: Some(100),
+                cwd: "/tmp".into(),
+                resume_session_id: None,
+                headless: false,
+            },
         ];
         assert_eq!(resolve_pid(&procs, "any"), (Some(100), true));
     }
@@ -2634,8 +2789,20 @@ mod tests {
     #[test]
     fn resolve_pid_multiple_roots_imprecise() {
         let procs = vec![
-            CliProcess { pid: 100, ppid: Some(1), cwd: "/tmp".into(), resume_session_id: None, headless: false },
-            CliProcess { pid: 200, ppid: Some(2), cwd: "/tmp".into(), resume_session_id: None, headless: false },
+            CliProcess {
+                pid: 100,
+                ppid: Some(1),
+                cwd: "/tmp".into(),
+                resume_session_id: None,
+                headless: false,
+            },
+            CliProcess {
+                pid: 200,
+                ppid: Some(2),
+                cwd: "/tmp".into(),
+                resume_session_id: None,
+                headless: false,
+            },
         ];
         let (pid, precise) = resolve_pid(&procs, "any");
         assert!(pid.is_some());
@@ -2658,7 +2825,10 @@ mod tests {
         let chat = tmp.path().join(".fleet/chat");
         assert_eq!(workspace_name(&chat.to_string_lossy()), "Chat");
         // A sibling directory keeps its basename.
-        assert_eq!(workspace_name(&tmp.path().join(".fleet/wiki").to_string_lossy()), "wiki");
+        assert_eq!(
+            workspace_name(&tmp.path().join(".fleet/wiki").to_string_lossy()),
+            "wiki"
+        );
         match prev {
             Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
             None => unsafe { std::env::remove_var("FLEET_HOME") },
@@ -2839,7 +3009,10 @@ mod tests {
         s.token_speed = 200.0;
         s.cost_speed_usd_per_min = 4.0;
         age_out_status(&mut s, 0.0);
-        assert_eq!(s.token_speed, 0.0, "rate-limited session must not report speed");
+        assert_eq!(
+            s.token_speed, 0.0,
+            "rate-limited session must not report speed"
+        );
         assert_eq!(s.cost_speed_usd_per_min, 0.0);
         assert_eq!(
             s.status,
@@ -2997,7 +3170,8 @@ mod tests {
                     "cache_read_input_tokens": cache_read
                 }
             }
-        }).to_string()
+        })
+        .to_string()
     }
 
     fn compact_summary_line() -> String {
@@ -3009,7 +3183,8 @@ mod tests {
                 "role": "user",
                 "content": "This session is being continued..."
             }
-        }).to_string()
+        })
+        .to_string()
     }
 
     #[test]
@@ -3032,7 +3207,7 @@ mod tests {
         // Latest turn can be smaller than an earlier peak (e.g. context shed
         // via tool-result cleanup or a /clear-style mid-session reset).
         let lines = vec![
-            asst_usage_line(0, 0, 800_000, false), // big peak
+            asst_usage_line(0, 0, 800_000, false),  // big peak
             asst_usage_line(200, 0, 50_000, false), // smaller current
         ];
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
@@ -3070,7 +3245,7 @@ mod tests {
         let lines = vec![
             asst_usage_line(1000, 0, 180_000, false), // pre-compact, stale
             compact_summary_line(),
-            asst_usage_line(200, 0, 8_000, false),    // fresh post-compact turn
+            asst_usage_line(200, 0, 8_000, false), // fresh post-compact turn
         ];
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         let (used, _, max) = extract_last_context_usage(&refs).unwrap();
@@ -3242,8 +3417,7 @@ mod tests {
     #[test]
     fn percent_uses_inferred_window() {
         // 250K used on Opus 4.6 with a session max of 530K → 25%, not capped.
-        let pct =
-            compute_context_percent(250_000, Some("claude-opus-4-6"), 530_000).unwrap();
+        let pct = compute_context_percent(250_000, Some("claude-opus-4-6"), 530_000).unwrap();
         assert!((pct - 0.25).abs() < 1e-6);
     }
 
@@ -3258,7 +3432,13 @@ mod tests {
     /// prefers that, so this path only fires when the field is missing.
     #[test]
     fn context_window_catalogued_codex_slugs() {
-        for model in ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5"] {
+        for model in [
+            "gpt-6-astra",
+            "gpt-5.6-sol",
+            "gpt-5.6-luna",
+            "gpt-5.6-terra",
+            "gpt-5.5",
+        ] {
             assert_eq!(
                 context_window_for_model(model, 0),
                 Some(272_000),
@@ -3330,7 +3510,10 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
 
-        assert!(captured > 0, "start_time must be a real unix-epoch value, got {captured}");
+        assert!(
+            captured > 0,
+            "start_time must be a real unix-epoch value, got {captured}"
+        );
         let delta = if captured > now_secs {
             captured - now_secs
         } else {
@@ -3376,7 +3559,8 @@ mod tests {
         let real = super::process_start_time(my_pid).expect("self alive");
         let mut holders = vec![
             super::HolderEntry::capture(my_pid), // matches → kept
-            super::HolderEntry {                  // pid alive but start_time wrong → pruned
+            super::HolderEntry {
+                // pid alive but start_time wrong → pruned
                 pid: my_pid,
                 start_time_secs: real.wrapping_add(1),
             },
@@ -3483,7 +3667,13 @@ mod tests {
         let claude_encode = |p: &Path| -> String {
             p.to_string_lossy()
                 .chars()
-                .map(|c| if c == '/' || c == '.' || c == '_' { '-' } else { c })
+                .map(|c| {
+                    if c == '/' || c == '.' || c == '_' {
+                        '-'
+                    } else {
+                        c
+                    }
+                })
                 .collect()
         };
 
@@ -3528,7 +3718,13 @@ mod tests {
         let claude_encode = |p: &Path| -> String {
             p.to_string_lossy()
                 .chars()
-                .map(|c| if c == '/' || c == '.' || c == '_' { '-' } else { c })
+                .map(|c| {
+                    if c == '/' || c == '.' || c == '_' {
+                        '-'
+                    } else {
+                        c
+                    }
+                })
                 .collect()
         };
 

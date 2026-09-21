@@ -98,11 +98,7 @@ impl Default for SseBroadcaster {
 /// stream — same-origin doesn't need CORS headers anyway.
 pub fn handle_sse_upgrade(request: Request, sse: &SseBroadcaster, cors: Vec<Header>) {
     let mut response = Response::empty(200)
-        .with_header(
-            "Content-Type: text/event-stream"
-                .parse::<Header>()
-                .unwrap(),
-        )
+        .with_header("Content-Type: text/event-stream".parse::<Header>().unwrap())
         .with_header("Cache-Control: no-cache".parse::<Header>().unwrap())
         .with_header("Connection: keep-alive".parse::<Header>().unwrap());
     for h in cors {

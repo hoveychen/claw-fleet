@@ -27,8 +27,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 use crate::agent_source::{AgentSource, WatchStrategy};
-use crate::ui_types::SourceUsageSummary;
 use crate::session::{compute_context_percent, SessionInfo, SessionStatus};
+use crate::ui_types::SourceUsageSummary;
 
 /// URI prefix for Codex session identifiers.
 const CODEX_URI_PREFIX: &str = "codex://";
@@ -141,7 +141,7 @@ fn read_zst_file(path: &Path) -> Result<String, String> {
 }
 
 /// Read a Codex session file (supports both .jsonl.zst and plain .jsonl).
-fn read_session_content(path: &Path) -> Result<String, String> {
+pub(crate) fn read_session_content(path: &Path) -> Result<String, String> {
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -368,7 +368,7 @@ pub fn codex_fleet_owned_cwd(thread_id: &str) -> Option<String> {
 }
 
 /// Extract the model name from turn_context lines.
-fn extract_model(lines: &[Value]) -> Option<String> {
+pub(crate) fn extract_model(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
         if line.get("type").and_then(|t| t.as_str()) == Some("turn_context") {
             if let Some(model) = line
@@ -393,7 +393,7 @@ fn extract_model(lines: &[Value]) -> Option<String> {
 /// turn_context, but the nested one is the older shape, so read the top-level
 /// first and fall back. Scans from the tail so a mid-session `/effort` change
 /// is what the header shows.
-fn extract_effort(lines: &[Value]) -> Option<String> {
+pub(crate) fn extract_effort(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
         if line.get("type").and_then(|t| t.as_str()) != Some("turn_context") {
             continue;
@@ -1036,8 +1036,7 @@ fn compute_token_stats_at(lines: &[Value], model: Option<&str>, now_secs: f64) -
 
                     if let Some(ts_str) = line.get("timestamp").and_then(|t| t.as_str()) {
                         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str) {
-                            let cost =
-                                codex_event_incremental_cost(usage, model).unwrap_or(0.0);
+                            let cost = codex_event_incremental_cost(usage, model).unwrap_or(0.0);
                             timed_tokens.push((dt.timestamp() as f64, output, cost));
                         }
                     }
@@ -2070,7 +2069,8 @@ fn build_session_from_sqlite(
         background_tasks: Vec::new(),
         task_plan: None,
         handoff: None,
-        user_mark: None, task_outcome: None,
+        user_mark: None,
+        task_outcome: None,
         title_override: None,
         compact_count: 0,
         compact_pre_tokens: 0,
@@ -2116,9 +2116,8 @@ mod tests {
     use super::{
         build_session_from_sqlite, clamp_dead_session_status, codex_account_email_from_auth_json,
         codex_cost_and_input, codex_last_turn_incomplete, codex_out_of_credits,
-        codex_rate_limit_state_from_rollout,
-        codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
-        codex_token_breakdown_from_lines, codex_token_deltas_from_lines,
+        codex_rate_limit_state_from_rollout, codex_rate_limit_state_from_usage,
+        codex_rollout_rate_limit, codex_token_breakdown_from_lines, codex_token_deltas_from_lines,
         codex_usage_from_app_server_result, codex_usage_from_foxy, compute_token_stats,
         derive_codex_title, determine_status, exec_note_from_script, extract_context_percent,
         extract_first_user_prompt, last_rollout_rate_limits, latest_total_token_usage,
@@ -2135,6 +2134,19 @@ mod tests {
     /// (always forward slashes). On Windows the two spellings name the same
     /// directory, so the cwd tier of resolve_pid must not require an exact
     /// string match — a `C:\code\proj` process is the `C:/code/proj` session.
+    /// A process whose argv names another thread (a `session_explain` fork
+    /// resuming its rollout copy) must not be taken for this session on the
+    /// cwd tier, even when it is the only codex process in the workspace.
+    #[test]
+    fn resolve_pid_cwd_tier_skips_processes_bound_to_another_thread() {
+        let procs = vec![CodexProcess {
+            pid: 5151,
+            cwd: "/ws".to_string(),
+            thread_id: Some("fork-copy-id".to_string()),
+        }];
+        assert_eq!(resolve_pid(&procs, "source-thread", "/ws"), (None, false));
+    }
+
     #[test]
     fn resolve_pid_cwd_match_tolerates_separator_spelling() {
         let procs = vec![CodexProcess {
@@ -4365,14 +4377,24 @@ mod tests {
         crate::codex_image::mark_internal_thread(image_id);
 
         let sessions = vec![
-            crate::SessionInfo { id: image_id.into(), ..Default::default() },
-            crate::SessionInfo { id: real_id.into(), ..Default::default() },
+            crate::SessionInfo {
+                id: image_id.into(),
+                ..Default::default()
+            },
+            crate::SessionInfo {
+                id: real_id.into(),
+                ..Default::default()
+            },
         ];
         let kept: Vec<String> = super::drop_internal_threads(sessions)
             .into_iter()
             .map(|s| s.id)
             .collect();
-        assert_eq!(kept, vec![real_id.to_string()], "only the image thread may be dropped");
+        assert_eq!(
+            kept,
+            vec![real_id.to_string()],
+            "only the image thread may be dropped"
+        );
 
         match prev {
             Some(p) => std::env::set_var("FLEET_HOME", p),
@@ -4536,7 +4558,11 @@ mod tests {
         // The tail path reads a window that never includes line 1, so it must
         // pick the fork marker up from the meta read it does separately.
         let tail = src.get_messages_tail(&uri, 50).unwrap();
-        assert_eq!(tail.len(), all.len(), "tail(50) returns the whole fork body");
+        assert_eq!(
+            tail.len(),
+            all.len(),
+            "tail(50) returns the whole fork body"
+        );
         assert!(!format!("{tail:?}").contains("parent turn"));
     }
 
@@ -4564,7 +4590,10 @@ mod tests {
             "a fork whose boundary marker is absent keeps every row"
         );
 
-        assert_eq!(super::trim_forked_replay(rows.clone(), None).len(), rows.len());
+        assert_eq!(
+            super::trim_forked_replay(rows.clone(), None).len(),
+            rows.len()
+        );
     }
 
     /// The live-follow path: `tail_incremental` must return *normalized* codex
@@ -5116,7 +5145,10 @@ mod tests {
                 "error": {"message": "out of credits", "codex_error_info": "usage_limit_exceeded"}
             }
         });
-        assert_eq!(codex_out_of_credits(&[e]).as_deref(), Some("out of credits"));
+        assert_eq!(
+            codex_out_of_credits(&[e]).as_deref(),
+            Some("out of credits")
+        );
     }
 
     /// The whole point of the field is that it reaches a `SessionInfo`, and the
@@ -5634,9 +5666,13 @@ fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Optio
             return (Some(pid), true);
         }
     }
-    // Third: cwd match. Precise only if exactly one process matches.
+    // Third: cwd match. Precise only if exactly one process matches. A process
+    // whose argv names *another* thread is that thread's, not this one's —
+    // without this, a `session_explain` fork (`exec resume <copy-id>`) in the
+    // same workspace would light up its source session as running.
     let cwd_matches: Vec<_> = processes
         .iter()
+        .filter(|p| p.thread_id.is_none())
         .filter(|p| crate::session::same_workspace_path(&p.cwd, cwd))
         .collect();
     match cwd_matches.len() {
@@ -5882,7 +5918,8 @@ fn parse_codex_session(
         background_tasks: Vec::new(),
         task_plan: None,
         handoff: None,
-        user_mark: None, task_outcome: None,
+        user_mark: None,
+        task_outcome: None,
         title_override: None,
         compact_count: 0,
         compact_pre_tokens: 0,
@@ -5976,12 +6013,12 @@ fn codex_turn_error_text(payload: &Value) -> Option<String> {
 fn fork_replay_boundary(lines: &[Value], own_thread_id: &str) -> Option<usize> {
     lines.iter().position(|line| {
         let payload = line.get("payload");
-        let is_settings = payload
-            .and_then(|p| p.get("type"))
-            .and_then(|t| t.as_str())
+        let is_settings = payload.and_then(|p| p.get("type")).and_then(|t| t.as_str())
             == Some("thread_settings_applied");
         is_settings
-            && payload.and_then(|p| p.get("thread_id")).and_then(|t| t.as_str())
+            && payload
+                .and_then(|p| p.get("thread_id"))
+                .and_then(|t| t.as_str())
                 == Some(own_thread_id)
     })
 }
@@ -6983,6 +7020,14 @@ impl AgentSource for CodexSource {
         CODEX_URI_PREFIX
     }
 
+    fn fork_ask(
+        &self,
+        spec: &crate::agent_source::ForkAskSpec,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<crate::agent_source::ForkAskOutcome, String> {
+        crate::codex_explain::codex_fork_ask(spec, on_delta)
+    }
+
     fn is_available(&self) -> bool {
         get_codex_dir().map(|d| d.is_dir()).unwrap_or(false)
     }
@@ -7628,7 +7673,9 @@ fn codex_out_of_credits(parsed: &[Value]) -> Option<String> {
         if v.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
             continue;
         }
-        let Some(payload) = v.get("payload") else { continue };
+        let Some(payload) = v.get("payload") else {
+            continue;
+        };
         let kind = payload.get("type").and_then(|t| t.as_str()).unwrap_or("");
         if !matches!(
             kind,

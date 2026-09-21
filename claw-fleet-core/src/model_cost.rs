@@ -230,8 +230,8 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
     if let Some(start) = m.find("opus-4-") {
         let rest = &m.as_bytes()[start + "opus-4-".len()..];
         if let Some((&first, tail)) = rest.split_first() {
-            let is_single_digit = first.is_ascii_digit()
-                && tail.first().map_or(true, |c| !c.is_ascii_digit());
+            let is_single_digit =
+                first.is_ascii_digit() && tail.first().map_or(true, |c| !c.is_ascii_digit());
             if is_single_digit {
                 return match first {
                     b'0' | b'1' => COST_TIER_15_75,
@@ -310,7 +310,9 @@ pub fn turn_cost_usd(model: &str, usage: &TurnUsage) -> f64 {
     let c = get_model_costs(model);
     // `cache_creation_1h_tokens` is a subset of the total; saturating_sub keeps a
     // malformed pair (1h > total) from wrapping into an astronomical 5m figure.
-    let write_1h = usage.cache_creation_1h_tokens.min(usage.cache_creation_tokens);
+    let write_1h = usage
+        .cache_creation_1h_tokens
+        .min(usage.cache_creation_tokens);
     let write_5m = usage.cache_creation_tokens.saturating_sub(write_1h);
     (usage.input_tokens as f64 / 1_000_000.0) * c.input
         + (usage.output_tokens as f64 / 1_000_000.0) * c.output
@@ -440,7 +442,12 @@ mod tests {
             output_tokens: 1_000_000,
             ..Default::default()
         };
-        for model in ["claude-fable-5", "claude-fable-5-1", "fable", "Claude-Fable-5"] {
+        for model in [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "fable",
+            "Claude-Fable-5",
+        ] {
             let cost = turn_cost_usd(model, &usage);
             assert!(
                 (cost - 60.0).abs() < 1e-9,
@@ -501,9 +508,15 @@ mod tests {
             ..Default::default()
         };
         let cost_40 = turn_cost_usd("claude-opus-4-20250514", &usage);
-        assert!((cost_40 - 90.0).abs() < 1e-9, "opus-4.0 priced wrong: {cost_40}");
+        assert!(
+            (cost_40 - 90.0).abs() < 1e-9,
+            "opus-4.0 priced wrong: {cost_40}"
+        );
         let cost_41 = turn_cost_usd("claude-opus-4-1-20250805", &usage);
-        assert!((cost_41 - 90.0).abs() < 1e-9, "opus-4.1 priced wrong: {cost_41}");
+        assert!(
+            (cost_41 - 90.0).abs() < 1e-9,
+            "opus-4.1 priced wrong: {cost_41}"
+        );
     }
 
     #[test]

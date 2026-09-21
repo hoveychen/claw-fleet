@@ -104,7 +104,7 @@ function deepFreeze(value) {
  * @param {string} cwd - the session's working directory
  * @param {string} sessionId
  * @param {{used: number, window: number, model: string}} [pressure]
- * @returns {Promise<{sections: Array<{name: string, text: string}>, sandboxMode: string | undefined}>}
+ * @returns {Promise<{sections: Array<{name: string, text: string}>, sandboxMode: string | undefined, oneShot: boolean}>}
  */
 export async function fetchContext(config, cwd, sessionId, pressure) {
   const result = await runFleet(config, cwd, sessionId, pressure)
@@ -147,12 +147,12 @@ function warnOnce(message) {
 }
 
 /** What a CLI that could not answer yields: inject nothing, fail nothing. */
-const NOTHING = { sections: [], sandboxMode: undefined }
+const NOTHING = { sections: [], sandboxMode: undefined, oneShot: false }
 
 /**
  * One `fleet dsh-context` invocation.
  *
- * @returns {Promise<{sections: Array<{name: string, text: string}>, sandboxMode: string | undefined} | undefined>}
+ * @returns {Promise<{sections: Array<{name: string, text: string}>, sandboxMode: string | undefined, oneShot: boolean} | undefined>}
  *   `undefined` when the process itself failed — the signal {@link fetchContext}
  *   retries on. A process that ran but said nothing useful resolves to empty
  *   sections instead, because re-running it would say the same thing.
@@ -194,9 +194,13 @@ function runFleet(config, cwd, sessionId, pressure) {
         // own default, which is the safe direction: escalation must be an
         // explicit decision Fleet made, never a parsing accident.
         const mode = parsed?.sandboxMode
+        // Same strictness for the one-step contract: only a literal `true`
+        // caps the turn. A build that predates the field omits it, and a
+        // session that is not a side-question fork must keep running.
         resolve({
           sections,
           sandboxMode: typeof mode === 'string' && mode.length > 0 ? mode : undefined,
+          oneShot: parsed?.oneShot === true,
         })
       },
     )
@@ -409,7 +413,7 @@ export function apply(ctx, config) {
       const cwd = agent.session.header.cwd
       if (typeof cwd !== 'string' || cwd.length === 0) return decision
 
-      const { sections, sandboxMode } = await fetchContext(
+      const { sections, sandboxMode, oneShot } = await fetchContext(
         resolved,
         cwd,
         agent.session.id,
@@ -420,6 +424,16 @@ export function apply(ctx, config) {
       // unchanged and we return without injecting, so a switch gated behind that
       // would never happen on a resumed session.
       if (sandboxMode) ensureSandboxMode(agent, sandboxMode)
+
+      // A side-question fork answers in exactly one step. Its prompt already
+      // forbids tools; this is the hard stop for a model that calls one anyway:
+      // the tool result would open step 2, and step 2 is rejected before any
+      // request is made. Rejecting rather than trimming the tools list keeps
+      // the child's request byte-identical to its parent's prefix, which is
+      // the whole reason the question is asked on a fork. `step` is dsh's
+      // 1-based counter within the turn; a build that stops passing it is not
+      // second-guessed, so the soft contract still stands there.
+      if (oneShot && typeof step === 'number' && step >= 2) return { kind: 'reject' }
 
       if (sections.length === 0 || signal.aborted) return decision
 

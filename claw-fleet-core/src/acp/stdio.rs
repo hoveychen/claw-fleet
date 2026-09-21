@@ -72,7 +72,9 @@ impl Sink for StdoutSink {
 /// Serve ACP on stdin/stdout against the local workspace. Returns at EOF.
 pub fn serve_local() -> std::io::Result<()> {
     trace("conn", "serving ACP on stdio");
-    let peer = Arc::new(Peer::new(Box::new(StdoutSink(Mutex::new(std::io::stdout())))));
+    let peer = Arc::new(Peer::new(Box::new(StdoutSink(Mutex::new(
+        std::io::stdout(),
+    )))));
     let sources = Arc::new(crate::agent_source::build_sources());
     let agent = Arc::new(AcpAgent::new(peer, sources));
     // Push decision cards to the client as they appear.
@@ -120,7 +122,10 @@ async fn proxy_loop(url: &str, token: Option<&str>) -> Result<(), String> {
         Ok(Ok(pair)) => pair,
         Ok(Err(e)) => return Err(format!("connect {url}: {e}")),
         Err(_) => {
-            return Err(format!("connect {url}: timed out after {}s", CONNECT_TIMEOUT.as_secs()))
+            return Err(format!(
+                "connect {url}: timed out after {}s",
+                CONNECT_TIMEOUT.as_secs()
+            ))
         }
     };
     trace("conn", &format!("connected to {url}"));
@@ -236,7 +241,10 @@ async fn proxy_loop(url: &str, token: Option<&str>) -> Result<(), String> {
                 {
                     pending.remove(&id.to_string());
                 }
-                if writeln!(stdout, "{text}").and_then(|_| stdout.flush()).is_err() {
+                if writeln!(stdout, "{text}")
+                    .and_then(|_| stdout.flush())
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -259,11 +267,15 @@ fn build_ws_request(
 ) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-    let mut req = url.into_client_request().map_err(|e| format!("bad url {url}: {e}"))?;
+    let mut req = url
+        .into_client_request()
+        .map_err(|e| format!("bad url {url}: {e}"))?;
     let protocols = ws_subprotocol_header(token);
     req.headers_mut().insert(
         "Sec-WebSocket-Protocol",
-        protocols.parse().map_err(|_| "token is not header-safe".to_string())?,
+        protocols
+            .parse()
+            .map_err(|_| "token is not header-safe".to_string())?,
     );
     Ok(req)
 }
@@ -292,7 +304,10 @@ pub fn token_from_subprotocols(header: &str) -> Option<String> {
 
 /// Whether the client offered the ACP subprotocol. Pure; unit-tested.
 pub fn offers_acp_subprotocol(header: &str) -> bool {
-    header.split(',').map(str::trim).any(|p| p == WS_SUBPROTOCOL)
+    header
+        .split(',')
+        .map(str::trim)
+        .any(|p| p == WS_SUBPROTOCOL)
 }
 
 #[cfg(test)]
@@ -322,8 +337,14 @@ mod tests {
     #[test]
     fn subprotocol_parsing_tolerates_spacing_and_ordering() {
         assert!(offers_acp_subprotocol("bearer.t,acp.v1"));
-        assert_eq!(token_from_subprotocols("bearer.t,acp.v1").as_deref(), Some("t"));
-        assert_eq!(token_from_subprotocols("acp.v1,   bearer.t  ").as_deref(), Some("t"));
+        assert_eq!(
+            token_from_subprotocols("bearer.t,acp.v1").as_deref(),
+            Some("t")
+        );
+        assert_eq!(
+            token_from_subprotocols("acp.v1,   bearer.t  ").as_deref(),
+            Some("t")
+        );
     }
 
     #[test]
@@ -344,7 +365,12 @@ mod tests {
     #[test]
     fn ws_request_carries_the_subprotocol_header() {
         let req = build_ws_request("ws://example.test/acp", Some("tok")).unwrap();
-        let got = req.headers().get("Sec-WebSocket-Protocol").unwrap().to_str().unwrap();
+        let got = req
+            .headers()
+            .get("Sec-WebSocket-Protocol")
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert_eq!(got, "acp.v1, bearer.tok");
     }
 

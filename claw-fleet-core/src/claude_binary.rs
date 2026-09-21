@@ -105,7 +105,9 @@ pub fn discover() -> Vec<ClaudeBinary> {
     let mut out: Vec<ClaudeBinary> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    let push = |bin: ClaudeBinary, out: &mut Vec<ClaudeBinary>, seen: &mut std::collections::HashSet<String>| {
+    let push = |bin: ClaudeBinary,
+                out: &mut Vec<ClaudeBinary>,
+                seen: &mut std::collections::HashSet<String>| {
         let canon = std::fs::canonicalize(&bin.path)
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| bin.path.clone());
@@ -116,23 +118,49 @@ pub fn discover() -> Vec<ClaudeBinary> {
 
     // 1. PATH lookup.
     if let Some(p) = which_claude() {
-        push(ClaudeBinary { path: p, source: ClaudeBinarySource::Path, version: None }, &mut out, &mut seen);
+        push(
+            ClaudeBinary {
+                path: p,
+                source: ClaudeBinarySource::Path,
+                version: None,
+            },
+            &mut out,
+            &mut seen,
+        );
     }
 
     let home = real_home_dir();
 
     // 2-5. Hardcoded standard install locations.
     let standard = [
-        (home.as_ref().map(|h| h.join(".local").join("bin").join("claude")), ClaudeBinarySource::NativeInstaller),
-        (Some(PathBuf::from("/opt/homebrew/bin/claude")), ClaudeBinarySource::Homebrew),
-        (home.as_ref().map(|h| h.join(".npm-global").join("bin").join("claude")), ClaudeBinarySource::NpmGlobal),
-        (Some(PathBuf::from("/usr/local/bin/claude")), ClaudeBinarySource::UsrLocalBin),
+        (
+            home.as_ref()
+                .map(|h| h.join(".local").join("bin").join("claude")),
+            ClaudeBinarySource::NativeInstaller,
+        ),
+        (
+            Some(PathBuf::from("/opt/homebrew/bin/claude")),
+            ClaudeBinarySource::Homebrew,
+        ),
+        (
+            home.as_ref()
+                .map(|h| h.join(".npm-global").join("bin").join("claude")),
+            ClaudeBinarySource::NpmGlobal,
+        ),
+        (
+            Some(PathBuf::from("/usr/local/bin/claude")),
+            ClaudeBinarySource::UsrLocalBin,
+        ),
     ];
     for (path_opt, source) in standard {
         if let Some(path) = path_opt {
             if path.exists() {
                 push(
-                    ClaudeBinary { path: path.to_string_lossy().to_string(), source, version: None },
+                    ClaudeBinary {
+                        path: path.to_string_lossy().to_string(),
+                        source,
+                        version: None,
+                    },
                     &mut out,
                     &mut seen,
                 );
@@ -146,9 +174,18 @@ pub fn discover() -> Vec<ClaudeBinary> {
     // (one user's machine had 5 in ~/.vscode/extensions side by side).
     if let Some(home) = home.as_ref() {
         let editor_roots: &[(PathBuf, ClaudeBinarySource)] = &[
-            (home.join(".vscode").join("extensions"), ClaudeBinarySource::VsCodeExtension),
-            (home.join(".vscode-insiders").join("extensions"), ClaudeBinarySource::VsCodeInsidersExtension),
-            (home.join(".windsurf").join("extensions"), ClaudeBinarySource::WindsurfExtension),
+            (
+                home.join(".vscode").join("extensions"),
+                ClaudeBinarySource::VsCodeExtension,
+            ),
+            (
+                home.join(".vscode-insiders").join("extensions"),
+                ClaudeBinarySource::VsCodeInsidersExtension,
+            ),
+            (
+                home.join(".windsurf").join("extensions"),
+                ClaudeBinarySource::WindsurfExtension,
+            ),
         ];
         for (root, source) in editor_roots {
             if let Some(bin) = scan_editor_extensions(root, source.clone()) {
@@ -192,12 +229,22 @@ fn scan_editor_extensions(root: &Path, source: ClaudeBinarySource) -> Option<Cla
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy().to_string();
-        let Some(rest) = name.strip_prefix("anthropic.claude-code-") else { continue };
+        let Some(rest) = name.strip_prefix("anthropic.claude-code-") else {
+            continue;
+        };
         // rest ~ "2.1.123-darwin-arm64"; version is the leading "X.Y.Z" segment.
         let ver_str = rest.split('-').next()?.to_string();
-        let Some(ver) = parse_version(&ver_str) else { continue };
-        let bin = entry.path().join("resources").join("native-binary").join("claude");
-        if !bin.is_file() { continue }
+        let Some(ver) = parse_version(&ver_str) else {
+            continue;
+        };
+        let bin = entry
+            .path()
+            .join("resources")
+            .join("native-binary")
+            .join("claude");
+        if !bin.is_file() {
+            continue;
+        }
         match &best {
             Some((cur, _, _)) if *cur >= ver => {}
             _ => best = Some((ver, ver_str, bin)),
@@ -252,8 +299,10 @@ mod tests {
         // Mirror the real layout the user has on disk: 5 versions, the binary
         // we want is buried inside the highest one's resources/native-binary.
         for v in &["2.1.94", "2.1.118", "2.1.120", "2.1.121", "2.1.123"] {
-            let dir = root.join(format!("anthropic.claude-code-{}-darwin-arm64", v))
-                .join("resources").join("native-binary");
+            let dir = root
+                .join(format!("anthropic.claude-code-{}-darwin-arm64", v))
+                .join("resources")
+                .join("native-binary");
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("claude"), b"fake").unwrap();
         }
@@ -273,14 +322,18 @@ mod tests {
         // Two extension dirs; only the older one has the binary file. We must
         // pick the older one rather than returning the newer broken install.
         for v in &["2.1.94", "2.1.123"] {
-            fs::create_dir_all(root.join(format!("anthropic.claude-code-{}-darwin-arm64", v))).unwrap();
+            fs::create_dir_all(root.join(format!("anthropic.claude-code-{}-darwin-arm64", v)))
+                .unwrap();
         }
-        let dir94 = root.join("anthropic.claude-code-2.1.94-darwin-arm64")
-            .join("resources").join("native-binary");
+        let dir94 = root
+            .join("anthropic.claude-code-2.1.94-darwin-arm64")
+            .join("resources")
+            .join("native-binary");
         fs::create_dir_all(&dir94).unwrap();
         fs::write(dir94.join("claude"), b"fake").unwrap();
 
-        let bin = scan_editor_extensions(root, ClaudeBinarySource::VsCodeInsidersExtension).unwrap();
+        let bin =
+            scan_editor_extensions(root, ClaudeBinarySource::VsCodeInsidersExtension).unwrap();
         assert_eq!(bin.version.as_deref(), Some("2.1.94"));
     }
 

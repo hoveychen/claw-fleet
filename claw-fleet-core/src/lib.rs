@@ -4,22 +4,22 @@ pub mod agent_loop;
 pub mod agent_source;
 pub mod artifacts;
 pub mod atomic_json;
-pub(crate) mod claude_md_block;
-pub mod claude_md_lock;
 pub mod audit;
 pub mod auto_resume;
-pub mod ui_types;
 pub mod bg_guard;
 pub mod bom;
 pub mod browse_paths;
+pub mod chain_completion_gate;
+pub mod chat_workspace;
 pub mod claude_analyze;
 pub mod claude_binary;
 pub mod claude_cli;
+pub(crate) mod claude_md_block;
+pub mod claude_md_lock;
 pub mod claude_source;
-pub mod chain_completion_gate;
-pub mod chat_workspace;
 pub mod cmd_ast;
 pub mod codex_guidance;
+pub mod codex_explain;
 pub mod codex_image;
 pub mod codex_launch;
 pub mod codex_source;
@@ -42,6 +42,7 @@ pub mod dsh_client;
 pub mod dsh_cost;
 pub mod dsh_decisions;
 pub mod dsh_events;
+pub mod dsh_explain;
 pub mod dsh_guidance;
 pub mod dsh_messages;
 pub mod dsh_plugin;
@@ -74,41 +75,42 @@ pub mod interaction_mode_diagnostics;
 pub mod interaction_mode_test;
 pub mod jsonl_tail;
 pub mod lan_access;
+pub mod launch_spec;
 pub mod launchd;
+pub mod lessons_store;
+pub mod live_inject;
 pub mod live_thinking;
 pub mod llm_provider;
 pub mod llm_usage;
+pub mod mcp_a2ui_ipc;
 pub mod mcp_control;
 pub mod mcp_injector;
 pub mod mcp_inspect;
 pub mod mcp_ipc;
-pub mod mcp_a2ui_ipc;
 pub mod mcp_server;
-pub mod lessons_store;
 pub mod memory;
 pub mod message_trim;
 pub mod mirror_guard;
 pub mod mobile_relay;
-pub mod relay_crypto;
-pub mod relay_region;
-pub mod relay_role;
 pub mod model_catalog;
 pub mod model_cost;
 pub mod model_guidance;
-pub mod launch_spec;
 pub mod off_runtime;
 pub mod orphan_reaper;
 pub mod parked;
-pub mod pending_decisions;
-pub mod live_inject;
-pub mod pending_message;
 pub mod pattern_update;
+pub mod pending_decisions;
+pub mod pending_message;
 pub mod permission_prompt_ipc;
 pub mod permissions_injector;
 pub mod proc_runner;
 pub mod process_util;
 pub mod queued_command;
+pub mod relay_crypto;
+pub mod relay_region;
+pub mod relay_role;
 pub mod routes;
+pub mod ui_types;
 /// Path helpers, formerly re-exported from the (removed) `claw-fleet-task`
 /// crate. `real_home_dir` / `get_fleet_dir` live in [`session`];
 /// `fleet_home_lock` is the process-wide `FLEET_HOME` test mutex whose
@@ -181,15 +183,17 @@ pub mod paths {
     /// writing into, and the victim fails with whatever errno the next syscall
     /// happens to produce (EEXIST, EINVAL, …), never with anything that names
     /// the real cause. Observed 2026-09-16 in `injector_watchdog`.
-    pub fn fleet_home_guard_with(
-        make_home: impl FnOnce() -> std::path::PathBuf,
-    ) -> FleetHomeGuard {
+    pub fn fleet_home_guard_with(make_home: impl FnOnce() -> std::path::PathBuf) -> FleetHomeGuard {
         let lock = fleet_home_lock();
         let home = make_home();
         let prev = std::env::var_os("FLEET_HOME");
         // SAFETY: serialised by the lock this guard holds.
         unsafe { std::env::set_var("FLEET_HOME", &home) };
-        FleetHomeGuard { home, prev, _lock: lock }
+        FleetHomeGuard {
+            home,
+            prev,
+            _lock: lock,
+        }
     }
 
     impl Drop for FleetHomeGuard {
@@ -212,7 +216,6 @@ pub mod plugins;
 pub mod prd_context_dedup;
 pub mod prd_discipline;
 pub mod prd_tasks;
-pub mod task_progress;
 pub mod rate_limit_parser;
 pub mod recent_sessions;
 pub mod remote_disconnect;
@@ -222,11 +225,10 @@ pub mod scan_cache_disk;
 pub mod schedule;
 pub mod search_index;
 pub mod session;
-pub mod session_launch;
+pub mod session_explain;
 pub mod session_history;
+pub mod session_launch;
 pub mod session_mark;
-pub mod task_outcome;
-pub mod task_review;
 pub mod session_notes;
 pub mod session_snapshot;
 pub mod session_title;
@@ -236,6 +238,9 @@ pub mod skill_history;
 pub mod skill_sync;
 pub mod skills;
 pub mod subagent_caller;
+pub mod task_outcome;
+pub mod task_progress;
+pub mod task_review;
 pub mod tcc;
 pub mod today_usage;
 pub mod token_analysis;
@@ -246,14 +251,14 @@ pub mod wakeup_guard;
 pub mod watch;
 pub mod web_assets;
 pub mod wiki;
-pub mod zip_stream;
 pub mod wiki_guidance;
 pub mod workflow;
 pub mod workflow_sidecar;
 pub mod workspace_browse;
+pub mod zip_stream;
 
-use std::fs;
 use session::SessionInfo;
+use std::fs;
 
 pub fn log_debug(msg: &str) {
     if let Some(log_path) = debug_log_path() {
@@ -325,11 +330,14 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> ui_types::DetectedToo
             h.join(".vscode-insiders").join("extensions"),
         ];
         ext_dirs.iter().any(|dir| {
-            dir.is_dir() && fs::read_dir(dir).map_or(false, |entries| {
-                entries.filter_map(|e| e.ok()).any(|e| {
-                    e.file_name().to_string_lossy().starts_with("anthropic.claude-code")
+            dir.is_dir()
+                && fs::read_dir(dir).map_or(false, |entries| {
+                    entries.filter_map(|e| e.ok()).any(|e| {
+                        e.file_name()
+                            .to_string_lossy()
+                            .starts_with("anthropic.claude-code")
+                    })
                 })
-            })
         })
     }) || sessions.iter().any(|s| {
         s.ide_name.as_deref().map_or(false, |name| {
@@ -341,32 +349,55 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> ui_types::DetectedToo
     let jetbrains = sessions.iter().any(|s| {
         s.ide_name.as_deref().map_or(false, |name| {
             let n = name.to_lowercase();
-            n.contains("intellij") || n.contains("webstorm") || n.contains("pycharm")
-                || n.contains("goland") || n.contains("rustrover") || n.contains("phpstorm")
-                || n.contains("rider") || n.contains("clion") || n.contains("jetbrains")
+            n.contains("intellij")
+                || n.contains("webstorm")
+                || n.contains("pycharm")
+                || n.contains("goland")
+                || n.contains("rustrover")
+                || n.contains("phpstorm")
+                || n.contains("rider")
+                || n.contains("clion")
+                || n.contains("jetbrains")
         })
     });
 
     let desktop = {
         #[cfg(target_os = "macos")]
-        { std::path::Path::new("/Applications/Claude.app").exists() }
+        {
+            std::path::Path::new("/Applications/Claude.app").exists()
+        }
         #[cfg(target_os = "windows")]
         {
             std::env::var("LOCALAPPDATA").map_or(false, |appdata| {
-                std::path::Path::new(&appdata).join("Programs").join("Claude").join("Claude.exe").exists()
+                std::path::Path::new(&appdata)
+                    .join("Programs")
+                    .join("Claude")
+                    .join("Claude.exe")
+                    .exists()
             })
         }
         #[cfg(target_os = "linux")]
-        { false }
+        {
+            false
+        }
     };
 
-    let codex = home.as_ref().map_or(false, |h| h.join(".codex").is_dir())
-        || {
-            #[cfg(unix)]
-            { process_util::command("which").arg("codex").output().map_or(false, |o| o.status.success()) }
-            #[cfg(not(unix))]
-            { process_util::command("where").arg("codex").output().map_or(false, |o| o.status.success()) }
-        };
+    let codex = home.as_ref().map_or(false, |h| h.join(".codex").is_dir()) || {
+        #[cfg(unix)]
+        {
+            process_util::command("which")
+                .arg("codex")
+                .output()
+                .map_or(false, |o| o.status.success())
+        }
+        #[cfg(not(unix))]
+        {
+            process_util::command("where")
+                .arg("codex")
+                .output()
+                .map_or(false, |o| o.status.success())
+        }
+    };
 
     let config = agent_source::SourcesConfig::load();
     let claude_enabled = config.is_source_enabled("claude");
@@ -376,7 +407,13 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> ui_types::DetectedToo
     let desktop = desktop && claude_enabled;
     let codex = codex && config.is_source_enabled("codex");
 
-    ui_types::DetectedTools { cli, vscode, jetbrains, desktop, codex }
+    ui_types::DetectedTools {
+        cli,
+        vscode,
+        jetbrains,
+        desktop,
+        codex,
+    }
 }
 
 /// Resolve the Claude CLI binary fleet should use, honouring the user override.
@@ -561,7 +598,10 @@ mod bundled_skill_tests {
             body.contains("ignore") || body.contains("ignored") || body.contains("ignores"),
             "must say the controls get ignored"
         );
-        assert!(body.contains("fleet__image"), "must name the tool it drives");
+        assert!(
+            body.contains("fleet__image"),
+            "must name the tool it drives"
+        );
         assert!(
             body.contains("fleet__image_edit"),
             "must name the edit tool too"

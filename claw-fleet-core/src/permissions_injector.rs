@@ -28,8 +28,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::session::{
-    deserialize_holders, get_claude_dir, get_fleet_dir,
-    prune_dead_holders as prune_holder_entries, HolderEntry,
+    deserialize_holders, get_claude_dir, get_fleet_dir, prune_dead_holders as prune_holder_entries,
+    HolderEntry,
 };
 
 /// The full set of tool patterns Fleet injects into `permissions.allow`.
@@ -223,7 +223,9 @@ fn write_settings(v: &serde_json::Value) -> std::io::Result<()> {
 }
 
 fn delete_settings() -> std::io::Result<()> {
-    let Some(p) = settings_path() else { return Ok(()) };
+    let Some(p) = settings_path() else {
+        return Ok(());
+    };
     if p.exists() {
         fs::remove_file(p)?;
     }
@@ -348,7 +350,9 @@ pub fn acquire(pid: u32) -> std::io::Result<()> {
 ///
 /// Safe to call when no lock exists (returns `Ok(())`).
 pub fn release(pid: u32) -> std::io::Result<()> {
-    let Some(mut lock) = read_lock() else { return Ok(()) };
+    let Some(mut lock) = read_lock() else {
+        return Ok(());
+    };
     prune_dead_holders(&mut lock);
     lock.holders.retain(|h| h.pid != pid);
     write_lock(&lock)
@@ -365,7 +369,9 @@ pub fn release(pid: u32) -> std::io::Result<()> {
 ///
 /// Safe to call when no lock exists (returns `Ok(())`).
 pub fn deactivate() -> std::io::Result<()> {
-    let Some(lock) = read_lock() else { return Ok(()) };
+    let Some(lock) = read_lock() else {
+        return Ok(());
+    };
     restore_from_snapshot(&lock)?;
     delete_lock()?;
     Ok(())
@@ -380,7 +386,9 @@ pub fn deactivate() -> std::io::Result<()> {
 /// Returns `Ok(true)` if a re-injection actually wrote the file,
 /// `Ok(false)` otherwise. Used by [`crate::injector_watchdog`].
 pub fn verify_and_reinject() -> std::io::Result<bool> {
-    let Some(mut lock) = read_lock() else { return Ok(false) };
+    let Some(mut lock) = read_lock() else {
+        return Ok(false);
+    };
     prune_dead_holders(&mut lock);
     if lock.holders.is_empty() {
         return Ok(false);
@@ -435,10 +443,7 @@ fn restore_from_snapshot(lock: &PermissionsLock) -> std::io::Result<()> {
             set_allow(&mut current, stripped);
         }
         // If the resulting file is an empty object, delete it.
-        let is_empty_obj = current
-            .as_object()
-            .map(|o| o.is_empty())
-            .unwrap_or(false);
+        let is_empty_obj = current.as_object().map(|o| o.is_empty()).unwrap_or(false);
         if is_empty_obj {
             delete_settings()?;
         } else {
@@ -510,7 +515,10 @@ mod tests {
         let guard = fleet_home_lock();
         let tmp = TempDir::new().unwrap();
         std::env::set_var("FLEET_HOME", tmp.path());
-        TestEnv { _tmp: tmp, _guard: guard }
+        TestEnv {
+            _tmp: tmp,
+            _guard: guard,
+        }
     }
 
     fn read_settings_for_test() -> Option<serde_json::Value> {
@@ -535,7 +543,10 @@ mod tests {
         #[cfg(unix)]
         let mut child = std::process::Command::new("true").spawn().unwrap();
         #[cfg(windows)]
-        let mut child = std::process::Command::new("cmd").args(["/C", "exit"]).spawn().unwrap();
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "exit"])
+            .spawn()
+            .unwrap();
         let pid = child.id();
         child.wait().unwrap();
         pid
@@ -546,7 +557,10 @@ mod tests {
     fn live_child() -> std::process::Child {
         #[cfg(unix)]
         {
-            std::process::Command::new("sleep").arg("60").spawn().unwrap()
+            std::process::Command::new("sleep")
+                .arg("60")
+                .spawn()
+                .unwrap()
         }
         #[cfg(windows)]
         {
@@ -699,12 +713,22 @@ mod tests {
         release(1234).unwrap();
 
         let allow = allow_of(&read_settings_for_test().expect("file preserved"));
-        assert!(allow.iter().any(|s| s == "Bash(*)"), "injection survives exit");
-        assert!(allow.contains(&"Bash(npm run:*)".to_string()), "user rule kept");
+        assert!(
+            allow.iter().any(|s| s == "Bash(*)"),
+            "injection survives exit"
+        );
+        assert!(
+            allow.contains(&"Bash(npm run:*)".to_string()),
+            "user rule kept"
+        );
 
         let lock = read_lock().expect("lock survives exit");
         assert!(lock.holders.is_empty(), "pid deregistered");
-        assert_eq!(lock.original_allow, vec!["Bash(npm run:*)"], "snapshot retained");
+        assert_eq!(
+            lock.original_allow,
+            vec!["Bash(npm run:*)"],
+            "snapshot retained"
+        );
     }
 
     #[test]
@@ -767,7 +791,10 @@ mod tests {
 
         // `kill -9`: no release ran, lock keeps a dead holder.
         let mut lock = read_lock().unwrap();
-        lock.holders = vec![HolderEntry { pid: dead_pid(), start_time_secs: 0 }];
+        lock.holders = vec![HolderEntry {
+            pid: dead_pid(),
+            start_time_secs: 0,
+        }];
         write_lock(&lock).unwrap();
 
         acquire(1234).unwrap(); // next Fleet startup
@@ -815,8 +842,14 @@ mod tests {
 
         deactivate().unwrap();
         let allow = allow_of(&read_settings_for_test().unwrap());
-        assert!(allow.contains(&"Bash(npm run:*)".to_string()), "original kept");
-        assert!(allow.contains(&"Read(./secrets/*)".to_string()), "user addition kept");
+        assert!(
+            allow.contains(&"Bash(npm run:*)".to_string()),
+            "original kept"
+        );
+        assert!(
+            allow.contains(&"Read(./secrets/*)".to_string()),
+            "user addition kept"
+        );
         // Fleet's injected rules should be gone.
         assert!(!allow.contains(&"WebFetch(*)".to_string()));
     }
@@ -831,13 +864,19 @@ mod tests {
             original_allow: vec![],
             original_had_permissions: false,
             original_existed: false,
-            holders: vec![HolderEntry { pid: dead, start_time_secs: 0 }],
+            holders: vec![HolderEntry {
+                pid: dead,
+                start_time_secs: 0,
+            }],
         })
         .unwrap();
 
         acquire(1234).unwrap();
         let lock = read_lock().unwrap();
-        assert!(!lock.holders.iter().any(|h| h.pid == dead), "dead pid pruned");
+        assert!(
+            !lock.holders.iter().any(|h| h.pid == dead),
+            "dead pid pruned"
+        );
         assert!(lock.holders.iter().any(|h| h.pid == 1234));
         // Settings should have been injected (the dead holder didn't prevent cold-start).
         let allow = allow_of(&read_settings_for_test().unwrap());
@@ -858,17 +897,26 @@ mod tests {
 
         let mut first = live_child();
         acquire(first.id()).unwrap();
-        assert_eq!(read_lock().unwrap().original_allow, vec!["Bash(ls)".to_string()]);
+        assert_eq!(
+            read_lock().unwrap().original_allow,
+            vec!["Bash(ls)".to_string()]
+        );
         first.kill().ok();
         first.wait().ok();
 
         // Simulate `kill -9`: the holder is dead, release() never ran, and
         // settings.json still carries the injected rules.
         let mut lock = read_lock().unwrap();
-        lock.holders = vec![HolderEntry { pid: dead_pid(), start_time_secs: 0 }];
+        lock.holders = vec![HolderEntry {
+            pid: dead_pid(),
+            start_time_secs: 0,
+        }];
         write_lock(&lock).unwrap();
         let injected = allow_of(&read_settings_for_test().unwrap());
-        assert!(injected.iter().any(|s| s == "Bash(*)"), "precondition: still injected");
+        assert!(
+            injected.iter().any(|s| s == "Bash(*)"),
+            "precondition: still injected"
+        );
 
         // Next Fleet startup.
         acquire(1234).unwrap();
@@ -954,8 +1002,7 @@ mod tests {
         // Even with pid alive, a mismatched start_time must trigger prune
         // — defeating the OS-recycled-PID-into-a-Fleet-holder scenario.
         let my_pid = std::process::id();
-        let real_start = crate::session::process_start_time(my_pid)
-            .expect("self has a start_time");
+        let real_start = crate::session::process_start_time(my_pid).expect("self has a start_time");
         let mut lock = PermissionsLock {
             holders: vec![HolderEntry {
                 pid: my_pid,

@@ -236,7 +236,9 @@ pub fn parse_codex_device_auth_output(raw: &str) -> CodexDeviceAuthParse {
                 && t.len() <= 16
                 && t.contains('-')
                 && t.split('-').all(|g| {
-                    g.len() >= 4 && g.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+                    g.len() >= 4
+                        && g.chars()
+                            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
                 })
         })
         .map(str::to_string);
@@ -265,7 +267,9 @@ fn auth_path() -> Option<PathBuf> {
 }
 
 fn load_auth() -> HarnessAuth {
-    let Some(path) = auth_path() else { return HarnessAuth::default() };
+    let Some(path) = auth_path() else {
+        return HarnessAuth::default();
+    };
     std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -331,7 +335,8 @@ mod tests {
 
     #[test]
     fn parses_auth_url_from_plain_text_when_no_hyperlink() {
-        let raw = "\u{1b}[1mSign in:\u{1b}[0m https://claude.com/cai/oauth/authorize?code=true&state=x\n";
+        let raw =
+            "\u{1b}[1mSign in:\u{1b}[0m https://claude.com/cai/oauth/authorize?code=true&state=x\n";
         let p = parse_claude_login_output(raw);
         assert_eq!(
             p.auth_url.as_deref(),
@@ -381,7 +386,8 @@ mod tests {
         assert!(parse_codex_login_output(busy).port_busy);
         // The localhost line alone must not be mistaken for the auth URL.
         assert_eq!(
-            parse_codex_login_output("Starting local login server on http://localhost:1455.").auth_url,
+            parse_codex_login_output("Starting local login server on http://localhost:1455.")
+                .auth_url,
             None
         );
     }
@@ -391,7 +397,10 @@ mod tests {
         let cmd = codex_device_auth_ssh_command("user@host").unwrap();
         assert!(cmd.starts_with("ssh "));
         assert!(cmd.contains("codex login --device-auth"));
-        assert!(!cmd.contains('\''), "must nest inside $SHELL -lc '<cmd>': {cmd}");
+        assert!(
+            !cmd.contains('\''),
+            "must nest inside $SHELL -lc '<cmd>': {cmd}"
+        );
         assert!(codex_device_auth_ssh_command("host; rm -rf /").is_err());
         assert!(codex_device_auth_ssh_command("").is_err());
     }

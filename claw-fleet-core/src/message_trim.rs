@@ -179,9 +179,11 @@ pub fn extract_full_tool_result(jsonl_path: &Path, tool_use_id: &str) -> Result<
             continue;
         };
         for block in blocks {
-            let matches_id =
-                block.get("tool_use_id").or_else(|| block.get("id")).and_then(|i| i.as_str())
-                    == Some(tool_use_id);
+            let matches_id = block
+                .get("tool_use_id")
+                .or_else(|| block.get("id"))
+                .and_then(|i| i.as_str())
+                == Some(tool_use_id);
             if !matches_id {
                 continue;
             }
@@ -240,7 +242,9 @@ mod tests {
         let n = trim_messages_with_threshold(&mut msgs, 4096);
         assert_eq!(n, 1);
         assert_eq!(msgs[0][TRUNCATED_FLAG], Value::Bool(true));
-        let c = msgs[0]["message"]["content"][0]["content"].as_str().unwrap();
+        let c = msgs[0]["message"]["content"][0]["content"]
+            .as_str()
+            .unwrap();
         assert!(c.len() < 10_000);
         assert!(c.contains("Fleet truncated"));
     }
@@ -266,9 +270,7 @@ mod tests {
     fn structured_patch_lines_survive_because_each_is_short() {
         // A big diff is an array of many short line strings — none over the
         // threshold — so the header's +N/−N chips must keep working.
-        let lines: Vec<Value> = (0..500)
-            .map(|i| json!(format!("+ line {i}")))
-            .collect();
+        let lines: Vec<Value> = (0..500).map(|i| json!(format!("+ line {i}"))).collect();
         let mut msgs = vec![json!({
             "type": "user",
             "message": {"content": [
@@ -323,7 +325,10 @@ mod tests {
 
         let full = extract_full_tool_result(&path, "abc").unwrap();
         assert_eq!(full["content"].as_str().unwrap().len(), 10_000);
-        assert_eq!(full["toolUseResult"]["stdout"].as_str().unwrap().len(), 20_000);
+        assert_eq!(
+            full["toolUseResult"]["stdout"].as_str().unwrap().len(),
+            20_000
+        );
 
         assert!(extract_full_tool_result(&path, "missing").is_err());
         std::fs::remove_file(path).ok();
@@ -342,7 +347,9 @@ mod tests {
             ]}
         })];
         trim_messages_with_threshold(&mut msgs, 4096);
-        let c = msgs[0]["message"]["content"][0]["content"].as_str().unwrap();
+        let c = msgs[0]["message"]["content"][0]["content"]
+            .as_str()
+            .unwrap();
         assert!(
             c.contains("[Fleet truncated "),
             "marker prefix must stay in sync with the frontend detector"
@@ -388,10 +395,7 @@ mod tests {
 
         let full = extract_full_tool_result(&path, "image-call").unwrap();
         assert_eq!(
-            full["content"][0]["source"]["data"]
-                .as_str()
-                .unwrap()
-                .len(),
+            full["content"][0]["source"]["data"].as_str().unwrap().len(),
             8_192
         );
         assert_eq!(full["content"][0]["source"]["media_type"], "image/png");

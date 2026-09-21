@@ -44,7 +44,13 @@ pub fn sanitize_filename(raw: &str) -> String {
         .unwrap_or_default();
     let cleaned: String = base
         .chars()
-        .map(|c| if c == '/' || c == '\\' || c == '\0' { '_' } else { c })
+        .map(|c| {
+            if c == '/' || c == '\\' || c == '\0' {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let cleaned = cleaned.trim();
     if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
@@ -72,7 +78,10 @@ fn ext_for_mime(mime: &str) -> &'static str {
 ///
 /// `index` keeps two unnamed blocks in one prompt from colliding.
 pub fn attachment_name(uri: Option<&str>, mime: &str, index: usize) -> String {
-    match uri.and_then(|u| u.rsplit('/').next()).filter(|s| !s.is_empty()) {
+    match uri
+        .and_then(|u| u.rsplit('/').next())
+        .filter(|s| !s.is_empty())
+    {
         Some(from_uri) => sanitize_filename(from_uri),
         None => format!("attachment-{index}.{}", ext_for_mime(mime)),
     }
@@ -92,7 +101,11 @@ pub fn ingest(workspace: &str, blocks: &[ContentBlock]) -> Result<Vec<PathBuf>, 
     let mut out = Vec::new();
     for (i, block) in blocks.iter().enumerate() {
         let (data, mime, uri) = match block {
-            ContentBlock::Image { data, mime_type, uri } => (data, mime_type, uri.as_deref()),
+            ContentBlock::Image {
+                data,
+                mime_type,
+                uri,
+            } => (data, mime_type, uri.as_deref()),
             ContentBlock::Audio { data, mime_type } => (data, mime_type, None),
             // A link to something the client holds. Fleet's agent runs in its
             // own container and cannot reach the client's filesystem, so this
@@ -114,7 +127,9 @@ pub fn ingest(workspace: &str, blocks: &[ContentBlock]) -> Result<Vec<PathBuf>, 
         // Each attachment gets its own subdirectory so the caller's filename
         // survives verbatim — it shows up in the prompt, and `photo.png` reads
         // better than a hash — without one upload overwriting another.
-        let dir = PathBuf::from(workspace).join(UPLOADS_DIR).join(uuid::Uuid::new_v4().to_string());
+        let dir = PathBuf::from(workspace)
+            .join(UPLOADS_DIR)
+            .join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(&dir)
             .map_err(|e| IngestError(format!("cannot create upload dir: {e}")))?;
         let path = dir.join(&name);
@@ -155,8 +170,7 @@ pub fn prompt_with_attachments(prompt: &str, paths: &[PathBuf]) -> String {
     if paths.is_empty() {
         return prompt.to_string();
     }
-    let list: Vec<String> =
-        paths.iter().map(|p| format!("- {}", p.display())).collect();
+    let list: Vec<String> = paths.iter().map(|p| format!("- {}", p.display())).collect();
     format!(
         "{prompt}\n\nAttached files (read each before answering):\n{}",
         list.join("\n")
@@ -211,9 +225,15 @@ mod tests {
     fn unnamed_attachments_are_named_by_mime_and_index() {
         assert_eq!(attachment_name(None, "image/png", 0), "attachment-0.png");
         assert_eq!(attachment_name(None, "image/jpeg", 3), "attachment-3.jpg");
-        assert_eq!(attachment_name(None, "application/pdf", 1), "attachment-1.pdf");
+        assert_eq!(
+            attachment_name(None, "application/pdf", 1),
+            "attachment-1.pdf"
+        );
         // An unknown type still gets a usable name rather than none.
-        assert_eq!(attachment_name(None, "application/x-weird", 2), "attachment-2.bin");
+        assert_eq!(
+            attachment_name(None, "application/x-weird", 2),
+            "attachment-2.bin"
+        );
         // Two unnamed blocks in one prompt must not collide.
         assert_ne!(
             attachment_name(None, "image/png", 0),
@@ -223,7 +243,10 @@ mod tests {
 
     #[test]
     fn a_uri_supplies_the_name_but_cannot_supply_a_path() {
-        assert_eq!(attachment_name(Some("file:///tmp/photo.png"), "image/png", 0), "photo.png");
+        assert_eq!(
+            attachment_name(Some("file:///tmp/photo.png"), "image/png", 0),
+            "photo.png"
+        );
         assert_eq!(
             attachment_name(Some("https://x.test/a/b/../../etc/passwd"), "image/png", 0),
             "passwd"
@@ -243,7 +266,11 @@ mod tests {
                 mime_type: "image/png".into(),
                 uri: Some("first.png".into()),
             },
-            ContentBlock::Image { data: png, mime_type: "image/png".into(), uri: None },
+            ContentBlock::Image {
+                data: png,
+                mime_type: "image/png".into(),
+                uri: None,
+            },
         ];
         let paths = ingest(&ws, &blocks).unwrap();
 
@@ -252,7 +279,10 @@ mod tests {
         assert_eq!(paths[1].file_name().unwrap(), "attachment-2.png");
         for p in &paths {
             assert_eq!(std::fs::read(p).unwrap(), [0x89, 0x50, 0x4E, 0x47]);
-            assert!(p.starts_with(dir.path().join(UPLOADS_DIR)), "must land under uploads");
+            assert!(
+                p.starts_with(dir.path().join(UPLOADS_DIR)),
+                "must land under uploads"
+            );
         }
         // Separate subdirectories, so identical names cannot overwrite.
         assert_ne!(paths[0].parent(), paths[1].parent());
@@ -263,7 +293,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path().to_string_lossy().into_owned();
         assert!(ingest(&ws, &[ContentBlock::text("hi")]).unwrap().is_empty());
-        assert!(!dir.path().join(UPLOADS_DIR).exists(), "no attachments, no directory");
+        assert!(
+            !dir.path().join(UPLOADS_DIR).exists(),
+            "no attachments, no directory"
+        );
     }
 
     #[test]
@@ -305,8 +338,7 @@ mod tests {
 
     #[test]
     fn attachments_split_per_agent_ingestion() {
-        let paths =
-            vec![PathBuf::from("/w/a.png"), PathBuf::from("/w/b.pdf")];
+        let paths = vec![PathBuf::from("/w/a.png"), PathBuf::from("/w/b.pdf")];
         // Claude reads files itself, so everything is listed in the prompt.
         let (in_prompt, images) = split_for_tool("claude", &paths);
         assert_eq!(in_prompt.len(), 2);
@@ -323,7 +355,10 @@ mod tests {
         let got = prompt_with_attachments("do it", &[PathBuf::from("/w/a.png")]);
         assert!(got.starts_with("do it"));
         assert!(got.contains("/w/a.png"));
-        assert!(got.contains("read each"), "a bare path is easy to acknowledge without opening");
+        assert!(
+            got.contains("read each"),
+            "a bare path is easy to acknowledge without opening"
+        );
     }
 
     #[test]
@@ -338,7 +373,12 @@ mod tests {
 
         std::env::set_var("FLEET_PUBLIC_BASE_URL", "https://fleet.example.com/");
         match artifact_link("out/report.pdf", "file_abc").unwrap() {
-            ContentBlock::ResourceLink { uri, name, mime_type, .. } => {
+            ContentBlock::ResourceLink {
+                uri,
+                name,
+                mime_type,
+                ..
+            } => {
                 // The trailing slash on the base must not double up.
                 assert_eq!(uri, "https://fleet.example.com/v1/files/file_abc/content");
                 assert_eq!(name, "report.pdf");

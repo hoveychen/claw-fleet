@@ -150,7 +150,11 @@ pub fn extract(script: &str, args: Option<&str>) -> Result<SidecarResult, Sideca
 /// Spawn `node <harness> <script> [args]` with a hard timeout, returning parsed
 /// stdout. A reader thread drains stdout so a full pipe can't deadlock the
 /// timeout poll.
-fn run_node(harness: &Path, script: &Path, args: Option<&str>) -> Result<SidecarResult, SidecarError> {
+fn run_node(
+    harness: &Path,
+    script: &Path,
+    args: Option<&str>,
+) -> Result<SidecarResult, SidecarError> {
     use std::process::Stdio;
 
     let mut cmd = crate::process_util::command(node_bin());
@@ -158,11 +162,15 @@ fn run_node(harness: &Path, script: &Path, args: Option<&str>) -> Result<Sidecar
     if let Some(a) = args {
         cmd.arg(a);
     }
-    cmd.stdout(Stdio::piped()).stderr(Stdio::null()).stdin(Stdio::null());
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null());
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(SidecarError::NodeNotFound),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(SidecarError::NodeNotFound)
+        }
         Err(e) => return Err(SidecarError::Io(e.to_string())),
     };
 
@@ -198,8 +206,12 @@ fn run_node(harness: &Path, script: &Path, args: Option<&str>) -> Result<Sidecar
         return Err(SidecarError::NonZeroExit(status.code().unwrap_or(-1)));
     }
 
-    serde_json::from_str::<SidecarResult>(out.trim())
-        .map_err(|e| SidecarError::BadOutput(format!("{e}; head={:?}", out.chars().take(80).collect::<String>())))
+    serde_json::from_str::<SidecarResult>(out.trim()).map_err(|e| {
+        SidecarError::BadOutput(format!(
+            "{e}; head={:?}",
+            out.chars().take(80).collect::<String>()
+        ))
+    })
 }
 
 /// One process-wide lock serializing every test that reads/writes the global
@@ -212,8 +224,8 @@ pub(crate) static NODE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(()
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::NODE_ENV_LOCK as ENV_LOCK;
+    use super::*;
 
     /// Probe whether `node` is runnable in this environment; tests that need it
     /// skip (return early) when absent so CI without node still passes.
@@ -244,7 +256,9 @@ return out
 
     #[test]
     fn extracts_static_parallel_then_single() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !node_available() {
             eprintln!("skipping: node not available");
             return;
@@ -297,7 +311,9 @@ return out
 
     #[test]
     fn node_not_found_is_typed() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // An override that can't be a real binary → NodeNotFound, never a panic.
         std::env::set_var("FLEET_NODE_BIN", "/nonexistent/definitely-not-node-xyz");
         let r = extract(VIZ_PROBE, None);

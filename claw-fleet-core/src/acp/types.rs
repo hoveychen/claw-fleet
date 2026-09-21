@@ -28,7 +28,9 @@ pub const PROTOCOL_VERSION: u16 = 1;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     /// Plain text or Markdown. Every agent MUST support this in prompts.
-    Text { text: String },
+    Text {
+        text: String,
+    },
     Image {
         data: String,
         #[serde(rename = "mimeType")]
@@ -53,7 +55,9 @@ pub enum ContentBlock {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         size: Option<u64>,
     },
-    Resource { resource: Value },
+    Resource {
+        resource: Value,
+    },
     /// Forward compatibility: a client on a newer schema may send a block we do
     /// not know. Dropping it silently beats failing the whole prompt.
     #[serde(other)]
@@ -382,7 +386,9 @@ pub enum ToolCallContent {
 
 impl ToolCallContent {
     pub fn text(s: impl Into<String>) -> Self {
-        ToolCallContent::Content { content: ContentBlock::text(s) }
+        ToolCallContent::Content {
+            content: ContentBlock::text(s),
+        }
     }
 }
 
@@ -440,7 +446,11 @@ pub struct ToolCallUpdate {
 
 impl ToolCallUpdate {
     pub fn status(id: impl Into<String>, status: ToolCallStatus) -> Self {
-        Self { tool_call_id: id.into(), status: Some(status), ..Default::default() }
+        Self {
+            tool_call_id: id.into(),
+            status: Some(status),
+            ..Default::default()
+        }
     }
 }
 
@@ -533,7 +543,12 @@ pub struct ElicitationSchema {
 
 impl ElicitationSchema {
     pub fn object(properties: serde_json::Map<String, Value>, required: Vec<String>) -> Self {
-        Self { kind: "object", title: None, properties, required }
+        Self {
+            kind: "object",
+            title: None,
+            properties,
+            required,
+        }
     }
 }
 
@@ -664,13 +679,19 @@ pub enum SessionUpdate {
 
 impl SessionUpdate {
     pub fn agent_text(text: impl Into<String>) -> Self {
-        SessionUpdate::AgentMessageChunk { content: ContentBlock::text(text) }
+        SessionUpdate::AgentMessageChunk {
+            content: ContentBlock::text(text),
+        }
     }
     pub fn user_text(text: impl Into<String>) -> Self {
-        SessionUpdate::UserMessageChunk { content: ContentBlock::text(text) }
+        SessionUpdate::UserMessageChunk {
+            content: ContentBlock::text(text),
+        }
     }
     pub fn thought(text: impl Into<String>) -> Self {
-        SessionUpdate::AgentThoughtChunk { content: ContentBlock::text(text) }
+        SessionUpdate::AgentThoughtChunk {
+            content: ContentBlock::text(text),
+        }
     }
 }
 
@@ -738,12 +759,18 @@ mod tests {
 
     #[test]
     fn stop_reason_uses_the_schema_spelling() {
-        assert_eq!(serde_json::to_value(StopReason::EndTurn).unwrap(), json!("end_turn"));
+        assert_eq!(
+            serde_json::to_value(StopReason::EndTurn).unwrap(),
+            json!("end_turn")
+        );
         assert_eq!(
             serde_json::to_value(StopReason::MaxTurnRequests).unwrap(),
             json!("max_turn_requests")
         );
-        assert_eq!(serde_json::to_value(StopReason::Cancelled).unwrap(), json!("cancelled"));
+        assert_eq!(
+            serde_json::to_value(StopReason::Cancelled).unwrap(),
+            json!("cancelled")
+        );
     }
 
     #[test]

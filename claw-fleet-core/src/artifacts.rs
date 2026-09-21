@@ -305,12 +305,16 @@ pub fn normalize_dir_path(raw: &str) -> Result<String, String> {
             return Err("a folder name cannot contain control characters".to_string());
         }
         if seg.chars().count() > MAX_SEGMENT_CHARS {
-            return Err(format!("folder name '{seg}' is longer than {MAX_SEGMENT_CHARS} characters"));
+            return Err(format!(
+                "folder name '{seg}' is longer than {MAX_SEGMENT_CHARS} characters"
+            ));
         }
         segments.push(seg.to_string());
     }
     if segments.len() > MAX_PATH_DEPTH {
-        return Err(format!("folder path is more than {MAX_PATH_DEPTH} levels deep"));
+        return Err(format!(
+            "folder path is more than {MAX_PATH_DEPTH} levels deep"
+        ));
     }
     Ok(segments.join("/"))
 }
@@ -331,7 +335,11 @@ fn repath(path: &str, from: &str, to: &str) -> Option<String> {
         return Some(to.to_string());
     }
     let rest = path.strip_prefix(&format!("{from}/"))?;
-    Some(if to.is_empty() { rest.to_string() } else { format!("{to}/{rest}") })
+    Some(if to.is_empty() {
+        rest.to_string()
+    } else {
+        format!("{to}/{rest}")
+    })
 }
 
 // ── Kind ─────────────────────────────────────────────────────────────────────
@@ -381,7 +389,11 @@ fn kind_from_extension(name: &str) -> &'static str {
 
 fn next_id(root: &Path, now: u64) -> String {
     let base = chrono::DateTime::from_timestamp_millis(now as i64)
-        .map(|dt| dt.with_timezone(&chrono::Local).format("%Y%m%d-%H%M%S").to_string())
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y%m%d-%H%M%S")
+                .to_string()
+        })
         .unwrap_or_else(|| format!("a{now}"));
     if !root.join(&base).exists() {
         return base;
@@ -411,8 +423,7 @@ fn ingest_blob(source: &Path, dest: &Path) -> Result<bool, String> {
     match fs::hard_link(source, dest) {
         Ok(()) => Ok(true),
         Err(_) => {
-            fs::copy(source, dest)
-                .map_err(|e| format!("copy '{}': {e}", source.display()))?;
+            fs::copy(source, dest).map_err(|e| format!("copy '{}': {e}", source.display()))?;
             Ok(false)
         }
     }
@@ -449,8 +460,8 @@ pub fn add_in(
     workspace: &Path,
     session_id: Option<&str>,
 ) -> Result<Artifact, String> {
-    let meta = fs::metadata(source)
-        .map_err(|e| format!("cannot read '{}': {e}", source.display()))?;
+    let meta =
+        fs::metadata(source).map_err(|e| format!("cannot read '{}': {e}", source.display()))?;
     if meta.is_dir() {
         return Err(format!(
             "'{}' is a directory — an artifact is a single file; zip it first",
@@ -469,7 +480,10 @@ pub fn add_in(
     }
 
     let name = crate::user_attachments::sanitize_name_with(
-        &source.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default(),
+        &source
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default(),
         "artifact.bin",
     );
 
@@ -481,7 +495,16 @@ pub fn add_in(
     // The same deliverable produced again becomes a new version of the card it
     // already has, rather than a second card with the same name.
     if let Some(existing) = find_same_deliverable(root, &workspace_path, &source_path, &name) {
-        return add_version_in(root, &existing.id, source, size, now, title, note, session_id);
+        return add_version_in(
+            root,
+            &existing.id,
+            source,
+            size,
+            now,
+            title,
+            note,
+            session_id,
+        );
     }
 
     let id = next_id(root, now);
@@ -603,8 +626,7 @@ fn archive_current_blob(
         .unwrap_or(artifact.hardlinked);
 
     if !was_hardlinked {
-        return fs::rename(blob, archived)
-            .map_err(|e| format!("archive '{}': {e}", artifact.name));
+        return fs::rename(blob, archived).map_err(|e| format!("archive '{}': {e}", artifact.name));
     }
 
     fs::copy(blob, archived).map_err(|e| {
@@ -724,7 +746,11 @@ pub fn list_in(root: &Path) -> Vec<Artifact> {
             a
         })
         .collect();
-    out.sort_by(|a, b| b.created_ms.cmp(&a.created_ms).then_with(|| b.id.cmp(&a.id)));
+    out.sort_by(|a, b| {
+        b.created_ms
+            .cmp(&a.created_ms)
+            .then_with(|| b.id.cmp(&a.id))
+    });
     out
 }
 
@@ -765,12 +791,17 @@ pub fn version_blob_path(
         return Ok(blob_path(root, artifact));
     }
     if !artifact.versions.iter().any(|v| v.id == version) {
-        return Err(format!("artifact '{}' has no version '{version}'", artifact.id));
+        return Err(format!(
+            "artifact '{}' has no version '{version}'",
+            artifact.id
+        ));
     }
     if !valid_id(version) {
         return Err(format!("invalid version id '{version}'"));
     }
-    Ok(versions_dir(&root.join(&artifact.id)).join(version).join(&artifact.name))
+    Ok(versions_dir(&root.join(&artifact.id))
+        .join(version)
+        .join(&artifact.name))
 }
 
 /// A hard-linked blob whose length or mtime no longer matches ingest has been
@@ -832,11 +863,19 @@ pub fn read_version_bytes_in(
 
     let Some((start, want_end)) = range else {
         let bytes = fs::read(&path).map_err(|e| format!("read '{}': {e}", artifact.name))?;
-        return Ok(ArtifactBytes { bytes, mime: artifact.mime, total_size: total, range: None });
+        return Ok(ArtifactBytes {
+            bytes,
+            mime: artifact.mime,
+            total_size: total,
+            range: None,
+        });
     };
 
     if start >= total {
-        return Err(format!("range start {start} is past end of '{}' ({total})", artifact.name));
+        return Err(format!(
+            "range start {start} is past end of '{}' ({total})",
+            artifact.name
+        ));
     }
     let end = want_end
         .min(total.saturating_sub(1))
@@ -844,9 +883,11 @@ pub fn read_version_bytes_in(
     let len = end - start + 1;
 
     let mut f = fs::File::open(&path).map_err(|e| format!("open '{}': {e}", artifact.name))?;
-    f.seek(SeekFrom::Start(start)).map_err(|e| format!("seek '{}': {e}", artifact.name))?;
+    f.seek(SeekFrom::Start(start))
+        .map_err(|e| format!("seek '{}': {e}", artifact.name))?;
     let mut bytes = vec![0u8; len as usize];
-    f.read_exact(&mut bytes).map_err(|e| format!("read '{}': {e}", artifact.name))?;
+    f.read_exact(&mut bytes)
+        .map_err(|e| format!("read '{}': {e}", artifact.name))?;
 
     Ok(ArtifactBytes {
         bytes,
@@ -893,7 +934,11 @@ pub fn update_in(
     if let Some(t) = title {
         let t = t.trim();
         // An empty title would render as a blank card; fall back to the filename.
-        artifact.title = if t.is_empty() { artifact.name.clone() } else { t.to_string() };
+        artifact.title = if t.is_empty() {
+            artifact.name.clone()
+        } else {
+            t.to_string()
+        };
     }
     if let Some(n) = note {
         artifact.note = n.trim().to_string();
@@ -934,7 +979,10 @@ pub fn rollback_in(root: &Path, id: &str, version: &str) -> Result<Artifact, Str
     let outgoing_dir = versions_dir(&dir).join(&artifact.current_version);
     let incoming = versions_dir(&dir).join(&target.id).join(&artifact.name);
     if !incoming.exists() {
-        return Err(format!("version '{version}' of '{}' has no stored bytes", artifact.name));
+        return Err(format!(
+            "version '{version}' of '{}' has no stored bytes",
+            artifact.name
+        ));
     }
     fs::create_dir_all(&outgoing_dir)
         .map_err(|e| format!("create '{}': {e}", outgoing_dir.display()))?;
@@ -1094,11 +1142,13 @@ pub fn export_folder_zip(
     let directory = normalize_dir_path(directory)?;
     let members = folder_members(root, workspace_path, &directory);
 
-    let file = fs::File::create(dest)
-        .map_err(|e| format!("create '{}': {e}", dest.display()))?;
+    let file = fs::File::create(dest).map_err(|e| format!("create '{}': {e}", dest.display()))?;
     let mut zip = crate::zip_stream::ZipStream::new(std::io::BufWriter::new(file));
     let mut used = std::collections::HashSet::new();
-    let mut report = FolderZip { filename: zip_filename(&directory, workspace_path), ..Default::default() };
+    let mut report = FolderZip {
+        filename: zip_filename(&directory, workspace_path),
+        ..Default::default()
+    };
 
     for artifact in &members {
         let blob = blob_path(root, artifact);
@@ -1111,8 +1161,8 @@ pub fn export_folder_zip(
                 continue;
             }
         };
-        let mut source = fs::File::open(&blob)
-            .map_err(|e| format!("open '{}': {e}", artifact.name))?;
+        let mut source =
+            fs::File::open(&blob).map_err(|e| format!("open '{}': {e}", artifact.name))?;
 
         // Path inside the archive, relative to the folder being exported.
         let dir = effective_directory(artifact);
@@ -1149,7 +1199,11 @@ fn zip_filename(directory: &str, workspace_path: &str) -> String {
     let stem = if directory.is_empty() {
         crate::wiki::workspace_name_of(workspace_path)
     } else {
-        directory.rsplit('/').next().unwrap_or(directory).to_string()
+        directory
+            .rsplit('/')
+            .next()
+            .unwrap_or(directory)
+            .to_string()
     };
     let stem = crate::user_attachments::sanitize_name_with(&stem, "artifacts");
     format!("{stem}.zip")
@@ -1184,7 +1238,9 @@ pub fn list_folders_in(root: &Path) -> Vec<Folder> {
     };
     let mut out: Vec<Folder> = serde_json::from_str(&raw).unwrap_or_default();
     out.sort_by(|a, b| {
-        a.workspace_path.cmp(&b.workspace_path).then_with(|| a.path.cmp(&b.path))
+        a.workspace_path
+            .cmp(&b.workspace_path)
+            .then_with(|| a.path.cmp(&b.path))
     });
     out.dedup();
     out
@@ -1217,14 +1273,24 @@ pub fn create_folder_in(root: &Path, workspace: &Path, path: &str) -> Result<Fol
 
     let mut prefix = String::new();
     for seg in path.split('/') {
-        prefix = if prefix.is_empty() { seg.to_string() } else { format!("{prefix}/{seg}") };
-        let entry = Folder { workspace_path: workspace_path.clone(), path: prefix.clone() };
+        prefix = if prefix.is_empty() {
+            seg.to_string()
+        } else {
+            format!("{prefix}/{seg}")
+        };
+        let entry = Folder {
+            workspace_path: workspace_path.clone(),
+            path: prefix.clone(),
+        };
         if !folders.contains(&entry) {
             folders.push(entry);
         }
     }
     write_folders(root, &folders)?;
-    Ok(Folder { workspace_path, path })
+    Ok(Folder {
+        workspace_path,
+        path,
+    })
 }
 
 /// Forget a folder. Refused while anything is still inside it, so the button
@@ -1246,15 +1312,15 @@ pub fn delete_folder_in(root: &Path, workspace: &Path, path: &str) -> Result<(),
         .filter(|a| a.workspace_path == workspace_path && is_at_or_under(&a.path, &path))
         .count();
     if filed > 0 {
-        return Err(format!("'{path}' still holds {filed} artifact(s) — move them out first"));
+        return Err(format!(
+            "'{path}' still holds {filed} artifact(s) — move them out first"
+        ));
     }
 
     let mut folders = list_folders_in(root);
     let before = folders.len();
     // Strictly-under children go with it: an empty folder tree is empty.
-    folders.retain(|f| {
-        !(f.workspace_path == workspace_path && is_at_or_under(&f.path, &path))
-    });
+    folders.retain(|f| !(f.workspace_path == workspace_path && is_at_or_under(&f.path, &path)));
     if folders.len() == before {
         return Err(format!("folder '{path}' not found"));
     }
@@ -1292,12 +1358,18 @@ pub fn rename_folder_in(
     let workspace_path = crate::wiki::resolve_workspace_path(workspace);
 
     let mut folders = list_folders_in(root);
-    if !folders.iter().any(|f| f.workspace_path == workspace_path && f.path == from) {
+    if !folders
+        .iter()
+        .any(|f| f.workspace_path == workspace_path && f.path == from)
+    {
         return Err(format!("folder '{from}' not found"));
     }
     // Merging two folders is a decision the user has to make explicitly, so
     // refuse rather than silently pouring one into the other.
-    if folders.iter().any(|f| f.workspace_path == workspace_path && f.path == to) {
+    if folders
+        .iter()
+        .any(|f| f.workspace_path == workspace_path && f.path == to)
+    {
         return Err(format!("folder '{to}' already exists"));
     }
 
@@ -1313,8 +1385,15 @@ pub fn rename_folder_in(
     // hang off a parent nothing records.
     let mut prefix = String::new();
     for seg in to.split('/') {
-        prefix = if prefix.is_empty() { seg.to_string() } else { format!("{prefix}/{seg}") };
-        let entry = Folder { workspace_path: workspace_path.clone(), path: prefix.clone() };
+        prefix = if prefix.is_empty() {
+            seg.to_string()
+        } else {
+            format!("{prefix}/{seg}")
+        };
+        let entry = Folder {
+            workspace_path: workspace_path.clone(),
+            path: prefix.clone(),
+        };
         if !folders.contains(&entry) {
             folders.push(entry);
         }
@@ -1326,7 +1405,9 @@ pub fn rename_folder_in(
         if a.workspace_path != workspace_path {
             continue;
         }
-        let Some(next) = repath(&a.path, &from, &to) else { continue };
+        let Some(next) = repath(&a.path, &from, &to) else {
+            continue;
+        };
         let dir = artifact_dir(root, &a.id)?;
         let mut artifact = read_meta(&dir)?;
         artifact.path = next;
@@ -1421,7 +1502,10 @@ fn read_meta(dir: &Path) -> Result<Artifact, String> {
         });
     }
     if artifact.current_version.is_empty()
-        || !artifact.versions.iter().any(|v| v.id == artifact.current_version)
+        || !artifact
+            .versions
+            .iter()
+            .any(|v| v.id == artifact.current_version)
     {
         // Newest first, so the head is the current one. Also heals a meta.json
         // whose `current_version` names a version that no longer exists.
@@ -1491,7 +1575,10 @@ mod tests {
         assert_eq!(a.size_bytes, 14);
         // Title defaults to the filename when the ingester supplied none.
         assert_eq!(a.title, "report.pdf");
-        assert_eq!(fs::read(blob_path(root.path(), &a)).unwrap(), b"%PDF-1.4 hello");
+        assert_eq!(
+            fs::read(blob_path(root.path(), &a)).unwrap(),
+            b"%PDF-1.4 hello"
+        );
     }
 
     #[test]
@@ -1500,7 +1587,10 @@ mod tests {
         let src = write_file(dir.path(), "deck.pptx", b"PK\x03\x04zzz");
 
         let fresh = dir.path().join("fresh.pptx");
-        assert!(ingest_blob(&src, &fresh).unwrap(), "a fresh dest must hard-link");
+        assert!(
+            ingest_blob(&src, &fresh).unwrap(),
+            "a fresh dest must hard-link"
+        );
         assert_eq!(fs::read(&fresh).unwrap(), b"PK\x03\x04zzz");
 
         // An occupied dest makes hard_link fail — the same branch a
@@ -1508,8 +1598,15 @@ mod tests {
         // *separate* file, never a link to `src`: see ingest_blob's docs.
         let occupied = dir.path().join("occupied.pptx");
         fs::write(&occupied, b"stale").unwrap();
-        assert!(!ingest_blob(&src, &occupied).unwrap(), "an occupied dest must fall back to copy");
-        assert_eq!(fs::read(&occupied).unwrap(), b"PK\x03\x04zzz", "the copy must win");
+        assert!(
+            !ingest_blob(&src, &occupied).unwrap(),
+            "an occupied dest must fall back to copy"
+        );
+        assert_eq!(
+            fs::read(&occupied).unwrap(),
+            b"PK\x03\x04zzz",
+            "the copy must win"
+        );
     }
 
     #[test]
@@ -1539,8 +1636,14 @@ mod tests {
         // The worktree the file came from is removed when the plan merges.
         fs::remove_file(&src).unwrap();
 
-        assert_eq!(fs::read(blob_path(root.path(), &a)).unwrap(), b"video bytes");
-        assert_eq!(get_in(root.path(), &a.id).unwrap().kind, ArtifactKind::VIDEO);
+        assert_eq!(
+            fs::read(blob_path(root.path(), &a)).unwrap(),
+            b"video bytes"
+        );
+        assert_eq!(
+            get_in(root.path(), &a.id).unwrap().kind,
+            ArtifactKind::VIDEO
+        );
     }
 
     #[test]
@@ -1549,13 +1652,26 @@ mod tests {
         let src_dir = store();
         fs::create_dir_all(src_dir.path().join("adir")).unwrap();
 
-        let err = add_in(root.path(), &src_dir.path().join("adir"), None, None, src_dir.path(), None)
-            .unwrap_err();
+        let err = add_in(
+            root.path(),
+            &src_dir.path().join("adir"),
+            None,
+            None,
+            src_dir.path(),
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("directory"), "got: {err}");
 
         for bad in ["../escape", "a/b", "..", "a\\b", ""] {
-            assert!(get_in(root.path(), bad).is_err(), "id '{bad}' must be rejected");
-            assert!(delete_in(root.path(), bad).is_err(), "id '{bad}' must be rejected");
+            assert!(
+                get_in(root.path(), bad).is_err(),
+                "id '{bad}' must be rejected"
+            );
+            assert!(
+                delete_in(root.path(), bad).is_err(),
+                "id '{bad}' must be rejected"
+            );
         }
     }
 
@@ -1597,7 +1713,10 @@ mod tests {
         let src_dir = store();
         let src = write_file(src_dir.path(), "empty.pdf", b"");
         let a = add_in(root.path(), &src, None, None, src_dir.path(), None).unwrap();
-        assert_eq!(a.size_bytes, 0, "an empty file is still a storable artifact");
+        assert_eq!(
+            a.size_bytes, 0,
+            "an empty file is still a storable artifact"
+        );
 
         let whole = read_bytes_in(root.path(), &a.id, None).unwrap();
         assert!(whole.bytes.is_empty());
@@ -1633,7 +1752,10 @@ mod tests {
         // therefore the archived artifact, changes underneath us.
         fs::write(&src, b"rewritten in place, different length").unwrap();
 
-        assert!(get_in(root.path(), &a.id).unwrap().drifted, "in-place rewrite must surface");
+        assert!(
+            get_in(root.path(), &a.id).unwrap().drifted,
+            "in-place rewrite must surface"
+        );
         assert!(list_in(root.path())[0].drifted);
     }
 
@@ -1642,8 +1764,15 @@ mod tests {
         let root = store();
         let src_dir = store();
         let src = write_file(src_dir.path(), "notes.txt", b"x");
-        let a = add_in(root.path(), &src, Some("初稿"), Some("给客户的"), src_dir.path(), None)
-            .unwrap();
+        let a = add_in(
+            root.path(),
+            &src,
+            Some("初稿"),
+            Some("给客户的"),
+            src_dir.path(),
+            None,
+        )
+        .unwrap();
         assert_eq!(a.title, "初稿");
         assert_eq!(a.note, "给客户的");
 
@@ -1663,11 +1792,18 @@ mod tests {
     fn normalizes_the_sloppy_paths_a_text_field_produces() {
         assert_eq!(normalize_dir_path("").unwrap(), "");
         assert_eq!(normalize_dir_path("/").unwrap(), "");
-        assert_eq!(normalize_dir_path("  /交付//2026Q3/ ").unwrap(), "交付/2026Q3");
+        assert_eq!(
+            normalize_dir_path("  /交付//2026Q3/ ").unwrap(),
+            "交付/2026Q3"
+        );
         assert_eq!(normalize_dir_path(" 交付 / 报告 ").unwrap(), "交付/报告");
 
-        assert!(normalize_dir_path("a/../b").unwrap_err().contains("not a usable"));
-        assert!(normalize_dir_path("a/./b").unwrap_err().contains("not a usable"));
+        assert!(normalize_dir_path("a/../b")
+            .unwrap_err()
+            .contains("not a usable"));
+        assert!(normalize_dir_path("a/./b")
+            .unwrap_err()
+            .contains("not a usable"));
         assert!(normalize_dir_path("a\nb").unwrap_err().contains("control"));
         // Counted in chars, not bytes — a 64-CJK-character name is legal.
         let cjk = "交".repeat(MAX_SEGMENT_CHARS);
@@ -1675,8 +1811,13 @@ mod tests {
         assert!(normalize_dir_path(&"交".repeat(MAX_SEGMENT_CHARS + 1))
             .unwrap_err()
             .contains("longer than"));
-        let deep = (0..=MAX_PATH_DEPTH).map(|n| n.to_string()).collect::<Vec<_>>().join("/");
-        assert!(normalize_dir_path(&deep).unwrap_err().contains("levels deep"));
+        let deep = (0..=MAX_PATH_DEPTH)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("/");
+        assert!(normalize_dir_path(&deep)
+            .unwrap_err()
+            .contains("levels deep"));
     }
 
     #[test]
@@ -1685,7 +1826,10 @@ mod tests {
         assert!(is_at_or_under("docs/a", "docs"));
         assert!(is_at_or_under("docs", "docs"));
         assert!(!is_at_or_under("docs-old", "docs"));
-        assert_eq!(repath("docs/a/b", "docs", "交付"), Some("交付/a/b".to_string()));
+        assert_eq!(
+            repath("docs/a/b", "docs", "交付"),
+            Some("交付/a/b".to_string())
+        );
         assert_eq!(repath("docs", "docs", "交付"), Some("交付".to_string()));
         assert_eq!(repath("docs-old", "docs", "交付"), None);
     }
@@ -1697,20 +1841,31 @@ mod tests {
         let src = write_file(src_dir.path(), "deck.pptx", b"PK\x03\x04");
         let a = add_in(root.path(), &src, None, None, src_dir.path(), None).unwrap();
 
-        let filed = update_in(root.path(), &a.id, None, None, None, Some("/交付//2026Q3/")).unwrap();
+        let filed =
+            update_in(root.path(), &a.id, None, None, None, Some("/交付//2026Q3/")).unwrap();
         assert_eq!(filed.path, "交付/2026Q3", "the path is stored normalized");
         assert_eq!(get_in(root.path(), &a.id).unwrap().path, "交付/2026Q3");
 
         let starred = update_in(root.path(), &a.id, None, None, Some(true), None).unwrap();
-        assert_eq!(starred.path, "交付/2026Q3", "path must survive a starred-only patch");
+        assert_eq!(
+            starred.path, "交付/2026Q3",
+            "path must survive a starred-only patch"
+        );
 
         // Back to the workspace root.
         let unfiled = update_in(root.path(), &a.id, None, None, None, Some("")).unwrap();
         assert_eq!(unfiled.path, "");
 
         // A refused path aborts the whole patch rather than half-applying it.
-        let err = update_in(root.path(), &a.id, Some("新标题"), None, None, Some("a/../b"))
-            .unwrap_err();
+        let err = update_in(
+            root.path(),
+            &a.id,
+            Some("新标题"),
+            None,
+            None,
+            Some("a/../b"),
+        )
+        .unwrap_err();
         assert!(err.contains("not a usable"), "{err}");
         assert_eq!(
             get_in(root.path(), &a.id).unwrap().title,
@@ -1754,7 +1909,11 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let root = store();
         let ws = store();
         let out = store();
-        for (name, path) in [("a.pdf", "交付"), ("b.pdf", "交付/2026Q3"), ("c.pdf", "别处")] {
+        for (name, path) in [
+            ("a.pdf", "交付"),
+            ("b.pdf", "交付/2026Q3"),
+            ("c.pdf", "别处"),
+        ] {
             let src = write_file(ws.path(), name, b"1234");
             let art = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
             update_in(root.path(), &art.id, None, None, None, Some(path)).unwrap();
@@ -1770,7 +1929,10 @@ with zipfile.ZipFile(sys.argv[1]) as z:
 
         let dest = out.path().join(&plan.filename);
         let done = export_folder_zip(root.path(), &ws_path, "交付", &dest).unwrap();
-        assert_eq!((done.member_count, done.total_bytes), (plan.member_count, plan.total_bytes));
+        assert_eq!(
+            (done.member_count, done.total_bytes),
+            (plan.member_count, plan.total_bytes)
+        );
         assert_eq!(done.filename, plan.filename);
 
         // An empty folder is reported as empty rather than as an error, which
@@ -1856,7 +2018,12 @@ with zipfile.ZipFile(sys.argv[1]) as z:
 
         let dest = out.path().join("dup.zip");
         let ws_path = crate::wiki::resolve_workspace_path(ws.path());
-        assert_eq!(export_folder_zip(root.path(), &ws_path, "交付", &dest).unwrap().member_count, 2);
+        assert_eq!(
+            export_folder_zip(root.path(), &ws_path, "交付", &dest)
+                .unwrap()
+                .member_count,
+            2
+        );
 
         let got = zip_members(&dest);
         // Without de-duplication the second would overwrite the first on
@@ -1929,12 +2096,19 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let src = Path::new(&ws_path).join("reports").join("q3.pdf");
         add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
         let members = folder_members(root.path(), &ws_path, "reports");
-        assert_eq!(members.len(), 1, "the derived directory counts as its folder");
+        assert_eq!(
+            members.len(),
+            1,
+            "the derived directory counts as its folder"
+        );
 
         let dest = out.path().join("derived.zip");
         export_folder_zip(root.path(), &ws_path, "reports", &dest).unwrap();
         assert_eq!(
-            zip_members(&dest).iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            zip_members(&dest)
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>(),
             vec!["q3.pdf"]
         );
     }
@@ -1954,7 +2128,10 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let report = export_folder_zip(root.path(), &ws_path, "docs", &dest).unwrap();
         assert_eq!(report.member_count, 1, "docs-old is a different folder");
         assert_eq!(
-            zip_members(&dest).iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            zip_members(&dest)
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>(),
             vec!["a.pdf"]
         );
     }
@@ -1967,15 +2144,19 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let f = create_folder_in(root.path(), ws.path(), "/交付/2026Q3/").unwrap();
         assert_eq!(f.path, "交付/2026Q3");
         // The parent is registered too, so deleting the leaf leaves it standing.
-        let paths: Vec<String> =
-            list_folders_in(root.path()).into_iter().map(|f| f.path).collect();
+        let paths: Vec<String> = list_folders_in(root.path())
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
         assert_eq!(paths, vec!["交付".to_string(), "交付/2026Q3".to_string()]);
 
         // Creating it again is a no-op success, not a duplicate row.
         create_folder_in(root.path(), ws.path(), "交付/2026Q3").unwrap();
         assert_eq!(list_folders_in(root.path()).len(), 2);
 
-        assert!(create_folder_in(root.path(), ws.path(), " / ").unwrap_err().contains("needs a name"));
+        assert!(create_folder_in(root.path(), ws.path(), " / ")
+            .unwrap_err()
+            .contains("needs a name"));
     }
 
     #[test]
@@ -1990,14 +2171,23 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         // Refused from the folder itself and from its ancestor.
         let err = delete_folder_in(root.path(), ws.path(), "交付/2026Q3").unwrap_err();
         assert!(err.contains("still holds 1"), "{err}");
-        assert!(delete_folder_in(root.path(), ws.path(), "交付").unwrap_err().contains("still holds 1"));
+        assert!(delete_folder_in(root.path(), ws.path(), "交付")
+            .unwrap_err()
+            .contains("still holds 1"));
 
         update_in(root.path(), &a.id, None, None, None, Some("")).unwrap();
         delete_folder_in(root.path(), ws.path(), "交付").unwrap();
-        assert!(list_folders_in(root.path()).is_empty(), "children go with the parent");
+        assert!(
+            list_folders_in(root.path()).is_empty(),
+            "children go with the parent"
+        );
 
-        assert!(delete_folder_in(root.path(), ws.path(), "交付").unwrap_err().contains("not found"));
-        assert!(delete_folder_in(root.path(), ws.path(), "").unwrap_err().contains("root"));
+        assert!(delete_folder_in(root.path(), ws.path(), "交付")
+            .unwrap_err()
+            .contains("not found"));
+        assert!(delete_folder_in(root.path(), ws.path(), "")
+            .unwrap_err()
+            .contains("root"));
     }
 
     #[test]
@@ -2037,20 +2227,28 @@ with zipfile.ZipFile(sys.argv[1]) as z:
             .collect();
         assert!(names.contains(&"交付".to_string()));
         assert!(names.contains(&"交付/2026".to_string()));
-        assert!(names.contains(&"docs-old".to_string()), "a sibling prefix must be left alone");
+        assert!(
+            names.contains(&"docs-old".to_string()),
+            "a sibling prefix must be left alone"
+        );
 
         // Nesting a folder into its own subtree, or onto an existing one.
         create_folder_in(root.path(), ws.path(), "归档").unwrap();
-        assert!(rename_folder_in(root.path(), ws.path(), "交付", "交付/内层")
-            .unwrap_err()
-            .contains("into itself"));
+        assert!(
+            rename_folder_in(root.path(), ws.path(), "交付", "交付/内层")
+                .unwrap_err()
+                .contains("into itself")
+        );
         assert!(rename_folder_in(root.path(), ws.path(), "交付", "归档")
             .unwrap_err()
             .contains("already exists"));
         assert!(rename_folder_in(root.path(), ws.path(), "没有这个", "x")
             .unwrap_err()
             .contains("not found"));
-        assert_eq!(rename_folder_in(root.path(), ws.path(), "交付", "交付").unwrap(), 0);
+        assert_eq!(
+            rename_folder_in(root.path(), ws.path(), "交付", "交付").unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -2060,10 +2258,17 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         create_folder_in(root.path(), ws.path(), "报告").unwrap();
         rename_folder_in(root.path(), ws.path(), "报告", "交付/2026/报告").unwrap();
 
-        let names: Vec<String> = list_folders_in(root.path()).into_iter().map(|f| f.path).collect();
+        let names: Vec<String> = list_folders_in(root.path())
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
         assert_eq!(
             names,
-            vec!["交付".to_string(), "交付/2026".to_string(), "交付/2026/报告".to_string()],
+            vec![
+                "交付".to_string(),
+                "交付/2026".to_string(),
+                "交付/2026/报告".to_string()
+            ],
             "the destination's ancestors must exist or the tree has a hole"
         );
     }
@@ -2076,7 +2281,11 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
         create_folder_in(root.path(), ws.path(), "交付").unwrap();
 
-        assert_eq!(list_in(root.path()).len(), 1, "folders.json must not read as an artifact");
+        assert_eq!(
+            list_in(root.path()).len(),
+            1,
+            "folders.json must not read as an artifact"
+        );
         assert_eq!(usage_in(root.path()).count, 1);
     }
 
@@ -2085,7 +2294,15 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let root = store();
         let ws = store();
         let src = write_file(ws.path(), "report.pdf", b"%PDF v1");
-        let first = add_in(root.path(), &src, Some("\u{62a5}\u{544a}"), None, ws.path(), None).unwrap();
+        let first = add_in(
+            root.path(),
+            &src,
+            Some("\u{62a5}\u{544a}"),
+            None,
+            ws.path(),
+            None,
+        )
+        .unwrap();
         assert_eq!(first.current_version, "v1");
         assert_eq!(first.versions.len(), 1);
 
@@ -2095,14 +2312,22 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         assert_eq!(second.id, first.id, "must not become a second artifact");
         assert_eq!(second.current_version, "v2");
         assert_eq!(
-            second.versions.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+            second
+                .versions
+                .iter()
+                .map(|v| v.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["v2", "v1"],
             "newest first"
         );
         assert_eq!(second.size_bytes, b"%PDF version two, longer".len() as u64);
         // A title the user may have edited survives an ingest that omits one.
         assert_eq!(second.title, "\u{62a5}\u{544a}");
-        assert_eq!(list_in(root.path()).len(), 1, "the list shows one card, not two");
+        assert_eq!(
+            list_in(root.path()).len(),
+            1,
+            "the list shows one card, not two"
+        );
 
         // Current bytes are at blob/, the superseded ones under versions/.
         assert_eq!(
@@ -2110,7 +2335,9 @@ with zipfile.ZipFile(sys.argv[1]) as z:
             b"%PDF version two, longer"
         );
         assert_eq!(
-            read_version_bytes_in(root.path(), &first.id, Some("v1"), None).unwrap().bytes,
+            read_version_bytes_in(root.path(), &first.id, Some("v1"), None)
+                .unwrap()
+                .bytes,
             b"%PDF v1"
         );
     }
@@ -2121,7 +2348,10 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let ws = store();
         let src = write_file(ws.path(), "report.pdf", b"first");
         let a = add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
-        assert!(a.hardlinked, "the premise: ingest shares the source's inode");
+        assert!(
+            a.hardlinked,
+            "the premise: ingest shares the source's inode"
+        );
 
         rewrite_atomically(&src, b"second");
         add_in(root.path(), &src, None, None, ws.path(), None).unwrap();
@@ -2131,13 +2361,20 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         // one thing that could still corrupt history — cannot reach it.
         fs::write(&src, b"third-in-place").unwrap();
         assert_eq!(
-            read_version_bytes_in(root.path(), &a.id, Some("v1"), None).unwrap().bytes,
+            read_version_bytes_in(root.path(), &a.id, Some("v1"), None)
+                .unwrap()
+                .bytes,
             b"first",
             "an archived version must not change under us"
         );
         let stored = get_in(root.path(), &a.id).unwrap();
         assert!(
-            !stored.versions.iter().find(|v| v.id == "v1").unwrap().hardlinked,
+            !stored
+                .versions
+                .iter()
+                .find(|v| v.id == "v1")
+                .unwrap()
+                .hardlinked,
             "and it is recorded as a standalone copy, which cannot drift"
         );
         // The current version is still the live hard link, so it *does* see
@@ -2172,19 +2409,34 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let rolled = rollback_in(root.path(), &a.id, "v1").unwrap();
         assert_eq!(rolled.current_version, "v1");
         assert_eq!(rolled.size_bytes, 3);
-        assert_eq!(read_bytes_in(root.path(), &a.id, None).unwrap().bytes, b"one");
+        assert_eq!(
+            read_bytes_in(root.path(), &a.id, None).unwrap().bytes,
+            b"one"
+        );
         // Nothing was discarded, so the rollback itself can be undone.
         assert_eq!(
-            read_version_bytes_in(root.path(), &a.id, Some("v2"), None).unwrap().bytes,
+            read_version_bytes_in(root.path(), &a.id, Some("v2"), None)
+                .unwrap()
+                .bytes,
             b"two!!"
         );
         let back = rollback_in(root.path(), &a.id, "v2").unwrap();
         assert_eq!(back.current_version, "v2");
-        assert_eq!(read_bytes_in(root.path(), &a.id, None).unwrap().bytes, b"two!!");
+        assert_eq!(
+            read_bytes_in(root.path(), &a.id, None).unwrap().bytes,
+            b"two!!"
+        );
 
         // Rolling back to where we already are is a no-op, not an error.
-        assert_eq!(rollback_in(root.path(), &a.id, "v2").unwrap().current_version, "v2");
-        assert!(rollback_in(root.path(), &a.id, "v9").unwrap_err().contains("no version"));
+        assert_eq!(
+            rollback_in(root.path(), &a.id, "v2")
+                .unwrap()
+                .current_version,
+            "v2"
+        );
+        assert!(rollback_in(root.path(), &a.id, "v9")
+            .unwrap_err()
+            .contains("no version"));
     }
 
     #[test]
@@ -2210,9 +2462,14 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         assert_eq!(read.versions[0].size_bytes, a.size_bytes);
         assert_eq!(read.versions[0].added_ms, a.created_ms);
         // And the bytes are still reachable both ways.
-        assert_eq!(read_bytes_in(root.path(), &a.id, None).unwrap().bytes, b"%PDF");
         assert_eq!(
-            read_version_bytes_in(root.path(), &a.id, Some("v1"), None).unwrap().bytes,
+            read_bytes_in(root.path(), &a.id, None).unwrap().bytes,
+            b"%PDF"
+        );
+        assert_eq!(
+            read_version_bytes_in(root.path(), &a.id, Some("v1"), None)
+                .unwrap()
+                .bytes,
             b"%PDF"
         );
     }
@@ -2229,7 +2486,10 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let usage = usage_in(root.path());
         assert_eq!(usage.count, 1, "one artifact, whatever its history");
         assert_eq!(usage.total_bytes, 15, "both versions occupy disk");
-        assert_eq!(usage.version_bytes, 10, "the reclaimable part is the old one");
+        assert_eq!(
+            usage.version_bytes, 10,
+            "the reclaimable part is the old one"
+        );
         let _ = a;
     }
 
@@ -2255,13 +2515,19 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         let a = add_in(
             root.path(),
             &write_file(src_dir.path(), "one.png", b"12345"),
-            None, None, src_dir.path(), None,
+            None,
+            None,
+            src_dir.path(),
+            None,
         )
         .unwrap();
         let b = add_in(
             root.path(),
             &write_file(src_dir.path(), "two.png", b"1234567890"),
-            None, None, src_dir.path(), None,
+            None,
+            None,
+            src_dir.path(),
+            None,
         )
         .unwrap();
 
@@ -2289,7 +2555,10 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         delete_in(root.path(), &a.id).unwrap();
         assert!(!root.path().join(&a.id).exists());
         assert!(get_in(root.path(), &a.id).is_err());
-        assert!(delete_in(root.path(), &a.id).is_err(), "second delete must not succeed");
+        assert!(
+            delete_in(root.path(), &a.id).is_err(),
+            "second delete must not succeed"
+        );
     }
 
     #[test]

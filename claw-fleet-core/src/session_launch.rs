@@ -370,7 +370,7 @@ pub fn spawn_claude_detached(
 /// the session's decision cards / `fleet plan` / `fleet handoff`) or mis-tag the
 /// agent source. Mirror of the codex side's env-stripping in
 /// [`crate::codex_launch::apply_codex_launch_env`].
-fn strip_inherited_agent_env(cmd: &mut std::process::Command) {
+pub(crate) fn strip_inherited_agent_env(cmd: &mut std::process::Command) {
     cmd.env_remove("FLEET_SESSION_ID");
     cmd.env_remove("FLEET_AGENT_SOURCE");
     cmd.env_remove(crate::codex_launch::FLEET_CODEX_LAUNCH_TOKEN_ENV);
@@ -382,7 +382,7 @@ fn strip_inherited_agent_env(cmd: &mut std::process::Command) {
 /// `real_home_dir()`: the agent's credentials are not Fleet's state, so
 /// `FLEET_HOME` alone must not relocate them. Defaults to the same value, so
 /// this changes nothing until `FLEET_AGENT_HOME` is set.
-fn spawn_home_dir() -> Option<std::path::PathBuf> {
+pub(crate) fn spawn_home_dir() -> Option<std::path::PathBuf> {
     crate::session::agent_home_dir()
 }
 
@@ -533,14 +533,16 @@ pub fn spawn_claude_detached_with_envs(
     // so a filesystem hiccup never blocks session launch.
     let mut sidecar_tmp: Option<PathBuf> = None;
     let stdout_stdio = if live_thinking {
-        let opened = crate::live_thinking::ensure_sidecar_dir().ok().and_then(|dir| {
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
-            let tmp = dir.join(format!("spawn-{}-{}.jsonl", std::process::id(), nanos));
-            std::fs::File::create(&tmp).ok().map(|f| (tmp, f))
-        });
+        let opened = crate::live_thinking::ensure_sidecar_dir()
+            .ok()
+            .and_then(|dir| {
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                let tmp = dir.join(format!("spawn-{}-{}.jsonl", std::process::id(), nanos));
+                std::fs::File::create(&tmp).ok().map(|f| (tmp, f))
+            });
         match opened {
             Some((tmp, file)) => {
                 sidecar_tmp = Some(tmp);
@@ -636,13 +638,19 @@ pub fn spawn_claude_detached_with_envs(
         let ws = workspace_path.to_string();
         let session_id = session_id_from_args(args).unwrap_or_default();
         std::thread::spawn(move || {
-            crate::remote_disconnect::watch_stderr(stderr, &log_path, &session_id, &ws, move || {
-                // Force-kill: the agent is mid-turn against a directory that
-                // just became a lie, and a SIGTERM it might catch and "handle"
-                // buys nothing. The tree, not the root — the agent's own tool
-                // children (a build, a test run) would otherwise survive it.
-                crate::session::kill_pid_tree(pid, true).is_ok()
-            });
+            crate::remote_disconnect::watch_stderr(
+                stderr,
+                &log_path,
+                &session_id,
+                &ws,
+                move || {
+                    // Force-kill: the agent is mid-turn against a directory that
+                    // just became a lie, and a SIGTERM it might catch and "handle"
+                    // buys nothing. The tree, not the root — the agent's own tool
+                    // children (a build, a test run) would otherwise survive it.
+                    crate::session::kill_pid_tree(pid, true).is_ok()
+                },
+            );
         });
     }
 
@@ -1019,7 +1027,9 @@ mod tests {
 
     #[test]
     fn normalize_rejects_blank_and_reports_missing_home() {
-        assert!(normalize_workspace_path_with_home("   ", Some(Path::new("/Users/tester"))).is_err());
+        assert!(
+            normalize_workspace_path_with_home("   ", Some(Path::new("/Users/tester"))).is_err()
+        );
         assert!(normalize_workspace_path_with_home("", None).is_err());
         // A home-relative path with no home to anchor it must fail loudly
         // rather than silently spawning in the desktop process's cwd.
@@ -1097,7 +1107,10 @@ mod tests {
     fn resolve_new_session_id_rejects_malformed() {
         // A non-uuid must never reach the process argv (`--session-id <x>`).
         let err = super::resolve_new_session_id(Some("not-a-uuid; rm -rf /")).unwrap_err();
-        assert!(err.contains("invalid session_id"), "unexpected error: {err}");
+        assert!(
+            err.contains("invalid session_id"),
+            "unexpected error: {err}"
+        );
     }
 
     /// Regression (2026-08-27, the reported symptom): `~/.claude.json` carried
@@ -1136,7 +1149,10 @@ mod tests {
         write_command("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
         let dead = super::permission_prompt_tool_args();
 
-        let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+        let live = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         write_command(&live);
         let alive = super::permission_prompt_tool_args();
 
@@ -1176,8 +1192,8 @@ mod tests {
         // moving only one would let the agent log in and then write its
         // transcript somewhere the scanner never looks.
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir()
-            .join(format!("fleet_test_agent_home_{}", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("fleet_test_agent_home_{}", std::process::id()));
         let fleet_state = tmp.join("fleet-state");
         let agent_home = tmp.join("agent-home");
         std::fs::create_dir_all(&fleet_state).unwrap();
@@ -1211,7 +1227,11 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&tmp);
 
-        assert_eq!(spawn.as_deref(), Some(agent_home.as_path()), "spawn target moves");
+        assert_eq!(
+            spawn.as_deref(),
+            Some(agent_home.as_path()),
+            "spawn target moves"
+        );
         assert_eq!(
             claude_dir,
             Some(agent_home.join(".claude")),
@@ -1239,10 +1259,8 @@ mod tests {
         // reads the polluted $HOME and made this test fail on CI). It used to
         // use FLEET_HOME, which no longer reaches the spawned child's HOME.
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet_test_spawn_home_{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("fleet_test_spawn_home_{}", std::process::id()));
         let fake_home = tmp.join("container-home");
         let real_home = tmp.join("real-home");
         std::fs::create_dir_all(&fake_home).unwrap();
@@ -1302,10 +1320,8 @@ mod tests {
         // covering the common install dirs plus ~/.fleet/bin, with
         // the parent's PATH preserved at the tail.
         let _guard = crate::session::fleet_home_lock();
-        let tmp = std::env::temp_dir().join(format!(
-            "fleet_test_spawn_path_{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("fleet_test_spawn_path_{}", std::process::id()));
         let real_home = tmp.join("real-home");
         std::fs::create_dir_all(&real_home).unwrap();
         let out = tmp.join("observed-path.txt");
@@ -1451,7 +1467,9 @@ mod path_tests {
         // /usr/local/bin is always injected; it must survive as its own entry,
         // not glued onto a neighbour by a wrong separator.
         assert!(
-            entries.iter().any(|p| p == &PathBuf::from("/usr/local/bin")),
+            entries
+                .iter()
+                .any(|p| p == &PathBuf::from("/usr/local/bin")),
             "injected dirs must each be a separate entry, got {joined:?}"
         );
     }
@@ -1512,7 +1530,12 @@ mod remote_workspace_spawn_tests {
         let stderr_log = home.join("stderr.log");
         super::spawn_claude_detached_with_envs(
             "/fake/claude",
-            &["-p".to_string(), "hi".to_string(), "--session-id".to_string(), "s1".to_string()],
+            &[
+                "-p".to_string(),
+                "hi".to_string(),
+                "--session-id".to_string(),
+                "s1".to_string(),
+            ],
             ws.to_str().unwrap(),
             &stderr_log,
             "rca-test",
@@ -1532,7 +1555,15 @@ mod remote_workspace_spawn_tests {
         let argv = std::fs::read_to_string(&argv_out).unwrap();
         assert_eq!(
             argv.lines().collect::<Vec<_>>(),
-            vec!["/fake/claude", "-p", "hi", "--session-id", "s1", "--code", "rca1.TESTCODE"],
+            vec![
+                "/fake/claude",
+                "-p",
+                "hi",
+                "--session-id",
+                "s1",
+                "--code",
+                "rca1.TESTCODE"
+            ],
         );
         let local_bins = std::fs::read_to_string(&env_out).unwrap();
         assert!(
@@ -1566,7 +1597,10 @@ mod remote_workspace_spawn_tests {
         );
         assert_eq!(super::session_id_from_args(&a(&["-p", "hi"])), None);
         // A trailing flag with no value must not panic or mis-read.
-        assert_eq!(super::session_id_from_args(&a(&["-p", "--session-id"])), None);
+        assert_eq!(
+            super::session_id_from_args(&a(&["-p", "--session-id"])),
+            None
+        );
     }
 
     /// The chain repair must fire on a resume and stay away from a first run —
@@ -1640,7 +1674,12 @@ mod remote_workspace_spawn_tests {
         let stderr_log = home.join("stderr.log");
         super::spawn_claude_detached_with_envs(
             "/fake/claude",
-            &["-p".to_string(), "hi".to_string(), "--session-id".to_string(), "drop-1".to_string()],
+            &[
+                "-p".to_string(),
+                "hi".to_string(),
+                "--session-id".to_string(),
+                "drop-1".to_string(),
+            ],
             ws.to_str().unwrap(),
             &stderr_log,
             "rca-drop-test",
@@ -1669,14 +1708,24 @@ mod remote_workspace_spawn_tests {
             })
             .expect("the disconnect must be recorded against the session id");
         assert_eq!(rec.code, crate::remote_workspace::codes::TRANSPORT_LOST);
-        assert!(rec.detail.contains("stream reset"), "got detail: {}", rec.detail);
+        assert!(
+            rec.detail.contains("stream reset"),
+            "got detail: {}",
+            rec.detail
+        );
         assert_eq!(rec.host_label.as_deref(), Some("test-host"));
         assert!(rec.agent_stopped);
 
         // Piping stderr must not cost the log its content.
         let logged = std::fs::read_to_string(&stderr_log).unwrap();
-        assert!(logged.contains("PREAD handle=2"), "stderr log lost lines:\n{logged}");
-        assert!(logged.contains("remote recv failed"), "stderr log lost lines:\n{logged}");
+        assert!(
+            logged.contains("PREAD handle=2"),
+            "stderr log lost lines:\n{logged}"
+        );
+        assert!(
+            logged.contains("remote recv failed"),
+            "stderr log lost lines:\n{logged}"
+        );
 
         unsafe {
             match prev {

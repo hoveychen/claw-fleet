@@ -158,11 +158,20 @@ mod tests {
         let reason = gate_reason_in(&root, Some(&focus("mine", 200)), Some(100), false, false)
             .expect("pending plan + fresh focus ⇒ gate fires");
         assert!(reason.contains("mine"), "names the plan: {reason}");
-        assert!(reason.contains("**P2** — still open"), "names the next P: {reason}");
+        assert!(
+            reason.contains("**P2** — still open"),
+            "names the next P: {reason}"
+        );
         assert!(reason.contains("1/2"), "shows progress: {reason}");
         // Must offer the legitimate exits, or the gate is a trap.
-        assert!(reason.contains("fleet handoff"), "offers the relay exit: {reason}");
-        assert!(reason.contains("fleet watch"), "offers the wait exit: {reason}");
+        assert!(
+            reason.contains("fleet handoff"),
+            "offers the relay exit: {reason}"
+        );
+        assert!(
+            reason.contains("fleet watch"),
+            "offers the wait exit: {reason}"
+        );
     }
 
     /// Hatch 1: already blocked once this turn.
@@ -266,7 +275,10 @@ mod tests {
             .expect("completed child + pending parent ⇒ gate fires");
         assert!(reason.contains("kid"), "names the child: {reason}");
         assert!(reason.contains("par"), "names the parent: {reason}");
-        assert!(reason.contains("**P4** — parent tail"), "names the next P: {reason}");
+        assert!(
+            reason.contains("**P4** — parent tail"),
+            "names the next P: {reason}"
+        );
     }
 
     /// Whole tree complete ⇒ the turn may end.
@@ -302,7 +314,13 @@ mod tests {
     fn releases_when_the_focused_plan_is_not_in_this_workspace() {
         let (_t, root) = ws(ONE_PENDING);
         assert_eq!(
-            gate_reason_in(&root, Some(&focus("elsewhere", 200)), Some(100), false, false),
+            gate_reason_in(
+                &root,
+                Some(&focus("elsewhere", 200)),
+                Some(100),
+                false,
+                false
+            ),
             None
         );
     }

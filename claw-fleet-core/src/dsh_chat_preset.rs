@@ -182,7 +182,9 @@ pub fn ensure_chat_preset(source_composition: &str) -> Result<String, String> {
         .parent()
         .ok_or_else(|| "chat preset path has no parent".to_string())?;
     fs::create_dir_all(dir).map_err(|e| format!("create chat preset dir: {e}"))?;
-    let stale = fs::read_to_string(&path).map(|c| c != patched).unwrap_or(true);
+    let stale = fs::read_to_string(&path)
+        .map(|c| c != patched)
+        .unwrap_or(true);
     if stale {
         // Atomic because the roster re-reads its roots on every call: a chat
         // spawn racing a concurrent `agentPresets/list` must never expose a
@@ -262,7 +264,10 @@ mod tests {
         assert_eq!(out.matches("dshHome:").count(), 1);
         let dsh_home_at = out.find("dshHome:").unwrap();
         let row_at = out.find("- id: agent-instructions").unwrap();
-        assert!(dsh_home_at > row_at, "dshHome must sit inside the instructions row");
+        assert!(
+            dsh_home_at > row_at,
+            "dshHome must sit inside the instructions row"
+        );
     }
 
     #[test]

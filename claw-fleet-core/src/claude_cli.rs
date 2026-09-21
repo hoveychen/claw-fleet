@@ -29,10 +29,7 @@ pub enum ClaudeCliError {
     /// Process spawn failed (permissions, OS error).
     ExecFailed(String),
     /// CLI ran but exited non-zero.
-    NonZeroExit {
-        code: Option<i32>,
-        stderr: String,
-    },
+    NonZeroExit { code: Option<i32>, stderr: String },
     /// stdout did not parse as the expected JSON shape.
     InvalidJson { raw: String, error: String },
 }
@@ -42,12 +39,9 @@ impl std::fmt::Display for ClaudeCliError {
         match self {
             Self::BinaryNotFound => write!(f, "claude binary not found"),
             Self::ExecFailed(e) => write!(f, "failed to spawn claude: {}", e),
-            Self::NonZeroExit { code, stderr } => write!(
-                f,
-                "claude exited with code {:?}: {}",
-                code,
-                stderr.trim()
-            ),
+            Self::NonZeroExit { code, stderr } => {
+                write!(f, "claude exited with code {:?}: {}", code, stderr.trim())
+            }
             Self::InvalidJson { error, .. } => write!(f, "invalid JSON from claude: {}", error),
         }
     }
@@ -285,7 +279,10 @@ mod tests {
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].name, "claude-plugins-official");
         assert_eq!(parsed[0].source.as_deref(), Some("github"));
-        assert_eq!(parsed[0].repo.as_deref(), Some("anthropics/claude-plugins-official"));
+        assert_eq!(
+            parsed[0].repo.as_deref(),
+            Some("anthropics/claude-plugins-official")
+        );
     }
 
     #[test]

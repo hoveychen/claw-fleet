@@ -36,8 +36,7 @@ pub struct CliProcess {
 /// are installed globally, so they also fire for a `claude -p` the user ran by
 /// hand in a terminal — same dead end, no Fleet entrypoint.
 pub(crate) fn is_headless_argv(cmd: &[std::ffi::OsString]) -> bool {
-    cmd.iter()
-        .any(|arg| arg == "-p" || arg == "--print")
+    cmd.iter().any(|arg| arg == "-p" || arg == "--print")
 }
 
 pub(crate) fn extract_resume_id(cmd: &[std::ffi::OsString]) -> Option<String> {
@@ -73,18 +72,20 @@ pub(crate) fn resolve_pid(procs: &[CliProcess], session_id: &str) -> (Option<u32
     }
 
     // Rule 1: exact --resume match.
-    if let Some(p) = procs.iter().find(|p| {
-        p.resume_session_id.as_deref() == Some(session_id)
-    }) {
+    if let Some(p) = procs
+        .iter()
+        .find(|p| p.resume_session_id.as_deref() == Some(session_id))
+    {
         return (Some(p.pid), true);
     }
 
     // Rule 2: filter out child claude processes (subagents).
     // A process is a "child" if its parent PID is also in this workspace's process set.
     let pid_set: std::collections::HashSet<u32> = procs.iter().map(|p| p.pid).collect();
-    let roots: Vec<&CliProcess> = procs.iter().filter(|p| {
-        !p.ppid.map_or(false, |ppid| pid_set.contains(&ppid))
-    }).collect();
+    let roots: Vec<&CliProcess> = procs
+        .iter()
+        .filter(|p| !p.ppid.map_or(false, |ppid| pid_set.contains(&ppid)))
+        .collect();
 
     match roots.len() {
         0 => (Some(procs[0].pid), false), // shouldn't happen; fall back
@@ -107,8 +108,7 @@ pub fn scan_cli_processes() -> Vec<CliProcess> {
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::nothing()
-            .with_cmd(UpdateKind::Always),
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
     );
     let matched_pids: Vec<_> = sys
         .processes()
@@ -125,8 +125,7 @@ pub fn scan_cli_processes() -> Vec<CliProcess> {
         sys.refresh_processes_specifics(
             ProcessesToUpdate::Some(&matched_pids),
             true,
-            ProcessRefreshKind::nothing()
-                .with_cwd(UpdateKind::Always),
+            ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always),
         );
     }
 
@@ -245,7 +244,11 @@ pub(crate) fn last_real_message_age_secs(last_lines: &[Value]) -> Option<f64> {
     let ts = chrono::DateTime::parse_from_rfc3339(ts_str).ok()?;
     let now = chrono::Utc::now();
     let delta = (now - ts.with_timezone(&chrono::Utc)).num_milliseconds() as f64 / 1000.0;
-    if delta < 0.0 { Some(0.0) } else { Some(delta) }
+    if delta < 0.0 {
+        Some(0.0)
+    } else {
+        Some(delta)
+    }
 }
 
 /// Detect a terminal `error: "rate_limit"` entry in the last assistant messages.
@@ -367,7 +370,10 @@ pub(crate) fn detect_server_error(last_lines: &[Value]) -> bool {
 /// off; the caller has already established this is an `isApiErrorMessage`
 /// record, so the stem cannot collide with ordinary assistant prose.
 fn is_unparseable_tool_call(v: &Value) -> bool {
-    if v.get("message").and_then(|m| m.get("model")).and_then(|m| m.as_str()) != Some("<synthetic>")
+    if v.get("message")
+        .and_then(|m| m.get("model"))
+        .and_then(|m| m.as_str())
+        != Some("<synthetic>")
     {
         return false;
     }
@@ -522,7 +528,11 @@ pub(crate) fn pending_noninteractive_tool_batch(last_lines: &[Value]) -> Option<
         .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
         .filter_map(|b| {
             let id = b.get("id").and_then(|i| i.as_str())?.to_string();
-            let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            let name = b
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
             Some((id, name))
         })
         .collect();
@@ -560,7 +570,10 @@ pub(crate) fn pending_noninteractive_tool_batch(last_lines: &[Value]) -> Option<
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.timestamp_millis() as u64);
 
-    Some(PendingToolBatch { tool_name: tool_name.clone(), since_ms })
+    Some(PendingToolBatch {
+        tool_name: tool_name.clone(),
+        since_ms,
+    })
 }
 
 /// The unresolved block behind a [`SessionStatus::Stuck`] mark.
@@ -629,9 +642,7 @@ pub(crate) fn determine_status(
             if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
                 return false;
             }
-            let stop = v
-                .get("message")
-                .and_then(|m| m.get("stop_reason"));
+            let stop = v.get("message").and_then(|m| m.get("stop_reason"));
             // stop_reason absent or null → still streaming
             stop.map_or(true, |s| s.is_null())
         });
@@ -644,9 +655,7 @@ pub(crate) fn determine_status(
                 if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
                     return false;
                 }
-                let stop = v
-                    .get("message")
-                    .and_then(|m| m.get("stop_reason"));
+                let stop = v.get("message").and_then(|m| m.get("stop_reason"));
                 // stop_reason present and non-null → completed
                 stop.map_or(false, |s| !s.is_null())
             });
@@ -705,9 +714,7 @@ pub(crate) fn determine_status(
         }
 
         if last_type == Some("assistant") {
-            let stop_value = last
-                .get("message")
-                .and_then(|m| m.get("stop_reason"));
+            let stop_value = last.get("message").and_then(|m| m.get("stop_reason"));
             let stop_reason = stop_value.and_then(|s| s.as_str());
             let stop_is_null = stop_value.map_or(true, |s| s.is_null());
 
@@ -755,4 +762,3 @@ pub(crate) fn determine_status(
         SessionStatus::Idle
     }
 }
-

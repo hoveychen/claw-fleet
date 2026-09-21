@@ -12,8 +12,7 @@ use serde_json::{json, Map, Value};
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /// The shell command our hooks use.  Used as the identity marker when merging.
-const FLEET_HOOK_COMMAND: &str =
-    r#"sh -c 'cat >> "$HOME/.fleet/hooks.jsonl"'"#;
+const FLEET_HOOK_COMMAND: &str = r#"sh -c 'cat >> "$HOME/.fleet/hooks.jsonl"'"#;
 
 /// Legacy event-log path that a pre-`~/.fleet` build installed a `cat >>` hook
 /// for. `is_fleet_group` never matched it (it only recognizes the current
@@ -236,7 +235,9 @@ pub fn apply_hook_setup() -> Result<(), String> {
     }
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let obj = settings
+        .as_object_mut()
+        .ok_or("settings is not an object")?;
 
     // Ensure "hooks" key exists as an object.
     if !obj.contains_key("hooks") {
@@ -401,7 +402,9 @@ fn apply_guard_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let obj = settings
+        .as_object_mut()
+        .ok_or("settings is not an object")?;
 
     if !obj.contains_key("hooks") {
         obj.insert("hooks".into(), json!({}));
@@ -450,7 +453,10 @@ fn remove_guard_hook_inner() -> Result<(), String> {
         return Ok(());
     };
 
-    if let Some(arr) = hooks_obj.get_mut("PreToolUse").and_then(|v| v.as_array_mut()) {
+    if let Some(arr) = hooks_obj
+        .get_mut("PreToolUse")
+        .and_then(|v| v.as_array_mut())
+    {
         arr.retain(|group| !is_guard_group(group));
         if arr.is_empty() {
             hooks_obj.remove("PreToolUse");
@@ -493,7 +499,9 @@ fn apply_elicitation_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let obj = settings
+        .as_object_mut()
+        .ok_or("settings is not an object")?;
 
     if !obj.contains_key("hooks") {
         obj.insert("hooks".into(), json!({}));
@@ -542,7 +550,10 @@ fn remove_elicitation_hook_inner() -> Result<(), String> {
         return Ok(());
     };
 
-    if let Some(arr) = hooks_obj.get_mut("PreToolUse").and_then(|v| v.as_array_mut()) {
+    if let Some(arr) = hooks_obj
+        .get_mut("PreToolUse")
+        .and_then(|v| v.as_array_mut())
+    {
         arr.retain(|group| !is_elicitation_group(group));
         if arr.is_empty() {
             hooks_obj.remove("PreToolUse");
@@ -583,7 +594,9 @@ fn apply_plan_approval_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let obj = settings
+        .as_object_mut()
+        .ok_or("settings is not an object")?;
 
     if !obj.contains_key("hooks") {
         obj.insert("hooks".into(), json!({}));
@@ -632,7 +645,10 @@ fn remove_plan_approval_hook_inner() -> Result<(), String> {
         return Ok(());
     };
 
-    if let Some(arr) = hooks_obj.get_mut("PreToolUse").and_then(|v| v.as_array_mut()) {
+    if let Some(arr) = hooks_obj
+        .get_mut("PreToolUse")
+        .and_then(|v| v.as_array_mut())
+    {
         arr.retain(|group| !is_plan_approval_group(group));
         if arr.is_empty() {
             hooks_obj.remove("PreToolUse");
@@ -676,7 +692,9 @@ fn apply_prd_context_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let obj = settings
+        .as_object_mut()
+        .ok_or("settings is not an object")?;
 
     if !obj.contains_key("hooks") {
         obj.insert("hooks".into(), json!({}));
@@ -699,10 +717,7 @@ fn apply_prd_context_hook_inner() -> Result<(), String> {
             arr.push(prd_context_group);
         }
     } else {
-        hooks_obj.insert(
-            "UserPromptSubmit".to_string(),
-            json!([prd_context_group]),
-        );
+        hooks_obj.insert("UserPromptSubmit".to_string(), json!([prd_context_group]));
     }
 
     // Companion: the notes-hint SessionStart hook. Fires when a context window
@@ -918,7 +933,9 @@ fn apply_wakeup_guard_hook_inner() -> Result<(), String> {
     let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let obj = settings
+        .as_object_mut()
+        .ok_or("settings is not an object")?;
 
     if !obj.contains_key("hooks") {
         obj.insert("hooks".into(), json!({}));
@@ -968,7 +985,10 @@ fn remove_wakeup_guard_hook_inner() -> Result<(), String> {
         return Ok(());
     };
 
-    if let Some(arr) = hooks_obj.get_mut("PreToolUse").and_then(|v| v.as_array_mut()) {
+    if let Some(arr) = hooks_obj
+        .get_mut("PreToolUse")
+        .and_then(|v| v.as_array_mut())
+    {
         arr.retain(|group| !is_wakeup_guard_group(group));
         if arr.is_empty() {
             hooks_obj.remove("PreToolUse");
@@ -1014,7 +1034,9 @@ fn apply_idle_hooks_inner() -> Result<(), String> {
     let fleet_bin = resolve_publishable_fleet_binary()?;
 
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let obj = settings
+        .as_object_mut()
+        .ok_or("settings is not an object")?;
 
     if !obj.contains_key("hooks") {
         obj.insert("hooks".into(), json!({}));
@@ -1099,7 +1121,9 @@ pub fn apply_default_model(model: &str) -> Result<(), String> {
         return Ok(());
     }
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let obj = settings
+        .as_object_mut()
+        .ok_or("settings is not an object")?;
     obj.insert("model".to_string(), json!(model));
     write_settings(&settings)
 }
@@ -1135,7 +1159,9 @@ pub fn apply_default_model(model: &str) -> Result<(), String> {
 /// startup, so this only affects sessions spawned after the write.
 pub fn apply_no_commit_attribution() -> Result<(), String> {
     let mut settings = read_settings().unwrap_or_else(|| json!({}));
-    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    let obj = settings
+        .as_object_mut()
+        .ok_or("settings is not an object")?;
     obj.insert("includeCoAuthoredBy".to_string(), json!(false));
     let attribution = obj
         .entry("attribution".to_string())
@@ -1336,8 +1362,9 @@ impl HookTail {
             // looked. Following the file forward removes that accident, so the
             // distinction has to be made explicitly.)
             "PreToolUse" => {
-                if crate::session::detect::is_interactive_wait_tool(ev.tool_name.as_deref().unwrap_or(""))
-                {
+                if crate::session::detect::is_interactive_wait_tool(
+                    ev.tool_name.as_deref().unwrap_or(""),
+                ) {
                     HookState::AwaitingUserInput
                 } else {
                     HookState::ToolExecuting
@@ -1602,10 +1629,7 @@ pub fn repoint_fleet_hooks() -> Result<usize, String> {
     let Some(mut settings) = read_settings() else {
         return Ok(0);
     };
-    let Some(hooks_obj) = settings
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-    else {
+    let Some(hooks_obj) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
         return Ok(0);
     };
     let changed = repoint_fleet_hooks_in(hooks_obj, &fleet_bin);
@@ -1719,7 +1743,11 @@ fn fault_tolerant_command(fleet_bin: &str, subcommand: &str) -> String {
 fn fleet_subcommand_hook(fleet_bin: &str, subcommand: &str) -> Value {
     crate::log_debug(&format!(
         "hooks: emitting `fleet {subcommand}` hook as {} (bin={fleet_bin})",
-        if cfg!(windows) { "exec form" } else { "sh wrapper" },
+        if cfg!(windows) {
+            "exec form"
+        } else {
+            "sh wrapper"
+        },
     ));
     fleet_subcommand_hook_with(cfg!(windows), fleet_bin, subcommand)
 }
@@ -1758,7 +1786,11 @@ fn hook_invokes_fleet_subcommand(hook: &Value, subcommand: &str) -> bool {
     // the basename by hand — `Path::file_stem` treats `\` as a separator only
     // on Windows, and this matcher must recognize a Windows-written
     // settings.json on every platform.
-    let base = cmd.rsplit(['/', '\\']).next().unwrap_or(cmd).to_ascii_lowercase();
+    let base = cmd
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(cmd)
+        .to_ascii_lowercase();
     let is_fleet_bin = base == "fleet" || base == "fleet.exe";
     is_fleet_bin
         && hook
@@ -1911,9 +1943,18 @@ mod fleet_subcommand_hook_tests {
     fn unix_shape_is_the_fault_tolerant_sh_wrapper() {
         let hook = fleet_subcommand_hook_with(false, "/usr/local/bin/fleet", "guard");
         let cmd = hook["command"].as_str().unwrap();
-        assert!(cmd.starts_with("sh -c"), "unix shape must stay sh-wrapped: {cmd}");
-        assert!(cmd.contains("\" guard;"), "sh wrapper must carry the subcommand: {cmd}");
-        assert!(hook.get("args").is_none(), "unix shape must not carry exec-form args");
+        assert!(
+            cmd.starts_with("sh -c"),
+            "unix shape must stay sh-wrapped: {cmd}"
+        );
+        assert!(
+            cmd.contains("\" guard;"),
+            "sh wrapper must carry the subcommand: {cmd}"
+        );
+        assert!(
+            hook.get("args").is_none(),
+            "unix shape must not carry exec-form args"
+        );
     }
 
     #[test]
@@ -1927,7 +1968,11 @@ mod fleet_subcommand_hook_tests {
     #[test]
     fn matcher_recognizes_both_shapes_and_distinguishes_subcommands() {
         for windows in [false, true] {
-            let bin = if windows { r"C:\x\fleet.exe" } else { "/usr/local/bin/fleet" };
+            let bin = if windows {
+                r"C:\x\fleet.exe"
+            } else {
+                "/usr/local/bin/fleet"
+            };
             let hook = fleet_subcommand_hook_with(windows, bin, "session idle");
             assert!(
                 hook_invokes_fleet_subcommand(&hook, "session idle"),
@@ -2142,7 +2187,8 @@ mod tests {
         let bin = "/x/fleet";
         let hint = notes_hint_group_for(bin);
         let prd = prd_context_group_for(bin);
-        let user_start = json!({ "matcher": "startup", "hooks": [{"type": "command", "command": "echo hi"}] });
+        let user_start =
+            json!({ "matcher": "startup", "hooks": [{"type": "command", "command": "echo hi"}] });
 
         assert!(is_notes_hint_group(&hint));
         assert!(!is_notes_hint_group(&prd));
@@ -2154,15 +2200,25 @@ mod tests {
         // Old-build shape: prd-context present, no SessionStart companion.
         let mut hooks = Map::new();
         hooks.insert("UserPromptSubmit".into(), json!([prd.clone()]));
-        assert!(!has_prd_context_hook(&hooks), "must read as not installed until the companion exists");
+        assert!(
+            !has_prd_context_hook(&hooks),
+            "must read as not installed until the companion exists"
+        );
         assert!(!has_notes_hint_hook(&hooks));
 
         // Current shape: both halves; a neighbouring user group is untouched by
         // the idempotent retain.
-        let mut start_arr = vec![user_start.clone(), notes_hint_group_for("/old/fleet"), hint.clone()];
+        let mut start_arr = vec![
+            user_start.clone(),
+            notes_hint_group_for("/old/fleet"),
+            hint.clone(),
+        ];
         start_arr.retain(|g| !is_notes_hint_group(g));
         assert_eq!(start_arr, vec![user_start.clone()]);
-        hooks.insert("SessionStart".into(), json!([user_start.clone(), hint.clone()]));
+        hooks.insert(
+            "SessionStart".into(),
+            json!([user_start.clone(), hint.clone()]),
+        );
         assert!(has_notes_hint_hook(&hooks));
         assert!(
             !has_prd_context_hook(&hooks),
@@ -2294,7 +2350,10 @@ mod tests {
         // guard missing forever, since heal only installs what reads as absent.
         let bin = "/tmp/fleet";
         let mut hooks = Map::new();
-        assert!(!has_wakeup_guard_hook(&hooks), "empty settings have no hooks");
+        assert!(
+            !has_wakeup_guard_hook(&hooks),
+            "empty settings have no hooks"
+        );
 
         // Siblings under the same event must not read as the wakeup guard.
         hooks.insert(
@@ -2344,10 +2403,12 @@ mod tests {
                 .as_array()
                 .ok_or("PreToolUse is not an array")?
                 .clone();
-            let ours: Vec<&Value> =
-                arr.iter().filter(|g| is_wakeup_guard_group(g)).collect();
+            let ours: Vec<&Value> = arr.iter().filter(|g| is_wakeup_guard_group(g)).collect();
             if ours.len() != 1 {
-                return Err(format!("expected exactly 1 wakeup group, got {}", ours.len()));
+                return Err(format!(
+                    "expected exactly 1 wakeup group, got {}",
+                    ours.len()
+                ));
             }
             let matcher = ours[0]["matcher"].as_str().unwrap_or_default();
             if matcher != crate::wakeup_guard::WAKEUP_GUARD_MATCHER {
@@ -2705,7 +2766,10 @@ mod tests {
     #[test]
     fn guard_matcher_covers_bash_and_powershell() {
         let alts: Vec<&str> = GUARD_MATCHER.split('|').collect();
-        assert!(alts.contains(&"Bash"), "guard matcher must cover the Bash tool");
+        assert!(
+            alts.contains(&"Bash"),
+            "guard matcher must cover the Bash tool"
+        );
         assert!(
             alts.contains(&"PowerShell"),
             "guard matcher must cover the Windows PowerShell tool"
@@ -2724,8 +2788,7 @@ mod tests {
 
     #[test]
     fn plan_approval_marker_detects_actual_generated_command() {
-        let group =
-            plan_approval_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet");
+        let group = plan_approval_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet");
         assert!(
             is_plan_approval_group(&group),
             "is_plan_approval_group must recognise the command actually produced \
@@ -2815,7 +2878,9 @@ mod tests {
         let post = hooks.get("PostToolUse").unwrap().as_array().unwrap();
         assert_eq!(post.len(), 2, "legacy dropped, current + unrelated kept");
         assert!(post.iter().any(is_fleet_group));
-        assert!(post.iter().any(|g| !is_fleet_group(g) && !group_targets_legacy_events_file(g)));
+        assert!(post
+            .iter()
+            .any(|g| !is_fleet_group(g) && !group_targets_legacy_events_file(g)));
         assert!(!post.iter().any(group_targets_legacy_events_file));
         assert!(!hooks.contains_key("Stop"), "emptied event array removed");
     }
@@ -2834,7 +2899,10 @@ mod tests {
     fn idle_markers_detect_actual_generated_commands() {
         let stop = idle_stop_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet");
         let resume = idle_resume_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet");
-        assert!(is_idle_stop_group(&stop), "is_idle_stop_group must recognise generated cmd");
+        assert!(
+            is_idle_stop_group(&stop),
+            "is_idle_stop_group must recognise generated cmd"
+        );
         assert!(
             is_idle_resume_group(&resume),
             "is_idle_resume_group must recognise generated cmd"
@@ -2915,7 +2983,12 @@ mod tests {
     fn tail_matches_a_full_read_on_a_multi_chunk_file() {
         // > 64 KiB, so the reader must walk several chunks backwards.
         let content: String = (0..4000)
-            .map(|i| format!("{{\"session_id\":\"s{i}\",\"hook_event_name\":\"Stop\",\"pad\":\"{}\"}}\n", "x".repeat(40)))
+            .map(|i| {
+                format!(
+                    "{{\"session_id\":\"s{i}\",\"hook_event_name\":\"Stop\",\"pad\":\"{}\"}}\n",
+                    "x".repeat(40)
+                )
+            })
             .collect();
         assert!(content.len() > 64 * 1024, "test needs a multi-chunk file");
         let p = write_tmp("multi.jsonl", &content);
@@ -2933,7 +3006,11 @@ mod tests {
         // boundary lands mid-character constantly; the affected line is the
         // partial leading one and must be dropped, never mangled into the result.
         let content: String = (0..3000)
-            .map(|i| format!("{{\"session_id\":\"s{i}\",\"description\":\"等待生产部署完成并上传矩阵\"}}\n"))
+            .map(|i| {
+                format!(
+                    "{{\"session_id\":\"s{i}\",\"description\":\"等待生产部署完成并上传矩阵\"}}\n"
+                )
+            })
             .collect();
         assert!(content.len() > 64 * 1024);
         let p = write_tmp("utf8.jsonl", &content);
@@ -2945,7 +3022,10 @@ mod tests {
         for line in &tail {
             let v: Value = serde_json::from_str(line).expect("tail line must be valid JSON");
             assert_eq!(v["description"], "等待生产部署完成并上传矩阵");
-            assert!(!line.contains('\u{FFFD}'), "no replacement chars in the tail");
+            assert!(
+                !line.contains('\u{FFFD}'),
+                "no replacement chars in the tail"
+            );
         }
 
         let _ = fs::remove_file(&p);
@@ -2981,8 +3061,10 @@ mod tests {
         // End-to-end through the tail reader: the Stop payload's background_tasks
         // must survive into the HookEvent the scan consumes.
         let content = concat!(
-            r#"{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash"}"#, "\n",
-            r#"{"session_id":"s1","hook_event_name":"Stop","background_tasks":[{"id":"b1","type":"shell","status":"running","description":"等部署"}]}"#, "\n",
+            r#"{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash"}"#,
+            "\n",
+            r#"{"session_id":"s1","hook_event_name":"Stop","background_tasks":[{"id":"b1","type":"shell","status":"running","description":"等部署"}]}"#,
+            "\n",
         );
         let p = write_tmp("events.jsonl", content);
 
@@ -3011,9 +3093,8 @@ mod tests {
     }
 
     fn pre_tool(sid: &str, tool: &str) -> String {
-        format!(
-            r#"{{"session_id":"{sid}","hook_event_name":"PreToolUse","tool_name":"{tool}"}}"#
-        ) + "\n"
+        format!(r#"{{"session_id":"{sid}","hook_event_name":"PreToolUse","tool_name":"{tool}"}}"#)
+            + "\n"
     }
 
     fn append(path: &Path, line: &str) {
@@ -3032,7 +3113,10 @@ mod tests {
         let p = write_tmp("follow.jsonl", &pre_tool("quiet", "Bash"));
         let mut tail = empty_tail();
         tail.follow(&p, 1_000);
-        assert_eq!(tail.snapshot(1_000).states.get("quiet"), Some(&HookState::ToolExecuting));
+        assert_eq!(
+            tail.snapshot(1_000).states.get("quiet"),
+            Some(&HookState::ToolExecuting)
+        );
 
         for i in 0..2_000 {
             append(&p, &pre_tool(&format!("busy-{i}"), "Read"));
@@ -3057,7 +3141,10 @@ mod tests {
         let mut tail = empty_tail();
         tail.follow(&p, 1_000);
 
-        assert!(tail.snapshot(1_000 + HOOK_STATE_MAX_AGE_MS).states.contains_key("s1"));
+        assert!(tail
+            .snapshot(1_000 + HOOK_STATE_MAX_AGE_MS)
+            .states
+            .contains_key("s1"));
         assert!(
             !tail
                 .snapshot(1_000 + HOOK_STATE_MAX_AGE_MS + 1)
@@ -3083,7 +3170,10 @@ mod tests {
 
         append(&p, rest);
         tail.follow(&p, 1_000);
-        assert_eq!(tail.snapshot(1_000).states.get("s1"), Some(&HookState::ToolExecuting));
+        assert_eq!(
+            tail.snapshot(1_000).states.get("s1"),
+            Some(&HookState::ToolExecuting)
+        );
         let _ = fs::remove_file(&p);
     }
 
@@ -3120,7 +3210,10 @@ mod tests {
         tail.follow(&p, 1_000);
 
         let snap = tail.snapshot(1_000);
-        assert_eq!(snap.states.get("asking"), Some(&HookState::AwaitingUserInput));
+        assert_eq!(
+            snap.states.get("asking"),
+            Some(&HookState::AwaitingUserInput)
+        );
         assert_eq!(snap.states.get("working"), Some(&HookState::ToolExecuting));
         let _ = fs::remove_file(&p);
     }
@@ -3136,7 +3229,13 @@ mod tests {
         let p = write_tmp("bgtasks.jsonl", stop);
         let mut tail = empty_tail();
         tail.follow(&p, 1_000);
-        assert_eq!(tail.snapshot(1_000).background_tasks.get("s1").map(Vec::len), Some(1));
+        assert_eq!(
+            tail.snapshot(1_000)
+                .background_tasks
+                .get("s1")
+                .map(Vec::len),
+            Some(1)
+        );
 
         append(&p, &pre_tool("s1", "Bash"));
         tail.follow(&p, 1_000);

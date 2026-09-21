@@ -269,8 +269,7 @@ pub fn fold_into_pending(
 /// again must not get a second card queued behind the first — it gets the notice
 /// straight back instead.
 pub fn has_parked_for_session(session_id: &str) -> bool {
-    !session_id.trim().is_empty()
-        && list().iter().any(|c| c.session_id == session_id)
+    !session_id.trim().is_empty() && list().iter().any(|c| c.session_id == session_id)
 }
 
 pub fn is_parked(id: &str) -> bool {
@@ -306,7 +305,13 @@ fn inflight_dir() -> Option<PathBuf> {
 fn inflight_path(session_id: &str) -> Option<PathBuf> {
     let safe: String = session_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     inflight_dir().map(|d| d.join(format!("{safe}.json")))
 }
@@ -320,7 +325,10 @@ fn now_ms() -> u64 {
 /// clears the marker — well within it), so only a crashed producer leaves one
 /// behind this long.
 fn inflight_ttl_ms() -> u64 {
-    crate::decision_panel_config::load().wait_duration().as_millis() as u64 + 60_000
+    crate::decision_panel_config::load()
+        .wait_duration()
+        .as_millis() as u64
+        + 60_000
 }
 
 /// A marker is live (still holds the session) when its owning process is alive
@@ -515,9 +523,13 @@ fn wait_for_exit(pid: u32, budget: Duration) -> bool {
 /// It is rendered, together with the original question, into the prompt of a
 /// `claude --resume`.
 pub fn answer(id: &str, response: &Value) -> Result<(), String> {
-    answer_with(id, response, |session_id, workspace, prompt, model, effort, perm| {
-        resume_session(session_id, workspace, prompt, model, effort, perm)
-    })
+    answer_with(
+        id,
+        response,
+        |session_id, workspace, prompt, model, effort, perm| {
+            resume_session(session_id, workspace, prompt, model, effort, perm)
+        },
+    )
 }
 
 /// Resume a parked session through the launcher that owns its transcript.
@@ -541,7 +553,7 @@ pub(crate) fn resume_session(
             model: model.map(str::to_string),
             effort: effort.map(str::to_string),
             permission_mode: permission_mode.map(str::to_string),
-        images: Vec::new(),
+            images: Vec::new(),
         },
         Box::new(|_| {}),
     )
@@ -684,9 +696,9 @@ fn record_resolution(card: &ParkedCard, response: &Value, dismissed: bool) {
     let resolved_at = chrono::Utc::now().to_rfc3339();
     let record = match card.kind {
         ParkedKind::FleetAsk => {
-            let Ok(req) = serde_json::from_value::<crate::mcp_ipc::FleetAskRequest>(
-                card.request.clone(),
-            ) else {
+            let Ok(req) =
+                serde_json::from_value::<crate::mcp_ipc::FleetAskRequest>(card.request.clone())
+            else {
                 return;
             };
             let resp =
@@ -706,11 +718,10 @@ fn record_resolution(card: &ParkedCard, response: &Value, dismissed: bool) {
             ) else {
                 return;
             };
-            let answers = serde_json::from_value::<crate::elicitation::ElicitationResponse>(
-                response.clone(),
-            )
-            .map(|r| r.answers)
-            .unwrap_or_default();
+            let answers =
+                serde_json::from_value::<crate::elicitation::ElicitationResponse>(response.clone())
+                    .map(|r| r.answers)
+                    .unwrap_or_default();
             let outcome = if dismissed {
                 dh::ElicitationOutcome::Declined
             } else {
@@ -799,9 +810,7 @@ fn build_resume_prompt(card: &ParkedCard, response: &Value) -> String {
             }
         }
     }
-    out.push_str(
-        "\n请直接基于这个回复，从被中断的地方继续之前的工作——不要重新问一遍同样的问题。",
-    );
+    out.push_str("\n请直接基于这个回复，从被中断的地方继续之前的工作——不要重新问一遍同样的问题。");
     out
 }
 
@@ -873,9 +882,15 @@ mod fold_tests {
             &known,
             &mut announced,
         );
-        assert!(pending.contains("gone-quiet"), "parked id must rejoin pending");
+        assert!(
+            pending.contains("gone-quiet"),
+            "parked id must rejoin pending"
+        );
         let dismissed: Vec<&String> = known.iter().filter(|id| !pending.contains(*id)).collect();
-        assert!(dismissed.is_empty(), "nothing may be dismissed: {dismissed:?}");
+        assert!(
+            dismissed.is_empty(),
+            "nothing may be dismissed: {dismissed:?}"
+        );
     }
 
     #[test]
@@ -883,12 +898,10 @@ mod fold_tests {
         let known = set(&["a"]);
         let mut announced = HashSet::new();
         let mut pending = HashSet::new();
-        let first =
-            fold_into_pending(&["a".to_string()], &mut pending, &known, &mut announced);
+        let first = fold_into_pending(&["a".to_string()], &mut pending, &known, &mut announced);
         assert_eq!(first, vec!["a".to_string()]);
         let mut pending = HashSet::new();
-        let second =
-            fold_into_pending(&["a".to_string()], &mut pending, &known, &mut announced);
+        let second = fold_into_pending(&["a".to_string()], &mut pending, &known, &mut announced);
         assert!(second.is_empty(), "second tick must stay quiet: {second:?}");
     }
 
@@ -905,7 +918,10 @@ mod fold_tests {
             &mut announced,
         );
         assert!(out.is_empty(), "{out:?}");
-        assert!(pending.contains("never-seen"), "but it must still be pending");
+        assert!(
+            pending.contains("never-seen"),
+            "but it must still be pending"
+        );
     }
 }
 
@@ -943,7 +959,12 @@ mod tests {
                 std::env::set_var("FLEET_HOME", &dir);
                 std::env::set_var("CODEX_HOME", dir.join(".codex"));
             }
-            Self { dir, prev, prev_codex, _lock: lock }
+            Self {
+                dir,
+                prev,
+                prev_codex,
+                _lock: lock,
+            }
         }
 
         /// Plant a transcript for `session_id` carrying `entrypoint` + `cwd`,
@@ -955,11 +976,7 @@ mod tests {
             if let Some(e) = entrypoint {
                 rec["entrypoint"] = json!(e);
             }
-            fs::write(
-                proj.join(format!("{session_id}.jsonl")),
-                format!("{rec}\n"),
-            )
-            .unwrap();
+            fs::write(proj.join(format!("{session_id}.jsonl")), format!("{rec}\n")).unwrap();
         }
 
         /// Plant a Codex rollout for `thread_id` carrying `originator` + `cwd` in
@@ -1032,8 +1049,16 @@ mod tests {
     #[test]
     fn only_fleet_owned_sessions_are_parkable() {
         let home = TmpHome::new("gate");
-        home.plant_session("fleet-one", Some(crate::session_launch::NEW_SESSION_ENTRYPOINT), "/ws/a");
-        home.plant_session("handoff-one", Some(crate::handoff::HANDOFF_ENTRYPOINT), "/ws/b");
+        home.plant_session(
+            "fleet-one",
+            Some(crate::session_launch::NEW_SESSION_ENTRYPOINT),
+            "/ws/a",
+        );
+        home.plant_session(
+            "handoff-one",
+            Some(crate::handoff::HANDOFF_ENTRYPOINT),
+            "/ws/b",
+        );
         home.plant_session("terminal-one", Some("cli"), "/ws/c");
         home.plant_session("no-entrypoint", None, "/ws/d");
 
@@ -1081,7 +1106,10 @@ mod tests {
         let _home = TmpHome::new("inflight");
         let sess = "inflight-sess-1";
         // First owner (this process's pid, freshly stamped) registers fine.
-        assert!(register_inflight_ask(sess, "req-A"), "first owner registers");
+        assert!(
+            register_inflight_ask(sess, "req-A"),
+            "first owner registers"
+        );
         // A different request id = a second process asking on the same session.
         // Its marker is live (our pid) → must be refused.
         assert!(
@@ -1098,7 +1126,10 @@ mod tests {
         );
         // A clear that is not ours is a no-op (must not free req-C's hold).
         clear_inflight_ask(sess, "req-not-owner");
-        assert!(!register_inflight_ask(sess, "req-D"), "non-owner clear must not free the hold");
+        assert!(
+            !register_inflight_ask(sess, "req-D"),
+            "non-owner clear must not free the hold"
+        );
         clear_inflight_ask(sess, "req-C");
         clear_inflight_ask("inflight-sess-other", "req-X");
     }
@@ -1121,7 +1152,10 @@ mod tests {
         assert_eq!(back[0].id, "card-1");
         assert_eq!(back[0].questions[0].question, "要不要保留向后兼容？");
         // A card of another kind must not leak into this channel's listing.
-        assert!(list_requests::<crate::elicitation::ElicitationRequest>(ParkedKind::Elicitation).is_empty());
+        assert!(
+            list_requests::<crate::elicitation::ElicitationRequest>(ParkedKind::Elicitation)
+                .is_empty()
+        );
 
         discard("card-1").unwrap();
         assert!(!is_parked("card-1"));
@@ -1252,7 +1286,10 @@ mod tests {
             "the resumed session must stay on its own model, not the CLI default"
         );
         assert_eq!(effort.as_deref(), Some("high"), "same for reasoning effort");
-        assert!(prompt.unwrap().contains("保留"), "the answer still has to get through");
+        assert!(
+            prompt.unwrap().contains("保留"),
+            "the answer still has to get through"
+        );
     }
 
     /// A card parked with no recorded model (its transcript had no assistant turn
@@ -1262,13 +1299,26 @@ mod tests {
     fn resume_without_a_recorded_model_passes_no_override() {
         let _home = TmpHome::new("resume-nomodel");
         let req = fleet_ask_request("card-n", "sess-n");
-        park_with("card-n", ParkedKind::FleetAsk, "sess-n", "/ws/a", &req, None, None).unwrap();
+        park_with(
+            "card-n",
+            ParkedKind::FleetAsk,
+            "sess-n",
+            "/ws/a",
+            &req,
+            None,
+            None,
+        )
+        .unwrap();
 
         let spy = std::cell::RefCell::new((None::<String>, None::<String>));
-        answer_with("card-n", &json!({ "id": "card-n", "answers": {} }), |_s, _w, _p, model, effort, _perm| {
-            *spy.borrow_mut() = (model.map(str::to_string), effort.map(str::to_string));
-            Ok(())
-        })
+        answer_with(
+            "card-n",
+            &json!({ "id": "card-n", "answers": {} }),
+            |_s, _w, _p, model, effort, _perm| {
+                *spy.borrow_mut() = (model.map(str::to_string), effort.map(str::to_string));
+                Ok(())
+            },
+        )
         .unwrap();
 
         assert_eq!(spy.into_inner(), (None, None));
@@ -1327,11 +1377,18 @@ mod tests {
         .unwrap();
 
         let records = crate::decision_history::list_session_records("sess-h1");
-        assert_eq!(records.len(), 1, "the stale timeout record must be superseded, not duplicated: {records:?}");
+        assert_eq!(
+            records.len(),
+            1,
+            "the stale timeout record must be superseded, not duplicated: {records:?}"
+        );
         let crate::decision_history::DecisionHistoryRecord::FleetAsk(rec) = &records[0] else {
             panic!("expected a fleet-ask record, got {records:?}");
         };
-        assert_eq!(rec.outcome, crate::decision_history::FleetAskOutcome::Answered);
+        assert_eq!(
+            rec.outcome,
+            crate::decision_history::FleetAskOutcome::Answered
+        );
         assert_eq!(
             rec.answers.get("要不要保留向后兼容？").map(String::as_str),
             Some("保留"),
@@ -1394,7 +1451,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("fleet-live-gate-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("blk.c");
-        std::fs::write(&src, "#include <unistd.h>\nint main(){for(;;)pause();return 0;}\n").unwrap();
+        std::fs::write(
+            &src,
+            "#include <unistd.h>\nint main(){for(;;)pause();return 0;}\n",
+        )
+        .unwrap();
         let bin = dir.join("claude");
         let cc = std::process::Command::new("cc")
             .arg("-o")
@@ -1433,12 +1494,22 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        assert!(found, "session_pid/session_alive must find the live claude --resume process");
+        assert!(
+            found,
+            "session_pid/session_alive must find the live claude --resume process"
+        );
 
         // The gate must KILL it (this is what watch::interrupt_if_live calls).
         let interrupted = interrupt_session(&sid);
-        assert!(interrupted, "interrupt_session must SIGINT the live session and see it exit");
-        assert_eq!(session_pid(&sid), None, "no live process should remain after interrupt");
+        assert!(
+            interrupted,
+            "interrupt_session must SIGINT the live session and see it exit"
+        );
+        assert_eq!(
+            session_pid(&sid),
+            None,
+            "no live process should remain after interrupt"
+        );
 
         let _ = reaper.join();
         let _ = std::fs::remove_dir_all(&dir);

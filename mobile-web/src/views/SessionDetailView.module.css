@@ -941,3 +941,19 @@
   font-size: 11px;
   overflow-wrap: anywhere;
 }
+
+/* The row a side question was asked about, when the card sends the reader
+   back to it: a ring that fades, restarted on every locate. */
+.explainFlash {
+  animation: explainFlash 1.6s ease-out forwards;
+  border-radius: 8px;
+}
+@keyframes explainFlash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 2px var(--color-accent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}

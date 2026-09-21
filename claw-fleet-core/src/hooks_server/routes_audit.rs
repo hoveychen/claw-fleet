@@ -18,64 +18,62 @@ pub(crate) fn route_audit(
     let sources = ctx.sources;
     let audit_history = ctx.audit_history.clone();
 
-                use crate::audit::extract_audit_events;
-                let sessions = ctx.snapshot.sessions();
-                let active_ids: std::collections::HashSet<String> = sessions
-                    .iter()
-                    .filter(|s| !matches!(s.status, SessionStatus::Idle))
-                    .map(|s| s.id.clone())
-                    .collect();
-                let active: Vec<&SessionInfo> = sessions
-                    .iter()
-                    .filter(|s| active_ids.contains(&s.id))
-                    .collect();
-                let total = active.len();
+    use crate::audit::extract_audit_events;
+    let sessions = ctx.snapshot.sessions();
+    let active_ids: std::collections::HashSet<String> = sessions
+        .iter()
+        .filter(|s| !matches!(s.status, SessionStatus::Idle))
+        .map(|s| s.id.clone())
+        .collect();
+    let active: Vec<&SessionInfo> = sessions
+        .iter()
+        .filter(|s| active_ids.contains(&s.id))
+        .collect();
+    let total = active.len();
 
-                // Scan active sessions for audit events.
-                let mut live_events = Vec::new();
-                for session in &active {
-                    let path = &session.jsonl_path;
-                    if let Some(src) = find_source_for_path(sources, path) {
-                        if let Ok(messages) = src.get_messages(path) {
-                            let events = extract_audit_events(&messages, session);
-                            live_events.extend(events);
-                        }
-                    }
-                }
-
-                // Persist events from idle sessions into history.
-                let idle: Vec<&SessionInfo> = sessions
-                    .iter()
-                    .filter(|s| matches!(s.status, SessionStatus::Idle))
-                    .collect();
-                let mut idle_events = Vec::new();
-                for session in &idle {
-                    let path = &session.jsonl_path;
-                    if let Some(src) = find_source_for_path(sources, path) {
-                        if let Ok(messages) = src.get_messages(path) {
-                            let events = extract_audit_events(&messages, session);
-                            idle_events.extend(events);
-                        }
-                    }
-                }
-
-                let mut hist = audit_history.lock().unwrap();
-                hist.persist_evicted(idle_events);
-                hist.remove_sessions(&active_ids);
-                let mut all_events: Vec<_> = hist.events().to_vec();
-                drop(hist);
-                all_events.extend(live_events);
-
-                all_events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                let summary = crate::audit::AuditSummary {
-                    events: all_events,
-                    total_sessions_scanned: total,
-                };
-                let body = serde_json::to_string(&summary).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
+    // Scan active sessions for audit events.
+    let mut live_events = Vec::new();
+    for session in &active {
+        let path = &session.jsonl_path;
+        if let Some(src) = find_source_for_path(sources, path) {
+            if let Ok(messages) = src.get_messages(path) {
+                let events = extract_audit_events(&messages, session);
+                live_events.extend(events);
             }
+        }
+    }
+
+    // Persist events from idle sessions into history.
+    let idle: Vec<&SessionInfo> = sessions
+        .iter()
+        .filter(|s| matches!(s.status, SessionStatus::Idle))
+        .collect();
+    let mut idle_events = Vec::new();
+    for session in &idle {
+        let path = &session.jsonl_path;
+        if let Some(src) = find_source_for_path(sources, path) {
+            if let Ok(messages) = src.get_messages(path) {
+                let events = extract_audit_events(&messages, session);
+                idle_events.extend(events);
+            }
+        }
+    }
+
+    let mut hist = audit_history.lock().unwrap();
+    hist.persist_evicted(idle_events);
+    hist.remove_sessions(&active_ids);
+    let mut all_events: Vec<_> = hist.events().to_vec();
+    drop(hist);
+    all_events.extend(live_events);
+
+    all_events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    let summary = crate::audit::AuditSummary {
+        events: all_events,
+        total_sessions_scanned: total,
+    };
+    let body = serde_json::to_string(&summary).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_audit_pattern_info(
     ctx: &ServeCtx,
@@ -84,16 +82,14 @@ pub(crate) fn route_audit_pattern_info(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let (version, path) = crate::pattern_update::get_patterns_info();
-                let body = serde_json::json!({
-                    "version": version,
-                    "path": path,
-                }).to_string();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let (version, path) = crate::pattern_update::get_patterns_info();
+    let body = serde_json::json!({
+        "version": version,
+        "path": path,
+    })
+    .to_string();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_audit_check_update(
     ctx: &ServeCtx,
@@ -102,13 +98,10 @@ pub(crate) fn route_audit_check_update(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let msg = crate::pattern_update::check_update_now();
-                let body = serde_json::json!({ "message": msg }).to_string();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let msg = crate::pattern_update::check_update_now();
+    let body = serde_json::json!({ "message": msg }).to_string();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_audit_rules(
     ctx: &ServeCtx,
@@ -117,13 +110,10 @@ pub(crate) fn route_audit_rules(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let rules = crate::audit::get_all_rules();
-                let body = serde_json::to_string(&rules).unwrap_or_else(|_| "[]".into());
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let rules = crate::audit::get_all_rules();
+    let body = serde_json::to_string(&rules).unwrap_or_else(|_| "[]".into());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_audit_rules_toggle(
     ctx: &ServeCtx,
@@ -132,37 +122,38 @@ pub(crate) fn route_audit_rules_toggle(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut body_bytes = Vec::new();
-                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                #[derive(serde::Deserialize)]
-                struct ToggleReq { id: String, enabled: bool }
-                match serde_json::from_slice::<ToggleReq>(&body_bytes) {
-                    Ok(req) => match crate::audit::set_rule_enabled(&req.id, req.enabled) {
-                        Ok(()) => {
-                            let _ = request.respond(
-                                tiny_http::Response::from_string("{}").with_header(json_header),
-                            );
-                        }
-                        Err(e) => {
-                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body)
-                                    .with_status_code(500)
-                                    .with_header(json_header),
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    #[derive(serde::Deserialize)]
+    struct ToggleReq {
+        id: String,
+        enabled: bool,
+    }
+    match serde_json::from_slice::<ToggleReq>(&body_bytes) {
+        Ok(req) => match crate::audit::set_rule_enabled(&req.id, req.enabled) {
+            Ok(()) => {
+                let _ = request
+                    .respond(tiny_http::Response::from_string("{}").with_header(json_header));
             }
+            Err(e) => {
+                let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_audit_rules_save(
     ctx: &ServeCtx,
@@ -171,35 +162,33 @@ pub(crate) fn route_audit_rules_save(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut body_bytes = Vec::new();
-                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                match serde_json::from_slice::<crate::audit::AuditRuleInfo>(&body_bytes) {
-                    Ok(rule) => match crate::audit::save_custom_rule(rule) {
-                        Ok(()) => {
-                            let _ = request.respond(
-                                tiny_http::Response::from_string("{}").with_header(json_header),
-                            );
-                        }
-                        Err(e) => {
-                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body)
-                                    .with_status_code(500)
-                                    .with_header(json_header),
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    match serde_json::from_slice::<crate::audit::AuditRuleInfo>(&body_bytes) {
+        Ok(rule) => match crate::audit::save_custom_rule(rule) {
+            Ok(()) => {
+                let _ = request
+                    .respond(tiny_http::Response::from_string("{}").with_header(json_header));
             }
+            Err(e) => {
+                let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_audit_rules_delete(
     ctx: &ServeCtx,
@@ -208,37 +197,37 @@ pub(crate) fn route_audit_rules_delete(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut body_bytes = Vec::new();
-                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                #[derive(serde::Deserialize)]
-                struct DeleteReq { id: String }
-                match serde_json::from_slice::<DeleteReq>(&body_bytes) {
-                    Ok(req) => match crate::audit::delete_custom_rule(&req.id) {
-                        Ok(()) => {
-                            let _ = request.respond(
-                                tiny_http::Response::from_string("{}").with_header(json_header),
-                            );
-                        }
-                        Err(e) => {
-                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body)
-                                    .with_status_code(500)
-                                    .with_header(json_header),
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    #[derive(serde::Deserialize)]
+    struct DeleteReq {
+        id: String,
+    }
+    match serde_json::from_slice::<DeleteReq>(&body_bytes) {
+        Ok(req) => match crate::audit::delete_custom_rule(&req.id) {
+            Ok(()) => {
+                let _ = request
+                    .respond(tiny_http::Response::from_string("{}").with_header(json_header));
             }
+            Err(e) => {
+                let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_audit_rules_suggest(
     ctx: &ServeCtx,
@@ -249,68 +238,74 @@ pub(crate) fn route_audit_rules_suggest(
 ) {
     let llm_config = ctx.llm_config.clone();
 
-                let mut body_bytes = Vec::new();
-                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                #[derive(serde::Deserialize)]
-                struct SuggestReq { concern: String, lang: String }
-                match serde_json::from_slice::<SuggestReq>(&body_bytes) {
-                    Ok(req) => {
-                        let existing_tags: Vec<String> = crate::audit::get_all_rules()
-                            .iter()
-                            .map(|r| r.tag.clone())
-                            .collect();
-                        let prompt = crate::audit::build_suggest_rules_prompt(
-                            &req.concern, &req.lang, &existing_tags,
-                        );
-                        let llm_cfg = llm_config.lock().unwrap().clone();
-                        match crate::llm_provider::complete_routed(
-                                    &llm_cfg,
-                                    crate::llm_provider::ModelSlot::Standard,
-                                    &prompt,
-                                    std::time::Duration::from_secs(120),
-                                    crate::llm_usage::SCENARIO_AUDIT_RULES,
-                                ) {
-                                    Some(resp) => {
-                                        let json_str = resp.trim();
-                                        let json_str = json_str
-                                            .strip_prefix("```json")
-                                            .or_else(|| json_str.strip_prefix("```"))
-                                            .unwrap_or(json_str);
-                                        let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
-                                        match serde_json::from_str::<Vec<crate::audit::SuggestedRule>>(json_str) {
-                                            Ok(suggestions) => {
-                                                let body = serde_json::to_string(&suggestions).unwrap_or_else(|_| "[]".into());
-                                                let _ = request.respond(
-                                                    tiny_http::Response::from_string(body).with_header(json_header),
-                                                );
-                                            }
-                                            Err(e) => {
-                                                let body = format!(r#"{{"error":"Failed to parse LLM response: {}"}}"#, e.to_string().replace('"', "'"));
-                                                let _ = request.respond(
-                                                    tiny_http::Response::from_string(body)
-                                                        .with_status_code(500)
-                                                        .with_header(json_header),
-                                                );
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        let body = r#"{"error":"LLM did not return a response"}"#;
-                                        let _ = request.respond(
-                                            tiny_http::Response::from_string(body)
-                                                .with_status_code(500)
-                                                .with_header(json_header),
-                                        );
-                                    }
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    #[derive(serde::Deserialize)]
+    struct SuggestReq {
+        concern: String,
+        lang: String,
+    }
+    match serde_json::from_slice::<SuggestReq>(&body_bytes) {
+        Ok(req) => {
+            let existing_tags: Vec<String> = crate::audit::get_all_rules()
+                .iter()
+                .map(|r| r.tag.clone())
+                .collect();
+            let prompt =
+                crate::audit::build_suggest_rules_prompt(&req.concern, &req.lang, &existing_tags);
+            let llm_cfg = llm_config.lock().unwrap().clone();
+            match crate::llm_provider::complete_routed(
+                &llm_cfg,
+                crate::llm_provider::ModelSlot::Standard,
+                &prompt,
+                std::time::Duration::from_secs(120),
+                crate::llm_usage::SCENARIO_AUDIT_RULES,
+            ) {
+                Some(resp) => {
+                    let json_str = resp.trim();
+                    let json_str = json_str
+                        .strip_prefix("```json")
+                        .or_else(|| json_str.strip_prefix("```"))
+                        .unwrap_or(json_str);
+                    let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
+                    match serde_json::from_str::<Vec<crate::audit::SuggestedRule>>(json_str) {
+                        Ok(suggestions) => {
+                            let body =
+                                serde_json::to_string(&suggestions).unwrap_or_else(|_| "[]".into());
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = format!(
+                                r#"{{"error":"Failed to parse LLM response: {}"}}"#,
+                                e.to_string().replace('"', "'")
+                            );
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
                         }
                     }
-                    Err(e) => {
-                        let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
+                }
+                None => {
+                    let body = r#"{"error":"LLM did not return a response"}"#;
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
                 }
             }
+        }
+        Err(e) => {
+            let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}

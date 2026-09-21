@@ -114,8 +114,7 @@ impl SessionAcc {
             self.stats.push_value(&v);
             self.push_context(&v);
 
-            if self.ai_title.is_none()
-                && v.get("type").and_then(|t| t.as_str()) == Some("ai-title")
+            if self.ai_title.is_none() && v.get("type").and_then(|t| t.as_str()) == Some("ai-title")
             {
                 self.ai_title = v
                     .get("aiTitle")
@@ -123,8 +122,7 @@ impl SessionAcc {
                     .map(|s| s.to_string());
             }
 
-            if !self.entrypoint_settled && v.get("type").and_then(|t| t.as_str()) == Some("user")
-            {
+            if !self.entrypoint_settled && v.get("type").and_then(|t| t.as_str()) == Some("user") {
                 self.entrypoint_settled = true;
                 self.entrypoint = v
                     .get("entrypoint")
@@ -180,8 +178,9 @@ impl SessionAcc {
                 .and_then(|t| t.as_u64())
                 .unwrap_or(0)
         };
-        let total_input =
-            get("input_tokens") + get("cache_creation_input_tokens") + get("cache_read_input_tokens");
+        let total_input = get("input_tokens")
+            + get("cache_creation_input_tokens")
+            + get("cache_read_input_tokens");
         if total_input == 0 {
             return;
         }
@@ -540,7 +539,10 @@ pub fn resolve_session_model_spec(session_id: &str) -> Option<String> {
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect();
     let model = extract_model(&lines)?;
-    Some(reconcile_model_spec(&model, configured_model_spec().as_deref()))
+    Some(reconcile_model_spec(
+        &model,
+        configured_model_spec().as_deref(),
+    ))
 }
 
 /// The launch context a relayed / scheduled / looped / watched successor
@@ -779,7 +781,11 @@ pub(crate) fn extract_entrypoint(all_lines: &[&str]) -> Option<String> {
         .iter()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .find(|v| v.get("type").and_then(|t| t.as_str()) == Some("user"))
-        .and_then(|v| v.get("entrypoint").and_then(|s| s.as_str()).map(|s| s.to_string()))
+        .and_then(|v| {
+            v.get("entrypoint")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string())
+        })
 }
 
 pub fn parse_session_info(
@@ -803,10 +809,7 @@ pub fn parse_session_info(
 ) -> Option<(SessionInfo, IncrParse)> {
     let metadata = fs::metadata(jsonl_path).ok()?;
     let last_modified = metadata.modified().ok()?;
-    let last_activity_ms = last_modified
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_millis() as u64;
+    let last_activity_ms = last_modified.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
     let created_at_ms = metadata
         .created()
         .ok()
@@ -872,13 +875,17 @@ pub fn parse_session_info(
     // `total_token_usage`. NOT the last-turn context-window snapshot: that is
     // `ctx_usage.used`, which still drives `context_percent` just below.
     let total_input_tokens = stats.total_input_tokens;
-    let context_percent = ctx_usage
-        .and_then(|(used, model, max)| compute_context_percent(used, Some(&model), max));
+    let context_percent =
+        ctx_usage.and_then(|(used, model, max)| compute_context_percent(used, Some(&model), max));
     let last_message_preview = extract_last_text(&last_n);
 
     let slug = last_n
         .iter()
-        .filter_map(|v| v.get("slug").and_then(|s| s.as_str()).map(|s| s.to_string()))
+        .filter_map(|v| {
+            v.get("slug")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string())
+        })
         .last();
 
     let ai_title = acc.ai_title();
@@ -887,8 +894,10 @@ pub fn parse_session_info(
     let model = meta_model.or_else(|| extract_model(&last_n));
     let last_skill = extract_last_skill(&last_n);
     let todos = acc.todos();
-    let task_plan =
-        crate::prd_tasks::summarize_workspace_tasks(Path::new(&workspace_path), Some(session_id.as_str()));
+    let task_plan = crate::prd_tasks::summarize_workspace_tasks(
+        Path::new(&workspace_path),
+        Some(session_id.as_str()),
+    );
 
     // Prefer explicit thinking level from meta; fall back to detecting thinking blocks
     let thinking_level = meta_thinking_level.or_else(|| {
@@ -1008,7 +1017,10 @@ mod extract_last_text_tests {
         // the last *real* assistant text, never the synthetic noise.
         let lines = vec![
             assistant("claude-opus-4-8", "Design is clear, implementing now."),
-            assistant("<synthetic>", "Failed to authenticate. API Error: 403 Request not allowed"),
+            assistant(
+                "<synthetic>",
+                "Failed to authenticate. API Error: 403 Request not allowed",
+            ),
             assistant("<synthetic>", "No response requested."),
         ];
         assert_eq!(
@@ -1023,7 +1035,10 @@ mod extract_last_text_tests {
         // turns. Better to fall through to "(Untitled)" than title the card
         // with a control message.
         let lines = vec![
-            assistant("<synthetic>", "Failed to authenticate. API Error: 403 Request not allowed"),
+            assistant(
+                "<synthetic>",
+                "Failed to authenticate. API Error: 403 Request not allowed",
+            ),
             assistant("<synthetic>", "No response requested."),
         ];
         assert_eq!(extract_last_text(&lines), None);
@@ -1059,7 +1074,10 @@ mod roster_overlay_tests {
         // never resume a dsh session.
         assert_eq!(ctx.source.as_deref(), Some("dsh"));
         assert_eq!(ctx.workspace, "/repo/claude-fleet");
-        assert_eq!(ctx.model.as_deref(), Some("openrouter/anthropic/claude-opus-5"));
+        assert_eq!(
+            ctx.model.as_deref(),
+            Some("openrouter/anthropic/claude-opus-5")
+        );
     }
 
     #[test]
@@ -1079,7 +1097,12 @@ mod roster_overlay_tests {
         let mut ctx = env_only();
         ctx.workspace = "/repo/from-transcript".into();
         ctx.model = Some("claude-opus-5[1m]".into());
-        let ctx = overlay_roster_entry(ctx, "claude-code", "/repo/from-roster", Some("claude-opus-5"));
+        let ctx = overlay_roster_entry(
+            ctx,
+            "claude-code",
+            "/repo/from-roster",
+            Some("claude-opus-5"),
+        );
         assert_eq!(ctx.workspace, "/repo/from-transcript");
         assert_eq!(ctx.model.as_deref(), Some("claude-opus-5[1m]"));
         assert_eq!(ctx.source.as_deref(), Some("claude-code"));

@@ -60,7 +60,11 @@ const BOOT_BUDGET: Duration = Duration::from_secs(30);
 /// The worker is deliberately not joined on timeout: it is parked inside a
 /// startup timeout that cannot be cancelled from here, and the point of this
 /// helper is that the *test* stops waiting for it.
-fn within<T: Send + 'static>(budget: Duration, what: &str, body: impl FnOnce() -> T + Send + 'static) -> T {
+fn within<T: Send + 'static>(
+    budget: Duration,
+    what: &str,
+    body: impl FnOnce() -> T + Send + 'static,
+) -> T {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(body());
@@ -268,7 +272,11 @@ fn concurrent_roster_scans_collapse_into_one_dsh_call() {
     std::thread::sleep(claw_fleet_core::dsh_source::ROSTER_TTL + Duration::from_millis(300));
     let refreshed = source.scan_sessions();
     assert_eq!(list_calls(&log), 2, "a scan past the TTL must refresh");
-    assert_eq!(refreshed.len(), 1, "the refreshed roster still has the session");
+    assert_eq!(
+        refreshed.len(),
+        1,
+        "the refreshed roster still has the session"
+    );
 
     claw_fleet_core::dsh_source::shutdown();
 }

@@ -77,7 +77,9 @@ pub fn build_test_request() -> ElicitationRequest {
 /// (html / formFields / options) so the diagnostic Decision Card visually
 /// proves end-to-end coverage of the fleet__ask renderer in one shot.
 pub fn build_test_fleet_ask_request() -> crate::mcp_ipc::FleetAskRequest {
-    use crate::mcp_ipc::{FleetAskFormField, FleetAskOption, FleetAskQuestion, FleetAskRequest, FormFieldKind};
+    use crate::mcp_ipc::{
+        FleetAskFormField, FleetAskOption, FleetAskQuestion, FleetAskRequest, FormFieldKind,
+    };
     let id = Uuid::new_v4().to_string();
     FleetAskRequest {
         id: id.clone(),
@@ -244,26 +246,30 @@ fn run_cli_test_inner(
 
     let home = crate::session::real_home_dir().ok_or("cannot determine home directory")?;
     let workdir = home.join(".fleet").join("diagnostics");
-    std::fs::create_dir_all(&workdir)
-        .map_err(|e| format!("create diagnostics workspace: {e}"))?;
+    std::fs::create_dir_all(&workdir).map_err(|e| format!("create diagnostics workspace: {e}"))?;
 
     // Snapshot existing pending request ids so we can identify new
     // ones the test produced (vs. unrelated cards already in flight).
     let baseline: std::collections::HashSet<String> = match kind {
-        ElicitationKind::AskUserQuestion => {
-            crate::elicitation::list_pending_requests().into_iter().collect()
-        }
-        ElicitationKind::FleetAsk => {
-            crate::mcp_ipc::list_pending_requests().into_iter().collect()
-        }
+        ElicitationKind::AskUserQuestion => crate::elicitation::list_pending_requests()
+            .into_iter()
+            .collect(),
+        ElicitationKind::FleetAsk => crate::mcp_ipc::list_pending_requests()
+            .into_iter()
+            .collect(),
     };
 
-    let mut child = build_claude_command(std::path::Path::new(&bin.path), allowed_tool, prompt, &workdir)?
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("spawn claude -p: {e}"))?;
+    let mut child = build_claude_command(
+        std::path::Path::new(&bin.path),
+        allowed_tool,
+        prompt,
+        &workdir,
+    )?
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
+    .map_err(|e| format!("spawn claude -p: {e}"))?;
 
     let poll = poll_for_test_card(&mut child, timeout, &baseline, kind);
 
@@ -337,20 +343,29 @@ fn poll_for_test_card(
         }
         match child.try_wait() {
             Ok(Some(_)) => {
-                return CardPollResult { matched_request_id: matched, timed_out: false };
+                return CardPollResult {
+                    matched_request_id: matched,
+                    timed_out: false,
+                };
             }
             Ok(None) => {
                 if start.elapsed() > timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return CardPollResult { matched_request_id: matched, timed_out: true };
+                    return CardPollResult {
+                        matched_request_id: matched,
+                        timed_out: true,
+                    };
                 }
                 std::thread::sleep(Duration::from_millis(200));
             }
             Err(_) => {
                 // try_wait failed (rare); treat as exited so we don't
                 // spin forever, and return whatever we matched.
-                return CardPollResult { matched_request_id: matched, timed_out: false };
+                return CardPollResult {
+                    matched_request_id: matched,
+                    timed_out: false,
+                };
             }
         }
     }
@@ -485,8 +500,7 @@ mod tests {
         // a sibling test flipping FLEET_HOME between the two makes them
         // disagree, so the read needs the same lock a write does.
         let _env_guard = crate::session::fleet_home_lock();
-        let expected_home = crate::session::real_home_dir()
-            .expect("self has a home dir");
+        let expected_home = crate::session::real_home_dir().expect("self has a home dir");
         let cmd = build_claude_command(
             std::path::Path::new("/usr/bin/false"),
             "AskUserQuestion",
@@ -545,7 +559,10 @@ mod tests {
         assert_eq!(req.questions.len(), 1);
         let q = &req.questions[0];
         assert!(q.html.is_some(), "html hook must be exercised");
-        assert!(!q.form_fields.is_empty(), "formFields hook must be exercised");
+        assert!(
+            !q.form_fields.is_empty(),
+            "formFields hook must be exercised"
+        );
         assert_eq!(q.options.len(), 2, "options hook must be exercised");
     }
 
@@ -554,12 +571,21 @@ mod tests {
         let req = build_test_fleet_ask_request();
         let body = &req.questions[0].question;
         let count = body.matches("\n---\n").count();
-        assert_eq!(count, 1, "test question needs exactly one TTS divider: {body}");
+        assert_eq!(
+            count, 1,
+            "test question needs exactly one TTS divider: {body}"
+        );
     }
 
     #[test]
     fn build_cli_message_happy_path_exit_zero_with_card() {
-        let msg = build_cli_message("AskUserQuestion", Some(0), false, true, Duration::from_secs(60));
+        let msg = build_cli_message(
+            "AskUserQuestion",
+            Some(0),
+            false,
+            true,
+            Duration::from_secs(60),
+        );
         assert!(msg.starts_with("✅"), "expected success marker: {msg}");
         assert!(msg.contains("exited 0"));
         assert!(msg.contains("card landed"));
@@ -569,7 +595,13 @@ mod tests {
     fn build_cli_message_smoking_gun_exit_zero_no_card() {
         // The most useful failure mode: agent ran cleanly but never
         // produced the card. Message must call this out clearly.
-        let msg = build_cli_message("AskUserQuestion", Some(0), false, false, Duration::from_secs(60));
+        let msg = build_cli_message(
+            "AskUserQuestion",
+            Some(0),
+            false,
+            false,
+            Duration::from_secs(60),
+        );
         assert!(msg.starts_with("❌"), "expected failure marker: {msg}");
         assert!(msg.contains("exited 0 but NO test"));
         assert!(msg.contains("AskUserQuestion"));
@@ -582,14 +614,23 @@ mod tests {
         // Boss's answer). This is the normal happy path when Boss doesn't
         // click within the window — still wired end-to-end.
         let msg = build_cli_message("mcp__fleet__ask", None, true, true, Duration::from_secs(60));
-        assert!(msg.starts_with("✅"), "timeout-with-card must be success: {msg}");
+        assert!(
+            msg.starts_with("✅"),
+            "timeout-with-card must be success: {msg}"
+        );
         assert!(msg.contains("60s"));
         assert!(msg.contains("DID land"));
     }
 
     #[test]
     fn build_cli_message_timeout_no_card() {
-        let msg = build_cli_message("AskUserQuestion", None, true, false, Duration::from_secs(45));
+        let msg = build_cli_message(
+            "AskUserQuestion",
+            None,
+            true,
+            false,
+            Duration::from_secs(45),
+        );
         assert!(msg.starts_with("❌"));
         assert!(msg.contains("45s"));
         assert!(msg.contains("no test"));
@@ -597,7 +638,13 @@ mod tests {
 
     #[test]
     fn build_cli_message_nonzero_exit() {
-        let msg = build_cli_message("AskUserQuestion", Some(127), false, false, Duration::from_secs(60));
+        let msg = build_cli_message(
+            "AskUserQuestion",
+            Some(127),
+            false,
+            false,
+            Duration::from_secs(60),
+        );
         assert!(msg.starts_with("❌"));
         assert!(msg.contains("status 127"));
     }

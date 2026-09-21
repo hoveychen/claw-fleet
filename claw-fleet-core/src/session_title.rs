@@ -183,7 +183,9 @@ fn write_title_in(
     source: SessionTitleSource,
 ) -> Result<(), String> {
     let path = dir.join(format!("{session_id}.json"));
-    let trimmed = title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let trimmed = title
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
     match trimmed {
         None => {
             let _ = fs::remove_file(&path);
@@ -256,7 +258,10 @@ mod tests {
             set_agent_title_in(dir.path(), "sess-a", "/ws", "Agent one".into()).unwrap(),
             AgentTitleOutcome::Updated
         );
-        assert_eq!(read_in(dir.path(), "sess-a").unwrap().source, SessionTitleSource::Agent);
+        assert_eq!(
+            read_in(dir.path(), "sess-a").unwrap().source,
+            SessionTitleSource::Agent
+        );
         assert_eq!(
             set_agent_title_in(dir.path(), "sess-a", "/ws", "Agent two".into()).unwrap(),
             AgentTitleOutcome::Updated

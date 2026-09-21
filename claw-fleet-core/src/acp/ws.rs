@@ -117,18 +117,20 @@ pub fn spawn_listener(
 ) -> std::io::Result<std::net::SocketAddr> {
     let listener = std::net::TcpListener::bind(addr)?;
     let bound = listener.local_addr()?;
-    std::thread::Builder::new().name("acp-listener".into()).spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
-            let sources = sources.clone();
-            let authorize = authorize.clone();
-            // One thread per connection — see the module docs on why they do
-            // not share a runtime.
-            let _ = std::thread::Builder::new()
-                .name("acp-conn".into())
-                .spawn(move || serve_connection(stream, sources, authorize));
-        }
-    })?;
+    std::thread::Builder::new()
+        .name("acp-listener".into())
+        .spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                let sources = sources.clone();
+                let authorize = authorize.clone();
+                // One thread per connection — see the module docs on why they do
+                // not share a runtime.
+                let _ = std::thread::Builder::new()
+                    .name("acp-conn".into())
+                    .spawn(move || serve_connection(stream, sources, authorize));
+            }
+        })?;
     Ok(bound)
 }
 
@@ -138,42 +140,48 @@ fn serve_connection(
     sources: Arc<Vec<Box<dyn crate::agent_source::AgentSource>>>,
     authorize: Authorizer,
 ) {
-    let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
         return;
     };
     rt.block_on(async move {
         if stream.set_nonblocking(true).is_err() {
             return;
         }
-        let Ok(stream) = tokio::net::TcpStream::from_std(stream) else { return };
+        let Ok(stream) = tokio::net::TcpStream::from_std(stream) else {
+            return;
+        };
 
         // The callback is where the subprotocol and the token are checked, and
         // where the accepted subprotocol is echoed back. Only `acp.v1` goes
         // back — never the `bearer.*` entry, which is a credential and would
         // otherwise land in proxy logs.
         let mut rejection: Option<HandshakeError> = None;
-        let ws = tokio_tungstenite::accept_hdr_async(stream, |req: &HsRequest, mut resp: HsResponse| {
-            let protos = req
-                .headers()
-                .get("Sec-WebSocket-Protocol")
-                .and_then(|v| v.to_str().ok());
-            match check_subprotocols(protos, |t| authorize(t)) {
-                Ok(()) => {
-                    resp.headers_mut().insert(
-                        "Sec-WebSocket-Protocol",
-                        WS_SUBPROTOCOL.parse().expect("static subprotocol token"),
-                    );
-                    Ok(resp)
+        let ws =
+            tokio_tungstenite::accept_hdr_async(stream, |req: &HsRequest, mut resp: HsResponse| {
+                let protos = req
+                    .headers()
+                    .get("Sec-WebSocket-Protocol")
+                    .and_then(|v| v.to_str().ok());
+                match check_subprotocols(protos, |t| authorize(t)) {
+                    Ok(()) => {
+                        resp.headers_mut().insert(
+                            "Sec-WebSocket-Protocol",
+                            WS_SUBPROTOCOL.parse().expect("static subprotocol token"),
+                        );
+                        Ok(resp)
+                    }
+                    Err(e) => {
+                        rejection = Some(e);
+                        let mut err = ErrorResponse::new(Some(e.message().to_string()));
+                        *err.status_mut() = e.status();
+                        Err(err)
+                    }
                 }
-                Err(e) => {
-                    rejection = Some(e);
-                    let mut err = ErrorResponse::new(Some(e.message().to_string()));
-                    *err.status_mut() = e.status();
-                    Err(err)
-                }
-            }
-        })
-        .await;
+            })
+            .await;
 
         let ws = match ws {
             Ok(ws) => ws,
@@ -322,7 +330,10 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(err, HandshakeError::WrongSubprotocol);
-        assert!(!authorized, "authorization must not run for a non-ACP socket");
+        assert!(
+            !authorized,
+            "authorization must not run for a non-ACP socket"
+        );
 
         assert_eq!(
             check_subprotocols(None, |_| true).unwrap_err(),
@@ -335,7 +346,10 @@ mod tests {
         let err = check_subprotocols(Some("acp.v1, bearer.no"), |_| false).unwrap_err();
         assert_eq!(err, HandshakeError::Unauthorized);
         assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(HandshakeError::WrongSubprotocol.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            HandshakeError::WrongSubprotocol.status(),
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[test]
@@ -362,7 +376,10 @@ mod tests {
         let authorize: Authorizer = Arc::new(|t: Option<&str>| t == Some("good"));
         let bound = spawn_listener("127.0.0.1:0", Arc::new(Vec::new()), authorize).unwrap();
 
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         rt.block_on(async move {
             use tokio_tungstenite::tungstenite::client::IntoClientRequest;
             let mut req = format!("ws://{bound}/acp").into_client_request().unwrap();
@@ -370,13 +387,22 @@ mod tests {
                 "Sec-WebSocket-Protocol",
                 "acp.v1, bearer.good".parse().unwrap(),
             );
-            let (mut ws, resp) = tokio_tungstenite::connect_async(req).await.expect("handshake");
+            let (mut ws, resp) = tokio_tungstenite::connect_async(req)
+                .await
+                .expect("handshake");
 
             // The server echoes back only the protocol, never the credential.
-            let negotiated =
-                resp.headers().get("Sec-WebSocket-Protocol").unwrap().to_str().unwrap();
+            let negotiated = resp
+                .headers()
+                .get("Sec-WebSocket-Protocol")
+                .unwrap()
+                .to_str()
+                .unwrap();
             assert_eq!(negotiated, WS_SUBPROTOCOL);
-            assert!(!negotiated.contains("bearer"), "a reflected token would leak into proxy logs");
+            assert!(
+                !negotiated.contains("bearer"),
+                "a reflected token would leak into proxy logs"
+            );
 
             ws.send(Message::Text(
                 r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#
@@ -386,7 +412,11 @@ mod tests {
             .unwrap();
             // A notification must draw no reply, and must not stall the next
             // request behind it.
-            ws.send(Message::Text(r#"{"jsonrpc":"2.0","method":"$/ping"}"#.into())).await.unwrap();
+            ws.send(Message::Text(
+                r#"{"jsonrpc":"2.0","method":"$/ping"}"#.into(),
+            ))
+            .await
+            .unwrap();
             ws.send(Message::Text(
                 r#"{"jsonrpc":"2.0","id":2,"method":"session/list","params":{}}"#.into(),
             ))
@@ -407,8 +437,14 @@ mod tests {
 
             assert_eq!(got[0]["id"], 1);
             assert_eq!(got[0]["result"]["agentInfo"]["name"], "fleet");
-            assert_eq!(got[0]["result"]["protocolVersion"], PROTOCOL_VERSION_FOR_TEST);
-            assert_eq!(got[1]["id"], 2, "the ping must not have consumed a reply slot");
+            assert_eq!(
+                got[0]["result"]["protocolVersion"],
+                PROTOCOL_VERSION_FOR_TEST
+            );
+            assert_eq!(
+                got[1]["id"], 2,
+                "the ping must not have consumed a reply slot"
+            );
             assert!(got[1]["result"]["sessions"].is_array());
         });
     }
@@ -420,7 +456,10 @@ mod tests {
         let authorize: Authorizer = Arc::new(|t: Option<&str>| t == Some("good"));
         let bound = spawn_listener("127.0.0.1:0", Arc::new(Vec::new()), authorize).unwrap();
 
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         rt.block_on(async move {
             for protos in ["acp.v1, bearer.wrong", "acp.v1", "chat"] {
                 let mut req = format!("ws://{bound}/acp").into_client_request().unwrap();
@@ -446,7 +485,11 @@ mod tests {
 
         std::env::remove_var("FLEET_ACP_PORT");
         std::env::remove_var("FLEET_ACP_HOST");
-        assert_eq!(listen_addr().as_deref(), Some("127.0.0.1:7008"), "loopback by default");
+        assert_eq!(
+            listen_addr().as_deref(),
+            Some("127.0.0.1:7008"),
+            "loopback by default"
+        );
 
         std::env::set_var("FLEET_ACP_PORT", "9999");
         assert_eq!(listen_addr().as_deref(), Some("127.0.0.1:9999"));

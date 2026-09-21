@@ -69,7 +69,10 @@ fn live_spawn_creates_the_session_it_promised() {
     // The promise Fleet makes to its caller: the id it hands back is the session
     // that now exists, findable without guessing which one just appeared.
     let found = wait_for(Duration::from_secs(30), || {
-        source.scan_sessions().into_iter().find(|s| s.id == session_id)
+        source
+            .scan_sessions()
+            .into_iter()
+            .find(|s| s.id == session_id)
     })
     .expect("the spawned session must show up in a scan");
 
@@ -79,11 +82,17 @@ fn live_spawn_creates_the_session_it_promised() {
 
     // And it must actually be running the prompt we gave it, not sitting blank.
     let worked = wait_for(Duration::from_secs(90), || {
-        let s = source.scan_sessions().into_iter().find(|s| s.id == session_id)?;
+        let s = source
+            .scan_sessions()
+            .into_iter()
+            .find(|s| s.id == session_id)?;
         (s.status != SessionStatus::Idle).then_some(s.status)
     });
     println!("status after spawn: {worked:?}");
-    assert!(worked.is_some(), "the spawned session never started working");
+    assert!(
+        worked.is_some(),
+        "the spawned session never started working"
+    );
 }
 
 /// The path the desktop launcher actually takes.
@@ -172,7 +181,10 @@ fn live_resume_continues_a_session_and_reports_its_outcome() {
 
     // Let the first turn finish before layering a second one on top.
     let settled = wait_for(Duration::from_secs(120), || {
-        let s = source.scan_sessions().into_iter().find(|x| x.id == session_id)?;
+        let s = source
+            .scan_sessions()
+            .into_iter()
+            .find(|x| x.id == session_id)?;
         matches!(s.status, SessionStatus::WaitingInput | SessionStatus::Idle).then_some(s.status)
     });
     println!("first turn settled: {settled:?}");
@@ -268,7 +280,10 @@ fn live_interrupt_cancels_the_turn_without_touching_the_server() {
     // Wait until the turn is actually in flight; cancelling before admission
     // would prove nothing.
     let running = wait_for(Duration::from_secs(120), || {
-        let s = source.scan_sessions().into_iter().find(|x| x.id == session_id)?;
+        let s = source
+            .scan_sessions()
+            .into_iter()
+            .find(|x| x.id == session_id)?;
         (s.status != SessionStatus::Idle).then_some(s.status)
     });
     println!("status before interrupt: {running:?}");
@@ -283,7 +298,10 @@ fn live_interrupt_cancels_the_turn_without_touching_the_server() {
     // unit tests beside `dsh_events` — this one is about the turn really
     // ending, on a prompt long enough that it would still be running.)
     let stopped = wait_for(Duration::from_secs(120), || {
-        let s = source.scan_sessions().into_iter().find(|x| x.id == session_id)?;
+        let s = source
+            .scan_sessions()
+            .into_iter()
+            .find(|x| x.id == session_id)?;
         matches!(s.status, SessionStatus::WaitingInput | SessionStatus::Idle).then_some(s.status)
     });
     println!("status after interrupt: {stopped:?}");

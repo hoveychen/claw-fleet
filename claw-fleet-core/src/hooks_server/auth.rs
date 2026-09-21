@@ -90,7 +90,13 @@ mod tests {
     fn admin_token_reaches_any_path_including_internal() {
         // A public path and a dangerous internal one both succeed for admin.
         assert_eq!(
-            authorize(routes::SPAWN_SESSION, Some(ADMIN), ADMIN, Some(PUBLIC), false),
+            authorize(
+                routes::SPAWN_SESSION,
+                Some(ADMIN),
+                ADMIN,
+                Some(PUBLIC),
+                false
+            ),
             AuthOutcome::Admin
         );
         assert_eq!(
@@ -98,7 +104,13 @@ mod tests {
             AuthOutcome::Admin
         );
         assert_eq!(
-            authorize(routes::APPLY_GUARD_HOOK, Some(ADMIN), ADMIN, Some(PUBLIC), false),
+            authorize(
+                routes::APPLY_GUARD_HOOK,
+                Some(ADMIN),
+                ADMIN,
+                Some(PUBLIC),
+                false
+            ),
             AuthOutcome::Admin
         );
     }
@@ -296,7 +308,13 @@ mod tests {
     #[test]
     fn wrong_token_is_denied() {
         assert_eq!(
-            authorize(routes::SPAWN_SESSION, Some("nope"), ADMIN, Some(PUBLIC), false),
+            authorize(
+                routes::SPAWN_SESSION,
+                Some("nope"),
+                ADMIN,
+                Some(PUBLIC),
+                false
+            ),
             AuthOutcome::Denied
         );
     }

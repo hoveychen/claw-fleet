@@ -95,7 +95,10 @@ pub fn locations_for(name: &str, input: &Value) -> Vec<ToolCallLocation> {
         .map(|p| {
             vec![ToolCallLocation {
                 path: p.to_string(),
-                line: input.get("offset").and_then(|v| v.as_u64()).map(|n| n as u32),
+                line: input
+                    .get("offset")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as u32),
             }]
         })
         .unwrap_or_default()
@@ -113,8 +116,14 @@ pub fn diff_for(name: &str, input: &Value) -> Option<ToolCallContent> {
     match name {
         "Edit" => Some(ToolCallContent::Diff(Diff {
             path,
-            old_text: input.get("old_string").and_then(|v| v.as_str()).map(String::from),
-            new_text: input.get("new_string").and_then(|v| v.as_str())?.to_string(),
+            old_text: input
+                .get("old_string")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            new_text: input
+                .get("new_string")
+                .and_then(|v| v.as_str())?
+                .to_string(),
         })),
         "Write" => Some(ToolCallContent::Diff(Diff {
             path,
@@ -173,7 +182,10 @@ const MAX_OUTPUT_CHARS: usize = 8_000;
 /// Build the `tool_call_update` for a transcript `tool_result` block.
 pub fn tool_call_update_from_result(block: &Value) -> Option<ToolCallUpdate> {
     let id = block.get("tool_use_id")?.as_str()?.to_string();
-    let failed = block.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+    let failed = block
+        .get("is_error")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let text = result_text(block.get("content"));
     let content = text.map(|t| vec![ToolCallContent::text(clip(&t))]);
@@ -182,7 +194,11 @@ pub fn tool_call_update_from_result(block: &Value) -> Option<ToolCallUpdate> {
     // about, so it carries no title/kind of its own.
     Some(ToolCallUpdate {
         tool_call_id: id,
-        status: Some(if failed { ToolCallStatus::Failed } else { ToolCallStatus::Completed }),
+        status: Some(if failed {
+            ToolCallStatus::Failed
+        } else {
+            ToolCallStatus::Completed
+        }),
         content,
         ..Default::default()
     })
@@ -284,8 +300,10 @@ pub fn project_updates(messages: &[Value], include_user: bool) -> Vec<super::typ
                 }
                 // Claude also writes a bare-string user message.
                 if include_user {
-                    if let Some(s) =
-                        msg.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str())
+                    if let Some(s) = msg
+                        .get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_str())
                     {
                         push_text(&mut out, Some(&Value::from(s)), U::user_text);
                     }
@@ -313,10 +331,16 @@ fn project_codex_item(
                 return;
             }
             let make = if is_user { U::user_text } else { U::agent_text };
-            for b in p.get("content").and_then(|c| c.as_array()).map(|v| v.as_slice()).unwrap_or(&[])
+            for b in p
+                .get("content")
+                .and_then(|c| c.as_array())
+                .map(|v| v.as_slice())
+                .unwrap_or(&[])
             {
-                if matches!(b.get("type").and_then(|t| t.as_str()), Some("output_text" | "input_text"))
-                {
+                if matches!(
+                    b.get("type").and_then(|t| t.as_str()),
+                    Some("output_text" | "input_text")
+                ) {
                     push_text(out, b.get("text"), make);
                 }
             }
@@ -325,9 +349,16 @@ fn project_codex_item(
         // there is normally nothing to show. Forward a summary when there is
         // one; never touch `encrypted_content`.
         Some("reasoning") => {
-            for s in p.get("summary").and_then(|s| s.as_array()).map(|v| v.as_slice()).unwrap_or(&[])
+            for s in p
+                .get("summary")
+                .and_then(|s| s.as_array())
+                .map(|v| v.as_slice())
+                .unwrap_or(&[])
             {
-                let text = s.as_str().map(Value::from).or_else(|| s.get("text").cloned());
+                let text = s
+                    .as_str()
+                    .map(Value::from)
+                    .or_else(|| s.get("text").cloned());
                 push_text(out, text.as_ref(), U::thought);
             }
         }
@@ -378,7 +409,10 @@ fn codex_tool_call(p: &Value) -> Option<ToolCall> {
 
 fn codex_tool_result(p: &Value) -> Option<ToolCallUpdate> {
     let id = p.get("call_id")?.as_str()?.to_string();
-    let text = p.get("output").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+    let text = p
+        .get("output")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
     Some(ToolCallUpdate {
         tool_call_id: id,
         status: Some(ToolCallStatus::Completed),
@@ -437,12 +471,21 @@ mod tests {
     #[test]
     fn titles_name_the_argument_a_person_would_recognise() {
         assert_eq!(
-            title_for("Bash", &json!({"command": "ls -la", "description": "List files"})),
+            title_for(
+                "Bash",
+                &json!({"command": "ls -la", "description": "List files"})
+            ),
             "Bash: List files",
             "the human description wins over the raw command"
         );
-        assert_eq!(title_for("Bash", &json!({"command": "ls -la"})), "Bash: ls -la");
-        assert_eq!(title_for("Read", &json!({"file_path": "/w/a.rs"})), "Read: /w/a.rs");
+        assert_eq!(
+            title_for("Bash", &json!({"command": "ls -la"})),
+            "Bash: ls -la"
+        );
+        assert_eq!(
+            title_for("Read", &json!({"file_path": "/w/a.rs"})),
+            "Read: /w/a.rs"
+        );
         assert_eq!(title_for("Grep", &json!({"pattern": "TODO"})), "Grep: TODO");
         // Nothing recognisable is still better than an empty label.
         assert_eq!(title_for("Bash", &json!({})), "Bash");
@@ -453,11 +496,18 @@ mod tests {
     fn titles_stay_one_short_line() {
         let long = "x".repeat(500);
         let t = title_for("Bash", &json!({"command": long}));
-        assert!(t.chars().count() < 100, "a title is a label, not a transcript: {}", t.len());
+        assert!(
+            t.chars().count() < 100,
+            "a title is a label, not a transcript: {}",
+            t.len()
+        );
         assert!(t.ends_with('…'));
 
         let multi = title_for("Bash", &json!({"command": "first\nsecond\nthird"}));
-        assert_eq!(multi, "Bash: first", "a multi-line command must not break the list");
+        assert_eq!(
+            multi, "Bash: first",
+            "a multi-line command must not break the list"
+        );
     }
 
     #[test]
@@ -483,8 +533,11 @@ mod tests {
     fn a_write_has_no_prior_text_rather_than_empty_text() {
         // null vs "" is the difference between "new file" and "replaced
         // everything", and clients render those differently.
-        match diff_for("Write", &json!({"file_path": "/w/new.rs", "content": "fn main() {}"}))
-            .unwrap()
+        match diff_for(
+            "Write",
+            &json!({"file_path": "/w/new.rs", "content": "fn main() {}"}),
+        )
+        .unwrap()
         {
             ToolCallContent::Diff(d) => {
                 assert_eq!(d.old_text, None);
@@ -544,7 +597,9 @@ mod tests {
             "an update that replaces content must still carry the diff, or the client loses it",
         );
         assert!(
-            content.iter().any(|c| matches!(c, ToolCallContent::Diff(_))),
+            content
+                .iter()
+                .any(|c| matches!(c, ToolCallContent::Diff(_))),
             "the completed edit still renders as a diff, got {content:?}"
         );
 
@@ -600,7 +655,10 @@ mod tests {
         assert_eq!(call.kind, ToolKind::Edit);
         assert_eq!(call.status, ToolCallStatus::InProgress);
         assert_eq!(call.locations.len(), 1);
-        assert!(matches!(call.content.first(), Some(ToolCallContent::Diff(_))));
+        assert!(matches!(
+            call.content.first(),
+            Some(ToolCallContent::Diff(_))
+        ));
         assert!(call.raw_input.is_some());
     }
 
@@ -620,7 +678,13 @@ mod tests {
             assert_eq!(initial_status(name), ToolCallStatus::Pending, "{name}");
         }
         // Everything else really is running by the time it hits the transcript.
-        for name in ["Bash", "Edit", "Read", "mcp__fleet__fleet__plan", "WebFetch"] {
+        for name in [
+            "Bash",
+            "Edit",
+            "Read",
+            "mcp__fleet__fleet__plan",
+            "WebFetch",
+        ] {
             assert!(!is_interactive_tool(name), "{name} does not ask a human");
             assert_eq!(initial_status(name), ToolCallStatus::InProgress, "{name}");
         }
@@ -629,7 +693,10 @@ mod tests {
     #[test]
     fn the_pending_status_survives_the_projection_for_both_agents() {
         let claude = json!({"id": "t1", "name": "mcp__fleet__fleet__ask", "input": {}});
-        assert_eq!(tool_call_from_use(&claude).unwrap().status, ToolCallStatus::Pending);
+        assert_eq!(
+            tool_call_from_use(&claude).unwrap().status,
+            ToolCallStatus::Pending
+        );
 
         let codex = json!({"type": "response_item", "payload": {
             "type": "custom_tool_call", "call_id": "c1",
@@ -685,8 +752,10 @@ mod tests {
     fn result_content_reads_both_string_and_block_forms() {
         assert_eq!(result_text(Some(&json!("plain"))).as_deref(), Some("plain"));
         assert_eq!(
-            result_text(Some(&json!([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}])))
-                .as_deref(),
+            result_text(Some(
+                &json!([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}])
+            ))
+            .as_deref(),
             Some("a\nb")
         );
         assert_eq!(result_text(Some(&json!(""))), None);
@@ -700,7 +769,10 @@ mod tests {
         let big = "あ".repeat(MAX_OUTPUT_CHARS + 500);
         let out = clip(&big);
         assert!(out.chars().count() < big.chars().count());
-        assert!(out.ends_with("… (truncated)"), "truncation must be visible, not silent");
+        assert!(
+            out.ends_with("… (truncated)"),
+            "truncation must be visible, not silent"
+        );
         // Short output is untouched.
         assert_eq!(clip("small"), "small");
     }
@@ -754,7 +826,10 @@ mod tests {
         ];
         let ups = project_updates(&msgs, false);
         assert_eq!(ups.len(), 5);
-        assert!(matches!(ups[0], U::AgentThoughtChunk { .. }), "thinking is its own channel");
+        assert!(
+            matches!(ups[0], U::AgentThoughtChunk { .. }),
+            "thinking is its own channel"
+        );
         assert!(matches!(ups[1], U::AgentMessageChunk { .. }));
         match &ups[2] {
             U::ToolCall(c) => {
@@ -765,7 +840,10 @@ mod tests {
         }
         match &ups[3] {
             U::ToolCallUpdate(u) => {
-                assert_eq!(u.tool_call_id, "t1", "the result must name the call it completes");
+                assert_eq!(
+                    u.tool_call_id, "t1",
+                    "the result must name the call it completes"
+                );
                 assert_eq!(u.status, Some(ToolCallStatus::Completed));
             }
             other => panic!("expected a tool_call_update, got {other:?}"),
@@ -780,7 +858,10 @@ mod tests {
         ]}})];
         let json = serde_json::to_string(&project_updates(&msgs, false)).unwrap();
         assert!(json.contains("reasoning"));
-        assert!(!json.contains("SECRET"), "the signature is not ours to forward");
+        assert!(
+            !json.contains("SECRET"),
+            "the signature is not ours to forward"
+        );
     }
 
     #[test]
@@ -796,7 +877,9 @@ mod tests {
 
         let replayed = project_updates(&msgs, true);
         assert_eq!(replayed.len(), 2, "both shapes must survive a replay");
-        assert!(replayed.iter().all(|u| matches!(u, U::UserMessageChunk { .. })));
+        assert!(replayed
+            .iter()
+            .all(|u| matches!(u, U::UserMessageChunk { .. })));
     }
 
     #[test]
@@ -824,7 +907,10 @@ mod tests {
                 assert_eq!(c.kind, ToolKind::Read);
                 // `arguments` is a JSON *string* and must be parsed, or the
                 // title and locations come out empty.
-                assert_eq!(c.locations.first().map(|l| l.path.as_str()), Some("/w/a.rs"));
+                assert_eq!(
+                    c.locations.first().map(|l| l.path.as_str()),
+                    Some("/w/a.rs")
+                );
             }
             other => panic!("expected a tool_call, got {other:?}"),
         }
@@ -859,13 +945,19 @@ mod tests {
         let ups = project_updates(&empty, false);
         assert!(ups.is_empty());
         let json = serde_json::to_string(&ups).unwrap();
-        assert!(!json.contains("gAAAAA"), "encrypted content is never forwarded");
+        assert!(
+            !json.contains("gAAAAA"),
+            "encrypted content is never forwarded"
+        );
 
         // When a summary is present it is worth showing.
         let summarised = vec![json!({"type": "response_item", "payload": {
             "type": "reasoning", "summary": ["planned the edit"]
         }})];
-        assert!(matches!(project_updates(&summarised, false)[0], U::AgentThoughtChunk { .. }));
+        assert!(matches!(
+            project_updates(&summarised, false)[0],
+            U::AgentThoughtChunk { .. }
+        ));
     }
 
     #[test]

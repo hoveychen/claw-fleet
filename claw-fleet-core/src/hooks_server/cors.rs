@@ -111,7 +111,11 @@ mod tests {
     fn stays_shut_when_auth_is_disabled() {
         assert!(!cors_enabled(true));
         assert!(headers(true, "/mobile_rpc").is_empty());
-        assert!(!is_preflight(&tiny_http::Method::Options, "/mobile_rpc", true));
+        assert!(!is_preflight(
+            &tiny_http::Method::Options,
+            "/mobile_rpc",
+            true
+        ));
     }
 
     #[test]
@@ -123,7 +127,9 @@ mod tests {
             .iter()
             .map(|h| format!("{}: {}", h.field.as_str().as_str(), h.value.as_str()))
             .collect();
-        assert!(rendered.iter().any(|h| h == "Access-Control-Allow-Origin: *"));
+        assert!(rendered
+            .iter()
+            .any(|h| h == "Access-Control-Allow-Origin: *"));
         // Token and JSON content-type must be in the allow list, or preflight
         // will reject the request at the gate.
         assert!(rendered
@@ -140,8 +146,16 @@ mod tests {
     #[test]
     fn preflight_is_only_options_on_a_cors_path() {
         assert!(is_preflight(&tiny_http::Method::Options, "/events", false));
-        assert!(!is_preflight(&tiny_http::Method::Post, "/mobile_rpc", false));
-        assert!(!is_preflight(&tiny_http::Method::Options, "/settings", false));
+        assert!(!is_preflight(
+            &tiny_http::Method::Post,
+            "/mobile_rpc",
+            false
+        ));
+        assert!(!is_preflight(
+            &tiny_http::Method::Options,
+            "/settings",
+            false
+        ));
     }
 
     #[test]

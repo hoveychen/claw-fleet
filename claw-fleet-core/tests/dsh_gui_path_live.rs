@@ -54,14 +54,16 @@ fn live_dsh_web_starts_under_a_gui_minimal_path() {
     println!("PATH now: {:?}", std::env::var("PATH").unwrap_or_default());
 
     let workspace = std::env::temp_dir();
-    let mut server = claw_fleet_core::dsh_server::DshServer::start(&binary, &workspace)
-        .expect(
-            "dsh web must start under a GUI-minimal PATH — if this says \
+    let mut server = claw_fleet_core::dsh_server::DshServer::start(&binary, &workspace).expect(
+        "dsh web must start under a GUI-minimal PATH — if this says \
              'exited before reporting a port', the spawn is not augmenting PATH \
              and every desktop user sees an unusable dsh source",
-        );
+    );
     println!("started on port {} (pid {})", server.port(), server.pid());
     assert!(server.port() > 0);
-    assert!(server.is_alive(), "the server must still be up after health check");
+    assert!(
+        server.is_alive(),
+        "the server must still be up after health check"
+    );
     server.stop();
 }

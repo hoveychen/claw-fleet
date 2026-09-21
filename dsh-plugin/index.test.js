@@ -669,3 +669,71 @@ describe('fetchContext sandbox mode', () => {
     ])
   })
 })
+
+describe('one-shot forks', () => {
+  const ONE_SHOT = `echo '{"sections":[{"name":"p","text":"BODY"}],"oneShot":true}'`
+
+  test('fetchContext carries oneShot only for a literal true', async () => {
+    for (const [label, body, expected] of [
+      ['true', ONE_SHOT, true],
+      ['absent', `echo '{"sections":[]}'`, false],
+      ['false', `echo '{"sections":[],"oneShot":false}'`, false],
+      ['string', `echo '{"sections":[],"oneShot":"true"}'`, false],
+      ['number', `echo '{"sections":[],"oneShot":1}'`, false],
+    ]) {
+      const fleetBin = stubFleet(`oneshot-${label}`, body)
+      const ctx = await fetchContext({ fleetBin, timeoutMs: 5000 }, '/ws', 's')
+      assert.equal(ctx.oneShot, expected, `${label} must read as ${expected}`)
+    }
+  })
+
+  test('a CLI that cannot answer reads as not one-shot', async () => {
+    const fleetBin = stubFleet('oneshot-fail', 'exit 1')
+    const ctx = await fetchContext({ fleetBin, timeoutMs: 5000 }, '/ws', 's')
+    assert.equal(ctx.oneShot, false)
+  })
+
+  test('the first step of a one-shot fork enters with its context injected', async () => {
+    const fleetBin = stubFleet('oneshot-step1', ONE_SHOT)
+    const decision = await runPreStep({ fleetBin, timeoutMs: 5000 }, fakeAgent(), undefined, {
+      turn: 1,
+      step: 1,
+    })
+    assert.equal(decision.kind, 'enter')
+    assert.equal(decision.messages.length, 1, 'the section still enters on step 1')
+    assert.equal(decision.messages[0].content[0].text, 'BODY')
+  })
+
+  test('the second step of a one-shot fork is rejected outright', async () => {
+    // A model that called a tool despite the prompt would open step 2 with the
+    // tool result; the request must never be made. `reject` is what dsh's own
+    // codex-hooks plugin returns, and the agent loop passes it back verbatim.
+    const fleetBin = stubFleet('oneshot-step2', ONE_SHOT)
+    const decision = await runPreStep({ fleetBin, timeoutMs: 5000 }, fakeAgent(), undefined, {
+      turn: 1,
+      step: 2,
+    })
+    assert.deepEqual(decision, { kind: 'reject' })
+  })
+
+  test('a later step of an ordinary session keeps running', async () => {
+    const fleetBin = stubFleet('oneshot-none', `echo '{"sections":[{"name":"p","text":"BODY"}]}'`)
+    const decision = await runPreStep({ fleetBin, timeoutMs: 5000 }, fakeAgent(), undefined, {
+      turn: 1,
+      step: 2,
+    })
+    assert.equal(decision.kind, 'enter')
+  })
+
+  test('a build that stops passing step is not second-guessed', async () => {
+    // Without a step counter there is no way to tell the first request from
+    // the second; the soft contract (the prompt forbids tools) still stands,
+    // and the fork must not lose its only step to a missing field.
+    const fleetBin = stubFleet('oneshot-nostep', ONE_SHOT)
+    const decision = await runPreStep({ fleetBin, timeoutMs: 5000 }, fakeAgent(), undefined, {
+      turn: 1,
+      step: undefined,
+    })
+    assert.equal(decision.kind, 'enter')
+  })
+})

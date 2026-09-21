@@ -242,7 +242,10 @@ pub fn git_pull(
 /// resolves the way the user's shell would.
 pub fn git_clone(url: &str, dest: &str) -> Result<GitOpResult, String> {
     let prepared = prepare_clone(url, dest)?;
-    run_git_in(&prepared.parent, &["clone", "--", prepared.url.as_str(), dest])
+    run_git_in(
+        &prepared.parent,
+        &["clone", "--", prepared.url.as_str(), dest],
+    )
 }
 
 /// A validated clone request: where to run, and the exact shell command line.
@@ -310,7 +313,9 @@ pub fn prepare_clone(url: &str, dest: &str) -> Result<PreparedClone, String> {
     }
     let dest_path = Path::new(dest);
     if !dest_path.is_absolute() {
-        return Err(format!("clone destination must be an absolute path: {dest}"));
+        return Err(format!(
+            "clone destination must be an absolute path: {dest}"
+        ));
     }
     let parent = dest_path
         .parent()
@@ -578,7 +583,10 @@ fn known_repo_roots(known_workspaces: &[String]) -> Vec<PathBuf> {
 
 fn validate_repo_root(root: &str, known_workspaces: &[String]) -> Result<PathBuf, String> {
     let rc = std::fs::canonicalize(root).map_err(|e| format!("root: {e}"))?;
-    if known_repo_roots(known_workspaces).into_iter().any(|r| r == rc) {
+    if known_repo_roots(known_workspaces)
+        .into_iter()
+        .any(|r| r == rc)
+    {
         Ok(rc)
     } else {
         Err("root is not a known repository".into())
@@ -608,7 +616,9 @@ fn worktree_healths(
             continue;
         };
         let head = wt_repo.head().ok();
-        let branch = head.as_ref().and_then(|h| h.shorthand().map(str::to_string));
+        let branch = head
+            .as_ref()
+            .and_then(|h| h.shorthand().map(str::to_string));
         let wt_oid = head.as_ref().and_then(git2::Reference::target);
         // Worktrees share the main repo's object database, so the worktree tip
         // is resolvable from `main_repo`. ahead = commits in the worktree
@@ -797,14 +807,22 @@ mod tests {
         // First clone seeds the remote with two commits.
         let seed = tmp.path().join("seed");
         init_repo(&seed);
-        git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(
+            &seed,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
         git(&seed, &["push", "-q", "-u", "origin", "main"]);
 
         // Second clone tracks origin/main at the first commit only.
         let ws = tmp.path().join("ws");
         git(
             tmp.path(),
-            &["clone", "-q", remote.to_str().unwrap(), ws.to_str().unwrap()],
+            &[
+                "clone",
+                "-q",
+                remote.to_str().unwrap(),
+                ws.to_str().unwrap(),
+            ],
         );
         git(&ws, &["config", "user.email", "t@t"]);
         git(&ws, &["config", "user.name", "t"]);
@@ -860,7 +878,10 @@ mod tests {
         git(&remote, &["init", "-q", "--bare", "-b", "main"]);
         let seed = tmp.path().join("seed");
         init_repo(&seed);
-        git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(
+            &seed,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
         git(&seed, &["push", "-q", "-u", "origin", "main"]);
 
         let dest = tmp.path().join("cloned");
@@ -893,13 +914,15 @@ mod tests {
         git(&remote, &["init", "-q", "--bare", "-b", "main"]);
         let seed = tmp.path().join("seed");
         init_repo(&seed);
-        git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(
+            &seed,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
         git(&seed, &["push", "-q", "-u", "origin", "main"]);
 
         // A space in the destination is the cheapest real quoting failure.
         let dest = tmp.path().join("cloned with space");
-        let prepared =
-            prepare_clone(remote.to_str().unwrap(), dest.to_str().unwrap()).unwrap();
+        let prepared = prepare_clone(remote.to_str().unwrap(), dest.to_str().unwrap()).unwrap();
 
         let out = std::process::Command::new("/bin/sh")
             .arg("-c")
@@ -932,7 +955,10 @@ mod tests {
         git(&remote, &["init", "-q", "--bare", "-b", "main"]);
         let seed = tmp.path().join("seed");
         init_repo(&seed);
-        git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(
+            &seed,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
         git(&seed, &["push", "-q", "-u", "origin", "main"]);
 
         let dest = tmp.path().join("empty-dir");
@@ -1001,7 +1027,10 @@ mod tests {
         // Parent directory missing.
         let missing = tmp.path().join("nope").join("child");
         let err = git_clone(url, missing.to_str().unwrap()).unwrap_err();
-        assert!(err.contains("parent directory does not exist"), "got: {err}");
+        assert!(
+            err.contains("parent directory does not exist"),
+            "got: {err}"
+        );
 
         // Destination is a file.
         let file = tmp.path().join("a-file");
@@ -1065,7 +1094,10 @@ mod tests {
         init_repo(&ws);
         // A worktree on a fresh branch with one extra commit not on main.
         let wt = tmp.path().join("wt-feature");
-        git(&ws, &["worktree", "add", "-b", "prd/feature", wt.to_str().unwrap()]);
+        git(
+            &ws,
+            &["worktree", "add", "-b", "prd/feature", wt.to_str().unwrap()],
+        );
         fs::write(wt.join("f.txt"), "f\n").unwrap();
         git(&wt, &["add", "-A"]);
         git(&wt, &["commit", "-q", "-m", "feature work"]);
@@ -1099,7 +1131,10 @@ mod tests {
         init_repo(&ws);
         // A worktree on a fresh branch.
         let wt = tmp.path().join("wt-feature");
-        git(&ws, &["worktree", "add", "-b", "prd/feature", wt.to_str().unwrap()]);
+        git(
+            &ws,
+            &["worktree", "add", "-b", "prd/feature", wt.to_str().unwrap()],
+        );
 
         // Main checkout: one untracked file.
         fs::write(ws.join("scratch.txt"), "s\n").unwrap();

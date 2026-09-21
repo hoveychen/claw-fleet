@@ -17,25 +17,24 @@ pub(crate) fn route_daily_report(
 ) {
     let report_store = ctx.report_store.clone();
 
-                let date = query.get("date").cloned().unwrap_or_default();
-                let store = report_store.lock().unwrap();
-                match store.get_report(&date) {
-                    Ok(report) => {
-                        let body = serde_json::to_string(&report).unwrap_or_default();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = format!("{{\"error\":\"{}\"}}", e);
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(500)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    let date = query.get("date").cloned().unwrap_or_default();
+    let store = report_store.lock().unwrap();
+    match store.get_report(&date) {
+        Ok(report) => {
+            let body = serde_json::to_string(&report).unwrap_or_default();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = format!("{{\"error\":\"{}\"}}", e);
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(500)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_daily_report_stats(
     ctx: &ServeCtx,
@@ -46,15 +45,13 @@ pub(crate) fn route_daily_report_stats(
 ) {
     let report_store = ctx.report_store.clone();
 
-                let from = query.get("from").cloned().unwrap_or_default();
-                let to = query.get("to").cloned().unwrap_or_default();
-                let store = report_store.lock().unwrap();
-                let stats = store.list_stats(&from, &to).unwrap_or_default();
-                let body = serde_json::to_string(&stats).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let from = query.get("from").cloned().unwrap_or_default();
+    let to = query.get("to").cloned().unwrap_or_default();
+    let store = report_store.lock().unwrap();
+    let stats = store.list_stats(&from, &to).unwrap_or_default();
+    let body = serde_json::to_string(&stats).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 /// `GET /task_reviews?date=YYYY-MM-DD` — the day's per-task retrospectives.
 /// Reads through `daily_report::task_reviews_for_date` so the remote answer and
@@ -79,26 +76,24 @@ pub(crate) fn route_daily_report_generate(
 ) {
     let report_store = ctx.report_store.clone();
 
-                let date = query.get("date").cloned().unwrap_or_default();
-                let sessions = scan_sessions_for_date(&date);
-                if sessions.is_empty() {
-                    let body = r#"{"error":"no sessions found for date"}"#;
-                    let _ = request.respond(
-                        tiny_http::Response::from_string(body)
-                            .with_status_code(404)
-                            .with_header(json_header),
-                    );
-                } else {
-                    let session_refs: Vec<&SessionInfo> = sessions.iter().collect();
-                    let tz = crate::daily_report::local_tz_tag(&date);
-                    let report = generate_report_from_sessions(&date, &tz, &session_refs);
-                    report_store.lock().unwrap().save_report(&report).ok();
-                    let body = serde_json::to_string(&report).unwrap_or_default();
-                    let _ = request.respond(
-                        tiny_http::Response::from_string(body).with_header(json_header),
-                    );
-                }
-            }
+    let date = query.get("date").cloned().unwrap_or_default();
+    let sessions = scan_sessions_for_date(&date);
+    if sessions.is_empty() {
+        let body = r#"{"error":"no sessions found for date"}"#;
+        let _ = request.respond(
+            tiny_http::Response::from_string(body)
+                .with_status_code(404)
+                .with_header(json_header),
+        );
+    } else {
+        let session_refs: Vec<&SessionInfo> = sessions.iter().collect();
+        let tz = crate::daily_report::local_tz_tag(&date);
+        let report = generate_report_from_sessions(&date, &tz, &session_refs);
+        report_store.lock().unwrap().save_report(&report).ok();
+        let body = serde_json::to_string(&report).unwrap_or_default();
+        let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+    }
+}
 
 pub(crate) fn route_daily_report_ai_summary(
     ctx: &ServeCtx,
@@ -110,47 +105,45 @@ pub(crate) fn route_daily_report_ai_summary(
     let report_store = ctx.report_store.clone();
     let llm_config = ctx.llm_config.clone();
 
-                let date = query.get("date").cloned().unwrap_or_default();
-                let lang = query.get("lang").map(|s| s.as_str()).unwrap_or("en");
-                let store = report_store.lock().unwrap();
-                match store.get_report(&date) {
-                    Ok(Some(report)) => {
-                        drop(store);
-                        let cfg = llm_config.lock().unwrap().clone();
-                        let result = generate_ai_summary_routed(&cfg, &report, lang);
-                        match result {
-                            Some(summary) => {
-                                report_store
-                                    .lock()
-                                    .unwrap()
-                                    .update_ai_summary(&date, &summary)
-                                    .ok();
-                                let body = serde_json::to_string(&summary).unwrap_or_default();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_header(json_header),
-                                );
-                            }
-                            None => {
-                                let body = r#"{"error":"AI summary generation failed"}"#;
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
-                                        .with_header(json_header),
-                                );
-                            }
-                        }
-                    }
-                    _ => {
-                        let body = r#"{"error":"report not found"}"#;
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(404)
-                                .with_header(json_header),
-                        );
-                    }
+    let date = query.get("date").cloned().unwrap_or_default();
+    let lang = query.get("lang").map(|s| s.as_str()).unwrap_or("en");
+    let store = report_store.lock().unwrap();
+    match store.get_report(&date) {
+        Ok(Some(report)) => {
+            drop(store);
+            let cfg = llm_config.lock().unwrap().clone();
+            let result = generate_ai_summary_routed(&cfg, &report, lang);
+            match result {
+                Some(summary) => {
+                    report_store
+                        .lock()
+                        .unwrap()
+                        .update_ai_summary(&date, &summary)
+                        .ok();
+                    let body = serde_json::to_string(&summary).unwrap_or_default();
+                    let _ = request
+                        .respond(tiny_http::Response::from_string(body).with_header(json_header));
+                }
+                None => {
+                    let body = r#"{"error":"AI summary generation failed"}"#;
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
                 }
             }
+        }
+        _ => {
+            let body = r#"{"error":"report not found"}"#;
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(404)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_daily_report_lessons(
     ctx: &ServeCtx,
@@ -162,47 +155,45 @@ pub(crate) fn route_daily_report_lessons(
     let report_store = ctx.report_store.clone();
     let llm_config = ctx.llm_config.clone();
 
-                let date = query.get("date").cloned().unwrap_or_default();
-                let lang = query.get("lang").map(|s| s.as_str()).unwrap_or("en");
-                let store = report_store.lock().unwrap();
-                match store.get_report(&date) {
-                    Ok(Some(report)) => {
-                        drop(store);
-                        let cfg = llm_config.lock().unwrap().clone();
-                        let result = generate_lessons_routed(&cfg, &report, lang);
-                        match result {
-                            Some(lessons) => {
-                                report_store
-                                    .lock()
-                                    .unwrap()
-                                    .update_lessons(&date, &lessons)
-                                    .ok();
-                                let body = serde_json::to_string(&lessons).unwrap_or_default();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_header(json_header),
-                                );
-                            }
-                            None => {
-                                let body = r#"{"error":"Lessons generation failed"}"#;
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
-                                        .with_header(json_header),
-                                );
-                            }
-                        }
-                    }
-                    _ => {
-                        let body = r#"{"error":"report not found"}"#;
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(404)
-                                .with_header(json_header),
-                        );
-                    }
+    let date = query.get("date").cloned().unwrap_or_default();
+    let lang = query.get("lang").map(|s| s.as_str()).unwrap_or("en");
+    let store = report_store.lock().unwrap();
+    match store.get_report(&date) {
+        Ok(Some(report)) => {
+            drop(store);
+            let cfg = llm_config.lock().unwrap().clone();
+            let result = generate_lessons_routed(&cfg, &report, lang);
+            match result {
+                Some(lessons) => {
+                    report_store
+                        .lock()
+                        .unwrap()
+                        .update_lessons(&date, &lessons)
+                        .ok();
+                    let body = serde_json::to_string(&lessons).unwrap_or_default();
+                    let _ = request
+                        .respond(tiny_http::Response::from_string(body).with_header(json_header));
+                }
+                None => {
+                    let body = r#"{"error":"Lessons generation failed"}"#;
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
                 }
             }
+        }
+        _ => {
+            let body = r#"{"error":"report not found"}"#;
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(404)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_daily_report_append_lesson(
     ctx: &ServeCtx,
@@ -211,36 +202,36 @@ pub(crate) fn route_daily_report_append_lesson(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut body_bytes = Vec::new();
-                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                match serde_json::from_slice::<Lesson>(&body_bytes) {
-                    Ok(lesson) => match append_lesson_to_claude_md(&lesson) {
-                        Ok(()) => {
-                            let _ = request.respond(
-                                tiny_http::Response::from_string("{}")
-                                    .with_header(json_header),
-                            );
-                        }
-                        Err(e) => {
-                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body)
-                                    .with_status_code(500)
-                                    .with_header(json_header),
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        let body = format!(r#"{{"error":"invalid lesson: {}"}}"#, e.to_string().replace('"', "'"));
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    match serde_json::from_slice::<Lesson>(&body_bytes) {
+        Ok(lesson) => match append_lesson_to_claude_md(&lesson) {
+            Ok(()) => {
+                let _ = request
+                    .respond(tiny_http::Response::from_string("{}").with_header(json_header));
             }
+            Err(e) => {
+                let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = format!(
+                r#"{{"error":"invalid lesson: {}"}}"#,
+                e.to_string().replace('"', "'")
+            );
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_managed_lessons(
     ctx: &ServeCtx,
@@ -269,9 +260,8 @@ pub(crate) fn route_managed_lesson_remove(
     match id {
         Some(id) => match crate::lessons_store::remove_lesson(&id) {
             Ok(()) => {
-                let _ = request.respond(
-                    tiny_http::Response::from_string("{}").with_header(json_header),
-                );
+                let _ = request
+                    .respond(tiny_http::Response::from_string("{}").with_header(json_header));
             }
             Err(e) => {
                 let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));

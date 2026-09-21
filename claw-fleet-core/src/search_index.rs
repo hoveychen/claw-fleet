@@ -191,8 +191,7 @@ impl SearchIndex {
         };
 
         // Read new content.
-        let mut file =
-            fs::File::open(jsonl_path).map_err(|e| format!("open {jsonl_path}: {e}"))?;
+        let mut file = fs::File::open(jsonl_path).map_err(|e| format!("open {jsonl_path}: {e}"))?;
         if start_offset > 0 {
             file.seek(SeekFrom::Start(start_offset as u64))
                 .map_err(|e| format!("seek {jsonl_path}: {e}"))?;
@@ -216,7 +215,10 @@ impl SearchIndex {
 
         let mut new_lines = 0i64;
 
-        let tx = self.conn.unchecked_transaction().map_err(|e| format!("tx: {e}"))?;
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| format!("tx: {e}"))?;
 
         for line in chunk.lines() {
             if line.trim().is_empty() {
@@ -351,8 +353,8 @@ impl SearchIndex {
                 // Preferred: cut the snippet straight out of the author's text,
                 // so no indexing artefact can reach the UI. Fall back to the
                 // segmented column only when no term is locatable in `raw`.
-                let snippet = build_snippet(&raw, &terms)
-                    .unwrap_or_else(|| desegment_cjk(&sql_snippet));
+                let snippet =
+                    build_snippet(&raw, &terms).unwrap_or_else(|| desegment_cjk(&sql_snippet));
                 Ok(SearchHit {
                     session_id: row.get(0)?,
                     jsonl_path: row.get(1)?,
@@ -415,13 +417,15 @@ impl SearchIndex {
             .prepare(&sql)
             .map_err(|e| format!("prepare scoped search: {e}"))?;
 
-        let mut bound: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(jsonl_paths.len() + 2);
+        let mut bound: Vec<Box<dyn rusqlite::types::ToSql>> =
+            Vec::with_capacity(jsonl_paths.len() + 2);
         bound.push(Box::new(fts_query));
         bound.push(Box::new(limit.max(1) as i64));
         for p in jsonl_paths {
             bound.push(Box::new(p.clone()));
         }
-        let params_ref: Vec<&dyn rusqlite::types::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            bound.iter().map(|b| b.as_ref()).collect();
 
         let rows = stmt
             .query_map(params_ref.as_slice(), |row| {
@@ -610,11 +614,7 @@ fn segment_cjk(text: &str) -> String {
         // Insert a separator only at a CJK boundary where one is not already
         // present. Skipping it when `c` is itself whitespace keeps a space the
         // original text had from being doubled.
-        if (cur_cjk || prev_cjk)
-            && !c.is_whitespace()
-            && !out.is_empty()
-            && !out.ends_with(' ')
-        {
+        if (cur_cjk || prev_cjk) && !c.is_whitespace() && !out.is_empty() && !out.ends_with(' ') {
             out.push(' ');
         }
         out.push(c);
@@ -643,15 +643,17 @@ fn find_ci(hay: &str, needle: &str) -> Option<usize> {
     if needle.is_empty() {
         return None;
     }
-    hay.to_lowercase().find(&needle.to_lowercase()).and_then(|i| {
-        // `to_lowercase` can change byte lengths (e.g. 'İ'), which would make
-        // the offset meaningless. Fall back to an exact search in that case.
-        if hay.to_lowercase().len() == hay.len() {
-            Some(i)
-        } else {
-            hay.find(needle)
-        }
-    })
+    hay.to_lowercase()
+        .find(&needle.to_lowercase())
+        .and_then(|i| {
+            // `to_lowercase` can change byte lengths (e.g. 'İ'), which would make
+            // the offset meaningless. Fall back to an exact search in that case.
+            if hay.to_lowercase().len() == hay.len() {
+                Some(i)
+            } else {
+                hay.find(needle)
+            }
+        })
 }
 
 /// Build a display snippet from the **original** text, so nothing the indexer
@@ -820,14 +822,17 @@ mod tests {
         let db = dir.join("idx-partial.db");
         let _ = fs::remove_file(&db);
         let idx = SearchIndex::open_at(&db).unwrap();
-        idx.index_session(jsonl.to_str().unwrap(), "sess-p").unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-p")
+            .unwrap();
 
         // The CLI finishes writing that record.
         let mut f = fs::OpenOptions::new().append(true).open(&jsonl).unwrap();
-        f.write_all(format!("{}\n", &racy[split..]).as_bytes()).unwrap();
+        f.write_all(format!("{}\n", &racy[split..]).as_bytes())
+            .unwrap();
         drop(f);
 
-        idx.index_session(jsonl.to_str().unwrap(), "sess-p").unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-p")
+            .unwrap();
 
         let hits = idx.search("zqunique", 10).unwrap();
         assert_eq!(
@@ -855,7 +860,8 @@ mod tests {
         let db = dir.join("idx.db");
         let _ = fs::remove_file(&db);
         let idx = SearchIndex::open_at(&db).unwrap();
-        idx.index_session(jsonl.to_str().unwrap(), "sess-1").unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-1")
+            .unwrap();
 
         let hits = idx.search("Continue extracting", 10).unwrap();
         assert_eq!(hits.len(), 1, "title-only phrase should be findable");
@@ -883,10 +889,9 @@ mod tests {
         // an older user_version so the next open triggers a rebuild.
         {
             let idx = SearchIndex::open_at(&db).unwrap();
-            idx.index_session(jsonl.to_str().unwrap(), "sess-r").unwrap();
-            idx.conn
-                .execute_batch("PRAGMA user_version = 1;")
+            idx.index_session(jsonl.to_str().unwrap(), "sess-r")
                 .unwrap();
+            idx.conn.execute_batch("PRAGMA user_version = 1;").unwrap();
         }
 
         // Reopen: migration must clear index_meta so the file re-indexes.
@@ -898,7 +903,8 @@ mod tests {
         assert_eq!(remaining, 0, "stale-version DB should be wiped on open");
 
         // After re-indexing, the title is findable.
-        idx.index_session(jsonl.to_str().unwrap(), "sess-r").unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-r")
+            .unwrap();
         let hits = idx.search("unique rebuild phrase", 10).unwrap();
         assert_eq!(hits.len(), 1);
 
@@ -928,7 +934,8 @@ mod tests {
         let db = dir.join("cjk.db");
         let _ = fs::remove_file(&db);
         let idx = SearchIndex::open_at(&db).unwrap();
-        idx.index_session(jsonl.to_str().unwrap(), "sess-cjk").unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-cjk")
+            .unwrap();
 
         // Two-character word — the most common shape in Chinese, and the case
         // an ngram tokenizer of size 3 would still miss.
@@ -1029,7 +1036,8 @@ mod tests {
         let db = dir.join("snip.db");
         let _ = fs::remove_file(&db);
         let idx = SearchIndex::open_at(&db).unwrap();
-        idx.index_session(jsonl.to_str().unwrap(), "sess-s").unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-s")
+            .unwrap();
 
         let hits = idx.search("决策卡", 10).unwrap();
         assert_eq!(hits.len(), 1);
@@ -1070,25 +1078,21 @@ mod tests {
         let original = "已合并，main全绿，使用 fleet 工具。下一步";
         fs::write(
             &jsonl,
-            format!(
-                "{{\"type\":\"user\",\"message\":{{\"content\":\"{original}\"}}}}\n"
-            ),
+            format!("{{\"type\":\"user\",\"message\":{{\"content\":\"{original}\"}}}}\n"),
         )
         .unwrap();
 
         let db = dir.join("boundary.db");
         let _ = fs::remove_file(&db);
         let idx = SearchIndex::open_at(&db).unwrap();
-        idx.index_session(jsonl.to_str().unwrap(), "sess-b").unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-b")
+            .unwrap();
 
         // `main` is searchable even though it is welded between CJK…
         assert_eq!(idx.search("main", 10).unwrap().len(), 1);
         let hits = idx.search("已合并", 10).unwrap();
         assert_eq!(hits.len(), 1);
-        let plain = hits[0]
-            .snippet
-            .replace("<mark>", "")
-            .replace("</mark>", "");
+        let plain = hits[0].snippet.replace("<mark>", "").replace("</mark>", "");
         // …and the snippet is the author's text, both conventions intact.
         assert_eq!(plain, original, "snippet must be verbatim");
         assert!(
@@ -1133,22 +1137,29 @@ mod tests {
         let db = dir.join("scoped.db");
         let _ = fs::remove_file(&db);
         let idx = SearchIndex::open_at(&db).unwrap();
-        idx.index_session(own.to_str().unwrap(), "sess-own").unwrap();
-        idx.index_session(other.to_str().unwrap(), "sess-other").unwrap();
+        idx.index_session(own.to_str().unwrap(), "sess-own")
+            .unwrap();
+        idx.index_session(other.to_str().unwrap(), "sess-other")
+            .unwrap();
 
         // A second, incremental pass: the line number must be 4, not 1.
         let mut f = fs::OpenOptions::new().append(true).open(&own).unwrap();
         f.write_all(b"{\"type\":\"user\",\"message\":{\"content\":\"zqscoped fourth\"}}\n")
             .unwrap();
         drop(f);
-        idx.index_session(own.to_str().unwrap(), "sess-own").unwrap();
+        idx.index_session(own.to_str().unwrap(), "sess-own")
+            .unwrap();
 
         let mut hits = idx
             .search_scoped(&[own.to_str().unwrap().to_string()], "zqscoped", 10)
             .unwrap();
         hits.sort_by_key(|h| h.line_no);
         let lines: Vec<i64> = hits.iter().map(|h| h.line_no).collect();
-        assert_eq!(lines, vec![1, 3, 4], "every record, located, none from `other`: {hits:?}");
+        assert_eq!(
+            lines,
+            vec![1, 3, 4],
+            "every record, located, none from `other`: {hits:?}"
+        );
         assert!(hits.iter().all(|h| h.session_id == "sess-own"));
 
         // The unscoped search still collapses to one hit per session.
@@ -1197,19 +1208,56 @@ mod tests {
         idx.index_session(jsonl.to_str().unwrap(), "t1").unwrap();
         let paths = vec![jsonl.to_str().unwrap().to_string()];
         let line_of = |q: &str| -> Vec<i64> {
-            idx.search_scoped(&paths, q, 10).unwrap().iter().map(|h| h.line_no).collect()
+            idx.search_scoped(&paths, q, 10)
+                .unwrap()
+                .iter()
+                .map(|h| h.line_no)
+                .collect()
         };
 
-        assert_eq!(line_of("zquser"), vec![3], "user input_text must be indexed");
-        assert_eq!(line_of("分词器"), vec![3], "CJK inside a Codex user message must be indexed");
-        assert_eq!(line_of("zqassistant"), vec![5], "assistant output_text must be indexed");
-        assert_eq!(line_of("zqreason"), vec![4], "reasoning summary must be indexed");
-        assert_eq!(line_of("zqexec"), vec![6], "custom_tool_call name must be indexed");
-        assert_eq!(line_of("zqwait"), vec![8], "function_call name must be indexed");
+        assert_eq!(
+            line_of("zquser"),
+            vec![3],
+            "user input_text must be indexed"
+        );
+        assert_eq!(
+            line_of("分词器"),
+            vec![3],
+            "CJK inside a Codex user message must be indexed"
+        );
+        assert_eq!(
+            line_of("zqassistant"),
+            vec![5],
+            "assistant output_text must be indexed"
+        );
+        assert_eq!(
+            line_of("zqreason"),
+            vec![4],
+            "reasoning summary must be indexed"
+        );
+        assert_eq!(
+            line_of("zqexec"),
+            vec![6],
+            "custom_tool_call name must be indexed"
+        );
+        assert_eq!(
+            line_of("zqwait"),
+            vec![8],
+            "function_call name must be indexed"
+        );
         // Same policy as Claude: tool outputs are read via `read`, not indexed.
-        assert!(line_of("zqoutput").is_empty(), "tool output must not be indexed");
-        assert!(line_of("zqdev").is_empty(), "developer (injected) messages must not be indexed");
-        assert!(line_of("zqevent").is_empty(), "event_msg bookkeeping must not be indexed");
+        assert!(
+            line_of("zqoutput").is_empty(),
+            "tool output must not be indexed"
+        );
+        assert!(
+            line_of("zqdev").is_empty(),
+            "developer (injected) messages must not be indexed"
+        );
+        assert!(
+            line_of("zqevent").is_empty(),
+            "event_msg bookkeeping must not be indexed"
+        );
 
         let _ = fs::remove_file(&jsonl);
         let _ = fs::remove_file(&db);

@@ -338,7 +338,11 @@ fn assistant_block(block: &Value) -> Option<Value> {
         // payload has no summary to show, which is what `redacted_thinking`
         // means — the same mapping `codex_source` uses for a missing summary.
         "reasoning" => {
-            let text = block.get("text").and_then(Value::as_str).unwrap_or("").trim();
+            let text = block
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
             Some(if text.is_empty() {
                 json!({ "type": "redacted_thinking", "reason": "summary_unavailable" })
             } else {
@@ -733,7 +737,10 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["type"], "user");
         assert_eq!(out[0]["message"]["role"], "user");
-        assert_eq!(out[0]["message"]["content"][0]["text"], "Run this exact shell command");
+        assert_eq!(
+            out[0]["message"]["content"][0]["text"],
+            "Run this exact shell command"
+        );
     }
 
     /// dsh stamps epoch millis; the renderer formats an RFC3339 instant.
@@ -817,7 +824,10 @@ mod tests {
     /// keys that tool's card reads — a rename alone would draw an empty diff.
     #[test]
     fn str_replace_editor_becomes_the_claude_tool_its_command_means() {
-        let view = rekeyed("str_replace_editor", json!({"command": "view", "path": "/w/a.rs"}));
+        let view = rekeyed(
+            "str_replace_editor",
+            json!({"command": "view", "path": "/w/a.rs"}),
+        );
         assert_eq!(view["name"], "Read");
         assert_eq!(view["input"]["file_path"], "/w/a.rs");
 
@@ -856,7 +866,10 @@ mod tests {
             json!({"path": "/w/a.rs"}),                        // no command
             json!({"command": "undelete", "path": "/w/a.rs"}), // unknown command
         ] {
-            assert_eq!(rekeyed("str_replace_editor", args)["name"], "str_replace_editor");
+            assert_eq!(
+                rekeyed("str_replace_editor", args)["name"],
+                "str_replace_editor"
+            );
         }
     }
 
@@ -1015,7 +1028,10 @@ mod tests {
         let out = normalize(&[asked, decided]);
         assert_eq!(out.len(), 2);
         let first = out[0]["message"]["content"][0]["text"].as_str().unwrap();
-        assert!(first.contains("bash") && first.contains("danger-full-access"), "{first}");
+        assert!(
+            first.contains("bash") && first.contains("danger-full-access"),
+            "{first}"
+        );
         assert_eq!(out[1]["message"]["content"][0]["text"], "Approval rejected");
     }
 

@@ -37,7 +37,11 @@ use claw_fleet_core::image_api::{self, ImageRequest};
 fn report(label: &str, result: &Result<claw_fleet_core::codex_image::GenerateImageResult, String>) {
     match result {
         Ok(r) => {
-            println!("[{label}] OK handle={} images={}", r.thread_id, r.images.len());
+            println!(
+                "[{label}] OK handle={} images={}",
+                r.thread_id,
+                r.images.len()
+            );
             for img in &r.images {
                 println!("[{label}]   {} ({} bytes)", img.path, img.bytes);
             }

@@ -214,7 +214,11 @@ impl SourceUsageSummary {
         }
         SourceUsageSummary {
             source: "claude".into(),
-            plan: if info.plan.is_empty() { None } else { Some(info.plan.clone()) },
+            plan: if info.plan.is_empty() {
+                None
+            } else {
+                Some(info.plan.clone())
+            },
             bars,
             balances: Vec::new(),
             usage_source: if info.usage_source.is_empty() {
@@ -222,7 +226,11 @@ impl SourceUsageSummary {
             } else {
                 Some(info.usage_source.clone())
             },
-            email: if info.email.is_empty() { None } else { Some(info.email.clone()) },
+            email: if info.email.is_empty() {
+                None
+            } else {
+                Some(info.email.clone())
+            },
         }
     }
 
@@ -294,8 +302,18 @@ fn codex_usage_bar(bucket: &Value, window: &Value, slot: &str) -> UsageBar {
         .get("limitName")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .or_else(|| bucket.get("normalModelSlug").and_then(Value::as_str).filter(|value| !value.is_empty()))
-        .or_else(|| bucket.get("limitId").and_then(Value::as_str).filter(|value| !value.is_empty()))
+        .or_else(|| {
+            bucket
+                .get("normalModelSlug")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| {
+            bucket
+                .get("limitId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+        })
         .unwrap_or("Codex");
     let duration = window
         .get("windowDurationMins")
@@ -310,7 +328,13 @@ fn codex_usage_bar(bucket: &Value, window: &Value, slot: &str) -> UsageBar {
                 format!("{mins}m")
             }
         })
-        .unwrap_or_else(|| if slot == "primary" { "Primary".into() } else { "Secondary".into() });
+        .unwrap_or_else(|| {
+            if slot == "primary" {
+                "Primary".into()
+            } else {
+                "Secondary".into()
+            }
+        });
     let resets_at = window["resetsAt"].as_i64().map(|ts| {
         chrono::DateTime::from_timestamp(ts, 0)
             .map(|dt| dt.to_rfc3339())
@@ -331,8 +355,8 @@ pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024; // 50 MiB
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use crate::account::{AccountInfo, ScopedUsage, UsageStats};
+    use serde_json::json;
 
     // ── SourceUsageSummary::from_claude tests ───────────────────────────────
 
@@ -383,7 +407,12 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, task_outcome: None, title_override: None,            compact_count: 0,
+            task_plan: None,
+            handoff: None,
+            user_mark: None,
+            task_outcome: None,
+            title_override: None,
+            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
@@ -417,7 +446,10 @@ mod tests {
         let sessions = vec![mk_session("s1", "my-workspace", Some("Fix the bug"))];
         resolve_pending_display(&mut pending, &sessions);
         assert_eq!(pending.elicitation[0].workspace_name, "my-workspace");
-        assert_eq!(pending.elicitation[0].ai_title.as_deref(), Some("Fix the bug"));
+        assert_eq!(
+            pending.elicitation[0].ai_title.as_deref(),
+            Some("Fix the bug")
+        );
     }
 
     #[test]
@@ -440,7 +472,10 @@ mod tests {
         let mut s = mk_session("s1", "ws", Some("raw first prompt"));
         s.title_override = Some("Renamed nicely".into());
         resolve_pending_display(&mut pending, &[s]);
-        assert_eq!(pending.elicitation[0].ai_title.as_deref(), Some("Renamed nicely"));
+        assert_eq!(
+            pending.elicitation[0].ai_title.as_deref(),
+            Some("Renamed nicely")
+        );
     }
 
     #[test]
@@ -472,7 +507,10 @@ mod tests {
         let sessions = vec![mk_session("s1", "lookup-ws", Some("lookup-title"))];
         resolve_pending_display(&mut pending, &sessions);
         assert_eq!(pending.elicitation[0].workspace_name, "preset-ws");
-        assert_eq!(pending.elicitation[0].ai_title.as_deref(), Some("preset-title"));
+        assert_eq!(
+            pending.elicitation[0].ai_title.as_deref(),
+            Some("preset-title")
+        );
         assert_eq!(pending.elicitation[1].workspace_name, "");
         assert_eq!(pending.elicitation[1].ai_title, None);
     }
@@ -481,8 +519,16 @@ mod tests {
     fn from_claude_all_windows() {
         let info = AccountInfo {
             plan: "Max 5x".into(),
-            five_hour: Some(UsageStats { utilization: 0.3, resets_at: "2026-01-01T00:00:00Z".into(), prev_utilization: None }),
-            seven_day: Some(UsageStats { utilization: 0.7, resets_at: "2026-01-07T00:00:00Z".into(), prev_utilization: None }),
+            five_hour: Some(UsageStats {
+                utilization: 0.3,
+                resets_at: "2026-01-01T00:00:00Z".into(),
+                prev_utilization: None,
+            }),
+            seven_day: Some(UsageStats {
+                utilization: 0.7,
+                resets_at: "2026-01-07T00:00:00Z".into(),
+                prev_utilization: None,
+            }),
             seven_day_scoped: vec![ScopedUsage {
                 model_label: "Fable".into(),
                 utilization: 0.1,
@@ -505,7 +551,11 @@ mod tests {
     fn from_claude_partial_windows() {
         let info = AccountInfo {
             plan: "".into(),
-            five_hour: Some(UsageStats { utilization: 0.5, resets_at: "t".into(), prev_utilization: None }),
+            five_hour: Some(UsageStats {
+                utilization: 0.5,
+                resets_at: "t".into(),
+                prev_utilization: None,
+            }),
             ..Default::default()
         };
         let s = SourceUsageSummary::from_claude(&info);
@@ -600,5 +650,4 @@ mod tests {
         assert_eq!(s.plan, None);
         assert!(s.bars.is_empty());
     }
-
 }

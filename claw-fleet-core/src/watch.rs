@@ -758,7 +758,9 @@ fn capture_event(rec: &WatchRecord) -> String {
     match crate::process_util::shell_command(cmd).output() {
         Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         Err(e) => {
-            crate::log_debug(&format!("watch capture: cannot run capture-command ({e}): {cmd}"));
+            crate::log_debug(&format!(
+                "watch capture: cannot run capture-command ({e}): {cmd}"
+            ));
             String::new()
         }
     }
@@ -780,7 +782,9 @@ pub fn compose_resume_prompt(rec: &WatchRecord, event_text: &str, timed_out: boo
         out.push_str(&format!(
             "\n轮询 {} 次，最后一次 exit {}",
             rec.poll_count,
-            rec.last_exit.map(|c| c.to_string()).unwrap_or_else(|| "?".into())
+            rec.last_exit
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "?".into())
         ));
         if !rec.last_stderr.is_empty() {
             out.push_str(&format!("\n最后一次 stderr：{}", rec.last_stderr));
@@ -832,7 +836,11 @@ fn fire_in(
     resume: &ResumeFn<'_>,
 ) -> Result<WatchRecord, ClaimError> {
     let rec = claim_fire_in(dir, id, generation)?;
-    let event_text = if timed_out { String::new() } else { capture(&rec) };
+    let event_text = if timed_out {
+        String::new()
+    } else {
+        capture(&rec)
+    };
     let prompt = compose_resume_prompt(&rec, &event_text, timed_out);
     // A watch resumes on the assumption its session already died (a headless
     // `-p` turn that ended). But a condition can fire while the session is
@@ -875,7 +883,7 @@ fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
             model: rec.model.clone(),
             effort: rec.effort.clone(),
             permission_mode: None,
-        images: Vec::new(),
+            images: Vec::new(),
         },
         Box::new(|_| {}),
     )
@@ -1170,7 +1178,11 @@ mod tests {
         assert_eq!(after.note, before.note);
         assert_eq!(after.deadline_at, before.deadline_at);
         assert_eq!(after.generation, before.generation);
-        assert_eq!(get_in(d.path(), "w1").unwrap(), *after, "persisted, not just returned");
+        assert_eq!(
+            get_in(d.path(), "w1").unwrap(),
+            *after,
+            "persisted, not just returned"
+        );
     }
 
     /// Relaying to yourself (or to a blank id) must not rewrite records — a
@@ -1197,7 +1209,9 @@ mod tests {
 
     #[test]
     fn rejects_garbage_durations() {
-        assert!(parse_duration_secs("5x").unwrap_err().contains("unknown duration unit"));
+        assert!(parse_duration_secs("5x")
+            .unwrap_err()
+            .contains("unknown duration unit"));
         assert!(parse_duration_secs("abc").is_err());
         assert!(parse_duration_secs("").is_err());
     }
@@ -1214,7 +1228,9 @@ mod tests {
     fn timeout_clamps_and_refuses_zero() {
         assert_eq!(parse_timeout("30d").unwrap(), MAX_TIMEOUT_SECS);
         assert_eq!(parse_timeout("1h").unwrap(), 3600);
-        assert!(parse_timeout("0").unwrap_err().contains("greater than zero"));
+        assert!(parse_timeout("0")
+            .unwrap_err()
+            .contains("greater than zero"));
     }
 
     #[test]
@@ -1233,17 +1249,53 @@ mod tests {
     fn create_rejects_empty_session_and_until() {
         let d = dir();
         assert!(create_in(
-            d.path(), "  ", "/ws", "true", None, None, 30, 60, None, None, None, "x", 1
+            d.path(),
+            "  ",
+            "/ws",
+            "true",
+            None,
+            None,
+            30,
+            60,
+            None,
+            None,
+            None,
+            "x",
+            1
         )
         .unwrap_err()
         .contains("session id is required"));
         assert!(create_in(
-            d.path(), "s", "/ws", "  ", None, None, 30, 60, None, None, None, "x", 1
+            d.path(),
+            "s",
+            "/ws",
+            "  ",
+            None,
+            None,
+            30,
+            60,
+            None,
+            None,
+            None,
+            "x",
+            1
         )
         .unwrap_err()
         .contains("--until command is required"));
         assert!(create_in(
-            d.path(), "s", "/ws", "true", None, None, 30, 0, None, None, None, "x", 1
+            d.path(),
+            "s",
+            "/ws",
+            "true",
+            None,
+            None,
+            30,
+            0,
+            None,
+            None,
+            None,
+            "x",
+            1
         )
         .unwrap_err()
         .contains("timeout must be greater than zero"));
@@ -1277,14 +1329,29 @@ mod tests {
         let reread = get_in(d.path(), "w-dsh").expect("record on disk");
         assert_eq!(reread.agent_source.as_deref(), Some("dsh"));
         assert_eq!(reread.session_id, "dsh-uuid-1");
-        assert_eq!(reread.model.as_deref(), Some("openrouter/anthropic/claude-opus-5"));
+        assert_eq!(
+            reread.model.as_deref(),
+            Some("openrouter/anthropic/claude-opus-5")
+        );
     }
 
     #[test]
     fn create_clamps_poll_and_timeout() {
         let d = dir();
         let rec = create_in(
-            d.path(), "s", "/ws", "true", None, None, 1, MAX_TIMEOUT_SECS + 999, None, None, None, "w", 0,
+            d.path(),
+            "s",
+            "/ws",
+            "true",
+            None,
+            None,
+            1,
+            MAX_TIMEOUT_SECS + 999,
+            None,
+            None,
+            None,
+            "w",
+            0,
         )
         .unwrap();
         assert_eq!(rec.poll_secs, MIN_POLL_SECS, "sub-floor poll clamps up");
@@ -1299,10 +1366,38 @@ mod tests {
     fn roundtrip_list_get_stop() {
         let d = dir();
         // w1 has the later deadline, w2 the earlier — list sorts by deadline
-        create_in(d.path(), "s", "/ws", "true", None, None, 30, 7200, None, None, None, "w1", 1_000)
-            .unwrap();
-        create_in(d.path(), "s", "/ws", "true", None, None, 30, 60, None, None, None, "w2", 1_000)
-            .unwrap();
+        create_in(
+            d.path(),
+            "s",
+            "/ws",
+            "true",
+            None,
+            None,
+            30,
+            7200,
+            None,
+            None,
+            None,
+            "w1",
+            1_000,
+        )
+        .unwrap();
+        create_in(
+            d.path(),
+            "s",
+            "/ws",
+            "true",
+            None,
+            None,
+            30,
+            60,
+            None,
+            None,
+            None,
+            "w2",
+            1_000,
+        )
+        .unwrap();
         let all = list_in(d.path());
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].id, "w2", "earliest deadline first");
@@ -1330,7 +1425,10 @@ mod tests {
         assert_eq!(claimed.session_id, "sess-1");
         assert!(get_in(d.path(), "w1").is_none(), "fire retires the record");
         // second timer, same generation, finds it gone
-        assert_eq!(claim_fire_in(d.path(), "w1", 0).unwrap_err(), ClaimError::Gone);
+        assert_eq!(
+            claim_fire_in(d.path(), "w1", 0).unwrap_err(),
+            ClaimError::Gone
+        );
     }
 
     /// A timer re-armed by reconcile bumps generation; the old timer holding the
@@ -1342,7 +1440,13 @@ mod tests {
         rec.generation = 2;
         write_record(d.path(), &rec).unwrap();
         let err = claim_fire_in(d.path(), "w1", 1).unwrap_err();
-        assert_eq!(err, ClaimError::StaleGeneration { expected: 1, found: 2 });
+        assert_eq!(
+            err,
+            ClaimError::StaleGeneration {
+                expected: 1,
+                found: 2
+            }
+        );
         // and the record is untouched — the live timer can still fire it
         assert!(get_in(d.path(), "w1").is_some());
     }
@@ -1354,16 +1458,29 @@ mod tests {
         let d = dir();
         make(d.path(), "w1", 0);
         stop_in(d.path(), "w1");
-        assert_eq!(claim_fire_in(d.path(), "w1", 0).unwrap_err(), ClaimError::Gone);
+        assert_eq!(
+            claim_fire_in(d.path(), "w1", 0).unwrap_err(),
+            ClaimError::Gone
+        );
     }
 
     #[test]
     fn optional_fields_survive_the_roundtrip() {
         let d = dir();
         let rec = create_in(
-            d.path(), "s", "/ws", "true",
-            Some("echo done"), Some("waiting on X"),
-            30, 60, Some("claude-fable-5"), Some("high"), Some("codex"), "w1", 0,
+            d.path(),
+            "s",
+            "/ws",
+            "true",
+            Some("echo done"),
+            Some("waiting on X"),
+            30,
+            60,
+            Some("claude-fable-5"),
+            Some("high"),
+            Some("codex"),
+            "w1",
+            0,
         )
         .unwrap();
         assert_eq!(rec.capture_cmd.as_deref(), Some("echo done"));
@@ -1376,8 +1493,19 @@ mod tests {
 
         // blank optionals normalize to None
         let rec2 = create_in(
-            d.path(), "s", "/ws", "true",
-            Some("  "), Some(""), 30, 60, Some(" "), Some(""), Some("  "), "w2", 0,
+            d.path(),
+            "s",
+            "/ws",
+            "true",
+            Some("  "),
+            Some(""),
+            30,
+            60,
+            Some(" "),
+            Some(""),
+            Some("  "),
+            "w2",
+            0,
         )
         .unwrap();
         assert_eq!(rec2.capture_cmd, None);
@@ -1481,18 +1609,21 @@ mod tests {
         let seen: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
         let capture = |_r: &WatchRecord| "conclusion=success".to_string();
         let resume = |r: &WatchRecord, prompt: &str| {
-            seen.borrow_mut().push((r.session_id.clone(), prompt.to_string()));
+            seen.borrow_mut()
+                .push((r.session_id.clone(), prompt.to_string()));
             Ok(())
         };
-        let claimed =
-            fire_in(d.path(), "w1", 0, false, &capture, &dead, &resume).unwrap();
+        let claimed = fire_in(d.path(), "w1", 0, false, &capture, &dead, &resume).unwrap();
         assert_eq!(claimed.session_id, "sess-1");
         assert!(get_in(d.path(), "w1").is_none(), "fire retires the record");
 
         let seen = seen.into_inner();
         assert_eq!(seen.len(), 1, "resumed exactly once");
         assert_eq!(seen[0].0, "sess-1");
-        assert!(seen[0].1.contains("conclusion=success"), "event text carried into prompt");
+        assert!(
+            seen[0].1.contains("conclusion=success"),
+            "event text carried into prompt"
+        );
         assert!(seen[0].1.contains("触发了"));
 
         // a racing second fire finds the record gone and resumes nothing
@@ -1520,7 +1651,10 @@ mod tests {
             Ok(())
         };
         fire_in(d.path(), "w1", 0, true, &capture, &dead, &resume).unwrap();
-        assert!(!*captured.borrow(), "timeout fire must not run the capture command");
+        assert!(
+            !*captured.borrow(),
+            "timeout fire must not run the capture command"
+        );
         assert!(last.borrow().contains("已超时"));
         assert!(!last.borrow().contains("should-not-run"));
     }
@@ -1607,8 +1741,17 @@ mod tests {
             &|_r, _p| panic!("stale timer must not resume"),
         )
         .unwrap_err();
-        assert_eq!(err, ClaimError::StaleGeneration { expected: 4, found: 5 });
-        assert!(get_in(d.path(), "w1").is_some(), "record untouched for the live timer");
+        assert_eq!(
+            err,
+            ClaimError::StaleGeneration {
+                expected: 4,
+                found: 5
+            }
+        );
+        assert!(
+            get_in(d.path(), "w1").is_some(),
+            "record untouched for the live timer"
+        );
     }
 
     // ── P3: heartbeat + reconcile ──────────────────────────────────────────────
@@ -1622,7 +1765,10 @@ mod tests {
     fn preflight_rejects_a_command_that_cannot_run() {
         let err = preflight("fleet-no-such-binary-xyz --json").unwrap_err();
         assert!(err.contains("跑不起来"), "{err}");
-        assert!(err.contains("fleet-no-such-binary-xyz"), "the command is quoted back: {err}");
+        assert!(
+            err.contains("fleet-no-such-binary-xyz"),
+            "the command is quoted back: {err}"
+        );
     }
 
     #[test]
@@ -1663,7 +1809,10 @@ mod tests {
 
         touch_in(d.path(), "w1", 0, 30_000, Some(&unmet));
         let rec = get_in(d.path(), "w1").unwrap();
-        assert_eq!(rec.structural_fail_streak, 0, "a normal unmet poll clears the flag");
+        assert_eq!(
+            rec.structural_fail_streak, 0,
+            "a normal unmet poll clears the flag"
+        );
         assert_eq!(rec.last_exit, Some(1));
     }
 
@@ -1679,7 +1828,10 @@ mod tests {
         rec.last_stderr = "sh: gh: command not found".into();
         rec.structural_fail_streak = 204;
         let prompt = compose_resume_prompt(&rec, "", true);
-        assert!(prompt.contains("gh run view 123"), "the until command itself");
+        assert!(
+            prompt.contains("gh run view 123"),
+            "the until command itself"
+        );
         assert!(prompt.contains("204"), "how many polls");
         assert!(prompt.contains("command not found"), "what the shell said");
         assert!(prompt.contains("结构性失败"), "and the verdict on it");
@@ -1716,7 +1868,11 @@ mod tests {
     fn touch_increments_the_poll_count() {
         let d = dir();
         make(d.path(), "w1", 1_000);
-        assert_eq!(get_in(d.path(), "w1").unwrap().poll_count, 0, "starts at zero");
+        assert_eq!(
+            get_in(d.path(), "w1").unwrap().poll_count,
+            0,
+            "starts at zero"
+        );
         touch_in(d.path(), "w1", 0, 50_000, None);
         touch_in(d.path(), "w1", 0, 80_000, None);
         touch_in(d.path(), "w1", 0, 110_000, None);
@@ -1740,8 +1896,19 @@ mod tests {
         touch_in(d.path(), "w1", 0, 2_000, None);
         touch_in(d.path(), "w1", 0, 3_000, None); // poll_count = 2
         create_in(
-            d.path(), "sess-2", "/ws", "true", None, Some("other thing"), 30, 60, None, None, None,
-            "w2", 1_000,
+            d.path(),
+            "sess-2",
+            "/ws",
+            "true",
+            None,
+            Some("other thing"),
+            30,
+            60,
+            None,
+            None,
+            None,
+            "w2",
+            1_000,
         )
         .unwrap();
 
@@ -1788,8 +1955,16 @@ mod tests {
         ];
         enrich_sessions_in(d.path(), &mut sessions);
 
-        assert_eq!(sessions[0].status, St::Watching, "the waiting one is rescued");
-        assert_eq!(sessions[1].status, St::Idle, "a watchless session is untouched");
+        assert_eq!(
+            sessions[0].status,
+            St::Watching,
+            "the waiting one is rescued"
+        );
+        assert_eq!(
+            sessions[1].status,
+            St::Idle,
+            "a watchless session is untouched"
+        );
 
         // WaitingInput — the window right after the turn ended — is rescued too.
         let mut just_ended = vec![mk("sess-1", St::WaitingInput, false)];
@@ -1824,8 +1999,15 @@ mod tests {
         ] {
             let mut sessions = vec![mk(status.clone(), proc_alive)];
             enrich_sessions_in(d.path(), &mut sessions);
-            assert_eq!(sessions[0].status, status, "{status:?} must survive the override");
-            assert_eq!(sessions[0].watches.len(), 1, "the chip is stamped either way");
+            assert_eq!(
+                sessions[0].status, status,
+                "{status:?} must survive the override"
+            );
+            assert_eq!(
+                sessions[0].watches.len(),
+                1,
+                "the chip is stamped either way"
+            );
         }
     }
 
@@ -1850,12 +2032,19 @@ mod tests {
         let mut armed = Vec::new();
         let rearmed = reconcile_in(d.path(), 1_000_000, &mut |r| armed.push(r.id.clone()));
 
-        assert_eq!(rearmed, vec!["stranded"], "only the stranded watch is re-armed");
+        assert_eq!(
+            rearmed,
+            vec!["stranded"],
+            "only the stranded watch is re-armed"
+        );
         assert_eq!(armed, vec!["stranded"]);
         // its generation was bumped so the zombie timer exits on stale-gen
         assert_eq!(get_in(d.path(), "stranded").unwrap().generation, 1);
         // and the re-arm resets its heartbeat forward
-        assert_eq!(get_in(d.path(), "stranded").unwrap().last_poll_at, 1_000_000);
+        assert_eq!(
+            get_in(d.path(), "stranded").unwrap().last_poll_at,
+            1_000_000
+        );
         // healthy untouched
         assert_eq!(get_in(d.path(), "healthy").unwrap().generation, 0);
     }
@@ -1877,6 +2066,9 @@ mod tests {
         // the re-armed record is still expired, so its timer will Fire{timed_out:true}
         let back = get_in(d.path(), "w1").unwrap();
         assert!(back.is_expired(now));
-        assert_eq!(decide(&back, back.generation, now, || false), TimerStep::Fire { timed_out: true });
+        assert_eq!(
+            decide(&back, back.generation, now, || false),
+            TimerStep::Fire { timed_out: true }
+        );
     }
 }

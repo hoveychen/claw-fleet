@@ -70,7 +70,10 @@ pub struct InstallError {
 
 impl InstallError {
     fn new(code: InstallErrorCode, message: impl Into<String>) -> Self {
-        InstallError { code, message: message.into() }
+        InstallError {
+            code,
+            message: message.into(),
+        }
     }
 }
 
@@ -87,7 +90,11 @@ pub struct InstallPlan {
 /// Build the official-installer invocation for `source` on this platform.
 pub fn install_plan(source: &str) -> Result<InstallPlan, InstallError> {
     match source {
-        "claude-code" => Ok(pipe_installer_plan(CLAUDE_INSTALL_SH, CLAUDE_INSTALL_PS1, &[])),
+        "claude-code" => Ok(pipe_installer_plan(
+            CLAUDE_INSTALL_SH,
+            CLAUDE_INSTALL_PS1,
+            &[],
+        )),
         "codex" => Ok(pipe_installer_plan(
             CODEX_INSTALL_SH,
             CODEX_INSTALL_PS1,
@@ -105,7 +112,10 @@ pub fn install_plan(source: &str) -> Result<InstallPlan, InstallError> {
 /// `curl | sh` on unix, `irm | iex` under PowerShell on Windows — exactly the
 /// commands the vendors document, no local re-implementation of their logic.
 fn pipe_installer_plan(sh_url: &str, ps1_url: &str, envs: &[(&str, &str)]) -> InstallPlan {
-    let envs = envs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    let envs = envs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
     #[cfg(unix)]
     {
         let _ = ps1_url;
@@ -181,7 +191,10 @@ pub fn install_harness(
 
     progress("verifying installation…");
     let status = crate::harness_status::probe_source(source).ok_or_else(|| {
-        InstallError::new(InstallErrorCode::UnsupportedSource, format!("unknown source '{source}'"))
+        InstallError::new(
+            InstallErrorCode::UnsupportedSource,
+            format!("unknown source '{source}'"),
+        )
     })?;
     if !status.installed {
         return Err(InstallError::new(
@@ -216,23 +229,38 @@ pub fn run_streaming(
     }
     // The installers themselves shell out (curl, tar, node) — give them the
     // same augmented PATH the GUI lacks.
-    cmd.env("PATH", crate::session_launch::augmented_path_with_front(&[]));
+    cmd.env(
+        "PATH",
+        crate::session_launch::augmented_path_with_front(&[]),
+    );
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| InstallError::new(InstallErrorCode::SpawnFailed, format!("{}: {e}", plan.program)))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        InstallError::new(
+            InstallErrorCode::SpawnFailed,
+            format!("{}: {e}", plan.program),
+        )
+    })?;
 
     let (tx, rx) = mpsc::channel::<String>();
     for reader in [
-        child.stdout.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
-        child.stderr.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+        child
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
     ]
     .into_iter()
     .flatten()
     {
         let tx = tx.clone();
         std::thread::spawn(move || {
-            for line in std::io::BufReader::new(reader).lines().map_while(Result::ok) {
+            for line in std::io::BufReader::new(reader)
+                .lines()
+                .map_while(Result::ok)
+            {
                 if tx.send(line).is_err() {
                     break;
                 }
@@ -266,7 +294,10 @@ pub fn run_streaming(
             let _ = child.wait();
             return Err(InstallError::new(
                 InstallErrorCode::Timeout,
-                format!("installer still running after {}s — killed", timeout.as_secs()),
+                format!(
+                    "installer still running after {}s — killed",
+                    timeout.as_secs()
+                ),
             ));
         }
     }
@@ -353,7 +384,10 @@ pub fn update_plan(
 ) -> Result<InstallPlan, InstallError> {
     let bin = |fallback: &str| bin_path.unwrap_or(fallback).to_string();
     let unsupported = |detail: &str| {
-        Err(InstallError::new(InstallErrorCode::UnsupportedChannel, detail.to_string()))
+        Err(InstallError::new(
+            InstallErrorCode::UnsupportedChannel,
+            detail.to_string(),
+        ))
     };
     match source {
         "claude-code" => match channel.unwrap_or("path") {
@@ -363,9 +397,9 @@ pub fn update_plan(
                 args: vec!["upgrade".into(), "--cask".into(), "claude-code".into()],
                 envs: vec![],
             }),
-            c if c.ends_with("extension") => {
-                unsupported("this claude binary is bundled with an editor extension; the editor updates it")
-            }
+            c if c.ends_with("extension") => unsupported(
+                "this claude binary is bundled with an editor extension; the editor updates it",
+            ),
             // native-installer / path: claude's own updater.
             _ => Ok(InstallPlan {
                 program: bin("claude"),
@@ -374,9 +408,9 @@ pub fn update_plan(
             }),
         },
         "codex" => match channel.unwrap_or("path") {
-            c if c.ends_with("extension") => {
-                unsupported("this codex binary is bundled with an editor extension; the editor updates it")
-            }
+            c if c.ends_with("extension") => unsupported(
+                "this codex binary is bundled with an editor extension; the editor updates it",
+            ),
             // codex update detects its own install method (standalone/npm/brew).
             _ => Ok(InstallPlan {
                 program: bin("codex"),
@@ -394,7 +428,10 @@ pub fn update_plan(
 
 fn npm_global_latest_plan(package: &str) -> Result<InstallPlan, InstallError> {
     let npm = find_npm().ok_or_else(|| {
-        InstallError::new(InstallErrorCode::NodeMissing, "npm not found for the npm-channel update")
+        InstallError::new(
+            InstallErrorCode::NodeMissing,
+            "npm not found for the npm-channel update",
+        )
     })?;
     Ok(InstallPlan {
         program: npm.to_string_lossy().into_owned(),
@@ -411,7 +448,10 @@ pub fn update_harness(
     progress: &(dyn Fn(&str) + Sync),
 ) -> Result<UpdateReport, InstallError> {
     let before = crate::harness_status::probe_source(source).ok_or_else(|| {
-        InstallError::new(InstallErrorCode::UnsupportedSource, format!("unknown source '{source}'"))
+        InstallError::new(
+            InstallErrorCode::UnsupportedSource,
+            format!("unknown source '{source}'"),
+        )
     })?;
     if !before.installed {
         return Err(InstallError::new(
@@ -574,12 +614,18 @@ pub fn install_node(progress: &(dyn Fn(&str) + Sync)) -> Result<PathBuf, Install
         )
     })?;
     let dest = fleet_node_dir().ok_or_else(|| {
-        InstallError::new(InstallErrorCode::InstallFailed, "cannot resolve home directory")
+        InstallError::new(
+            InstallErrorCode::InstallFailed,
+            "cannot resolve home directory",
+        )
     })?;
 
     progress("resolving the current Node.js LTS release…");
     let version = latest_node_lts()?;
-    progress(&format!("installing Node.js {version} ({slug}) into {}", dest.display()));
+    progress(&format!(
+        "installing Node.js {version} ({slug}) into {}",
+        dest.display()
+    ));
     let plan = node_install_plan_for(&version, slug, &dest);
     run_streaming(&plan, INSTALL_TIMEOUT, progress)?;
 
@@ -609,7 +655,10 @@ pub fn install_node(progress: &(dyn Fn(&str) + Sync)) -> Result<PathBuf, Install
     if !out.status.success() {
         return Err(InstallError::new(
             InstallErrorCode::VerifyFailed,
-            format!("npm --version failed: {}", String::from_utf8_lossy(&out.stderr).trim()),
+            format!(
+                "npm --version failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
         ));
     }
     progress(&format!(
@@ -697,7 +746,11 @@ mod tests {
         };
         let err = run_streaming(&plan, Duration::from_secs(10), &*progress).unwrap_err();
         assert_eq!(err.code, InstallErrorCode::InstallFailed);
-        assert!(err.message.contains("boom reason"), "tail missing: {}", err.message);
+        assert!(
+            err.message.contains("boom reason"),
+            "tail missing: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -719,7 +772,10 @@ mod tests {
     fn update_plan_branches_by_channel() {
         // Native claude → its own updater, pinned to the resolved binary.
         let p = update_plan("claude-code", Some("native-installer"), Some("/x/claude")).unwrap();
-        assert_eq!((p.program.as_str(), p.args[0].as_str()), ("/x/claude", "update"));
+        assert_eq!(
+            (p.program.as_str(), p.args[0].as_str()),
+            ("/x/claude", "update")
+        );
 
         // Editor-extension bundles are the editor's job — structured refusal.
         let e = update_plan("claude-code", Some("vscode-extension"), Some("/x")).unwrap_err();
@@ -729,8 +785,14 @@ mod tests {
 
         // codex update is itself channel-aware — standalone and path both use it.
         let p = update_plan("codex", Some("standalone"), Some("/x/codex")).unwrap();
-        assert_eq!((p.program.as_str(), p.args[0].as_str()), ("/x/codex", "update"));
-        assert!(p.envs.iter().any(|(k, v)| k == "CODEX_NON_INTERACTIVE" && v == "1"));
+        assert_eq!(
+            (p.program.as_str(), p.args[0].as_str()),
+            ("/x/codex", "update")
+        );
+        assert!(p
+            .envs
+            .iter()
+            .any(|(k, v)| k == "CODEX_NON_INTERACTIVE" && v == "1"));
 
         // Homebrew claude goes through brew's cask upgrade.
         let p = update_plan("claude-code", Some("homebrew"), Some("/x")).unwrap();
@@ -743,7 +805,11 @@ mod tests {
             ("claude-code", "@anthropic-ai/claude-code@latest"),
             ("dsh", "@deepseek-ai/dsh@latest"),
         ] {
-            let channel = if src == "dsh" { None } else { Some("npm-global") };
+            let channel = if src == "dsh" {
+                None
+            } else {
+                Some("npm-global")
+            };
             match update_plan(src, channel, None) {
                 Ok(p) => {
                     assert!(p.program.contains("npm"));

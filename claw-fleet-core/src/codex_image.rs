@@ -172,8 +172,10 @@ pub fn list_thread_images(id: &str) -> Vec<GeneratedImage> {
 // So the fix is not to harden the image prompt — it is to stop claiming the
 // thread is a session at all.
 
-/// Marker files naming threads Fleet drove purely as an internal image turn.
-/// One empty file per thread id, written after every generate/edit.
+/// Marker files naming threads Fleet drove purely as an internal turn: image
+/// generations (one empty file per thread id, written after every
+/// generate/edit) and `session_explain`'s rollout-copy forks
+/// (`crate::codex_explain`, marked before the copy is written).
 fn internal_thread_dir() -> Option<PathBuf> {
     crate::session::get_fleet_dir().map(|d| d.join("codex-internal-threads"))
 }
@@ -204,7 +206,9 @@ pub fn mark_internal_thread(thread_id: &str) {
         }
     }
     if let Err(e) = std::fs::write(&path, b"") {
-        crate::log_debug(&format!("codex_image: mark internal thread {thread_id}: {e}"));
+        crate::log_debug(&format!(
+            "codex_image: mark internal thread {thread_id}: {e}"
+        ));
     }
 }
 
@@ -257,9 +261,8 @@ const ROLLOUT_HEAD_LINES: usize = 40;
 /// check in [`is_internal_thread`]: that one has to stay live, or a thread
 /// scanned while its image turn is still running would be cached as "not
 /// internal" and stay visible for the rest of the process.
-static ROLLOUT_IS_IMAGE_PROMPT: std::sync::Mutex<
-    Option<std::collections::HashMap<String, bool>>,
-> = std::sync::Mutex::new(None);
+static ROLLOUT_IS_IMAGE_PROMPT: std::sync::Mutex<Option<std::collections::HashMap<String, bool>>> =
+    std::sync::Mutex::new(None);
 
 fn rollout_opens_with_image_prompt(thread_id: &str) -> bool {
     if let Some(hit) = ROLLOUT_IS_IMAGE_PROMPT
@@ -292,7 +295,10 @@ fn read_rollout_opening_prompt(thread_id: &str) -> bool {
     let Ok(file) = std::fs::File::open(&path) else {
         return false;
     };
-    for line in std::io::BufReader::new(file).lines().take(ROLLOUT_HEAD_LINES) {
+    for line in std::io::BufReader::new(file)
+        .lines()
+        .take(ROLLOUT_HEAD_LINES)
+    {
         let Ok(line) = line else { return false };
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
@@ -301,7 +307,9 @@ fn read_rollout_opening_prompt(thread_id: &str) -> bool {
         if payload.and_then(|p| p.get("role")).and_then(|r| r.as_str()) != Some("user") {
             continue;
         }
-        let texts = payload.and_then(|p| p.get("content")).and_then(|c| c.as_array());
+        let texts = payload
+            .and_then(|p| p.get("content"))
+            .and_then(|c| c.as_array());
         for part in texts.into_iter().flatten() {
             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                 if text.starts_with(IMAGE_PROMPT_PREFIX) {
@@ -692,7 +700,10 @@ pub fn generate_image(
             // Failing before the thread even starts is the auth/config shape of
             // the same problem; name it rather than dumping the raw stream.
             Some(reason) => format!("codex turn failed before it started: {reason}"),
-            None => format!("codex never printed thread.started; output: {}", tail(&stdout)),
+            None => format!(
+                "codex never printed thread.started; output: {}",
+                tail(&stdout)
+            ),
         })?;
 
     // `run_turn` already claimed it off the `thread.started` line; re-assert so
@@ -737,8 +748,14 @@ pub fn edit_image(
     // whose marker predates this change, or was cleaned out from under us.
     mark_internal_thread(thread_id);
 
-    let (program, args, rca_envs) =
-        build_edit_launch(codex, &workspace_path, thread_id, instruction, images, model)?;
+    let (program, args, rca_envs) = build_edit_launch(
+        codex,
+        &workspace_path,
+        thread_id,
+        instruction,
+        images,
+        model,
+    )?;
     let stdout = run_turn(&program, &args, &rca_envs, &workspace_path)?;
 
     finish_turn(thread_id.to_string(), &before, &stdout)
@@ -763,7 +780,9 @@ fn finish_turn(
         // every model on the account was answering "Selected model is at
         // capacity". Codex's own words first, always.
         if let Some(reason) = parse_turn_failure(stdout) {
-            return Err(format!("codex turn failed for thread {thread_id}: {reason}"));
+            return Err(format!(
+                "codex turn failed for thread {thread_id}: {reason}"
+            ));
         }
         // Otherwise the turn really did end cleanly having generated nothing —
         // the agent asked a question, refused, or (despite the wrapper)
@@ -979,11 +998,17 @@ mod tests {
     fn prompt_pins_the_builtin_tool_and_forbids_moving() {
         let p = build_image_prompt("  a shiba in a red scarf  ", 0);
         assert!(p.contains("image_gen"), "must name the built-in tool: {p}");
-        assert!(p.contains("a shiba in a red scarf"), "must carry the description: {p}");
+        assert!(
+            p.contains("a shiba in a red scarf"),
+            "must carry the description: {p}"
+        );
         assert!(!p.contains("  a shiba"), "description must be trimmed: {p}");
         // Fleet locates output by thread id; a helpful `mv` would empty the dir.
         assert!(p.contains("not move"), "must forbid moving the output: {p}");
-        assert!(p.contains("SVG"), "must forbid the vector substitution: {p}");
+        assert!(
+            p.contains("SVG"),
+            "must forbid the vector substitution: {p}"
+        );
     }
 
     /// The pre-marker recogniser matches on [`IMAGE_PROMPT_PREFIX`], so a
@@ -1050,7 +1075,10 @@ mod tests {
         let out = run_turn(&script, &[], &[], tmp.to_str().unwrap())
             .expect("a child that floods stderr must still complete");
 
-        assert!(out.contains("thread.started"), "stdout must be captured: {out}");
+        assert!(
+            out.contains("thread.started"),
+            "stdout must be captured: {out}"
+        );
         assert!(
             out.contains("agent_message"),
             "stdout written after the stderr flood must survive: {out}"
@@ -1154,7 +1182,10 @@ mod tests {
         // having produced nothing to say.
         let err = finish_turn("t1".to_string(), &[], CAPACITY_FAILURE_STDOUT)
             .expect_err("no images means Err");
-        assert!(err.contains("at capacity"), "must carry codex's reason: {err}");
+        assert!(
+            err.contains("at capacity"),
+            "must carry codex's reason: {err}"
+        );
         assert!(
             !err.contains("(nothing)"),
             "must not fall through to the agent-silence wording: {err}"
@@ -1169,7 +1200,10 @@ mod tests {
             r#"{"type":"turn.completed","usage":{}}"#,
         );
         let err = finish_turn("t2".to_string(), &[], clean).expect_err("no images means Err");
-        assert!(err.contains("(nothing)"), "unchanged for a clean empty turn: {err}");
+        assert!(
+            err.contains("(nothing)"),
+            "unchanged for a clean empty turn: {err}"
+        );
     }
 
     #[test]
@@ -1193,9 +1227,18 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                TurnEvent { kind: "message".into(), text: "starting".into() },
-                TurnEvent { kind: "command".into(), text: "sips -z 1024 1024 a.png".into() },
-                TurnEvent { kind: "message".into(), text: "done".into() },
+                TurnEvent {
+                    kind: "message".into(),
+                    text: "starting".into()
+                },
+                TurnEvent {
+                    kind: "command".into(),
+                    text: "sips -z 1024 1024 a.png".into()
+                },
+                TurnEvent {
+                    kind: "message".into(),
+                    text: "done".into()
+                },
             ],
             "item.started must not double the command; non-message/command items are skipped"
         );
@@ -1250,12 +1293,19 @@ mod tests {
         let ws = td.path().to_string_lossy().to_string();
         let codex = PathBuf::from("/usr/local/bin/codex");
         let (program, args, envs) =
-            build_generate_launch(codex.clone(), &ws, "draw a cat", &[], None).expect("local launch");
+            build_generate_launch(codex.clone(), &ws, "draw a cat", &[], None)
+                .expect("local launch");
 
         assert_eq!(program, codex, "local workspace must not be re-programmed");
-        assert!(envs.is_empty(), "local workspace needs no rca env, got {envs:?}");
+        assert!(
+            envs.is_empty(),
+            "local workspace needs no rca env, got {envs:?}"
+        );
         assert_eq!(args.first().map(String::as_str), Some("exec"));
-        assert!(args.iter().any(|a| a == "--json"), "must stay machine-readable");
+        assert!(
+            args.iter().any(|a| a == "--json"),
+            "must stay machine-readable"
+        );
         assert!(
             args.windows(2)
                 .any(|w| w[0] == "-s" && w[1] == "workspace-write"),
@@ -1263,7 +1313,10 @@ mod tests {
         );
         // The prompt is last, after `--`, and carries the wrapper.
         let last = args.last().expect("prompt");
-        assert!(last.contains("image_gen") && last.contains("draw a cat"), "{last}");
+        assert!(
+            last.contains("image_gen") && last.contains("draw a cat"),
+            "{last}"
+        );
     }
 
     #[test]
@@ -1271,7 +1324,8 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let ws = td.path().to_string_lossy().to_string();
         let (_, args, _) =
-            build_generate_launch(PathBuf::from("/usr/local/bin/codex"), &ws, "x", &[], None).unwrap();
+            build_generate_launch(PathBuf::from("/usr/local/bin/codex"), &ws, "x", &[], None)
+                .unwrap();
         assert!(
             args.iter().any(|a| a == DEFAULT_ROUTING_MODEL),
             "generation quality comes from gpt-image-2 regardless, so the cheap tier drives: {args:?}"
@@ -1297,16 +1351,25 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let ws = td.path().to_string_lossy().to_string();
         let (a, b, images) = two_attachments(&td);
-        let (_, args, _) =
-            build_generate_launch(PathBuf::from("/usr/local/bin/codex"), &ws, "x", &images, None)
-                .unwrap();
+        let (_, args, _) = build_generate_launch(
+            PathBuf::from("/usr/local/bin/codex"),
+            &ws,
+            "x",
+            &images,
+            None,
+        )
+        .unwrap();
         let flags: Vec<&String> = args
             .iter()
             .enumerate()
             .filter(|(i, _)| *i > 0 && args[i - 1] == "-i")
             .map(|(_, v)| v)
             .collect();
-        assert_eq!(flags, vec![&a, &b], "both attachments must ride along: {args:?}");
+        assert_eq!(
+            flags,
+            vec![&a, &b],
+            "both attachments must ride along: {args:?}"
+        );
         // Flags must precede `--`, or codex parses them as prompt text.
         let sep = args.iter().position(|a| a == "--").expect("-- separator");
         let last_i = args.iter().rposition(|a| a == "-i").expect("-i present");
@@ -1358,7 +1421,11 @@ mod tests {
         let before = vec![img("/d/one.png", 10)];
         let after = vec![img("/d/two.png", 30), img("/d/one.png", 10)];
         let got = new_images_since(&before, after);
-        assert_eq!(got, vec![img("/d/two.png", 30)], "round 1's image must not resurface");
+        assert_eq!(
+            got,
+            vec![img("/d/two.png", 30)],
+            "round 1's image must not resurface"
+        );
     }
 
     #[test]

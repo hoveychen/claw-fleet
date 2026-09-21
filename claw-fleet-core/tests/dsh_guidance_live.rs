@@ -51,7 +51,10 @@ fn live_agents_md_reaches_the_session_as_a_durable_instruction() {
         "zh",
     )
     .expect("write AGENTS.md");
-    assert!(home.join("AGENTS.md").exists(), "reconcile must have written the file");
+    assert!(
+        home.join("AGENTS.md").exists(),
+        "reconcile must have written the file"
+    );
 
     let _guard = ServerGuard;
     let source = DshSource::new();
@@ -82,12 +85,15 @@ fn live_agents_md_reaches_the_session_as_a_durable_instruction() {
     let mut injected = None;
     while Instant::now() < deadline {
         events = source.get_messages(&uri).unwrap_or_default();
-        injected = events.iter().find(|e| {
-            e.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true)
-                && serde_json::to_string(e)
-                    .unwrap_or_default()
-                    .contains(marker)
-        }).cloned();
+        injected = events
+            .iter()
+            .find(|e| {
+                e.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true)
+                    && serde_json::to_string(e)
+                        .unwrap_or_default()
+                        .contains(marker)
+            })
+            .cloned();
         if injected.is_some() {
             break;
         }
@@ -98,7 +104,11 @@ fn live_agents_md_reaches_the_session_as_a_durable_instruction() {
         panic!(
             "no injected instruction message in history: {} event(s): {}",
             events.len(),
-            serde_json::to_string(&events).unwrap_or_default().chars().take(2000).collect::<String>()
+            serde_json::to_string(&events)
+                .unwrap_or_default()
+                .chars()
+                .take(2000)
+                .collect::<String>()
         );
     });
 

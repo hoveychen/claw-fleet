@@ -70,7 +70,8 @@ pub(crate) fn route_schedule_update(
             Ok(rec) => {
                 let _ = crate::schedule::arm_timer(&rec);
                 let body = serde_json::to_string(&rec).unwrap_or_default();
-                let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+                let _ = request
+                    .respond(tiny_http::Response::from_string(body).with_header(json_header));
             }
             Err(e) => {
                 let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));

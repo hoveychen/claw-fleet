@@ -160,7 +160,10 @@ fn live_scan_sessions_carries_the_pushed_phase() {
     let port = source
         .server_port()
         .expect("the first scan must have started a server");
-    println!("{} session(s) before the probe; server on {port}", before.len());
+    println!(
+        "{} session(s) before the probe; server on {port}",
+        before.len()
+    );
 
     // Drive the turn through *that* server: both downlinks are scoped to the
     // process that runs the turn, so a helper server's turn would be invisible
@@ -168,8 +171,7 @@ fn live_scan_sessions_carries_the_pushed_phase() {
     let launch_token = source
         .server_launch_token()
         .expect("a started server announced a token");
-    let client =
-        claw_fleet_core::dsh_client::DshClient::new(port, &launch_token).expect("client");
+    let client = claw_fleet_core::dsh_client::DshClient::new(port, &launch_token).expect("client");
     let session_id = format!("session-{}", uuid::Uuid::new_v4());
     client
         .call(

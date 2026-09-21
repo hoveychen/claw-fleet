@@ -152,7 +152,8 @@ pub fn analyze_session_outcome_routed(
     )?;
     log_debug(&format!(
         "[claude_analyze] [{sid}] routed response (len={}): {:?}",
-        raw.len(), truncate_str(&raw, 200)
+        raw.len(),
+        truncate_str(&raw, 200)
     ));
     Some(parse_response(&raw))
 }
@@ -187,11 +188,25 @@ fn parse_response(raw: &str) -> AnalysisResult {
     let (tags_part, summary) = if let Some(idx) = after_tags.find("| SUMMARY:") {
         let t = after_tags[..idx].trim();
         let s = after_tags[idx + "| SUMMARY:".len()..].trim();
-        (t, if s.is_empty() { None } else { Some(s.to_string()) })
+        (
+            t,
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            },
+        )
     } else if let Some(idx) = after_tags.find("| SUMMARY：") {
         let t = after_tags[..idx].trim();
         let s = after_tags[idx + "| SUMMARY：".len()..].trim();
-        (t, if s.is_empty() { None } else { Some(s.to_string()) })
+        (
+            t,
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            },
+        )
     } else {
         (after_tags, None)
     };
@@ -356,7 +371,10 @@ pub fn generate_mascot_quips(
     locale: &str,
 ) -> MascotQuips {
     if !provider.is_available() {
-        log_debug(&format!("[mascot_quips] provider '{}' not available", provider.name()));
+        log_debug(&format!(
+            "[mascot_quips] provider '{}' not available",
+            provider.name()
+        ));
         return MascotQuips::default();
     }
 
@@ -467,7 +485,8 @@ mod tests {
 
     #[test]
     fn parse_needs_input_with_summary() {
-        let r = parse_response("TAGS: needs_input, scheming | SUMMARY: Asking which database to use");
+        let r =
+            parse_response("TAGS: needs_input, scheming | SUMMARY: Asking which database to use");
         assert_eq!(r.tags, vec!["needs_input", "scheming"]);
         assert_eq!(r.summary.as_deref(), Some("Asking which database to use"));
     }

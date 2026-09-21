@@ -81,7 +81,10 @@ fn live_session_cost_comes_back_from_the_provider() {
     let _guard = ServerGuard;
     let source = DshSource::new();
     let sessions = source.scan_sessions();
-    assert!(!sessions.is_empty(), "the real dsh home has no sessions to price");
+    assert!(
+        !sessions.is_empty(),
+        "the real dsh home has no sessions to price"
+    );
 
     // Find a session the provider will actually price, and do not assume the
     // first candidate is one.
@@ -107,18 +110,17 @@ fn live_session_cost_comes_back_from_the_provider() {
             continue;
         }
         candidates += 1;
-        let cost = claw_fleet_core::dsh_cost::dsh_session_cost(&s.jsonl_path)
-            .expect("dsh_session_cost");
+        let cost =
+            claw_fleet_core::dsh_cost::dsh_session_cost(&s.jsonl_path).expect("dsh_session_cost");
         if cost.total_usd.is_some() {
-            println!(
-                "pricing {} — {} generation(s)",
-                s.jsonl_path,
-                refs.len()
-            );
+            println!("pricing {} — {} generation(s)", s.jsonl_path, refs.len());
             found = Some((s.jsonl_path.clone(), cost));
             break;
         }
-        println!("skipping {} — nothing priceable ({})", s.jsonl_path, cost.note);
+        println!(
+            "skipping {} — nothing priceable ({})",
+            s.jsonl_path, cost.note
+        );
     }
 
     let Some((uri, cost)) = found else {
@@ -225,13 +227,21 @@ fn a_real_multi_day_session_is_split_across_its_days() {
             continue;
         }
 
-        println!("{} spans {days:?} over {} call(s)", s.jsonl_path, calls.len());
+        println!(
+            "{} spans {days:?} over {} call(s)",
+            s.jsonl_path,
+            calls.len()
+        );
         let priced: f64 = calls.iter().filter_map(|c| c.usd).sum();
         assert!(
             priced > 0.0,
             "this install's multi-day sessions are on the table-priced route, so \
              they must price without any key: {:?}",
-            calls.iter().map(|c| (&c.model, c.usd)).take(3).collect::<Vec<_>>()
+            calls
+                .iter()
+                .map(|c| (&c.model, c.usd))
+                .take(3)
+                .collect::<Vec<_>>()
         );
 
         // Each day must carry its own money, and the days must sum to the whole —
@@ -239,12 +249,20 @@ fn a_real_multi_day_session_is_split_across_its_days() {
         let mut per_day: std::collections::BTreeMap<String, f64> = Default::default();
         for c in &calls {
             let day = chrono::DateTime::from_timestamp_millis(c.at_ms)
-                .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d")
+                        .to_string()
+                })
                 .unwrap_or_default();
             *per_day.entry(day).or_default() += c.usd.unwrap_or(0.0);
         }
         println!("per-day: {per_day:?}");
-        assert_eq!(per_day.len(), days.len(), "every day the session ran gets a bucket");
+        assert_eq!(
+            per_day.len(),
+            days.len(),
+            "every day the session ran gets a bucket"
+        );
         assert!(
             per_day.values().filter(|v| **v > 0.0).count() >= 2,
             "at least two days must carry real money, else the split is cosmetic: {per_day:?}"

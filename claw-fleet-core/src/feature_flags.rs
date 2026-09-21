@@ -224,7 +224,10 @@ mod tests {
         for off in ["", " ", "0", "false", "no", "off", "ture", "2"] {
             assert!(!env_truthy(Some(off)), "{off:?} should not enable");
         }
-        assert!(!env_truthy(None), "an unset var is off — that is the default");
+        assert!(
+            !env_truthy(None),
+            "an unset var is off — that is the default"
+        );
     }
 
     // Simplified mode is tri-state, not truthy: "the deployment said off" and
@@ -236,7 +239,11 @@ mod tests {
             assert_eq!(env_tristate(Some(on)), Some(true), "{on:?} should be on");
         }
         for off in ["0", "false", "NO", "off", " 0 "] {
-            assert_eq!(env_tristate(Some(off)), Some(false), "{off:?} should be off");
+            assert_eq!(
+                env_tristate(Some(off)),
+                Some(false),
+                "{off:?} should be off"
+            );
         }
         for silent in ["", " ", "ture", "2", "maybe"] {
             assert_eq!(env_tristate(Some(silent)), None, "{silent:?} says nothing");

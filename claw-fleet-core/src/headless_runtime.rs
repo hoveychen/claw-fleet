@@ -158,11 +158,7 @@ pub fn maybe_fire_auto_resume(
             // repeated failures.
             |id| {
                 fire_map.get(id).is_some_and(|t| t.elapsed() < debounce)
-                    || crate::auto_resume::is_backed_off(
-                        &fail_map,
-                        id,
-                        AUTO_RESUME_FAILURE_BACKOFF,
-                    )
+                    || crate::auto_resume::is_backed_off(&fail_map, id, AUTO_RESUME_FAILURE_BACKOFF)
             },
             slots,
         );
@@ -205,7 +201,7 @@ pub fn maybe_fire_auto_resume(
                 model: None,
                 effort: None,
                 permission_mode: None,
-            images: Vec::new(),
+                images: Vec::new(),
             },
             Box::new(move |success| {
                 in_flight_done.fetch_sub(1, Ordering::SeqCst);
@@ -299,7 +295,7 @@ pub fn maybe_fire_auto_resume(
                 model: None,
                 effort: None,
                 permission_mode: None,
-            images: Vec::new(),
+                images: Vec::new(),
             },
             // The per-episode se_map cap (not the failures backoff) bounds these,
             // so the reaper only needs to release the concurrency slot.
@@ -453,9 +449,7 @@ mod tests {
         };
         let handle = {
             let running = running.clone();
-            std::thread::spawn(move || {
-                run_with_interval(scan, running, Duration::from_millis(5))
-            })
+            std::thread::spawn(move || run_with_interval(scan, running, Duration::from_millis(5)))
         };
         handle.join().expect("ticker thread must not panic");
         // Exactly 3 ticks: the 3rd cleared the flag, and the 4th wake hit the

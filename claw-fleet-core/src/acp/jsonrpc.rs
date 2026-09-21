@@ -78,10 +78,17 @@ pub struct RpcError {
 
 impl RpcError {
     pub fn new(code: i32, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), data: None }
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
     }
     pub fn method_not_found(method: &str) -> Self {
-        Self::new(codes::METHOD_NOT_FOUND, format!("Method not found: {method}"))
+        Self::new(
+            codes::METHOD_NOT_FOUND,
+            format!("Method not found: {method}"),
+        )
     }
     pub fn invalid_params(detail: impl Into<String>) -> Self {
         Self::new(codes::INVALID_PARAMS, detail)
@@ -100,11 +107,18 @@ impl RpcError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Incoming {
     /// Has `id` + `method`: peer wants an answer.
-    Request { id: Value, method: String, params: Value },
+    Request {
+        id: Value,
+        method: String,
+        params: Value,
+    },
     /// Has `method`, no `id`: peer wants nothing back. Never answer these.
     Notification { method: String, params: Value },
     /// Has `id` + (`result` | `error`): the answer to something *we* sent.
-    Response { id: Value, result: Result<Value, RpcError> },
+    Response {
+        id: Value,
+        result: Result<Value, RpcError>,
+    },
 }
 
 /// Parse one JSON-RPC frame.
@@ -118,7 +132,10 @@ pub fn parse(line: &str) -> Result<Incoming, (Option<Value>, RpcError)> {
     let obj = match v.as_object() {
         Some(o) => o,
         None => {
-            return Err((None, RpcError::new(codes::INVALID_REQUEST, "frame is not an object")))
+            return Err((
+                None,
+                RpcError::new(codes::INVALID_REQUEST, "frame is not an object"),
+            ))
         }
     };
     let id = obj.get("id").cloned().filter(|i| !i.is_null());
@@ -137,8 +154,10 @@ pub fn parse(line: &str) -> Result<Incoming, (Option<Value>, RpcError)> {
         };
         let result = if let Some(err) = obj.get("error") {
             Err(RpcError {
-                code: err.get("code").and_then(|c| c.as_i64()).unwrap_or(codes::INTERNAL_ERROR as i64)
-                    as i32,
+                code: err
+                    .get("code")
+                    .and_then(|c| c.as_i64())
+                    .unwrap_or(codes::INTERNAL_ERROR as i64) as i32,
                 message: err
                     .get("message")
                     .and_then(|m| m.as_str())
@@ -227,7 +246,11 @@ pub struct Peer {
 
 impl Peer {
     pub fn new(sink: Box<dyn Sink>) -> Self {
-        Self { sink, next_id: AtomicI64::new(1), pending: Mutex::new(HashMap::new()) }
+        Self {
+            sink,
+            next_id: AtomicI64::new(1),
+            pending: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Fire-and-forget. This is how every `session/update` goes out.
@@ -263,8 +286,14 @@ impl Peer {
     ) -> Result<Value, RpcError> {
         let id = Value::from(self.next_id.fetch_add(1, Ordering::Relaxed));
         let key = id.to_string();
-        let slot = Arc::new(Pending { lock: Mutex::new(None), cv: Condvar::new() });
-        self.pending.lock().unwrap().insert(key.clone(), slot.clone());
+        let slot = Arc::new(Pending {
+            lock: Mutex::new(None),
+            cv: Condvar::new(),
+        });
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(key.clone(), slot.clone());
 
         if !self.sink.send(&request(&id, method, params)) {
             self.pending.lock().unwrap().remove(&key);
@@ -287,7 +316,10 @@ impl Peer {
         // the slot for the life of the connection.
         self.pending.lock().unwrap().remove(&key);
         answer.unwrap_or_else(|| {
-            Err(RpcError::new(codes::REQUEST_CANCELLED, format!("{method} timed out")))
+            Err(RpcError::new(
+                codes::REQUEST_CANCELLED,
+                format!("{method} timed out"),
+            ))
         })
     }
 
@@ -310,8 +342,13 @@ impl Peer {
     /// Fail every waiter. Call this when the connection drops, so blocked
     /// decision-card threads unwind instead of sitting until their timeout.
     pub fn fail_all(&self, err: RpcError) {
-        let slots: Vec<Arc<Pending>> =
-            self.pending.lock().unwrap().drain().map(|(_, s)| s).collect();
+        let slots: Vec<Arc<Pending>> = self
+            .pending
+            .lock()
+            .unwrap()
+            .drain()
+            .map(|(_, s)| s)
+            .collect();
         for slot in slots {
             *slot.lock.lock().unwrap() = Some(Err(err.clone()));
             slot.cv.notify_all();
@@ -335,7 +372,10 @@ mod tests {
     }
     impl VecSink {
         fn new(alive: bool) -> Self {
-            Self { frames: Mutex::new(Vec::new()), alive }
+            Self {
+                frames: Mutex::new(Vec::new()),
+                alive,
+            }
         }
     }
     impl Sink for VecSink {
@@ -356,7 +396,8 @@ mod tests {
     #[test]
     fn parses_the_three_message_shapes() {
         assert_eq!(
-            parse(r#"{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"a":1}}"#).unwrap(),
+            parse(r#"{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"a":1}}"#)
+                .unwrap(),
             Incoming::Request {
                 id: json!(1),
                 method: "session/prompt".into(),
@@ -365,11 +406,17 @@ mod tests {
         );
         assert_eq!(
             parse(r#"{"jsonrpc":"2.0","method":"session/update","params":{}}"#).unwrap(),
-            Incoming::Notification { method: "session/update".into(), params: json!({}) }
+            Incoming::Notification {
+                method: "session/update".into(),
+                params: json!({})
+            }
         );
         assert_eq!(
             parse(r#"{"jsonrpc":"2.0","id":7,"result":{"ok":true}}"#).unwrap(),
-            Incoming::Response { id: json!(7), result: Ok(json!({"ok": true})) }
+            Incoming::Response {
+                id: json!(7),
+                result: Ok(json!({"ok": true}))
+            }
         );
     }
 
@@ -380,7 +427,10 @@ mod tests {
         // it would violate "MUST NOT reply to a Notification".
         assert_eq!(
             parse(r#"{"jsonrpc":"2.0","id":null,"method":"$/ping"}"#).unwrap(),
-            Incoming::Notification { method: METHOD_PING.into(), params: Value::Null }
+            Incoming::Notification {
+                method: METHOD_PING.into(),
+                params: Value::Null
+            }
         );
     }
 
@@ -454,7 +504,11 @@ mod tests {
     fn outbound_request_times_out_without_leaking_its_slot() {
         let peer = Peer::new(Box::new(VecSink::new(true)));
         let err = peer
-            .request_blocking("elicitation/create", json!({}), std::time::Duration::from_millis(30))
+            .request_blocking(
+                "elicitation/create",
+                json!({}),
+                std::time::Duration::from_millis(30),
+            )
             .unwrap_err();
         assert_eq!(err.code, codes::REQUEST_CANCELLED);
         assert_eq!(peer.pending_count(), 0, "a timed-out slot must not leak");
@@ -528,9 +582,16 @@ mod tests {
         );
         let err = response_err(None, &RpcError::method_not_found("nope"));
         let v: Value = serde_json::from_str(&err).unwrap();
-        assert_eq!(v["id"], Value::Null, "an unrecoverable id serializes as null");
+        assert_eq!(
+            v["id"],
+            Value::Null,
+            "an unrecoverable id serializes as null"
+        );
         assert_eq!(v["error"]["code"], codes::METHOD_NOT_FOUND);
-        assert!(v["error"].get("data").is_none(), "absent data must not serialize");
+        assert!(
+            v["error"].get("data").is_none(),
+            "absent data must not serialize"
+        );
 
         let n: Value = serde_json::from_str(&notification(METHOD_PING, Value::Null)).unwrap();
         assert!(n.get("id").is_none(), "a notification must not carry an id");

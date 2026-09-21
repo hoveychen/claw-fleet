@@ -187,8 +187,10 @@ impl AcpAgent {
     /// The peer hung up: fail every parked request so blocked decision-card
     /// threads unwind now rather than at their timeout.
     pub fn disconnect(&self) {
-        self.closed.store(true, std::sync::atomic::Ordering::Release);
-        self.peer.fail_all(RpcError::internal("client disconnected"));
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.peer
+            .fail_all(RpcError::internal("client disconnected"));
     }
 
     pub fn is_closed(&self) -> bool {
@@ -244,7 +246,12 @@ impl AcpAgent {
         let session_id = uuid::Uuid::new_v4().to_string();
         self.sessions.lock().unwrap().insert(
             session_id.clone(),
-            SessionState { internal_id: None, tool: "claude", model: None, cancelled: false },
+            SessionState {
+                internal_id: None,
+                tool: "claude",
+                model: None,
+                cancelled: false,
+            },
         );
         serde_json::to_value(NewSessionResponse { session_id })
             .map_err(|e| RpcError::internal(e.to_string()))
@@ -262,7 +269,10 @@ impl AcpAgent {
             .lock()
             .unwrap()
             .insert(request_id.to_string(), req.session_id.clone());
-        let _unregister = InFlightGuard { agent: self, key: request_id.to_string() };
+        let _unregister = InFlightGuard {
+            agent: self,
+            key: request_id.to_string(),
+        };
 
         let (internal_id, tool, model) = {
             let sessions = self.sessions.lock().unwrap();
@@ -382,8 +392,7 @@ impl AcpAgent {
     /// sees every session on the host, and this surface may only ever show the
     /// one workspace the container is bound to.
     fn session_list(&self, params: &Value) -> Result<Value, RpcError> {
-        let req: ListSessionsRequest =
-            serde_json::from_value(params.clone()).unwrap_or_default();
+        let req: ListSessionsRequest = serde_json::from_value(params.clone()).unwrap_or_default();
         if let Some(cwd) = req.cwd.as_deref().filter(|c| !c.is_empty()) {
             self.check_cwd(cwd)?;
         }
@@ -403,8 +412,11 @@ impl AcpAgent {
             })
             .collect();
 
-        serde_json::to_value(ListSessionsResponse { sessions, next_cursor: None })
-            .map_err(|e| RpcError::internal(e.to_string()))
+        serde_json::to_value(ListSessionsResponse {
+            sessions,
+            next_cursor: None,
+        })
+        .map_err(|e| RpcError::internal(e.to_string()))
     }
 
     /// `session/set_mode` — Fleet advertises no modes, so any id is unknown.
@@ -453,7 +465,11 @@ impl AcpAgent {
             .find(|s| s.id == session_id && same_path(&s.workspace_path, &workspace))
             .ok_or_else(|| RpcError::invalid_params("unknown sessionId"))?;
 
-        let tool = if found.agent_type.as_deref() == Some("codex") { "codex" } else { "claude" };
+        let tool = if found.agent_type.as_deref() == Some("codex") {
+            "codex"
+        } else {
+            "claude"
+        };
         self.sessions.lock().unwrap().insert(
             session_id.to_string(),
             SessionState {
@@ -539,7 +555,6 @@ impl AcpAgent {
         }
     }
 
-
     /// Emit `usage_update` and `session_info_update` when they change.
     ///
     /// Both come free with ACP: the numbers were already on `SessionInfo` and
@@ -566,7 +581,11 @@ impl AcpAgent {
             .and_then(|m| crate::session::stats::context_window_for_model(m, s.total_input_tokens))
             .unwrap_or(0);
 
-        let next = SessionMetrics { used, size, title: s.ai_title.clone() };
+        let next = SessionMetrics {
+            used,
+            size,
+            title: s.ai_title.clone(),
+        };
         for update in metrics_updates(&next, last, iso8601_from_unix_ms(s.last_activity_ms)) {
             self.notify_update(acp_session_id, update);
         }
@@ -580,7 +599,10 @@ impl AcpAgent {
     }
 
     fn notify_update(&self, session_id: &str, update: SessionUpdate) {
-        let params = SessionNotification { session_id: session_id.to_string(), update };
+        let params = SessionNotification {
+            session_id: session_id.to_string(),
+            update,
+        };
         if let Ok(v) = serde_json::to_value(params) {
             super::stdio::trace("<-", &format!("session/update {}", v));
             self.peer.notify("session/update", v);
@@ -593,7 +615,12 @@ impl AcpAgent {
     /// have finished between the client sending the cancel and us reading it,
     /// which is a race, not an error.
     pub fn cancel_request(&self, request_id: &Value) {
-        let session = self.in_flight.lock().unwrap().get(&request_id.to_string()).cloned();
+        let session = self
+            .in_flight
+            .lock()
+            .unwrap()
+            .get(&request_id.to_string())
+            .cloned();
         if let Some(sid) = session {
             self.cancel(&sid);
         }
@@ -646,7 +673,10 @@ impl AcpAgent {
     fn find_transcript(&self, internal_id: &str) -> Option<String> {
         self.find_transcript_fast(internal_id).or_else(|| {
             let sessions = crate::session::scan_all_sources(&self.sources);
-            sessions.iter().find(|s| s.id == internal_id).map(|s| s.jsonl_path.clone())
+            sessions
+                .iter()
+                .find(|s| s.id == internal_id)
+                .map(|s| s.jsonl_path.clone())
         })
     }
 
@@ -685,7 +715,10 @@ impl AcpAgent {
             .ok()
             .and_then(|v| v.as_str().map(String::from))
             .unwrap_or_default();
-        matches!(status.as_str(), "waitingInput" | "done" | "idle" | "completed" | "succeeded")
+        matches!(
+            status.as_str(),
+            "waitingInput" | "done" | "idle" | "completed" | "succeeded"
+        )
     }
 }
 
@@ -737,7 +770,10 @@ fn metrics_updates(
         return out;
     }
     if next.size > 0 && (next.used, next.size) != (last.used, last.size) {
-        out.push(SessionUpdate::UsageUpdate(UsageUpdate { used: next.used, size: next.size }));
+        out.push(SessionUpdate::UsageUpdate(UsageUpdate {
+            used: next.used,
+            size: next.size,
+        }));
     }
     if next.title != last.title {
         if let Some(title) = next.title.clone() {
@@ -806,7 +842,10 @@ mod tests {
     }
 
     fn agent() -> AcpAgent {
-        AcpAgent::new(Arc::new(Peer::new(Box::new(NullSink))), Arc::new(Vec::new()))
+        AcpAgent::new(
+            Arc::new(Peer::new(Box::new(NullSink))),
+            Arc::new(Vec::new()),
+        )
     }
 
     /// Serialises every test that reads *or* writes `FLEET_PUBLIC_WORKSPACE`.
@@ -875,7 +914,10 @@ mod tests {
         return;
 
         // The scan sees the resolved directory...
-        let scanned = std::fs::canonicalize(&real).unwrap().to_string_lossy().into_owned();
+        let scanned = std::fs::canonicalize(&real)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         // ...while the container is bound to the symlinked one.
         let bound = link.to_string_lossy().into_owned();
 
@@ -904,10 +946,17 @@ mod tests {
         );
 
         // The same comparison gates adoption, so load must not reject it.
-        let loaded = a.dispatch(&json!(2), "session/load", &json!({
-            "sessionId": "sess-1", "cwd": bound, "mcpServers": []
-        }));
-        assert!(loaded.is_ok(), "session/load rejected a session it should have adopted");
+        let loaded = a.dispatch(
+            &json!(2),
+            "session/load",
+            &json!({
+                "sessionId": "sess-1", "cwd": bound, "mcpServers": []
+            }),
+        );
+        assert!(
+            loaded.is_ok(),
+            "session/load rejected a session it should have adopted"
+        );
 
         match prev {
             Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
@@ -920,14 +969,22 @@ mod tests {
     #[test]
     fn initialize_advertises_the_capabilities_fleet_actually_has() {
         let a = agent();
-        let v = a.dispatch(&json!(1), "initialize", &json!({"protocolVersion": 1})).unwrap();
+        let v = a
+            .dispatch(&json!(1), "initialize", &json!({"protocolVersion": 1}))
+            .unwrap();
         assert_eq!(v["protocolVersion"], PROTOCOL_VERSION);
         // Sessions outlive connections — this is the capability that lets a
         // reconnecting client pick a run back up.
         assert_eq!(v["agentCapabilities"]["loadSession"], true);
-        assert_eq!(v["agentCapabilities"]["sessionCapabilities"]["resume"], true);
+        assert_eq!(
+            v["agentCapabilities"]["sessionCapabilities"]["resume"],
+            true
+        );
         // One container, one workspace.
-        assert_eq!(v["agentCapabilities"]["sessionCapabilities"]["additionalDirectories"], false);
+        assert_eq!(
+            v["agentCapabilities"]["sessionCapabilities"]["additionalDirectories"],
+            false
+        );
         assert_eq!(v["agentInfo"]["name"], "fleet");
     }
 
@@ -949,7 +1006,13 @@ mod tests {
         let a = agent();
         let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
-        let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws, "mcpServers": []})).unwrap();
+        let v = a
+            .dispatch(
+                &json!(1),
+                "session/new",
+                &json!({"cwd": ws, "mcpServers": []}),
+            )
+            .unwrap();
         let sid = v["sessionId"].as_str().expect("a session id");
         assert!(!sid.is_empty());
         // Deferred: no process exists yet, so no internal id.
@@ -971,7 +1034,10 @@ mod tests {
 
         #[cfg(unix)]
         assert!(same_path(link.to_str().unwrap(), real.to_str().unwrap()));
-        assert!(same_path("/a/b", "/a/b"), "identical strings need no filesystem");
+        assert!(
+            same_path("/a/b", "/a/b"),
+            "identical strings need no filesystem"
+        );
         assert!(!same_path("/does/not/exist/a", "/does/not/exist/b"));
     }
 
@@ -982,10 +1048,17 @@ mod tests {
         // client believe it is running against its own checkout.
         let a = agent();
         let err = a
-            .dispatch(&json!(1), "session/new", &json!({"cwd": "/somewhere/else", "mcpServers": []}))
+            .dispatch(
+                &json!(1),
+                "session/new",
+                &json!({"cwd": "/somewhere/else", "mcpServers": []}),
+            )
             .unwrap_err();
         assert_eq!(err.code, jsonrpc::codes::INVALID_PARAMS);
-        assert!(err.message.contains("/somewhere/else"), "the rejection names the bad path");
+        assert!(
+            err.message.contains("/somewhere/else"),
+            "the rejection names the bad path"
+        );
     }
 
     #[test]
@@ -1004,7 +1077,9 @@ mod tests {
     #[test]
     fn unknown_methods_report_method_not_found() {
         let a = agent();
-        let err = a.dispatch(&json!(1), "session/does_not_exist", &json!({})).unwrap_err();
+        let err = a
+            .dispatch(&json!(1), "session/does_not_exist", &json!({}))
+            .unwrap_err();
         assert_eq!(err.code, jsonrpc::codes::METHOD_NOT_FOUND);
     }
 
@@ -1027,7 +1102,9 @@ mod tests {
         let a = agent();
         let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
-        let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
+        let v = a
+            .dispatch(&json!(1), "session/new", &json!({"cwd": ws}))
+            .unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
         let frame = format!(
@@ -1064,18 +1141,26 @@ mod tests {
         let a = agent();
         let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
-        let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
+        let v = a
+            .dispatch(&json!(1), "session/new", &json!({"cwd": ws}))
+            .unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
         // Pretend request 42 is the in-flight prompt turn for this session.
-        a.in_flight.lock().unwrap().insert(json!(42).to_string(), sid.clone());
+        a.in_flight
+            .lock()
+            .unwrap()
+            .insert(json!(42).to_string(), sid.clone());
 
         assert!(handle_frame(
             &a,
             r#"{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":42}}"#
         )
         .is_none());
-        assert!(a.take_cancelled(&sid), "the turn behind request 42 is cancelled");
+        assert!(
+            a.take_cancelled(&sid),
+            "the turn behind request 42 is cancelled"
+        );
     }
 
     #[test]
@@ -1093,9 +1178,17 @@ mod tests {
         let a = agent();
         for method in ["session/load", "session/resume"] {
             let err = a
-                .dispatch(&json!(1), method, &json!({"sessionId": "s", "cwd": "/elsewhere"}))
+                .dispatch(
+                    &json!(1),
+                    method,
+                    &json!({"sessionId": "s", "cwd": "/elsewhere"}),
+                )
                 .unwrap_err();
-            assert_eq!(err.code, jsonrpc::codes::INVALID_PARAMS, "{method} must check cwd");
+            assert_eq!(
+                err.code,
+                jsonrpc::codes::INVALID_PARAMS,
+                "{method} must check cwd"
+            );
             assert!(err.message.contains("/elsewhere"));
         }
     }
@@ -1118,14 +1211,24 @@ mod tests {
         let a = agent();
         let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
-        let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
+        let v = a
+            .dispatch(&json!(1), "session/new", &json!({"cwd": ws}))
+            .unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
-        a.dispatch(&json!(2), "session/close", &json!({"sessionId": sid})).unwrap();
-        assert!(!a.sessions.lock().unwrap().contains_key(&sid), "resources are freed");
+        a.dispatch(&json!(2), "session/close", &json!({"sessionId": sid}))
+            .unwrap();
+        assert!(
+            !a.sessions.lock().unwrap().contains_key(&sid),
+            "resources are freed"
+        );
         // Prompting it again is now an unknown session, not a silent no-op.
         let err = a
-            .dispatch(&json!(3), "session/prompt", &json!({"sessionId": sid, "prompt": []}))
+            .dispatch(
+                &json!(3),
+                "session/prompt",
+                &json!({"sessionId": sid, "prompt": []}),
+            )
             .unwrap_err();
         assert_eq!(err.code, jsonrpc::codes::INVALID_PARAMS);
     }
@@ -1138,10 +1241,13 @@ mod tests {
         let a = agent();
         let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
-        let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
+        let v = a
+            .dispatch(&json!(1), "session/new", &json!({"cwd": ws}))
+            .unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
-        a.dispatch(&json!(2), "session/delete", &json!({"sessionId": sid})).unwrap();
+        a.dispatch(&json!(2), "session/delete", &json!({"sessionId": sid}))
+            .unwrap();
         assert!(a.deleted.lock().unwrap().contains(&sid));
 
         let listed = a.dispatch(&json!(3), "session/list", &json!({})).unwrap();
@@ -1151,7 +1257,10 @@ mod tests {
             .iter()
             .filter_map(|s| s["sessionId"].as_str())
             .collect();
-        assert!(!ids.contains(&sid.as_str()), "a deleted session is hidden from list");
+        assert!(
+            !ids.contains(&sid.as_str()),
+            "a deleted session is hidden from list"
+        );
     }
 
     #[test]
@@ -1173,10 +1282,17 @@ mod tests {
         // Answering `{}` would let a client believe the mode took effect.
         let a = agent();
         let err = a
-            .dispatch(&json!(1), "session/set_mode", &json!({"sessionId": "s", "modeId": "plan"}))
+            .dispatch(
+                &json!(1),
+                "session/set_mode",
+                &json!({"sessionId": "s", "modeId": "plan"}),
+            )
             .unwrap_err();
         assert_eq!(err.code, jsonrpc::codes::INVALID_PARAMS);
-        assert!(err.message.contains("plan"), "the rejection names the id it did not know");
+        assert!(
+            err.message.contains("plan"),
+            "the rejection names the id it did not know"
+        );
 
         let err = a
             .dispatch(
@@ -1189,21 +1305,30 @@ mod tests {
         assert!(err.message.contains("effort"));
     }
 
-
     #[test]
     fn metrics_are_sent_only_when_they_change() {
-        let base = SessionMetrics { used: 100, size: 200_000, title: Some("T".into()) };
+        let base = SessionMetrics {
+            used: 100,
+            size: 200_000,
+            title: Some("T".into()),
+        };
         // An unchanged tick is silent — the loop runs several times a second.
         assert!(metrics_updates(&base, &base.clone(), None).is_empty());
 
         // Token movement alone sends usage, not the title.
-        let more = SessionMetrics { used: 150, ..base.clone() };
+        let more = SessionMetrics {
+            used: 150,
+            ..base.clone()
+        };
         let ups = metrics_updates(&more, &base, None);
         assert_eq!(ups.len(), 1);
         assert!(matches!(ups[0], SessionUpdate::UsageUpdate(_)));
 
         // A new title alone sends session_info, not usage.
-        let renamed = SessionMetrics { title: Some("T2".into()), ..base.clone() };
+        let renamed = SessionMetrics {
+            title: Some("T2".into()),
+            ..base.clone()
+        };
         let ups = metrics_updates(&renamed, &base, Some("2026-01-01T00:00:00Z".into()));
         assert_eq!(ups.len(), 1);
         match &ups[0] {
@@ -1215,7 +1340,11 @@ mod tests {
         }
 
         // Both changing sends both.
-        let both = SessionMetrics { used: 150, size: 200_000, title: Some("T2".into()) };
+        let both = SessionMetrics {
+            used: 150,
+            size: 200_000,
+            title: Some("T2".into()),
+        };
         assert_eq!(metrics_updates(&both, &base, None).len(), 2);
     }
 
@@ -1223,14 +1352,22 @@ mod tests {
     fn an_unknown_context_window_withholds_usage_rather_than_reporting_zero() {
         // size 0 means context_window_for_model did not recognise the model.
         // Sending it would make a client draw a full or empty gauge.
-        let unknown = SessionMetrics { used: 500, size: 0, title: None };
+        let unknown = SessionMetrics {
+            used: 500,
+            size: 0,
+            title: None,
+        };
         let prev = SessionMetrics::default();
         assert!(metrics_updates(&unknown, &prev, None).is_empty());
     }
 
     #[test]
     fn a_session_with_no_title_yet_sends_no_title_update() {
-        let untitled = SessionMetrics { used: 10, size: 200_000, title: None };
+        let untitled = SessionMetrics {
+            used: 10,
+            size: 200_000,
+            title: None,
+        };
         let ups = metrics_updates(&untitled, &SessionMetrics::default(), None);
         assert_eq!(ups.len(), 1, "usage only");
         assert!(matches!(ups[0], SessionUpdate::UsageUpdate(_)));
@@ -1238,7 +1375,11 @@ mod tests {
 
     #[test]
     fn updated_at_is_iso8601_and_absent_when_unknown() {
-        assert_eq!(iso8601_from_unix_ms(0), None, "0 means unknown, not the epoch");
+        assert_eq!(
+            iso8601_from_unix_ms(0),
+            None,
+            "0 means unknown, not the epoch"
+        );
         let s = iso8601_from_unix_ms(1_700_000_000_000).expect("a timestamp");
         assert!(s.starts_with("2023-11-"), "unexpected rendering: {s}");
         assert!(s.contains('T'), "ISO 8601 needs the date/time separator");
@@ -1249,7 +1390,11 @@ mod tests {
         // The guard must fire on the error path too, or a failed prompt leaks
         // its entry and a later cancel hits the wrong session.
         let a = agent();
-        let _ = a.dispatch(&json!(7), "session/prompt", &json!({"sessionId": "nope", "prompt": []}));
+        let _ = a.dispatch(
+            &json!(7),
+            "session/prompt",
+            &json!({"sessionId": "nope", "prompt": []}),
+        );
         assert!(a.in_flight.lock().unwrap().is_empty());
     }
 }

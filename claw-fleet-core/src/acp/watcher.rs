@@ -46,45 +46,47 @@ const ANSWER_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// Start the per-connection decision watcher. Returns immediately.
 pub fn spawn(agent: Arc<AcpAgent>) {
-    let _ = std::thread::Builder::new().name("acp-decisions".into()).spawn(move || {
-        let mut seen: HashSet<String> = HashSet::new();
-        loop {
-            if agent.is_closed() {
-                return;
-            }
-            // Say out loud that someone is watching the stores. `fleet guard`,
-            // `fleet elicitation` and the `fleet__ask` MCP tool all check this
-            // heartbeat before parking a card and refuse outright when it is
-            // missing — so without it, an ACP-only head (a cloud container, a
-            // phone over the websocket) never receives a single card: they are
-            // rejected at the asking end, before this loop could route them.
-            // `fleet serve` writes the same heartbeat for SSE and mobile-relay
-            // clients; an ACP connection is a third surface with equal claim.
-            // `Server`, like `fleet serve`'s own write: this loop exits when the
-            // connection closes, so a stale timestamp means the peer is gone —
-            // and the process it ran in is a daemon whose liveness proves
-            // nothing about that.
-            crate::consumer_heartbeat::write_heartbeat_as(
-                crate::consumer_heartbeat::WriterKind::Server,
-            );
-
-            for card in pending_cards() {
-                if seen.contains(&card.id) {
-                    continue;
+    let _ = std::thread::Builder::new()
+        .name("acp-decisions".into())
+        .spawn(move || {
+            let mut seen: HashSet<String> = HashSet::new();
+            loop {
+                if agent.is_closed() {
+                    return;
                 }
-                // Only cards belonging to a session this connection drives.
-                let Some(acp_session) = agent.acp_session_for_internal(&card.session_id) else {
-                    continue;
-                };
-                seen.insert(card.id.clone());
-                let agent = agent.clone();
-                let _ = std::thread::Builder::new()
-                    .name("acp-decision".into())
-                    .spawn(move || ask(&agent, &acp_session, card));
+                // Say out loud that someone is watching the stores. `fleet guard`,
+                // `fleet elicitation` and the `fleet__ask` MCP tool all check this
+                // heartbeat before parking a card and refuse outright when it is
+                // missing — so without it, an ACP-only head (a cloud container, a
+                // phone over the websocket) never receives a single card: they are
+                // rejected at the asking end, before this loop could route them.
+                // `fleet serve` writes the same heartbeat for SSE and mobile-relay
+                // clients; an ACP connection is a third surface with equal claim.
+                // `Server`, like `fleet serve`'s own write: this loop exits when the
+                // connection closes, so a stale timestamp means the peer is gone —
+                // and the process it ran in is a daemon whose liveness proves
+                // nothing about that.
+                crate::consumer_heartbeat::write_heartbeat_as(
+                    crate::consumer_heartbeat::WriterKind::Server,
+                );
+
+                for card in pending_cards() {
+                    if seen.contains(&card.id) {
+                        continue;
+                    }
+                    // Only cards belonging to a session this connection drives.
+                    let Some(acp_session) = agent.acp_session_for_internal(&card.session_id) else {
+                        continue;
+                    };
+                    seen.insert(card.id.clone());
+                    let agent = agent.clone();
+                    let _ = std::thread::Builder::new()
+                        .name("acp-decision".into())
+                        .spawn(move || ask(&agent, &acp_session, card));
+                }
+                std::thread::sleep(POLL_INTERVAL);
             }
-            std::thread::sleep(POLL_INTERVAL);
-        }
-    });
+        });
 }
 
 /// A pending card, reduced to what the watcher needs to route it.
@@ -112,7 +114,11 @@ fn pending_cards() -> Vec<Card> {
     let mut out = Vec::new();
     let mut push = |id: String, session_id: String, kind: CardKind| {
         if !session_id.is_empty() {
-            out.push(Card { id, session_id, kind });
+            out.push(Card {
+                id,
+                session_id,
+                kind,
+            });
         }
     };
 
@@ -172,12 +178,16 @@ fn ask(agent: &AcpAgent, acp_session: &str, card: Card) {
 }
 
 fn ask_guard(agent: &AcpAgent, acp_session: &str, id: &str) {
-    let Some(req) = crate::guard::read_request(id) else { return };
+    let Some(req) = crate::guard::read_request(id) else {
+        return;
+    };
     // The command and its risk tags ride in `tool_call.title`, which is what a
     // client labels the dialog with.
     let ask = decisions::guard_to_permission(acp_session, &req);
 
-    let Some(outcome) = request_permission(agent, ask) else { return };
+    let Some(outcome) = request_permission(agent, ask) else {
+        return;
+    };
     // Allow or Block; see `decisions::guard_to_permission` for why no
     // "remember" option is offered.
     let decision = if decisions::outcome_allows(&outcome) {
@@ -193,9 +203,13 @@ fn ask_guard(agent: &AcpAgent, acp_session: &str, id: &str) {
 }
 
 fn ask_permission_prompt(agent: &AcpAgent, acp_session: &str, id: &str) {
-    let Some(req) = crate::permission_prompt_ipc::read_request(id) else { return };
+    let Some(req) = crate::permission_prompt_ipc::read_request(id) else {
+        return;
+    };
     let ask = decisions::permission_prompt_to_permission(acp_session, &req);
-    let Some(outcome) = request_permission(agent, ask) else { return };
+    let Some(outcome) = request_permission(agent, ask) else {
+        return;
+    };
     let allow = decisions::outcome_allows(&outcome);
     let _ = crate::permission_prompt_ipc::write_response(
         &crate::permission_prompt_ipc::PermissionPromptResponse {
@@ -226,7 +240,9 @@ fn ask_elicitation(agent: &AcpAgent, acp_session: &str, id: &str) {
         return leave_for_another_surface(agent, acp_session);
     }
     let ask = decisions::elicitation_to_form(acp_session, &req);
-    let Some(action) = create_elicitation(agent, ask) else { return };
+    let Some(action) = create_elicitation(agent, ask) else {
+        return;
+    };
     let resp = decisions::form_answer_to_elicitation(id, &action);
     let _ = crate::parked::deliver(
         &resp.id,
@@ -260,10 +276,11 @@ fn ask_fleet_ask(agent: &AcpAgent, acp_session: &str, id: &str) {
         decisions::Delivery::Form => decisions::fleet_ask_to_form(acp_session, &req),
         decisions::Delivery::Unsupported => return leave_for_another_surface(agent, acp_session),
     };
-    let Some(action) = create_elicitation(agent, ask) else { return };
+    let Some(action) = create_elicitation(agent, ask) else {
+        return;
+    };
     let resp = decisions::form_answer_to_fleet_ask(id, &action);
-    let _ =
-        crate::mcp_ipc::deliver_response(&resp);
+    let _ = crate::mcp_ipc::deliver_response(&resp);
 }
 
 fn ask_plan(agent: &AcpAgent, acp_session: &str, id: &str) {
@@ -280,7 +297,9 @@ fn ask_plan(agent: &AcpAgent, acp_session: &str, id: &str) {
         return leave_for_another_surface(agent, acp_session);
     }
     let ask = decisions::plan_approval_to_form(acp_session, &req);
-    let Some(action) = create_elicitation(agent, ask) else { return };
+    let Some(action) = create_elicitation(agent, ask) else {
+        return;
+    };
     let resp = decisions::form_answer_to_plan(id, &action);
     let _ = crate::parked::deliver(&resp.id, &resp, false, crate::plan_approval::write_response);
 }
@@ -309,8 +328,12 @@ fn request_permission(
     req: RequestPermissionRequest,
 ) -> Option<super::types::RequestPermissionOutcome> {
     let params = serde_json::to_value(&req).ok()?;
-    let raw = agent.request_client("session/request_permission", params, ANSWER_TIMEOUT).ok()?;
-    serde_json::from_value::<RequestPermissionResponse>(raw).ok().map(|r| r.outcome)
+    let raw = agent
+        .request_client("session/request_permission", params, ANSWER_TIMEOUT)
+        .ok()?;
+    serde_json::from_value::<RequestPermissionResponse>(raw)
+        .ok()
+        .map(|r| r.outcome)
 }
 
 /// Send `elicitation/create` and wait. `None` on the same terms as
@@ -320,7 +343,9 @@ fn create_elicitation(
     req: CreateElicitationRequest,
 ) -> Option<ElicitationAction> {
     let params = serde_json::to_value(&req).ok()?;
-    let raw = agent.request_client("elicitation/create", params, ANSWER_TIMEOUT).ok()?;
+    let raw = agent
+        .request_client("elicitation/create", params, ANSWER_TIMEOUT)
+        .ok()?;
     serde_json::from_value::<ElicitationAction>(raw).ok()
 }
 
@@ -368,7 +393,10 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        assert!(alive, "a live ACP connection must count as a decision-card consumer");
+        assert!(
+            alive,
+            "a live ACP connection must count as a decision-card consumer"
+        );
 
         match prev {
             Some(v) => std::env::set_var("FLEET_HOME", v),
@@ -391,7 +419,11 @@ mod tests {
         let mut out = Vec::new();
         let mut push = |id: String, session_id: String, kind: CardKind| {
             if !session_id.is_empty() {
-                out.push(Card { id, session_id, kind });
+                out.push(Card {
+                    id,
+                    session_id,
+                    kind,
+                });
             }
         };
         push("a".into(), String::new(), CardKind::Guard);
@@ -430,7 +462,9 @@ mod tests {
             serde_json::json!({"outcome": "yes"})
         )
         .is_err());
-        assert!(serde_json::from_value::<ElicitationAction>(serde_json::json!({"action": "maybe"}))
-            .is_err());
+        assert!(serde_json::from_value::<ElicitationAction>(
+            serde_json::json!({"action": "maybe"})
+        )
+        .is_err());
     }
 }

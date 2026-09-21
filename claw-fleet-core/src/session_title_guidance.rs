@@ -193,7 +193,8 @@ fn apply_inner(user_title: &str, locale: &str) -> Result<(), String> {
         let existing = fs::read_to_string(&claude_md).unwrap_or_default();
         let new_content =
             crate::claude_md_block::compose(&existing, &block, BEGIN_MARKER, END_MARKER);
-        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))
+        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
+            .map_err(|e| format!("write CLAUDE.md: {e}"))
     })
 }
 
@@ -212,7 +213,8 @@ fn remove_inner() -> Result<(), String> {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
                 let stripped = strip_sentinel_block(&existing);
                 if stripped != existing {
-                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes())
+                        .map_err(|e| format!("write CLAUDE.md: {e}"))?;
                 }
             }
             Ok::<(), String>(())
@@ -361,8 +363,10 @@ mod tests {
         for locale in ["en", "zh"] {
             assert!(render_session_title_section("Boss", locale, Harness::Codex)
                 .contains("await tools.mcp__fleet__fleet__set_session_title"));
-            assert!(!render_session_title_section("Boss", locale, Harness::Claude)
-                .contains("await tools."));
+            assert!(
+                !render_session_title_section("Boss", locale, Harness::Claude)
+                    .contains("await tools.")
+            );
         }
     }
 
@@ -378,7 +382,10 @@ mod tests {
     fn guidance_file_carries_the_managed_header_and_the_claude_section() {
         let zh = render_guidance("", "zh");
         assert!(zh.starts_with("# Fleet 会话标题 (managed by Claw Fleet"));
-        assert!(zh.contains("老板"), "empty title falls back to the zh default");
+        assert!(
+            zh.contains("老板"),
+            "empty title falls back to the zh default"
+        );
         assert!(zh.contains("fleet__set_session_title"));
 
         let en = render_guidance("Chief", "en");

@@ -254,6 +254,8 @@ pub const SCRATCHPAD_DIR: &str = "/scratchpad_dir";
 pub const SCRATCHPAD_FILE: &str = "/scratchpad_file";
 pub const SEARCH: &str = "/search";
 pub const SESSION_DECISIONS: &str = "/session_decisions";
+pub const SESSION_EXPLAIN: &str = "/session_explain";
+pub const SESSION_EXPLAINS: &str = "/session_explains";
 pub const SESSION_MARK: &str = "/session_mark";
 pub const SESSION_NOTE: &str = "/session_note";
 pub const SESSION_NOTES: &str = "/session_notes";
@@ -371,7 +373,6 @@ pub fn is_public(path: &str) -> bool {
         // itself to `~/.fleet/decision-assets`.
         || path.starts_with(DECISION_ASSET_PREFIX)
 }
-
 
 /// The Agent Client Protocol surface.
 ///

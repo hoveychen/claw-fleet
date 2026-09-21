@@ -67,7 +67,11 @@ pub fn trim_host_suffix(raw: &str) -> String {
 #[cfg(target_os = "macos")]
 fn scutil_name() -> Option<String> {
     for key in ["ComputerName", "LocalHostName"] {
-        let out = std::process::Command::new("/usr/sbin/scutil").arg("--get").arg(key).output().ok();
+        let out = std::process::Command::new("/usr/sbin/scutil")
+            .arg("--get")
+            .arg(key)
+            .output()
+            .ok();
         if let Some(out) = out {
             if out.status.success() {
                 let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -94,7 +98,10 @@ fn scutil_name() -> Option<String> {
 fn looks_like_mac_address(name: &str) -> bool {
     let sep = if name.contains(':') { ':' } else { '-' };
     let parts: Vec<&str> = name.split(sep).collect();
-    parts.len() == 6 && parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
+    parts.len() == 6
+        && parts
+            .iter()
+            .all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 /// The identity of this machine. Every client calls this one function (the desktop Tauri side
@@ -118,11 +125,17 @@ mod tests {
 
     #[test]
     fn trims_only_known_lan_suffixes() {
-        assert_eq!(trim_host_suffix("Hoveys-MacBook-Pro.local"), "Hoveys-MacBook-Pro");
+        assert_eq!(
+            trim_host_suffix("Hoveys-MacBook-Pro.local"),
+            "Hoveys-MacBook-Pro"
+        );
         assert_eq!(trim_host_suffix("nas.lan"), "nas");
         assert_eq!(trim_host_suffix("  box  "), "box");
         // Not a suffix if it appears in the middle — `.local` is part of the name
-        assert_eq!(trim_host_suffix("build.local.example"), "build.local.example");
+        assert_eq!(
+            trim_host_suffix("build.local.example"),
+            "build.local.example"
+        );
         // Malformed name with only the suffix stays as-is, not truncated to empty string
         assert_eq!(trim_host_suffix(".local"), ".local");
     }
@@ -159,6 +172,9 @@ mod tests {
             return; // Machines without a configured ComputerName (very rare) are not required to pass
         };
         let id = host_identity();
-        assert_eq!(id.hostname.as_deref(), Some(trim_host_suffix(&scutil).as_str()));
+        assert_eq!(
+            id.hostname.as_deref(),
+            Some(trim_host_suffix(&scutil).as_str())
+        );
     }
 }

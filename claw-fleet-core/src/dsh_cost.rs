@@ -521,8 +521,7 @@ pub struct PricedCall {
     pub peak: Option<bool>,
 }
 
-impl PricedCall {
-}
+impl PricedCall {}
 
 /// Fold a ledger back into the per-session figure the token panel shows.
 ///
@@ -690,7 +689,12 @@ pub fn deepseek_api_key() -> Option<String> {
     if let Some(key) = non_empty(std::env::var(var).ok()) {
         return Some(key);
     }
-    if let Some(key) = non_empty(plugin.get("apiKey").and_then(Value::as_str).map(str::to_string)) {
+    if let Some(key) = non_empty(
+        plugin
+            .get("apiKey")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    ) {
         return Some(key);
     }
     credential_from_store(&dsh_home, var)
@@ -732,9 +736,8 @@ fn credential_from_store(dsh_home: &std::path::Path, var: &str) -> Option<String
         .and_then(|refs| refs.get(var))
         .and_then(Value::as_str)
         .map(str::to_string);
-    non_empty(from_refs).or_else(|| {
-        non_empty(creds.get(var).and_then(Value::as_str).map(str::to_string))
-    })
+    non_empty(from_refs)
+        .or_else(|| non_empty(creds.get(var).and_then(Value::as_str).map(str::to_string)))
 }
 
 fn non_empty(v: Option<String>) -> Option<String> {
@@ -849,7 +852,9 @@ fn store_cache(
             crate::atomic_json::JsonLoad::Unreadable => return,
             _ => CostCache::default(),
         };
-        cache.costs.extend(fresh.iter().map(|(k, v)| (k.clone(), *v)));
+        cache
+            .costs
+            .extend(fresh.iter().map(|(k, v)| (k.clone(), *v)));
         cache
             .metered
             .extend(fresh_metered.iter().map(|(k, v)| (k.clone(), *v)));
@@ -928,7 +933,18 @@ fn dsh_session_calls_for_pricing(uri: &str) -> Result<Vec<PricedCall>, String> {
     session_calls_from(uri, crate::dsh_source::session_events_for_pricing(uri)?)
 }
 
-fn session_calls_from(uri: &str, events: Vec<serde_json::Value>) -> Result<Vec<PricedCall>, String> {
+/// Price the calls in `events` as calls of the session at `uri`, without
+/// reading its history: for a caller that already holds the events (the
+/// `session_explain` fork tapped them off the follow stream) and must not
+/// price the fork-inherited prefix the history would also contain.
+pub(crate) fn price_events(uri: &str, events: &[serde_json::Value]) -> Vec<PricedCall> {
+    session_calls_from(uri, events.to_vec()).unwrap_or_default()
+}
+
+fn session_calls_from(
+    uri: &str,
+    events: Vec<serde_json::Value>,
+) -> Result<Vec<PricedCall>, String> {
     // The session's own id namespaces the metered keys, so two sessions cannot
     // collide on a `seq` they both happen to use. Absent (a URI shape this
     // module does not recognise) means nothing is cacheable — an empty id would
@@ -997,7 +1013,10 @@ fn price_ledger_with(
             let cache_key = (!session_id.is_empty())
                 .then(|| call.seq.map(|seq| metered_key(session_id, seq)))
                 .flatten();
-            let frozen = cache_key.as_ref().and_then(|k| cache.metered.get(k)).copied();
+            let frozen = cache_key
+                .as_ref()
+                .and_then(|k| cache.metered.get(k))
+                .copied();
             let price = frozen.or_else(|| {
                 let price = rate_price(&MeteredCall {
                     provider: call.provider.clone(),
@@ -1074,8 +1093,9 @@ fn price_ledger_with(
 /// frozen metered prices and all — every few seconds, to use a few dozen bytes
 /// of it. The mtime gate makes a poll free when nothing has been priced since
 /// the last one, which is the overwhelmingly common case.
-static SPEND_MEMO: std::sync::Mutex<Option<(std::time::SystemTime, BTreeMap<String, SessionSpend>)>> =
-    std::sync::Mutex::new(None);
+static SPEND_MEMO: std::sync::Mutex<
+    Option<(std::time::SystemTime, BTreeMap<String, SessionSpend>)>,
+> = std::sync::Mutex::new(None);
 
 /// Every session's recorded spend. No RPC, no network, usually no file read.
 pub fn all_session_spend() -> BTreeMap<String, SessionSpend> {
@@ -1139,11 +1159,7 @@ pub fn refresh_session_spend(
 /// output tokens alone would miss a turn that generated nothing at all.
 ///
 /// Absent means never priced, which is stale by definition.
-pub fn spend_is_current(
-    spend: Option<&SessionSpend>,
-    updated_ms: i64,
-    output_tokens: u64,
-) -> bool {
+pub fn spend_is_current(spend: Option<&SessionSpend>, updated_ms: i64, output_tokens: u64) -> bool {
     spend.is_some_and(|s| {
         s.priced_at_updated_ms >= updated_ms && s.priced_at_output_tokens >= output_tokens
     })
@@ -1308,10 +1324,7 @@ mod tests {
     fn extracts_ids_from_both_replay_shapes_in_one_log() {
         let mut events = recorded_events();
         events.push(v2_envelope_event());
-        let ids: Vec<String> = generation_refs(&events)
-            .into_iter()
-            .map(|r| r.id)
-            .collect();
+        let ids: Vec<String> = generation_refs(&events).into_iter().map(|r| r.id).collect();
         assert_eq!(
             ids,
             vec!["gen-1", "gen-2", "gen-1787026253-Te7maM1es7yqmeDdhUS6"],
@@ -1511,12 +1524,25 @@ mod tests {
     #[test]
     fn only_pro_switches_rows_at_the_cutover() {
         let row = |m, t| rates_for(m, t).expect("rated").model;
-        assert_eq!(row("deepseek-v4-pro", PRO_ROUTED_TO_FLASH_MS - 1), "deepseek-v4-pro");
-        assert_eq!(row("deepseek-v4-pro", PRO_ROUTED_TO_FLASH_MS), "deepseek-flash");
+        assert_eq!(
+            row("deepseek-v4-pro", PRO_ROUTED_TO_FLASH_MS - 1),
+            "deepseek-v4-pro"
+        );
+        assert_eq!(
+            row("deepseek-v4-pro", PRO_ROUTED_TO_FLASH_MS),
+            "deepseek-flash"
+        );
         // Everything else is date-independent: the flash ids were already
         // aligned when V4.1 landed, and an unknown id stays unknown.
-        for id in ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"] {
-            assert_eq!(row(id, PRO_ROUTED_TO_FLASH_MS - 1), row(id, PRO_ROUTED_TO_FLASH_MS));
+        for id in [
+            "deepseek-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-vision-exp",
+        ] {
+            assert_eq!(
+                row(id, PRO_ROUTED_TO_FLASH_MS - 1),
+                row(id, PRO_ROUTED_TO_FLASH_MS)
+            );
         }
         assert!(rates_for("deepseek-v5-unreleased", PRO_ROUTED_TO_FLASH_MS).is_none());
     }
@@ -1731,7 +1757,11 @@ mod tests {
     /// never takes hold and every visit re-prices from scratch.
     #[test]
     fn a_first_pricing_is_handed_back_to_be_written_down() {
-        let (out, fresh) = ledger(TEST_SESSION, &CostCache::default(), &[weekend_call(Some(20))]);
+        let (out, fresh) = ledger(
+            TEST_SESSION,
+            &CostCache::default(),
+            &[weekend_call(Some(20))],
+        );
         assert!(
             (out[0].usd.expect("priced") - 0.75).abs() < 1e-9,
             "priced at today's table"
@@ -1788,7 +1818,12 @@ mod tests {
     }
 
     /// A priced ledger row, for the fold's arithmetic.
-    fn row(provider: &str, usd: Option<f64>, basis: Option<PriceBasis>, peak: Option<bool>) -> PricedCall {
+    fn row(
+        provider: &str,
+        usd: Option<f64>,
+        basis: Option<PriceBasis>,
+        peak: Option<bool>,
+    ) -> PricedCall {
         PricedCall {
             at_ms: OFF_PEAK_MS,
             provider: provider.into(),
@@ -1811,12 +1846,30 @@ mod tests {
             row(OPENROUTER, Some(0.02), Some(PriceBasis::Receipt), None),
             row(OPENROUTER, Some(0.03), Some(PriceBasis::Receipt), None),
             row(OPENROUTER, None, None, None),
-            row(DEEPSEEK_OFFICIAL, Some(0.10), Some(PriceBasis::Table), Some(true)),
-            row(DEEPSEEK_OFFICIAL, Some(0.09), Some(PriceBasis::Table), Some(false)),
-            row(DEEPSEEK_OFFICIAL, Some(0.06), Some(PriceBasis::Table), Some(false)),
+            row(
+                DEEPSEEK_OFFICIAL,
+                Some(0.10),
+                Some(PriceBasis::Table),
+                Some(true),
+            ),
+            row(
+                DEEPSEEK_OFFICIAL,
+                Some(0.09),
+                Some(PriceBasis::Table),
+                Some(false),
+            ),
+            row(
+                DEEPSEEK_OFFICIAL,
+                Some(0.06),
+                Some(PriceBasis::Table),
+                Some(false),
+            ),
         ]);
         let total = cost.total_usd.expect("both routes priced something");
-        assert!((total - 0.30).abs() < 1e-9, "0.05 receipt + 0.25 table, got {total}");
+        assert!(
+            (total - 0.30).abs() < 1e-9,
+            "0.05 receipt + 0.25 table, got {total}"
+        );
         assert_eq!(cost.priced_calls, 5, "2 by receipt + 3 by table");
         assert_eq!(cost.table_priced_calls, 3);
         assert_eq!(cost.unpriced_calls, 1, "the receipt gap is untouched");
@@ -1947,8 +2000,9 @@ mod tests {
             cache_write_tokens: 0,
             output_tokens: 0,
         }];
-        let (out, fresh, _) =
-            price_ledger_with(TEST_SESSION, &raw, &CostCache::default(), |_| Err("HTTP 404".into()));
+        let (out, fresh, _) = price_ledger_with(TEST_SESSION, &raw, &CostCache::default(), |_| {
+            Err("HTTP 404".into())
+        });
         assert_eq!(out[0].usd, None, "nothing priced → no number, not $0");
         let cost = fold_session_cost(&out);
         assert_eq!(cost.total_usd, None);

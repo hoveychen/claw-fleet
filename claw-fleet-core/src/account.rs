@@ -110,7 +110,10 @@ fn snapshot_path() -> Option<std::path::PathBuf> {
 
 fn normalize_snap(snap: MetricSnap) -> MetricSnap {
     if snap.utilization > 1.0 {
-        MetricSnap { utilization: snap.utilization / 100.0, resets_at: snap.resets_at }
+        MetricSnap {
+            utilization: snap.utilization / 100.0,
+            resets_at: snap.resets_at,
+        }
     } else {
         snap
     }
@@ -127,7 +130,10 @@ fn normalize_entries(entries: Vec<SnapshotEntry>) -> Vec<SnapshotEntry> {
             seven_day_scoped: e
                 .seven_day_scoped
                 .into_iter()
-                .map(|s| ScopedSnap { model_label: s.model_label, snap: normalize_snap(s.snap) })
+                .map(|s| ScopedSnap {
+                    model_label: s.model_label,
+                    snap: normalize_snap(s.snap),
+                })
                 .collect(),
         })
         .collect()
@@ -269,8 +275,7 @@ fn find_prev_utilization_by<'a>(
 ) -> Option<f64> {
     let current_reset_ms = parse_ts_ms(current_resets_at)?;
     let current_start_ms = current_reset_ms - pms;
-    let current_frac =
-        ((now_ms - current_start_ms) as f64 / pms as f64).clamp(0.0, 1.0);
+    let current_frac = ((now_ms - current_start_ms) as f64 / pms as f64).clamp(0.0, 1.0);
 
     let mut prev_resets: Vec<String> = history
         .iter()
@@ -314,7 +319,12 @@ fn find_prev_utilization_by<'a>(
 #[cfg(target_os = "macos")]
 pub fn read_keychain_credentials() -> Result<(String, String), String> {
     let out = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .args([
+            "find-generic-password",
+            "-s",
+            "Claude Code-credentials",
+            "-w",
+        ])
         .output()
         .map_err(|e| format!("security command failed: {e}"))?;
 
@@ -397,8 +407,8 @@ fn read_desktop_app_credentials() -> Result<(String, String), String> {
 
     let raw = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("read {}: {e}", config_path.display()))?;
-    let cfg: Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("parse {}: {e}", config_path.display()))?;
+    let cfg: Value =
+        serde_json::from_str(&raw).map_err(|e| format!("parse {}: {e}", config_path.display()))?;
 
     let encoded = cfg
         .get("oauth:tokenCache")
@@ -406,10 +416,10 @@ fn read_desktop_app_credentials() -> Result<(String, String), String> {
         .ok_or_else(|| "Desktop App config.json missing `oauth:tokenCache`".to_string())?;
 
     let plain_bytes = crate::dpapi::decrypt_safe_storage(encoded)?;
-    let plain_str = std::str::from_utf8(&plain_bytes)
-        .map_err(|e| format!("decrypted blob not UTF-8: {e}"))?;
-    let blob: Value = serde_json::from_str(plain_str)
-        .map_err(|e| format!("decrypted blob not JSON: {e}"))?;
+    let plain_str =
+        std::str::from_utf8(&plain_bytes).map_err(|e| format!("decrypted blob not UTF-8: {e}"))?;
+    let blob: Value =
+        serde_json::from_str(plain_str).map_err(|e| format!("decrypted blob not JSON: {e}"))?;
 
     let inner = blob.get("claudeAiOauth").unwrap_or(&blob);
 
@@ -437,7 +447,11 @@ fn read_desktop_app_credentials() -> Result<(String, String), String> {
 fn parse_usage(v: &Value) -> Option<UsageStats> {
     let utilization = v.get("utilization")?.as_f64()? / 100.0;
     let resets_at = v.get("resets_at")?.as_str().unwrap_or("").to_string();
-    Some(UsageStats { utilization, resets_at, prev_utilization: None })
+    Some(UsageStats {
+        utilization,
+        resets_at,
+        prev_utilization: None,
+    })
 }
 
 /// Extract per-model weekly-scoped usage from the usage API's `limits[]` array.
@@ -581,7 +595,9 @@ async fn fetch_via_anthropic() -> Result<RawAccount, String> {
         .await
         .map_err(|e| format!("Profile parse failed: {e}"))?;
     if !profile_status.is_success() {
-        return Err(format!("Profile API error {profile_status}: {profile_body}"));
+        return Err(format!(
+            "Profile API error {profile_status}: {profile_body}"
+        ));
     }
 
     let usage_raw = usage_res.map_err(|e| format!("Usage request failed: {e}"))?;
@@ -616,7 +632,15 @@ async fn fetch_via_anthropic() -> Result<RawAccount, String> {
     let seven_day = usage_body.get("seven_day").and_then(|v| parse_usage(v));
     let seven_day_scoped = parse_scoped_limits(&usage_body);
 
-    Ok((email, full_name, org_name, plan, five_hour, seven_day, seven_day_scoped))
+    Ok((
+        email,
+        full_name,
+        org_name,
+        plan,
+        five_hour,
+        seven_day,
+        seven_day_scoped,
+    ))
 }
 
 pub async fn fetch_account_info() -> Result<AccountInfo, String> {
@@ -625,15 +649,33 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
     // avoids a redundant Anthropic call (and the rate limits that come with it).
     // foxy only exposes email + plan, so full_name falls back to the email and
     // organization_name is left blank. Any failure falls back to the direct API.
-    let (usage_source, (email, full_name, organization_name, plan, mut five_hour, mut seven_day, mut seven_day_scoped)) =
-        if let Some(f) = crate::foxy::fetch_in_use_account().await {
+    let (
+        usage_source,
+        (
+            email,
+            full_name,
+            organization_name,
+            plan,
+            mut five_hour,
+            mut seven_day,
+            mut seven_day_scoped,
+        ),
+    ) = if let Some(f) = crate::foxy::fetch_in_use_account().await {
+        (
+            "foxy-switcher".to_string(),
             (
-                "foxy-switcher".to_string(),
-                (f.email.clone(), f.email, String::new(), f.plan, f.five_hour, f.seven_day, f.seven_day_scoped),
-            )
-        } else {
-            ("anthropic".to_string(), fetch_via_anthropic().await?)
-        };
+                f.email.clone(),
+                f.email,
+                String::new(),
+                f.plan,
+                f.five_hour,
+                f.seven_day,
+                f.seven_day_scoped,
+            ),
+        )
+    } else {
+        ("anthropic".to_string(), fetch_via_anthropic().await?)
+    };
 
     let now_ms = chrono::Utc::now().timestamp_millis();
     let sample = SnapshotEntry {
@@ -653,7 +695,10 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
             .iter()
             .map(|s| ScopedSnap {
                 model_label: s.model_label.clone(),
-                snap: MetricSnap { utilization: s.utilization, resets_at: s.resets_at.clone() },
+                snap: MetricSnap {
+                    utilization: s.utilization,
+                    resets_at: s.resets_at.clone(),
+                },
             })
             .collect(),
     };
@@ -729,12 +774,15 @@ pub fn load_usage_history(from_ms: i64, to_ms: i64) -> Vec<UsageHistoryPoint> {
 
 /// Pick the newest snapshot out of an unsorted history slice.
 fn latest_of(history: &[SnapshotEntry]) -> Option<UsageHistoryPoint> {
-    history.iter().max_by_key(|e| e.ts).map(|e| UsageHistoryPoint {
-        ts: e.ts,
-        five_hour: e.five_hour.as_ref().map(|m| m.utilization),
-        seven_day: e.seven_day.as_ref().map(|m| m.utilization),
-        seven_day_sonnet: e.seven_day_sonnet.as_ref().map(|m| m.utilization),
-    })
+    history
+        .iter()
+        .max_by_key(|e| e.ts)
+        .map(|e| UsageHistoryPoint {
+            ts: e.ts,
+            five_hour: e.five_hour.as_ref().map(|m| m.utilization),
+            seven_day: e.seven_day.as_ref().map(|m| m.utilization),
+            seven_day_sonnet: e.seven_day_sonnet.as_ref().map(|m| m.utilization),
+        })
 }
 
 /// The most recent usage snapshot the background sampler has persisted, read
@@ -783,7 +831,10 @@ mod tests {
     fn snap_at(ts: i64) -> SnapshotEntry {
         SnapshotEntry {
             ts,
-            five_hour: Some(MetricSnap { utilization: 0.5, resets_at: String::new() }),
+            five_hour: Some(MetricSnap {
+                utilization: 0.5,
+                resets_at: String::new(),
+            }),
             seven_day: None,
             seven_day_sonnet: None,
             seven_day_scoped: Vec::new(),
@@ -815,7 +866,10 @@ mod tests {
             "a corrupt history file must be backed up (.corrupt-*), never silently destroyed"
         );
         let saved = std::fs::read_to_string(backups[0].path()).unwrap();
-        assert_eq!(saved, garbage, "the backup must hold the original corrupt bytes verbatim");
+        assert_eq!(
+            saved, garbage,
+            "the backup must hold the original corrupt bytes verbatim"
+        );
     }
 
     // On-demand `fetch_account_info` callers hit this every ~10s; without a
@@ -831,7 +885,11 @@ mod tests {
 
         // 10s later — well inside any sane min interval — must be dropped.
         let h = append_sample(&path, snap_at(base + 10_000), base + 10_000);
-        assert_eq!(h.len(), 1, "a sample within the min interval must not be appended");
+        assert_eq!(
+            h.len(),
+            1,
+            "a sample within the min interval must not be appended"
+        );
         assert_eq!(
             load_snapshots_from(&path).len(),
             1,
@@ -840,7 +898,11 @@ mod tests {
 
         // 10 min later — past the interval — is appended.
         let h2 = append_sample(&path, snap_at(base + 600_000), base + 600_000);
-        assert_eq!(h2.len(), 2, "a sample past the min interval must be appended");
+        assert_eq!(
+            h2.len(),
+            2,
+            "a sample past the min interval must be appended"
+        );
         assert_eq!(load_snapshots_from(&path).len(), 2);
     }
 
@@ -849,8 +911,14 @@ mod tests {
         assert!(latest_of(&[]).is_none());
 
         let mut newer = snap_at(2_000);
-        newer.five_hour = Some(MetricSnap { utilization: 0.91, resets_at: String::new() });
-        newer.seven_day = Some(MetricSnap { utilization: 0.12, resets_at: String::new() });
+        newer.five_hour = Some(MetricSnap {
+            utilization: 0.91,
+            resets_at: String::new(),
+        });
+        newer.seven_day = Some(MetricSnap {
+            utilization: 0.12,
+            resets_at: String::new(),
+        });
         // Deliberately out of order: the newest entry is not last.
         let history = vec![newer, snap_at(1_000), snap_at(500)];
 
@@ -866,11 +934,11 @@ mod tests {
         let now = 100 * 24 * 3600 * 1000; // day 100, in ms
         let day = 24 * 3600 * 1000;
         let mut history = vec![
-            snap_at(now - 9 * day), // older than 8d → dropped
+            snap_at(now - 9 * day),     // older than 8d → dropped
             snap_at(now - 8 * day - 1), // just over 8d → dropped
             snap_at(now - 8 * day + 1), // just under 8d → kept
-            snap_at(now - 1 * day), // recent → kept
-            snap_at(now),           // now → kept
+            snap_at(now - 1 * day),     // recent → kept
+            snap_at(now),               // now → kept
         ];
         prune_old_snapshots(&mut history, now);
         let kept: Vec<i64> = history.iter().map(|e| e.ts).collect();
@@ -910,7 +978,10 @@ mod tests {
         let scoped = parse_scoped_limits(&body);
         assert_eq!(scoped.len(), 1, "only the weekly_scoped entry counts");
         assert_eq!(scoped[0].model_label, "Fable");
-        assert!((scoped[0].utilization - 0.04).abs() < 1e-9, "4 percent → 0.04 fraction");
+        assert!(
+            (scoped[0].utilization - 0.04).abs() < 1e-9,
+            "4 percent → 0.04 fraction"
+        );
         assert_eq!(scoped[0].resets_at, "2026-07-27T10:59:59+00:00");
     }
 
@@ -942,7 +1013,8 @@ mod tests {
         });
         assert_eq!(derive_plan(&max20, ""), "Claude Max 20x");
 
-        let pro = serde_json::json!({ "account": { "has_claude_max": false, "has_claude_pro": true } });
+        let pro =
+            serde_json::json!({ "account": { "has_claude_max": false, "has_claude_pro": true } });
         assert_eq!(derive_plan(&pro, ""), "Claude Pro");
 
         // Credential subscription_type == "pro" still routes to Pro.
@@ -984,7 +1056,10 @@ mod tests {
             seven_day_sonnet: None,
             seven_day_scoped: vec![ScopedSnap {
                 model_label: "Fable".into(),
-                snap: MetricSnap { utilization: util, resets_at: resets.into() },
+                snap: MetricSnap {
+                    utilization: util,
+                    resets_at: resets.into(),
+                },
             }],
         };
         // Current sample sits ~2 days into its window.

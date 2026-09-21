@@ -51,7 +51,11 @@ fn data_dir() -> Option<PathBuf> {
 /// the file is absent (daemon not running) or unparseable.
 fn read_port() -> Option<u16> {
     let path = data_dir()?.join("port");
-    std::fs::read_to_string(&path).ok()?.trim().parse::<u16>().ok()
+    std::fs::read_to_string(&path)
+        .ok()?
+        .trim()
+        .parse::<u16>()
+        .ok()
 }
 
 /// Parse one `{ utilization, resets_at }` window. foxy reports `utilization`
@@ -64,7 +68,11 @@ fn parse_window(v: &Value) -> Option<UsageStats> {
         .and_then(|x| x.as_str())
         .unwrap_or("")
         .to_string();
-    Some(UsageStats { utilization, resets_at, prev_utilization: None })
+    Some(UsageStats {
+        utilization,
+        resets_at,
+        prev_utilization: None,
+    })
 }
 
 /// From the `/api/accounts` body, pick the account whose `id` equals
@@ -77,8 +85,16 @@ fn map_in_use(accounts_body: &Value, managed_id: i64) -> Option<FoxyAccount> {
         .iter()
         .find(|a| a.get("id").and_then(|x| x.as_i64()) == Some(managed_id))?;
     Some(FoxyAccount {
-        email: acct.get("email").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-        plan: acct.get("plan").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        email: acct
+            .get("email")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        plan: acct
+            .get("plan")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         five_hour: acct.get("five_hour").and_then(parse_window),
         seven_day: acct.get("seven_day").and_then(parse_window),
         // Best-effort: parse scoped models if foxy passes through Anthropic's
@@ -160,8 +176,12 @@ fn map_in_use_codex(accounts_body: &Value, codex_managed_id: i64) -> Option<Foxy
         email: text("email"),
         plan: text("plan"),
         full_name: text("full_name"),
-        primary: canonical.and_then(|bucket| bucket.primary.clone()).or(legacy_primary),
-        secondary: canonical.and_then(|bucket| bucket.secondary.clone()).or(legacy_secondary),
+        primary: canonical
+            .and_then(|bucket| bucket.primary.clone())
+            .or(legacy_primary),
+        secondary: canonical
+            .and_then(|bucket| bucket.secondary.clone())
+            .or(legacy_secondary),
         rate_limit_buckets,
     })
 }
@@ -384,18 +404,30 @@ mod tests {
         let both = json!({ "managed_account_id": 3, "codex_managed_account_id": 7 });
         assert_eq!(
             custody_from_status(&both),
-            FoxyCustody { alive: true, manages_claude: true, manages_codex: true }
+            FoxyCustody {
+                alive: true,
+                manages_claude: true,
+                manages_codex: true
+            }
         );
         // 0 = provider configured but no lease; absent key = not configured.
         let claude_only = json!({ "managed_account_id": 3, "codex_managed_account_id": 0 });
         assert_eq!(
             custody_from_status(&claude_only),
-            FoxyCustody { alive: true, manages_claude: true, manages_codex: false }
+            FoxyCustody {
+                alive: true,
+                manages_claude: true,
+                manages_codex: false
+            }
         );
         let none = json!({});
         assert_eq!(
             custody_from_status(&none),
-            FoxyCustody { alive: true, manages_claude: false, manages_codex: false }
+            FoxyCustody {
+                alive: true,
+                manages_claude: false,
+                manages_codex: false
+            }
         );
     }
 
@@ -500,7 +532,9 @@ mod tests {
     #[test]
     fn codex_five_hour_column_maps_onto_the_primary_window() {
         let a = map_in_use_codex(&sample_mixed_accounts(), 66).expect("codex account 66 present");
-        let primary = a.primary.expect("primary window mapped from the five_hour column");
+        let primary = a
+            .primary
+            .expect("primary window mapped from the five_hour column");
         assert_eq!(primary.used_percent, 1);
         assert_eq!(primary.resets_at, Some(1_787_622_736));
     }
@@ -538,7 +572,9 @@ mod tests {
             }]
         });
         let a = map_in_use_codex(&body, 7).unwrap();
-        let secondary = a.secondary.expect("secondary mapped from the seven_day column");
+        let secondary = a
+            .secondary
+            .expect("secondary mapped from the seven_day column");
         assert_eq!(secondary.used_percent, 25);
         assert_eq!(secondary.resets_at, Some(1_787_738_400));
     }
@@ -559,9 +595,22 @@ mod tests {
         }]});
         let account = map_in_use_codex(&body, 7).unwrap();
         assert_eq!(account.rate_limit_buckets.len(), 2);
-        assert_eq!(account.rate_limit_buckets[1].limit_name.as_deref(), Some("Luna Reserve"));
-        assert_eq!(account.rate_limit_buckets[1].normal_model_slug.as_deref(), Some("gpt-reserve"));
-        assert_eq!(account.rate_limit_buckets[0].primary.as_ref().unwrap().window_duration_mins, Some(300));
+        assert_eq!(
+            account.rate_limit_buckets[1].limit_name.as_deref(),
+            Some("Luna Reserve")
+        );
+        assert_eq!(
+            account.rate_limit_buckets[1].normal_model_slug.as_deref(),
+            Some("gpt-reserve")
+        );
+        assert_eq!(
+            account.rate_limit_buckets[0]
+                .primary
+                .as_ref()
+                .unwrap()
+                .window_duration_mins,
+            Some(300)
+        );
         assert_eq!(account.primary.as_ref().unwrap().used_percent, 10);
     }
 

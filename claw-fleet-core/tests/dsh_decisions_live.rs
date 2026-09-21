@@ -62,7 +62,10 @@ fn isolated_fleet_home() -> &'static Path {
 /// live somewhere else for the turn to park.
 fn probe_path(tag: &str) -> PathBuf {
     let home = dirs::home_dir().expect("home dir");
-    home.join(format!("fleet-dsh-approval-probe-{}-{tag}.txt", std::process::id()))
+    home.join(format!(
+        "fleet-dsh-approval-probe-{}-{tag}.txt",
+        std::process::id()
+    ))
 }
 
 fn wait_for<T>(budget: Duration, mut f: impl FnMut() -> Option<T>) -> Option<T> {
@@ -236,7 +239,10 @@ fn live_a_question_becomes_a_card_and_its_answer_reaches_the_agent() {
     })
     .unwrap_or_else(|| panic!("no question card for {session_id} within {DECISION_BUDGET:?}"));
 
-    assert!(!card.questions.is_empty(), "question card carries no questions");
+    assert!(
+        !card.questions.is_empty(),
+        "question card carries no questions"
+    );
     let first = &card.questions[0];
     println!(
         "card: header={:?} question={:?} options={:?}",
@@ -257,12 +263,14 @@ fn live_a_question_becomes_a_card_and_its_answer_reaches_the_agent() {
     for q in card.questions.iter().skip(1) {
         answers.insert(q.question.clone(), String::new());
     }
-    claw_fleet_core::elicitation::write_response(&claw_fleet_core::elicitation::ElicitationResponse {
-        id: card.id.clone(),
-        declined: false,
-        answers,
-        task_outcome: None,
-    })
+    claw_fleet_core::elicitation::write_response(
+        &claw_fleet_core::elicitation::ElicitationResponse {
+            id: card.id.clone(),
+            declined: false,
+            answers,
+            task_outcome: None,
+        },
+    )
     .expect("write answer");
 
     let gone = wait_for(Duration::from_secs(30), || {
@@ -295,7 +303,11 @@ fn live_a_question_becomes_a_card_and_its_answer_reaches_the_agent() {
             .filter_map(|m| m.pointer("/message/content")?.as_array())
             .flatten()
             .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
-            .any(|b| serde_json::to_string(b).unwrap_or_default().contains(&picked))
+            .any(|b| {
+                serde_json::to_string(b)
+                    .unwrap_or_default()
+                    .contains(&picked)
+            })
             .then_some(())
     });
     assert!(

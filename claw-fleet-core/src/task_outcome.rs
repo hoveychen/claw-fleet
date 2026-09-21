@@ -316,7 +316,15 @@ mod tests {
     #[test]
     fn index_skips_junk() {
         let dir = tmpdir("index");
-        set_outcome_in(&dir, "good", "/ws", Some(TaskOutcome::Completed), "c", false).unwrap();
+        set_outcome_in(
+            &dir,
+            "good",
+            "/ws",
+            Some(TaskOutcome::Completed),
+            "c",
+            false,
+        )
+        .unwrap();
         std::fs::write(dir.join("bad.json"), "not json").unwrap();
         std::fs::write(dir.join("ignored.txt"), "{}").unwrap();
         let idx = outcome_index(&dir);

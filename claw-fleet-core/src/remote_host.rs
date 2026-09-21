@@ -146,7 +146,13 @@ pub fn set_host_rca_path(id: &str, rca_path: &str) -> Result<(), String> {
 fn derive_host_id(ssh_target: &str) -> String {
     let slug: String = ssh_target
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     format!("ssh-{}", slug.trim_matches('-'))
 }
@@ -172,8 +178,9 @@ pub fn adopt_host(candidate: &SshHost) -> Result<String, String> {
     if let Some(h) = hosts.iter().find(|h| h.id == candidate.id) {
         return Ok(h.id.clone());
     }
-    if let Some(h) =
-        hosts.iter().find(|h| ssh_target_for(h).ok().as_deref() == Some(target.as_str()))
+    if let Some(h) = hosts
+        .iter()
+        .find(|h| ssh_target_for(h).ok().as_deref() == Some(target.as_str()))
     {
         return Ok(h.id.clone());
     }
@@ -198,7 +205,12 @@ pub fn adopt_host(candidate: &SshHost) -> Result<String, String> {
 /// (when not 22), `-i <key>`, `-J <jump>`, then `user@host` — which `sh -c`
 /// splits back into argv for ssh.
 pub fn ssh_target_for(host: &SshHost) -> Result<String, String> {
-    if let Some(profile) = host.ssh_profile.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(profile) = host
+        .ssh_profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         return Ok(profile.to_string());
     }
     let h = host.host.trim();
@@ -210,10 +222,20 @@ pub fn ssh_target_for(host: &SshHost) -> Result<String, String> {
     if host.port != 22 {
         parts.push(format!("-p {}", host.port));
     }
-    if let Some(key) = host.identity_file.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(key) = host
+        .identity_file
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         parts.push(format!("-i {key}"));
     }
-    if let Some(jump) = host.jump_host.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(jump) = host
+        .jump_host
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         parts.push(format!("-J {jump}"));
     }
     parts.push(format!("{u}@{h}"));
@@ -228,8 +250,10 @@ const MAX_ENTRIES: usize = 500;
 /// `sh -c` that `rca --via` eventually wraps it in. Mirrors
 /// `remote_workspace`'s validator (spaces ARE allowed — the target may be a
 /// full `-p 2222 -i /key user@host` fragment).
-const SHELL_METACHARS: &[char] =
-    &[';', '&', '|', '$', '`', '"', '\'', '\\', '\n', '\r', '(', ')', '<', '>', '*', '?', '[', ']', '{', '}', '!', '#', '~'];
+const SHELL_METACHARS: &[char] = &[
+    ';', '&', '|', '$', '`', '"', '\'', '\\', '\n', '\r', '(', ')', '<', '>', '*', '?', '[', ']',
+    '{', '}', '!', '#', '~',
+];
 
 fn validate_ssh_target(target: &str) -> Result<(), String> {
     let t = target.trim();
@@ -237,7 +261,9 @@ fn validate_ssh_target(target: &str) -> Result<(), String> {
         return Err("ssh target must not be empty".to_string());
     }
     if let Some(c) = t.chars().find(|c| SHELL_METACHARS.contains(c)) {
-        return Err(format!("ssh target contains an unsupported character {c:?}"));
+        return Err(format!(
+            "ssh target contains an unsupported character {c:?}"
+        ));
     }
     Ok(())
 }
@@ -281,7 +307,11 @@ pub fn ssh_exec(ssh_target: &str, remote_cmd: &str) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        Err(if err.is_empty() { "ssh failed with no output".to_string() } else { err })
+        Err(if err.is_empty() {
+            "ssh failed with no output".to_string()
+        } else {
+            err
+        })
     }
 }
 
@@ -320,7 +350,11 @@ fn browse_script(path: &str) -> String {
 /// `Path::join`: these are REMOTE paths, and on a Windows agent `Path` would
 /// join them with a backslash.
 fn remote_join(dir: &str, name: &str) -> String {
-    if dir.ends_with('/') { format!("{dir}{name}") } else { format!("{dir}/{name}") }
+    if dir.ends_with('/') {
+        format!("{dir}{name}")
+    } else {
+        format!("{dir}/{name}")
+    }
 }
 
 /// The parent of a canonical remote path, or `None` at the root.
@@ -351,9 +385,7 @@ fn parse_browse_reply(reply: &str) -> Result<BrowseDirResponse, String> {
         match parts.next() {
             Some("HOME") => home = parts.next().unwrap_or_default().to_string(),
             Some("PWD") => pwd = Some(parts.next().unwrap_or_default().to_string()),
-            Some("ERR") => {
-                return Err(parts.next().unwrap_or("remote listing failed").to_string())
-            }
+            Some("ERR") => return Err(parts.next().unwrap_or("remote listing failed").to_string()),
             Some("D") => {
                 let is_git_repo = parts.next() == Some("1");
                 // The name is the REST of the line: a directory name may itself
@@ -367,7 +399,11 @@ fn parse_browse_reply(reply: &str) -> Result<BrowseDirResponse, String> {
                     truncated = true;
                     break;
                 }
-                entries.push(BrowseEntry { name, path: String::new(), is_git_repo });
+                entries.push(BrowseEntry {
+                    name,
+                    path: String::new(),
+                    is_git_repo,
+                });
             }
             _ => {}
         }
@@ -384,7 +420,11 @@ fn parse_browse_reply(reply: &str) -> Result<BrowseDirResponse, String> {
         path,
         entries,
         truncated,
-        roots: if home.is_empty() { Vec::new() } else { vec![home] },
+        roots: if home.is_empty() {
+            Vec::new()
+        } else {
+            vec![home]
+        },
     })
 }
 
@@ -491,13 +531,16 @@ fn health_script() -> String {
        if \"$r\" serve -h 2>&1 | grep -qi stdio; then printf 'STDIO\\t1\\n'; \
        else printf 'STDIO\\t0\\n'; fi; \
      fi"
-        .to_string()
+    .to_string()
 }
 
 /// Parse [`health_script`]'s reply into a [`HostHealth`]. Separate from the ssh
 /// call so the "rca missing" / "rca too old" distinction is unit-testable.
 fn parse_health_reply(reply: &str) -> HostHealth {
-    let mut h = HostHealth { ssh_ok: true, ..Default::default() };
+    let mut h = HostHealth {
+        ssh_ok: true,
+        ..Default::default()
+    };
     for line in reply.lines() {
         let mut parts = line.split('\t');
         let val = |p: &mut std::str::Split<'_, char>| p.next().unwrap_or_default().to_string();
@@ -529,7 +572,11 @@ fn parse_health_reply(reply: &str) -> HostHealth {
 pub fn host_health(ssh_target: &str) -> HostHealth {
     match ssh_exec(ssh_target, &health_script()) {
         Ok(reply) => parse_health_reply(&reply),
-        Err(e) => HostHealth { ssh_ok: false, error: Some(e), ..Default::default() },
+        Err(e) => HostHealth {
+            ssh_ok: false,
+            error: Some(e),
+            ..Default::default()
+        },
     }
 }
 
@@ -641,7 +688,11 @@ pub fn ssh_harness_install_plan(
 ) -> Result<crate::harness_install::InstallPlan, String> {
     let script = crate::harness_install::install_shell_script(source).map_err(|e| e.message)?;
     let args = ssh_argv(ssh_target, &script)?;
-    Ok(crate::harness_install::InstallPlan { program: "ssh".into(), args, envs: vec![] })
+    Ok(crate::harness_install::InstallPlan {
+        program: "ssh".into(),
+        args,
+        envs: vec![],
+    })
 }
 
 #[cfg(test)]
@@ -659,17 +710,18 @@ mod tests {
     impl TmpHome {
         fn new(tag: &str) -> Self {
             let lock = crate::session::fleet_home_lock();
-            let dir = std::env::temp_dir().join(format!(
-                "fleet-hostbook-{}-{}",
-                tag,
-                std::process::id()
-            ));
+            let dir =
+                std::env::temp_dir().join(format!("fleet-hostbook-{}-{}", tag, std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let prev = std::env::var_os("FLEET_HOME");
             // SAFETY: serialized on the process-wide FLEET_HOME lock.
             unsafe { std::env::set_var("FLEET_HOME", &dir) };
-            Self { dir, prev, _lock: lock }
+            Self {
+                dir,
+                prev,
+                _lock: lock,
+            }
         }
     }
 
@@ -732,7 +784,10 @@ mod tests {
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].rca_path, None);
         let back = serde_json::to_string(&hosts[0]).unwrap();
-        assert!(!back.contains("rcaPath"), "absent capability must not serialise: {back}");
+        assert!(
+            !back.contains("rcaPath"),
+            "absent capability must not serialise: {back}"
+        );
     }
 
     #[test]
@@ -743,7 +798,10 @@ mod tests {
         // The wizard's hand-typed candidate carries the placeholder id
         // "manual", but resolves to the same ssh target — it is the same box.
         let id = adopt_host(&host("manual", "dev", "box")).unwrap();
-        assert_eq!(id, "saved-1", "must attach to the existing record, not add a row");
+        assert_eq!(
+            id, "saved-1",
+            "must attach to the existing record, not add a row"
+        );
         assert_eq!(load_hosts().len(), 1);
     }
 
@@ -775,7 +833,10 @@ mod tests {
         upsert_host(host("a", "dev", "box-a")).unwrap();
         upsert_host(host("b", "dev", "box-b")).unwrap();
         set_host_rca_path("a", "/root/.fleet/bin/rca").unwrap();
-        assert_eq!(find_host("a").unwrap().rca_path.as_deref(), Some("/root/.fleet/bin/rca"));
+        assert_eq!(
+            find_host("a").unwrap().rca_path.as_deref(),
+            Some("/root/.fleet/bin/rca")
+        );
         assert_eq!(find_host("b").unwrap().rca_path, None);
         assert!(set_host_rca_path("nope", "/x").is_err());
     }
@@ -803,7 +864,8 @@ mod tests {
         assert!(s[2].installed);
         assert_eq!(s[2].logged_in, None);
 
-        let with_auth = reply.replace("AUTH\tclaude\t0", "AUTH\tclaude\t1")
+        let with_auth = reply
+            .replace("AUTH\tclaude\t0", "AUTH\tclaude\t1")
             .replace("AUTH\tcodex\t0", "AUTH\tcodex\t1");
         let s = parse_harness_probe(&with_auth);
         assert_eq!(s[0].logged_in, Some(true));
@@ -931,11 +993,17 @@ mod tests {
     fn health_reply_distinguishes_a_stale_rca_from_a_missing_one() {
         let stale = parse_health_reply("HOME\t/root\nRCA\t/usr/bin/rca\nSTDIO\t0\n");
         assert!(!stale.is_ready());
-        assert!(stale.error.as_deref().unwrap().contains("serve --stdio"), "{stale:?}");
+        assert!(
+            stale.error.as_deref().unwrap().contains("serve --stdio"),
+            "{stale:?}"
+        );
 
         let missing = parse_health_reply("HOME\t/root\n");
         assert!(!missing.is_ready());
-        assert!(missing.error.as_deref().unwrap().contains("not installed"), "{missing:?}");
+        assert!(
+            missing.error.as_deref().unwrap().contains("not installed"),
+            "{missing:?}"
+        );
     }
 
     /// The scripts against a REAL host — the only thing that proves the shell
@@ -964,8 +1032,17 @@ mod tests {
     fn live_browse_walks_a_real_remote_tree() {
         let t = live_target();
         let home = browse_remote_dir(&t, None).expect("browse home");
-        eprintln!("home={} parent={:?} n={}", home.path, home.parent, home.entries.len());
-        assert!(home.path.starts_with('/'), "canonical absolute path: {}", home.path);
+        eprintln!(
+            "home={} parent={:?} n={}",
+            home.path,
+            home.parent,
+            home.entries.len()
+        );
+        assert!(
+            home.path.starts_with('/'),
+            "canonical absolute path: {}",
+            home.path
+        );
         assert_eq!(home.roots.len(), 1, "remote $HOME reported as the root");
 
         // Walking into the first child must produce a listing whose parent
@@ -996,13 +1073,20 @@ mod tests {
         let parent = "/tmp";
         let name = format!("fleet-picker-test-{}", std::process::id());
         let made = create_remote_dir(&t, Some(parent), &name).expect("create");
-        assert_eq!(made.path, format!("{parent}/{name}"), "must land INSIDE the new directory");
+        assert_eq!(
+            made.path,
+            format!("{parent}/{name}"),
+            "must land INSIDE the new directory"
+        );
         assert_eq!(made.parent.as_deref(), Some(parent));
         assert!(made.entries.is_empty(), "a fresh directory has no children");
         // Idempotent (mkdir -p), and it now shows up in its parent's listing.
         create_remote_dir(&t, Some(parent), &name).expect("second create is a no-op");
         let listing = browse_remote_dir(&t, Some(parent)).unwrap();
-        assert!(listing.entries.iter().any(|e| e.name == name), "not listed under {parent}");
+        assert!(
+            listing.entries.iter().any(|e| e.name == name),
+            "not listed under {parent}"
+        );
         let _ = ssh_exec(&t, &format!("rmdir '{parent}/{name}'"));
     }
 

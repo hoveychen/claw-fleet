@@ -306,7 +306,9 @@ fn append_to_queue(session_id: &str, workspace_path: &str, text: &str) -> Result
 /// True when `session_id` has at least one queued follow-up. Cheap re-entry
 /// guard for the UI ("show the pending chips").
 pub fn has_pending(session_id: &str) -> bool {
-    get(session_id).map(|q| !q.messages.is_empty()).unwrap_or(false)
+    get(session_id)
+        .map(|q| !q.messages.is_empty())
+        .unwrap_or(false)
 }
 
 /// Every session's queued follow-ups, `session_id → messages`. One directory
@@ -375,8 +377,7 @@ fn is_drainable(session: &crate::session::SessionInfo) -> bool {
     // pending message would race the retry path, so skip both.
     if matches!(
         session.status,
-        crate::session::SessionStatus::RateLimited
-            | crate::session::SessionStatus::ServerErrored
+        crate::session::SessionStatus::RateLimited | crate::session::SessionStatus::ServerErrored
     ) {
         return false;
     }
@@ -520,7 +521,7 @@ pub fn maybe_drain(session: &crate::session::SessionInfo) {
                 model: model.map(str::to_string),
                 effort: effort.map(str::to_string),
                 permission_mode: perm.map(str::to_string),
-            images: Vec::new(),
+                images: Vec::new(),
             },
             Box::new(|_| {}),
         )
@@ -668,7 +669,10 @@ mod tests {
             let log = std::cell::RefCell::new(Vec::new());
             let s = base_session("sess-rl", SessionStatus::RateLimited, false);
             drain_if_idle(&s, recording_spawn(&log));
-            assert!(log.borrow().is_empty(), "rate-limited => auto_resume owns it");
+            assert!(
+                log.borrow().is_empty(),
+                "rate-limited => auto_resume owns it"
+            );
             assert!(get("sess-rl").is_some(), "queue must survive rate-limit");
         });
     }
@@ -697,7 +701,10 @@ mod tests {
             let fired = log.borrow();
             assert_eq!(fired.len(), 1, "idle codex session must drain its queue");
             assert_eq!(fired[0].0, "sess-codex-idle");
-            assert!(get("sess-codex-idle").is_none(), "queue cleared after firing");
+            assert!(
+                get("sess-codex-idle").is_none(),
+                "queue cleared after firing"
+            );
         });
     }
 
@@ -912,7 +919,10 @@ mod tests {
             let s = base_session("hop-a", SessionStatus::WaitingInput, false);
             drain_if_idle(&s, recording_spawn(&log));
 
-            assert!(log.borrow().is_empty(), "the retired hop must not be resumed");
+            assert!(
+                log.borrow().is_empty(),
+                "the retired hop must not be resumed"
+            );
             assert!(get("hop-a").is_none(), "its queue is gone");
             let moved = get("hop-c").expect("messages landed on the live baton");
             assert_eq!(moved.messages, vec!["steer left", "and then right"]);

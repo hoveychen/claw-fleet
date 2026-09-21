@@ -32,7 +32,10 @@ fn config_pair<T: serde::de::DeserializeOwned + serde::Serialize>(
         let mut buf = String::new();
         let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
         let (status, body) = match serde_json::from_str::<T>(&buf) {
-            Err(e) => (400u16, serde_json::json!({"error": e.to_string()}).to_string()),
+            Err(e) => (
+                400u16,
+                serde_json::json!({"error": e.to_string()}).to_string(),
+            ),
             Ok(cfg) => match save(cfg) {
                 Ok(stored) => (200u16, serde_json::to_string(&stored).unwrap_or_default()),
                 Err(e) => (500u16, serde_json::json!({"error": e}).to_string()),

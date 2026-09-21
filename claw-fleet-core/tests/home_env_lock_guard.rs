@@ -105,10 +105,12 @@ struct Item {
 /// extra dependency, and the shapes it cares about (a `fn` line, an `impl` line,
 /// balanced braces) are unambiguous in this codebase.
 fn items_of(src: &str) -> Vec<Item> {
-    let fn_re = Regex::new(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+([A-Za-z0-9_]+)")
-        .expect("fn regex");
-    let impl_re = Regex::new(r"^\s*impl(?:<[^>]*>)?\s+(?:[A-Za-z0-9_:<>]+\s+for\s+)?([A-Za-z0-9_]+)")
-        .expect("impl regex");
+    let fn_re =
+        Regex::new(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+([A-Za-z0-9_]+)")
+            .expect("fn regex");
+    let impl_re =
+        Regex::new(r"^\s*impl(?:<[^>]*>)?\s+(?:[A-Za-z0-9_:<>]+\s+for\s+)?([A-Za-z0-9_]+)")
+            .expect("impl regex");
 
     let lines: Vec<&str> = src.lines().collect();
     let mut items = Vec::new();
@@ -116,10 +118,7 @@ fn items_of(src: &str) -> Vec<Item> {
     for (i, line) in lines.iter().enumerate() {
         let as_impl = impl_re.captures(line);
         let is_impl = as_impl.is_some();
-        let name = fn_re
-            .captures(line)
-            .or(as_impl)
-            .map(|c| c[1].to_string());
+        let name = fn_re.captures(line).or(as_impl).map(|c| c[1].to_string());
         let Some(name) = name else { continue };
         if !line.contains('{') {
             continue;
@@ -211,9 +210,9 @@ fn every_test_that_repoints_a_fleet_home_holds_the_lock() {
         let name = file.file_name().unwrap_or_default().to_string_lossy();
         for test in items.iter().filter(|it| it.is_test) {
             let direct = mutates_home(&test.body);
-            let via_helper = unguarded_helpers
-                .iter()
-                .any(|h| test.body.contains(&format!("{h}(")) || test.body.contains(&format!("{h}::")));
+            let via_helper = unguarded_helpers.iter().any(|h| {
+                test.body.contains(&format!("{h}(")) || test.body.contains(&format!("{h}::"))
+            });
             if !direct && !via_helper {
                 continue;
             }

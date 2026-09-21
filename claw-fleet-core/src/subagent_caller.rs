@@ -80,7 +80,10 @@ pub fn subagent_tool_refusal(tool: &str, effect: &str, agent_type: &str) -> Stri
 pub fn detect_ask_caller(session_id: &str, first_question: &str) -> Option<String> {
     let question = first_question.to_string();
     detect_caller(session_id, "fleet__ask", move |input| {
-        input.pointer("/questions/0/question").and_then(|q| q.as_str()) == Some(question.as_str())
+        input
+            .pointer("/questions/0/question")
+            .and_then(|q| q.as_str())
+            == Some(question.as_str())
     })
 }
 
@@ -214,7 +217,10 @@ fn line_calls(
     if !record_is_recent(&record, max_age) {
         return false;
     }
-    let Some(blocks) = record.pointer("/message/content").and_then(|c| c.as_array()) else {
+    let Some(blocks) = record
+        .pointer("/message/content")
+        .and_then(|c| c.as_array())
+    else {
         return false;
     };
     blocks.iter().any(|b| {
@@ -253,7 +259,11 @@ fn read_tail(path: &Path, bytes: u64) -> Option<String> {
     if from == 0 {
         return Some(text);
     }
-    Some(text.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_default())
+    Some(
+        text.split_once('\n')
+            .map(|(_, rest)| rest.to_string())
+            .unwrap_or_default(),
+    )
 }
 
 /// The `agentType` Claude Code records in the sidecar `agent-<id>.meta.json`
@@ -264,7 +274,11 @@ fn agent_type_of(transcript: &Path) -> String {
     std::fs::read_to_string(meta)
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|v| v.get("agentType").and_then(|t| t.as_str()).map(str::to_string))
+        .and_then(|v| {
+            v.get("agentType")
+                .and_then(|t| t.as_str())
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| "subagent".to_string())
 }
 
@@ -274,7 +288,10 @@ mod tests {
 
     fn asked(question: &str) -> impl Fn(&serde_json::Value) -> bool + '_ {
         move |input: &serde_json::Value| {
-            input.pointer("/questions/0/question").and_then(|q| q.as_str()) == Some(question)
+            input
+                .pointer("/questions/0/question")
+                .and_then(|q| q.as_str())
+                == Some(question)
         }
     }
 
@@ -294,7 +311,11 @@ mod tests {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(
             dir.join(format!("agent-{id}.jsonl")),
-            format!("{}\n{}\n", ask_line("some earlier card"), ask_line(question)),
+            format!(
+                "{}\n{}\n",
+                ask_line("some earlier card"),
+                ask_line(question)
+            ),
         )
         .unwrap();
         if let Some(t) = agent_type {
@@ -310,7 +331,12 @@ mod tests {
     fn matching_question_in_subagent_transcript_names_the_agent_type() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("subagents");
-        write_agent(&dir, "abc", "已合进 main（未 push）", Some("general-purpose"));
+        write_agent(
+            &dir,
+            "abc",
+            "已合进 main（未 push）",
+            Some("general-purpose"),
+        );
         assert_eq!(
             detect_in_subagents_dir(&dir, "fleet__ask", &asked("已合进 main（未 push）")),
             Some("general-purpose".to_string())
@@ -322,7 +348,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("subagents");
         std::fs::create_dir_all(&dir).unwrap();
-        write_agent(&dir.join("workflows").join("wf_run1"), "xyz", "q from a workflow agent", Some("Explore"));
+        write_agent(
+            &dir.join("workflows").join("wf_run1"),
+            "xyz",
+            "q from a workflow agent",
+            Some("Explore"),
+        );
         assert_eq!(
             detect_in_subagents_dir(&dir, "fleet__ask", &asked("q from a workflow agent")),
             Some("Explore".to_string())
@@ -334,7 +365,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("subagents");
         write_agent(&dir, "abc", "no sidecar here", None);
-        assert_eq!(detect_in_subagents_dir(&dir, "fleet__ask", &asked("no sidecar here")), Some("subagent".to_string()));
+        assert_eq!(
+            detect_in_subagents_dir(&dir, "fleet__ask", &asked("no sidecar here")),
+            Some("subagent".to_string())
+        );
     }
 
     #[test]
@@ -345,13 +379,23 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("subagents");
         write_agent(&dir, "abc", "the subagent's card", Some("general-purpose"));
-        assert_eq!(detect_in_subagents_dir(&dir, "fleet__ask", &asked("the parent's own card")), None);
+        assert_eq!(
+            detect_in_subagents_dir(&dir, "fleet__ask", &asked("the parent's own card")),
+            None
+        );
     }
 
     #[test]
     fn no_subagents_dir_is_not_a_subagent() {
         let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(detect_in_subagents_dir(&tmp.path().join("subagents"), "fleet__ask", &asked("anything")), None);
+        assert_eq!(
+            detect_in_subagents_dir(
+                &tmp.path().join("subagents"),
+                "fleet__ask",
+                &asked("anything")
+            ),
+            None
+        );
     }
 
     #[test]
@@ -361,9 +405,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("subagents");
         write_agent(&dir, "old", "stale card text", Some("general-purpose"));
-        assert_eq!(detect_in_subagents_dir(&dir, "fleet__ask", &asked("stale card text")), Some("general-purpose".into()));
         assert_eq!(
-            detect_in_subagents_dir_within(&dir, "fleet__ask", &asked("stale card text"), std::time::Duration::ZERO),
+            detect_in_subagents_dir(&dir, "fleet__ask", &asked("stale card text")),
+            Some("general-purpose".into())
+        );
+        assert_eq!(
+            detect_in_subagents_dir_within(
+                &dir,
+                "fleet__ask",
+                &asked("stale card text"),
+                std::time::Duration::ZERO
+            ),
             None
         );
     }
@@ -439,14 +491,23 @@ mod tests {
 
         std::fs::write(
             dir.join("agent-x.jsonl"),
-            format!("{}\n", tool_line("mcp__fleet__fleet__plan", input.clone(), Some(&old))),
+            format!(
+                "{}\n",
+                tool_line("mcp__fleet__fleet__plan", input.clone(), Some(&old))
+            ),
         )
         .unwrap();
-        assert_eq!(detect_in_subagents_dir(&dir, "fleet__plan", &eq(input.clone())), None);
+        assert_eq!(
+            detect_in_subagents_dir(&dir, "fleet__plan", &eq(input.clone())),
+            None
+        );
 
         std::fs::write(
             dir.join("agent-x.jsonl"),
-            format!("{}\n", tool_line("mcp__fleet__fleet__plan", input.clone(), Some(&now))),
+            format!(
+                "{}\n",
+                tool_line("mcp__fleet__fleet__plan", input.clone(), Some(&now))
+            ),
         )
         .unwrap();
         assert_eq!(

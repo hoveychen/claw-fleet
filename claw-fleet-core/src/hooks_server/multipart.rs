@@ -129,7 +129,8 @@ fn split_outside_quotes(s: &str, sep: char) -> Vec<String> {
 pub fn parse_multipart(body: &[u8], boundary: &str) -> Result<Vec<FormPart>, String> {
     let delim = format!("--{boundary}");
     let delim = delim.as_bytes();
-    let mut cursor = find_sub(body, delim, 0).ok_or_else(|| "boundary not found in body".to_string())?;
+    let mut cursor =
+        find_sub(body, delim, 0).ok_or_else(|| "boundary not found in body".to_string())?;
     let mut parts = Vec::new();
     loop {
         // Position just past the delimiter that opens this segment.
@@ -142,11 +143,12 @@ pub fn parse_multipart(body: &[u8], boundary: &str) -> Result<Vec<FormPart>, Str
             return Err("unterminated multipart body (no closing boundary)".to_string());
         };
         // Segment = CRLF + headers + CRLFCRLF + data + CRLF (before delimiter).
-        let seg_start = if body.len() > after_delim + 1 && &body[after_delim..after_delim + 2] == b"\r\n" {
-            after_delim + 2
-        } else {
-            after_delim
-        };
+        let seg_start =
+            if body.len() > after_delim + 1 && &body[after_delim..after_delim + 2] == b"\r\n" {
+                after_delim + 2
+            } else {
+                after_delim
+            };
         let seg = &body[seg_start..next];
         let split = find_sub(seg, b"\r\n\r\n", 0)
             .ok_or_else(|| "multipart part has no header/body separator".to_string())?;
@@ -155,7 +157,12 @@ pub fn parse_multipart(body: &[u8], boundary: &str) -> Result<Vec<FormPart>, Str
         if data.ends_with(b"\r\n") {
             data = &data[..data.len() - 2];
         }
-        parts.push(FormPart { name, filename, content_type, data: data.to_vec() });
+        parts.push(FormPart {
+            name,
+            filename,
+            content_type,
+            data: data.to_vec(),
+        });
         cursor = next;
     }
 }

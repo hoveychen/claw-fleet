@@ -67,7 +67,11 @@ fn segment_is_noop(segment: &str) -> bool {
         // and observes nothing. `sleep 30; <probe>` is not this — the probe is a
         // second segment and fails the all-segments-are-noops test below.
         "sleep" => {
-            rest.len() == 1 && rest[0].trim_end_matches(['s', 'm', 'h']).parse::<f64>().is_ok()
+            rest.len() == 1
+                && rest[0]
+                    .trim_end_matches(['s', 'm', 'h'])
+                    .parse::<f64>()
+                    .is_ok()
         }
         _ => false,
     }
@@ -107,7 +111,8 @@ pub fn is_idle_spin(command: &str) -> bool {
 /// than just saying no — and it concedes the true half of the agent's belief
 /// (background shells really do die with the turn) so the correction lands
 /// instead of reading as a contradiction it can argue with.
-pub const DENY_REASON: &str = "Fleet: 这条命令什么都不做，也什么都不告诉你——它只是在空转保活回合，已拦下。\n\
+pub const DENY_REASON: &str =
+    "Fleet: 这条命令什么都不做，也什么都不告诉你——它只是在空转保活回合，已拦下。\n\
 \n\
 一次空转不比一次真工作便宜：模型每个回合都要重读整个上下文。实测一个会话连发 57 次 \
 `echo waiting`，重读了 1163 万 cache token，换回 57 遍「waiting」，约 $17.80。\n\
@@ -272,13 +277,13 @@ mod tests {
     #[test]
     fn spares_echo_that_does_real_work() {
         for cmd in [
-            "echo hello > /tmp/marker",          // writes a file
-            "echo $PATH",                        // reports state
-            "echo \"$(git rev-parse HEAD)\"",    // runs a command
-            "echo waiting | tee /tmp/log",       // pipes somewhere
-            "echo done &",                       // backgrounds
-            "echo `date`",                       // substitutes
-            "printf '%s' \"$HOME\"",             // expands
+            "echo hello > /tmp/marker",       // writes a file
+            "echo $PATH",                     // reports state
+            "echo \"$(git rev-parse HEAD)\"", // runs a command
+            "echo waiting | tee /tmp/log",    // pipes somewhere
+            "echo done &",                    // backgrounds
+            "echo `date`",                    // substitutes
+            "printf '%s' \"$HOME\"",          // expands
         ] {
             assert!(!is_idle_spin(cmd), "{cmd:?} must be allowed");
         }
@@ -290,9 +295,9 @@ mod tests {
             "cargo test",
             "ls -la",
             "git status",
-            "sleep",                  // no operand — not the spin shape
-            "sleep 30 infinity",      // not a bare sleep
-            "echoes",                 // not `echo`
+            "sleep",             // no operand — not the spin shape
+            "sleep 30 infinity", // not a bare sleep
+            "echoes",            // not `echo`
             "sleeper --wait 30",
             "",
             "   ",
@@ -342,7 +347,10 @@ mod tests {
         );
 
         let second = deny_reason_for_strike(2);
-        assert!(second.starts_with(DENY_REASON), "escalation appends, never replaces — the four replacements must survive");
+        assert!(
+            second.starts_with(DENY_REASON),
+            "escalation appends, never replaces — the four replacements must survive"
+        );
         assert!(second.contains("第 2 次"), "the repeat must name the count");
         assert!(
             second.contains("换个词不会过"),

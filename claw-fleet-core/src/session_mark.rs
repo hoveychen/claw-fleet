@@ -215,7 +215,10 @@ mod tests {
     fn set_then_read_roundtrips() {
         let dir = tempfile::tempdir().unwrap();
         set_mark_in(dir.path(), "sess-a", "/ws", Some(SessionMark::Done)).unwrap();
-        assert_eq!(read_in(dir.path(), "sess-a").unwrap().mark, SessionMark::Done);
+        assert_eq!(
+            read_in(dir.path(), "sess-a").unwrap().mark,
+            SessionMark::Done
+        );
     }
 
     #[test]
@@ -258,10 +261,19 @@ mod tests {
         // Done → cleared to unmarked (mirrors toggling the done control off).
         set_mark_in(dir.path(), "done-sess", "/ws", Some(SessionMark::Done)).unwrap();
         clear_done_on_resume_in(dir.path(), "done-sess", "/ws");
-        assert!(read_in(dir.path(), "done-sess").is_none(), "done cleared on resume");
+        assert!(
+            read_in(dir.path(), "done-sess").is_none(),
+            "done cleared on resume"
+        );
 
         // Pending → untouched ("seen, not finished" is still true after resume).
-        set_mark_in(dir.path(), "pending-sess", "/ws", Some(SessionMark::Pending)).unwrap();
+        set_mark_in(
+            dir.path(),
+            "pending-sess",
+            "/ws",
+            Some(SessionMark::Pending),
+        )
+        .unwrap();
         clear_done_on_resume_in(dir.path(), "pending-sess", "/ws");
         assert_eq!(
             read_in(dir.path(), "pending-sess").unwrap().mark,
@@ -271,7 +283,10 @@ mod tests {
 
         // Unmarked → no-op, no file created.
         clear_done_on_resume_in(dir.path(), "unmarked-sess", "/ws");
-        assert!(read_in(dir.path(), "unmarked-sess").is_none(), "unmarked stays unmarked");
+        assert!(
+            read_in(dir.path(), "unmarked-sess").is_none(),
+            "unmarked stays unmarked"
+        );
     }
 
     /// Un-marking the *last* done session empties the index. Enrich must still

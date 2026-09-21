@@ -193,7 +193,10 @@ impl DshSource {
     /// the same outcome the call had before — the restart happens precisely
     /// because the server died under it — and the next call rebuilds its client
     /// off the new port.
-    fn with_client<T>(&self, f: impl FnOnce(&DshClient) -> Result<T, String>) -> Result<T, String> {
+    pub(crate) fn with_client<T>(
+        &self,
+        f: impl FnOnce(&DshClient) -> Result<T, String>,
+    ) -> Result<T, String> {
         let client = {
             let mut guard = lock(server_slot());
 
@@ -348,8 +351,11 @@ impl DshSource {
             return Ok(fresh);
         }
 
-        let value =
-            self.with_client(|client| client.call("session/list", json!({ "_request": {} })).map_err(Into::into))?;
+        let value = self.with_client(|client| {
+            client
+                .call("session/list", json!({ "_request": {} }))
+                .map_err(Into::into)
+        })?;
         *lock(roster_slot()) = Some((std::time::Instant::now(), value.clone()));
         Ok(value)
     }
@@ -400,7 +406,10 @@ impl DshSource {
     /// The launcher pid, or 0 when the server is not up. Reported as a dsh
     /// session's pid — see [`DshServer::pid`] for why it is shared.
     fn server_pid() -> u32 {
-        lock(server_slot()).as_ref().map(DshServer::pid).unwrap_or(0)
+        lock(server_slot())
+            .as_ref()
+            .map(DshServer::pid)
+            .unwrap_or(0)
     }
 
     /// The phase the downlinks report for `session_id`, if any is fresh.
@@ -432,7 +441,7 @@ impl DshSource {
     /// process is cold to this server until something touches it, and
     /// `session/selectModel` loads it (verified against a session created by a
     /// different `dsh web` instance).
-    fn select_model(
+    pub(crate) fn select_model(
         client: &DshClient,
         session_id: &str,
         model: Option<&str>,
@@ -502,7 +511,7 @@ impl DshSource {
     /// refuses those images (a text-only model route, an over-limit batch) gets
     /// the prompt again as plain text rather than losing the turn — see
     /// [`crate::dsh_attachments::send_with_text_fallback`].
-    fn prompt(client: &DshClient, session_id: &str, prompt: &str) -> Result<(), String> {
+    pub(crate) fn prompt(client: &DshClient, session_id: &str, prompt: &str) -> Result<(), String> {
         crate::dsh_attachments::send_with_text_fallback(prompt, |content| {
             client
                 .call(
@@ -528,6 +537,62 @@ impl DshSource {
                 .map(|_| ())
         })
         .map_err(Into::into)
+    }
+
+    /// Receive every raw follow item of `session_id` until the handle drops
+    /// (see [`crate::dsh_events::LiveView::tap`]). Brings the server and its
+    /// follower up first: the tap registry lives on the watcher.
+    pub(crate) fn tap(
+        &self,
+        session_id: &str,
+        tap: crate::dsh_events::RawItemTap,
+    ) -> Result<crate::dsh_events::TapHandle, String> {
+        self.with_client(|_| Ok(()))?;
+        lock(watcher_slot())
+            .as_ref()
+            .map(|w| w.tap(session_id, tap))
+            .ok_or_else(|| "dsh: no event watcher to tap".to_string())
+    }
+
+    /// The route and effort the roster reports for `session_id` — what its
+    /// last request went out with — or `None` when the roster does not list
+    /// it. Falls back to what this process last read from the session's own
+    /// log, then to Fleet's launch note.
+    pub(crate) fn session_selection(&self, session_id: &str) -> RosterSelection {
+        let from_roster = self.roster().ok().and_then(|roster| {
+            roster
+                .get("items")
+                .and_then(Value::as_array)?
+                .iter()
+                .find(|item| item.get("sessionId").and_then(Value::as_str) == Some(session_id))
+                .and_then(|item| {
+                    roster_selection(item.get("projections").unwrap_or(&Value::Null))
+                })
+        });
+        let route = from_roster
+            .as_ref()
+            .and_then(|s| s.route.clone())
+            .or_else(|| known_model(session_id))
+            .or_else(|| crate::launch_spec::model_of(session_id));
+        let effort = from_roster
+            .as_ref()
+            .and_then(|s| s.effort.clone())
+            .or_else(|| known_effort(session_id))
+            .or_else(|| crate::launch_spec::effort_of(session_id));
+        RosterSelection { route, effort }
+    }
+
+    /// dsh's `agent-default-model` selection — the model a session mounts when
+    /// nobody names one — as `(provider/model, effort)`.
+    pub(crate) fn default_selection(client: &DshClient) -> Result<RosterSelection, String> {
+        let value = client
+            .call("session/modelCatalog", json!({}))
+            .map_err(String::from)?;
+        let cat = parse_model_catalog(&value);
+        Ok(RosterSelection {
+            route: cat.default_spec,
+            effort: cat.default_effort,
+        })
     }
 
     /// Arrange for `on_exit` to fire when `session_id`'s turn ends.
@@ -615,7 +680,9 @@ where
 /// degradation here is exactly the failure the preset exists to prevent, so it
 /// is never swallowed.
 fn log_chat_preset_skip(reason: &str) {
-    eprintln!("fleet dsh: chat preset unavailable, session keeps the default composition — {reason}");
+    eprintln!(
+        "fleet dsh: chat preset unavailable, session keeps the default composition — {reason}"
+    );
 }
 
 /// Split Fleet's single `model` string into dsh's `provider` + `model` pair.
@@ -683,11 +750,11 @@ fn projection_u64(projections: &Value, key: &str, field: &str) -> u64 {
 }
 
 /// The route and effort a roster item names, if it names either.
-#[derive(Debug, Default, PartialEq)]
-struct RosterSelection {
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct RosterSelection {
     /// `provider/model`, on the same shape [`known_model`] produces.
-    route: Option<String>,
-    effort: Option<String>,
+    pub(crate) route: Option<String>,
+    pub(crate) effort: Option<String>,
 }
 
 /// Read `projections.values.modelSelection` off one roster item.
@@ -1139,6 +1206,12 @@ impl AgentSource for DshSource {
                         let Some(mut info) = session_info_from_list_item(item) else {
                             continue;
                         };
+                        // A child `session_explain` forked for one side
+                        // question persists like any session (dsh has no
+                        // ephemeral fork and no delete RPC) but is not one.
+                        if crate::session_explain::is_fork_session(&info.id) {
+                            continue;
+                        }
                         roster_updated.push(info.last_activity_ms as i64);
                         // The poll only knows running/not-running; the downlinks
                         // know which phase of the turn it is in.
@@ -1169,7 +1242,8 @@ impl AgentSource for DshSource {
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
         let id = Self::session_id_of(path).ok_or_else(|| format!("invalid dsh URI: {path}"))?;
-        let mut records = history_with(id, None, |before, max| self.fetch_history(id, before, max))?;
+        let mut records =
+            history_with(id, None, |before, max| self.fetch_history(id, before, max))?;
         self.resolve_images(id, &mut records);
         records.iter_mut().for_each(crate::fleet_event::annotate);
         Ok(records)
@@ -1177,8 +1251,9 @@ impl AgentSource for DshSource {
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
         let id = Self::session_id_of(path).ok_or_else(|| format!("invalid dsh URI: {path}"))?;
-        let mut records =
-            history_with(id, Some(n), |before, max| self.fetch_history(id, before, max))?;
+        let mut records = history_with(id, Some(n), |before, max| {
+            self.fetch_history(id, before, max)
+        })?;
         self.resolve_images(id, &mut records);
         records.iter_mut().for_each(crate::fleet_event::annotate);
         Ok(records)
@@ -1244,7 +1319,12 @@ impl AgentSource for DshSource {
                     "dsh spawn: asked for session {session_id}, got {assigned}"
                 ));
             }
-            Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
+            Self::select_model(
+                client,
+                &session_id,
+                spec.model.as_deref(),
+                spec.effort.as_deref(),
+            )?;
             Self::prompt(client, &session_id, &spec.prompt)
         })?;
 
@@ -1303,7 +1383,12 @@ impl AgentSource for DshSource {
         let armed = Self::arm_turn_end(&session_id, on_exit);
 
         let started = self.with_client(|client| {
-            Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
+            Self::select_model(
+                client,
+                &session_id,
+                spec.model.as_deref(),
+                spec.effort.as_deref(),
+            )?;
             Self::prompt(client, &session_id, prompt)
         });
 
@@ -1346,6 +1431,15 @@ impl AgentSource for DshSource {
     /// zstd-framed log the server owns. Nothing may hand out a path for it.
     fn resolve_file_path(&self, _path: &str) -> Option<PathBuf> {
         None
+    }
+
+    /// See [`crate::dsh_explain`].
+    fn fork_ask(
+        &self,
+        spec: &crate::agent_source::ForkAskSpec,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<crate::agent_source::ForkAskOutcome, String> {
+        crate::dsh_explain::dsh_fork_ask(self, spec, on_delta)
     }
 }
 
@@ -1451,8 +1545,11 @@ fn dsh_token_breakdown_from_projections(projections: &Value) -> DshTokenBreakdow
 /// a stale URI reports that instead of rendering a plausible all-zero panel.
 pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
     let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
-    let value = DshSource::new()
-        .with_client(|client| client.call("session/list", json!({ "_request": {} })).map_err(Into::into))?;
+    let value = DshSource::new().with_client(|client| {
+        client
+            .call("session/list", json!({ "_request": {} }))
+            .map_err(Into::into)
+    })?;
 
     let item = value
         .get("items")
@@ -2270,8 +2367,11 @@ fn parse_model_catalog(value: &Value) -> DshModelCatalog {
 /// Credential reference names learned from `settings/describe` (`apiKeyEnv`
 /// fields anywhere in the redacted namespace values).
 pub fn dsh_credential_refs() -> Result<Vec<String>, String> {
-    let v = DshSource::new()
-        .with_client(|client| client.call("settings/describe", json!({})).map_err(Into::into))?;
+    let v = DshSource::new().with_client(|client| {
+        client
+            .call("settings/describe", json!({}))
+            .map_err(Into::into)
+    })?;
     let mut refs = Vec::new();
     collect_api_key_envs(&v, &mut refs);
     refs.sort();
@@ -2319,7 +2419,10 @@ pub fn dsh_credentials_describe(refs: Vec<String>) -> Result<Value, String> {
 pub fn dsh_credentials_set(reference: &str, value: &str) -> Result<(), String> {
     DshSource::new().with_client(|client| {
         client
-            .call("credentials/set", json!({ "ref": reference, "value": value }))
+            .call(
+                "credentials/set",
+                json!({ "ref": reference, "value": value }),
+            )
             .map(|_| ())
             .map_err(Into::into)
     })
@@ -2336,8 +2439,11 @@ pub fn dsh_credentials_unset(reference: &str) -> Result<(), String> {
 }
 
 pub fn dsh_models() -> Result<DshModelCatalog, String> {
-    let value = DshSource::new()
-        .with_client(|client| client.call("session/modelCatalog", json!({})).map_err(Into::into))?;
+    let value = DshSource::new().with_client(|client| {
+        client
+            .call("session/modelCatalog", json!({}))
+            .map_err(Into::into)
+    })?;
     Ok(parse_model_catalog(&value))
 }
 
@@ -2450,7 +2556,10 @@ mod spend_refresh_tests {
 
         // Priced again after those tokens landed: nothing left to do.
         let caught_up = BTreeMap::from([("live".to_string(), spend_at(200, 2_743))]);
-        assert_eq!(pick_stale_spend(&infos, &updated, &caught_up, &none()), None);
+        assert_eq!(
+            pick_stale_spend(&infos, &updated, &caught_up, &none()),
+            None
+        );
     }
 
     /// A session that cannot be priced must not be retried forever.
@@ -2548,7 +2657,10 @@ mod tests {
         dsh_credentials_unset(test_ref).unwrap();
         assert_eq!(configured, Some(true));
         let desc = dsh_credentials_describe(vec![test_ref.to_string()]).unwrap();
-        assert_eq!(desc["credentials"][test_ref]["configured"].as_bool(), Some(false));
+        assert_eq!(
+            desc["credentials"][test_ref]["configured"].as_bool(),
+            Some(false)
+        );
     }
 
     /// Verbatim shape of one `session/list` item observed live.
@@ -2596,12 +2708,19 @@ mod tests {
         std::env::set_var("FLEET_HOME", tmp.path());
 
         let item = live_list_item();
-        let id = item.get("sessionId").and_then(Value::as_str).unwrap().to_string();
+        let id = item
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_string();
 
         // Not spawned by Fleet (a session the user started in dsh's own UI):
         // it belongs in the sessions list, never in the Tasks list.
         let foreign = session_info_from_list_item(&item).expect("mapped");
-        assert!(!foreign.fleet_spawned, "an unrecorded session is not Fleet's");
+        assert!(
+            !foreign.fleet_spawned,
+            "an unrecorded session is not Fleet's"
+        );
         assert_eq!(foreign.entrypoint, None);
 
         // Spawned by Fleet: the spawn path records the marker, and the mapping
@@ -2622,7 +2741,10 @@ mod tests {
             Some(crate::session_launch::NEW_SESSION_ENTRYPOINT),
             "entrypoint must be one isFleetOwnedEntrypoint() accepts"
         );
-        assert!(!owned.is_subagent, "a spawned dsh session is a main session");
+        assert!(
+            !owned.is_subagent,
+            "a spawned dsh session is a main session"
+        );
 
         match prev {
             Some(v) => std::env::set_var("FLEET_HOME", v),
@@ -2765,7 +2887,10 @@ mod tests {
             Some("session-9ba2e49d-36d8-49d1-90bd-500d81a9a433")
         );
         assert_eq!(info.agent_type.as_deref(), Some("one-shot"));
-        assert_eq!(info.agent_description.as_deref(), Some("Read secret.txt token"));
+        assert_eq!(
+            info.agent_description.as_deref(),
+            Some("Read secret.txt token")
+        );
     }
 
     #[test]
@@ -2829,7 +2954,10 @@ mod tests {
             }
         }));
         let sel = roster_selection(&p).expect("a selection");
-        assert_eq!(sel.route.as_deref(), Some("deepseek-official/deepseek-v4-pro"));
+        assert_eq!(
+            sel.route.as_deref(),
+            Some("deepseek-official/deepseek-v4-pro")
+        );
         assert_eq!(sel.effort.as_deref(), Some("high"));
     }
 
@@ -2844,7 +2972,10 @@ mod tests {
             }
         }));
         let sel = roster_selection(&p).expect("a selection");
-        assert_eq!(sel.route.as_deref(), Some("deepseek-official/deepseek-flash"));
+        assert_eq!(
+            sel.route.as_deref(),
+            Some("deepseek-official/deepseek-flash")
+        );
         assert_eq!(sel.effort, None);
     }
 
@@ -2911,7 +3042,10 @@ mod tests {
                           "reasoningEffort": "high" }
         });
         let info = session_info_from_list_item(&item).expect("mapped");
-        assert_eq!(info.model.as_deref(), Some("deepseek-official/deepseek-v4-pro"));
+        assert_eq!(
+            info.model.as_deref(),
+            Some("deepseek-official/deepseek-v4-pro")
+        );
         assert_eq!(info.effort.as_deref(), Some("high"));
     }
 
@@ -3111,7 +3245,11 @@ mod tests {
             "the effort chip needs the same free ride as the model chip"
         );
         // A later page that names a route but no effort must not erase it.
-        merge_page(id, &[reply_event(900, "deepseek-official", "deepseek-v4-pro")], false);
+        merge_page(
+            id,
+            &[reply_event(900, "deepseek-official", "deepseek-v4-pro")],
+            false,
+        );
         assert_eq!(known_effort(id).as_deref(), Some("high"));
         forget_history(id);
     }
@@ -3328,7 +3466,9 @@ mod tests {
         /// Append one more message, as a live session would between two polls.
         fn append_message(&self, label: &str, chunks: usize) {
             let mut events = self.events.lock().unwrap();
-            let mut seq = events.last().map_or(0, |(_, e)| e["event"]["seq"].as_i64().unwrap() + 1);
+            let mut seq = events
+                .last()
+                .map_or(0, |(_, e)| e["event"]["seq"].as_i64().unwrap() + 1);
             let m = events.last().map_or(0, |(m, _)| m + 1);
             events.push((m, wire_user_event(seq, label)));
             seq += 1;
@@ -3597,7 +3737,11 @@ mod tests {
             })
         };
         let events = raw_history_with(page).expect("walk");
-        assert_eq!(events.len(), 2, "the boundary repeat is dropped: {events:?}");
+        assert_eq!(
+            events.len(),
+            2,
+            "the boundary repeat is dropped: {events:?}"
+        );
         assert_eq!(events[0]["seq"], 10, "oldest first");
         assert_eq!(events[1]["type"], "assistant/message");
         assert_eq!(
@@ -3656,7 +3800,10 @@ mod tests {
             Some(("openrouter", "anthropic/claude-haiku-4.5")),
             "the provider is the first segment; the rest is the model verbatim"
         );
-        assert_eq!(split_model("deepseek/deepseek-chat"), Some(("deepseek", "deepseek-chat")));
+        assert_eq!(
+            split_model("deepseek/deepseek-chat"),
+            Some(("deepseek", "deepseek-chat"))
+        );
     }
 
     /// A model with no provider cannot be selected, and guessing one would point
@@ -3711,8 +3858,8 @@ mod tests {
     #[test]
     fn only_a_chat_workspace_resolves_a_preset_and_it_walks_both_rpcs() {
         let _guard = crate::session::fleet_home_lock();
-        let base = std::env::temp_dir()
-            .join(format!("fleet-dsh-preset-test-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("fleet-dsh-preset-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(base.join("dsh-home")).unwrap();
         let prev_dsh = std::env::var_os("DSH_HOME");
@@ -3895,7 +4042,10 @@ mod tests {
 
         let pro = &cat.groups[0].models[0];
         assert_eq!(
-            pro.efforts.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            pro.efforts
+                .iter()
+                .map(|e| e.id.as_str())
+                .collect::<Vec<_>>(),
             ["off", "low", "high", "max"]
         );
         assert_eq!(pro.efforts[3].name, "Max");
@@ -3943,7 +4093,8 @@ mod tests {
 
         // A default with no effort is still a usable model.
         let mut bare = live_models_value();
-        bare["default"] = json!({ "provider": "openrouter", "model": "anthropic/claude-haiku-4.5" });
+        bare["default"] =
+            json!({ "provider": "openrouter", "model": "anthropic/claude-haiku-4.5" });
         let cat = parse_model_catalog(&bare);
         assert_eq!(
             cat.default_spec.as_deref(),
@@ -3989,10 +4140,15 @@ mod tests {
 
         // Nothing named: no RPC at all, and `current` is never consulted.
         assert_eq!(
-            resolve_selection(None, None, || panic!("must not resolve a model for nothing")),
+            resolve_selection(None, None, || panic!(
+                "must not resolve a model for nothing"
+            )),
             None
         );
-        assert_eq!(resolve_selection(Some(""), Some(""), || unreachable!()), None);
+        assert_eq!(
+            resolve_selection(Some(""), Some(""), || unreachable!()),
+            None
+        );
 
         // Effort only, but no model can be found: drop the effort rather than
         // guess — the old behaviour, now the explicit last resort.

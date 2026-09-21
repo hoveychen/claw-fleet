@@ -122,7 +122,10 @@ fn render_block(
     out.push_str("\n# Managed by Claw Fleet — do not edit. Injects Fleet's per-turn context.\n");
     out.push_str("- insert:\n");
     out.push_str(&format!("    - id: {ENTRY_ID}\n"));
-    out.push_str(&format!("      name: {}\n", yaml_scalar(&entry_path.to_string_lossy())));
+    out.push_str(&format!(
+        "      name: {}\n",
+        yaml_scalar(&entry_path.to_string_lossy())
+    ));
     out.push_str("      config:\n");
     if let Some(bin) = fleet_bin {
         out.push_str(&format!(

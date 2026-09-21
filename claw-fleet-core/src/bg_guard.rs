@@ -116,7 +116,11 @@ impl SessionCron {
     /// One line for the block reason: the schedule plus the prompt, so the agent
     /// recognises which of its own `/loop`s is about to evaporate.
     fn summarize(&self) -> String {
-        let kind = if self.recurring { "循环" } else { "一次性" };
+        let kind = if self.recurring {
+            "循环"
+        } else {
+            "一次性"
+        };
         format!(
             "  - [{kind} {}] {} (id: {})",
             self.schedule, self.prompt, self.id
@@ -534,7 +538,9 @@ mod tests {
             "<task-notification>\n<summary>Monitor event: \"run 2 milestones\"</summary>\n</task-notification>"
         ));
         // Leading whitespace must not defeat it.
-        assert!(is_harness_injected_prompt("\n  <task-notification></task-notification>"));
+        assert!(is_harness_injected_prompt(
+            "\n  <task-notification></task-notification>"
+        ));
     }
 
     #[test]

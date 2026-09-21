@@ -263,7 +263,8 @@ fn apply_interaction_mode_inner(user_title: &str, locale: &str) -> Result<(), St
         let existing = fs::read_to_string(&claude_md).unwrap_or_default();
         let new_content =
             crate::claude_md_block::compose(&existing, &block, BEGIN_MARKER, END_MARKER);
-        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))
+        crate::atomic_json::write_atomic(&claude_md, new_content.as_bytes())
+            .map_err(|e| format!("write CLAUDE.md: {e}"))
     })?;
     Ok(())
 }
@@ -284,7 +285,8 @@ fn remove_interaction_mode_inner() -> Result<(), String> {
             if let Ok(existing) = fs::read_to_string(&claude_md) {
                 let stripped = strip_sentinel_block(&existing);
                 if stripped != existing {
-                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes()).map_err(|e| format!("write CLAUDE.md: {e}"))?;
+                    crate::atomic_json::write_atomic(&claude_md, stripped.as_bytes())
+                        .map_err(|e| format!("write CLAUDE.md: {e}"))?;
                 }
             }
             Ok::<(), String>(())
@@ -384,7 +386,14 @@ mod tests {
 
         // The demand must stay unconditional. Softening it back into "try to" /
         // "it's fine to drift" hands the 97.5%-English prior the out it wants.
-        for hedge in ["尽量", "没关系", "できるだけ", "構いません", "가능한 한", "괜찮"] {
+        for hedge in [
+            "尽量",
+            "没关系",
+            "できるだけ",
+            "構いません",
+            "가능한 한",
+            "괜찮",
+        ] {
             for loc in ["zh", "ja", "ko"] {
                 let g = render_guidance("", loc);
                 let line = g
@@ -489,7 +498,10 @@ mod tests {
     #[test]
     fn render_embeds_askuserquestion_schema_for_deferred_case() {
         let g = render_guidance("Boss", "en");
-        assert!(g.contains("deferred"), "must explain deferred-tool semantics");
+        assert!(
+            g.contains("deferred"),
+            "must explain deferred-tool semantics"
+        );
         assert!(
             g.contains("\"questions\""),
             "must embed the AskUserQuestion schema as reference so agents can verify their call shape"

@@ -30,13 +30,19 @@ fn ts_mime_table() -> Vec<(String, String)> {
         .find("const MIME_BY_EXT")
         .expect("drift-guard: MIME_BY_EXT not found — was it renamed?");
     let body = &src[start..];
-    let end = body.find("\n};").expect("drift-guard: MIME_BY_EXT is not closed");
+    let end = body
+        .find("\n};")
+        .expect("drift-guard: MIME_BY_EXT is not closed");
     let entry = Regex::new(r#"(?m)^\s*"?([A-Za-z0-9_]+)"?:\s*"([^"]+)","#).unwrap();
     let out: Vec<(String, String)> = entry
         .captures_iter(&body[..end])
         .map(|c| (c[1].to_string(), c[2].to_string()))
         .collect();
-    assert!(out.len() > 30, "drift-guard: parsed only {} entries", out.len());
+    assert!(
+        out.len() > 30,
+        "drift-guard: parsed only {} entries",
+        out.len()
+    );
     out
 }
 
@@ -47,10 +53,16 @@ fn zip_mime_table_matches_the_backend() {
         let name = format!("sample.{ext}");
         let expected = claw_fleet_core::wiki::mime_for_path(Path::new(&name));
         if expected != mime {
-            wrong.push(format!(".{ext}: TS says '{mime}', mime_for_path says '{expected}'"));
+            wrong.push(format!(
+                ".{ext}: TS says '{mime}', mime_for_path says '{expected}'"
+            ));
         }
     }
-    assert!(wrong.is_empty(), "shared-ts/zipDir.ts drifted from wiki::mime_for_path:\n{}", wrong.join("\n"));
+    assert!(
+        wrong.is_empty(),
+        "shared-ts/zipDir.ts drifted from wiki::mime_for_path:\n{}",
+        wrong.join("\n")
+    );
 }
 
 #[test]

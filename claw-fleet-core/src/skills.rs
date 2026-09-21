@@ -734,7 +734,11 @@ mod tests {
         assert_eq!(user.scope, "user");
         assert!(user.can_delete, "the user's own dsh root is deletable");
 
-        assert_eq!(find("flat-dsh").source, "dsh", "flat .md is a dsh skill too");
+        assert_eq!(
+            find("flat-dsh").source,
+            "dsh",
+            "flat .md is a dsh skill too"
+        );
 
         let repo_item = find("dsh-repo-skill");
         assert_eq!(repo_item.source, "dsh");

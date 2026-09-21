@@ -57,8 +57,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::StreamExt;
-use tokio::sync::mpsc;
 use serde_json::Value;
+use tokio::sync::mpsc;
 
 use crate::dsh_client::DshClient;
 use crate::session::SessionStatus;
@@ -234,7 +234,9 @@ impl DshFrame {
     pub fn is_decision(&self) -> bool {
         matches!(
             self,
-            Self::ApprovalRequested { .. } | Self::QuestionRequested { .. } | Self::Withdrawn { .. }
+            Self::ApprovalRequested { .. }
+                | Self::QuestionRequested { .. }
+                | Self::Withdrawn { .. }
         )
     }
 }
@@ -494,6 +496,23 @@ impl LiveSession {
 /// Called once when a session's turn ends; `true` when it ran to completion.
 pub type TurnEndCallback = Box<dyn FnOnce(bool) + Send>;
 
+/// Receives every raw `session/follow` item of one session, before Fleet's
+/// phase decoding throws the payload away — see [`LiveView::tap`].
+pub type RawItemTap = Arc<dyn Fn(&Value) + Send + Sync>;
+
+/// A registered [`RawItemTap`]; dropping it unregisters the tap.
+pub struct TapHandle {
+    live: SharedLive,
+    session_id: String,
+    id: u64,
+}
+
+impl Drop for TapHandle {
+    fn drop(&mut self) {
+        self.live.untap(&self.session_id, self.id);
+    }
+}
+
 /// The per-session live view both sockets write into.
 ///
 /// Two maps, two locks: `sessions` is read on every scan tick, while `waiters`
@@ -528,6 +547,11 @@ pub struct LiveView {
     /// session is addressable is the server's call, and a later generation
     /// (or a later dsh) may answer differently.
     follow_refused: Mutex<HashSet<String>>,
+    /// Raw-item taps by session — see [`Self::tap`]. Its own lock for the same
+    /// reason `waiters` has one: taps run caller code on every follow item.
+    taps: Mutex<HashMap<String, Vec<(u64, RawItemTap)>>>,
+    /// Mints tap ids so a handle unregisters exactly its own tap.
+    next_tap_id: std::sync::atomic::AtomicU64,
 }
 
 /// Handle shared between the socket follower and its owner.
@@ -623,6 +647,66 @@ impl LiveView {
             .entry(session_id.to_string())
             .or_default()
             .push(cb);
+    }
+
+    /// Hand every raw `session/follow` item of `session_id` to `tap`, for as
+    /// long as the returned handle lives.
+    ///
+    /// The phase machine keeps only what a phase needs from a follow item and
+    /// drops the payload — the streamed text, the per-call usage, the tool
+    /// call's name. [`crate::dsh_explain`] needs exactly that payload for the
+    /// one session it forked, so the pump offers each item here first
+    /// ([`Self::offer_raw`]) and the fold happens on the tap's side. `live`
+    /// is the shared view the handle unregisters through.
+    pub fn tap(self: &Arc<Self>, session_id: &str, tap: RawItemTap) -> TapHandle {
+        let id = self
+            .next_tap_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.taps
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(session_id.to_string())
+            .or_default()
+            .push((id, tap));
+        TapHandle {
+            live: Arc::clone(self),
+            session_id: session_id.to_string(),
+            id,
+        }
+    }
+
+    fn untap(&self, session_id: &str, id: u64) {
+        let mut guard = self
+            .taps
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(list) = guard.get_mut(session_id) {
+            list.retain(|(tap_id, _)| *tap_id != id);
+            if list.is_empty() {
+                guard.remove(session_id);
+            }
+        }
+    }
+
+    /// Offer one raw follow item to `session_id`'s taps, if it has any.
+    ///
+    /// The taps are cloned out before they run: they are caller code and may
+    /// drop their own handle from inside, which would otherwise deadlock on
+    /// the registry lock.
+    pub fn offer_raw(&self, session_id: &str, value: &Value) {
+        let taps: Vec<RawItemTap> = {
+            let guard = self
+                .taps
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match guard.get(session_id) {
+                Some(list) if !list.is_empty() => list.iter().map(|(_, t)| Arc::clone(t)).collect(),
+                _ => return,
+            }
+        };
+        for tap in taps {
+            tap(value);
+        }
     }
 
     /// The phase to overlay for `session_id`, if a fresh one exists.
@@ -802,7 +886,10 @@ impl DshEventWatcher {
     pub fn start(port: u16, launch_token: &str) -> Self {
         let live: SharedLive = Arc::new(LiveView::default());
         let stop = Arc::new(AtomicBool::new(false));
-        let decisions = Arc::new(crate::dsh_decisions::DecisionBridge::start(port, launch_token));
+        let decisions = Arc::new(crate::dsh_decisions::DecisionBridge::start(
+            port,
+            launch_token,
+        ));
         let (follow_tx, follow_rx) = mpsc::unbounded_channel();
 
         let thread_states = live.clone();
@@ -914,6 +1001,13 @@ impl DshEventWatcher {
         self.live.on_turn_end(session_id, cb);
     }
 
+    /// Receive every raw follow item of `session_id` until the handle drops.
+    /// See [`LiveView::tap`]; opens the follow stream like [`Self::on_turn_end`].
+    pub fn tap(&self, session_id: &str, tap: RawItemTap) -> TapHandle {
+        self.follow(session_id);
+        self.live.tap(session_id, tap)
+    }
+
     /// How many sessions the socket has reported on. Diagnostics and tests.
     pub fn tracked(&self) -> usize {
         self.live.tracked()
@@ -933,9 +1027,8 @@ impl Drop for DshEventWatcher {
     }
 }
 
-type DshWs = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type DshWs =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Build one `{"type":"open",…}` request for a logical stream.
 ///
@@ -1001,15 +1094,7 @@ async fn run_mux(
         match connect(port, &cookie).await {
             Ok(ws) => {
                 states.set_unreachable(false);
-                pump(
-                    ws,
-                    &states,
-                    &decisions,
-                    &stop,
-                    &mut follow_rx,
-                    &mut wanted,
-                )
-                .await;
+                pump(ws, &states, &decisions, &stop, &mut follow_rx, &mut wanted).await;
             }
             Err(e) => {
                 // Reads that need a cut from this socket can stop waiting for
@@ -1112,6 +1197,10 @@ async fn pump(
                         match parse_envelope(&text) {
                             MuxEnvelope::Item { stream_id, value } => {
                                 let Some(kind) = streams.get(&stream_id) else { continue };
+                                // Taps see the payload the decode below discards.
+                                if let StreamKind::Follow(session_id) = kind {
+                                    states.offer_raw(session_id, &value);
+                                }
                                 let frame = decode_item(kind, &value);
                                 // Answerable frames go to the bridge's own
                                 // thread: raising a card and answering it are
@@ -1202,7 +1291,7 @@ mod tests {
     use serde_json::json;
 
     /// Verbatim `tool/call` frame captured off `events.mux`.
-     /// Every frame in this block is verbatim from a live capture: a node `ws`
+    /// Every frame in this block is verbatim from a live capture: a node `ws`
     /// client on `/api/remote.mux` against dsh 0.1.2-rc.1, driving one real turn
     /// and one real approval.
     fn item(stream_id: &str, value: Value) -> String {
@@ -1247,6 +1336,27 @@ mod tests {
                 reason_kind: None,
             }
         );
+    }
+
+    /// A tap sees the raw item for its own session only, and stops seeing
+    /// anything once its handle drops.
+    #[test]
+    fn taps_receive_raw_items_until_dropped() {
+        let live: SharedLive = Arc::new(LiveView::default());
+        let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let sink = seen.clone();
+        let handle = live.tap(
+            "session-a",
+            Arc::new(move |v: &Value| sink.lock().unwrap().push(v.clone())),
+        );
+        let item = json!({ "type": "event", "event": { "type": "turn/start", "seq": 1, "data": {} } });
+        live.offer_raw("session-a", &item);
+        live.offer_raw("session-b", &json!({ "type": "event" }));
+        assert_eq!(seen.lock().unwrap().as_slice(), &[item.clone()]);
+        drop(handle);
+        live.offer_raw("session-a", &item);
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert!(live.taps.lock().unwrap().is_empty());
     }
 
     /// Verbatim `turn/end` values: one that finished, one cut short by
@@ -1520,8 +1630,7 @@ mod tests {
         assert_eq!(events["payload"], json!({ "args": {} }));
         assert_eq!(events.as_object().unwrap().len(), 4);
 
-        let follow: Value =
-            serde_json::from_str(&open_frame("s-2", &follow("session-a"))).unwrap();
+        let follow: Value = serde_json::from_str(&open_frame("s-2", &follow("session-a"))).unwrap();
         assert_eq!(follow["endpoint"], "session/follow");
         assert_eq!(
             follow["payload"]["args"]["request"]["address"],
@@ -1551,30 +1660,56 @@ mod tests {
     #[test]
     fn resolves_the_block_type_of_every_observed_chunk_shape() {
         let cases = [
-            (json!({"type":"block-start","index":0,"blockType":"tool-call"}), Some("tool-call")),
-            (json!({"type":"block-start","index":0,"blockType":"text"}), Some("text")),
-            (json!({"type":"text-delta","index":0,"text":"hi"}), Some("text")),
-            (json!({"type":"tool-call-delta","index":0,"name":"bash"}), Some("tool-call")),
-            (json!({"type":"block-end","index":0,"block":{"type":"tool-call"}}), Some("tool-call")),
+            (
+                json!({"type":"block-start","index":0,"blockType":"tool-call"}),
+                Some("tool-call"),
+            ),
+            (
+                json!({"type":"block-start","index":0,"blockType":"text"}),
+                Some("text"),
+            ),
+            (
+                json!({"type":"text-delta","index":0,"text":"hi"}),
+                Some("text"),
+            ),
+            (
+                json!({"type":"tool-call-delta","index":0,"name":"bash"}),
+                Some("tool-call"),
+            ),
+            (
+                json!({"type":"block-end","index":0,"block":{"type":"tool-call"}}),
+                Some("tool-call"),
+            ),
             (json!({"type":"usage","usage":{"outputTokens":84}}), None),
-            (json!({"type":"finish","reason":{"kind":"tool-calls"}}), None),
+            (
+                json!({"type":"finish","reason":{"kind":"tool-calls"}}),
+                None,
+            ),
         ];
         for (chunk, want) in cases {
-            assert_eq!(
-                chunk_block_type(&chunk).as_deref(),
-                want,
-                "chunk {chunk}"
-            );
+            assert_eq!(chunk_block_type(&chunk).as_deref(), want, "chunk {chunk}");
         }
     }
 
     #[test]
     fn maps_the_turn_lifecycle_onto_fleet_phases() {
-        assert_eq!(phase_of("turn/start", None), Some(SessionStatus::Processing));
-        assert_eq!(phase_of("step/start", None), Some(SessionStatus::Processing));
+        assert_eq!(
+            phase_of("turn/start", None),
+            Some(SessionStatus::Processing)
+        );
+        assert_eq!(
+            phase_of("step/start", None),
+            Some(SessionStatus::Processing)
+        );
         assert_eq!(phase_of("tool/call", None), Some(SessionStatus::Executing));
-        assert_eq!(phase_of("tool/result", None), Some(SessionStatus::Processing));
-        assert_eq!(phase_of("turn/end", None), Some(SessionStatus::WaitingInput));
+        assert_eq!(
+            phase_of("tool/result", None),
+            Some(SessionStatus::Processing)
+        );
+        assert_eq!(
+            phase_of("turn/end", None),
+            Some(SessionStatus::WaitingInput)
+        );
         assert_eq!(
             phase_of("assistant/chunk", Some("text")),
             Some(SessionStatus::Streaming)
@@ -1659,7 +1794,11 @@ mod tests {
             },
             1_000,
         );
-        for (kind, at) in [("turn/start", 1_001u64), ("step/start", 1_002), ("tool/call", 1_003)] {
+        for (kind, at) in [
+            ("turn/start", 1_001u64),
+            ("step/start", 1_002),
+            ("tool/call", 1_003),
+        ] {
             live.apply(event(sid, kind), at);
         }
         assert_eq!(live.phase_of(sid, 1_004), Some(SessionStatus::Executing));
@@ -1674,7 +1813,10 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::<bool>::new()));
         for _ in 0..2 {
             let sink = seen.clone();
-            live.on_turn_end("session-a", Box::new(move |ok| sink.lock().unwrap().push(ok)));
+            live.on_turn_end(
+                "session-a",
+                Box::new(move |ok| sink.lock().unwrap().push(ok)),
+            );
         }
         // Another session's turn ending must not settle ours.
         live.apply(turn_end("session-b", "completed"), 1_000);
@@ -1696,7 +1838,10 @@ mod tests {
         let live = LiveView::default();
         let seen = Arc::new(Mutex::new(Vec::<bool>::new()));
         let sink = seen.clone();
-        live.on_turn_end("session-a", Box::new(move |ok| sink.lock().unwrap().push(ok)));
+        live.on_turn_end(
+            "session-a",
+            Box::new(move |ok| sink.lock().unwrap().push(ok)),
+        );
         live.apply(turn_end("session-a", "aborted"), 1_000);
         assert_eq!(*seen.lock().unwrap(), vec![false]);
     }
@@ -1708,7 +1853,10 @@ mod tests {
         let live = LiveView::default();
         let seen = Arc::new(Mutex::new(Vec::<bool>::new()));
         let sink = seen.clone();
-        live.on_turn_end("session-a", Box::new(move |ok| sink.lock().unwrap().push(ok)));
+        live.on_turn_end(
+            "session-a",
+            Box::new(move |ok| sink.lock().unwrap().push(ok)),
+        );
         live.abandon_all();
         assert_eq!(*seen.lock().unwrap(), vec![false]);
     }

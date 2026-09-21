@@ -101,9 +101,9 @@ fn split_top_level_segments(cmd: &str) -> Vec<(Option<Connector>, String)> {
     let mut in_double = false;
     let mut chars = cmd.chars().peekable();
     let flush = |pending: &mut Option<Connector>,
-                     cur: &mut String,
-                     segments: &mut Vec<(Option<Connector>, String)>,
-                     next: Connector| {
+                 cur: &mut String,
+                 segments: &mut Vec<(Option<Connector>, String)>,
+                 next: Connector| {
         segments.push((*pending, std::mem::take(cur)));
         *pending = Some(next);
     };
@@ -214,10 +214,7 @@ fn visit_top_level(cmd: &TopLevelCommand<String>, out: &mut Vec<SimpleCommand>) 
     visit_command(&cmd.0, out);
 }
 
-fn visit_command(
-    cmd: &Command<AndOrList<DefaultListableCommand>>,
-    out: &mut Vec<SimpleCommand>,
-) {
+fn visit_command(cmd: &Command<AndOrList<DefaultListableCommand>>, out: &mut Vec<SimpleCommand>) {
     match cmd {
         Command::Job(list) | Command::List(list) => {
             visit_listable(&list.first, out);
@@ -436,9 +433,8 @@ fn flatten_simple(s: &SimpleT) -> Option<String> {
 /// honoured.  Whitespace-only rules return an empty `Vec`, which never
 /// matches anything (so a blank rule won't accidentally allow every command).
 pub fn tokenize_rule(rule: &str) -> Vec<String> {
-    shell_words::split(rule).unwrap_or_else(|_| {
-        rule.split_whitespace().map(|s| s.to_string()).collect()
-    })
+    shell_words::split(rule)
+        .unwrap_or_else(|_| rule.split_whitespace().map(|s| s.to_string()).collect())
 }
 
 /// Common command wrappers that *delegate* to the real command in their
@@ -780,9 +776,8 @@ pub fn extract_structured_view(cmd: &str) -> CommandView {
         // Last resort (e.g. unterminated quote → no recoverable segments):
         // keep the raw command as a single leaf so the UI still shows
         // something readable.
-        let argv = shell_words::split(cmd).unwrap_or_else(|_| {
-            cmd.split_whitespace().map(|s| s.to_string()).collect()
-        });
+        let argv = shell_words::split(cmd)
+            .unwrap_or_else(|_| cmd.split_whitespace().map(|s| s.to_string()).collect());
         let mut single = ViewBuilder::new();
         if !argv.is_empty() {
             single.leaves.push(CommandLeaf {
@@ -883,9 +878,7 @@ fn visit_compound_for_view(
             all
         }
         CompoundCommandKind::For { body, .. } => body.iter().collect(),
-        CompoundCommandKind::Case { arms, .. } => {
-            arms.iter().flat_map(|a| a.body.iter()).collect()
-        }
+        CompoundCommandKind::Case { arms, .. } => arms.iter().flat_map(|a| a.body.iter()).collect(),
     };
     for (i, child) in cmds.iter().enumerate() {
         if i > 0 {
@@ -1470,10 +1463,7 @@ mod tests {
 
     #[test]
     fn rule_matches_through_sudo_wrapper() {
-        assert!(cmd_matches_rule(
-            "sudo curl https://example.com",
-            "curl"
-        ));
+        assert!(cmd_matches_rule("sudo curl https://example.com", "curl"));
         assert!(cmd_matches_rule(
             "sudo -u root curl https://example.com",
             "curl"
@@ -1658,9 +1648,7 @@ mod tests {
 
     #[test]
     fn view_python_c_treats_script_as_opaque() {
-        let v = extract_structured_view(
-            r#"python3 -c "import os; os.system('rm -rf /')""#,
-        );
+        let v = extract_structured_view(r#"python3 -c "import os; os.system('rm -rf /')""#);
         let nested = v.leaves[0].nested.as_ref().expect("python nested");
         assert_eq!(nested.kind, NestedKind::PythonC);
         // Python script is a single opaque leaf — no shell-parsing of `;`.
@@ -1675,9 +1663,7 @@ mod tests {
         // command, so the card MUST surface it too — otherwise the very script
         // that tripped the audit (`python3 - <<EOF ... exec(...) ... EOF`) is
         // invisible and the operator can only blind-approve.
-        let v = extract_structured_view(
-            "python3 - <<'PYEOF'\nimport os\nexec('rm -rf /')\nPYEOF",
-        );
+        let v = extract_structured_view("python3 - <<'PYEOF'\nimport os\nexec('rm -rf /')\nPYEOF");
         let leaf = &v.leaves[0];
         assert_eq!(leaf.argv[0], "python3");
         let nested = leaf
@@ -1748,22 +1734,28 @@ mod tests {
         let v = extract_structured_view(cmd);
         for leaf in &v.leaves {
             assert!(
-                !leaf.argv.iter().any(|t| matches!(t.as_str(), ";" | "|" | "&&" | "||" | "&")),
+                !leaf
+                    .argv
+                    .iter()
+                    .any(|t| matches!(t.as_str(), ";" | "|" | "&&" | "||" | "&")),
                 "no leaf may carry a raw shell connector as an argv token; got {:?}",
                 leaf.argv
             );
         }
         // The eval segment must surface as a leaf headed by `patchwright-cli eval`.
         assert!(
-            v.leaves.iter().any(|l| l.argv.starts_with(&[
-                "patchwright-cli".to_string(),
-                "eval".to_string()
-            ])),
+            v.leaves.iter().any(|l| l
+                .argv
+                .starts_with(&["patchwright-cli".to_string(), "eval".to_string()])),
             "expected a `patchwright-cli eval` leaf; got {:?}",
             v.leaves.iter().map(|l| &l.argv).collect::<Vec<_>>()
         );
         // And the `cd` leaf must be just `cd <dir>`, not the whole flattened chain.
-        let cd_leaves: Vec<_> = v.leaves.iter().filter(|l| l.argv.first().map(|s| s == "cd").unwrap_or(false)).collect();
+        let cd_leaves: Vec<_> = v
+            .leaves
+            .iter()
+            .filter(|l| l.argv.first().map(|s| s == "cd").unwrap_or(false))
+            .collect();
         assert!(
             cd_leaves.iter().all(|l| l.argv.len() <= 2),
             "a `cd` leaf ballooned into a flattened chain: {:?}",
@@ -1780,9 +1772,7 @@ mod tests {
 
     #[test]
     fn view_nested_bash_then_python() {
-        let v = extract_structured_view(
-            r#"bash -c "python3 -c \"print(1)\"""#,
-        );
+        let v = extract_structured_view(r#"bash -c "python3 -c \"print(1)\"""#);
         // outer bash leaf
         let outer = &v.leaves[0];
         let bash_nested = outer.nested.as_ref().expect("bash nested");
@@ -1809,7 +1799,10 @@ mod tests {
         // Bug A: `echo "task=$id"` used to render as `["echo", "task="]`
         // because Param flattened to "" in the display path.
         let v = extract_structured_view(r#"echo "task=$id""#);
-        assert_eq!(view_argvs(&v), vec![vec!["echo".to_string(), "task=$id".into()]]);
+        assert_eq!(
+            view_argvs(&v),
+            vec![vec!["echo".to_string(), "task=$id".into()]]
+        );
     }
 
     #[test]
@@ -1861,9 +1854,7 @@ mod tests {
         // Make sure a leading assignment followed by another top-level cmd
         // gets the connectors right: curl, jq joined by Pipe, then Semi to
         // the echo.
-        let v = extract_structured_view(
-            r#"x=$(curl a | jq .) ; echo done"#,
-        );
+        let v = extract_structured_view(r#"x=$(curl a | jq .) ; echo done"#);
         assert_eq!(v.leaves.len(), 3);
         assert_eq!(v.connectors, vec![Connector::Pipe, Connector::Semi]);
     }
@@ -1887,9 +1878,18 @@ mod tests {
             already_allowed: false,
         };
         let json = serde_json::to_string(&leaf).unwrap();
-        assert!(!json.contains("triggering"), "default-false must skip serializing: {json}");
-        assert!(!json.contains("alreadyAllowed"), "default-false must skip serializing: {json}");
-        assert!(!json.contains("already_allowed"), "default-false must skip serializing: {json}");
+        assert!(
+            !json.contains("triggering"),
+            "default-false must skip serializing: {json}"
+        );
+        assert!(
+            !json.contains("alreadyAllowed"),
+            "default-false must skip serializing: {json}"
+        );
+        assert!(
+            !json.contains("already_allowed"),
+            "default-false must skip serializing: {json}"
+        );
     }
 
     #[test]

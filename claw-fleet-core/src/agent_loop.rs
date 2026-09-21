@@ -138,7 +138,10 @@ impl LoopRecord {
     }
 
     fn remaining_iterations(&self) -> u32 {
-        let cap = self.max_iterations.unwrap_or(MAX_ITERATIONS).min(MAX_ITERATIONS);
+        let cap = self
+            .max_iterations
+            .unwrap_or(MAX_ITERATIONS)
+            .min(MAX_ITERATIONS);
         cap.saturating_sub(self.iterations_done)
     }
 
@@ -641,26 +644,32 @@ type SpawnFn<'a> = dyn Fn(
 /// wedges or doubles. The claimed record's advanced schedule stands either way.
 pub fn fire_once(id: &str, generation: u64) -> Result<LoopRecord, ClaimError> {
     let dir = loops_dir().ok_or(ClaimError::Gone)?;
-    fire_once_in(&dir, id, generation, now_ms(), &move |source, ws, prompt, model, effort, perm, ep| {
-        // Route by the loop's agent source so a codex loop wakes up as codex,
-        // not silently as claude. Blank/"claude" resolves to the Claude source
-        // inside `spawn_session`. The entrypoint stamp (LOOP_ENTRYPOINT) is
-        // honoured by the Claude source; the codex source ignores it and carries
-        // its Fleet-owned marker via the launch env (see `codex_launch`).
-        crate::agent_source::spawn_session(
-            source,
-            &crate::agent_source::SpawnSpec {
-                workspace_path: ws.to_string(),
-                prompt: prompt.to_string(),
-                model: model.map(str::to_string),
-                effort: effort.map(str::to_string),
-                permission_mode: perm.map(str::to_string),
-                session_id: None,
-                entrypoint: ep.to_string(),
-            images: Vec::new(),
-            },
-        )
-    })
+    fire_once_in(
+        &dir,
+        id,
+        generation,
+        now_ms(),
+        &move |source, ws, prompt, model, effort, perm, ep| {
+            // Route by the loop's agent source so a codex loop wakes up as codex,
+            // not silently as claude. Blank/"claude" resolves to the Claude source
+            // inside `spawn_session`. The entrypoint stamp (LOOP_ENTRYPOINT) is
+            // honoured by the Claude source; the codex source ignores it and carries
+            // its Fleet-owned marker via the launch env (see `codex_launch`).
+            crate::agent_source::spawn_session(
+                source,
+                &crate::agent_source::SpawnSpec {
+                    workspace_path: ws.to_string(),
+                    prompt: prompt.to_string(),
+                    model: model.map(str::to_string),
+                    effort: effort.map(str::to_string),
+                    permission_mode: perm.map(str::to_string),
+                    session_id: None,
+                    entrypoint: ep.to_string(),
+                    images: Vec::new(),
+                },
+            )
+        },
+    )
 }
 
 fn fire_once_in(
@@ -712,25 +721,27 @@ fn fire_once_in(
 /// on time. Returns the spawned session id, if any.
 pub fn run_now(id: &str) -> Result<Option<String>, String> {
     let dir = loops_dir().ok_or_else(|| "no fleet home".to_string())?;
-    run_now_in(
-        &dir,
-        id,
-        &move |source, ws, prompt, model, effort, perm, ep| {
-            crate::agent_source::spawn_session(
-                source,
-                &crate::agent_source::SpawnSpec {
-                    workspace_path: ws.to_string(),
-                    prompt: prompt.to_string(),
-                    model: model.map(str::to_string),
-                    effort: effort.map(str::to_string),
-                    permission_mode: perm.map(str::to_string),
-                    session_id: None,
-                    entrypoint: ep.to_string(),
+    run_now_in(&dir, id, &move |source,
+                                ws,
+                                prompt,
+                                model,
+                                effort,
+                                perm,
+                                ep| {
+        crate::agent_source::spawn_session(
+            source,
+            &crate::agent_source::SpawnSpec {
+                workspace_path: ws.to_string(),
+                prompt: prompt.to_string(),
+                model: model.map(str::to_string),
+                effort: effort.map(str::to_string),
+                permission_mode: perm.map(str::to_string),
+                session_id: None,
+                entrypoint: ep.to_string(),
                 images: Vec::new(),
-                },
-            )
-        },
-    )
+            },
+        )
+    })
 }
 
 fn run_now_in(dir: &Path, id: &str, spawn: &SpawnFn<'_>) -> Result<Option<String>, String> {
@@ -790,7 +801,9 @@ fn decide(
     let wait = rec.due_in_ms(now);
     if wait > 0 {
         let cap_ms = POLL_CAP.as_millis() as u64;
-        return LoopStep::Nap { ms: cap_ms.min(wait) };
+        return LoopStep::Nap {
+            ms: cap_ms.min(wait),
+        };
     }
     // Due. No gate ⇒ always fire. Gated ⇒ fire only if the gate passes, else
     // skip this tick (the interval is the poll cadence).
@@ -875,8 +888,8 @@ pub fn run_timer_blocking(id: &str, mut generation: u64) {
 /// one win (see module docs). Used by `fleet loop create` and the reconcile
 /// sweep; a running timer re-arms itself in-process and does not call this.
 pub fn arm_timer(rec: &LoopRecord) -> Result<u32, String> {
-    let fleet = crate::hooks::resolve_fleet_binary()
-        .ok_or("cannot find fleet binary to arm loop timer")?;
+    let fleet =
+        crate::hooks::resolve_fleet_binary().ok_or("cannot find fleet binary to arm loop timer")?;
     arm_timer_with(&fleet, rec)
 }
 
@@ -906,11 +919,7 @@ pub fn reconcile() -> Vec<String> {
     })
 }
 
-fn reconcile_in(
-    dir: &Path,
-    now: u64,
-    arm: &mut dyn FnMut(&LoopRecord),
-) -> Vec<String> {
+fn reconcile_in(dir: &Path, now: u64, arm: &mut dyn FnMut(&LoopRecord)) -> Vec<String> {
     let mut rearmed = Vec::new();
     for rec in list_in(dir) {
         if !rec.is_live(now) {
@@ -947,9 +956,7 @@ fn arm_timer_with(fleet_bin: &str, rec: &LoopRecord) -> Result<u32, String> {
             Ok(())
         });
     }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("spawn loop timer: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("spawn loop timer: {e}"))?;
     let pid = child.id();
     // Reap the direct child handle; the timer keeps running detached.
     std::thread::spawn(move || {
@@ -967,8 +974,22 @@ mod tests {
     }
 
     fn make(d: &Path, id: &str, now: u64) -> LoopRecord {
-        create_in(d, "/ws", "check the deploy", None, 300, None, None, None, None, Some("s1"), None, id, now)
-            .unwrap()
+        create_in(
+            d,
+            "/ws",
+            "check the deploy",
+            None,
+            300,
+            None,
+            None,
+            None,
+            None,
+            Some("s1"),
+            None,
+            id,
+            now,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -987,7 +1008,9 @@ mod tests {
     fn rejects_sub_minute_and_garbage_intervals() {
         assert!(parse_interval("10s").unwrap_err().contains("minimum"));
         assert!(parse_interval("0").unwrap_err().contains("minimum"));
-        assert!(parse_interval("5x").unwrap_err().contains("unknown interval unit"));
+        assert!(parse_interval("5x")
+            .unwrap_err()
+            .contains("unknown interval unit"));
         assert!(parse_interval("abc").is_err());
         assert!(parse_interval("").is_err());
     }
@@ -1008,23 +1031,62 @@ mod tests {
     #[test]
     fn create_rejects_empty_prompt_and_zero_iterations() {
         let d = dir();
-        assert!(create_in(d.path(), "/ws", "  ", None, 300, None, None, None, None, None, None, "x", 1)
-            .unwrap_err()
-            .contains("prompt is required"));
-        assert!(
-            create_in(d.path(), "/ws", "p", None, 300, Some(0), None, None, None, None, None, "x", 1)
-                .unwrap_err()
-                .contains("at least 1")
-        );
+        assert!(create_in(
+            d.path(),
+            "/ws",
+            "  ",
+            None,
+            300,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "x",
+            1
+        )
+        .unwrap_err()
+        .contains("prompt is required"));
+        assert!(create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300,
+            Some(0),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "x",
+            1
+        )
+        .unwrap_err()
+        .contains("at least 1"));
     }
 
     #[test]
     fn update_changes_interval_prompt_max_and_bumps_generation() {
         let d = dir();
         make(d.path(), "l1", 0); // interval 300, next_fire 300_000
-        let u = update_in(d.path(), "l1", Some(600), Some("new prompt"), None, Some(3), 1_000_000).unwrap();
+        let u = update_in(
+            d.path(),
+            "l1",
+            Some(600),
+            Some("new prompt"),
+            None,
+            Some(3),
+            1_000_000,
+        )
+        .unwrap();
         assert_eq!(u.interval_secs, 600);
-        assert_eq!(u.next_fire_at, 1_000_000 + 600 * 1000, "reschedule from now");
+        assert_eq!(
+            u.next_fire_at,
+            1_000_000 + 600 * 1000,
+            "reschedule from now"
+        );
         assert_eq!(u.prompt, "new prompt");
         assert_eq!(u.max_iterations, Some(3));
         assert_eq!(u.generation, 1, "bump supersedes the old timer");
@@ -1040,15 +1102,28 @@ mod tests {
         assert_eq!(u.next_fire_at, 300_000);
         assert_eq!(u.prompt, "p2");
         // sub-minute interval rejected
-        assert!(update_in(d.path(), "l1", Some(10), None, None, None, 0).unwrap_err().contains("minimum"));
+        assert!(update_in(d.path(), "l1", Some(10), None, None, None, 0)
+            .unwrap_err()
+            .contains("minimum"));
         // empty prompt rejected
-        assert!(update_in(d.path(), "l1", None, Some("  "), None, None, 0).unwrap_err().contains("cannot be empty"));
+        assert!(update_in(d.path(), "l1", None, Some("  "), None, None, 0)
+            .unwrap_err()
+            .contains("cannot be empty"));
         // zero max rejected
-        assert!(update_in(d.path(), "l1", None, None, None, Some(0), 0).unwrap_err().contains("at least 1"));
+        assert!(update_in(d.path(), "l1", None, None, None, Some(0), 0)
+            .unwrap_err()
+            .contains("at least 1"));
         // max clamped to ceiling
-        assert_eq!(update_in(d.path(), "l1", None, None, None, Some(99_999), 0).unwrap().max_iterations, Some(MAX_ITERATIONS));
+        assert_eq!(
+            update_in(d.path(), "l1", None, None, None, Some(99_999), 0)
+                .unwrap()
+                .max_iterations,
+            Some(MAX_ITERATIONS)
+        );
         // unknown id
-        assert!(update_in(d.path(), "nope", None, Some("x"), None, None, 0).unwrap_err().contains("no loop with id"));
+        assert!(update_in(d.path(), "nope", None, Some("x"), None, None, 0)
+            .unwrap_err()
+            .contains("no loop with id"));
     }
 
     /// The title is the label the Schedule view shows instead of two clamped
@@ -1058,12 +1133,45 @@ mod tests {
     fn title_set_blank_normalised_and_clearable() {
         let d = dir();
         // Blank at create time is no title at all.
-        let rec = create_in(d.path(), "/ws", "p", Some("   "), 300, None, None, None, None, None, None, "l1", 0).unwrap();
+        let rec = create_in(
+            d.path(),
+            "/ws",
+            "p",
+            Some("   "),
+            300,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "l1",
+            0,
+        )
+        .unwrap();
         assert_eq!(rec.title, None, "blank title normalises to None");
         // A real title is trimmed and persisted.
-        let rec = create_in(d.path(), "/ws", "p", Some("  每日更新日志  "), 300, None, None, None, None, None, None, "l2", 0).unwrap();
+        let rec = create_in(
+            d.path(),
+            "/ws",
+            "p",
+            Some("  每日更新日志  "),
+            300,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "l2",
+            0,
+        )
+        .unwrap();
         assert_eq!(rec.title.as_deref(), Some("每日更新日志"));
-        assert_eq!(get_in(d.path(), "l2").unwrap().title.as_deref(), Some("每日更新日志"));
+        assert_eq!(
+            get_in(d.path(), "l2").unwrap().title.as_deref(),
+            Some("每日更新日志")
+        );
         // update sets it on a record that had none…
         let u = update_in(d.path(), "l1", None, None, Some("补个名字"), None, 0).unwrap();
         assert_eq!(u.title.as_deref(), Some("补个名字"));
@@ -1072,7 +1180,11 @@ mod tests {
         assert_eq!(u.title, None, r#"Some("") clears the title"#);
         // Omitting the field leaves an existing title alone.
         let u = update_in(d.path(), "l2", None, Some("p2"), None, None, 0).unwrap();
-        assert_eq!(u.title.as_deref(), Some("每日更新日志"), "None leaves it untouched");
+        assert_eq!(
+            u.title.as_deref(),
+            Some("每日更新日志"),
+            "None leaves it untouched"
+        );
     }
 
     /// Records written before titles existed must still deserialize.
@@ -1144,7 +1256,10 @@ mod tests {
         let d = dir();
         make(d.path(), "l1", 0);
         stop_in(d.path(), "l1");
-        assert_eq!(claim_fire_in(d.path(), "l1", 0, 300_000).unwrap_err(), ClaimError::Gone);
+        assert_eq!(
+            claim_fire_in(d.path(), "l1", 0, 300_000).unwrap_err(),
+            ClaimError::Gone
+        );
     }
 
     #[test]
@@ -1173,7 +1288,22 @@ mod tests {
     #[test]
     fn a_bounded_loop_retires_itself_on_the_final_iteration() {
         let d = dir();
-        create_in(d.path(), "/ws", "twice", None, 60, Some(2), None, None, None, None, None, "l1", 0).unwrap();
+        create_in(
+            d.path(),
+            "/ws",
+            "twice",
+            None,
+            60,
+            Some(2),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "l1",
+            0,
+        )
+        .unwrap();
         let first = claim_fire_in(d.path(), "l1", 0, 60_000).unwrap();
         assert_eq!(first.iterations_done, 1);
         assert!(get_in(d.path(), "l1").is_some(), "one iteration left");
@@ -1184,7 +1314,10 @@ mod tests {
             get_in(d.path(), "l1").is_none(),
             "final iteration must retire the record so no timer re-arms"
         );
-        assert_eq!(claim_fire_in(d.path(), "l1", 2, 180_000).unwrap_err(), ClaimError::Gone);
+        assert_eq!(
+            claim_fire_in(d.path(), "l1", 2, 180_000).unwrap_err(),
+            ClaimError::Gone
+        );
     }
 
     /// A loop is an agent that spawns agents. `max_iterations` is user-supplied;
@@ -1192,8 +1325,22 @@ mod tests {
     #[test]
     fn max_iterations_is_clamped_to_the_hard_ceiling() {
         let d = dir();
-        let rec =
-            create_in(d.path(), "/ws", "p", None, 60, Some(99_999), None, None, None, None, None, "l1", 0).unwrap();
+        let rec = create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            60,
+            Some(99_999),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "l1",
+            0,
+        )
+        .unwrap();
         assert_eq!(rec.max_iterations, Some(MAX_ITERATIONS));
     }
 
@@ -1221,8 +1368,16 @@ mod tests {
     fn ok_spawner<'a>(
         calls: &'a RefCell<Vec<SpawnCall>>,
         sid: &'a str,
-    ) -> impl Fn(&str, &str, &str, Option<&str>, Option<&str>, Option<&str>, &str)
-        -> Result<crate::session_launch::SpawnSessionResponse, String> + 'a {
+    ) -> impl Fn(
+        &str,
+        &str,
+        &str,
+        Option<&str>,
+        Option<&str>,
+        Option<&str>,
+        &str,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String>
+           + 'a {
         move |source, ws, prompt, model, _effort, _perm, ep| {
             calls.borrow_mut().push(SpawnCall {
                 agent_source: source.to_string(),
@@ -1242,14 +1397,31 @@ mod tests {
     fn fire_once_claims_spawns_and_records_the_session() {
         let d = dir();
         create_in(
-            d.path(), "/ws", "check the deploy", None, 300, None,
-            Some("claude-fable-5"), Some("high"), None, None, None, "l1", 0,
+            d.path(),
+            "/ws",
+            "check the deploy",
+            None,
+            300,
+            None,
+            Some("claude-fable-5"),
+            Some("high"),
+            None,
+            None,
+            None,
+            "l1",
+            0,
         )
         .unwrap();
 
         let calls = RefCell::new(Vec::new());
-        let claimed =
-            fire_once_in(d.path(), "l1", 0, 300_000, &ok_spawner(&calls, "iter-sid-1")).unwrap();
+        let claimed = fire_once_in(
+            d.path(),
+            "l1",
+            0,
+            300_000,
+            &ok_spawner(&calls, "iter-sid-1"),
+        )
+        .unwrap();
 
         assert_eq!(claimed.iterations_done, 1);
         assert_eq!(claimed.generation, 1);
@@ -1278,7 +1450,10 @@ mod tests {
     fn history_accumulates_and_caps_at_max() {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path();
-        create_in(dir, "/ws", "p", None, 60, None, None, None, None, None, None, "l1", 0).unwrap();
+        create_in(
+            dir, "/ws", "p", None, 60, None, None, None, None, None, None, "l1", 0,
+        )
+        .unwrap();
 
         // Record more runs than the cap; each with a distinct id and timestamp.
         let total = MAX_HISTORY + 5;
@@ -1289,10 +1464,19 @@ mod tests {
         let rec = get_in(dir, "l1").unwrap();
         assert_eq!(rec.history.len(), MAX_HISTORY, "capped at MAX_HISTORY");
         // Oldest `total - MAX_HISTORY` runs were dropped; the tail is the newest.
-        assert_eq!(rec.history.first().unwrap().session_id, format!("sid-{}", total - MAX_HISTORY));
-        assert_eq!(rec.history.last().unwrap().session_id, format!("sid-{}", total - 1));
+        assert_eq!(
+            rec.history.first().unwrap().session_id,
+            format!("sid-{}", total - MAX_HISTORY)
+        );
+        assert_eq!(
+            rec.history.last().unwrap().session_id,
+            format!("sid-{}", total - 1)
+        );
         // last_session_id mirrors the newest run.
-        assert_eq!(rec.last_session_id.as_deref(), Some(format!("sid-{}", total - 1).as_str()));
+        assert_eq!(
+            rec.last_session_id.as_deref(),
+            Some(format!("sid-{}", total - 1).as_str())
+        );
     }
 
     /// The claim happens before the spawn; if two timers race, the second's
@@ -1306,8 +1490,18 @@ mod tests {
         fire_once_in(d.path(), "l1", 0, 300_000, &ok_spawner(&calls, "s1")).unwrap();
         // second timer, still holding gen 0, must be refused with no spawn
         let err = fire_once_in(d.path(), "l1", 0, 300_000, &ok_spawner(&calls, "s2")).unwrap_err();
-        assert_eq!(err, ClaimError::StaleGeneration { expected: 0, found: 1 });
-        assert_eq!(calls.into_inner().len(), 1, "the stale timer must not spawn");
+        assert_eq!(
+            err,
+            ClaimError::StaleGeneration {
+                expected: 0,
+                found: 1
+            }
+        );
+        assert_eq!(
+            calls.into_inner().len(),
+            1,
+            "the stale timer must not spawn"
+        );
     }
 
     /// A spawn failure must not un-claim (that would risk a double-fire) — the
@@ -1316,8 +1510,16 @@ mod tests {
     fn a_spawn_failure_still_advances_the_schedule() {
         let d = dir();
         make(d.path(), "l1", 0);
-        let failing = |_src: &str, _ws: &str, _p: &str, _m: Option<&str>, _e: Option<&str>, _pm: Option<&str>, _ep: &str|
-            -> Result<crate::session_launch::SpawnSessionResponse, String> { Err("boom".into()) };
+        let failing = |_src: &str,
+                       _ws: &str,
+                       _p: &str,
+                       _m: Option<&str>,
+                       _e: Option<&str>,
+                       _pm: Option<&str>,
+                       _ep: &str|
+         -> Result<crate::session_launch::SpawnSessionResponse, String> {
+            Err("boom".into())
+        };
         let claimed = fire_once_in(d.path(), "l1", 0, 300_000, &failing).unwrap();
         assert_eq!(claimed.iterations_done, 1);
         // record persisted with advanced generation, still live for next time
@@ -1347,7 +1549,22 @@ mod tests {
     fn reconcile_rearms_only_stranded_loops() {
         let d = dir();
         // "healthy": due in the future — a timer is presumably driving it
-        create_in(d.path(), "/ws", "p", None, 300, None, None, None, None, None, None, "healthy", 1_000_000).unwrap();
+        create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "healthy",
+            1_000_000,
+        )
+        .unwrap();
         // "napping": due, but only just — inside the grace window, timer likely mid-nap
         let mut napping = make(d.path(), "napping", 0);
         napping.next_fire_at = 1_000_000 - 10_000; // 10s overdue < grace
@@ -1360,7 +1577,11 @@ mod tests {
         let mut armed = Vec::new();
         let rearmed = reconcile_in(d.path(), 1_000_000, &mut |r| armed.push(r.id.clone()));
 
-        assert_eq!(rearmed, vec!["stranded"], "only the stranded loop is re-armed");
+        assert_eq!(
+            rearmed,
+            vec!["stranded"],
+            "only the stranded loop is re-armed"
+        );
         assert_eq!(armed, vec!["stranded"]);
     }
 
@@ -1368,8 +1589,22 @@ mod tests {
     fn reconcile_ignores_exhausted_and_expired() {
         let d = dir();
         // exhausted: max 1 iteration, already done — overdue but must not re-arm
-        let mut done =
-            create_in(d.path(), "/ws", "p", None, 60, Some(1), None, None, None, None, None, "done", 0).unwrap();
+        let mut done = create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            60,
+            Some(1),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "done",
+            0,
+        )
+        .unwrap();
         done.iterations_done = 1;
         done.next_fire_at = 0; // very overdue
         write_record(d.path(), &done).unwrap();
@@ -1411,8 +1646,22 @@ mod tests {
         assert_eq!(rec.model.as_deref(), Some("claude-fable-5"));
         assert_eq!(rec.effort.as_deref(), Some("high"));
         // blank strings are not a model
-        let rec = create_in(d.path(), "/ws", "p", None, 300, None, Some("  "), Some(""), None, None, None, "l2", 0)
-            .unwrap();
+        let rec = create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300,
+            None,
+            Some("  "),
+            Some(""),
+            None,
+            None,
+            None,
+            "l2",
+            0,
+        )
+        .unwrap();
         assert_eq!(rec.model, None);
         assert_eq!(rec.effort, None);
     }
@@ -1424,13 +1673,30 @@ mod tests {
     #[test]
     fn codex_loop_fires_iterations_on_codex_source() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", None, 60, None, None, None, Some("codex"), None, None, "cx", 0)
-            .unwrap();
+        create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            60,
+            None,
+            None,
+            None,
+            Some("codex"),
+            None,
+            None,
+            "cx",
+            0,
+        )
+        .unwrap();
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cx", 0, 300_000, &ok_spawner(&calls, "cx-sid")).unwrap();
         let calls = calls.into_inner();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].agent_source, "codex", "codex loop must route to codex spawner");
+        assert_eq!(
+            calls[0].agent_source, "codex",
+            "codex loop must route to codex spawner"
+        );
     }
 
     /// Companion: a loop with no agent_source (legacy record / claude session)
@@ -1438,12 +1704,34 @@ mod tests {
     #[test]
     fn loop_without_source_defaults_to_claude() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", None, 60, None, None, None, None, None, None, "cl", 0).unwrap();
-        assert_eq!(get_in(d.path(), "cl").unwrap().agent_source, None, "no source stored");
+        create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            60,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "cl",
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            get_in(d.path(), "cl").unwrap().agent_source,
+            None,
+            "no source stored"
+        );
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cl", 0, 300_000, &ok_spawner(&calls, "cl-sid")).unwrap();
         let calls = calls.into_inner();
-        assert_eq!(calls[0].agent_source, "claude", "absent source falls back to claude");
+        assert_eq!(
+            calls[0].agent_source, "claude",
+            "absent source falls back to claude"
+        );
     }
 
     #[test]
@@ -1463,7 +1751,10 @@ mod tests {
         assert!(calls[0].prompt.contains("check the deploy"));
         assert!(calls[0].prompt.contains("手动运行"), "run-now footer");
         // Manual run has a human present — not exempt, no unattended marker.
-        assert!(!calls[0].prompt.contains("无人值守"), "manual run stays interactive");
+        assert!(
+            !calls[0].prompt.contains("无人值守"),
+            "manual run stays interactive"
+        );
 
         // next_fire_at / iterations_done / generation all unchanged — the
         // recurring schedule is untouched by a manual run.
@@ -1488,8 +1779,19 @@ mod tests {
     fn create_stamps_until_cmd_and_drops_blank() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", None, 60, None, None, None, None, None,
-            Some("test -f /tmp/ready"), "g1", 0,
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            60,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("test -f /tmp/ready"),
+            "g1",
+            0,
         )
         .unwrap();
         assert!(rec.has_gate());
@@ -1498,7 +1800,19 @@ mod tests {
         assert!(raw.contains("\"untilCmd\""));
 
         let rec = create_in(
-            d.path(), "/ws", "p", None, 60, None, None, None, None, None, Some("   "), "g2", 0,
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            60,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("   "),
+            "g2",
+            0,
         )
         .unwrap();
         assert!(!rec.has_gate(), "blank gate command ⇒ no gate");
@@ -1513,7 +1827,10 @@ mod tests {
             decide(&rec, 0, 100_000, || panic!("gate must not be polled")),
             LoopStep::Nap { ms: 30_000 }
         );
-        assert_eq!(decide(&rec, 0, 300_000, || panic!("gate must not be polled")), LoopStep::Fire);
+        assert_eq!(
+            decide(&rec, 0, 300_000, || panic!("gate must not be polled")),
+            LoopStep::Fire
+        );
     }
 
     /// Gated + due: fire when the gate passes, skip when it doesn't. Not due ⇒
@@ -1522,7 +1839,19 @@ mod tests {
     fn decide_gated_fires_when_met_skips_when_unmet() {
         let d = dir();
         let rec = create_in(
-            d.path(), "/ws", "p", None, 300, None, None, None, None, None, Some("gate"), "g1", 0,
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            300,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("gate"),
+            "g1",
+            0,
         )
         .unwrap(); // due at 300_000
         assert_eq!(decide(&rec, 0, 300_000, || true), LoopStep::Fire);
@@ -1541,8 +1870,15 @@ mod tests {
         make(d.path(), "l1", 0); // interval 300, due at 300_000, iterations_done 0
         let skipped = claim_skip_in(d.path(), "l1", 0, 300_000).unwrap();
         assert_eq!(skipped.iterations_done, 0, "skip is not an iteration");
-        assert_eq!(skipped.generation, 1, "generation bumps so racing timers can't double-advance");
-        assert_eq!(skipped.next_fire_at, 300_000 + 300_000, "advanced one interval from now");
+        assert_eq!(
+            skipped.generation, 1,
+            "generation bumps so racing timers can't double-advance"
+        );
+        assert_eq!(
+            skipped.next_fire_at,
+            300_000 + 300_000,
+            "advanced one interval from now"
+        );
         // persisted, still present (not retired)
         let on_disk = get_in(d.path(), "l1").unwrap();
         assert_eq!(on_disk.generation, 1);
@@ -1554,8 +1890,22 @@ mod tests {
     #[test]
     fn skipping_does_not_exhaust_a_bounded_loop() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", None, 60, Some(1), None, None, None, None, Some("gate"), "l1", 0)
-            .unwrap();
+        create_in(
+            d.path(),
+            "/ws",
+            "p",
+            None,
+            60,
+            Some(1),
+            None,
+            None,
+            None,
+            None,
+            Some("gate"),
+            "l1",
+            0,
+        )
+        .unwrap();
         // skip several ticks; each advances gen + next_fire but leaves the single
         // iteration unspent, so the loop is never retired.
         let mut gen = 0;
@@ -1578,6 +1928,12 @@ mod tests {
         make(d.path(), "l1", 0);
         assert!(claim_skip_in(d.path(), "l1", 0, 300_000).is_ok());
         let err = claim_skip_in(d.path(), "l1", 0, 300_000).unwrap_err();
-        assert_eq!(err, ClaimError::StaleGeneration { expected: 0, found: 1 });
+        assert_eq!(
+            err,
+            ClaimError::StaleGeneration {
+                expected: 0,
+                found: 1
+            }
+        );
     }
 }

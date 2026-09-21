@@ -86,7 +86,13 @@ pub(crate) fn route_artifact_add(
             serde_json::from_slice::<Req>(&b).map_err(|e| format!("bad /artifact_add body: {e}"))
         })
         .and_then(|r| {
-            let opt = |s: &str| if s.trim().is_empty() { None } else { Some(s.to_string()) };
+            let opt = |s: &str| {
+                if s.trim().is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            };
             crate::artifacts::add(
                 std::path::Path::new(&r.source_path),
                 opt(&r.title).as_deref(),
@@ -155,8 +161,8 @@ pub(crate) fn route_artifact_delete(
         .and_then(|r| crate::artifacts::delete(&r.id));
     match deleted {
         Ok(()) => {
-            let _ = request
-                .respond(tiny_http::Response::from_string("{}").with_header(json_header));
+            let _ =
+                request.respond(tiny_http::Response::from_string("{}").with_header(json_header));
         }
         Err(e) => {
             let body = serde_json::json!({ "error": e }).to_string();
@@ -256,7 +262,10 @@ pub(crate) fn route_artifact_folder_zip(
                     header("Content-Type", "application/zip"),
                     header(
                         "Content-Disposition",
-                        &format!("attachment; filename=\"{}\"", ascii_fallback(&report.filename)),
+                        &format!(
+                            "attachment; filename=\"{}\"",
+                            ascii_fallback(&report.filename)
+                        ),
                     ),
                 ],
                 file,
@@ -281,7 +290,13 @@ pub(crate) fn route_artifact_folder_zip(
 fn ascii_fallback(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if c.is_ascii() && c != '"' && c != '\\' && !c.is_control() { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii() && c != '"' && c != '\\' && !c.is_control() {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if cleaned.trim_matches('_').is_empty() {
         "artifacts.zip".to_string()
@@ -389,11 +404,7 @@ pub(crate) fn route_artifact_folder_rename(
                 .map_err(|e| format!("bad /artifact_folder_rename body: {e}"))
         })
         .and_then(|r| {
-            crate::artifacts::rename_folder(
-                std::path::Path::new(&r.workspace_path),
-                &r.from,
-                &r.to,
-            )
+            crate::artifacts::rename_folder(std::path::Path::new(&r.workspace_path), &r.from, &r.to)
         });
     respond_json_result(request, json_header, moved);
 }
@@ -421,7 +432,11 @@ pub(crate) fn route_artifact_blob(
         .find(|h| h.field.equiv("Range"))
         .and_then(|h| crate::artifacts::parse_range_header(h.value.as_str()));
 
-    let version = if version.is_empty() { None } else { Some(version.as_str()) };
+    let version = if version.is_empty() {
+        None
+    } else {
+        Some(version.as_str())
+    };
     match crate::artifacts::read_version_bytes(&id, version, range) {
         Ok(blob) => {
             let mut resp = tiny_http::Response::from_data(blob.bytes)
@@ -439,8 +454,7 @@ pub(crate) fn route_artifact_blob(
         // 416 tells the client to re-ask, 404 tells it to give up.
         Err(e) if range.is_some() && e.contains("past end of") => {
             let _ = request.respond(
-                tiny_http::Response::empty(416)
-                    .with_header(header("Accept-Ranges", "bytes")),
+                tiny_http::Response::empty(416).with_header(header("Accept-Ranges", "bytes")),
             );
         }
         Err(_) => {

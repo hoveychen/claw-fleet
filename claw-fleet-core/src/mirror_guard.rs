@@ -72,7 +72,10 @@ pub(crate) fn guard_dir() -> Option<PathBuf> {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 /// List what is sitting in `mirror` right now. `None` when the directory is
@@ -177,7 +180,9 @@ pub(crate) fn enrich_sessions_in(dir: &Path, sessions: &mut [crate::session::Ses
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
         if let Some(rec) = read_in(dir, id) {
             idx.insert(id.to_string(), rec);
         }
@@ -249,7 +254,10 @@ mod tests {
     }
 
     fn mk_session(id: &str) -> crate::session::SessionInfo {
-        crate::session::SessionInfo { id: id.to_string(), ..Default::default() }
+        crate::session::SessionInfo {
+            id: id.to_string(),
+            ..Default::default()
+        }
     }
 
     #[test]

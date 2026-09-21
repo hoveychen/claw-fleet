@@ -65,7 +65,11 @@ fn default_relay_url() -> String {
 
 impl Default for MobileRelayConfig {
     fn default() -> Self {
-        Self { enabled: false, relay_url: default_relay_url(), secret: String::new() }
+        Self {
+            enabled: false,
+            relay_url: default_relay_url(),
+            secret: String::new(),
+        }
     }
 }
 
@@ -109,7 +113,11 @@ pub fn save_config(cfg: &MobileRelayConfig) -> std::io::Result<()> {
 /// 64 hex chars of UUIDv4 entropy (2 × 122 bits) — long enough that the
 /// relay-side SHA-256 channel id cannot be brute-forced.
 pub fn generate_secret() -> String {
-    format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 /// The URL the mobile web app opens; the secret rides in the fragment so it
@@ -133,7 +141,11 @@ pub fn set_config_normalized(mut cfg: MobileRelayConfig) -> Result<MobileRelayCo
     }
     if cfg.secret.is_empty() {
         let existing = load_config().secret;
-        cfg.secret = if existing.is_empty() { generate_secret() } else { existing };
+        cfg.secret = if existing.is_empty() {
+            generate_secret()
+        } else {
+            existing
+        };
     }
     save_config(&cfg).map_err(|e| format!("save mobile relay config: {e}"))?;
     Ok(cfg)
@@ -269,7 +281,11 @@ pub fn notify_preview(text: &str) -> String {
 /// Workspace label for notification titles (falls back when the request
 /// predates session-display resolution).
 pub fn notify_workspace(workspace_name: &str) -> &str {
-    if workspace_name.is_empty() { "Fleet" } else { workspace_name }
+    if workspace_name.is_empty() {
+        "Fleet"
+    } else {
+        workspace_name
+    }
 }
 
 pub fn status() -> MobileRelayStatus {
@@ -467,7 +483,9 @@ where
     if let Some(map) = IDEMPOTENT_WRITES.lock().unwrap().as_ref() {
         if let Some((at, v)) = map.get(&key) {
             if now.saturating_sub(*at) < WRITE_DEDUP_TTL_MS {
-                crate::log_debug(&format!("[relay] duplicate {key}; replaying the first reply"));
+                crate::log_debug(&format!(
+                    "[relay] duplicate {key}; replaying the first reply"
+                ));
                 return Ok(v.clone());
             }
         }
@@ -595,7 +613,12 @@ fn record_resume_dispatched(key: &str) {
 /// for an id already delivered this process is a no-op success, so an old client
 /// and a new client (or a new client's own retries) can't double-deliver.
 fn deliver_decision_answer_deduped(payload: &Value) -> Result<(), String> {
-    let id = payload.get("id").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    let id = payload
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if !id.is_empty() && !claim_decision_answer(&id) {
         return Ok(());
     }
@@ -615,21 +638,40 @@ fn deliver_decision_answer_deduped(payload: &Value) -> Result<(), String> {
 /// Record (or refresh) a client from its `client_hello` payload. First sighting
 /// stamps `connected_at_ms`; later ones only bump `last_seen_ms` and metadata.
 fn upsert_client(payload: &Value) {
-    let Some(client_id) = payload.get("clientId").and_then(Value::as_str).filter(|s| !s.is_empty())
+    let Some(client_id) = payload
+        .get("clientId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
     else {
         return;
     };
     let now = now_ms();
-    let label = payload.get("label").and_then(Value::as_str).unwrap_or("").to_string();
-    let platform = payload.get("platform").and_then(Value::as_str).unwrap_or("").to_string();
-    let push_subscribed =
-        payload.get("pushSubscribed").and_then(Value::as_bool).unwrap_or(false);
-    let supports_gzip =
-        payload.get("supportsGzip").and_then(Value::as_bool).unwrap_or(false);
-    let supports_binary =
-        payload.get("supportsBinary").and_then(Value::as_bool).unwrap_or(false);
-    let supports_delta =
-        payload.get("supportsDelta").and_then(Value::as_bool).unwrap_or(false);
+    let label = payload
+        .get("label")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let platform = payload
+        .get("platform")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let push_subscribed = payload
+        .get("pushSubscribed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let supports_gzip = payload
+        .get("supportsGzip")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let supports_binary = payload
+        .get("supportsBinary")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let supports_delta = payload
+        .get("supportsDelta")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     // Treat an empty/"unknown" commit as absent so the desktop shows nothing
     // rather than a bogus version for a bundle built without a commit source.
     let app_commit = payload
@@ -640,18 +682,20 @@ fn upsert_client(payload: &Value) {
         .map(str::to_string);
     let mut guard = CLIENTS_REGISTRY.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
-    let entry = map.entry(client_id.to_string()).or_insert_with(|| MobileClientInfo {
-        client_id: client_id.to_string(),
-        label: label.clone(),
-        platform: platform.clone(),
-        push_subscribed,
-        connected_at_ms: now,
-        last_seen_ms: now,
-        supports_gzip,
-        supports_binary,
-        supports_delta,
-        app_commit: app_commit.clone(),
-    });
+    let entry = map
+        .entry(client_id.to_string())
+        .or_insert_with(|| MobileClientInfo {
+            client_id: client_id.to_string(),
+            label: label.clone(),
+            platform: platform.clone(),
+            push_subscribed,
+            connected_at_ms: now,
+            last_seen_ms: now,
+            supports_gzip,
+            supports_binary,
+            supports_delta,
+            app_commit: app_commit.clone(),
+        });
     entry.label = label;
     entry.platform = platform;
     entry.push_subscribed = push_subscribed;
@@ -791,7 +835,9 @@ fn provided_sessions() -> Option<Vec<crate::session::SessionInfo>> {
 /// mid-idle still gets state even though nothing changed for existing clients).
 /// No-op when no provider is registered — see [`SESSIONS_PROVIDER`].
 fn push_snapshot_on_connect() {
-    let Some(sessions) = provided_sessions() else { return };
+    let Some(sessions) = provided_sessions() else {
+        return;
+    };
     // Serialised here rather than by the provider: the wire wants JSON, the
     // in-process projections want the structs.
     if let Ok(v) = serde_json::to_value(&sessions) {
@@ -930,7 +976,9 @@ pub fn publish_decision_created(kind: &str, request: Value, notify_title: &str, 
         .and_then(Value::as_str)
         .map(|id| format!("{kind}:{id}"))
         .unwrap_or_else(|| kind.to_string());
-    send_out(encode_payload(&build_decision_created_payload(kind, request)));
+    send_out(encode_payload(&build_decision_created_payload(
+        kind, request,
+    )));
     send_raw(build_notify_frame(notify_title, notify_body, &tag));
 }
 
@@ -1055,8 +1103,11 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
     let Some(list) = sessions.as_array() else {
         return Value::Array(Vec::new());
     };
-    let is_subagent =
-        |s: &&Value| s.get("isSubagent").and_then(Value::as_bool).unwrap_or(false);
+    let is_subagent = |s: &&Value| {
+        s.get("isSubagent")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
     // Main (non-subagent) Fleet-owned sessions: sorted most-recent-first and
     // capped, exactly as before. The cap is spent only on tasks the phone can
     // actually show — subagents must not evict a visible task from a slot.
@@ -1079,8 +1130,10 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
     // list. `scan.rs` flattens direct + workflow-fanout subagents to point their
     // `parentSessionId` at the owning main session, so matching against kept
     // main ids covers every subagent — there is no deeper nesting to chase.
-    let kept_ids: std::collections::HashSet<&str> =
-        mains.iter().filter_map(|s| s.get("id").and_then(Value::as_str)).collect();
+    let kept_ids: std::collections::HashSet<&str> = mains
+        .iter()
+        .filter_map(|s| s.get("id").and_then(Value::as_str))
+        .collect();
     let subagents = list.iter().filter(is_subagent).filter(|s| {
         s.get("parentSessionId")
             .and_then(Value::as_str)
@@ -1101,8 +1154,7 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
                 if key == "lastMessagePreview" {
                     if let Some(text) = v.as_str() {
                         if text.chars().count() > SNAPSHOT_PREVIEW_CHARS {
-                            let cut: String =
-                                text.chars().take(SNAPSHOT_PREVIEW_CHARS).collect();
+                            let cut: String = text.chars().take(SNAPSHOT_PREVIEW_CHARS).collect();
                             out.insert(key.to_string(), Value::String(format!("{cut}…")));
                             continue;
                         }
@@ -1228,20 +1280,19 @@ where
         return cached;
     }
 
-    let thumb = bytes()
-        .and_then(|bytes| {
-            let (out, mime) = downscale_image(
-                bytes,
-                media_type,
-                TAIL_THUMB_TARGET_BYTES,
-                TAIL_THUMB_HARD_CAP_BYTES,
-                TAIL_THUMB_MIN_DIM,
-            );
-            // `downscale_image` echoes undecodable input back unchanged — only a
-            // real JPEG re-encode under the cap is worth putting on the wire.
-            (mime == "image/jpeg" && out.len() <= TAIL_THUMB_HARD_CAP_BYTES)
-                .then(|| base64::engine::general_purpose::STANDARD.encode(out))
-        });
+    let thumb = bytes().and_then(|bytes| {
+        let (out, mime) = downscale_image(
+            bytes,
+            media_type,
+            TAIL_THUMB_TARGET_BYTES,
+            TAIL_THUMB_HARD_CAP_BYTES,
+            TAIL_THUMB_MIN_DIM,
+        );
+        // `downscale_image` echoes undecodable input back unchanged — only a
+        // real JPEG re-encode under the cap is worth putting on the wire.
+        (mime == "image/jpeg" && out.len() <= TAIL_THUMB_HARD_CAP_BYTES)
+            .then(|| base64::engine::general_purpose::STANDARD.encode(out))
+    });
 
     if let Ok(mut guard) = CACHE.lock() {
         let map = guard.get_or_insert_with(HashMap::new);
@@ -1276,7 +1327,10 @@ fn base64_image_source(block: &Value) -> Option<(&str, &str)> {
     if source.get("type").and_then(Value::as_str) != Some("base64") {
         return None;
     }
-    let media_type = source.get("media_type").and_then(Value::as_str).unwrap_or("image/png");
+    let media_type = source
+        .get("media_type")
+        .and_then(Value::as_str)
+        .unwrap_or("image/png");
     let data = source.get("data").and_then(Value::as_str)?;
     Some((media_type, data))
 }
@@ -1293,8 +1347,16 @@ fn base64_image_source(block: &Value) -> Option<(&str, &str)> {
 /// cannot tell them apart). Same reasoning — and same shape — as the desktop's
 /// `ToolUseBlock`. The bulky siblings (`Agent.prompt`, `AskUserQuestion.
 /// questions`) stay stripped; only the label rides along.
-const TAIL_TOOL_INPUT_FIELDS: [&str; 8] =
-    ["description", "command", "file_path", "pattern", "path", "query", "url", "skill"];
+const TAIL_TOOL_INPUT_FIELDS: [&str; 8] = [
+    "description",
+    "command",
+    "file_path",
+    "pattern",
+    "path",
+    "query",
+    "url",
+    "skill",
+];
 
 /// Chars kept of a decision card's summary line / chosen answer. Long enough to
 /// tell two cards apart on a phone-width chip, short enough that the skeleton
@@ -1330,7 +1392,10 @@ fn ask_summary(input: &Map<String, Value>) -> Option<Value> {
     let first = questions.first()?.get("question").and_then(Value::as_str)?;
     let line = first.lines().map(str::trim).find(|l| !l.is_empty())?;
     let mut out = Map::new();
-    out.insert("q".into(), truncate_chars(line, ASK_SUMMARY_MAX_CHARS).into());
+    out.insert(
+        "q".into(),
+        truncate_chars(line, ASK_SUMMARY_MAX_CHARS).into(),
+    );
     out.insert("n".into(), (questions.len() as u64).into());
     Some(Value::Object(out))
 }
@@ -1373,7 +1438,10 @@ fn ingest_summary(block: &Map<String, Value>) -> Option<Value> {
         let mut out = Map::new();
         out.insert("kind".into(), "artifact".into());
         out.insert("id".into(), id.into());
-        out.insert("title".into(), truncate_chars(title, INGEST_TITLE_MAX_CHARS).into());
+        out.insert(
+            "title".into(),
+            truncate_chars(title, INGEST_TITLE_MAX_CHARS).into(),
+        );
         out.insert("akind".into(), kind.into());
         out.insert("bytes".into(), bytes.into());
         return Some(Value::Object(out));
@@ -1388,7 +1456,10 @@ fn ingest_summary(block: &Map<String, Value>) -> Option<Value> {
         out.insert("kind".into(), "wiki".into());
         out.insert("slug".into(), slug.into());
         out.insert("version".into(), version.into());
-        out.insert("title".into(), truncate_chars(title, INGEST_TITLE_MAX_CHARS).into());
+        out.insert(
+            "title".into(),
+            truncate_chars(title, INGEST_TITLE_MAX_CHARS).into(),
+        );
         return Some(Value::Object(out));
     }
 
@@ -1445,12 +1516,18 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
         .and_then(Value::as_object)
         .and_then(|a| a.values().find_map(Value::as_str))
     {
-        d.insert("answer".into(), truncate_chars(answer, ASK_SUMMARY_MAX_CHARS).into());
+        d.insert(
+            "answer".into(),
+            truncate_chars(answer, ASK_SUMMARY_MAX_CHARS).into(),
+        );
     }
     // Edit / Write: unified-diff hunks → ±line counts.
     if let Some(hunks) = obj.get("structuredPatch").and_then(Value::as_array) {
         let (mut added, mut removed) = (0u64, 0u64);
-        for lines in hunks.iter().filter_map(|h| h.get("lines").and_then(Value::as_array)) {
+        for lines in hunks
+            .iter()
+            .filter_map(|h| h.get("lines").and_then(Value::as_array))
+        {
             for line in lines.iter().filter_map(Value::as_str) {
                 match line.as_bytes().first() {
                     Some(b'+') => added += 1,
@@ -1571,7 +1648,11 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
             truncate_chars(desc, ASK_SUMMARY_MAX_CHARS).into(),
         );
     }
-    if d.is_empty() { None } else { Some(Value::Object(d)) }
+    if d.is_empty() {
+        None
+    } else {
+        Some(Value::Object(d))
+    }
 }
 
 /// Slim one content block to the fields the mobile renders. An `image` block
@@ -1603,7 +1684,11 @@ fn slim_tail_block(block: &Value) -> Value {
         if !slim_input.is_empty() {
             out.insert("input".into(), Value::Object(slim_input));
         }
-        if obj.get("name").and_then(Value::as_str).is_some_and(is_decision_tool) {
+        if obj
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(is_decision_tool)
+        {
             if let Some(ask) = ask_summary(input) {
                 out.insert("_ask".into(), ask);
             }
@@ -1764,15 +1849,20 @@ fn diff_snapshot(prev: &HashMap<String, u64>, slim: &Value) -> (Vec<Value>, Vec<
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     if let Some(arr) = slim.as_array() {
         for s in arr {
-            let Some(id) = s.get("id").and_then(Value::as_str) else { continue };
+            let Some(id) = s.get("id").and_then(Value::as_str) else {
+                continue;
+            };
             seen.insert(id);
             if prev.get(id) != Some(&snapshot_hash(s)) {
                 upsert.push(s.clone());
             }
         }
     }
-    let remove: Vec<String> =
-        prev.keys().filter(|id| !seen.contains(id.as_str())).cloned().collect();
+    let remove: Vec<String> = prev
+        .keys()
+        .filter(|id| !seen.contains(id.as_str()))
+        .cloned()
+        .collect();
     (upsert, remove)
 }
 
@@ -1822,7 +1912,9 @@ fn gzip_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
 fn gunzip_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
     use std::io::Read as _;
     let mut out = Vec::new();
-    flate2::read::GzDecoder::new(bytes).read_to_end(&mut out).ok()?;
+    flate2::read::GzDecoder::new(bytes)
+        .read_to_end(&mut out)
+        .ok()?;
     Some(out)
 }
 
@@ -1904,6 +1996,7 @@ fn is_ackable_method(method: &str) -> bool {
             | "stop"
             | "stop_workspace"
             | "session_mark"
+            | "session_explain_ask"
             | "upload_attachment"
             | "decision_answer"
     )
@@ -1974,7 +2067,10 @@ fn serve_decision_answer(params: &Value) -> Result<Value, String> {
 /// used by mobile and desktop clients. Fleet Cloud Runner calls this boundary
 /// after durably claiming a `decision.response` command.
 pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
-    let kind = payload.get("kind").and_then(Value::as_str).ok_or("missing kind")?;
+    let kind = payload
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or("missing kind")?;
     let id = payload
         .get("id")
         .and_then(Value::as_str)
@@ -1982,11 +2078,18 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
         .ok_or("missing id")?
         .to_string();
     let str_field = |key: &str| -> Option<String> {
-        payload.get(key).and_then(Value::as_str).map(str::to_string).filter(|s| !s.is_empty())
+        payload
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
     };
     match kind {
         "guard" => {
-            let allow = payload.get("allow").and_then(Value::as_bool).ok_or("missing allow")?;
+            let allow = payload
+                .get("allow")
+                .and_then(Value::as_bool)
+                .ok_or("missing allow")?;
             // "Always allow": persist the rule BEFORE writing the response file
             // so a subsequent `fleet guard` for the same prefix already sees it
             // (same order as the desktop panel and `/guard/respond`). Only
@@ -2020,7 +2123,10 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
                 .transpose()
                 .map_err(|e| format!("bad answers: {e}"))?
                 .unwrap_or_default();
-            let declined = payload.get("declined").and_then(Value::as_bool).unwrap_or(false);
+            let declined = payload
+                .get("declined")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             // Terminal button: the phone sends `taskOutcome` alongside
             // `declined: true`, exactly like the fleet-ask arm below.
             let task_outcome = payload
@@ -2042,7 +2148,10 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
                 .transpose()
                 .map_err(|e| format!("bad answers: {e}"))?
                 .unwrap_or_default();
-            let cancelled = payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false);
+            let cancelled = payload
+                .get("cancelled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             // v3 terminal button: the phone sends `taskOutcome` alongside
             // `cancelled: true` when the user pressed "end task" / "abandon task", so the
             // phone stamps the same session terminal state the desktop does.
@@ -2050,7 +2159,12 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
                 .get("taskOutcome")
                 .cloned()
                 .and_then(|v| serde_json::from_value(v).ok());
-            let resp = crate::mcp_ipc::FleetAskResponse { id: id.clone(), answers, cancelled, task_outcome };
+            let resp = crate::mcp_ipc::FleetAskResponse {
+                id: id.clone(),
+                answers,
+                cancelled,
+                task_outcome,
+            };
             crate::mcp_ipc::deliver_response(&resp)
         }
         "plan-approval" => {
@@ -2073,7 +2187,10 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
                 .transpose()
                 .map_err(|e| format!("bad actionContext: {e}"))?
                 .unwrap_or_default();
-            let cancelled = payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false);
+            let cancelled = payload
+                .get("cancelled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let resp = crate::mcp_a2ui_ipc::A2uiRenderResponse {
                 id: id.clone(),
                 action_name: str_field("actionName"),
@@ -2083,7 +2200,10 @@ pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
             crate::parked::deliver(&id, &resp, cancelled, crate::mcp_a2ui_ipc::write_response)
         }
         "permission-prompt" => {
-            let allow = payload.get("allow").and_then(Value::as_bool).ok_or("missing allow")?;
+            let allow = payload
+                .get("allow")
+                .and_then(Value::as_bool)
+                .ok_or("missing allow")?;
             crate::permission_prompt_ipc::write_response(
                 &crate::permission_prompt_ipc::PermissionPromptResponse {
                     id,
@@ -2157,6 +2277,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "session_notes" => serve_session_notes(params),
         "session_note" => serve_session_note(params),
         "session_notes_search" => serve_session_notes_search(params),
+        "session_explain" => serve_session_explain(params),
+        "session_explain_list" => serve_session_explain_list(params),
         "guard_analyze" => serve_guard_analyze(params),
         "session_search" => serve_session_search(params),
         "wiki_list" => serve_wiki_list(params),
@@ -2186,6 +2308,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "stop" => serve_stop(params),
         "stop_workspace" => serve_stop_workspace(params),
         "session_mark" => serve_session_mark(params),
+        // Forks a session and spends money; a lost reply must not fork twice.
+        "session_explain_ask" => idempotent_write(method, params, || serve_session_explain_ask(params)),
         "upload_attachment" => serve_upload_attachment(params),
         "decision_answer" => serve_decision_answer(params),
         "attachments_exist" => serve_attachments_exist(params),
@@ -2344,9 +2468,11 @@ fn serve_session_decisions(params: &Value) -> Result<Value, String> {
         .get("sessionId")
         .and_then(Value::as_str)
         .ok_or("missing sessionId")?;
-    let jsonl = params.get("jsonlPath").and_then(Value::as_str).map(std::path::Path::new);
-    let records =
-        crate::decision_history::list_session_records_with_jsonl(session_id, jsonl);
+    let jsonl = params
+        .get("jsonlPath")
+        .and_then(Value::as_str)
+        .map(std::path::Path::new);
+    let records = crate::decision_history::list_session_records_with_jsonl(session_id, jsonl);
     serde_json::to_value(records).map_err(|e| e.to_string())
 }
 
@@ -2366,7 +2492,10 @@ fn serve_session_note(params: &Value) -> Result<Value, String> {
         .get("sessionId")
         .and_then(Value::as_str)
         .ok_or("missing sessionId")?;
-    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("missing path")?;
     let text = crate::session_notes::read_owned(session_id, path)?;
     Ok(Value::String(text))
 }
@@ -2376,7 +2505,10 @@ fn serve_session_notes_search(params: &Value) -> Result<Value, String> {
         .get("sessionId")
         .and_then(Value::as_str)
         .ok_or("missing sessionId")?;
-    let query = params.get("query").and_then(Value::as_str).ok_or("missing query")?;
+    let query = params
+        .get("query")
+        .and_then(Value::as_str)
+        .ok_or("missing query")?;
     let matches = crate::session_notes::search(
         session_id,
         query,
@@ -2387,11 +2519,51 @@ fn serve_session_notes_search(params: &Value) -> Result<Value, String> {
     serde_json::to_value(matches).map_err(|e| e.to_string())
 }
 
+/// `session_explain_ask` — accept a side question about a session; returns the
+/// `running` record. Params are an `ExplainRequest` (camelCase) plus the
+/// optional `idempotencyKey` the write wrapper consumes.
+fn serve_session_explain_ask(params: &Value) -> Result<Value, String> {
+    let req: crate::session_explain::ExplainRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad session_explain_ask params: {e}"))?;
+    let rec = crate::session_explain::ask(req)?;
+    serde_json::to_value(rec).map_err(|e| e.to_string())
+}
+
+/// `session_explain {sessionId, id}` — one record as it stands; polled until
+/// its status leaves `running`.
+fn serve_session_explain(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    let rec = crate::session_explain::get(session_id, id).ok_or("no such explanation")?;
+    serde_json::to_value(rec).map_err(|e| e.to_string())
+}
+
+/// `session_explain_list {sessionId}` — every record of the session, oldest first.
+fn serve_session_explain_list(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    serde_json::to_value(crate::session_explain::list(session_id)).map_err(|e| e.to_string())
+}
+
 fn serve_decision_asset(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
-    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
-    let qidx = params.get("qidx").and_then(Value::as_str).ok_or("missing qidx")?;
-    let rel = params.get("rel").and_then(Value::as_str).ok_or("missing rel")?;
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("missing id")?;
+    let qidx = params
+        .get("qidx")
+        .and_then(Value::as_str)
+        .ok_or("missing qidx")?;
+    let rel = params
+        .get("rel")
+        .and_then(Value::as_str)
+        .ok_or("missing rel")?;
     let asset = crate::mcp_ipc::read_decision_asset(id, qidx, rel)?;
     // Every image is squeezed toward the target size so the WS frame stays
     // small enough to cross the relay, regardless of the source size.
@@ -2469,7 +2641,10 @@ fn serve_session_image(params: &Value) -> Result<Value, String> {
 const TAIL_DETAIL_LOG_MS: u128 = 1_000;
 
 fn serve_tail(params: &Value) -> Result<Value, String> {
-    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("missing path")?;
     let n = params.get("n").and_then(Value::as_u64).unwrap_or(200) as usize;
 
     // Staged so a slow reply names its own culprit. `[relay-timing]` says the
@@ -2505,14 +2680,19 @@ fn serve_tail(params: &Value) -> Result<Value, String> {
 // appended since. Omitting `offset` locates the current end without
 // reading the body — the cheap "start following from here" call.
 fn serve_tail_delta(params: &Value) -> Result<Value, String> {
-    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("missing path")?;
     let sources = crate::agent_source::build_sources();
     let source = crate::agent_source::find_source_for_path(&sources, path)
         .ok_or_else(|| format!("no agent source for path: {path}"))?;
     let resolved = source
         .resolve_file_path(path)
         .ok_or_else(|| format!("cannot resolve path: {path}"))?;
-    let size = std::fs::metadata(&resolved).map_err(|e| e.to_string())?.len();
+    let size = std::fs::metadata(&resolved)
+        .map_err(|e| e.to_string())?
+        .len();
     let offset = params.get("offset").and_then(Value::as_u64);
     let Some(offset) = offset else {
         // Bootstrap: locate the current end so the client follows from here.
@@ -2548,9 +2728,14 @@ const TOOL_DETAIL_MAX_IMAGES: usize = 6;
 fn serve_tool_detail(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
 
-    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
-    let tool_use_id =
-        params.get("tool_use_id").and_then(Value::as_str).ok_or("missing tool_use_id")?;
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("missing path")?;
+    let tool_use_id = params
+        .get("tool_use_id")
+        .and_then(Value::as_str)
+        .ok_or("missing tool_use_id")?;
     let full = params.get("full").and_then(Value::as_bool).unwrap_or(false);
 
     let sources = crate::agent_source::build_sources();
@@ -2561,7 +2746,9 @@ fn serve_tool_detail(params: &Value) -> Result<Value, String> {
         .ok_or_else(|| format!("cannot resolve path: {path}"))?;
 
     let mut detail = crate::message_trim::extract_full_tool_result(&resolved, tool_use_id)?;
-    let obj = detail.as_object_mut().expect("extract_full_tool_result returns an object");
+    let obj = detail
+        .as_object_mut()
+        .expect("extract_full_tool_result returns an object");
 
     // Pull screenshots out of the result content before any truncation: a
     // base64 leaf would otherwise be cut into a useless 1 KB preview. The raw
@@ -2632,19 +2819,23 @@ fn serve_handoff_chain(params: &Value) -> Result<Value, String> {
         .get("sessionId")
         .and_then(Value::as_str)
         .ok_or("missing sessionId")?;
-    serde_json::to_value(crate::handoff::chain_containing(session_id))
-        .map_err(|e| e.to_string())
+    serde_json::to_value(crate::handoff::chain_containing(session_id)).map_err(|e| e.to_string())
 }
 
 fn serve_workflow_trees(params: &Value) -> Result<Value, String> {
-    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
-    let trees =
-        crate::workflow::discover_workflow_trees(std::path::Path::new(path));
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("missing path")?;
+    let trees = crate::workflow::discover_workflow_trees(std::path::Path::new(path));
     serde_json::to_value(trees).map_err(|e| e.to_string())
 }
 
 fn serve_token_breakdown(params: &Value) -> Result<Value, String> {
-    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("missing path")?;
     let project_root = params.get("projectRoot").and_then(Value::as_str);
     let breakdown = crate::token_analysis::aggregate_task(
         std::path::Path::new(path),
@@ -2750,7 +2941,10 @@ fn serve_codex_usage_history(params: &Value) -> Result<Value, String> {
 // Main-session invocations plus subagent sidecars, sorted by timestamp
 // (mirrors `LocalBackend::get_skill_history` / `/skill_history`).
 fn serve_skill_history(params: &Value) -> Result<Value, String> {
-    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("missing path")?;
     let sources = crate::agent_source::build_sources();
     let source = crate::agent_source::find_source_for_path(&sources, path)
         .ok_or_else(|| format!("no agent source for path: {path}"))?;
@@ -2760,7 +2954,9 @@ fn serve_skill_history(params: &Value) -> Result<Value, String> {
     for sub in skill_history::subagent_jsonl_paths(std::path::Path::new(path)) {
         let sub_str = sub.to_string_lossy().to_string();
         // Best-effort: a broken subagent file shouldn't lose the rest.
-        let Ok(msgs) = source.get_messages(&sub_str) else { continue };
+        let Ok(msgs) = source.get_messages(&sub_str) else {
+            continue;
+        };
         out.extend(skill_history::extract_from_messages(&msgs, true));
     }
     skill_history::sort_by_timestamp(&mut out);
@@ -2771,8 +2967,10 @@ fn serve_skill_history(params: &Value) -> Result<Value, String> {
 // desktop's `analyze_guard_command`). Synchronous up to 30s — fine, we
 // run inside `spawn_blocking` so other frames keep flowing.
 fn serve_guard_analyze(params: &Value) -> Result<Value, String> {
-    let command =
-        params.get("command").and_then(Value::as_str).ok_or("missing command")?;
+    let command = params
+        .get("command")
+        .and_then(Value::as_str)
+        .ok_or("missing command")?;
     let context = params.get("context").and_then(Value::as_str).unwrap_or("");
     let lang = params.get("lang").and_then(Value::as_str).unwrap_or("zh");
     let risk_tags = crate::audit::classify_bash_command_pub(command)
@@ -2859,16 +3057,25 @@ fn serve_artifact_folders(_params: &Value) -> Result<Value, String> {
 /// `sizeBytes`, which may be a version or a rewrite behind.
 fn serve_artifact_blob(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
-    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("missing id")?;
     // Optional `version`; absent means the current one. The phone browses
     // history read-only, so this is the whole of its version support.
-    let version = params.get("version").and_then(Value::as_str).filter(|v| !v.is_empty());
+    let version = params
+        .get("version")
+        .and_then(Value::as_str)
+        .filter(|v| !v.is_empty());
     let artifact = crate::artifacts::get(id)?;
     let offset = params.get("offset").and_then(Value::as_u64);
     let range = offset.map(|start| {
         // `length` is a request, not a promise: the store clamps to
         // MAX_RANGE_CHUNK and to EOF, and the reply reports what it served.
-        let want = params.get("length").and_then(Value::as_u64).unwrap_or(u64::MAX);
+        let want = params
+            .get("length")
+            .and_then(Value::as_u64)
+            .unwrap_or(u64::MAX);
         (start, start.saturating_add(want.max(1)).saturating_sub(1))
     });
 
@@ -2915,11 +3122,18 @@ fn serve_wiki_list(_params: &Value) -> Result<Value, String> {
 // though a whole doc can reach 100 MiB.
 fn serve_wiki_file(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
-    let slug = params.get("slug").and_then(Value::as_str).ok_or("missing slug")?;
-    let version =
-        params.get("version").and_then(Value::as_str).unwrap_or("current");
-    let relpath =
-        params.get("relpath").and_then(Value::as_str).ok_or("missing relpath")?;
+    let slug = params
+        .get("slug")
+        .and_then(Value::as_str)
+        .ok_or("missing slug")?;
+    let version = params
+        .get("version")
+        .and_then(Value::as_str)
+        .unwrap_or("current");
+    let relpath = params
+        .get("relpath")
+        .and_then(Value::as_str)
+        .ok_or("missing relpath")?;
     let file = crate::wiki::get_file(slug, version, relpath)?;
     const MAX_WIKI_FILE_BYTES: usize = 16 * 1024 * 1024;
     if file.bytes.len() > MAX_WIKI_FILE_BYTES {
@@ -2949,13 +3163,21 @@ fn serve_wiki_search(params: &Value) -> Result<Value, String> {
 // a single export frame stays bounded.
 fn serve_wiki_export(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
-    let slug = params.get("slug").and_then(Value::as_str).ok_or("missing slug")?;
-    let version =
-        params.get("version").and_then(Value::as_str).unwrap_or("current");
+    let slug = params
+        .get("slug")
+        .and_then(Value::as_str)
+        .ok_or("missing slug")?;
+    let version = params
+        .get("version")
+        .and_then(Value::as_str)
+        .unwrap_or("current");
     let export = crate::wiki::export_doc(slug, version)?;
     const MAX_WIKI_EXPORT_BYTES: usize = 64 * 1024 * 1024;
     if export.bytes.len() > MAX_WIKI_EXPORT_BYTES {
-        return Err(format!("wiki export too large: {} bytes", export.bytes.len()));
+        return Err(format!(
+            "wiki export too large: {} bytes",
+            export.bytes.len()
+        ));
     }
     Ok(json!({
         "filename": export.filename,
@@ -3014,7 +3236,10 @@ fn serve_model_catalog(_params: &Value) -> Result<Value, String> {
 /// that one parses a Claude JSONL off disk, and a dsh session has no transcript
 /// file at all — its id is a `dsh://<session-id>` URI answered over RPC.
 fn serve_dsh_token_breakdown(params: &Value) -> Result<Value, String> {
-    let uri = params.get("uri").and_then(Value::as_str).ok_or("missing uri")?;
+    let uri = params
+        .get("uri")
+        .and_then(Value::as_str)
+        .ok_or("missing uri")?;
     let breakdown = crate::dsh_source::dsh_token_breakdown(uri)?;
     serde_json::to_value(breakdown).map_err(|e| e.to_string())
 }
@@ -3026,7 +3251,10 @@ fn serve_dsh_token_breakdown(params: &Value) -> Result<Value, String> {
 /// provider. The desktop and `fleet serve` have both had this since the feature
 /// landed; the phone had the counts with no money beside them.
 fn serve_dsh_session_cost(params: &Value) -> Result<Value, String> {
-    let uri = params.get("uri").and_then(Value::as_str).ok_or("missing uri")?;
+    let uri = params
+        .get("uri")
+        .and_then(Value::as_str)
+        .ok_or("missing uri")?;
     let cost = crate::dsh_cost::dsh_session_cost(uri)?;
     serde_json::to_value(cost).map_err(|e| e.to_string())
 }
@@ -3051,16 +3279,21 @@ fn serve_browse_dir(params: &Value) -> Result<Value, String> {
 /// this the picker has no reachable answer. Boundary is `browse_dir`'s, and the
 /// reply is the new directory's own listing so the client lands inside it.
 fn serve_create_dir(params: &Value) -> Result<Value, String> {
-    let path = params.get("path").and_then(Value::as_str).filter(|s| !s.is_empty());
-    let name = params.get("name").and_then(Value::as_str).ok_or("missing name")?;
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or("missing name")?;
     let resp = crate::workspace_browse::create_dir(path, name, &known_workspaces())?;
     serde_json::to_value(resp).map_err(|e| e.to_string())
 }
 
 fn serve_spawn_session(params: &Value) -> Result<Value, String> {
-    let req: crate::session_launch::SpawnSessionRequest =
-        serde_json::from_value(params.clone())
-            .map_err(|e| format!("bad spawn_session params: {e}"))?;
+    let req: crate::session_launch::SpawnSessionRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad spawn_session params: {e}"))?;
     // Thread the phone-provided session id through so a dropped reply
     // frame is still recoverable: the phone confirms success by finding
     // this exact id in a later `sessions` snapshot (relay delivery is
@@ -3080,7 +3313,9 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
     // Handlers run concurrently, so hold this id's guard across check→spawn→record:
     // a duplicate frame waits here and then sees the recorded pid instead of
     // launching a second `claude --session-id S`.
-    let guard = preassigned.as_deref().map(|id| dedup_key_guard(&format!("spawn:{id}")));
+    let guard = preassigned
+        .as_deref()
+        .map(|id| dedup_key_guard(&format!("spawn:{id}")));
     let _held = guard.as_ref().map(|g| g.lock().unwrap());
     if let Some(id) = preassigned.as_deref() {
         if let Some(pid) = spawned_session_pid(id) {
@@ -3099,18 +3334,16 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
         permission_mode: req.permission_mode.clone(),
         session_id: req.session_id.clone(),
         entrypoint: String::new(),
-    images: Vec::new(),
+        images: Vec::new(),
     };
-    let resp =
-        crate::agent_source::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;
+    let resp = crate::agent_source::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;
     record_if_dedupable(preassigned.as_deref(), resp.session_id.as_deref(), resp.pid);
     serde_json::to_value(resp).map_err(|e| e.to_string())
 }
 
 fn serve_resume_session(params: &Value) -> Result<Value, String> {
-    let req: crate::auto_resume::ResumeSessionRequest =
-        serde_json::from_value(params.clone())
-            .map_err(|e| format!("bad resume_session params: {e}"))?;
+    let req: crate::auto_resume::ResumeSessionRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad resume_session params: {e}"))?;
     // Idempotent-resend guard: `resume_session` is an ackable write, so a lost ack
     // makes the phone resend it. Without this, a resend fires a *second*
     // `claude --resume` on the same session — the double-submit that stacks two
@@ -3144,7 +3377,7 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
             model: req.model.clone(),
             effort: req.effort.clone(),
             permission_mode: req.permission_mode.clone(),
-        images: Vec::new(),
+            images: Vec::new(),
         },
         Box::new(|_| {}),
     )?;
@@ -3156,9 +3389,8 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
 }
 
 fn serve_enqueue_message(params: &Value) -> Result<Value, String> {
-    let req: crate::pending_message::EnqueueMessageRequest =
-        serde_json::from_value(params.clone())
-            .map_err(|e| format!("bad enqueue_message params: {e}"))?;
+    let req: crate::pending_message::EnqueueMessageRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad enqueue_message params: {e}"))?;
     // The phone's composer is a person typing, same as the desktop's.
     let delivery = crate::pending_message::enqueue(
         &req.session_id,
@@ -3192,7 +3424,10 @@ fn serve_stop(params: &Value) -> Result<Value, String> {
     if pid == 0 {
         return Err("missing or invalid pid".into());
     }
-    let force = params.get("force").and_then(Value::as_bool).unwrap_or(false);
+    let force = params
+        .get("force")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     #[cfg(unix)]
     {
         // Probe first so a stale pid errors; then take the whole tree,
@@ -3221,9 +3456,8 @@ fn serve_stop_workspace(params: &Value) -> Result<Value, String> {
 }
 
 fn serve_session_mark(params: &Value) -> Result<Value, String> {
-    let req: crate::session_mark::SetSessionMarkRequest =
-        serde_json::from_value(params.clone())
-            .map_err(|e| format!("bad session_mark params: {e}"))?;
+    let req: crate::session_mark::SetSessionMarkRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad session_mark params: {e}"))?;
     crate::session_mark::set_mark(&req.session_id, &req.workspace_path, req.mark)?;
     Ok(json!({ "ok": true }))
 }
@@ -3234,8 +3468,14 @@ fn serve_session_mark(params: &Value) -> Result<Value, String> {
 // shared by the decision panel and the composer flows.
 fn serve_upload_attachment(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
-    let name = params.get("name").and_then(Value::as_str).unwrap_or("attachment.bin");
-    let b64 = params.get("base64").and_then(Value::as_str).ok_or("missing base64")?;
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("attachment.bin");
+    let b64 = params
+        .get("base64")
+        .and_then(Value::as_str)
+        .ok_or("missing base64")?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
         .map_err(|e| format!("invalid base64: {e}"))?;
@@ -3255,13 +3495,14 @@ fn serve_upload_attachment(params: &Value) -> Result<Value, String> {
 // drop ones whose backing file has been cleared, so a restored draft
 // never carries a `Context files:` path that no longer resolves.
 fn serve_attachments_exist(params: &Value) -> Result<Value, String> {
-    let paths = params.get("paths").and_then(Value::as_array).ok_or("missing paths")?;
+    let paths = params
+        .get("paths")
+        .and_then(Value::as_array)
+        .ok_or("missing paths")?;
     let existing: Vec<String> = paths
         .iter()
         .filter_map(Value::as_str)
-        .filter(|p| {
-            crate::user_attachments::exists_in_store(std::path::Path::new(p))
-        })
+        .filter(|p| crate::user_attachments::exists_in_store(std::path::Path::new(p)))
         .map(str::to_string)
         .collect();
     Ok(json!({ "existing": existing }))
@@ -3294,8 +3535,14 @@ const ATTACHMENT_FULL_MAX_BYTES: usize = 12 * 1024 * 1024;
 /// verbatim — a client can only ever name a file inside one store key.
 fn serve_user_attachment(params: &Value) -> Result<Value, String> {
     use base64::Engine as _;
-    let key = params.get("key").and_then(Value::as_str).ok_or("missing key")?;
-    let name = params.get("name").and_then(Value::as_str).ok_or("missing name")?;
+    let key = params
+        .get("key")
+        .and_then(Value::as_str)
+        .ok_or("missing key")?;
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or("missing name")?;
     let full = params.get("full").and_then(Value::as_bool).unwrap_or(false);
     let asset = crate::user_attachments::read_user_attachment(key, name)?;
     // Images only. The store also holds the PDFs and archives a user picked, and
@@ -3339,7 +3586,10 @@ fn serve_repo_list(_params: &Value) -> Result<Value, String> {
 }
 
 fn serve_repo_detail(params: &Value) -> Result<Value, String> {
-    let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
+    let root = params
+        .get("root")
+        .and_then(Value::as_str)
+        .ok_or("missing root")?;
     let known = known_workspaces();
     // Unwrap the core `Result` before serialising — `to_value` on the `Result`
     // itself emits serde's `{"Ok": {..}}` / `{"Err": ".."}` enum tagging, which
@@ -3349,14 +3599,20 @@ fn serve_repo_detail(params: &Value) -> Result<Value, String> {
 }
 
 fn serve_repo_push(params: &Value) -> Result<Value, String> {
-    let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
+    let root = params
+        .get("root")
+        .and_then(Value::as_str)
+        .ok_or("missing root")?;
     let known = known_workspaces();
     let res = crate::git_ops::repo_push(root, &known)?;
     serde_json::to_value(res).map_err(|e| e.to_string())
 }
 
 fn serve_repo_pull(params: &Value) -> Result<Value, String> {
-    let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
+    let root = params
+        .get("root")
+        .and_then(Value::as_str)
+        .ok_or("missing root")?;
     let known = known_workspaces();
     let res = crate::git_ops::repo_pull(root, &known)?;
     serde_json::to_value(res).map_err(|e| e.to_string())
@@ -3389,8 +3645,8 @@ fn serve_host_identity(_params: &Value) -> Result<Value, String> {
 }
 
 fn serve_proc_run(params: &Value) -> Result<Value, String> {
-    let req: crate::proc_runner::SpawnProcRequest = serde_json::from_value(params.clone())
-        .map_err(|e| format!("bad proc_run params: {e}"))?;
+    let req: crate::proc_runner::SpawnProcRequest =
+        serde_json::from_value(params.clone()).map_err(|e| format!("bad proc_run params: {e}"))?;
     // Same host binary the HTTP route uses: both the desktop app and the fleet
     // CLI intercept the host argv marker, so re-exec'ing ourselves needs no
     // PATH lookup and works whichever process is answering.
@@ -3406,7 +3662,10 @@ fn serve_proc_run(params: &Value) -> Result<Value, String> {
 }
 
 fn serve_proc_output(params: &Value) -> Result<Value, String> {
-    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("missing id")?;
     let offset = params.get("offset").and_then(Value::as_u64);
     let chunk = crate::proc_runner::proc_output(id, offset)?;
     serde_json::to_value(chunk).map_err(|e| e.to_string())
@@ -3427,8 +3686,14 @@ fn serve_proc_resize(params: &Value) -> Result<Value, String> {
 }
 
 fn serve_proc_kill(params: &Value) -> Result<Value, String> {
-    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
-    let force = params.get("force").and_then(Value::as_bool).unwrap_or(false);
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("missing id")?;
+    let force = params
+        .get("force")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     crate::proc_runner::kill_proc(id, force)?;
     Ok(Value::Null)
 }
@@ -3581,9 +3846,8 @@ fn ws_url(relay_url: &str) -> String {
 /// idle ESTABLISHED socket to the relay.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-type RelayWs = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type RelayWs =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Open the relay WebSocket, giving up after `connect_timeout` so a stalled
 /// handshake can never park the reconnect loop.
@@ -3594,9 +3858,10 @@ async fn connect_ws(url: &str, connect_timeout: Duration) -> Result<RelayWs, Str
         Ok(Err(e)) => Err(format!("connect {url}: {e}")),
         // Timing out is reported like any other connect failure so `ws_run_loop`
         // logs it and retries after its usual backoff.
-        Err(_) => {
-            Err(format!("connect {url}: timed out after {}s", connect_timeout.as_secs_f32()))
-        }
+        Err(_) => Err(format!(
+            "connect {url}: timed out after {}s",
+            connect_timeout.as_secs_f32()
+        )),
     }
 }
 
@@ -3651,7 +3916,10 @@ pub fn ensure_ws_client() {
     let spawned = std::thread::Builder::new()
         .name("mobile-relay-ws".into())
         .spawn(|| {
-            match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
                 Ok(rt) => rt.block_on(ws_run_loop()),
                 Err(e) => {
                     eprintln!("mobile-relay ws: runtime build failed: {e}");
@@ -3774,7 +4042,10 @@ fn stalled_entries(
         .values()
         .filter(|(_, started)| now.saturating_duration_since(*started) >= after)
         .map(|(method, started)| {
-            (method.clone(), now.saturating_duration_since(*started).as_millis())
+            (
+                method.clone(),
+                now.saturating_duration_since(*started).as_millis(),
+            )
         })
         .collect();
     // Longest-stuck first: that is the one whose stack is worth reading.
@@ -3787,13 +4058,18 @@ fn stalled_entries(
 /// entitlement to inspect its own process. Elsewhere the stall is still logged,
 /// just without the stacks.
 fn capture_stall_stacks(label: &str, detail: &str) {
-    let Some(home) = crate::session::real_home_dir() else { return };
+    let Some(home) = crate::session::real_home_dir() else {
+        return;
+    };
     let dir = home.join(".fleet").join("diagnostics");
     if fs::create_dir_all(&dir).is_err() {
         return;
     }
     let out = dir.join(format!("stall-{}-{}.txt", now_ms(), label));
-    crate::log_debug(&format!("[stall] {detail} → sampling into {}", out.display()));
+    crate::log_debug(&format!(
+        "[stall] {detail} → sampling into {}",
+        out.display()
+    ));
 
     #[cfg(target_os = "macos")]
     {
@@ -3840,7 +4116,9 @@ fn start_stall_watchdog() {
                             .unwrap_or_default(),
                         Err(_) => continue,
                     };
-                    let Some((method, elapsed_ms)) = stalled.first().cloned() else { continue };
+                    let Some((method, elapsed_ms)) = stalled.first().cloned() else {
+                        continue;
+                    };
                     if last_capture.is_some_and(|t| now.duration_since(t) < STALL_CAPTURE_COOLDOWN)
                     {
                         continue;
@@ -3850,9 +4128,7 @@ fn start_stall_watchdog() {
                     let others = stalled.len().saturating_sub(1);
                     capture_stall_stacks(
                         &method,
-                        &format!(
-                            "method={method} stuck_ms={elapsed_ms} other_stalled={others}"
-                        ),
+                        &format!("method={method} stuck_ms={elapsed_ms} other_stalled={others}"),
                     );
                 }
             });
@@ -3870,7 +4146,9 @@ fn start_stall_watchdog() {
 /// timestamp would need them to be. Only correlated replies (`req_id` present)
 /// are stamped; unsolicited pushes carry no request to attribute the time to.
 fn stamp_handle_ms(reply: &mut Value, handle_ms: u128) {
-    let Some(obj) = reply.as_object_mut() else { return };
+    let Some(obj) = reply.as_object_mut() else {
+        return;
+    };
     if !obj.contains_key("req_id") {
         return;
     }
@@ -3961,8 +4239,7 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
     // is cached for `encode_payload`/`decode_inbound_payload` to seal/open with.
     let keys = crate::relay_crypto::derive_keys(&cfg.secret);
     *ENC_KEY.lock().unwrap() = Some(keys.enc_key);
-    let auth =
-        json!({ "type": "auth", "role": "agent", "secret": keys.channel_token }).to_string();
+    let auth = json!({ "type": "auth", "role": "agent", "secret": keys.channel_token }).to_string();
     sink.send(Message::Text(auth.into()))
         .await
         .map_err(|e| format!("auth send: {e}"))?;
@@ -4173,11 +4450,33 @@ mod tests {
         // codex mints its own thread id and ignores the preassigned one (resp id
         // != preassigned) → NOT dedupable, so a resend of the preassigned id must
         // not find a cached pid (it would return the wrong session otherwise).
-        record_if_dedupable(Some("dedup-phone-preassigned"), Some("dedup-codex-real"), 222);
+        record_if_dedupable(
+            Some("dedup-phone-preassigned"),
+            Some("dedup-codex-real"),
+            222,
+        );
         assert_eq!(spawned_session_pid("dedup-phone-preassigned"), None);
     }
 
     // ── Plan A early submit-ack ──────────────────────────────────────────────────
+
+    #[test]
+    fn session_explain_reads_answer_for_unknown_ids() {
+        // Malformed / unknown ids never touch the store: list is empty, get is
+        // an error the phone can show, ask rejects before forking anything.
+        let list = serve_request("session_explain_list", &json!({"sessionId": "../nope"})).unwrap();
+        assert_eq!(list, json!([]));
+        let err = serve_request("session_explain", &json!({"sessionId": "s", "id": "nope"}))
+            .unwrap_err();
+        assert!(err.contains("no such explanation"), "{err}");
+        let err = serve_request(
+            "session_explain_ask",
+            &json!({"sessionId": "s", "sessionPath": "/x.jsonl", "quote": "   ", "preset": "explain"}),
+        )
+        .unwrap_err();
+        assert!(err.contains("nothing selected"), "{err}");
+        assert!(serve_request("session_explain", &json!({})).unwrap_err().contains("sessionId"));
+    }
 
     #[test]
     fn ackable_covers_writes_not_reads() {
@@ -4190,6 +4489,7 @@ mod tests {
             "stop",
             "stop_workspace",
             "session_mark",
+            "session_explain_ask",
             "upload_attachment",
             "decision_answer",
         ] {
@@ -4235,7 +4535,9 @@ mod tests {
         assert!(!decision_already_answered(id));
         record_decision_answered(id);
         assert!(decision_already_answered(id));
-        assert!(!decision_already_answered("dedup-decision-primitive-unrelated"));
+        assert!(!decision_already_answered(
+            "dedup-decision-primitive-unrelated"
+        ));
     }
 
     // ── resume_session idempotent-resend dedup (weak network double-run resend dedup) ──
@@ -4255,7 +4557,9 @@ mod tests {
             resume_recently_dispatched(id),
             "a resume dispatched this window must be a dedup hit"
         );
-        assert!(!resume_recently_dispatched("dedup-resume-primitive-unrelated"));
+        assert!(!resume_recently_dispatched(
+            "dedup-resume-primitive-unrelated"
+        ));
     }
 
     #[test]
@@ -4319,7 +4623,11 @@ mod tests {
         let p = tmp.to_str().unwrap();
 
         let out = serve_tail_delta(&json!({ "path": p, "offset": 0 })).unwrap();
-        assert_eq!(out["lines"].as_array().unwrap().len(), 1, "only complete line");
+        assert_eq!(
+            out["lines"].as_array().unwrap().len(),
+            1,
+            "only complete line"
+        );
         let new_offset = out["newOffset"].as_u64().unwrap();
         assert_eq!(new_offset, 8, "offset stops at last newline, not EOF");
 
@@ -4377,7 +4685,11 @@ mod tests {
         .unwrap();
 
         let recorder = home.join("claude-recorder");
-        fs::write(&recorder, format!("#!/bin/sh\necho resumed >> {}\n", resume_log.display())).unwrap();
+        fs::write(
+            &recorder,
+            format!("#!/bin/sh\necho resumed >> {}\n", resume_log.display()),
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             let mut perms = fs::metadata(&recorder).unwrap().permissions();
@@ -4495,8 +4807,8 @@ mod tests {
     #[test]
     fn ranged_artifact_blob_serves_a_file_over_the_whole_file_ceiling() {
         let _guard = crate::session::fleet_home_lock();
-        let home = std::env::temp_dir()
-            .join(format!("fleet-artifact-range-{}", std::process::id()));
+        let home =
+            std::env::temp_dir().join(format!("fleet-artifact-range-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
         fs::create_dir_all(&home).unwrap();
         let prev = std::env::var_os("FLEET_HOME");
@@ -4510,7 +4822,10 @@ mod tests {
 
         // Whole-file: still refused, and the message points at the way out.
         let err = serve_artifact_blob(&json!({ "id": artifact.id })).unwrap_err();
-        assert!(err.contains("offset"), "the refusal must name the ranged form: {err}");
+        assert!(
+            err.contains("offset"),
+            "the refusal must name the ranged form: {err}"
+        );
 
         // Ranged: served, clamped to the store's chunk cap, and self-describing
         // enough to drive the next request without consulting `artifact_list`.
@@ -4523,8 +4838,7 @@ mod tests {
         // The tail chunk closes the file out exactly — no short read, no overrun.
         let mut at = served;
         while at < total {
-            let next =
-                serve_artifact_blob(&json!({ "id": artifact.id, "offset": at })).unwrap();
+            let next = serve_artifact_blob(&json!({ "id": artifact.id, "offset": at })).unwrap();
             assert_eq!(next["offset"].as_u64().unwrap(), at);
             at += next["length"].as_u64().unwrap();
         }
@@ -4564,7 +4878,11 @@ mod tests {
         let snap = serve_request("pending_snapshot", &serde_json::json!({})).unwrap();
 
         let asks = snap["fleetAsk"].as_array().expect("fleetAsk list");
-        assert_eq!(asks.len(), 1, "the parked card must still be pending: {snap}");
+        assert_eq!(
+            asks.len(),
+            1,
+            "the parked card must still be pending: {snap}"
+        );
         assert_eq!(asks[0]["id"], serde_json::json!("card-snap"));
         assert_eq!(
             asks[0]["parked"],
@@ -4609,7 +4927,10 @@ mod tests {
             );
             assert_eq!(
                 agent["home"],
-                serde_json::json!(crate::session::real_home_dir().unwrap().display().to_string()),
+                serde_json::json!(crate::session::real_home_dir()
+                    .unwrap()
+                    .display()
+                    .to_string()),
                 "home has to be the tree this process actually reads — that is what \
                  identifies a serve running on a redirected FLEET_HOME"
             );
@@ -4666,7 +4987,10 @@ mod tests {
             let cfg = load_config();
             assert!(!cfg.enabled);
             // Region-derived: the mainland host in CN, DEFAULT_RELAY_URL elsewhere.
-            assert_eq!(cfg.relay_url, crate::relay_region::region_default_relay_url());
+            assert_eq!(
+                cfg.relay_url,
+                crate::relay_region::region_default_relay_url()
+            );
             assert!(cfg.secret.is_empty());
 
             let cfg = MobileRelayConfig {
@@ -4681,7 +5005,10 @@ mod tests {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mode = fs::metadata(config_path().unwrap()).unwrap().permissions().mode();
+                let mode = fs::metadata(config_path().unwrap())
+                    .unwrap()
+                    .permissions()
+                    .mode();
                 assert_eq!(mode & 0o777, 0o600, "secret file must be 0600");
             }
         });
@@ -4739,8 +5066,14 @@ mod tests {
 
     #[test]
     fn ws_url_derivation() {
-        assert_eq!(ws_url("https://relay.example.com"), "wss://relay.example.com/ws");
-        assert_eq!(ws_url("https://relay.example.com/"), "wss://relay.example.com/ws");
+        assert_eq!(
+            ws_url("https://relay.example.com"),
+            "wss://relay.example.com/ws"
+        );
+        assert_eq!(
+            ws_url("https://relay.example.com/"),
+            "wss://relay.example.com/ws"
+        );
         assert_eq!(ws_url("http://127.0.0.1:18080"), "ws://127.0.0.1:18080/ws");
     }
 
@@ -4909,7 +5242,9 @@ mod tests {
                 "event": "req", "req_id": "r2", "method": "pending_snapshot"
             }))
             .expect("pending_snapshot must produce a reply");
-            let list = reply["data"]["a2uiRender"].as_array().expect("a2uiRender list");
+            let list = reply["data"]["a2uiRender"]
+                .as_array()
+                .expect("a2uiRender list");
             assert_eq!(list.len(), 1);
             assert_eq!(list[0]["id"], "a9");
         });
@@ -5030,12 +5365,18 @@ mod tests {
             let m = &msgs[0];
 
             // Dropped: never referenced by the mobile client.
-            assert!(m.get("toolUseResult").is_none(), "toolUseResult must be stripped");
+            assert!(
+                m.get("toolUseResult").is_none(),
+                "toolUseResult must be stripped"
+            );
             assert!(m.get("cwd").is_none(), "cwd must be stripped");
             assert!(m.get("sessionId").is_none(), "sessionId must be stripped");
             assert!(m.get("parentUuid").is_none(), "parentUuid must be stripped");
             // usage survives trimmed to the two rendered counters (per-turn line).
-            assert_eq!(m["message"]["usage"], json!({"input_tokens": 1, "output_tokens": 2}));
+            assert_eq!(
+                m["message"]["usage"],
+                json!({"input_tokens": 1, "output_tokens": 2})
+            );
 
             // Kept: the RawMessage field set the UI actually reads.
             assert_eq!(m["type"], "user");
@@ -5047,18 +5388,27 @@ mod tests {
             assert_eq!(blocks.len(), 3, "block count preserved");
             // image: type kept (renders as "[Image]"), base64 payload dropped
             assert_eq!(blocks[0]["type"], "image");
-            assert!(blocks[0].get("source").is_none(), "image base64 must be stripped");
+            assert!(
+                blocks[0].get("source").is_none(),
+                "image base64 must be stripped"
+            );
             // text: kept verbatim
             assert_eq!(blocks[1]["text"], "look at this");
             // tool_use: only the fields the tool chip shows
             assert_eq!(blocks[2]["name"], "Read");
             assert_eq!(blocks[2]["input"]["file_path"], "/a/b.rs");
-            assert!(blocks[2]["input"].get("junk").is_none(), "unused input must be stripped");
+            assert!(
+                blocks[2]["input"].get("junk").is_none(),
+                "unused input must be stripped"
+            );
 
             // The whole point: the fat record collapses to a fraction of its size.
             let raw = fat_record().to_string().len();
             let slim = m.to_string().len();
-            assert!(slim * 20 < raw, "slim ({slim}B) must be far smaller than raw ({raw}B)");
+            assert!(
+                slim * 20 < raw,
+                "slim ({slim}B) must be far smaller than raw ({raw}B)"
+            );
         });
     }
 
@@ -5127,7 +5477,10 @@ mod tests {
             let data = request_ok("tail_delta", json!({"path": path, "offset": 0}));
             let lines = data["lines"].as_array().expect("lines");
             assert_eq!(lines.len(), 1);
-            assert!(lines[0].get("toolUseResult").is_none(), "delta must strip toolUseResult");
+            assert!(
+                lines[0].get("toolUseResult").is_none(),
+                "delta must strip toolUseResult"
+            );
             assert!(
                 lines[0]["message"]["content"][0].get("source").is_none(),
                 "delta must strip image base64"
@@ -5158,13 +5511,18 @@ mod tests {
             // wiki_list surfaces it.
             let data = request_ok("wiki_list", Value::Null);
             let docs = data.as_array().expect("array");
-            assert!(docs.iter().any(|d| d["slug"] == doc.slug), "listed docs miss the publish");
+            assert!(
+                docs.iter().any(|d| d["slug"] == doc.slug),
+                "listed docs miss the publish"
+            );
 
             // wiki_file returns the entry, base64-framed; decode back to text.
-            let data =
-                request_ok("wiki_file", json!({"slug": doc.slug, "relpath": doc.entry}));
+            let data = request_ok("wiki_file", json!({"slug": doc.slug, "relpath": doc.entry}));
             let text = String::from_utf8(decode_b64(&data)).unwrap();
-            assert!(text.contains("正文内容"), "entry text not round-tripped: {text}");
+            assert!(
+                text.contains("正文内容"),
+                "entry text not round-tripped: {text}"
+            );
             assert!(data["mime"].as_str().unwrap().contains("markdown"));
         });
     }
@@ -5186,7 +5544,10 @@ mod tests {
                 "wiki_file",
                 json!({"slug": doc.slug, "relpath": "assets/app.css"}),
             );
-            assert_eq!(String::from_utf8(decode_b64(&data)).unwrap(), "body{color:red}");
+            assert_eq!(
+                String::from_utf8(decode_b64(&data)).unwrap(),
+                "body{color:red}"
+            );
             assert!(data["mime"].as_str().unwrap().contains("css"));
 
             // Path traversal is rejected (get_file's canonicalize guard).
@@ -5231,19 +5592,21 @@ mod tests {
             fs::create_dir_all(&src).unwrap();
             let file = src.join("guide.md");
             fs::write(&file, "# 指南\n\n正文").unwrap();
-            let md = crate::wiki::publish(&file, None, None, std::path::Path::new("/ws/demo"))
-                .unwrap();
+            let md =
+                crate::wiki::publish(&file, None, None, std::path::Path::new("/ws/demo")).unwrap();
             let data = request_ok("wiki_export", json!({"slug": md.slug}));
             assert_eq!(data["filename"], "guide.md");
             assert!(data["mime"].as_str().unwrap().contains("markdown"));
-            assert!(String::from_utf8(decode_b64(&data)).unwrap().contains("正文"));
+            assert!(String::from_utf8(decode_b64(&data))
+                .unwrap()
+                .contains("正文"));
 
             // htmlDir doc → a zip (PK\x03\x04 magic), filename ends in .zip.
             let dir = crate::session::real_home_dir().unwrap().join("site");
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("index.html"), "<h1>hi</h1>").unwrap();
-            let hd = crate::wiki::publish(&dir, None, None, std::path::Path::new("/ws/demo"))
-                .unwrap();
+            let hd =
+                crate::wiki::publish(&dir, None, None, std::path::Path::new("/ws/demo")).unwrap();
             let data = request_ok("wiki_export", json!({"slug": hd.slug}));
             assert!(data["filename"].as_str().unwrap().ends_with(".zip"));
             assert_eq!(data["mime"], "application/zip");
@@ -5415,16 +5778,25 @@ mod tests {
                 json!({"sessionId": "s1", "workspacePath": "/ws", "mark": "pending"}),
             );
             assert_eq!(data["ok"], true);
-            assert_eq!(crate::session_mark::read("s1"), Some(crate::session_mark::SessionMark::Pending));
+            assert_eq!(
+                crate::session_mark::read("s1"),
+                Some(crate::session_mark::SessionMark::Pending)
+            );
 
             request_ok(
                 "session_mark",
                 json!({"sessionId": "s1", "workspacePath": "/ws", "mark": "done"}),
             );
-            assert_eq!(crate::session_mark::read("s1"), Some(crate::session_mark::SessionMark::Done));
+            assert_eq!(
+                crate::session_mark::read("s1"),
+                Some(crate::session_mark::SessionMark::Done)
+            );
 
             // Omitting `mark` clears the record.
-            request_ok("session_mark", json!({"sessionId": "s1", "workspacePath": "/ws"}));
+            request_ok(
+                "session_mark",
+                json!({"sessionId": "s1", "workspacePath": "/ws"}),
+            );
             assert_eq!(crate::session_mark::read("s1"), None);
         });
     }
@@ -5652,7 +6024,13 @@ mod tests {
             // desktop's `userAttachmentUrl` does.
             let path = std::path::PathBuf::from(uploaded["path"].as_str().unwrap());
             let name = path.file_name().unwrap().to_string_lossy().to_string();
-            let key = path.parent().unwrap().file_name().unwrap().to_string_lossy().to_string();
+            let key = path
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
 
             let thumb = request_ok("user_attachment", json!({"key": key, "name": name}));
             assert_eq!(thumb["mime"], json!("image/jpeg"));
@@ -5670,7 +6048,11 @@ mod tests {
                 "user_attachment",
                 json!({"key": key, "name": name, "full": true}),
             );
-            assert_eq!(full["mime"], json!("image/png"), "full keeps the stored type");
+            assert_eq!(
+                full["mime"],
+                json!("image/png"),
+                "full keeps the stored type"
+            );
             let full_bytes = base64::engine::general_purpose::STANDARD
                 .decode(full["base64"].as_str().expect("full base64"))
                 .unwrap();
@@ -5692,7 +6074,13 @@ mod tests {
                 }),
             );
             let path = std::path::PathBuf::from(uploaded["path"].as_str().unwrap());
-            let key = path.parent().unwrap().file_name().unwrap().to_string_lossy().to_string();
+            let key = path
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
 
             let reply = request_raw("user_attachment", json!({"key": key, "name": "notes.txt"}));
             assert_eq!(reply["ok"], false, "a text file is not previewable");
@@ -5732,7 +6120,9 @@ mod tests {
             let path = std::path::PathBuf::from(data["path"].as_str().unwrap());
             let store_root = crate::user_attachments::user_attachments_dir().unwrap();
             assert!(
-                path.canonicalize().unwrap().starts_with(store_root.canonicalize().unwrap()),
+                path.canonicalize()
+                    .unwrap()
+                    .starts_with(store_root.canonicalize().unwrap()),
                 "sanitized path must stay inside the store: {}",
                 path.display()
             );
@@ -5745,8 +6135,10 @@ mod tests {
             let reply = request_raw("upload_attachment", json!({"name": "a.png"}));
             assert_eq!(reply["ok"], false, "missing base64 must fail");
 
-            let reply =
-                request_raw("upload_attachment", json!({"name": "a.png", "base64": "!!!"}));
+            let reply = request_raw(
+                "upload_attachment",
+                json!({"name": "a.png", "base64": "!!!"}),
+            );
             assert_eq!(reply["ok"], false, "invalid base64 must fail");
             assert!(reply["error"].as_str().unwrap().contains("base64"));
         });
@@ -5758,7 +6150,10 @@ mod tests {
         with_temp_home(|| {
             let bytes = vec![0u8; (MAX_UPLOAD_BYTES + 1) as usize];
             let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            let reply = request_raw("upload_attachment", json!({"name": "big.bin", "base64": b64}));
+            let reply = request_raw(
+                "upload_attachment",
+                json!({"name": "big.bin", "base64": b64}),
+            );
             assert_eq!(reply["ok"], false);
             assert!(reply["error"].as_str().unwrap().contains("too large"));
         });
@@ -5829,7 +6224,10 @@ mod tests {
         with_temp_home(|| {
             let path = write_jsonl(
                 "delta.jsonl",
-                &[json!({"type":"user","uuid":"u1"}), json!({"type":"assistant","uuid":"a1"})],
+                &[
+                    json!({"type":"user","uuid":"u1"}),
+                    json!({"type":"assistant","uuid":"a1"}),
+                ],
             );
 
             // No offset → locate the current end without reading the body.
@@ -5921,10 +6319,7 @@ mod tests {
         // says the row was stopped by a dry account. Trimmed by the whitelist,
         // the phone shows a row that looks like it simply finished — and the
         // phone is where the refill happens.
-        assert_eq!(
-            list[1]["outOfCredits"],
-            "Your workspace is out of credits."
-        );
+        assert_eq!(list[1]["outOfCredits"], "Your workspace is out of credits.");
         // Long previews are truncated with an ellipsis.
         let preview = list[0]["lastMessagePreview"].as_str().unwrap();
         assert_eq!(preview.chars().count(), SNAPSHOT_PREVIEW_CHARS + 1);
@@ -5957,7 +6352,10 @@ mod tests {
         let list = slim.as_array().expect("array");
         let ids: Vec<&str> = list.iter().filter_map(|s| s["id"].as_str()).collect();
         assert!(ids.contains(&"main"));
-        assert!(ids.contains(&"agent-abc"), "subagent of kept parent survives");
+        assert!(
+            ids.contains(&"agent-abc"),
+            "subagent of kept parent survives"
+        );
         assert!(!ids.contains(&"agent-orphan"), "orphan subagent dropped");
         let sub = list.iter().find(|s| s["id"] == "agent-abc").unwrap();
         assert_eq!(sub["parentSessionId"], "main");
@@ -6029,7 +6427,10 @@ mod tests {
         assert_eq!(list.len(), SNAPSHOT_MAX_SESSIONS);
         // Kept the MOST recent ones (highest lastActivityMs).
         assert_eq!(list[0]["id"], format!("s{}", total - 1));
-        assert_eq!(list.last().unwrap()["id"], format!("s{}", total - SNAPSHOT_MAX_SESSIONS));
+        assert_eq!(
+            list.last().unwrap()["id"],
+            format!("s{}", total - SNAPSHOT_MAX_SESSIONS)
+        );
     }
 
     #[test]
@@ -6062,7 +6463,8 @@ mod tests {
         // non-Fleet session is present (filter applied before truncation).
         assert_eq!(list.len(), 130);
         assert!(
-            list.iter().all(|s| s["id"].as_str().unwrap().starts_with("fleet")),
+            list.iter()
+                .all(|s| s["id"].as_str().unwrap().starts_with("fleet")),
             "non-Fleet sessions must not appear in the mobile snapshot"
         );
     }
@@ -6166,9 +6568,12 @@ mod tests {
     fn snapshot_hash_dedups_identical_content() {
         use crate::session_launch::NEW_SESSION_ENTRYPOINT;
         let ep = NEW_SESSION_ENTRYPOINT;
-        let a = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1, "entrypoint": ep}]));
-        let b = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1, "entrypoint": ep}]));
-        let c = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 2, "entrypoint": ep}]));
+        let a =
+            slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1, "entrypoint": ep}]));
+        let b =
+            slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1, "entrypoint": ep}]));
+        let c =
+            slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 2, "entrypoint": ep}]));
         assert_eq!(snapshot_hash(&a), snapshot_hash(&b));
         assert_ne!(snapshot_hash(&a), snapshot_hash(&c));
         assert_ne!(snapshot_hash(&a), 0, "hash must never equal the sentinel");
@@ -6235,8 +6640,18 @@ mod tests {
         handle_client_payload(&hello("absent", "legacy", false)); // no appCommit key
         {
             let devs = live_devices();
-            let commit = |id: &str| devs.iter().find(|d| d.client_id == id).unwrap().app_commit.clone();
-            assert_eq!(commit("ver"), Some("ea6c003".to_string()), "real commit parsed");
+            let commit = |id: &str| {
+                devs.iter()
+                    .find(|d| d.client_id == id)
+                    .unwrap()
+                    .app_commit
+                    .clone()
+            };
+            assert_eq!(
+                commit("ver"),
+                Some("ea6c003".to_string()),
+                "real commit parsed"
+            );
             assert_eq!(commit("nover"), None, "\"unknown\" normalized to None");
             assert_eq!(commit("absent"), None, "missing appCommit → None");
         }
@@ -6251,7 +6666,10 @@ mod tests {
         assert_eq!(devices.len(), 2, "same clientId must not duplicate");
         let a = devices.iter().find(|d| d.client_id == "a").unwrap();
         assert!(a.push_subscribed, "second hello refreshed pushSubscribed");
-        assert!(a.connected_at_ms <= a.last_seen_ms, "connected_at is the earliest sighting");
+        assert!(
+            a.connected_at_ms <= a.last_seen_ms,
+            "connected_at is the earliest sighting"
+        );
 
         // A hello without a clientId is ignored.
         handle_client_payload(&json!({ "event": "client_hello", "label": "x" }));
@@ -6261,7 +6679,8 @@ mod tests {
         {
             let mut guard = CLIENTS_REGISTRY.lock().unwrap();
             let map = guard.as_mut().unwrap();
-            map.get_mut("b").unwrap().last_seen_ms = now_ms().saturating_sub(CLIENT_STALE_MS + 5_000);
+            map.get_mut("b").unwrap().last_seen_ms =
+                now_ms().saturating_sub(CLIENT_STALE_MS + 5_000);
         }
         let devices = live_devices();
         assert_eq!(devices.len(), 1, "stale device pruned");
@@ -6276,14 +6695,23 @@ mod tests {
 
         // gzip compression gate — folded in here because it shares the global
         // CLIENTS_REGISTRY and would race a separate #[test].
-        assert!(!all_clients_support_gzip(), "empty registry → never compress");
+        assert!(
+            !all_clients_support_gzip(),
+            "empty registry → never compress"
+        );
         handle_client_payload(&hello_gzip("g1", true));
-        assert!(all_clients_support_gzip(), "sole gzip-capable client → compress");
+        assert!(
+            all_clients_support_gzip(),
+            "sole gzip-capable client → compress"
+        );
         // A client that can't inflate (omits the flag → default false) vetoes
         // compression for the whole channel: the relay broadcasts one frame to
         // everyone, so we can't gzip for some clients only.
         handle_client_payload(&hello("g2", "old PWA", false));
-        assert!(!all_clients_support_gzip(), "one non-gzip client forces uncompressed");
+        assert!(
+            !all_clients_support_gzip(),
+            "one non-gzip client forces uncompressed"
+        );
         clear_clients();
     }
 
@@ -6303,7 +6731,10 @@ mod tests {
     /// by tests that assert on what a phone actually receives.
     fn decode_out(text: &str) -> Value {
         let frame: Value = serde_json::from_str(text).expect("valid frame");
-        assert_eq!(frame["type"], "msg", "outbound business frames are msg frames");
+        assert_eq!(
+            frame["type"], "msg",
+            "outbound business frames are msg frames"
+        );
         decode_inbound_payload(&frame["payload"]).expect("sealed payload opens")
     }
 
@@ -6355,7 +6786,10 @@ mod tests {
         assert_eq!(bars[0]["resetsAt"], "2026-07-13T10:00:00Z");
         assert_eq!(bars[1]["label"], "7d Fable");
         assert_eq!(bars[1]["utilization"], 0.07);
-        assert!(bars[1]["prevUtilization"].is_null(), "no previous period → null");
+        assert!(
+            bars[1]["prevUtilization"].is_null(),
+            "no previous period → null"
+        );
     }
 
     /// The raw series runs at a ~10s cadence; the phone gets one point per
@@ -6417,7 +6851,11 @@ mod tests {
         let rows = v.as_array().expect("an array");
         let bytes = serde_json::to_string(&v).unwrap().len();
         eprintln!("usage_history: {} rows, {} bytes", rows.len(), bytes);
-        assert!(rows.len() <= 289, "24h must fit in 5-min buckets, got {}", rows.len());
+        assert!(
+            rows.len() <= 289,
+            "24h must fit in 5-min buckets, got {}",
+            rows.len()
+        );
     }
 
     /// Pins the relay wiring for the codex occupancy frame: the method is
@@ -6498,7 +6936,11 @@ mod tests {
         )
         .expect("plan_forest must be routed");
         let roots = v["roots"].as_array().expect("roots array");
-        assert_eq!(roots.len(), 1, "the child must hang off the root, not sit beside it");
+        assert_eq!(
+            roots.len(),
+            1,
+            "the child must hang off the root, not sit beside it"
+        );
         assert_eq!(roots[0]["id"], "root-plan");
         assert_eq!(roots[0]["done"], 1);
         assert_eq!(roots[0]["total"], 2);
@@ -6543,8 +6985,7 @@ mod tests {
 
         let handles: Vec<_> = (0..6)
             .map(|_| {
-                let (key, calls, barrier) =
-                    (key.clone(), Arc::clone(&calls), Arc::clone(&barrier));
+                let (key, calls, barrier) = (key.clone(), Arc::clone(&calls), Arc::clone(&barrier));
                 std::thread::spawn(move || {
                     barrier.wait();
                     cached_by_key(&key, Duration::from_secs(30), || {
@@ -6578,7 +7019,11 @@ mod tests {
             .expect("ttl probe must succeed");
             std::thread::sleep(Duration::from_millis(25));
         }
-        assert_eq!(ttl_calls.load(Ordering::SeqCst), 2, "an expired entry is recomputed");
+        assert_eq!(
+            ttl_calls.load(Ordering::SeqCst),
+            2,
+            "an expired entry is recomputed"
+        );
     }
 
     /// The ws loop's inbound arm must hand a payload off and come straight back
@@ -6617,7 +7062,10 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(ran.load(Ordering::SeqCst), "the handler must still run, just off the loop");
+        assert!(
+            ran.load(Ordering::SeqCst),
+            "the handler must still run, just off the loop"
+        );
     }
 
     // ── reply timing stamp ───────────────────────────────────────────────────
@@ -6629,7 +7077,10 @@ mod tests {
     fn stamp_handle_ms_marks_only_correlated_replies() {
         let mut reply = json!({ "event": "reply", "req_id": "r1", "ok": true, "data": 42 });
         stamp_handle_ms(&mut reply, 380);
-        assert_eq!(reply["handle_ms"], 380, "a reply carries the desktop's own cost");
+        assert_eq!(
+            reply["handle_ms"], 380,
+            "a reply carries the desktop's own cost"
+        );
         assert_eq!(reply["data"], 42, "stamping must not disturb the payload");
 
         // An unsolicited push (sessions snapshot, decision_created) has no request
@@ -6653,7 +7104,10 @@ mod tests {
     #[test]
     fn stalled_entries_reports_only_the_overdue_longest_first() {
         let now = std::time::Instant::now();
-        let ago = |s: u64| now.checked_sub(Duration::from_secs(s)).expect("clock has headroom");
+        let ago = |s: u64| {
+            now.checked_sub(Duration::from_secs(s))
+                .expect("clock has headroom")
+        };
 
         let mut table = HashMap::new();
         table.insert(1u64, ("pending_snapshot".to_string(), ago(0)));
@@ -6726,7 +7180,10 @@ mod tests {
             "the dump must be a real sample report, got {} bytes",
             body.len()
         );
-        assert!(body.contains("Call graph"), "a sample report carries thread stacks");
+        assert!(
+            body.contains("Call graph"),
+            "a sample report carries thread stacks"
+        );
 
         std::env::remove_var("FLEET_HOME");
         fs::remove_dir_all(&tmp).ok();
@@ -6838,7 +7295,10 @@ mod tests {
         assert!(claim_decision_answer(&id), "first claim wins");
         assert!(!claim_decision_answer(&id), "second claim is a dedup hit");
         release_decision_answer(&id);
-        assert!(claim_decision_answer(&id), "a released id is claimable again");
+        assert!(
+            claim_decision_answer(&id),
+            "a released id is claimable again"
+        );
     }
 
     /// A relay that accepts the TCP connection and then never speaks must not
@@ -6853,8 +7313,9 @@ mod tests {
     /// exists so a regression fails loudly instead of hanging the suite.
     #[tokio::test(flavor = "multi_thread")]
     async fn connect_ws_gives_up_on_a_silent_peer() {
-        let listener =
-            tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback listener");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback listener");
         let addr = listener.local_addr().expect("listener addr");
         // Accept and hold: never write, never close.
         let _accepting = tokio::spawn(async move {
@@ -6875,7 +7336,10 @@ mod tests {
             "connect_ws must return on its own deadline; it parked instead, \
              which strands the reconnect loop forever",
         );
-        assert!(inner.is_err(), "a peer that never completes the handshake is not a connection");
+        assert!(
+            inner.is_err(),
+            "a peer that never completes the handshake is not a connection"
+        );
     }
 
     /// The pure gzip-gate decision — no global state, safe to run alone.
@@ -6905,9 +7369,18 @@ mod tests {
         // The wire carries no business fields — only the sealed envelope.
         let frame: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(frame["payload"]["enc"], "box");
-        assert!(frame["payload"].get("event").is_none(), "no plaintext event on the wire");
-        assert!(!text.contains("\"reply\""), "no plaintext leaks into the frame");
-        assert!(frame["payload"].get("z").is_none(), "small payload not gzipped");
+        assert!(
+            frame["payload"].get("event").is_none(),
+            "no plaintext event on the wire"
+        );
+        assert!(
+            !text.contains("\"reply\""),
+            "no plaintext leaks into the frame"
+        );
+        assert!(
+            frame["payload"].get("z").is_none(),
+            "small payload not gzipped"
+        );
         // A peer with the same key opens it back to the original.
         assert_eq!(decode_out(&text), payload);
         *ENC_KEY.lock().unwrap() = None;
@@ -6925,9 +7398,11 @@ mod tests {
 
         use crate::session_launch::NEW_SESSION_ENTRYPOINT;
         let many: Vec<Value> = (0..200)
-            .map(|i| json!({"id": format!("session-{i}"), "isSubagent": false,
+            .map(|i| {
+                json!({"id": format!("session-{i}"), "isSubagent": false,
                             "lastActivityMs": i, "workspaceName": "some-workspace-name",
-                            "entrypoint": NEW_SESSION_ENTRYPOINT}))
+                            "entrypoint": NEW_SESSION_ENTRYPOINT})
+            })
             .collect();
         let slim = slim_sessions_snapshot(&Value::Array(many));
         let payload = json!({ "event": "sessions", "sessions": slim });
@@ -6939,7 +7414,10 @@ mod tests {
         let Outbound::Text(text) = encode_payload(&payload);
         let frame: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(frame["payload"]["enc"], "box");
-        assert_eq!(frame["payload"]["z"], true, "large payload gzipped before sealing");
+        assert_eq!(
+            frame["payload"]["z"], true,
+            "large payload gzipped before sealing"
+        );
         // Ciphertext is far smaller than the plaintext JSON despite base64.
         assert!(
             text.len() < payload.to_string().len(),
@@ -7051,7 +7529,10 @@ mod tests {
         // the next scan-driven change. This is exactly the bug being fixed.
         *SESSIONS_PROVIDER.lock().unwrap() = None;
         push_snapshot_on_connect();
-        assert!(rx.try_recv().is_err(), "no provider → no on-connect push (pre-fix state)");
+        assert!(
+            rx.try_recv().is_err(),
+            "no provider → no on-connect push (pre-fix state)"
+        );
 
         // With a provider registered (the desktop LocalBackend path), connecting
         // emits the current snapshot immediately, no scan tick required.
@@ -7101,12 +7582,19 @@ mod tests {
         ]));
         let (upsert, mut remove) = diff_snapshot(&baseline, &next);
 
-        let mut up_ids: Vec<&str> =
-            upsert.iter().filter_map(|s| s["id"].as_str()).collect();
+        let mut up_ids: Vec<&str> = upsert.iter().filter_map(|s| s["id"].as_str()).collect();
         up_ids.sort_unstable();
-        assert_eq!(up_ids, vec!["s2", "s4"], "only changed + new ship as upsert");
+        assert_eq!(
+            up_ids,
+            vec!["s2", "s4"],
+            "only changed + new ship as upsert"
+        );
         remove.sort();
-        assert_eq!(remove, vec!["s3".to_string()], "vanished id ships as remove");
+        assert_eq!(
+            remove,
+            vec!["s3".to_string()],
+            "vanished id ships as remove"
+        );
 
         // Identical snapshot → nothing to send.
         let (u2, r2) = diff_snapshot(&per_id_hashes(&next), &next);
@@ -7122,10 +7610,16 @@ mod tests {
         clear_clients();
         assert!(!all_clients_support_delta(), "empty registry → never delta");
         handle_client_payload(&hello_delta("d1", true));
-        assert!(all_clients_support_delta(), "sole delta-capable client → delta");
+        assert!(
+            all_clients_support_delta(),
+            "sole delta-capable client → delta"
+        );
         // A legacy client (no flag → default false) vetoes deltas channel-wide.
         handle_client_payload(&hello("legacy", "old PWA", false));
-        assert!(!all_clients_support_delta(), "one legacy client forces full snapshots");
+        assert!(
+            !all_clients_support_delta(),
+            "one legacy client forces full snapshots"
+        );
         clear_clients();
     }
 
@@ -7169,8 +7663,12 @@ mod tests {
         let Outbound::Text(t2) = rx.try_recv().expect("second push emits a frame");
         let delta = decode_out(&t2);
         assert_eq!(delta["event"], "sessions_delta", "second push is a delta");
-        let mut up_ids: Vec<&str> =
-            delta["upsert"].as_array().unwrap().iter().filter_map(|s| s["id"].as_str()).collect();
+        let mut up_ids: Vec<&str> = delta["upsert"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|s| s["id"].as_str())
+            .collect();
         up_ids.sort_unstable();
         assert_eq!(up_ids, vec!["s2", "s4"]);
         assert_eq!(delta["remove"].as_array().unwrap(), &vec![json!("s3")]);
@@ -7182,7 +7680,11 @@ mod tests {
             {"id": "s2", "isSubagent": false, "lastActivityMs": 10, "entrypoint": ep},
         ]));
         let Outbound::Text(t3) = rx.try_recv().expect("third push emits a frame");
-        assert_eq!(decode_out(&t3)["event"], "sessions", "legacy client forces full");
+        assert_eq!(
+            decode_out(&t3)["event"],
+            "sessions",
+            "legacy client forces full"
+        );
 
         // Reset shared globals for sibling tests.
         clear_clients();
@@ -7248,14 +7750,21 @@ mod tests {
             "message": { "role": "user", "content": "injected SKILL.md body" }
         })];
         let slim = slim_tail_messages(msgs);
-        assert_eq!(slim[0]["isMeta"], json!(true), "isMeta must survive slimming");
+        assert_eq!(
+            slim[0]["isMeta"],
+            json!(true),
+            "isMeta must survive slimming"
+        );
         assert_eq!(
             slim[0]["sourceToolUseID"],
             json!("toolu_abc"),
             "sourceToolUseID must survive slimming"
         );
         assert_eq!(slim[0]["fleetEvent"]["kind"], json!("watch"));
-        assert!(slim[0].get("cwd").is_none(), "bookkeeping fields stay stripped");
+        assert!(
+            slim[0].get("cwd").is_none(),
+            "bookkeeping fields stay stripped"
+        );
     }
 
     /// The redesigned view shows one `↑in ↓out · model` line per turn and uses
@@ -7311,7 +7820,11 @@ mod tests {
         let slim = slim_tail_messages(msgs);
         let block = &slim[0]["message"]["content"][0];
         assert_eq!(block["tool_use_id"], json!("toolu_x"));
-        assert_eq!(block["is_error"], json!(true), "is_error must survive slimming");
+        assert_eq!(
+            block["is_error"],
+            json!(true),
+            "is_error must survive slimming"
+        );
         assert!(
             block.get("content").is_none(),
             "tool_result bodies stay stripped from the skeleton stream"
@@ -7427,13 +7940,19 @@ mod tests {
             "stderr": "\nShell cwd was reset to /Users/h/workspace/foxy",
             "interrupted": false
         }))]);
-        assert_eq!(slim[0]["message"]["content"][0]["_digest"]["stderrLines"], json!(0));
+        assert_eq!(
+            slim[0]["message"]["content"][0]["_digest"]["stderrLines"],
+            json!(0)
+        );
         let slim = slim_tail_messages(vec![record(json!({
             "stdout": "",
             "stderr": "warning: unused\nShell cwd was reset to /Users/h/workspace/foxy",
             "interrupted": false
         }))]);
-        assert_eq!(slim[0]["message"]["content"][0]["_digest"]["stderrLines"], json!(1));
+        assert_eq!(
+            slim[0]["message"]["content"][0]["_digest"]["stderrLines"],
+            json!(1)
+        );
 
         // Agent → status + totals.
         let slim = slim_tail_messages(vec![record(json!({
@@ -7499,11 +8018,16 @@ mod tests {
             })
         };
 
-        for name in ["mcp__fleet__fleet__ask", "AskUserQuestion", "request_user_input"] {
+        for name in [
+            "mcp__fleet__fleet__ask",
+            "AskUserQuestion",
+            "request_user_input",
+        ] {
             let slim = slim_tail_messages(vec![ask_use(name)]);
             let block = &slim[0]["message"]["content"][0];
             assert_eq!(
-                block["_ask"]["q"], json!("查清楚了，缺的是一个渲染器。"),
+                block["_ask"]["q"],
+                json!("查清楚了，缺的是一个渲染器。"),
                 "{name}: the chip shows the first question's opening line"
             );
             assert_eq!(block["_ask"]["n"], json!(2), "{name}: question count");
@@ -7609,7 +8133,11 @@ mod tests {
         let block = &slim[0]["message"]["content"][0];
         assert!(block.get("content").is_none(), "result body stays stripped");
         let thumbs = block["_thumbs"].as_array().expect("thumbs present");
-        assert_eq!(thumbs.len(), TAIL_THUMB_MAX_PER_RESULT, "thumb count capped");
+        assert_eq!(
+            thumbs.len(),
+            TAIL_THUMB_MAX_PER_RESULT,
+            "thumb count capped"
+        );
     }
 
     /// dsh's transcripts carry an image as a store path, not inline base64
@@ -7655,7 +8183,10 @@ mod tests {
         std::fs::write(&outside, std::fs::read(&stored).unwrap()).unwrap();
         let slim = slim_tail_messages(vec![path_block(&outside.to_string_lossy())]);
         let block = &slim[0]["message"]["content"][0];
-        assert!(block.get("source").is_none(), "path outside the store ships no source");
+        assert!(
+            block.get("source").is_none(),
+            "path outside the store ships no source"
+        );
         assert!(block.get("_thumb").is_none());
 
         // SAFETY: serialized via fleet_home_lock
@@ -7697,12 +8228,23 @@ mod tests {
             );
 
             // Default: truncated previews + flag.
-            let d = request_ok("tool_detail", json!({ "path": path, "tool_use_id": "toolu_det" }));
+            let d = request_ok(
+                "tool_detail",
+                json!({ "path": path, "tool_use_id": "toolu_det" }),
+            );
             assert_eq!(d["name"], json!("Bash"));
-            assert_eq!(d["input"]["command"], json!("make"), "full input comes back");
+            assert_eq!(
+                d["input"]["command"],
+                json!("make"),
+                "full input comes back"
+            );
             assert_eq!(d["truncated"], json!(true));
             let preview = d["content"].as_str().expect("content preview");
-            assert!(preview.len() < 3000, "content must be a preview, got {}B", preview.len());
+            assert!(
+                preview.len() < 3000,
+                "content must be a preview, got {}B",
+                preview.len()
+            );
             assert!(preview.contains("Fleet truncated"));
 
             // full=true returns the whole body.
@@ -7715,10 +8257,10 @@ mod tests {
             assert_eq!(d["toolUseResult"]["stdout"].as_str().unwrap().len(), 10_000);
 
             // Unknown id is a protocol error, not an empty reply.
-            assert!(serve_tool_detail(
-                &json!({ "path": path, "tool_use_id": "toolu_missing" })
-            )
-            .is_err());
+            assert!(
+                serve_tool_detail(&json!({ "path": path, "tool_use_id": "toolu_missing" }))
+                    .is_err()
+            );
         });
     }
 
@@ -7748,7 +8290,10 @@ mod tests {
                 })],
             );
 
-            let d = request_ok("tool_detail", json!({ "path": path, "tool_use_id": "toolu_shot" }));
+            let d = request_ok(
+                "tool_detail",
+                json!({ "path": path, "tool_use_id": "toolu_shot" }),
+            );
             let images = d["images"].as_array().expect("images list");
             assert_eq!(images.len(), 1);
             let bytes = base64::engine::general_purpose::STANDARD
@@ -7832,7 +8377,10 @@ mod tests {
             // Hostname is optional (containers, systems without a name), but if present
             // must be a non-empty string.
             if let Some(h) = data.get("hostname") {
-                assert!(h.as_str().is_some_and(|s| !s.is_empty()), "bad hostname: {data}");
+                assert!(
+                    h.as_str().is_some_and(|s| !s.is_empty()),
+                    "bad hostname: {data}"
+                );
             }
         });
     }

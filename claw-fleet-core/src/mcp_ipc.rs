@@ -141,7 +141,11 @@ pub fn read_review_doc(doc: &ReviewDoc) -> Result<ReviewDocContent, String> {
                 .clone()
                 .filter(|s| !s.is_empty())
                 .unwrap_or(wdoc.title);
-            ReviewDocContent { format, body, title }
+            ReviewDocContent {
+                format,
+                body,
+                title,
+            }
         }
     };
     autoheight_review_content(&mut content);
@@ -181,11 +185,7 @@ pub fn read_review_file(path: &str, title: Option<&str>) -> Result<ReviewDocCont
     let title = title
         .map(str::to_string)
         .filter(|s| !s.is_empty())
-        .or_else(|| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .map(str::to_string)
-        })
+        .or_else(|| p.file_name().and_then(|n| n.to_str()).map(str::to_string))
         .unwrap_or_else(|| path.to_string());
     // An `.html`/`.htm` file is meant to render, not to be shown as raw markdown
     // source. Flag it Html so the card frames it in the sandboxed iframe;
@@ -613,7 +613,9 @@ fn valid_asset_name(name: &str) -> bool {
 }
 
 fn html_escape_text(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn html_escape_attr(s: &str) -> String {
@@ -825,7 +827,9 @@ fn synthesize_gallery(images: &[FleetAskImage]) -> String {
         body.push_str("<figure><img src=\"");
         body.push_str(&html_escape_attr(&img.name));
         body.push_str("\" alt=\"");
-        body.push_str(&html_escape_attr(img.caption.as_deref().unwrap_or(&img.name)));
+        body.push_str(&html_escape_attr(
+            img.caption.as_deref().unwrap_or(&img.name),
+        ));
         body.push_str("\">");
         if let Some(cap) = &img.caption {
             body.push_str("<figcaption>");
@@ -1065,7 +1069,12 @@ mod tests {
                 std::env::set_var("FLEET_HOME", &dir);
                 std::env::set_var("CODEX_HOME", dir.join(".codex"));
             }
-            Self { dir, previous_fleet, previous_codex, _lock: lock }
+            Self {
+                dir,
+                previous_fleet,
+                previous_codex,
+                _lock: lock,
+            }
         }
 
         fn plant_codex_session(&self, id: &str, workspace: &std::path::Path) {
@@ -1156,7 +1165,10 @@ mod tests {
         let rec = crate::task_outcome::read("sess-term-1").expect("outcome stamped");
         assert_eq!(rec.outcome, crate::task_outcome::TaskOutcome::Completed);
         assert_eq!(rec.card_id, "card-term-1");
-        assert!(rec.agent_claimed_complete, "the agent's claim is carried over");
+        assert!(
+            rec.agent_claimed_complete,
+            "the agent's claim is carried over"
+        );
         assert_eq!(
             crate::session_mark::read("sess-term-1"),
             Some(crate::session_mark::SessionMark::Done),
@@ -1207,9 +1219,21 @@ mod tests {
         // Only the hop that raised the card made the `taskComplete` claim; the
         // retrospective reads that field as the agent's own verdict, so the
         // predecessors must not be credited with one they never made.
-        assert!(crate::task_outcome::read("hop-3").unwrap().agent_claimed_complete);
-        assert!(!crate::task_outcome::read("hop-1").unwrap().agent_claimed_complete);
-        assert!(!crate::task_outcome::read("hop-2").unwrap().agent_claimed_complete);
+        assert!(
+            crate::task_outcome::read("hop-3")
+                .unwrap()
+                .agent_claimed_complete
+        );
+        assert!(
+            !crate::task_outcome::read("hop-1")
+                .unwrap()
+                .agent_claimed_complete
+        );
+        assert!(
+            !crate::task_outcome::read("hop-2")
+                .unwrap()
+                .agent_claimed_complete
+        );
     }
 
     /// A plain dismissal (no terminal button) must record no terminal state —
@@ -1685,8 +1709,9 @@ mod tests {
             "question items description names the three answer surfaces, got: {item_desc}"
         );
         assert!(
-            props["options"]["description"].as_str().is_some_and(|d| d.contains("html")
-                && d.contains("formFields")),
+            props["options"]["description"]
+                .as_str()
+                .is_some_and(|d| d.contains("html") && d.contains("formFields")),
             "options description explains when it may be omitted"
         );
         // Form-field kinds enum surfaces in schema:
@@ -1769,11 +1794,9 @@ mod tests {
     #[test]
     fn schema_advertises_new_kinds_and_range_bounds() {
         let s = fleet_ask_input_schema();
-        let item_props =
-            &s["properties"]["questions"]["items"]["properties"]["formFields"]["items"]["properties"];
-        let kinds = item_props["kind"]["enum"]
-            .as_array()
-            .expect("enum array");
+        let item_props = &s["properties"]["questions"]["items"]["properties"]["formFields"]
+            ["items"]["properties"];
+        let kinds = item_props["kind"]["enum"].as_array().expect("enum array");
         for k in ["date", "datetime", "time", "range"] {
             assert!(kinds.iter().any(|v| v == k), "kind enum missing {k}");
         }
@@ -1808,7 +1831,10 @@ mod tests {
             }]
         });
         let req: FleetAskRequest = serde_json::from_value(raw).unwrap();
-        assert_eq!(req.questions[0].html.as_deref(), Some("<p>Diff preview</p>"));
+        assert_eq!(
+            req.questions[0].html.as_deref(),
+            Some("<p>Diff preview</p>")
+        );
         assert_eq!(req.questions[0].form_fields.len(), 2);
         assert_eq!(req.questions[0].form_fields[1].kind, FormFieldKind::Radio);
         assert_eq!(
@@ -1825,7 +1851,10 @@ mod tests {
         req.questions[0].html = Some("<p>hi</p>".into());
         normalize_html(&mut req);
         let once = req.questions[0].html.clone().unwrap();
-        assert!(once.starts_with("<p>hi</p>"), "author's html must survive intact: {once}");
+        assert!(
+            once.starts_with("<p>hi</p>"),
+            "author's html must survive intact: {once}"
+        );
         assert!(once.contains(AUTOHEIGHT_MARKER));
 
         // Re-injecting (e.g. a replayed request) must not stack a second copy.
@@ -1842,20 +1871,35 @@ mod tests {
     #[test]
     fn with_autoheight_injects_find_handler_alongside_height() {
         let out = with_autoheight("<p>hi</p>");
-        assert!(out.starts_with("<p>hi</p>"), "author's html must survive: {out}");
+        assert!(
+            out.starts_with("<p>hi</p>"),
+            "author's html must survive: {out}"
+        );
         // Both scripts land: height measurement + the Cmd+F find handler.
-        assert!(out.contains(AUTOHEIGHT_MARKER), "height script missing: {out}");
+        assert!(
+            out.contains(AUTOHEIGHT_MARKER),
+            "height script missing: {out}"
+        );
         assert!(out.contains(FIND_MARKER), "find handler missing: {out}");
         // The handler responds to the three parent actions and injects its own
         // highlight styles (the agent document has none).
-        assert!(out.contains("__fleetFindResult"), "must reply with match count");
-        assert!(out.contains("::highlight(find-match)"), "must inject highlight css");
+        assert!(
+            out.contains("__fleetFindResult"),
+            "must reply with match count"
+        );
+        assert!(
+            out.contains("::highlight(find-match)"),
+            "must inject highlight css"
+        );
         assert!(out.contains("'search'") && out.contains("'goto'") && out.contains("'clear'"));
 
         // The autoheight marker gates both, so a re-injection stacks neither.
         let twice = with_autoheight(&out);
         assert_eq!(twice, out, "second pass must be a no-op");
-        assert_eq!(twice.matches(FIND_MARKER).count(), out.matches(FIND_MARKER).count());
+        assert_eq!(
+            twice.matches(FIND_MARKER).count(),
+            out.matches(FIND_MARKER).count()
+        );
     }
 
     #[test]
@@ -1920,12 +1964,21 @@ mod tests {
         let index = read_decision_asset("card-img", "q0", "index.html").unwrap();
         assert_eq!(index.mime, "text/html; charset=utf-8");
         let idx = String::from_utf8_lossy(&index.bytes);
-        assert!(idx.contains("<img src=\"chart.png\">"), "agent html served verbatim: {idx}");
-        assert!(idx.contains(AUTOHEIGHT_MARKER), "served entry must report its height: {idx}");
+        assert!(
+            idx.contains("<img src=\"chart.png\">"),
+            "agent html served verbatim: {idx}"
+        );
+        assert!(
+            idx.contains(AUTOHEIGHT_MARKER),
+            "served entry must report its height: {idx}"
+        );
         // The theme prelude leads (a served document cannot be restyled from the
         // cross-origin parent, so the theme has to travel inside it) and comes
         // *before* the agent's markup so agent rules still win.
-        assert!(idx.starts_with(THEME_PRELUDE), "theme prelude must lead: {idx}");
+        assert!(
+            idx.starts_with(THEME_PRELUDE),
+            "theme prelude must lead: {idx}"
+        );
         assert!(
             idx.find(THEME_MARKER).unwrap() < idx.find("<img src=").unwrap(),
             "prelude must precede agent markup: {idx}"
@@ -1966,18 +2019,30 @@ mod tests {
         assert_eq!(req2.questions[0].images[0].name, "ok.png");
         let gallery = read_decision_asset("card-img2", "q0", "index.html").unwrap();
         let g = String::from_utf8_lossy(&gallery.bytes);
-        assert!(g.contains("src=\"ok.png\""), "gallery must reference survivor: {g}");
-        assert!(g.contains(AUTOHEIGHT_MARKER), "synthesized gallery must report its height: {g}");
+        assert!(
+            g.contains("src=\"ok.png\""),
+            "gallery must reference survivor: {g}"
+        );
+        assert!(
+            g.contains(AUTOHEIGHT_MARKER),
+            "synthesized gallery must report its height: {g}"
+        );
         // Theme regression guard: the gallery used to hard-code a white canvas,
         // which made every image-only card a white rectangle in the dark theme.
         // The served path cannot be recoloured from outside, so the document
         // itself must stay theme-neutral.
-        assert!(g.contains(THEME_MARKER), "gallery must carry the theme prelude: {g}");
+        assert!(
+            g.contains(THEME_MARKER),
+            "gallery must carry the theme prelude: {g}"
+        );
         assert!(
             !g.contains("background:#fff") && !g.contains("color:#222"),
             "gallery must not hard-code a light canvas: {g}"
         );
-        assert!(g.contains("color:CanvasText"), "gallery text follows the colour scheme: {g}");
+        assert!(
+            g.contains("color:CanvasText"),
+            "gallery text follows the colour scheme: {g}"
+        );
 
         // Idempotent: a document already carrying the prelude gets no second one.
         assert_eq!(

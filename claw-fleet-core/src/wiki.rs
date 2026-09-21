@@ -147,7 +147,9 @@ pub fn normalize_slug(raw: &str) -> Result<String, String> {
     }
     let out = segments.join("/");
     if out.len() > MAX_SLUG_LEN {
-        return Err(format!("slug '{out}' exceeds {MAX_SLUG_LEN} characters — pass a shorter --slug"));
+        return Err(format!(
+            "slug '{out}' exceeds {MAX_SLUG_LEN} characters — pass a shorter --slug"
+        ));
     }
     Ok(out)
 }
@@ -486,17 +488,18 @@ pub fn publish_in(
             let stem = if meta.is_dir() {
                 source.file_name().and_then(|n| n.to_str()).unwrap_or("")
             } else {
-                source
-                    .file_stem()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
+                source.file_stem().and_then(|n| n.to_str()).unwrap_or("")
             };
             normalize_slug(stem)?
         }
     };
 
     // Title: explicit > extracted from content > slug.
-    let entry_abs = if meta.is_dir() { source.join(&entry) } else { source.clone() };
+    let entry_abs = if meta.is_dir() {
+        source.join(&entry)
+    } else {
+        source.clone()
+    };
     let title = match title {
         Some(t) if !t.trim().is_empty() => t.trim().to_string(),
         _ => extract_title(&entry_abs, kind).unwrap_or_else(|| slug_basename(&slug).to_string()),
@@ -685,7 +688,9 @@ pub fn publish_text_in(
         source_path: TEXT_SOURCE_PATH.to_string(),
     };
 
-    let doc = assemble_doc(existing, &slug, title, "markdown", entry, workspace, now, version);
+    let doc = assemble_doc(
+        existing, &slug, title, "markdown", entry, workspace, now, version,
+    );
     write_doc_json(&doc_dir, &doc)?;
     Ok(doc)
 }
@@ -763,7 +768,11 @@ fn extract_title(entry: &Path, kind: &str) -> Option<String> {
 /// re-publishes with -2, -3 … suffixes.
 fn next_version_id(versions_dir: &Path, now: u64) -> String {
     let base = chrono::DateTime::from_timestamp_millis(now as i64)
-        .map(|dt| dt.with_timezone(&chrono::Local).format("%Y%m%d-%H%M%S").to_string())
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y%m%d-%H%M%S")
+                .to_string()
+        })
         .unwrap_or_else(|| format!("v{now}"));
     if !versions_dir.join(&base).exists() {
         return base;
@@ -843,7 +852,9 @@ fn copy_dir_inner(
 /// All docs under `~/.fleet/wiki`, newest `updated_ms` first. Dirs with a
 /// missing/corrupt `doc.json` are skipped.
 pub fn list_docs() -> Vec<WikiDoc> {
-    wiki_dir().map(|root| list_docs_in(&root)).unwrap_or_default()
+    wiki_dir()
+        .map(|root| list_docs_in(&root))
+        .unwrap_or_default()
 }
 
 /// [`list_docs`] against an explicit wiki root.
@@ -885,7 +896,9 @@ pub struct WikiSearchHit {
 /// plain text of its current version's entry file. Scans on demand — the doc
 /// set is small and this keeps the no-global-index concurrency design intact.
 pub fn search_docs(query: &str) -> Vec<WikiSearchHit> {
-    wiki_dir().map(|root| search_docs_in(&root, query)).unwrap_or_default()
+    wiki_dir()
+        .map(|root| search_docs_in(&root, query))
+        .unwrap_or_default()
 }
 
 /// [`search_docs`] against an explicit wiki root.
@@ -911,7 +924,11 @@ pub fn search_docs_in(root: &Path, query: &str) -> Vec<WikiSearchHit> {
         let Ok(raw) = String::from_utf8(file.bytes) else {
             continue;
         };
-        let text = if doc.kind == "markdown" { raw } else { strip_html(&raw) };
+        let text = if doc.kind == "markdown" {
+            raw
+        } else {
+            strip_html(&raw)
+        };
         if let Some(pos) = find_ci(&text, query) {
             hits.push(WikiSearchHit {
                 slug: doc.slug,
@@ -949,7 +966,13 @@ fn snippet_around(text: &str, pos: usize, match_len: usize) -> String {
     if start > 0 {
         out.push('…');
     }
-    out.extend(text[start..end].split_whitespace().collect::<Vec<_>>().join(" ").chars());
+    out.extend(
+        text[start..end]
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars(),
+    );
     if end < text.len() {
         out.push('…');
     }
@@ -989,7 +1012,11 @@ pub fn export_doc_in(root: &Path, slug: &str, version: &str) -> Result<WikiExpor
     let filename = export_filename(&doc);
     if doc.kind != "htmlDir" {
         let f = get_file_in(root, slug, version, &doc.entry)?;
-        return Ok(WikiExport { filename, mime: f.mime, bytes: f.bytes });
+        return Ok(WikiExport {
+            filename,
+            mime: f.mime,
+            bytes: f.bytes,
+        });
     }
     let version = if version.is_empty() || version == "current" {
         doc.current_version.as_str()
@@ -999,7 +1026,10 @@ pub fn export_doc_in(root: &Path, slug: &str, version: &str) -> Result<WikiExpor
     if version.contains('/') || version.contains('\\') || version.contains("..") {
         return Err("invalid version id".to_string());
     }
-    let dir = root.join(slug_to_dirname(slug)).join("versions").join(version);
+    let dir = root
+        .join(slug_to_dirname(slug))
+        .join("versions")
+        .join(version);
     if !dir.is_dir() {
         return Err(format!("version '{version}' not found for '{slug}'"));
     }
@@ -1080,7 +1110,11 @@ fn collect_files(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<(), 
     let entries = fs::read_dir(dir).map_err(|e| format!("read dir: {e}"))?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        let rel = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+        let rel = if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}/{name}")
+        };
         let ft = entry.file_type().map_err(|e| e.to_string())?;
         if ft.is_dir() {
             collect_files(&entry.path(), &rel, out)?;
@@ -1171,7 +1205,10 @@ pub fn get_file_in(
     if version.contains('/') || version.contains('\\') || version.contains("..") {
         return Err("invalid version id".to_string());
     }
-    let version_dir = root.join(slug_to_dirname(slug)).join("versions").join(version);
+    let version_dir = root
+        .join(slug_to_dirname(slug))
+        .join("versions")
+        .join(version);
 
     // Reject absolute paths and any `..` segment before touching the fs.
     let rel = Path::new(relpath);
@@ -1180,7 +1217,9 @@ pub fn get_file_in(
         || rel.components().any(|c| {
             matches!(
                 c,
-                std::path::Component::ParentDir | std::path::Component::Prefix(_) | std::path::Component::RootDir
+                std::path::Component::ParentDir
+                    | std::path::Component::Prefix(_)
+                    | std::path::Component::RootDir
             )
         })
     {
@@ -1278,7 +1317,11 @@ pub fn move_folder_in(root: &Path, from: &str, to: &str) -> Result<Vec<WikiDoc>,
     if from.is_empty() {
         return Err("cannot move the wiki root".to_string());
     }
-    let to = if to.is_empty() { String::new() } else { normalize_slug(to)? };
+    let to = if to.is_empty() {
+        String::new()
+    } else {
+        normalize_slug(to)?
+    };
     if to == from {
         return Ok(Vec::new());
     }
@@ -1297,12 +1340,18 @@ pub fn move_folder_in(root: &Path, from: &str, to: &str) -> Result<Vec<WikiDoc>,
     let mut targets: Vec<String> = Vec::new();
     for old in &sources {
         let rest = &old[from.len() + 1..];
-        let joined = if to.is_empty() { rest.to_string() } else { format!("{to}/{rest}") };
+        let joined = if to.is_empty() {
+            rest.to_string()
+        } else {
+            format!("{to}/{rest}")
+        };
         // Re-normalizing catches the depth ceiling: nesting `a/b` under `c/d/e`
         // can push a doc past MAX_SLUG_DEPTH.
         let new = normalize_slug(&joined)?;
         if targets.contains(&new) {
-            return Err(format!("'{new}' would collide with another doc in this move"));
+            return Err(format!(
+                "'{new}' would collide with another doc in this move"
+            ));
         }
         if root.join(slug_to_dirname(&new)).join("doc.json").exists() {
             return Err(format!("wiki doc '{new}' already exists"));
@@ -1444,7 +1493,10 @@ mod tests {
     #[test]
     fn normalize_slug_keeps_directory_segments() {
         assert_eq!(normalize_slug("arch/overview").unwrap(), "arch/overview");
-        assert_eq!(normalize_slug("Arch/Storage Layer").unwrap(), "arch/storage-layer");
+        assert_eq!(
+            normalize_slug("Arch/Storage Layer").unwrap(),
+            "arch/storage-layer"
+        );
         assert_eq!(normalize_slug("a/b/c/d").unwrap(), "a/b/c/d");
         // Empty segments collapse: no leading, trailing, or doubled separator.
         assert_eq!(normalize_slug("/arch//overview/").unwrap(), "arch/overview");
@@ -1477,14 +1529,21 @@ mod tests {
 
         let doc = publish_in(root.path(), &md, Some("arch/overview"), None, ws.path()).unwrap();
         assert_eq!(doc.slug, "arch/overview");
-        assert!(root.path().join("arch%2Foverview").join("doc.json").is_file());
+        assert!(root
+            .path()
+            .join("arch%2Foverview")
+            .join("doc.json")
+            .is_file());
         assert!(!root.path().join("arch").exists());
 
         // Round-trips through the flat scan and by-slug lookup.
         let listed = list_docs_in(root.path());
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].slug, "arch/overview");
-        assert_eq!(get_doc_in(root.path(), "arch/overview").unwrap().title, "Overview");
+        assert_eq!(
+            get_doc_in(root.path(), "arch/overview").unwrap().title,
+            "Overview"
+        );
         let f = get_file_in(root.path(), "arch/overview", "current", "overview.md").unwrap();
         assert_eq!(f.bytes, fs::read(&md).unwrap());
 
@@ -1499,7 +1558,14 @@ mod tests {
         let ws = tmp();
         let md = ws.path().join("overview.md");
         fs::write(&md, "# Overview\n").unwrap();
-        let doc = publish_in(root.path(), &md, Some("arch/deep/overview"), None, ws.path()).unwrap();
+        let doc = publish_in(
+            root.path(),
+            &md,
+            Some("arch/deep/overview"),
+            None,
+            ws.path(),
+        )
+        .unwrap();
         assert_eq!(export_filename(&doc), "overview.md");
     }
 
@@ -1538,7 +1604,10 @@ mod tests {
         publish_in(root.path(), &md, Some("b"), None, ws.path()).unwrap();
 
         assert!(move_doc_in(root.path(), "missing", "x").is_err());
-        assert!(move_doc_in(root.path(), "a", "b").is_err(), "target occupied");
+        assert!(
+            move_doc_in(root.path(), "a", "b").is_err(),
+            "target occupied"
+        );
         // The rejected move left both docs intact.
         assert!(get_doc_in(root.path(), "a").is_ok());
         assert!(get_doc_in(root.path(), "b").is_ok());
@@ -1635,7 +1704,10 @@ mod tests {
         // a/x moved first, then a/y failed — a/x must be back where it started.
         assert!(get_doc_in(root.path(), "a/x").is_ok(), "rolled back");
         assert!(get_doc_in(root.path(), "a/y").is_ok());
-        assert!(get_doc_in(root.path(), "b/x").is_err(), "no orphan left behind");
+        assert!(
+            get_doc_in(root.path(), "b/x").is_err(),
+            "no orphan left behind"
+        );
     }
 
     #[test]
@@ -1644,8 +1716,14 @@ mod tests {
         let ws = tmp();
         seed(&root, &ws, "a/x");
 
-        assert!(move_folder_in(root.path(), "", "b").is_err(), "no moving the root");
-        assert!(move_folder_in(root.path(), "a", "a/deeper").is_err(), "into itself");
+        assert!(
+            move_folder_in(root.path(), "", "b").is_err(),
+            "no moving the root"
+        );
+        assert!(
+            move_folder_in(root.path(), "a", "a/deeper").is_err(),
+            "into itself"
+        );
         assert!(move_folder_in(root.path(), "nosuch", "b").is_err());
         // A no-op move reports nothing moved rather than erroring.
         assert!(move_folder_in(root.path(), "a", "a").unwrap().is_empty());
@@ -1661,7 +1739,10 @@ mod tests {
         seed(&root, &ws, "a/b/c/d/e/f/g"); // 7 segments, at the ceiling
 
         assert!(move_folder_in(root.path(), "a", "x/y/z").is_err());
-        assert!(get_doc_in(root.path(), "a/b/c/d/e/f/g").is_ok(), "nothing moved");
+        assert!(
+            get_doc_in(root.path(), "a/b/c/d/e/f/g").is_ok(),
+            "nothing moved"
+        );
     }
 
     #[test]
@@ -1680,7 +1761,10 @@ mod tests {
         assert!(get_doc_in(root.path(), "b/z").is_ok());
 
         assert!(delete_folder_in(root.path(), "a").is_err(), "now empty");
-        assert!(delete_folder_in(root.path(), "").is_err(), "no deleting the root");
+        assert!(
+            delete_folder_in(root.path(), "").is_err(),
+            "no deleting the root"
+        );
     }
 
     #[test]
@@ -1699,7 +1783,13 @@ mod tests {
         assert_eq!(doc.versions[0].file_count, 1);
         assert_eq!(
             doc.workspace_name,
-            ws.path().canonicalize().unwrap().file_name().unwrap().to_str().unwrap()
+            ws.path()
+                .canonicalize()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
         );
 
         let f = get_file_in(root.path(), "findings", "current", "findings.md").unwrap();
@@ -1716,7 +1806,11 @@ mod tests {
         let root = tmp();
         let ws = tmp();
         let html = ws.path().join("Perf Demo.html");
-        fs::write(&html, "<html><head><TITLE> Perf 王者 </TITLE></head></html>").unwrap();
+        fs::write(
+            &html,
+            "<html><head><TITLE> Perf 王者 </TITLE></head></html>",
+        )
+        .unwrap();
 
         let doc = publish_in(root.path(), &html, None, None, ws.path()).unwrap();
         assert_eq!(doc.slug, "perf-demo");
@@ -1777,7 +1871,11 @@ mod tests {
         fs::create_dir_all(&ws).unwrap();
         let ws = ws.as_path();
         let md = ws.join("perf-report.md");
-        fs::write(&md, "# Perf Report\n\n压测显示 tokenizer 吞吐率下降 40%。\n").unwrap();
+        fs::write(
+            &md,
+            "# Perf Report\n\n压测显示 tokenizer 吞吐率下降 40%。\n",
+        )
+        .unwrap();
         publish_in(root.path(), &md, None, None, ws).unwrap();
         let html = ws.join("demo.html");
         fs::write(
@@ -1844,7 +1942,11 @@ mod tests {
         // silently skipped elsewhere to stay hermetic.
         let zip_path = root.path().join("demo.zip");
         fs::write(&zip_path, &e.bytes).unwrap();
-        if let Ok(out) = std::process::Command::new("unzip").arg("-t").arg(&zip_path).output() {
+        if let Ok(out) = std::process::Command::new("unzip")
+            .arg("-t")
+            .arg(&zip_path)
+            .output()
+        {
             assert!(
                 out.status.success(),
                 "unzip -t rejected our archive:\n{}",
@@ -1890,7 +1992,12 @@ mod tests {
         fs::write(root.path().join("secret.txt"), "s3cret").unwrap();
         publish_in(root.path(), &md, None, None, ws.path()).unwrap();
 
-        for bad in ["../../secret.txt", "/etc/passwd", "..\\..\\secret.txt", "a/../../../secret.txt"] {
+        for bad in [
+            "../../secret.txt",
+            "/etc/passwd",
+            "..\\..\\secret.txt",
+            "a/../../../secret.txt",
+        ] {
             assert!(
                 get_file_in(root.path(), "safe", "current", bad).is_err(),
                 "should reject '{bad}'"
@@ -1902,11 +2009,17 @@ mod tests {
 
     #[test]
     fn mime_map() {
-        assert_eq!(mime_for_path(Path::new("a/index.HTML")), "text/html; charset=utf-8");
+        assert_eq!(
+            mime_for_path(Path::new("a/index.HTML")),
+            "text/html; charset=utf-8"
+        );
         assert_eq!(mime_for_path(Path::new("s.css")), "text/css; charset=utf-8");
         assert_eq!(mime_for_path(Path::new("p.png")), "image/png");
         assert_eq!(mime_for_path(Path::new("v.svg")), "image/svg+xml");
-        assert_eq!(mime_for_path(Path::new("noext")), "application/octet-stream");
+        assert_eq!(
+            mime_for_path(Path::new("noext")),
+            "application/octet-stream"
+        );
     }
 
     #[test]
@@ -2060,7 +2173,11 @@ mod tests {
         let root = tmp();
         let ws = tmp();
         let page = ws.path().join("page.html");
-        fs::write(&page, "<h1>对话交互状态机</h1>\n<p>渲染 pipeline 重构</p>\n").unwrap();
+        fs::write(
+            &page,
+            "<h1>对话交互状态机</h1>\n<p>渲染 pipeline 重构</p>\n",
+        )
+        .unwrap();
         publish_in(root.path(), &page, None, None, ws.path()).unwrap();
 
         let hits = search_docs_in(root.path(), "渲染");
@@ -2095,7 +2212,10 @@ mod tests {
     fn resolve_workspace_path_keeps_nonexistent_path_verbatim() {
         // canonicalize() fails on a path that isn't on disk; we keep the input
         // rather than dropping the filter entirely.
-        assert_eq!(resolve_workspace_path(Path::new("/no/such/dir")), "/no/such/dir");
+        assert_eq!(
+            resolve_workspace_path(Path::new("/no/such/dir")),
+            "/no/such/dir"
+        );
     }
 
     /// `git init`-shaped checkout: a plain `.git` directory.
@@ -2186,7 +2306,10 @@ mod tests {
         let root = tmp();
         let dir = root.path().join("plain");
         fs::create_dir_all(dir.join("sub")).unwrap();
-        let (d, sub) = (dir.display().to_string(), dir.join("sub").display().to_string());
+        let (d, sub) = (
+            dir.display().to_string(),
+            dir.join("sub").display().to_string(),
+        );
         assert!(workspace_contains(&d, &d));
         assert!(!workspace_contains(&d, &sub));
     }
@@ -2222,7 +2345,10 @@ mod tests {
         assert_eq!(doc.title, "Hello");
         assert_eq!(doc.versions.len(), 1);
         assert_eq!(doc.versions[0].source_path, TEXT_SOURCE_PATH);
-        assert_eq!(current_text(root.path(), "notes/msg"), "# Hello\n\nbody text\n");
+        assert_eq!(
+            current_text(root.path(), "notes/msg"),
+            "# Hello\n\nbody text\n"
+        );
         // Directory slugs stay flat on disk, same as a file publish.
         assert!(root.path().join("notes%2Fmsg").join("doc.json").is_file());
     }
@@ -2233,7 +2359,8 @@ mod tests {
         let ws = tmp();
         let m = TextPublishMode::Replace;
         publish_text_in(root.path(), "note", Some("Note"), "first", ws.path(), m).unwrap();
-        let doc = publish_text_in(root.path(), "note", Some("Note"), "second", ws.path(), m).unwrap();
+        let doc =
+            publish_text_in(root.path(), "note", Some("Note"), "second", ws.path(), m).unwrap();
 
         assert_eq!(doc.versions.len(), 2, "re-publish keeps history");
         assert_eq!(current_text(root.path(), "note"), "second");
@@ -2349,8 +2476,18 @@ mod tests {
     fn publish_text_rejects_an_unusable_slug() {
         let root = tmp();
         let ws = tmp();
-        let err = publish_text_in(root.path(), "汉字", None, "x", ws.path(), TextPublishMode::Replace)
-            .unwrap_err();
-        assert!(err.contains("cannot derive a slug"), "unexpected error: {err}");
+        let err = publish_text_in(
+            root.path(),
+            "汉字",
+            None,
+            "x",
+            ws.path(),
+            TextPublishMode::Replace,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("cannot derive a slug"),
+            "unexpected error: {err}"
+        );
     }
 }
